@@ -3,8 +3,8 @@ import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { CommandResult, RunCommandOptions, Sandbox, SandboxFileRecord } from "@sixb/core"
+import type { ModelTool } from "@sixb/core/models"
 import { exec } from "@sixb/core/sandboxes"
-import type { Tool } from "ai"
 import { createReadTool, type ReadToolInput, type ReadToolOutput } from "../src/tools/read"
 
 const roots: string[] = []
@@ -252,7 +252,7 @@ async function createHarness(
   return {
     root,
     sandbox,
-    read: (input, signal = new AbortController().signal) => execute(input, { abortSignal: signal }),
+    read: (input, signal = new AbortController().signal) => execute(input, signal),
   }
 }
 
@@ -261,13 +261,14 @@ function commandResult(overrides: Partial<CommandResult> = {}): CommandResult {
 }
 
 function executableTool(
-  definition: Tool<ReadToolInput, ReadToolOutput>
-): (
-  input: ReadToolInput,
-  options: { readonly abortSignal?: AbortSignal }
-) => Promise<ReadToolOutput> {
-  if (typeof definition.execute !== "function") throw new Error("Expected executable read tool.")
-  return definition.execute as never
+  definition: ModelTool<ReadToolInput>
+): (input: ReadToolInput, signal: AbortSignal) => Promise<ReadToolOutput> {
+  return async (input, signal) =>
+    (await definition.execute(definition.parseInput(input), {
+      signal,
+      callId: "read-model-call",
+      toolCallId: "read-tool-call",
+    })) as unknown as ReadToolOutput
 }
 
 async function tempRoot(): Promise<string> {

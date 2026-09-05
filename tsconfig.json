@@ -7,6 +7,7 @@
       "@sixb/agent-ui": ["./packages/agent-ui/src/index.ts"],
       "@sixb/agent-ui/react-router": ["./packages/agent-ui/src/react-router.tsx"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
+      "@sixb/anthropic": ["./models/anthropic/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],
       "@sixb/app/agents": ["./packages/app/src/agents.ts"],
       "@sixb/app/auth": ["./packages/app/src/auth.ts"],
@@ -127,6 +128,7 @@
       "@sixb/core/internal/workflows": ["./packages/core/src/workflows/index.ts"],
       "@sixb/core/lake-storage": ["./packages/core/src/lake-storage/index.ts"],
       "@sixb/core/logging": ["./packages/core/src/logging/types.ts"],
+      "@sixb/core/models": ["./packages/core/src/models/index.ts"],
       "@sixb/core/ontology": ["./packages/core/src/ontology/index.ts"],
       "@sixb/core/query": ["./packages/core/src/query.ts"],
       "@sixb/core/queues": ["./packages/core/src/queues/index.ts"],
@@ -159,6 +161,7 @@
       "@sixb/ui/lib/shiki": ["./packages/ui/src/lib/shiki.ts"],
       "@sixb/ui/lib/speech": ["./packages/ui/src/lib/speech/index.ts"],
       "@sixb/ui/lib/utils": ["./packages/ui/src/lib/utils.ts"],
+      "@sixb/vercel-ai-gateway": ["./models/vercel-ai-gateway/src/index.ts"],
       "@sixb/workflow-worker": ["./packages/workflow-worker/src/index.ts"]
     }
   }

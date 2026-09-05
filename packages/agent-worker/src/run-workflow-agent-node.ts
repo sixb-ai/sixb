@@ -1,4 +1,5 @@
 import type { AgentDefinition, AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
+import { runModelLoop } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
@@ -7,13 +8,15 @@ import {
   validateWorkflowAgentStepOutput,
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
+import type { JsonObject, ModelMessage, ModelStep } from "@sixb/core/models"
+import { StructuredOutputError } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
-import { generateText, jsonSchema, type ModelMessage, NoObjectGeneratedError, Output } from "ai"
-import { renderWorkflowOutputFinalizerPrompt } from "./agent-prompt"
-import { type AiSdkTraceStep, agentTraceFromAiSdkSteps } from "./ai-sdk-adapters"
+import {
+  DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
+  renderWorkflowOutputFinalizerPrompt,
+} from "./agent-prompt"
+import { agentTraceFromModelSteps } from "./model-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
-import { runAgentLoop } from "./run-agent-loop"
-import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { AgentTurnContext } from "./types"
 
 const WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS = 2
@@ -64,37 +67,23 @@ export async function runWorkflowAgentNode(
   input: RunWorkflowAgentNodeInput
 ): Promise<WorkflowAgentNodeResult> {
   const maxSteps = input.agent.loop?.stopWhen?.maxSteps ?? input.context.defaultMaxSteps
-  const rawSchema = schemaRecordToJsonSchema({
+  const outputSchema = schemaRecordToJsonSchema({
     shape: input.agentStep.output as Readonly<Record<string, SchemaOrRef>>,
     valueTypesById: input.valueTypesById,
+  }) as JsonObject
+  const validateOutput = (value: unknown): Record<string, unknown> => ({
+    ...validateWorkflowAgentStepOutput({
+      workflowId: input.workflowId,
+      agentStep: input.agentStep,
+      value,
+      valueTypesById: input.valueTypesById,
+    }),
   })
-  const schema = jsonSchema<Record<string, unknown>>(
-    rawSchema as Parameters<typeof jsonSchema>[0],
-    {
-      validate(value) {
-        try {
-          const validated = validateWorkflowAgentStepOutput({
-            workflowId: input.workflowId,
-            agentStep: input.agentStep,
-            value,
-            valueTypesById: input.valueTypesById,
-          })
-          return { success: true, value: { ...validated } }
-        } catch (error) {
-          return {
-            success: false,
-            error: error instanceof Error ? error : new Error(String(error)),
-          }
-        }
-      },
-    }
-  )
 
   const timeout = new AbortController()
   const timer = setTimeout(() => timeout.abort(), input.context.turnTimeoutMs)
-  const sandboxReadiness = monitorSandboxReadiness(input.context.sandboxReady)
-  const abortSignal = AbortSignal.any([input.signal, timeout.signal, sandboxReadiness.signal])
-  const completedSteps: AiSdkTraceStep[] = []
+  const abortSignal = AbortSignal.any([input.signal, timeout.signal])
+  const completedSteps: ModelStep[] = []
   const traceDetails = {
     agentId: input.agent.id,
     workflowId: input.workflowId,
@@ -104,35 +93,36 @@ export async function runWorkflowAgentNode(
   let phase: WorkflowAgentFailurePhase = "agent-loop"
   let finishReason: AgentRunFinishReason | undefined
   try {
-    let researchError: unknown
-    const research = runAgentLoop({
-      agent: input.agent,
-      system: input.context.systemPrompt,
-      messages: [{ role: "user", content: input.prompt }],
+    const research = await runModelLoop({
+      model: input.agent.model,
+      messages: [
+        {
+          role: "system",
+          content: input.context.systemPrompt,
+        },
+        { role: "user", content: [{ type: "text", text: input.prompt }] },
+      ],
       tools: input.context.tools,
+      ...(input.agent.reasoning === undefined ? {} : { reasoning: input.agent.reasoning }),
+      ...(input.agent.loop?.caching === undefined ? {} : { caching: input.agent.loop.caching }),
       maxSteps,
-      usageRecorder: input.usageRecorder,
-      prepareStep: input.context.prepareStep,
-      abortSignal,
-      onError: ({ error }) => {
-        researchError ??= error
-      },
+      finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
+      ...(input.context.prepareStep === undefined
+        ? {}
+        : { prepareStep: input.context.prepareStep }),
+      signal: abortSignal,
+      onModelCallEnd: input.usageRecorder.onModelCallEnd,
       onStepEnd: (step) => {
         completedSteps.push(step)
       },
     })
-
-    await research.consumeStream({
-      onError(error) {
-        researchError = error
-      },
-    })
     input.usageRecorder.assertHealthy()
-    sandboxReadiness.throwIfFailed()
-    if (researchError !== undefined) throw researchError
+    if (research.status === "aborted") {
+      throw abortSignal.reason ?? new DOMException("The workflow agent was aborted.", "AbortError")
+    }
 
-    const researchText = await research.text
-    finishReason = coerceAgentRunFinishReason(await research.finishReason) ?? "unknown"
+    const researchText = research.output
+    finishReason = coerceAgentRunFinishReason(research.finishReason) ?? "unknown"
     if (researchText.trim().length === 0) {
       throw createSixbError(
         "agent.execution_failed",
@@ -144,56 +134,68 @@ export async function runWorkflowAgentNode(
     phase = "structured-finalizer"
     let finalizerMessages: ModelMessage[] = [
       {
-        role: "user",
-        content: `Original workflow request:\n${input.prompt}`,
+        role: "system",
+        content: renderWorkflowOutputFinalizerPrompt({ instructions: input.agent.instructions }),
       },
-      { role: "assistant", content: researchText },
       {
         role: "user",
-        content: "Convert the final agent answer into the required workflow output.",
+        content: [{ type: "text", text: `Original workflow request:\n${input.prompt}` }],
+      },
+      { role: "assistant", content: [{ type: "text", text: researchText }] },
+      {
+        role: "user",
+        content: [
+          {
+            type: "text",
+            text: "Convert the final agent answer into the required workflow output.",
+          },
+        ],
       },
     ]
     let structuredValue: Record<string, unknown> | undefined
     for (let attempt = 1; attempt <= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS; attempt += 1) {
       try {
-        const finalization = await generateText({
-          model: input.usageRecorder.wrapModel(input.agent.model),
-          ...(input.agent.providerOptions === undefined
-            ? {}
-            : { providerOptions: input.agent.providerOptions }),
-          system: renderWorkflowOutputFinalizerPrompt({
-            instructions: input.agent.instructions,
-          }),
+        const finalization = await runModelLoop({
+          model: input.agent.model,
           messages: finalizerMessages,
-          output: Output.object({ schema, name: input.agentStep.id }),
-          prepareStep: input.usageRecorder.prepareStep,
-          onLanguageModelCallStart: input.usageRecorder.onLanguageModelCallStart,
-          onLanguageModelCallEnd: input.usageRecorder.onLanguageModelCallEnd,
-          abortSignal,
+          output: {
+            name: input.agentStep.id,
+            schema: outputSchema,
+            validate: validateOutput,
+          },
+          maxSteps: 1,
+          signal: abortSignal,
+          onModelCallEnd: input.usageRecorder.onModelCallEnd,
         })
-
-        // A final-step callback failure has no later `prepareStep` invocation to surface it.
         input.usageRecorder.assertHealthy()
+        if (finalization.status === "aborted") {
+          throw (
+            abortSignal.reason ?? new DOMException("The workflow agent was aborted.", "AbortError")
+          )
+        }
         structuredValue = finalization.output
         break
       } catch (error) {
         input.usageRecorder.assertHealthy()
-        const canRetry =
-          attempt < WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS &&
-          NoObjectGeneratedError.isInstance(error)
-        if (!canRetry) throw error
-
+        if (
+          attempt >= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS ||
+          !(error instanceof StructuredOutputError)
+        ) {
+          throw error
+        }
         finalizerMessages = [
           ...finalizerMessages,
-          ...(error.text === undefined
-            ? []
-            : ([{ role: "assistant", content: error.text }] satisfies ModelMessage[])),
           {
             role: "user",
             content: [
-              "The previous response did not satisfy the workflow output schema.",
-              "Correct the structure and types using only the same request and final agent answer.",
-            ].join(" "),
+              {
+                type: "text",
+                text: [
+                  "The previous response did not satisfy the workflow output schema.",
+                  "Correct the structure and types using only the same request and final agent answer.",
+                ].join(" "),
+              },
+            ],
           },
         ]
       }
@@ -207,26 +209,22 @@ export async function runWorkflowAgentNode(
       )
     }
 
-    sandboxReadiness.throwIfFailed()
-    const output = snapshotWorkflowAgentStepOutput({
-      workflowId: input.workflowId,
-      agentStep: input.agentStep,
-      value: structuredValue,
-      valueTypesById: input.valueTypesById,
-    })
     return {
-      output,
+      output: snapshotWorkflowAgentStepOutput({
+        workflowId: input.workflowId,
+        agentStep: input.agentStep,
+        value: structuredValue,
+        valueTypesById: input.valueTypesById,
+      }),
       modelId: input.agent.model.modelId,
       finishReason,
-      trace: agentTraceFromAiSdkSteps(completedSteps, traceDetails),
+      trace: agentTraceFromModelSteps(completedSteps, traceDetails),
     }
   } catch (cause) {
-    // Prefer the concrete provisioning failure over the abort it causes in either model phase.
-    sandboxReadiness.throwIfFailed()
     throw new WorkflowAgentNodeExecutionError({
       phase,
       finishReason,
-      trace: agentTraceFromAiSdkSteps(completedSteps, traceDetails),
+      trace: agentTraceFromModelSteps(completedSteps, traceDetails),
       cause,
     })
   } finally {

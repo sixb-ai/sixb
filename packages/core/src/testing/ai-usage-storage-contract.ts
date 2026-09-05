@@ -34,6 +34,7 @@ function modelCallInput(overrides: Partial<RecordAiModelCallInput> = {}): Record
     requesterGroupIds: ["support", "engineering"],
     providerId: "gateway",
     requestedModelId: "openai/gpt-5",
+    requestedReasoning: { budgetTokens: 4_096 },
     responseModelId: "gpt-5-2026-06-01",
     responseId: "response_1",
     usage: {
@@ -508,6 +509,7 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
           modelCallInput({ usage: { inputTokens: -1 } }),
           modelCallInput({ occurredAt: new Date(Number.NaN) }),
           modelCallInput({ rawUsage: { invalid: undefined } as never }),
+          modelCallInput({ requestedReasoning: { budgetTokens: -1 } }),
           modelCallInput({ executionId: "" }),
         ]
 

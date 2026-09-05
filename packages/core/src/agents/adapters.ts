@@ -1,5 +1,16 @@
 import { type FileRef, isFileRef } from "../blob-storage"
 import { getInvalidJsonValueReason, isPlainRecord, type JsonValue } from "../json"
+import type {
+  ModelAssistantPart,
+  ModelFilePart,
+  ModelMessage,
+  ModelReasoningPart,
+  ModelTextPart,
+  ModelToolCallPart,
+  ModelToolOutput,
+  ModelToolResultPart,
+  ProviderData,
+} from "../models"
 import {
   type AgentContextEntryInput,
   type AgentContextInput,
@@ -8,25 +19,20 @@ import {
 } from "./context"
 import { serializeAgentContextForModel } from "./context-model"
 import { AgentMessageAdapterError } from "./errors"
-import type { AgentMessage, AgentMessagePart, AgentMessageRole, AgentToolCallPart } from "./message"
+import type { AgentMessage, AgentMessagePart, AgentMessageRole } from "./message"
 import { isAgentToolResult } from "./tool-result"
 import type { AgentToolFileContent } from "./types"
 
 // ── Inbound (write) — deliberately WIDE ────────────────────────────────────────────────────────
 //
-// `fromAiSdk` is the safety net at the SDK boundary, so its input is intentionally permissive: any
-// `{ type: string }` part is accepted at the type level and narrowed at runtime. This is a
-// structural supertype of the AI SDK's `UIMessage`, so a real SDK message can be passed without a
-// cast (verified by a compat test in the consumer package, where `ai` lives — core stays SDK-free).
+// The UI/storage boundary is intentionally permissive: any `{ type: string }` part is accepted at
+// the type level and narrowed at runtime. Persisted messages remain strict and JSON-canonical.
 
 export interface AgentInboundUiMessagePart {
   readonly type: string
   readonly text?: string
   readonly state?: string
-  // Provider metadata stays `unknown` here, exactly like `input` / `output` / `rawInput`: the SDK
-  // types it as provider metadata (a nested record), which is not structurally a Sixb
-  // `JsonValue`, so constraining it would break the "real SDK message assigns without a cast"
-  // contract (locked by the consumer's compat test). `fromAiSdk` validates it to JSON at runtime.
+  // Provider metadata stays unknown until the persistence boundary validates it.
   readonly providerMetadata?: unknown
   readonly toolName?: string
   readonly toolCallId?: string
@@ -39,6 +45,8 @@ export interface AgentInboundUiMessagePart {
   readonly fileRef?: unknown
   readonly context?: unknown
   readonly origin?: unknown
+  readonly providerId?: string
+  readonly data?: unknown
 }
 
 export interface AgentInboundUiMessage {
@@ -48,12 +56,12 @@ export interface AgentInboundUiMessage {
   readonly parts: readonly AgentInboundUiMessagePart[]
 }
 
-// ── Outbound (read) — PRECISE, aligned with the AI SDK message surface ──────────────────────────
+// ── Outbound (read) ─────────────────────────────────────────────────────────────────────────────
 
 interface AgentUiToolPartBody {
   readonly toolCallId: string
   readonly providerExecuted?: boolean
-  readonly callProviderMetadata?: JsonValue
+  readonly callProviderMetadata?: ProviderData
 }
 
 export type AgentUiToolPart =
@@ -77,10 +85,11 @@ export type AgentUiToolPart =
       ))
 
 export type AgentUiMessagePart =
-  | { readonly type: "text"; readonly text: string; readonly providerMetadata?: JsonValue }
-  | { readonly type: "reasoning"; readonly text: string; readonly providerMetadata?: JsonValue }
+  | { readonly type: "text"; readonly text: string; readonly providerMetadata?: ProviderData }
+  | { readonly type: "reasoning"; readonly text: string; readonly providerMetadata?: ProviderData }
   | { readonly type: "step-start" }
-  | { readonly type: "file"; readonly fileRef: FileRef; readonly providerMetadata?: JsonValue }
+  | { readonly type: "file"; readonly fileRef: FileRef; readonly providerMetadata?: ProviderData }
+  | { readonly type: "provider-state"; readonly providerId: string; readonly data: JsonValue }
   | {
       readonly type: "context"
       readonly context: AgentContextInput
@@ -95,59 +104,14 @@ export interface AgentUiMessage {
   readonly parts: readonly AgentUiMessagePart[]
 }
 
-export type AgentModelToolOutput =
-  | { readonly type: "text"; readonly value: string }
-  | { readonly type: "json"; readonly value: JsonValue }
-  | { readonly type: "error-text"; readonly value: string }
-  | { readonly type: "error-json"; readonly value: JsonValue }
-
-export interface AgentModelTextPart {
-  readonly type: "text"
-  readonly text: string
-  readonly providerOptions?: JsonValue
-}
-export interface AgentModelFilePart {
-  readonly type: "file"
-  readonly data: URL
-  readonly filename?: string
-  readonly mediaType: string
-  readonly providerOptions?: JsonValue
-}
-export interface AgentModelReasoningPart {
-  readonly type: "reasoning"
-  readonly text: string
-  readonly providerOptions?: JsonValue
-}
-export interface AgentModelToolCallPart {
-  readonly type: "tool-call"
-  readonly toolCallId: string
-  readonly toolName: string
-  readonly input: JsonValue
-  readonly providerExecuted?: boolean
-  readonly providerOptions?: JsonValue
-}
-export interface AgentModelToolResultPart {
-  readonly type: "tool-result"
-  readonly toolCallId: string
-  readonly toolName: string
-  readonly output: AgentModelToolOutput
-  readonly providerOptions?: JsonValue
-}
-
-export type AgentModelAssistantPart =
-  | AgentModelTextPart
-  | AgentModelReasoningPart
-  | AgentModelToolCallPart
-  | AgentModelToolResultPart
-
-export type AgentModelMessage =
-  | { readonly role: "system"; readonly content: string; readonly providerOptions?: JsonValue }
-  | {
-      readonly role: "user"
-      readonly content: readonly (AgentModelTextPart | AgentModelFilePart)[]
-    }
-  | { readonly role: "assistant"; readonly content: readonly AgentModelAssistantPart[] }
-  | { readonly role: "tool"; readonly content: readonly AgentModelToolResultPart[] }
+export type AgentModelToolOutput = ModelToolOutput
+export type AgentModelTextPart = ModelTextPart
+export type AgentModelFilePart = ModelFilePart
+export type AgentModelReasoningPart = ModelReasoningPart
+export type AgentModelToolCallPart = ModelToolCallPart
+export type AgentModelToolResultPart = ModelToolResultPart
+export type AgentModelAssistantPart = ModelAssistantPart
+export type AgentModelMessage = ModelMessage
 
 export interface AgentFileDataResolverInput<TMessage extends AgentMessage = AgentMessage> {
   readonly message: TMessage
@@ -163,7 +127,7 @@ export interface AgentFileDataProjection {
 
 export interface AgentToolResultFileResolverInput<TMessage extends AgentMessage = AgentMessage> {
   readonly message: TMessage
-  readonly part: AgentToolCallPart
+  readonly part: AgentToolCallPartResult
   readonly partIndex: number
   readonly contentPart: AgentToolFileContent
   readonly contentIndex: number
@@ -215,14 +179,21 @@ function optionalJson(value: unknown, label: string): JsonValue | undefined {
   return requireJson(omitUndefinedObjectProperties(value), label)
 }
 
+function optionalProviderData(value: unknown, label: string): ProviderData | undefined {
+  const json = optionalJson(value, label)
+  if (json === undefined) return undefined
+  assertAdapter(isPlainRecord(json), `agent message ${label} must be a provider-keyed JSON object`)
+  return json as ProviderData
+}
+
 /**
- * Provider metadata is opaque SDK-owned data that can contain optional object keys with
+ * Provider metadata is opaque provider-owned data that can contain optional object keys with
  * `undefined` values. `undefined` is not JSON, but on an object property it means the same thing as
  * "field absent", so omit those properties before validating/persisting the metadata.
  *
  * Keep the scope deliberately narrow: arrays, tool inputs/outputs, Dates, functions, bigint, cycles,
  * and every other non-JSON shape are left for `requireJson` to accept or reject. This helper only
- * turns `{ key: undefined }` into `{}` for metadata compatibility with SDK output.
+ * turns `{ key: undefined }` into `{}` for compatibility with provider output.
  */
 export function omitUndefinedObjectProperties(value: unknown): unknown {
   return omitUndefinedObjectPropertiesInternal(value, new Set())
@@ -270,22 +241,22 @@ function toolNameFromInbound(part: AgentInboundUiMessagePart): string {
   return name
 }
 
-// ── fromAiSdk (write) ─────────────────────────────────────────────────────────────────────────
+// ── fromUiMessage (write) ─────────────────────────────────────────────────────────────────────
 
 /**
- * Convert an SDK-shaped UI message into a durable {@link AgentMessage}. Total: throws
- * {@link AgentMessageAdapterError} on any part kind, tool state, or text/reasoning state that V1 does
- * not model, and on a role outside `system | user | assistant`. Transient states are rejected
+ * Convert a UI message into a durable {@link AgentMessage}. Total: throws
+ * {@link AgentMessageAdapterError} on any part kind, tool state, or text/reasoning state the durable
+ * contract does not model, and on a role outside `system | user | assistant`. Transient states are rejected
  * because messages are only ever persisted once a run has finished.
  */
-export function fromAiSdk(message: AgentInboundUiMessage): AgentMessage {
+export function fromUiMessage(message: AgentInboundUiMessage): AgentMessage {
   const { role } = message
   assertAdapter(
     role === "system" || role === "user" || role === "assistant",
     `unsupported message role '${role}'`
   )
 
-  const parts: AgentMessagePart[] = message.parts.map((part) => fromAiSdkPart(part))
+  const parts: AgentMessagePart[] = message.parts.map((part) => fromUiMessagePart(part))
   assertAdapter(
     role === "user" || !parts.some((part) => part.type === "context"),
     "context parts are only valid on user messages"
@@ -299,7 +270,7 @@ export function fromAiSdk(message: AgentInboundUiMessage): AgentMessage {
   }
 }
 
-function fromAiSdkPart(part: AgentInboundUiMessagePart): AgentMessagePart {
+function fromUiMessagePart(part: AgentInboundUiMessagePart): AgentMessagePart {
   switch (part.type) {
     case "text":
     case "reasoning": {
@@ -308,7 +279,10 @@ function fromAiSdkPart(part: AgentInboundUiMessagePart): AgentMessagePart {
         part.state !== "streaming",
         `cannot persist a streaming ${part.type} part; messages are written only once finalized`
       )
-      const providerMetadata = optionalJson(part.providerMetadata, `${part.type}.providerMetadata`)
+      const providerMetadata = optionalProviderData(
+        part.providerMetadata,
+        `${part.type}.providerMetadata`
+      )
       return {
         type: part.type,
         text: part.text,
@@ -319,7 +293,7 @@ function fromAiSdkPart(part: AgentInboundUiMessagePart): AgentMessagePart {
       return { type: "step-start" }
     case "file": {
       assertAdapter(isFileRef(part.fileRef), "file part is missing a valid fileRef")
-      const providerMetadata = optionalJson(part.providerMetadata, "file.providerMetadata")
+      const providerMetadata = optionalProviderData(part.providerMetadata, "file.providerMetadata")
       return {
         type: "file",
         fileRef: part.fileRef,
@@ -328,12 +302,22 @@ function fromAiSdkPart(part: AgentInboundUiMessagePart): AgentMessagePart {
     }
     case "context":
       return fromUiContextPart(part)
+    case "provider-state":
+      assertAdapter(
+        typeof part.providerId === "string" && part.providerId.length > 0,
+        "provider-state part is missing a provider id"
+      )
+      return {
+        type: "provider-state",
+        providerId: part.providerId,
+        data: requireJson(part.data, "provider-state data"),
+      }
     default: {
       assertAdapter(
         isToolType(part.type),
         `unsupported message part type '${part.type}'; extend the Sixb message part union to support it`
       )
-      return fromAiSdkToolPart(part)
+      return fromUiToolPart(part)
     }
   }
 }
@@ -351,7 +335,7 @@ function fromUiContextPart(part: AgentInboundUiMessagePart): AgentMessagePart {
   }
 }
 
-function fromAiSdkToolPart(part: AgentInboundUiMessagePart): AgentToolCallPart {
+function fromUiToolPart(part: AgentInboundUiMessagePart): AgentToolCallPartResult {
   const dynamic = part.type === "dynamic-tool"
   const toolName = toolNameFromInbound(part)
   assertAdapter(
@@ -365,7 +349,10 @@ function fromAiSdkToolPart(part: AgentInboundUiMessagePart): AgentToolCallPart {
 
   // For output-error the SDK input may be `undefined`; coerce to `null` to stay JSON-canonical.
   const input = part.input === undefined ? null : requireJson(part.input, "tool input")
-  const providerMetadata = optionalJson(part.callProviderMetadata, "tool callProviderMetadata")
+  const providerMetadata = optionalProviderData(
+    part.callProviderMetadata,
+    "tool callProviderMetadata"
+  )
 
   const base = {
     type: "tool-call" as const,
@@ -387,9 +374,11 @@ function fromAiSdkToolPart(part: AgentInboundUiMessagePart): AgentToolCallPart {
   return { ...base, state: "output-error", errorText: part.errorText }
 }
 
+type AgentToolCallPartResult = Extract<AgentMessagePart, { type: "tool-call" }>
+
 // ── toUiMessage (read) ────────────────────────────────────────────────────────────────────────
 
-/** Reconstruct an SDK-shaped UI message from a stored message. Exact inverse of {@link fromAiSdk}. */
+/** Reconstruct a UI message from a stored message. Exact inverse of {@link fromUiMessage}. */
 export function toUiMessage(message: AgentMessage): AgentUiMessage {
   return {
     role: message.role,
@@ -417,12 +406,18 @@ function toUiPart(part: AgentMessagePart): AgentUiMessagePart {
       }
     case "context":
       return { type: "context", context: part.context, origin: part.origin }
+    case "provider-state":
+      return {
+        type: "provider-state",
+        providerId: part.providerId,
+        data: part.data,
+      }
     case "tool-call":
       return toUiToolPart(part)
   }
 }
 
-function toUiToolPart(part: AgentToolCallPart): AgentUiToolPart {
+function toUiToolPart(part: AgentToolCallPartResult): AgentUiToolPart {
   const body = {
     toolCallId: part.toolCallId,
     ...(part.providerExecuted === undefined ? {} : { providerExecuted: part.providerExecuted }),
@@ -442,12 +437,11 @@ function toUiToolPart(part: AgentToolCallPart): AgentUiToolPart {
 // ── toModelMessages (read) ──────────────────────────────────────────────────────────────────────
 
 /**
- * Project messages into AI SDK `ModelMessage`s for replay into a model. The assistant/tool split
- * is hand-rolled to mirror `convertToModelMessages` (no `ai` import): assistant parts are grouped
+ * Project durable messages into Sixb model messages. Assistant parts are grouped
  * into blocks at each `step-start`; each block yields one `assistant` message plus, for any
  * non-provider-executed tool calls, one `tool` message. Provider-executed tool results stay inline
  * in the assistant message. Without a tool registry, a string output maps to `text` and anything
- * else to `json`; this is the documented V1 fidelity scope (a tool's custom `toModelOutput` is not
+ * else to `json`; this is the documented fidelity scope (a tool's custom `toModelOutput` is not
  * reproduced).
  */
 export function toModelMessages<TMessage extends AgentMessage>(
@@ -473,19 +467,17 @@ export function toModelMessages<TMessage extends AgentMessage>(
 
 function systemModelMessage(message: AgentMessage): AgentModelMessage {
   const textParts = message.parts.filter(isTextPart)
-  // Mirror convertToModelMessages: merge providerMetadata across all system text parts (carries e.g.
-  // a provider's prompt-cache directive) and forward it as providerOptions when non-empty.
-  const providerOptions = mergeProviderMetadata(textParts)
+  const providerData = mergeProviderMetadata(textParts)
   return {
     role: "system",
     content: textParts.map((part) => part.text).join(""),
-    ...(providerOptions === undefined ? {} : { providerOptions }),
+    ...(providerData === undefined ? {} : { providerData }),
   }
 }
 
 function mergeProviderMetadata(
   parts: readonly Extract<AgentMessagePart, { type: "text" }>[]
-): JsonValue | undefined {
+): ProviderData | undefined {
   let merged: Record<string, JsonValue> | undefined
   for (const part of parts) {
     const meta = part.providerMetadata
@@ -493,7 +485,7 @@ function mergeProviderMetadata(
       merged = { ...(merged ?? {}), ...meta }
     }
   }
-  return merged
+  return merged as ProviderData | undefined
 }
 
 function userModelMessage<TMessage extends AgentMessage>(
@@ -512,7 +504,7 @@ function userModelMessage<TMessage extends AgentMessage>(
       content.push({
         type: "text",
         text: part.text,
-        ...(part.providerMetadata === undefined ? {} : { providerOptions: part.providerMetadata }),
+        ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
       })
       return
     }
@@ -533,9 +525,7 @@ function userModelMessage<TMessage extends AgentMessage>(
             : part.fileRef.fileName === undefined
               ? {}
               : { filename: part.fileRef.fileName }),
-          ...(part.providerMetadata === undefined
-            ? {}
-            : { providerOptions: part.providerMetadata }),
+          ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
         })
       }
     }
@@ -562,17 +552,13 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
         content.push({
           type: "text",
           text: part.text,
-          ...(part.providerMetadata === undefined
-            ? {}
-            : { providerOptions: part.providerMetadata }),
+          ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
         })
       } else if (part.type === "reasoning") {
         content.push({
           type: "reasoning",
           text: part.text,
-          ...(part.providerMetadata === undefined
-            ? {}
-            : { providerOptions: part.providerMetadata }),
+          ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
         })
       } else if (part.type === "file") {
         const fileContext = options.fileText?.({ message, part, partIndex })
@@ -584,6 +570,12 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
         if (part.providerExecuted === true) {
           content.push(toolResultModelPart(message, part, partIndex, "json", options))
         }
+      } else if (part.type === "provider-state") {
+        content.push({
+          type: "provider-state",
+          providerId: part.providerId,
+          data: part.data,
+        })
       }
     }
     result.push({ role: "assistant", content })
@@ -608,20 +600,20 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
   flush()
 }
 
-function toolCallModelPart(part: AgentToolCallPart): AgentModelToolCallPart {
+function toolCallModelPart(part: AgentToolCallPartResult): AgentModelToolCallPart {
   return {
     type: "tool-call",
     toolCallId: part.toolCallId,
     toolName: part.toolName,
     input: part.input,
     ...(part.providerExecuted === undefined ? {} : { providerExecuted: part.providerExecuted }),
-    ...(part.providerMetadata === undefined ? {} : { providerOptions: part.providerMetadata }),
+    ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
   }
 }
 
 function toolResultModelPart<TMessage extends AgentMessage>(
   message: TMessage,
-  part: AgentToolCallPart,
+  part: AgentToolCallPartResult,
   partIndex: number,
   errorMode: "text" | "json",
   options: ToModelMessagesOptions<TMessage>
@@ -631,13 +623,13 @@ function toolResultModelPart<TMessage extends AgentMessage>(
     toolCallId: part.toolCallId,
     toolName: part.toolName,
     output: toolResultOutput(message, part, partIndex, errorMode, options),
-    ...(part.providerMetadata === undefined ? {} : { providerOptions: part.providerMetadata }),
+    ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
   }
 }
 
 function toolResultOutput<TMessage extends AgentMessage>(
   message: TMessage,
-  part: AgentToolCallPart,
+  part: AgentToolCallPartResult,
   partIndex: number,
   errorMode: "text" | "json",
   options: ToModelMessagesOptions<TMessage>
@@ -655,13 +647,14 @@ function toolResultOutput<TMessage extends AgentMessage>(
         return
       }
 
-      const resolverInput = { message, part, partIndex, contentPart, contentIndex }
-      const fileContext = options.toolResultFileText?.(resolverInput)
-      if (fileContext) {
-        value.push(fileContext)
-      } else {
-        value.push(toolResultFileFallbackText(contentPart))
-      }
+      const fileContext = options.toolResultFileText?.({
+        message,
+        part,
+        partIndex,
+        contentPart,
+        contentIndex,
+      })
+      value.push(fileContext ?? toolResultFileFallbackText(contentPart))
     })
     return { type: "text", value: value.join("\n") }
   }

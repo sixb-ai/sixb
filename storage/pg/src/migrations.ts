@@ -73,6 +73,12 @@ import agentContextCheckpointsSql from "./migrations/027-agent-context-checkpoin
 import objectOverrideEditTimesSql from "./migrations/028-object-override-edit-times.sql" with {
   type: "text",
 }
+import aiUsageRequestedReasoningSql from "./migrations/029-ai-usage-requested-reasoning.sql" with {
+  type: "text",
+}
+import aiCostRateCardReasonSql from "./migrations/030-ai-cost-rate-card-reason.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -354,6 +360,8 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("026-ai-cost-accounting", aiCostAccountingSql),
     pgSql("027-agent-context-checkpoints", agentContextCheckpointsSql),
     pgSql("028-object-override-edit-times", objectOverrideEditTimesSql),
+    pgSql("029-ai-usage-requested-reasoning", aiUsageRequestedReasoningSql),
+    pgSql("030-ai-cost-rate-card-reason", aiCostRateCardReasonSql),
   ],
 })
 

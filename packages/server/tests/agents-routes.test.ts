@@ -282,7 +282,7 @@ describe("agent routes", () => {
       threadId: thread.thread.id,
     })
     expect(persisted.messages[0]).toMatchObject({
-      contentVersion: 1,
+      contentVersion: 2,
       parts: [
         { type: "context", ...context[0] },
         { type: "context", ...context[1] },

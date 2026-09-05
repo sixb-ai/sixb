@@ -224,6 +224,20 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 28,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "029-ai-usage-requested-reasoning",
+    status: "applied",
+    version: 29,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "030-ai-cost-rate-card-reason",
+    status: "applied",
+    version: 30,
+  },
 ]
 
 afterEach(async () => {
@@ -237,6 +251,44 @@ afterEach(async () => {
 })
 
 describe("SQLite storage migrations", () => {
+  test("upgrades shipped AI cost reasons without losing valuations or constraints", () => {
+    // Regression proof: skip migration 030 below, or change 026 to missingRateCard in place.
+    const db = new Database(":memory:")
+    try {
+      db.run(`PRAGMA foreign_keys = ON;
+        CREATE TABLE ai_model_call_usage (
+          project_id TEXT, id TEXT, provider_id TEXT, requested_model_id TEXT, occurred_at TEXT,
+          PRIMARY KEY (project_id, id)
+        );
+        INSERT INTO ai_model_call_usage VALUES ('project', 'usage', 'mock', 'model', '2026-08-01');`)
+      sqliteStorageMigrations.steps.find((step) => step.id === "026-ai-cost-accounting")?.up(db)
+      db.run(`INSERT INTO ai_model_call_valuations (
+        project_id, usage_record_id, status, provider_id, model_id, reason, details, rated_at
+      ) VALUES ('project', 'usage', 'unpriceable', 'mock', 'model', 'missingCatalogEntry',
+        '{"pricingContext":{}}', '2026-08-01');`)
+      sqliteStorageMigrations.steps
+        .find((step) => step.id === "030-ai-cost-rate-card-reason")
+        ?.up(db)
+      expect(db.query("SELECT reason, details FROM ai_model_call_valuations").get()).toEqual({
+        reason: "missingRateCard",
+        details: '{"pricingContext":{}}',
+      })
+      expect(() =>
+        db.run("UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry'")
+      ).toThrow()
+      expect(() => db.run("DELETE FROM ai_model_call_usage")).toThrow()
+      expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
+      expect(
+        db
+          .query(
+            "SELECT name FROM sqlite_master WHERE name = 'idx_ai_model_call_valuations_summary'"
+          )
+          .get()
+      ).not.toBeNull()
+    } finally {
+      db.close()
+    }
+  })
   test("migrateStorage writes storage-level migration history", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "sixb-sqlite-migrations-"))
     tempDirs.push(tempDir)

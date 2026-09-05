@@ -131,7 +131,6 @@ export async function executeWorkflowAgentNode(
     executionId: executionRecord.executionId,
     attempt: reserved.attempt,
     requesterGroupIds: workflowRun.requesterGroupIds,
-    providerOptions: agent.providerOptions,
     recoverAiModelCall: context.recoverAiModelCall,
     errorRunId: nodeRun.id,
   })
@@ -203,7 +202,7 @@ export async function executeWorkflowAgentNode(
         : undefined
 
     // Output parsing and tool handling can fail after the final provider callback. Accounting
-    // failure takes precedence because AI SDK otherwise swallows the callback error.
+    // Accounting failure takes precedence so no later billable model call can start.
     let executionError = debug?.cause ?? error
     let failurePhase = debug?.phase
     try {

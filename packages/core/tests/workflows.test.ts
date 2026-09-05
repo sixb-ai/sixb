@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import type { LanguageModelV4 } from "@ai-sdk/provider"
 import {
   defineAction,
   defineAgent,
@@ -25,6 +24,7 @@ import {
   type WorkflowDefinition,
   WorkflowDefinitionError,
 } from "../src"
+import type { LanguageModel } from "../src/models"
 import { schemaFieldsToJsonSchema, schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { createTestSixb } from "../src/testing"
 import { validateWorkflowDefinition } from "../src/workflows"
@@ -44,7 +44,7 @@ const Invoice = defineObjectType({
 
 const resolverAgent = defineAgent("invoice-resolver", {
   name: "Invoice resolver",
-  model: {} as LanguageModelV4,
+  model: {} as LanguageModel,
   instructions: "Resolve invoices from transaction evidence.",
 })
 

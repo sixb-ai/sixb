@@ -18,7 +18,7 @@ export type {
   ToModelMessagesOptions,
 } from "./adapters"
 export {
-  fromAiSdk,
+  fromUiMessage,
   omitUndefinedObjectProperties,
   toModelMessages,
   toUiMessage,
@@ -102,12 +102,20 @@ export {
   type AgentMessagePart,
   type AgentMessagePartType,
   type AgentMessageRole,
+  type AgentProviderStatePart,
   type AgentReasoningPart,
   type AgentStepStartPart,
   type AgentTextPart,
   type AgentToolCallPart,
   type AgentToolCallState,
 } from "./message"
+export type {
+  ModelLoopResult,
+  PrepareModelStepInput,
+  PrepareModelStepResult,
+  RunModelLoopInput,
+} from "./model-loop"
+export { runModelLoop } from "./model-loop"
 export {
   type RequestAgentRunInput,
   type RequestAgentRunResult,
@@ -148,6 +156,7 @@ export type {
   AgentContextConfig,
   AgentDefinition,
   AgentLoopConfig,
+  AgentReasoning,
   AgentReasoningLevel,
   AgentToolArtifact,
   AgentToolArtifactPutInput,

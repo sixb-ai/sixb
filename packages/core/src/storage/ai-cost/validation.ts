@@ -21,14 +21,16 @@ const METER_ORDER: Readonly<Record<AiBillableMeter, number>> = {
   "tokens.input.uncached": 1,
   "tokens.input.cacheRead": 2,
   "tokens.input.cacheWrite": 3,
-  "tokens.output.total": 4,
-  "tokens.output.text": 5,
-  "tokens.output.reasoning": 6,
+  "tokens.input.cacheWrite5m": 4,
+  "tokens.input.cacheWrite1h": 5,
+  "tokens.output.total": 6,
+  "tokens.output.text": 7,
+  "tokens.output.reasoning": 8,
 }
 const METERS = new Set(Object.keys(METER_ORDER))
 const UNPRICEABLE_REASONS = new Set<AiUnpriceableReason>([
   "missingBillingIdentity",
-  "missingCatalogEntry",
+  "missingRateCard",
   "missingUsageMeter",
   "unsupportedPricingDimension",
   "invalidUsageForFormula",
@@ -38,6 +40,7 @@ const CONTEXT_STRING_FIELDS = [
   "region",
   "inferenceGeo",
   "routedProviderId",
+  "routedModelId",
   "deploymentId",
   "inferenceProfileId",
   "mode",
@@ -81,12 +84,23 @@ export function normalizeAiModelCallCostRecord(
     projectId: input.projectId,
     usageRecordId: input.usageRecordId,
     pricingContext: normalizeAiPricingContext(input.pricingContext),
-    priceSource: normalizePriceSource(input.priceSource),
     ratedAt: cloneDate(input.ratedAt, "cost record ratedAt"),
   }
 
-  if (input.status === "rated") return normalizeRatedCost(input, base)
-  if (input.status === "unpriceable") return normalizeUnpriceableCost(input, base)
+  if (input.status === "rated") {
+    return normalizeRatedCost(input, {
+      ...base,
+      priceSource: normalizePriceSource(input.priceSource),
+    })
+  }
+  if (input.status === "unpriceable") {
+    return normalizeUnpriceableCost(input, {
+      ...base,
+      ...(input.priceSource === undefined
+        ? {}
+        : { priceSource: normalizePriceSource(input.priceSource) }),
+    })
+  }
   throw new TypeError("[Sixb] AI cost status is invalid.")
 }
 
@@ -99,6 +113,9 @@ export function aiModelCallCostMatchesUsage(
     return false
   }
   if (record.status === "unpriceable") return true
+  if (record.components.length === 0 && isExternalValuationSource(record.priceSource.sourceId)) {
+    return true
+  }
 
   const usage = normalizeAiModelCallUsage(usageRecord.usage)
   const components = new Map(record.components.map((component) => [component.meter, component]))
@@ -113,24 +130,42 @@ function inputComponentsMatchUsage(
 ): boolean {
   if (usage.inputTokens === undefined) return false
   const total = components.get("tokens.input.total")
-  const partitions = [
+  const directPartitions = [
     ["tokens.input.uncached", usage.uncachedInputTokens],
     ["tokens.input.cacheRead", usage.cacheReadInputTokens],
     ["tokens.input.cacheWrite", usage.cacheWriteInputTokens],
   ] as const
-  const presentPartitions = partitions.filter(([meter]) => components.has(meter))
+  const presentDirect = directPartitions.filter(([meter]) => components.has(meter))
+  const specificWrites = [
+    components.get("tokens.input.cacheWrite5m"),
+    components.get("tokens.input.cacheWrite1h"),
+  ].filter((component): component is AiCostComponent => component !== undefined)
 
   if (total) {
-    return presentPartitions.length === 0 && BigInt(total.quantity) === BigInt(usage.inputTokens)
+    return (
+      presentDirect.length === 0 &&
+      specificWrites.length === 0 &&
+      BigInt(total.quantity) === BigInt(usage.inputTokens)
+    )
   }
-  if (presentPartitions.length === 0) return false
+  if (presentDirect.length === 0 && specificWrites.length === 0) return false
+  if (components.has("tokens.input.cacheWrite") && specificWrites.length > 0) return false
 
   let quantity = 0n
-  for (const [meter, expected] of presentPartitions) {
+  for (const [meter, expected] of presentDirect) {
     if (expected === undefined) return false
     const component = components.get(meter)!
     if (BigInt(component.quantity) !== BigInt(expected)) return false
     quantity += BigInt(component.quantity)
+  }
+  if (specificWrites.length > 0) {
+    if (usage.cacheWriteInputTokens === undefined) return false
+    const specificWriteQuantity = specificWrites.reduce(
+      (sum, component) => sum + BigInt(component.quantity),
+      0n
+    )
+    if (specificWriteQuantity !== BigInt(usage.cacheWriteInputTokens)) return false
+    quantity += specificWriteQuantity
   }
   return quantity === BigInt(usage.inputTokens)
 }
@@ -171,12 +206,14 @@ function normalizeRatedCost(
 ): AiRatedModelCallCostRecord {
   const billingIdentity = normalizeBillingIdentity(input.billingIdentity)
   const components = input.components.map(normalizeCostComponent).sort(compareComponents)
-  if (components.length === 0) throw new TypeError("[Sixb] AI rated cost requires components.")
+  if (components.length === 0 && !isExternalValuationSource(base.priceSource.sourceId)) {
+    throw new TypeError("[Sixb] AI rated cost requires components.")
+  }
   if (new Set(components.map((component) => component.meter)).size !== components.length) {
     throw new TypeError("[Sixb] AI rated cost cannot contain duplicate meters.")
   }
   const amountNanos = parseNonnegativeInt64(input.money.amountNanos, "money amountNanos").toString()
-  if (amountNanos !== sumComponents(components)) {
+  if (components.length > 0 && amountNanos !== sumComponents(components)) {
     throw new TypeError("[Sixb] AI cost total does not equal its component charges.")
   }
   return {
@@ -186,6 +223,10 @@ function normalizeRatedCost(
     money: { currency: normalizeCurrency(input.money.currency), amountNanos },
     components,
   }
+}
+
+function isExternalValuationSource(sourceId: string): boolean {
+  return sourceId === "provider-reported"
 }
 
 function normalizeUnpriceableCost(
@@ -252,8 +293,14 @@ function normalizePriceSource(input: AiPriceSource): AiPriceSource {
   assertNonBlank(input.sourceId, "price sourceId")
   assertNonBlank(input.sourceEntryId, "price sourceEntryId")
   assertNonBlank(input.sourceVersion, "price sourceVersion")
-  assertNonBlank(input.sourceUrl, "price sourceUrl")
-  return { ...input, observedAt: cloneDate(input.observedAt, "price source observedAt") }
+  if (input.sourceUrl !== undefined) assertNonBlank(input.sourceUrl, "price sourceUrl")
+  return {
+    sourceId: input.sourceId,
+    sourceEntryId: input.sourceEntryId,
+    sourceVersion: input.sourceVersion,
+    ...(input.sourceUrl === undefined ? {} : { sourceUrl: input.sourceUrl }),
+    observedAt: cloneDate(input.observedAt, "price source observedAt"),
+  }
 }
 
 function normalizeBillingIdentity(input: AiBillingIdentity): AiBillingIdentity {

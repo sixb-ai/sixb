@@ -1,8 +1,8 @@
-import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider"
 import type { BlobBody, FileRef } from "../blob-storage"
 import type { ConnectorRuntime } from "../connectors"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
+import { type LanguageModel, MODEL_REASONING_LEVELS, type ModelReasoning } from "../models"
 import type { InferSchema } from "../ontology/inference"
 import type { Schema } from "../ontology/types"
 import type { GroupDefinition } from "../security"
@@ -14,17 +14,12 @@ export type {
   AgentContextPart,
 } from "./context"
 
-export type AgentReasoningLevel = NonNullable<LanguageModelV4CallOptions["reasoning"]>
+export type AgentReasoning = ModelReasoning
 
-export const AGENT_REASONING_LEVELS = [
-  "provider-default",
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-] as const satisfies readonly AgentReasoningLevel[]
+/** @deprecated Use {@link AgentReasoning}. */
+export type AgentReasoningLevel = AgentReasoning
+
+export const AGENT_REASONING_LEVELS = MODEL_REASONING_LEVELS
 
 export interface AgentContextConfig {
   /** Override the provider context-window size inferred by the agent worker. */
@@ -193,9 +188,8 @@ export interface AgentToolDescriptionBuilder<TName extends string> {
 export interface DefineAgentConfig {
   readonly name: string
   readonly description?: string
-  readonly model: LanguageModelV4
-  readonly reasoning?: AgentReasoningLevel
-  readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
+  readonly model: LanguageModel
+  readonly reasoning?: AgentReasoning
   readonly instructions: string
   readonly groups?: readonly GroupDefinition[]
   /** Reusable tools this agent is explicitly allowed to call. */
@@ -207,8 +201,8 @@ export interface DefineAgentConfig {
  * Agent definition registered with Sixb.
  *
  * Definitions are safe to export from `agents/` modules; the runtime loads and
- * registers them. The agent worker runs them as streaming turns. The `model` is an
- * AI SDK language model instance and is therefore not serialisable — the worker
+ * registers them. The agent worker runs them as streaming turns. The `model` is a language model
+ * instance and is therefore not serialisable — the worker
  * resolves a definition from its own discovery rather than over the wire.
  */
 export interface AgentDefinition<TId extends string = string> {
@@ -216,9 +210,8 @@ export interface AgentDefinition<TId extends string = string> {
   readonly id: TId
   readonly name: string
   readonly description?: string
-  readonly model: LanguageModelV4
-  readonly reasoning?: AgentReasoningLevel
-  readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
+  readonly model: LanguageModel
+  readonly reasoning?: AgentReasoning
   readonly instructions: string
   readonly groupIds: readonly string[]
   /** Selected tool definitions, normalized to an empty array when omitted. */

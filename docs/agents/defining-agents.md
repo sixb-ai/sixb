@@ -7,21 +7,31 @@ threads) and must be unique across all agents. The call validates the config and
 ```ts
 // agents/invoice-assistant.ts
 import { defineAgent } from "@sixb/core"
-import { gateway } from "ai"
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
 
 export const invoiceAssistant = defineAgent("invoice-assistant", {
   name: "Invoice Assistant",
   description: "Tracks outstanding invoices, overdue accounts, and payment follow-ups.",
-  model: gateway("openai/gpt-5.5"),
+  model: vercelGateway("openai/gpt-5.5"),
   reasoning: "medium",
   instructions: [
     "You are this project's invoicing assistant.",
     "Focus on invoices, balances, due dates, and reminder status.",
     "Never claim a reminder was sent unless the data shows it.",
   ].join("\n"),
-  providerOptions: {
-    openai: { reasoningSummary: "detailed" },
-  },
+})
+```
+
+Providers share the same callable shape. To call Anthropic directly instead of routing through a
+gateway:
+
+```ts
+import { anthropic } from "@sixb/anthropic"
+
+export const supportAgent = defineAgent("support-agent", {
+  name: "Support Agent",
+  model: anthropic("claude-sonnet-5"),
+  instructions: "Help customers using verified account and product information.",
 })
 ```
 
@@ -30,25 +40,26 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | `string` | Yes | Display name shown in catalogs and pickers. |
-| `model` | `LanguageModelV4` | Yes | An AI SDK model instance (see below). |
+| `model` | `LanguageModel` | Yes | A provider-neutral Sixb language model (see below). |
 | `instructions` | `string` | Yes | The system prompt. |
 | `description` | `string` | No | Short summary for catalogs. |
-| `reasoning` | reasoning level | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
-| `providerOptions` | provider-keyed object | No | Per-provider passthrough, e.g. `{ openai: { ... } }`. |
+| `reasoning` | reasoning preference | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `{ budgetTokens }`. |
 | `groups` | `GroupDefinition[]` | No | Gate who can use the agent and what it can reach. See [Authorization](./authorization.md). |
 | `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
 | `loop` | `AgentLoopConfig` | No | Step cap, prompt caching, and optional context-budget overrides. |
 
 ## The model
 
-`model` is an [AI SDK](https://sdk.vercel.ai) `LanguageModelV4` instance, not a string. The simplest
-source is the `ai` gateway; any provider that returns a `LanguageModelV4` works.
+`model` is a `LanguageModel` from `@sixb/core/models`, not a string. Provider packages construct
+models and own their provider-specific configuration. Vercel AI Gateway is callable directly:
 
 ```ts
-import { gateway } from "ai"
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
 
-model: gateway("deepseek/deepseek-v4-flash")
-model: gateway("openai/gpt-5.5")
+model: vercelGateway("deepseek/deepseek-v4-flash")
+model: vercelGateway("openai/gpt-5.5", {
+  providerOptions: { gateway: { order: ["openai", "azure"] } },
+})
 ```
 
 ## The project model catalog
@@ -57,12 +68,13 @@ A project can declare the models Sixb is allowed to use. The catalog is optional
 present, every agent's `model` must be in it, and `createSixb()` fails at startup otherwise.
 
 ```ts
-import { gateway } from "ai"
-
 export const sixb = createSixb({
   // ...
   models: {
-    language: [gateway("openai/gpt-5.5"), gateway("anthropic/claude-sonnet-4.6")],
+    language: [
+      vercelGateway("openai/gpt-5.5"),
+      vercelGateway("anthropic/claude-sonnet-4.6"),
+    ],
   },
 })
 ```
@@ -70,9 +82,28 @@ export const sixb = createSixb({
 The first entry of each kind is the project default. Sixb identifies each entry by the model you
 configured — you never author an id or an alias. Configure the same model twice and startup fails.
 
-An entry is the binding, not the vendor's model: `gateway("openai/gpt-5.5")` and
-`openai("gpt-5.5")` are two entries, because they route and bill differently. An agent's `model`
-has to match one of them.
+An entry is the binding, not only the vendor model: the same vendor model reached through Vercel AI
+Gateway and through a direct provider are distinct entries because they route and bill differently.
+An agent's `model` has to match one of the configured entries.
+
+Reasoning is one normalized preference, not a boolean. Named efforts are the portable default:
+
+```ts
+reasoning: "high"
+```
+
+Providers that expose an exact native budget can also accept a token budget:
+
+```ts
+model: anthropic("claude-sonnet-4", { maxOutputTokens: 16_384 })
+reasoning: { budgetTokens: 8_192 }
+```
+
+`model.definition.capabilities.reasoning` describes the controls known for that concrete provider
+offering: whether reasoning can be disabled, its supported named efforts, and any exact token-budget
+bounds. `undefined` means the synchronous model definition does not know; `false` means the catalog
+knows reasoning is unsupported. Providers reject a known unsupported preference before making the
+network request rather than silently approximating it.
 
 ## Instructions vs Agent Skills
 
@@ -96,7 +127,7 @@ skill is relevant.
 ```ts
 export const researcher = defineAgent("researcher", {
   name: "Researcher",
-  model: gateway("openai/gpt-5.5"),
+  model: vercelGateway("openai/gpt-5.5"),
   instructions: "Research approved sources and cite them.",
   tools: [webSearch, webFetch],
 })
@@ -122,12 +153,18 @@ cache reads and writes in AI usage. Provider details stay out of project prompts
 loop: { caching: "off" }
 ```
 
-Direct-provider models are unchanged unless their AI SDK binding implements caching implicitly.
+Direct-provider models retain their provider-specific caching behavior.
 
 Sixb automatically checkpoints long conversations before their next model request exceeds the
-selected model's context window. The worker resolves exact model limits from its pinned Models.dev
-snapshot. If no exact entry exists, it uses a conservative 128,000-token window and logs one startup
-warning for that provider/model pair.
+selected model's context window. At startup, the worker uses locally available model limits or
+calls the model's `resolveDefinition()` to fetch metadata through its provider's cached catalog.
+An explicit `loop.context.windowTokens` avoids that lookup and allows offline startup.
+If no limit is available, startup fails with instructions to configure a window or supply a model
+definition; Sixb does not assume a default context size.
+
+Model definitions distinguish `contextWindow` (shared input/output capacity) from `maxInputTokens`.
+When both are known, the input budget respects both limits. When only an input limit is known,
+Sixb uses it as a conservative window and still leaves the configured output reserve.
 
 The full transcript remains unchanged. Only the model-facing view becomes a continuation summary
 plus recent complete turns.

@@ -61,6 +61,7 @@ function serializeModelCall(item: AiModelCallAccountingItem) {
       callId: item.usage.callId,
       providerId: item.usage.providerId,
       requestedModelId: item.usage.requestedModelId,
+      requestedReasoning: item.usage.requestedReasoning,
       responseModelId: item.usage.responseModelId,
       responseId: item.usage.responseId,
       usage: item.usage.usage,
@@ -73,10 +74,14 @@ function serializeModelCall(item: AiModelCallAccountingItem) {
         ? undefined
         : {
             ...item.cost,
-            priceSource: {
-              ...item.cost.priceSource,
-              observedAt: item.cost.priceSource.observedAt.toISOString(),
-            },
+            ...(item.cost.priceSource === undefined
+              ? {}
+              : {
+                  priceSource: {
+                    ...item.cost.priceSource,
+                    observedAt: item.cost.priceSource.observedAt.toISOString(),
+                  },
+                }),
             ratedAt: item.cost.ratedAt.toISOString(),
           },
     valuationStatus: item.valuationStatus,

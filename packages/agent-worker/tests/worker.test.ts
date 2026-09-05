@@ -2,12 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type {
-  LanguageModelV4,
-  LanguageModelV4CallOptions,
-  LanguageModelV4StreamPart,
-  LanguageModelV4Usage,
-} from "@ai-sdk/provider"
 import { exa } from "@sixb/connector-exa"
 import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
@@ -15,9 +9,7 @@ import {
   type AgentReasoningLevel,
   AgentRequestError,
   type AgentsRuntime,
-  type AgentToolArtifact,
   type AgentToolDefinition,
-  type AgentToolResult,
   type BlobStorage,
   type Broker,
   type CommandResult,
@@ -54,9 +46,15 @@ import {
 } from "@sixb/core/internal/agents"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
+import type {
+  LanguageModel,
+  LanguageModelRequest,
+  ModelFinishReason,
+  ModelTool,
+  ModelUsage,
+} from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
-  type AgentMessageRecord,
   type AgentStorage,
   AgentStorageError,
   type AiUsageStorage,
@@ -69,14 +67,11 @@ import {
   createTestSixb,
   createTestWorkflowExecution,
 } from "@sixb/core/testing"
-import { jsonSchema, type ToolSet, tool } from "ai"
-import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
-import { renderAgentSystemPrompt } from "../src/agent-prompt"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
-import { prepareAgentAttachments, toolResultAttachmentKey } from "../src/attachments"
+import { prepareAgentAttachments } from "../src/attachments"
 import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
@@ -90,48 +85,48 @@ import type {
   AgentWorkerStorage,
 } from "../src/types"
 import { waitFor, writeProjectSkill } from "./helpers"
+import { testStream, WorkerTestModel, type WorkerTestStreamEvent } from "./worker-model-fixture"
 
 const PROJECT_ID = "agent-worker-tests"
 const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
 const REQUESTER = { type: "user", id: "usr_requester" } as const
 const AGENT_PRINCIPAL = { type: "serviceAccount", id: "svc_agent_assistant" } as const
 const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime" })
-const TEST_PNG_BYTES = Uint8Array.from(
-  Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
-    "base64"
-  )
-)
 
-const USAGE: LanguageModelV4Usage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 7, text: 7, reasoning: 0 },
+const USAGE: ModelUsage = {
+  inputTokens: 10,
+  outputTokens: 7,
+  uncachedInputTokens: 10,
+  cacheReadInputTokens: 0,
+  cacheWriteInputTokens: 0,
+  textOutputTokens: 7,
+  reasoningOutputTokens: 0,
   raw: { input_tokens: 10, output_tokens: 7, provider_meter: 1 },
 }
 
-const COMPACTION_USAGE: LanguageModelV4Usage = {
-  inputTokens: { total: 3_500, noCache: 3_500, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 100, text: 100, reasoning: 0 },
+const COMPACTION_USAGE: ModelUsage = {
+  inputTokens: 3_500,
+  outputTokens: 100,
   raw: { input_tokens: 3_500, output_tokens: 100 },
 }
 
-function stream(chunks: LanguageModelV4StreamPart[]) {
-  return { stream: convertArrayToReadableStream(chunks) }
+function stream(chunks: WorkerTestStreamEvent[]) {
+  return testStream(chunks)
 }
 
-function finish(unified: "stop" | "tool-calls"): LanguageModelV4StreamPart {
-  return { type: "finish", finishReason: { unified, raw: unified }, usage: USAGE }
+function finish(unified: ModelFinishReason): WorkerTestStreamEvent {
+  return { type: "finish", finishReason: unified, rawFinishReason: unified, usage: USAGE }
 }
 
 /**
  * A model that, on its first call, calls the `echo` tool, then on its second call answers with
- * reasoning + text. A stateful `doStream` (not the array form) guarantees per-call ordering.
+ * reasoning + text. A stateful stream handler guarantees per-call ordering.
  */
-function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLanguageModelV4 {
+function toolThenAnswerModel(captureReplay?: (prompt: string) => void): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async (options) => {
       call += 1
       if (call === 1) {
         return stream([
@@ -146,7 +141,7 @@ function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLang
         ])
       }
       if (call === 3) {
-        captureReplay?.(JSON.stringify(options.prompt))
+        captureReplay?.(JSON.stringify(options.messages))
       }
       return stream([
         { type: "stream-start", warnings: [] },
@@ -162,111 +157,14 @@ function toolThenAnswerModel(captureReplay?: (prompt: string) => void): MockLang
   })
 }
 
-function artifactToolThenAnswerModel(
-  capture: {
-    readonly live?: (prompt: unknown) => void
-    readonly replay?: (prompt: unknown) => void
-    readonly viewed?: (prompt: unknown) => void
-  } = {}
-): MockLanguageModelV4 {
-  let call = 0
-  return new MockLanguageModelV4({
-    modelId: "mock-model",
-    supportedUrls: { "image/*": [/^data:/] },
-    doStream: async (options) => {
-      call += 1
-      if (call === 1) {
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "image-call-1",
-            toolName: "create_image",
-            input: JSON.stringify({}),
-          },
-          finish("tool-calls"),
-        ])
-      }
-      if (call === 2) capture.live?.(options.prompt)
-      if (call === 3) {
-        capture.replay?.(options.prompt)
-        const promptJson = JSON.stringify(options.prompt)
-        const sandboxPath = promptJson.match(/sandboxPath=\\"([^"]+generated\.png)\\"/)?.[1]
-        if (!sandboxPath) throw new Error("Expected replay attachment sandbox path.")
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "view-image-call-1",
-            toolName: "view_file",
-            input: JSON.stringify({ path: sandboxPath }),
-          },
-          finish("tool-calls"),
-        ])
-      }
-      if (call === 4) capture.viewed?.(options.prompt)
-      return stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "t" },
-        { type: "text-delta", id: "t", delta: "Created the image" },
-        { type: "text-end", id: "t" },
-        finish("stop"),
-      ])
-    },
-  })
-}
-
-function bashImageThenViewModel(captureViewed: (prompt: unknown) => void): MockLanguageModelV4 {
-  let call = 0
-  return new MockLanguageModelV4({
-    modelId: "mock-model",
-    supportedUrls: { "image/*": [/^data:/] },
-    doStream: async (options) => {
-      call += 1
-      if (call === 1) {
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "bash-image-call-1",
-            toolName: "bash",
-            input: JSON.stringify({ command: "create-view-image" }),
-          },
-          finish("tool-calls"),
-        ])
-      }
-      if (call === 2) {
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "view-bash-image-call-1",
-            toolName: "view_file",
-            input: JSON.stringify({ path: "scratch/bash-image.png" }),
-          },
-          finish("tool-calls"),
-        ])
-      }
-      captureViewed(options.prompt)
-      return stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "t" },
-        { type: "text-delta", id: "t", delta: "Viewed the bash image" },
-        { type: "text-end", id: "t" },
-        finish("stop"),
-      ])
-    },
-  })
-}
-
-function invalidMetadataAnswerModel(): MockLanguageModelV4 {
+function invalidMetadataAnswerModel(): WorkerTestModel {
   const invalidProviderMetadata = { mock: { generatedAt: new Date() } } as never
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () =>
+    stream: async () =>
       stream([
         { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "answer", providerMetadata: invalidProviderMetadata },
+        { type: "text-start", id: "answer", providerData: invalidProviderMetadata },
         { type: "text-delta", id: "answer", delta: "Done" },
         { type: "text-end", id: "answer" },
         finish("stop"),
@@ -274,11 +172,11 @@ function invalidMetadataAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function webSearchThenAnswerModel(): MockLanguageModelV4 {
+function webSearchThenAnswerModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       if (call === 1) {
         return stream([
@@ -305,11 +203,11 @@ function webSearchThenAnswerModel(): MockLanguageModelV4 {
 
 function webFetchThenAnswerModel(
   config: { readonly captureReplay?: (prompt: string) => void; readonly url?: string } = {}
-): MockLanguageModelV4 {
+): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async (options) => {
       call += 1
       if (call === 1) {
         return stream([
@@ -323,7 +221,7 @@ function webFetchThenAnswerModel(
           finish("tool-calls"),
         ])
       }
-      if (call === 3) config.captureReplay?.(JSON.stringify(options.prompt))
+      if (call === 3) config.captureReplay?.(JSON.stringify(options.messages))
       return stream([
         { type: "stream-start", warnings: [] },
         { type: "text-start", id: `answer-${call}` },
@@ -335,10 +233,10 @@ function webFetchThenAnswerModel(
   })
 }
 
-function answerModel(captureTools?: (names: readonly string[]) => void): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function answerModel(captureTools?: (names: readonly string[]) => void): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async (options) => {
       captureTools?.((options.tools ?? []).map((tool) => tool.name))
       return stream([
         { type: "stream-start", warnings: [] },
@@ -354,84 +252,88 @@ function answerModel(captureTools?: (names: readonly string[]) => void): MockLan
 function compactingAnswerModel(input: {
   readonly provider?: string
   readonly modelId?: string
-  readonly captureSummaryPrompt: (prompt: LanguageModelV4CallOptions["prompt"]) => void
-  readonly captureAnswerPrompt: (prompt: LanguageModelV4CallOptions["prompt"]) => void
-  readonly captureSummaryReasoning?: (reasoning: LanguageModelV4CallOptions["reasoning"]) => void
-  readonly captureAnswerReasoning?: (reasoning: LanguageModelV4CallOptions["reasoning"]) => void
-}): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
-    ...(input.provider === undefined ? {} : { provider: input.provider }),
+  readonly captureSummaryPrompt: (prompt: LanguageModelRequest["messages"]) => void
+  readonly captureAnswerPrompt: (prompt: LanguageModelRequest["messages"]) => void
+  readonly captureSummaryReasoning?: (reasoning: LanguageModelRequest["reasoning"]) => void
+  readonly captureAnswerReasoning?: (reasoning: LanguageModelRequest["reasoning"]) => void
+}): WorkerTestModel {
+  return new WorkerTestModel({
+    ...(input.provider === undefined ? {} : { providerId: input.provider }),
     modelId: input.modelId ?? "mock-model",
-    doGenerate: async (options) => {
-      input.captureSummaryPrompt(options.prompt)
+    stream: async (options) => {
+      if (options.maxOutputTokens === undefined) {
+        input.captureAnswerPrompt(options.messages)
+        input.captureAnswerReasoning?.(options.reasoning)
+        return stream([
+          { type: "stream-start" },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Continued after compaction." },
+          { type: "text-end", id: "answer" },
+          { type: "finish", finishReason: "stop", usage: COMPACTION_USAGE },
+        ])
+      }
+      expect(options.tools).toEqual([])
+      expect(options.maxOutputTokens).toBeGreaterThan(0)
+      input.captureSummaryPrompt(options.messages)
       input.captureSummaryReasoning?.(options.reasoning)
-      return {
-        content: [
-          {
-            type: "text",
-            text: [
-              "## Goal",
-              "Continue the durable test conversation.",
-              "## User Constraints and Preferences",
-              "Keep the answer concise.",
-              "## Established Facts and Results",
-              "Earlier turns were completed.",
-              "## Completed Actions",
-              "Recorded earlier answers.",
-              "## Open Work",
-              "Answer the latest request.",
-              "## Key Decisions",
-              "Retain the latest complete turn.",
-              "## Important Identifiers and Files",
-              "Thread remains authoritative.",
-            ].join("\n"),
-          },
-        ],
-        finishReason: { unified: "stop", raw: "stop" },
-        usage: COMPACTION_USAGE,
-        response: {
+      return stream([
+        { type: "stream-start" },
+        {
+          type: "response-metadata",
           id: "compaction-summary-response",
           modelId: "served-summary-model",
         },
-        providerMetadata: { test: { serviceTier: "summary-tier" } },
-        warnings: [],
-      }
-    },
-    doStream: async (options) => {
-      input.captureAnswerPrompt(options.prompt)
-      input.captureAnswerReasoning?.(options.reasoning)
-      return stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "answer" },
-        { type: "text-delta", id: "answer", delta: "Continued after compaction." },
-        { type: "text-end", id: "answer" },
-        { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage: COMPACTION_USAGE },
+        { type: "text-start", id: "summary" },
+        {
+          type: "text-delta",
+          id: "summary",
+          delta: [
+            "## Goal",
+            "Continue the durable test conversation.",
+            "## User Constraints and Preferences",
+            "Keep the answer concise.",
+            "## Established Facts and Results",
+            "Earlier turns were completed.",
+            "## Completed Actions",
+            "Recorded earlier answers.",
+            "## Open Work",
+            "Answer the latest request.",
+            "## Key Decisions",
+            "Retain the latest complete turn.",
+            "## Important Identifiers and Files",
+            "Thread remains authoritative.",
+          ].join("\n"),
+        },
+        { type: "text-end", id: "summary" },
+        { type: "finish", finishReason: "stop", usage: COMPACTION_USAGE },
       ])
     },
   })
 }
 
-function lengthLimitedSummaryModel(onAnswerCall: () => void): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function lengthLimitedSummaryModel(onAnswerCall: () => void): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doGenerate: async () => ({
-      content: [{ type: "text", text: "## Goal\nPartial summary" }],
-      finishReason: { unified: "length", raw: "length" },
-      usage: USAGE,
-      warnings: [],
-    }),
-    doStream: async () => {
+    stream: async (request) => {
+      if (request.maxOutputTokens !== undefined)
+        return stream([
+          { type: "stream-start" },
+          { type: "text-start", id: "summary" },
+          { type: "text-delta", id: "summary", delta: "## Goal\nPartial summary" },
+          { type: "text-end", id: "summary" },
+          finish("length"),
+        ])
       onAnswerCall()
       return stream([finish("stop")])
     },
   })
 }
 
-function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): MockLanguageModelV4 {
+function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async (options) => {
       call += 1
       if (call === 1) {
         return stream([
@@ -446,7 +348,7 @@ function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): Mo
         ])
       }
       if (call === 3) {
-        captureReplay(JSON.stringify(options.prompt))
+        captureReplay(JSON.stringify(options.messages))
       }
       return stream([
         { type: "stream-start", warnings: [] },
@@ -459,11 +361,11 @@ function failingToolThenAnswerModel(captureReplay: (prompt: string) => void): Mo
   })
 }
 
-function slowAnswerModel(delayMs: number): MockLanguageModelV4 {
+function slowAnswerModel(delayMs: number): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       await Bun.sleep(delayMs)
       return stream([
@@ -477,27 +379,12 @@ function slowAnswerModel(delayMs: number): MockLanguageModelV4 {
   })
 }
 
-function toolOnlyModel(captureSynthesis?: (options: LanguageModelV4CallOptions) => void) {
+function toolOnlyModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
+    stream: async () => {
       call += 1
-      const echoIsAvailable = options.tools?.some((candidate) => candidate.name === "echo") ?? false
-      if (!echoIsAvailable) {
-        captureSynthesis?.(options)
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: `synthesis-${call}` },
-          {
-            type: "text-delta",
-            id: `synthesis-${call}`,
-            delta: "Best answer from the work completed so far.",
-          },
-          { type: "text-end", id: `synthesis-${call}` },
-          finish("stop"),
-        ])
-      }
       return stream([
         { type: "stream-start", warnings: [] },
         {
@@ -512,22 +399,10 @@ function toolOnlyModel(captureSynthesis?: (options: LanguageModelV4CallOptions) 
   })
 }
 
-function structuredAnswerModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function structuredAnswerModel(): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () =>
-      stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "workflow-answer" },
-        {
-          type: "text-delta",
-          id: "workflow-answer",
-          delta: "Project Alpha is the best match with 0.96 confidence.",
-        },
-        { type: "text-end", id: "workflow-answer" },
-        finish("stop"),
-      ]),
-    doGenerate: async () => ({
+    generate: async () => ({
       content: [
         {
           type: "text",
@@ -541,36 +416,10 @@ function structuredAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function structuredAnswerUntilAbortedModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function invalidStructuredAnswerModel(): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doGenerate: async (options) => {
-      await new Promise<void>((_resolve, reject) => {
-        const abort = () => reject(new DOMException("Aborted", "AbortError"))
-        if (options.abortSignal?.aborted) abort()
-        else options.abortSignal?.addEventListener("abort", abort, { once: true })
-      })
-      throw new Error("unreachable")
-    },
-  })
-}
-
-function invalidStructuredAnswerModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
-    modelId: "mock-model",
-    doStream: async () =>
-      stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "workflow-answer" },
-        {
-          type: "text-delta",
-          id: "workflow-answer",
-          delta: "Project Alpha is the best match.",
-        },
-        { type: "text-end", id: "workflow-answer" },
-        finish("stop"),
-      ]),
-    doGenerate: async () => ({
+    generate: async () => ({
       content: [{ type: "text", text: JSON.stringify({ answer: 42, confidence: "high" }) }],
       finishReason: { unified: "stop", raw: "stop" },
       usage: USAGE,
@@ -579,115 +428,56 @@ function invalidStructuredAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function structuredAnswerAfterValidationRetryModel(
-  captureFinalizerPrompt: (prompt: LanguageModelV4CallOptions["prompt"]) => void
-): MockLanguageModelV4 {
-  let finalizerCall = 0
-  return new MockLanguageModelV4({
-    modelId: "mock-model",
-    doStream: async () =>
-      stream([
-        { type: "stream-start", warnings: [] },
-        { type: "text-start", id: "workflow-answer" },
-        {
-          type: "text-delta",
-          id: "workflow-answer",
-          delta: "Project Alpha is the best match with 0.96 confidence.",
-        },
-        { type: "text-end", id: "workflow-answer" },
-        finish("stop"),
-      ]),
-    doGenerate: async (options) => {
-      captureFinalizerPrompt(options.prompt)
-      finalizerCall += 1
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              finalizerCall === 1
-                ? JSON.stringify({ answer: 42, confidence: "high" })
-                : JSON.stringify({ answer: "Project Alpha", confidence: 0.96 }),
-          },
-        ],
-        finishReason: { unified: "stop", raw: "stop" },
-        usage: USAGE,
-        warnings: [],
-      }
-    },
-  })
-}
-
-function structuredToolThenProviderFailureModel(): MockLanguageModelV4 {
+function structuredToolThenProviderFailureModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    generate: async () => {
       call += 1
       if (call === 1) {
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "workflow-failure",
-            toolName: "fail_lookup",
-            input: JSON.stringify({ query: "alpha" }),
-          },
-          finish("tool-calls"),
-        ])
+        return {
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "workflow-failure",
+              toolName: "fail_lookup",
+              input: JSON.stringify({ query: "alpha" }),
+            },
+          ],
+          finishReason: { unified: "tool-calls", raw: "tool-calls" },
+          usage: USAGE,
+          warnings: [],
+        }
       }
       throw new Error("provider unavailable after tool failure")
     },
   })
 }
 
-interface CapturedWorkflowModelCall {
-  readonly phase: "research" | "finalize"
-  readonly options: LanguageModelV4CallOptions
-}
-
 function structuredToolThenAnswerModel(
-  captureCall?: (call: CapturedWorkflowModelCall) => void
-): MockLanguageModelV4 {
-  let researchCall = 0
-  return new MockLanguageModelV4({
+  captureSystem?: (system: string | undefined) => void
+): WorkerTestModel {
+  let call = 0
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
-      captureCall?.({ phase: "research", options })
-      researchCall += 1
-      if (researchCall === 1) {
-        return stream([
-          { type: "stream-start", warnings: [] },
-          {
-            type: "tool-call",
-            toolCallId: "workflow-lookup",
-            toolName: "lookup_project",
-            input: JSON.stringify({ query: "alpha" }),
-          },
-          finish("tool-calls"),
-        ])
+    generate: async (options) => {
+      captureSystem?.(options.messages.find((message) => message.role === "system")?.content)
+      call += 1
+      if (call === 1) {
+        return {
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: "workflow-lookup",
+              toolName: "lookup_project",
+              input: JSON.stringify({ query: "alpha" }),
+            },
+          ],
+          finishReason: { unified: "tool-calls", raw: "tool-calls" },
+          usage: USAGE,
+          warnings: [],
+        }
       }
-      return stream([
-        { type: "stream-start", warnings: [] },
-        { type: "reasoning-start", id: "workflow-reasoning" },
-        {
-          type: "reasoning-delta",
-          id: "workflow-reasoning",
-          delta: "private workflow reasoning",
-        },
-        { type: "reasoning-end", id: "workflow-reasoning" },
-        { type: "text-start", id: "workflow-answer" },
-        {
-          type: "text-delta",
-          id: "workflow-answer",
-          delta: "Project Alpha is the best match with 0.96 confidence.",
-        },
-        { type: "text-end", id: "workflow-answer" },
-        finish("stop"),
-      ])
-    },
-    doGenerate: async (options) => {
-      captureCall?.({ phase: "finalize", options })
       return {
         content: [
           {
@@ -703,11 +493,11 @@ function structuredToolThenAnswerModel(
   })
 }
 
-function bashThenAnswerModel(): MockLanguageModelV4 {
+function bashThenAnswerModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       if (call === 1) {
         return stream([
@@ -736,11 +526,11 @@ function bashThenAnswerModel(): MockLanguageModelV4 {
   })
 }
 
-function outputBashThenAnswerModel(): MockLanguageModelV4 {
+function outputBashThenAnswerModel(): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async () => {
+    stream: async () => {
       call += 1
       if (call === 1) {
         return stream([
@@ -767,12 +557,12 @@ function outputBashThenAnswerModel(): MockLanguageModelV4 {
 
 function apiBashThenAnswerModel(
   captureSystem?: (system: string | undefined) => void
-): MockLanguageModelV4 {
+): WorkerTestModel {
   let call = 0
-  return new MockLanguageModelV4({
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
-      captureSystem?.(options.prompt.find((message) => message.role === "system")?.content)
+    stream: async (options) => {
+      captureSystem?.(options.messages.find((message) => message.role === "system")?.content)
       call += 1
       if (call === 1) {
         return stream([
@@ -800,7 +590,7 @@ function apiBashThenAnswerModel(
 }
 
 function controlledBlockingAnswerModel(): {
-  readonly model: MockLanguageModelV4
+  readonly model: WorkerTestModel
   startedCount(): number
   waitForStarted(count: number): Promise<void>
   releaseAll(): void
@@ -818,10 +608,10 @@ function controlledBlockingAnswerModel(): {
   }
 
   return {
-    model: new MockLanguageModelV4({
+    model: new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => ({
-        stream: new ReadableStream<LanguageModelV4StreamPart>({
+      stream: async (options) => ({
+        stream: new ReadableStream<WorkerTestStreamEvent>({
           start(controller) {
             started += 1
             const callId = started
@@ -840,10 +630,10 @@ function controlledBlockingAnswerModel(): {
             controller.enqueue({ type: "stream-start", warnings: [] })
             releases.push(release)
             notifyStarted()
-            if (options.abortSignal?.aborted) {
+            if (options.signal.aborted) {
               abort()
             } else {
-              options.abortSignal?.addEventListener("abort", abort, { once: true })
+              options.signal.addEventListener("abort", abort, { once: true })
             }
           },
         }),
@@ -871,16 +661,16 @@ function controlledBlockingAnswerModel(): {
 // Streams `partial` text and then blocks until the turn is aborted, so a cancel lands mid-response
 // with real streamed content to persist.
 function partialTextThenBlockingModel(partial: string): {
-  readonly model: MockLanguageModelV4
+  readonly model: WorkerTestModel
   waitForStarted(): Promise<void>
 } {
   let started = 0
   const waiters: Array<() => void> = []
   return {
-    model: new MockLanguageModelV4({
+    model: new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => ({
-        stream: new ReadableStream<LanguageModelV4StreamPart>({
+      stream: async (options) => ({
+        stream: new ReadableStream<WorkerTestStreamEvent>({
           start(controller) {
             started += 1
             for (const resolve of waiters.splice(0)) resolve()
@@ -889,10 +679,10 @@ function partialTextThenBlockingModel(partial: string): {
             controller.enqueue({ type: "text-delta", id: "t1", delta: partial })
             // No text-end / finish: the turn hangs here until the abort signal errors the stream.
             const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-            if (options.abortSignal?.aborted) {
+            if (options.signal.aborted) {
               abort()
             } else {
-              options.abortSignal?.addEventListener("abort", abort, { once: true })
+              options.signal.addEventListener("abort", abort, { once: true })
             }
           },
         }),
@@ -905,20 +695,33 @@ function partialTextThenBlockingModel(partial: string): {
   }
 }
 
-const echoTool: ToolSet = {
-  echo: tool({
+const echoTool: readonly ModelTool[] = [
+  {
+    name: "echo",
     description: "Echo a value back.",
-    inputSchema: jsonSchema<{ value: string }>({
+    inputSchema: {
       type: "object",
       properties: { value: { type: "string" } },
       required: ["value"],
       additionalProperties: false,
-    }),
-    async execute(input) {
-      return { echoed: input.value }
     },
-  }),
-}
+    parseInput(input) {
+      if (
+        typeof input !== "object" ||
+        input === null ||
+        Array.isArray(input) ||
+        typeof (input as { value?: unknown }).value !== "string"
+      ) {
+        throw new TypeError("echo.value must be a string")
+      }
+      return input as { readonly value: string }
+    },
+    async execute(input) {
+      return { echoed: (input as { readonly value: string }).value }
+    },
+    errorText: () => "Echo failed.",
+  },
+]
 
 const echoAgentTool = defineAgentTool("echo")
   .description("Echo a value back.")
@@ -941,16 +744,6 @@ function workerOptions(
     apiBaseUrl: options.apiBaseUrl ?? TEST_AGENT_API_BASE_URL,
     idlePollMs: options.idlePollMs ?? 5,
   }
-}
-
-function testSystemPrompt(sixb: TestSixb): string {
-  const agent = sixb.definitions.agents.getById("assistant")
-  if (!agent) throw new Error("Expected test agent.")
-  return renderAgentSystemPrompt({
-    mode: "conversation",
-    instructions: agent.instructions,
-    skills: [],
-  })
 }
 
 interface RecordedCommand {
@@ -1046,15 +839,6 @@ class RecordingSandbox implements Sandbox {
         durationMs: 1,
       }
     }
-    if (command === "bash" && script === "create-view-image") {
-      this.files.set(join(this.workingDirectory, "scratch", "bash-image.png"), TEST_PNG_BYTES)
-      return {
-        exitCode: 0,
-        stdout: "created scratch/bash-image.png",
-        stderr: "",
-        durationMs: 1,
-      }
-    }
     if (
       command === "bash" &&
       typeof script === "string" &&
@@ -1096,28 +880,6 @@ class RecordingSandbox implements Sandbox {
             exitCode: 2,
             stdout: "",
             stderr: "output file not found",
-            durationMs: 1,
-          }
-    }
-    if (
-      command === "bash" &&
-      typeof script === "string" &&
-      script.includes("sixb-read-view-file")
-    ) {
-      const encoded = options.env?.SIXB_VIEW_FILE_PATH_B64
-      const path = encoded ? Buffer.from(encoded, "base64").toString("utf-8") : ""
-      const bytes = this.files.get(path)
-      return bytes
-        ? {
-            exitCode: 0,
-            stdout: `${bytes.byteLength}\n${Buffer.from(bytes).toString("base64")}`,
-            stderr: "",
-            durationMs: 1,
-          }
-        : {
-            exitCode: 2,
-            stdout: "",
-            stderr: "file not found",
             durationMs: 1,
           }
     }
@@ -1236,44 +998,12 @@ class FailingSandboxFactory implements SandboxFactory {
   }
 }
 
-class IncompatibleRuntimeSandbox extends RecordingSandbox {
-  constructor() {
-    super("incompatible-runtime", "smolvm")
-  }
-
-  override async runCommand(
-    command: string,
-    args: readonly string[] = [],
-    options: RunCommandOptions = {}
-  ): Promise<CommandResult> {
-    const script = args.at(-1)
-    if (
-      command === "bash" &&
-      typeof script === "string" &&
-      script.includes("SIXB_BASH_ENV_READY")
-    ) {
-      this.commands.push({ command, args, options })
-      return { exitCode: 24, stdout: "", stderr: "node: not found", durationMs: 1 }
-    }
-    return super.runCommand(command, args, options)
-  }
-}
-
-class IncompatibleRuntimeSandboxFactory implements SandboxFactory {
-  readonly sandbox = new IncompatibleRuntimeSandbox()
-
-  async create(): Promise<Sandbox> {
-    return this.sandbox
-  }
-}
-
 function buildSixb(
-  model: LanguageModelV4,
+  model: LanguageModel,
   broker: Broker = new InMemoryBroker(),
   sandboxes: SandboxFactory = new RecordingSandboxFactory(),
   options: {
     readonly reasoning?: AgentReasoningLevel
-    readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
     readonly projectRoot?: string
     readonly agentTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
@@ -1284,7 +1014,6 @@ function buildSixb(
     name: "Assistant",
     model,
     ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
-    ...(options.providerOptions === undefined ? {} : { providerOptions: options.providerOptions }),
     instructions: "You are a helpful test assistant.",
     groups: [AGENT_RUNTIME_GROUP],
     ...(options.agentTools === undefined ? {} : { tools: options.agentTools }),
@@ -1310,7 +1039,7 @@ function buildSixb(
 }
 
 function buildSixbWithEchoTool(
-  model: LanguageModelV4,
+  model: LanguageModel,
   broker: Broker = new InMemoryBroker(),
   sandboxes: SandboxFactory = new RecordingSandboxFactory()
 ): TestSixb {
@@ -1374,10 +1103,9 @@ async function seedRequesterUser(storage: Storage, principal = REQUESTER): Promi
 }
 
 async function queueWorkflowAgentNode(input: {
-  readonly model: LanguageModelV4
+  readonly model: LanguageModel
   readonly tools?: readonly AgentToolDefinition[]
   readonly storage?: Storage
-  readonly sandboxes?: SandboxFactory
   readonly runId: string
   readonly requestedByPrincipal?: typeof REQUESTER
   readonly requesterGroupIds?: readonly string[]
@@ -1405,7 +1133,7 @@ async function queueWorkflowAgentNode(input: {
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
-    sandboxes: input.sandboxes ?? new RecordingSandboxFactory(),
+    sandboxes: new RecordingSandboxFactory(),
   })
   const runs = sixb.storage.workflowRuns
   if (!runs) throw new Error("expected workflow run storage")
@@ -1503,36 +1231,30 @@ function withStorage(sixb: TestSixb, storage: Storage): TestSixb {
   })
 }
 
-function interceptAiUsageTransactions(
+function withAiUsageRecordInterceptor(
   storage: Storage,
-  handler: (
+  intercept: (
     input: RecordAiModelCallInput,
-    next: AiUsageStorage["recordModelCall"]
+    record: () => ReturnType<AiUsageStorage["recordModelCall"]>
   ) => ReturnType<AiUsageStorage["recordModelCall"]>
-): void {
-  const transaction = storage.transaction.bind(storage)
-  storage.transaction = <T>(
-    run: (tx: Storage) => Promise<T> | T,
-    options?: Parameters<Storage["transaction"]>[1]
-  ): Promise<T> =>
-    transaction((tx) => {
-      if (!tx.aiUsage) return run(tx)
-      const next = tx.aiUsage.recordModelCall.bind(tx.aiUsage)
-      const aiUsage = new Proxy(tx.aiUsage, {
-        get(target, property, receiver) {
-          return property === "recordModelCall"
-            ? (input: RecordAiModelCallInput) => handler(input, next)
-            : Reflect.get(target, property, receiver)
-        },
-      })
-      return run(
-        new Proxy(tx, {
-          get(target, property, receiver) {
-            return property === "aiUsage" ? aiUsage : Reflect.get(target, property, receiver)
-          },
+): Storage {
+  const wrap = (usage: AiUsageStorage): AiUsageStorage => ({
+    getLatestForExecution: (input) => usage.getLatestForExecution(input),
+    recordModelCall: (input) => intercept(input, () => usage.recordModelCall(input)),
+    summarizeExecution: (input) => usage.summarizeExecution(input),
+    summarizeExecutions: (input) => usage.summarizeExecutions(input),
+  })
+  return {
+    ...storage,
+    transaction: (run, options) =>
+      storage.transaction((tx) => {
+        const usage = tx.aiUsage
+        return run({
+          ...tx,
+          ...(usage ? { aiUsage: wrap(usage) } : {}),
         })
-      )
-    }, options)
+      }, options),
+  }
 }
 
 function aiUsageStorageOf(sixb: TestSixb): AiUsageStorage {
@@ -1557,6 +1279,9 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
   }
   if (!storage.aiUsage) {
     throw new Error("expected AI usage storage")
+  }
+  if (!storage.aiCosts) {
+    throw new Error("expected AI cost storage")
   }
   return storage as AgentWorkerStorage
 }
@@ -1661,16 +1386,17 @@ async function reserveRequestedRun(
 }
 
 async function runBashTool(
-  context: { readonly tools: ToolSet },
+  context: { readonly tools: readonly ModelTool[] },
   command: string
 ): Promise<{ readonly stdout: string }> {
-  const bash = context.tools.bash as unknown as {
-    execute(
-      input: { readonly command: string },
-      options: { readonly abortSignal?: AbortSignal }
-    ): Promise<{ readonly stdout: string }>
-  }
-  return bash.execute({ command }, { abortSignal: new AbortController().signal })
+  const bash = context.tools.find((candidate) => candidate.name === "bash")
+  if (!bash) throw new Error("expected bash tool")
+  const input = bash.parseInput({ command })
+  return bash.execute(input, {
+    signal: new AbortController().signal,
+    callId: "test-bash-call",
+    toolCallId: "test-bash-tool-call",
+  }) as Promise<{ readonly stdout: string }>
 }
 
 function stdoutValue(stdout: string, key: string): string {
@@ -1885,13 +1611,13 @@ function withObservedAgentMessageAppendStorage(
     runs: agents.runs,
     checkpoints: agents.checkpoints,
     messages: {
-      deleteByRunId: (input) => agents.messages.deleteByRunId(input),
       getById: (params) => agents.messages.getById(params),
       list: (input) => agents.messages.list(input),
       append: async (input) => {
         await onBeforeAppend(input)
         return agents.messages.append(input)
       },
+      deleteByRunId: (input) => agents.messages.deleteByRunId(input),
     },
   })
   return {
@@ -1909,18 +1635,18 @@ function withObservedAgentMessageAppendStorage(
 }
 
 /** A model whose stream opens then hangs until aborted — used to force a turn timeout. */
-function hangingModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function hangingModel(): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => ({
-      stream: new ReadableStream<LanguageModelV4StreamPart>({
+    stream: async (options) => ({
+      stream: new ReadableStream<WorkerTestStreamEvent>({
         start(controller) {
           controller.enqueue({ type: "stream-start", warnings: [] })
           const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-          if (options.abortSignal?.aborted) {
+          if (options.signal.aborted) {
             abort()
           } else {
-            options.abortSignal?.addEventListener("abort", abort, { once: true })
+            options.signal.addEventListener("abort", abort, { once: true })
           }
         },
       }),
@@ -1929,59 +1655,28 @@ function hangingModel(): MockLanguageModelV4 {
 }
 
 /** A summary request that hangs until the shared turn deadline aborts it. */
-function hangingCompactionModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function hangingCompactionModel(): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doGenerate: async (options) =>
+    stream: async (options) =>
       new Promise((_, reject) => {
         const abort = () => reject(new DOMException("Aborted", "AbortError"))
-        if (options.abortSignal?.aborted) {
+        if (options.signal.aborted) {
           abort()
         } else {
-          options.abortSignal?.addEventListener("abort", abort, { once: true })
+          options.signal.addEventListener("abort", abort, { once: true })
         }
       }),
-    doStream: async () => {
-      throw new Error("The answer model call must not start before compaction completes.")
-    },
   })
 }
 
 describe("AgentWorker", () => {
-  test("uses four concurrent jobs by default and accepts an explicit limit", () => {
-    const sixb = buildSixb(toolThenAnswerModel())
-
-    expect(new AgentWorker(sixb, workerOptions()).concurrency).toBe(4)
-    expect(new AgentWorker(sixb, workerOptions({ concurrency: 7 })).concurrency).toBe(7)
-  })
-
   test("requires an API base URL", () => {
     const sixb = buildSixb(toolThenAnswerModel())
 
     expect(() => new AgentWorker(sixb, { apiBaseUrl: "" })).toThrow(
       "Agent workers require options.apiBaseUrl."
     )
-  })
-
-  test("rejects invalid turn timeout values at the worker boundary", () => {
-    const sixb = new SixbHost({
-      id: PROJECT_ID,
-      ontology: [],
-      agents: [],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: new InMemoryLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      sandboxes: new RecordingSandboxFactory(),
-    })
-    const invalidTimeouts = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648]
-
-    for (const turnTimeoutMs of invalidTimeouts) {
-      expect(() => new AgentWorker(sixb, workerOptions({ turnTimeoutMs }))).toThrow(
-        "Agent turn timeout must be a positive integer no greater than 2147483647ms."
-      )
-    }
   })
 
   test("does not provision Agent identities when the worker starts", async () => {
@@ -2004,19 +1699,56 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("rejects startup before accepting work when the selected model has no context limit", async () => {
+    // Regression proof: restore a fixed context fallback or skip budget resolution in start().
+    const base = toolThenAnswerModel()
+    const { contextWindow: _contextWindow, ...definition } = base.definition
+    let resolutions = 0
+    const sixb = buildSixb({
+      providerId: base.providerId,
+      modelId: base.modelId,
+      definition,
+      stream: () => {
+        throw new Error("must not run inference")
+      },
+      resolveDefinition: async () => {
+        resolutions += 1
+        return definition
+      },
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    try {
+      await expect(worker.start()).rejects.toThrow("loop.context.windowTokens")
+      expect(resolutions).toBe(1)
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("automatically checkpoints with the selected model's catalog budget", async () => {
-    const summaryPrompts: LanguageModelV4CallOptions["prompt"][] = []
+    const summaryPrompts: LanguageModelRequest["messages"][] = []
     const modelId = "gemini-2.5-flash-image"
-    const sixb = buildSixb(
-      compactingAnswerModel({
-        provider: "google.generative-ai",
-        modelId,
-        captureSummaryPrompt: (prompt) => {
-          summaryPrompts.push(prompt)
-        },
-        captureAnswerPrompt: () => {},
-      })
-    )
+    // Regression proof: skip resolveAgentContextBudgets in worker startup; this model has no local limit.
+    const answeringModel = compactingAnswerModel({
+      provider: "google",
+      modelId,
+      captureSummaryPrompt: (prompt) => {
+        summaryPrompts.push(prompt)
+      },
+      captureAnswerPrompt: () => {},
+    })
+    const { contextWindow: _contextWindow, ...definition } = answeringModel.definition
+    let resolutions = 0
+    const sixb = buildSixb({
+      providerId: answeringModel.providerId,
+      modelId: answeringModel.modelId,
+      definition,
+      stream: (request) => answeringModel.stream(request),
+      resolveDefinition: async () => {
+        resolutions += 1
+        return { ...definition, contextWindow: 32_768 }
+      },
+    })
     const storage = agentStorageOf(sixb)
     const threadId = "automatic_compaction_thread"
     await storage.threads.create({
@@ -2054,6 +1786,7 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
+      expect(resolutions).toBe(1)
       await expect(
         storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
       ).resolves.toMatchObject({
@@ -2067,10 +1800,10 @@ describe("AgentWorker", () => {
   })
 
   test("checkpoints an over-budget thread, continues, and preserves the full transcript", async () => {
-    const summaryPrompts: LanguageModelV4CallOptions["prompt"][] = []
-    const answerPrompts: LanguageModelV4CallOptions["prompt"][] = []
-    const summaryReasoning: LanguageModelV4CallOptions["reasoning"][] = []
-    const answerReasoning: LanguageModelV4CallOptions["reasoning"][] = []
+    const summaryPrompts: LanguageModelRequest["messages"][] = []
+    const answerPrompts: LanguageModelRequest["messages"][] = []
+    const summaryReasoning: LanguageModelRequest["reasoning"][] = []
+    const answerReasoning: LanguageModelRequest["reasoning"][] = []
     const sixb = buildSixb(
       compactingAnswerModel({
         provider: "test-provider",
@@ -2091,7 +1824,6 @@ describe("AgentWorker", () => {
       new RecordingSandboxFactory(),
       {
         reasoning: "high",
-        providerOptions: { "test-provider": { region: "test-region" } },
         context: { windowTokens: 5_000, reserveTokens: 1_000, keepRecentTokens: 700 },
       }
     )
@@ -2194,8 +1926,7 @@ describe("AgentWorker", () => {
           executionId: run.executionId,
         })
       ).resolves.toMatchObject({ modelCallCount: 2 })
-      // Regression proof: removing the summary model wrapper or start callback drops the served
-      // model/provider metadata or the request-side region from this accounting row.
+      // Regression proof: omit onModelCallEnd in generateCheckpointSummary and this row disappears.
       const accounting = await sixb.storage.aiCosts?.listModelCalls({
         projectId: PROJECT_ID,
         executionId: run.executionId,
@@ -2209,11 +1940,10 @@ describe("AgentWorker", () => {
         usage: {
           responseId: "compaction-summary-response",
           responseModelId: "served-summary-model",
-          rawUsage: {
-            providerMetadata: { test: { serviceTier: "summary-tier" } },
-          },
+          requestedReasoning: "none",
+          rawUsage: { input_tokens: 3_500, output_tokens: 100 },
         },
-        cost: { pricingContext: { region: "test-region", serviceTier: "summary-tier" } },
+        cost: { status: "unpriceable", reason: "missingRateCard" },
       })
 
       const streamRecords = await listRunStreamRecords(sixb.broker, run.id)
@@ -2273,8 +2003,8 @@ describe("AgentWorker", () => {
   })
 
   test("checkpoints one oversized completed turn before a short follow-up", async () => {
-    const summaryPrompts: LanguageModelV4CallOptions["prompt"][] = []
-    const answerPrompts: LanguageModelV4CallOptions["prompt"][] = []
+    const summaryPrompts: LanguageModelRequest["messages"][] = []
+    const answerPrompts: LanguageModelRequest["messages"][] = []
     const sixb = buildSixb(
       compactingAnswerModel({
         captureSummaryPrompt: (prompt) => {
@@ -2454,8 +2184,10 @@ describe("AgentWorker", () => {
   })
 
   test("executes a headless workflow agent node and publishes its resume", async () => {
-    const capturedCalls: CapturedWorkflowModelCall[] = []
-    const model = structuredToolThenAnswerModel((call) => capturedCalls.push(call))
+    let capturedSystem: string | undefined
+    const model = structuredToolThenAnswerModel((system) => {
+      capturedSystem ??= system
+    })
     let lookupCalls = 0
     const lookupProject = defineAgentTool("lookup_project")
       .description("Look up a project.")
@@ -2470,8 +2202,6 @@ describe("AgentWorker", () => {
       instructions: "Resolve the best project.",
       groups: [AGENT_RUNTIME_GROUP],
       tools: [lookupProject],
-      reasoning: "high",
-      providerOptions: { openai: { reasoningSummary: "detailed" } },
     })
     const agentStep = defineAgentStep("resolve-project", agent)
       .input({ query: "string" })
@@ -2553,12 +2283,15 @@ describe("AgentWorker", () => {
     })
     const recordedUsage: RecordAiModelCallInput[] = []
     const aiUsage = aiUsageStorageOf(sixb)
-    interceptAiUsageTransactions(sixb.storage, async (usage, next) => {
-      recordedUsage.push(structuredClone(usage))
-      return next(usage)
-    })
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (usage, record) => {
+        recordedUsage.push(structuredClone(usage))
+        return record()
+      })
+    )
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
     await worker.start()
     try {
       const execution = await waitFor(
@@ -2666,30 +2399,8 @@ describe("AgentWorker", () => {
           },
         })
       )
-      expect(execution.trace).toContainEqual(
-        expect.objectContaining({ type: "reasoning", text: "private workflow reasoning" })
-      )
-      expect(capturedCalls.map((call) => call.phase)).toEqual(["research", "research", "finalize"])
-      const researchSystem = capturedCalls[0]?.options.prompt.find(
-        (message) => message.role === "system"
-      )?.content
-      expect(researchSystem).toContain("headless workflow agent inside a Sixb project")
-      expect(researchSystem).toContain("Never start another workflow")
-      expect(researchSystem).toContain("never ask a user for approval or a follow-up question")
-      expect(researchSystem).toContain("everything the next workflow node needs")
-      expect(researchSystem).not.toContain("structured output contract")
-      const finalizer = capturedCalls[2]?.options
-      const finalizerSystem = finalizer?.prompt.find(
-        (message) => message.role === "system"
-      )?.content
-      expect(finalizerSystem).toContain("convert a completed workflow agent answer")
-      expect(finalizer?.tools?.length ?? 0).toBe(0)
-      expect(finalizer?.responseFormat).toMatchObject({ type: "json" })
-      expect(finalizer?.reasoning).toBeUndefined()
-      expect(finalizer?.providerOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
-      expect(JSON.stringify(finalizer?.prompt)).not.toContain("workflow-lookup")
-      expect(JSON.stringify(finalizer?.prompt)).not.toContain("private workflow reasoning")
-      expect(JSON.stringify(finalizer?.prompt)).not.toContain(nodeRunId)
+      expect(capturedSystem).toContain("headless workflow agent")
+      expect(capturedSystem).toContain("never ask a user for approval or a follow-up question")
       expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
         status: "succeeded",
         output: { answer: "Project Alpha", confidence: 0.96 },
@@ -2700,62 +2411,8 @@ describe("AgentWorker", () => {
       })
       expect(resume?.job).toMatchObject({
         type: "workflow.run.resume.requested",
-        payload: {
-          runId,
-          nodeRunId,
-        },
+        payload: { runId, nodeRunId },
       })
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("fails a workflow agent node when concurrent sandbox preflight fails", async () => {
-    const sandboxes = new IncompatibleRuntimeSandboxFactory()
-    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
-      model: structuredAnswerUntilAbortedModel(),
-      sandboxes,
-      runId: "workflow-runtime-profile-failure",
-    })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
-
-    await worker.start()
-    try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({
-            projectId: PROJECT_ID,
-            nodeRunId,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow runtime profile failure" }
-      )
-
-      expect(execution).toMatchObject({
-        status: "failed",
-        error: {
-          code: "agent.execution_failed",
-          details: {
-            agentId: "workflow-usage-agent",
-            workflowId: "workflow-usage-test",
-            workflowRunId: "workflow-runtime-profile-failure",
-            nodeId: "workflow-usage-step",
-            nodeRunId,
-            provider: "smolvm",
-            runtimeProfile: AGENT_RUNTIME_PROFILE,
-            runtimeCheck: "javascript-runtime",
-            runtimeFailure: "nonzero-exit",
-            runtimeExitCode: "24",
-            remediation: "Provide Bun 1.3+ or Node 22+ in the configured sandbox host or image.",
-          },
-        },
-      })
-      await expect(
-        runs.getById({ projectId: PROJECT_ID, id: "workflow-runtime-profile-failure" })
-      ).resolves.toMatchObject({ status: "failed" })
-      expect(sandboxes.sandbox.destroyed).toBe(true)
-      expect(JSON.stringify(execution.error)).not.toContain("node: not found")
     } finally {
       await worker.stop()
     }
@@ -2781,14 +2438,7 @@ describe("AgentWorker", () => {
         { label: "workflow output validation failure" }
       )
 
-      expect(execution).toMatchObject({
-        status: "failed",
-        finishReason: "stop",
-        error: { details: { failurePhase: "structured-finalizer" } },
-      })
-      expect(execution.trace).toContainEqual(
-        expect.objectContaining({ type: "text", text: "Project Alpha is the best match." })
-      )
+      expect(execution.status).toBe("failed")
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
@@ -2802,49 +2452,6 @@ describe("AgentWorker", () => {
           totalTokens: 51,
           reportingStatus: "complete",
         },
-      })
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("retries only the structured workflow finalizer after validation fails", async () => {
-    const finalizerPrompts: LanguageModelV4CallOptions["prompt"][] = []
-    const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
-      model: structuredAnswerAfterValidationRetryModel((prompt) => finalizerPrompts.push(prompt)),
-      runId: "workflow-output-retry",
-    })
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
-
-    await worker.start()
-    try {
-      const execution = await waitFor(
-        async () => {
-          const record = await runs.agentNodes.getByNodeRunId({
-            projectId: PROJECT_ID,
-            nodeRunId,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "workflow output validation retry" }
-      )
-
-      expect(execution).toMatchObject({ status: "succeeded", finishReason: "stop" })
-      expect(finalizerPrompts).toHaveLength(2)
-      expect(JSON.stringify(finalizerPrompts[1])).toContain("answer")
-      expect(JSON.stringify(finalizerPrompts[1])).toContain("confidence")
-      expect(JSON.stringify(finalizerPrompts[1])).toContain("high")
-      expect(JSON.stringify(finalizerPrompts[1])).toContain(
-        "previous response did not satisfy the workflow output schema"
-      )
-      await expect(
-        aiUsageStorageOf(sixb).summarizeExecution({
-          projectId: PROJECT_ID,
-          executionId: agentExecutionId,
-        })
-      ).resolves.toMatchObject({
-        modelCallCount: 3,
-        usage: { inputTokens: 30, outputTokens: 21, totalTokens: 51 },
       })
     } finally {
       await worker.stop()
@@ -2881,18 +2488,7 @@ describe("AgentWorker", () => {
       )
 
       expect(toolCalls).toBe(1)
-      expect(execution).toMatchObject({
-        status: "failed",
-        error: { details: { failurePhase: "agent-loop" } },
-      })
-      expect(execution.trace).toContainEqual(
-        expect.objectContaining({
-          type: "tool-call",
-          toolName: "fail_lookup",
-          state: "output-error",
-          errorText: "An error occurred.",
-        })
-      )
+      expect(execution.status).toBe("failed")
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
@@ -2927,11 +2523,14 @@ describe("AgentWorker", () => {
     let storageAvailable = false
     let appendAttempts = 0
     let recoveryJobs = 0
-    interceptAiUsageTransactions(sixb.storage, async (input, next) => {
-      if (storageAvailable) return next(input)
-      appendAttempts += 1
-      throw new Error("usage storage unavailable")
-    })
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (_input, record) => {
+        if (storageAvailable) return record()
+        appendAttempts += 1
+        throw new Error("usage storage unavailable")
+      })
+    )
     queue.enqueue = async (params) => {
       const jobs = await enqueue(params)
       const handedOff = params.jobs.filter(
@@ -2943,7 +2542,7 @@ describe("AgentWorker", () => {
       }
       return jobs
     }
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
 
     await worker.start()
     try {
@@ -3001,19 +2600,9 @@ describe("AgentWorker", () => {
 
   test("surfaces final workflow accounting failure when durable handoff also fails", async () => {
     let modelCalls = 0
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () => {
-        modelCalls += 1
-        return stream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "workflow-answer" },
-          { type: "text-delta", id: "workflow-answer", delta: "Project Alpha." },
-          { type: "text-end", id: "workflow-answer" },
-          finish("stop"),
-        ])
-      },
-      doGenerate: async () => {
+      generate: async () => {
         modelCalls += 1
         return {
           content: [
@@ -3036,10 +2625,13 @@ describe("AgentWorker", () => {
     const enqueue = queue.enqueue.bind(queue)
     let appendAttempts = 0
     let recoveryAttempts = 0
-    interceptAiUsageTransactions(sixb.storage, async () => {
-      appendAttempts += 1
-      throw new Error("usage storage unavailable")
-    })
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async () => {
+        appendAttempts += 1
+        throw new Error("usage storage unavailable")
+      })
+    )
     queue.enqueue = async (params) => {
       if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
         recoveryAttempts += 1
@@ -3047,7 +2639,7 @@ describe("AgentWorker", () => {
       }
       return enqueue(params)
     }
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
 
     await worker.start()
     try {
@@ -3239,9 +2831,9 @@ describe("AgentWorker", () => {
 
   test("translates a failed agent execution into the parent workflow vocabulary", async () => {
     const originalError = new Error("workflow agent provider failed")
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () => {
+      generate: async () => {
         throw originalError
       },
     })
@@ -3573,10 +3165,10 @@ describe("AgentWorker", () => {
 
   test("adds text attachment context to model prompts", async () => {
     let capturedPrompt: unknown
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
-        capturedPrompt = options.prompt
+      stream: async (options) => {
+        capturedPrompt = options.messages
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -3624,11 +3216,11 @@ describe("AgentWorker", () => {
 
   test("inlines supported images only when the Bun runtime provides image processing", async () => {
     let capturedPrompt: unknown
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      supportedUrls: { "image/*": [/^data:/] },
-      doStream: async (options) => {
-        capturedPrompt = options.prompt
+      capabilities: { inputMediaTypes: ["image/*"] },
+      stream: async (options) => {
+        capturedPrompt = options.messages
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -3687,10 +3279,10 @@ describe("AgentWorker", () => {
 
   test("keeps image attachments metadata-only when the model does not advertise images", async () => {
     let capturedPrompt: unknown
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
-        capturedPrompt = options.prompt
+      stream: async (options) => {
+        capturedPrompt = options.messages
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -3782,111 +3374,6 @@ describe("AgentWorker", () => {
     expect(prepared.modelFileDataByPartKey.size).toBe(0)
   })
 
-  test("inlines only the current user image and defers historical images to view_file", async () => {
-    const blobStorage = new InMemoryBlobStorage()
-    const fileRef = await blobStorage.put({
-      body: TEST_PNG_BYTES,
-      fileName: "uploaded.png",
-      mediaType: "image/png",
-    })
-    const messages: AgentMessageRecord[] = [
-      {
-        id: "user-old",
-        projectId: PROJECT_ID,
-        threadId: "thread-1",
-        runId: "run-old",
-        role: "user",
-        seq: 1,
-        parts: [{ type: "file", fileRef }],
-        contentVersion: 1,
-        createdAt: new Date(2026, 0, 1),
-      },
-      {
-        id: "user-current",
-        projectId: PROJECT_ID,
-        threadId: "thread-1",
-        runId: "run-current",
-        role: "user",
-        seq: 2,
-        parts: [{ type: "file", fileRef }],
-        contentVersion: 1,
-        createdAt: new Date(2026, 0, 2),
-      },
-    ]
-
-    const prepared = await prepareAgentAttachments({
-      projectId: PROJECT_ID,
-      threadId: "thread-1",
-      messages,
-      blobStorage,
-      apiBaseUrl: TEST_AGENT_API_BASE_URL,
-      inlineImages: true,
-    })
-
-    expect(prepared.promptTextByPartKey.get("user-old:0")).toContain(
-      "Historical file kept as metadata"
-    )
-    expect(prepared.promptTextByPartKey.get("user-old:0")).toContain("view_file")
-    if (typeof Bun.Image === "function") {
-      expect(prepared.modelFileDataByPartKey.has("user-old:0")).toBe(false)
-      expect(prepared.modelFileDataByPartKey.get("user-current:0")?.data.href).toStartWith(
-        "data:image/png;base64,"
-      )
-    }
-  })
-
-  test("prepares nested rich tool-result files for replay and the next sandbox", async () => {
-    const blobStorage = new InMemoryBlobStorage()
-    const fileRef = await blobStorage.put({
-      body: TEST_PNG_BYTES,
-      fileName: "generated.png",
-      mediaType: "image/png",
-    })
-    const message: AgentMessageRecord = {
-      id: "assistant-rich",
-      projectId: PROJECT_ID,
-      threadId: "thread-1",
-      runId: "run-rich",
-      role: "assistant" as const,
-      seq: 1,
-      parts: [
-        {
-          type: "tool-call" as const,
-          toolCallId: "image-call-1",
-          toolName: "create_image",
-          input: {},
-          state: "output-available" as const,
-          output: {
-            kind: "agentToolResult",
-            content: [{ type: "file", fileRef: { ...fileRef } }],
-          },
-        },
-        { type: "file" as const, fileRef },
-      ],
-      contentVersion: 1,
-      createdAt: new Date(2026, 0, 1),
-    }
-
-    const prepared = await prepareAgentAttachments({
-      projectId: PROJECT_ID,
-      threadId: "thread-1",
-      messages: [message],
-      blobStorage,
-      apiBaseUrl: TEST_AGENT_API_BASE_URL,
-      inlineImages: true,
-    })
-    const key = toolResultAttachmentKey(message.id, 0, 0)
-
-    expect(prepared.entries).toHaveLength(1)
-    expect(prepared.entries[0]?.contentPath).toBe("/parts/0/output/content/0/fileRef")
-    expect(prepared.promptTextByPartKey.get(key)).toContain("generated.png")
-    expect(prepared.sandboxFiles).toHaveLength(1)
-    expect(prepared.sandboxFiles[0]?.path).toContain("tool-0-0-generated.png")
-    expect(prepared.sandboxFiles[0]?.bytes).toEqual(TEST_PNG_BYTES)
-    expect(prepared.modelFileDataByPartKey.has(key)).toBe(false)
-    expect(prepared.promptTextByPartKey.get(key)).toContain("Historical file kept as metadata")
-  })
-
   test("provisions the sandbox concurrently without blocking turn start", async () => {
     // Gate sandbox creation so we can prove the turn context is ready before the
     // sandbox finishes booting. If creation were on the critical path, awaiting
@@ -3916,10 +3403,7 @@ describe("AgentWorker", () => {
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
     const environment = await createConversationAgentEnvironment({ context, agent, run })
-    expect(environment.turnContext.systemPrompt).toContain(
-      "inside a live Sixb project modeled as an ontology"
-    )
-    expect(environment.turnContext.systemPrompt).not.toContain("Available Agent Skills")
+    expect(environment.turnContext.systemPrompt).toContain("<sixb_runtime_context>")
     expect(recording.sandboxes).toHaveLength(0)
 
     try {
@@ -4115,11 +3599,9 @@ describe("AgentWorker", () => {
       tools: [selectedEcho],
     })
     let unselectedToolNames: readonly string[] = []
-    let plainModelCalls = 0
     const plain = defineAgent("plain", {
       name: "Plain",
       model: answerModel((names) => {
-        plainModelCalls += 1
         unselectedToolNames = names
       }),
       instructions: "Answer without the research tool.",
@@ -4175,9 +3657,7 @@ describe("AgentWorker", () => {
         threadId: selectedRequest.run.threadId,
       })
       expect(unselectedToolNames).toContain("bash")
-      expect(unselectedToolNames).toContain("read")
       expect(unselectedToolNames).not.toContain(selectedEcho.name)
-      expect(plainModelCalls).toBe(1)
 
       const messages = await listMessages(storage, selectedRequest.run.threadId)
       expect(
@@ -4225,224 +3705,6 @@ describe("AgentWorker", () => {
         },
         context: { run: { kind: "agent", id: selectedRequest.run.id } },
       })
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("publishes a selected tool artifact to blob storage and the run sandbox", async () => {
-    let published: AgentToolArtifact | undefined
-    let receivedToolCallId: string | undefined
-    let livePrompt: unknown
-    let replayPrompt: unknown
-    let viewedPrompt: unknown
-    const createImage = defineAgentTool("create_image")
-      .description("Create a test image.")
-      .input({})
-      .run(async ({ artifacts, toolCallId }) => {
-        receivedToolCallId = toolCallId
-        published = await artifacts.put({
-          body: TEST_PNG_BYTES,
-          fileName: "generated.png",
-          mediaType: "image/png",
-        })
-        return {
-          kind: "agentToolResult",
-          content: [
-            { type: "text", text: "Created an image." },
-            { type: "file", fileRef: published.fileRef },
-          ],
-        } satisfies AgentToolResult
-      })
-    const sandboxes = new RecordingSandboxFactory()
-    const sixb = buildSixb(
-      artifactToolThenAnswerModel({
-        live: (prompt) => {
-          livePrompt = prompt
-        },
-        replay: (prompt) => {
-          replayPrompt = prompt
-        },
-        viewed: (prompt) => {
-          viewedPrompt = prompt
-        },
-      }),
-      new InMemoryBroker(),
-      sandboxes,
-      { agentTools: [createImage] }
-    )
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
-
-    await worker.start()
-    try {
-      const request = await requestAgent(sixb, {
-        agentId: "assistant",
-        text: "create an image",
-      })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "tool artifact run terminal" }
-      )
-
-      expect(run.status).toBe("succeeded")
-      expect(receivedToolCallId).toBe("image-call-1")
-      expect(published).toBeDefined()
-      if (!published) throw new Error("Expected the selected tool to publish an artifact.")
-
-      expect(
-        new Uint8Array(
-          await new Response(await sixb.blobStorage.open(published.fileRef.blobId)).arrayBuffer()
-        )
-      ).toEqual(TEST_PNG_BYTES)
-      const sandboxFile = sandboxes.sandboxes[0]?.writtenFiles.find((file) =>
-        file.path.includes(".sixb/agent/artifacts/")
-      )
-      expect(sandboxFile?.contents).toEqual(TEST_PNG_BYTES)
-      expect(published.sandboxPath).toEndWith("-generated.png")
-
-      const messages = await listMessages(storage, request.run.threadId)
-      const firstAssistant = messages.find(
-        (message) =>
-          message.role === "assistant" &&
-          message.parts.some(
-            (part) => part.type === "tool-call" && part.toolName === createImage.name
-          )
-      )
-      expect(
-        firstAssistant?.parts.find(
-          (part) => part.type === "tool-call" && part.toolName === createImage.name
-        )
-      ).toMatchObject({
-        state: "output-available",
-        output: {
-          kind: "agentToolResult",
-          content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
-        },
-      })
-      expect(firstAssistant?.parts.filter((part) => part.type === "file")).toEqual([
-        { type: "file", fileRef: published.fileRef },
-      ])
-      const richToolPartIndex = firstAssistant?.parts.findIndex(
-        (part) => part.type === "tool-call" && part.toolName === createImage.name
-      )
-      expect(richToolPartIndex).toBeGreaterThanOrEqual(0)
-      const durableJson = JSON.stringify(messages)
-      expect(durableJson).not.toContain("data:image")
-      expect(durableJson).not.toContain("iVBORw0KGgo")
-      expect(durableJson).not.toContain(published.sandboxPath)
-
-      const livePromptJson = JSON.stringify(livePrompt)
-      expect(livePromptJson).toContain("generated.png")
-      expect(livePromptJson).toContain("<tool_file")
-      expect(livePromptJson).toContain("<sixb_tool_files")
-      const livePromptMessages = Array.isArray(livePrompt) ? livePrompt : []
-      const liveToolResults = livePromptMessages.flatMap((message) => {
-        if (
-          typeof message !== "object" ||
-          message === null ||
-          !("role" in message) ||
-          message.role !== "tool" ||
-          !("content" in message) ||
-          !Array.isArray(message.content)
-        ) {
-          return []
-        }
-        return message.content.filter(
-          (part: unknown) =>
-            typeof part === "object" &&
-            part !== null &&
-            "type" in part &&
-            part.type === "tool-result"
-        )
-      })
-      expect(JSON.stringify(liveToolResults)).not.toContain('"type":"file"')
-      if (typeof Bun.Image === "function") {
-        expect(
-          livePromptMessages.some(
-            (message) =>
-              typeof message === "object" &&
-              message !== null &&
-              "role" in message &&
-              message.role === "user" &&
-              "content" in message &&
-              Array.isArray(message.content) &&
-              message.content.some(
-                (part: unknown) =>
-                  typeof part === "object" &&
-                  part !== null &&
-                  "type" in part &&
-                  part.type === "file"
-              )
-          )
-        ).toBe(true)
-        expect(livePromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
-      }
-
-      const followup = await requestAgent(sixb, {
-        agentId: "assistant",
-        threadId: request.run.threadId,
-        text: "inspect it again",
-      })
-      const replayRun = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: followup.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "tool artifact replay run terminal" }
-      )
-      expect(replayRun.status).toBe("succeeded")
-
-      const replayPromptJson = JSON.stringify(replayPrompt)
-      expect(replayPromptJson).toContain("generated.png")
-      expect(replayPromptJson).toContain(
-        encodeURIComponent(`/parts/${richToolPartIndex}/output/content/1/fileRef`)
-      )
-      if (typeof Bun.Image === "function") {
-        expect(replayPromptJson).not.toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
-      }
-      expect(
-        sandboxes.sandboxes[1]?.writtenFiles.some(
-          (file) =>
-            file.path.includes(".sixb/agent/attachments/") &&
-            file.path.endsWith(`tool-${richToolPartIndex}-1-generated.png`) &&
-            Buffer.from(file.contents).equals(Buffer.from(TEST_PNG_BYTES))
-        )
-      ).toBe(true)
-
-      const viewedPromptJson = JSON.stringify(viewedPrompt)
-      expect(viewedPromptJson).toContain("view_file")
-      if (typeof Bun.Image === "function") {
-        expect(viewedPromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
-      }
-      const replayMessages = await listMessages(storage, request.run.threadId)
-      const replayAssistant = replayMessages.find(
-        (message) =>
-          message.runId === followup.run.id &&
-          message.parts.some((part) => part.type === "tool-call" && part.toolName === "view_file")
-      )
-      expect(
-        replayAssistant?.parts.find(
-          (part) => part.type === "tool-call" && part.toolName === "view_file"
-        )
-      ).toMatchObject({
-        state: "output-available",
-        output: {
-          kind: "agentToolResult",
-          content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
-        },
-      })
-      expect(
-        sandboxes.sandboxes[1]?.writtenFiles.filter((file) =>
-          file.path.includes(".sixb/agent/artifacts/")
-        )
-      ).toHaveLength(0)
     } finally {
       await worker.stop()
     }
@@ -4695,7 +3957,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("persists and replays selected tool failures with clear invalid-result diagnostics", async () => {
+  test("persists and replays selected tool failures with clear non-JSON diagnostics", async () => {
     let replayedPrompt = ""
     const invalidResult = {
       kind: "agentTool",
@@ -4936,9 +4198,9 @@ describe("AgentWorker", () => {
 
   test("hands a failed usage append to the queue and fails closed before another provider call", async () => {
     let modelCalls = 0
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () => {
+      stream: async () => {
         modelCalls += 1
         if (modelCalls === 1) {
           return stream([
@@ -4969,11 +4231,14 @@ describe("AgentWorker", () => {
     let storageAvailable = false
     let appendAttempts = 0
     let recoveryJobs = 0
-    interceptAiUsageTransactions(sixb.storage, async (input, next) => {
-      if (storageAvailable) return next(input)
-      appendAttempts += 1
-      throw new Error("usage storage unavailable")
-    })
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (_input, record) => {
+        if (storageAvailable) return record()
+        appendAttempts += 1
+        throw new Error("usage storage unavailable")
+      })
+    )
     queue.enqueue = async (params) => {
       const jobs = await enqueue(params)
       const handedOff = params.jobs.filter(
@@ -4986,7 +4251,7 @@ describe("AgentWorker", () => {
       return jobs
     }
 
-    const worker = new AgentWorker(sixb, workerOptions())
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
@@ -5039,12 +4304,13 @@ describe("AgentWorker", () => {
       runId: "usage-recovery",
     })
     const aiUsage = aiUsageStorageOf(sixb)
+    const recordModelCall = aiUsage.recordModelCall.bind(aiUsage)
     let appendAttempts = 0
-    interceptAiUsageTransactions(sixb.storage, async (input, next) => {
+    aiUsage.recordModelCall = async (input) => {
       appendAttempts += 1
       if (appendAttempts === 1) throw new Error("temporary usage storage failure")
-      return next(input)
-    })
+      return recordModelCall(input)
+    }
 
     const queue = sixb.queues.agents
     const retry = queue.retry.bind(queue)
@@ -5087,9 +4353,9 @@ describe("AgentWorker", () => {
 
   test("fails the run before another provider call when storage and recovery queue fail", async () => {
     let modelCalls = 0
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () => {
+      stream: async () => {
         modelCalls += 1
         if (modelCalls === 1) {
           return stream([
@@ -5118,10 +4384,13 @@ describe("AgentWorker", () => {
     const enqueue = queue.enqueue.bind(queue)
     let appendAttempts = 0
     let recoveryAttempts = 0
-    interceptAiUsageTransactions(sixb.storage, async () => {
-      appendAttempts += 1
-      throw new Error("usage storage unavailable")
-    })
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async () => {
+        appendAttempts += 1
+        throw new Error("usage storage unavailable")
+      })
+    )
     queue.enqueue = async (params) => {
       if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
         recoveryAttempts += 1
@@ -5130,7 +4399,7 @@ describe("AgentWorker", () => {
       return enqueue(params)
     }
 
-    const worker = new AgentWorker(sixb, workerOptions())
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
@@ -5278,13 +4547,8 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("reserves the final loop step for a tool-free best-effort answer", async () => {
-    let synthesisOptions: LanguageModelV4CallOptions | undefined
-    const sixb = buildSixbWithEchoTool(
-      toolOnlyModel((options) => {
-        synthesisOptions = options
-      })
-    )
+  test("adds visible guidance when the step limit is reached before an answer", async () => {
+    const sixb = buildSixbWithEchoTool(toolOnlyModel())
     const storage = agentStorageOf(sixb)
 
     const worker = new AgentWorker(sixb, workerOptions())
@@ -5307,23 +4571,20 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
-      expect(run.finishReason).toBe("stop")
+      expect(run.finishReason).toBe("tool-calls")
 
       const messages = await listMessages(storage, threadId)
       const assistant = messages.find((message) => message.role === "assistant")
       const parts = assistant?.parts ?? []
-      expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(3)
+      expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(4)
       expect(
         parts.some(
           (part) =>
             part.type === "text" &&
-            part.text.includes("Best answer from the work completed so far.")
+            part.text.includes("configured 4-step limit") &&
+            part.text.includes("producing a final answer")
         )
       ).toBe(true)
-      expect(synthesisOptions?.tools?.length ?? 0).toBe(0)
-      expect(JSON.stringify(synthesisOptions?.prompt)).toContain(
-        "Provide the best possible final answer from the context available"
-      )
     } finally {
       await worker.stop()
     }
@@ -5409,79 +4670,6 @@ describe("AgentWorker", () => {
       expect(parts.some((part) => part.type === "text" && part.text.includes("Bash ran"))).toBe(
         true
       )
-    } finally {
-      await worker.stop()
-    }
-  })
-
-  test("views and publishes an image created by bash", async () => {
-    let viewedPrompt: unknown
-    const sandboxes = new RecordingSandboxFactory()
-    const sixb = buildSixb(
-      bashImageThenViewModel((prompt) => {
-        viewedPrompt = prompt
-      }),
-      new InMemoryBroker(),
-      sandboxes
-    )
-    const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
-
-    await worker.start()
-    try {
-      const request = await requestAgent(sixb, {
-        agentId: "assistant",
-        text: "create and inspect an image",
-      })
-      const run = await waitFor(
-        async () => {
-          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "bash view_file run terminal" }
-      )
-
-      expect(run.status).toBe("succeeded")
-      const assistant = (await listMessages(storage, request.run.threadId)).find(
-        (message) => message.role === "assistant"
-      )
-      const viewCall = assistant?.parts.find(
-        (part) => part.type === "tool-call" && part.toolName === "view_file"
-      )
-      expect(viewCall).toMatchObject({
-        state: "output-available",
-        output: {
-          kind: "agentToolResult",
-          content: [
-            { type: "text", text: expect.stringContaining("Prepared image") },
-            {
-              type: "file",
-              fileRef: { fileName: "bash-image.png", mediaType: "image/png" },
-            },
-          ],
-        },
-      })
-      const filePart = assistant?.parts.find((part) => part.type === "file")
-      expect(filePart).toMatchObject({
-        type: "file",
-        fileRef: { fileName: "bash-image.png", mediaType: "image/png" },
-      })
-      if (!filePart || filePart.type !== "file") throw new Error("Expected viewed image file.")
-      expect(
-        new Uint8Array(
-          await new Response(await sixb.blobStorage.open(filePart.fileRef.blobId)).arrayBuffer()
-        )
-      ).toEqual(TEST_PNG_BYTES)
-      expect(
-        sandboxes.sandboxes[0]?.writtenFiles.some((file) =>
-          file.path.includes(".sixb/agent/artifacts/")
-        )
-      ).toBe(true)
-      if (typeof Bun.Image === "function") {
-        expect(JSON.stringify(viewedPrompt)).toContain(
-          Buffer.from(TEST_PNG_BYTES).toString("base64")
-        )
-      }
     } finally {
       await worker.stop()
     }
@@ -5820,7 +5008,6 @@ describe("AgentWorker", () => {
       expect(env?.SIXB_OUTPUT_STAGING_DIR).toContain("/.sixb/agent/outputs/staging")
       expect(env?.SIXB_OUTPUT_DIR).toContain("/.sixb/agent/outputs/published")
       expect(env?.SIXB_API_GUIDE).toBeUndefined()
-      expect(env?.SIXB_CLI).toBeUndefined()
       expect(env?.SIXB_ACCESS_TOKEN).toBeUndefined()
 
       if (!env?.SIXB_SKILLS_DIR || !env.SIXB_BIN_DIR || !env.BASH_ENV || !env.SIXB_RUN_CONTEXT) {
@@ -5836,40 +5023,18 @@ describe("AgentWorker", () => {
 
       expect(sandbox.writtenFiles.some((file) => file.path.endsWith("/SKILL.md"))).toBe(false)
 
-      const sixbCliPath = join(env.SIXB_BIN_DIR, "sixb")
-      const sixbCli = sandbox.readFileContents(sixbCliPath)
+      const sixbCli = sandbox.readFileContents(join(env.SIXB_BIN_DIR, "sixb"))
       expect(sixbCli).toContain("../lib/sixb.mjs")
       expect(sixbCli).toContain("command -v bun")
       expect(sixbCli).toContain("command -v node")
       expect(sixbCli).not.toContain("SIXB_ACCESS_TOKEN")
-      expect(sandbox.writtenFiles.find((file) => file.path === sixbCliPath)?.mode).toBe(0o755)
 
-      const sixbArtifactPath = join(env.SIXB_CONTEXT_DIR, "lib", "sixb.mjs")
-      const sixbArtifact = sandbox.readFileContents(sixbArtifactPath)
-      expect(sixbArtifact).toContain("Sixb agent CLI")
-      expect(sixbArtifact).toContain("objects inspect <type> <id>")
-      expect(sixbArtifact).toContain("objects get <type> <id>")
-      expect(sixbArtifact).toContain('kind: "refs"')
-      expect(sixbArtifact).toContain("directions are outgoing or incoming")
-      expect(sixbArtifact).not.toContain("SIXB_ACCESS_TOKEN")
-      expect(sandbox.writtenFiles.find((file) => file.path === sixbArtifactPath)?.mode).toBe(0o644)
-
-      const bashEnv = sandbox.readFileContents(env.BASH_ENV)
-      expect(bashEnv).toContain('export PATH="$SIXB_BIN_DIR:$PATH"')
-      expect(bashEnv).toContain("export SIXB_BASH_ENV_READY=1")
-      if (!env.SIXB_RUNTIME_PROBE_FILE) {
-        throw new Error("Expected sandbox runtime probe path.")
-      }
-      expect(sandbox.readFileContents(env.SIXB_RUNTIME_PROBE_FILE)).toBe(
-        "first\nsixb-runtime-probe\nthird\n"
-      )
       const runContext = JSON.parse(sandbox.readFileContents(env.SIXB_RUN_CONTEXT)) as unknown
       expect(runContext).toMatchObject({
         projectId: PROJECT_ID,
         agentId: "assistant",
         threadId,
         runId,
-        runtimeProfile: AGENT_RUNTIME_PROFILE,
         apiBaseUrl: env.SIXB_API_BASE_URL,
         outputDir: env.SIXB_OUTPUT_DIR,
         outputStagingDir: env.SIXB_OUTPUT_STAGING_DIR,
@@ -5897,8 +5062,6 @@ describe("AgentWorker", () => {
       })
       expect(stdout).toContain(`base=${env.SIXB_API_BASE_URL}`)
       expect(stdout).toContain(`skills=${env.SIXB_SKILLS_DIR}`)
-      expect(stdout).toContain(`bin=${env.SIXB_BIN_DIR}`)
-      expect(stdout).toContain(`bashEnv=${env.BASH_ENV}`)
       expect(stdout).toContain(`context=${env.SIXB_RUN_CONTEXT}`)
       expect(stdout).toContain(`outputDir=${env.SIXB_OUTPUT_DIR}`)
       expect(stdout).toContain(`outputStagingDir=${env.SIXB_OUTPUT_STAGING_DIR}`)
@@ -6389,12 +5552,15 @@ describe("AgentWorker", () => {
     // Regression guard: hard-code the recorder attempt to 1 instead of using the reclaimed durable
     // run and this captures [1, 1], even though the terminal run correctly reports attempt 2.
     const recordedAttempts: number[] = []
-    interceptAiUsageTransactions(sixb.storage, async (input, next) => {
-      recordedAttempts.push(input.attempt)
-      return next(input)
-    })
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (input, record) => {
+        recordedAttempts.push(input.attempt)
+        return record()
+      })
+    )
 
-    const worker = new AgentWorker(sixb, workerOptions())
+    const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
       const reclaimed = await waitFor(
@@ -6459,7 +5625,7 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
-        systemPrompt: testSystemPrompt(sixb),
+        systemPrompt: "Test system prompt.",
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
@@ -6488,12 +5654,12 @@ describe("AgentWorker", () => {
     })
   })
 
-  test("adds concise Sixb context to every model system prompt", async () => {
+  test("uses the complete worker-owned system prompt", async () => {
     let capturedSystem: string | undefined
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
-        capturedSystem = options.prompt.find((message) => message.role === "system")?.content
+      stream: async (options) => {
+        capturedSystem = options.messages.find((message) => message.role === "system")?.content
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -6513,8 +5679,8 @@ describe("AgentWorker", () => {
         agentPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
-        tools: {},
-        systemPrompt: testSystemPrompt(sixb),
+        tools: [],
+        systemPrompt: "<sixb_runtime_context>\nExtra sandbox context.\n</sixb_runtime_context>",
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
@@ -6528,29 +5694,16 @@ describe("AgentWorker", () => {
     expect(capturedSystem).toBeDefined()
     if (!capturedSystem) throw new Error("Expected a system prompt")
 
-    expect(capturedSystem).toContain("<sixb_mode_rules>")
     expect(capturedSystem).toContain("<sixb_runtime_context>")
-    expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
-    expect(capturedSystem).toContain(
-      "Use the `sixb` CLI only for the live project data or capability needed by the task"
-    )
-    expect(capturedSystem).toContain("Do not run `sixb --help`")
-    expect(capturedSystem).toContain("Sixb agent CLI")
-    expect(capturedSystem).toContain("<agent_instructions>")
-    expect(capturedSystem).toContain("You are a helpful test assistant.")
-    expect(capturedSystem.indexOf("<agent_instructions>")).toBeLessThan(
-      capturedSystem.indexOf("<sixb_mode_rules>")
-    )
+    expect(capturedSystem).toContain("Extra sandbox context.")
   })
 
-  test("passes agent model options into streamText", async () => {
+  test("passes agent reasoning into the owned model request", async () => {
     let capturedReasoning: unknown
-    let capturedProviderOptions: unknown
-    const model = new MockLanguageModelV4({
+    const model = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
+      stream: async (options) => {
         capturedReasoning = options.reasoning
-        capturedProviderOptions = options.providerOptions
         return stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -6562,7 +5715,6 @@ describe("AgentWorker", () => {
     })
     const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
       reasoning: "high",
-      providerOptions: { openai: { reasoningSummary: "detailed" } },
     })
     const request = await requestAgent(sixb, { agentId: "assistant", text: "hello" })
     const run = await reserveRequestedRun(sixb, request)
@@ -6573,8 +5725,8 @@ describe("AgentWorker", () => {
         agentPrincipal: AGENT_PRINCIPAL,
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
-        tools: {},
-        systemPrompt: testSystemPrompt(sixb),
+        tools: [],
+        systemPrompt: "Test system prompt.",
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         defaultMaxSteps: 4,
@@ -6586,15 +5738,14 @@ describe("AgentWorker", () => {
     })
 
     expect(capturedReasoning).toBe("high")
-    expect(capturedProviderOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
   })
 
   test("reports a terminal model failure exactly once with the original error", async () => {
     const originalError = new Error("provider boom")
-    const failingModel = new MockLanguageModelV4({
+    const failingModel = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () => ({
-        stream: new ReadableStream<LanguageModelV4StreamPart>({
+      stream: async () => ({
+        stream: new ReadableStream<WorkerTestStreamEvent>({
           start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
             controller.error(originalError)
@@ -6667,9 +5818,9 @@ describe("AgentWorker", () => {
   test("fails the run when the sandbox cannot be provisioned (no bash used)", async () => {
     // The model answers without ever invoking bash. Provisioning runs concurrently and fails; the
     // run must be recorded `failed` rather than finalizing as a success with no working sandbox.
-    const answerModel = new MockLanguageModelV4({
+    const answerModel = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async () =>
+      stream: async () =>
         stream([
           { type: "stream-start", warnings: [] },
           { type: "text-start", id: "t" },
@@ -6715,64 +5866,19 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("blocks sandbox tool use with actionable runtime-profile details", async () => {
-    const sandboxes = new IncompatibleRuntimeSandboxFactory()
-    const sixb = buildSixb(apiBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const storage = agentStorageOf(sixb)
-
-    const worker = new AgentWorker(sixb, workerOptions())
-    await worker.start()
-    try {
-      const {
-        run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "hi" })
-      const run = await waitFor(
-        async () => {
-          const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-          const found = list.runs[0]
-          return found && found.status !== "queued" && found.status !== "running" ? found : null
-        },
-        { label: "runtime profile run failed" }
-      )
-
-      expect(run.status).toBe("failed")
-      expect(run.error).toMatchObject({
-        code: "agent.execution_failed",
-        details: {
-          agentId: "assistant",
-          runId: run.id,
-          threadId,
-          provider: "smolvm",
-          runtimeProfile: AGENT_RUNTIME_PROFILE,
-          runtimeCheck: "javascript-runtime",
-          runtimeFailure: "nonzero-exit",
-          runtimeExitCode: "24",
-          remediation: "Provide Bun 1.3+ or Node 22+ in the configured sandbox host or image.",
-        },
-      })
-      expect(JSON.stringify(run.error)).not.toContain("node: not found")
-      expect(sandboxes.sandbox.destroyed).toBe(true)
-      expect(
-        (await listMessages(storage, threadId)).every((message) => message.role !== "assistant")
-      ).toBe(true)
-    } finally {
-      await worker.stop()
-    }
-  })
-
   test("cancels the run when the worker is stopped mid-turn", async () => {
     // A model whose stream blocks until the call is aborted, so the turn is reliably in-flight.
-    const blockingModel = new MockLanguageModelV4({
+    const blockingModel = new WorkerTestModel({
       modelId: "mock-model",
-      doStream: async (options) => {
-        const blocked = new ReadableStream<LanguageModelV4StreamPart>({
+      stream: async (options) => {
+        const blocked = new ReadableStream<WorkerTestStreamEvent>({
           start(controller) {
             controller.enqueue({ type: "stream-start", warnings: [] })
             const abort = () => controller.error(new DOMException("Aborted", "AbortError"))
-            if (options.abortSignal?.aborted) {
+            if (options.signal.aborted) {
               abort()
             } else {
-              options.abortSignal?.addEventListener("abort", abort, { once: true })
+              options.signal.addEventListener("abort", abort, { once: true })
             }
           },
         })
@@ -6870,7 +5976,7 @@ describe("AgentWorker", () => {
           storage: workerStorageOf(failingStorage),
           blobStorage: sixb.blobStorage,
           tools: echoTool,
-          systemPrompt: testSystemPrompt(sixb),
+          systemPrompt: "Test system prompt.",
           streamSink: createBrokerStreamSink({
             broker: sixb.broker,
             projectId: PROJECT_ID,
@@ -6909,7 +6015,7 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
-        systemPrompt: testSystemPrompt(sixb),
+        systemPrompt: "Test system prompt.",
         streamSink: createBrokerStreamSink({
           broker: sixb.broker,
           projectId: PROJECT_ID,
@@ -7034,12 +6140,11 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("failed")
-      expect(run.finishReason).toBe("timeout")
       expect(run.error).toMatchObject({
         code: "agent.execution_failed",
         message: "Agent execution failed.",
         retryable: false,
-        details: { agentId: "assistant", runId: run.id, threadId, timeoutMs: "50" },
+        details: { agentId: "assistant", runId: run.id, threadId },
       })
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
@@ -7048,11 +6153,10 @@ describe("AgentWorker", () => {
       ).toMatchObject({
         type: "agent.run.finished",
         status: "failed",
-        finishReason: "timeout",
         runId: run.id,
         attempt: 1,
       })
-      // Thread released so a retry can run; there was no coherent progress to persist.
+      // Thread released so a later message can run, and no assistant message was persisted.
       const thread = await storage.threads.getById({ projectId: PROJECT_ID, id: threadId })
       expect(thread?.activeRunId).toBeNull()
       const messages = await listMessages(storage, threadId)

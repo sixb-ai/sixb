@@ -125,9 +125,8 @@ export function AiUsagePage() {
   }
 
   const totals = overview.totals
-  const catalogValuedCalls = totals.costs.ratedCallCount
-  const coverage =
-    totals.modelCallCount === 0 ? 0 : (catalogValuedCalls / totals.modelCallCount) * 100
+  const ratedCalls = totals.costs.ratedCallCount
+  const coverage = totals.modelCallCount === 0 ? 0 : (ratedCalls / totals.modelCallCount) * 100
   const selectedAmount = amountForCurrency(totals.costs.amounts, currency)
   const tokenSeries = overview.series.map((period) => ({
     at: period.start,
@@ -184,7 +183,7 @@ export function AiUsagePage() {
     .sort((left, right) => right.value - left.value)
     .slice(0, 8)
   const valuationBreakdown = [
-    { key: "rated", label: "Catalog-valued", value: totals.costs.ratedCallCount },
+    { key: "rated", label: "Valued", value: totals.costs.ratedCallCount },
     { key: "unpriceable", label: "Unpriceable", value: totals.costs.unpriceableCallCount },
     { key: "unvalued", label: "Unvalued", value: totals.costs.unvaluedCallCount },
   ].filter((item) => item.value > 0)
@@ -286,11 +285,9 @@ export function AiUsagePage() {
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <AiUsageMetricCard
-              label="Catalog-estimated cost"
+              label="Tracked cost"
               value={selectedAmount ? formatMoney(selectedAmount) : "—"}
-              description={
-                currency ? `Catalog-valued calls in ${currency}` : "No catalog-valued calls"
-              }
+              description={currency ? `Valued calls in ${currency}` : "No valued calls"}
               icon={<CircleDollarSign className="size-4" />}
               sparkline={costSeries.map((point) => ({
                 timestamp: point.at,
@@ -316,7 +313,7 @@ export function AiUsagePage() {
             <AiUsageMetricCard
               label="Pricing coverage"
               value={`${coverage.toFixed(coverage >= 99.95 ? 0 : 1)}%`}
-              description={`${catalogValuedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls catalog-valued`}
+              description={`${ratedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls valued`}
               icon={<Coins className="size-4" />}
             />
           </div>
@@ -340,9 +337,7 @@ export function AiUsagePage() {
               className="xl:col-span-2"
               title="Estimated cost over time"
               description={
-                currency
-                  ? `Catalog-valued model calls in ${currency}`
-                  : "No catalog-valued calls in this range"
+                currency ? `Valued model calls in ${currency}` : "No valued calls in this range"
               }
             >
               <AiUsageTimeSeries
@@ -552,7 +547,12 @@ function ModelCallsTable({
                     </TableCell>
                     <TableCell>
                       <p className="font-medium">{call.usage.requestedModelId}</p>
-                      <p className="text-xs text-muted-foreground">{call.usage.providerId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {call.usage.providerId}
+                        {call.usage.requestedReasoning === undefined
+                          ? ""
+                          : ` · ${formatReasoning(call.usage.requestedReasoning)}`}
+                      </p>
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs tabular-nums">
                       {formatOptionalTokens(call.usage.usage.totalTokens)}
@@ -948,6 +948,12 @@ function formatOptionalTokens(value: number | undefined): string {
   return value === undefined ? "—" : formatCompactNumber(value)
 }
 
+function formatReasoning(reasoning: string | { budgetTokens: number }): string {
+  return typeof reasoning === "string"
+    ? `${reasoning} reasoning`
+    : `${reasoning.budgetTokens.toLocaleString()}-token reasoning budget`
+}
+
 function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
     value
@@ -1004,7 +1010,7 @@ function formatCallTime(value: string): string {
 function valuationStatusLabel(status: ValuationStatus): string {
   switch (status) {
     case "rated":
-      return "Catalog-valued"
+      return "Valued"
     case "unpriceable":
       return "Unpriceable"
     case "unvalued":
@@ -1022,8 +1028,8 @@ function unpriceableReasonLabel(
   switch (reason) {
     case "missingBillingIdentity":
       return "Missing billing identity"
-    case "missingCatalogEntry":
-      return "Missing Models.dev entry"
+    case "missingRateCard":
+      return "Missing rate card"
     case "missingUsageMeter":
       return "Missing usage meter"
     case "unsupportedPricingDimension":

@@ -1,7 +1,6 @@
 import type { BlobStorage, FileRef, JsonValue } from "@sixb/core"
+import type { PrepareModelStepInput, PrepareModelStepResult } from "@sixb/core/internal/agents"
 import { isAgentToolResult } from "@sixb/core/internal/agents"
-import type { PrepareStepFunction, ToolSet } from "ai"
-import { NEVER_ABORTED_SIGNAL } from "../abort"
 import { modelSupportsInlineImages, prepareAgentToolFileProjection } from "../attachments"
 import { fileContentKey } from "../file-ref"
 import { type AgentToolModelOutput, agentToolResultToModelOutput } from "./result-output"
@@ -58,14 +57,17 @@ export class AgentToolResultMediaBridge {
     return output
   }
 
-  readonly prepareStep: PrepareStepFunction<ToolSet> = async ({ messages, model }) => {
+  readonly prepareStep = async ({
+    messages,
+    model,
+    signal: stepSignal,
+  }: PrepareModelStepInput): Promise<PrepareModelStepResult | undefined> => {
     if (this.#pending.length === 0) return undefined
 
     const pending = this.#pending.slice()
-    const signal = combinedSignal(pending)
+    const signal = combinedSignal(pending, stepSignal)
     signal.throwIfAborted()
-    const supportsImages =
-      typeof model !== "string" && (await modelSupportsInlineImages(model, signal))
+    const supportsImages = modelSupportsInlineImages(model)
     if (!supportsImages) {
       this.#pending.splice(0, pending.length)
       return undefined
@@ -122,9 +124,9 @@ export class AgentToolResultMediaBridge {
   }
 }
 
-function combinedSignal(pending: readonly PendingToolFile[]): AbortSignal {
-  const signals = [...new Set(pending.map((item) => item.signal))]
-  return signals.length === 1 ? (signals[0] ?? NEVER_ABORTED_SIGNAL) : AbortSignal.any(signals)
+function combinedSignal(pending: readonly PendingToolFile[], stepSignal: AbortSignal): AbortSignal {
+  const signals = [...new Set([stepSignal, ...pending.map((item) => item.signal)])]
+  return signals.length === 1 ? stepSignal : AbortSignal.any(signals)
 }
 
 function isImageFile(fileRef: FileRef): boolean {

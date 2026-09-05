@@ -1,3 +1,4 @@
+import { isModelReasoning } from "@sixb/core/models"
 import type { ReadonlyJsonObject } from "@sixb/core/storage"
 import {
   type AiModelCallUsageInput,
@@ -130,6 +131,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             call_id,
             provider_id,
             requested_model_id,
+            requested_reasoning,
             response_model_id,
             response_id,
             input_tokens,
@@ -145,7 +147,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             occurred_at,
             recorded_at
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `
       )
@@ -157,6 +159,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
         record.callId,
         record.providerId,
         record.requestedModelId,
+        record.requestedReasoning === undefined ? null : JSON.stringify(record.requestedReasoning),
         record.responseModelId ?? null,
         record.responseId,
         record.usage.inputTokens ?? null,
@@ -229,6 +232,9 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
       requesterGroupIds: groupRows.map((group) => group.group_id),
       providerId: row.provider_id,
       requestedModelId: row.requested_model_id,
+      ...(row.requested_reasoning === null
+        ? {}
+        : { requestedReasoning: requestedReasoningFromRow(row.requested_reasoning) }),
       ...(row.response_model_id === null ? {} : { responseModelId: row.response_model_id }),
       responseId: row.response_id,
       usage: {
@@ -282,6 +288,7 @@ interface AiUsageRow {
   readonly call_id: string
   readonly provider_id: string
   readonly requested_model_id: string
+  readonly requested_reasoning: string | null
   readonly response_model_id: string | null
   readonly response_id: string
   readonly input_tokens: number | null
@@ -334,6 +341,14 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
       ? {}
       : { reasoningOutputTokens: row.reasoning_output_tokens }),
   }
+}
+
+function requestedReasoningFromRow(value: string): AiModelCallUsageRecord["requestedReasoning"] {
+  const parsed: unknown = JSON.parse(value)
+  if (!isModelReasoning(parsed)) {
+    throw new Error("[SixbSqlite] Stored AI usage requested reasoning is invalid.")
+  }
+  return parsed
 }
 
 function assertNonBlankProjectId(projectId: string): void {

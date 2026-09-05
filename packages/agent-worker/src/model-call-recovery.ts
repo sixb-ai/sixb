@@ -73,8 +73,10 @@ export async function recordRecoveredAiModelCall(
   job: AgentAiUsageRecordRequestedQueueJob
 ): Promise<RecordAiModelCallResult> {
   const usage = fromQueuePayload(job)
-  const accounting = accountingFromQueuePayload(job, usage)
-  return recordAiModelCallAccounting({ storage, usage, ...accounting })
+  const accounting = accountingFromQueuePayload(job)
+  return accounting
+    ? recordAiModelCallAccounting({ storage, usage, ...accounting })
+    : storage.aiUsage.recordModelCall(usage)
 }
 
 /** Validation and referential-integrity failures cannot become valid through queue redelivery. */
@@ -98,6 +100,9 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
     requesterGroupIds: [...record.requesterGroupIds],
     providerId: record.providerId,
     requestedModelId: record.requestedModelId,
+    ...(record.requestedReasoning === undefined
+      ? {}
+      : { requestedReasoning: structuredClone(record.requestedReasoning) }),
     ...(record.responseModelId === undefined ? {} : { responseModelId: record.responseModelId }),
     responseId: record.responseId,
     usage: toQueueUsage(record.usage),
@@ -108,7 +113,8 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
 
 function toAccountingPayload(input: RecoverAiModelCallInput): AgentAiUsageAccountingPayload {
   return {
-    pricingContext: { ...input.pricingContext },
+    cost: structuredClone(input.cost),
+    ...(input.route === undefined ? {} : { route: structuredClone(input.route) }),
     ratedAt: input.ratedAt.toISOString(),
   }
 }
@@ -139,18 +145,13 @@ function fromQueuePayload(job: AgentAiUsageRecordRequestedQueueJob): RecordAiMod
 }
 
 function accountingFromQueuePayload(
-  job: AgentAiUsageRecordRequestedQueueJob,
-  usage: RecordAiModelCallInput
-): Omit<RecoverAiModelCallInput, "usage"> {
+  job: AgentAiUsageRecordRequestedQueueJob
+): Omit<RecoverAiModelCallInput, "usage"> | undefined {
   const accounting = job.payload.accounting
-  if (!accounting) {
-    return {
-      pricingContext: {},
-      ratedAt: new Date(usage.occurredAt),
-    }
-  }
+  if (!accounting) return undefined
   return {
-    pricingContext: { ...accounting.pricingContext },
+    cost: structuredClone(accounting.cost),
+    ...(accounting.route === undefined ? {} : { route: structuredClone(accounting.route) }),
     ratedAt: parseDate(accounting.ratedAt, job.id, "ratedAt"),
   }
 }

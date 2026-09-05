@@ -2,16 +2,42 @@ import { afterEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import type { LanguageModelV4 } from "@ai-sdk/provider"
 import { createSixb, defineAgent, defineObjectType, prop } from "../src"
-import { createModelCatalog } from "../src/models"
+import { createModelCatalog, defineLanguageModel, type LanguageModel } from "../src/models"
+
+test("model definitions preserve and validate distinct input limits", () => {
+  // Regression proof: omit maxInputTokens from defineLanguageModel's output or validation.
+  const definition = {
+    kind: "language" as const,
+    providerId: "mock",
+    modelId: "model",
+    capabilities: {},
+    contextWindow: 200_000,
+    maxInputTokens: 180_000,
+  }
+  expect(defineLanguageModel(definition)).toMatchObject({
+    contextWindow: 200_000,
+    maxInputTokens: 180_000,
+  })
+  for (const maxInputTokens of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect(() => defineLanguageModel({ ...definition, maxInputTokens })).toThrow("maxInputTokens")
+  }
+})
+
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const tempRoots = new Set<string>()
 
-/** The catalog only reads `provider` and `modelId`, so a conforming stub is enough. */
-function testModel(provider: string, modelId: string): LanguageModelV4 {
-  return { specificationVersion: "v4", provider, modelId } as LanguageModelV4
+/** The catalog never calls the model, so a minimal owned-contract stub is enough. */
+function testModel(providerId: string, modelId: string): LanguageModel {
+  return {
+    providerId,
+    modelId,
+    definition: defineLanguageModel({ kind: "language", providerId, modelId, capabilities: {} }),
+    async stream() {
+      throw new Error("Catalog tests do not run inference.")
+    },
+  }
 }
 
 const gpt = testModel("gateway", "openai/gpt-5.4")

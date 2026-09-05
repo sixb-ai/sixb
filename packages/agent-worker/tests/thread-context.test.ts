@@ -1,16 +1,12 @@
 import { expect, test } from "bun:test"
-import type {
-  LanguageModelV4CallOptions,
-  LanguageModelV4StreamPart,
-  LanguageModelV4Usage,
-} from "@ai-sdk/provider"
 import { defineAgent, InMemoryBlobStorage, InMemoryStorage, type Storage } from "@sixb/core"
 import { toModelMessages } from "@sixb/core/internal/agents"
+import type { ModelMessage, ModelUsage } from "@sixb/core/models"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { NOOP_STREAM_SINK } from "../src/stream-sink"
 import type { AgentWorkerStorage } from "../src/types"
+import { testStream, WorkerTestModel } from "./worker-model-fixture"
 
 const projectId = "project"
 const threadId = "thread"
@@ -23,27 +19,26 @@ const serializedSummary = [
   "</sixb_thread_summary>",
 ].join("\n")
 
-const usage: LanguageModelV4Usage = {
-  inputTokens: { total: 10, noCache: 10, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 7, text: 7, reasoning: 0 },
+const usage: ModelUsage = {
+  inputTokens: 10,
+  outputTokens: 7,
+  uncachedInputTokens: 10,
+  cacheReadInputTokens: 0,
   raw: { input_tokens: 10, output_tokens: 7 },
 }
 
-function captureModel(
-  capture: (prompt: LanguageModelV4CallOptions["prompt"]) => void
-): MockLanguageModelV4 {
-  return new MockLanguageModelV4({
+function captureModel(capture: (prompt: readonly ModelMessage[]) => void): WorkerTestModel {
+  return new WorkerTestModel({
     modelId: "mock-model",
-    doStream: async (options) => {
-      capture(options.prompt)
-      const chunks: LanguageModelV4StreamPart[] = [
-        { type: "stream-start", warnings: [] },
+    stream: async (options) => {
+      capture(options.messages)
+      return testStream([
+        { type: "stream-start" },
         { type: "text-start", id: "answer" },
         { type: "text-delta", id: "answer", delta: "Done" },
         { type: "text-end", id: "answer" },
-        { type: "finish", finishReason: { unified: "stop", raw: "stop" }, usage },
-      ]
-      return { stream: convertArrayToReadableStream(chunks) }
+        { type: "finish", finishReason: "stop", rawFinishReason: "stop", usage },
+      ])
     },
   })
 }
@@ -167,7 +162,7 @@ async function seedThread(withCheckpoint: boolean) {
 
 async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
   const seeded = await seedThread(withCheckpoint)
-  let prompt: LanguageModelV4CallOptions["prompt"] | undefined
+  let prompt: readonly ModelMessage[] | undefined
   const agent = defineAgent("assistant", {
     name: "Assistant",
     instructions: "Answer clearly.",
@@ -182,7 +177,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       agentPrincipal: { type: "serviceAccount", id: "service_agent" },
       storage: requireWorkerStorage(seeded.storage),
       blobStorage: new InMemoryBlobStorage(),
-      tools: {},
+      tools: [],
       systemPrompt: "Test system prompt.",
       streamSink: NOOP_STREAM_SINK,
       recoverAiModelCall: async () => {},
@@ -198,7 +193,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
   return { ...seeded, prompt }
 }
 
-function conversationMessages(prompt: LanguageModelV4CallOptions["prompt"]): readonly unknown[] {
+function conversationMessages(prompt: readonly ModelMessage[]): readonly unknown[] {
   return prompt.filter((message) => message.role !== "system")
 }
 

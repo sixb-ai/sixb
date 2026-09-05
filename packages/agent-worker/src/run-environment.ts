@@ -1,6 +1,7 @@
 import type { AgentDefinition, Sandbox } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
+import type { ModelTool } from "@sixb/core/models"
 import type {
   AgentMessageRecord,
   AgentRunRecord,
@@ -9,21 +10,21 @@ import type {
 import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import type { AgentSkill } from "./agent-skills"
-import { aiSdkToolsFromAgentDefinitions } from "./ai-sdk-adapters"
 import { createAgentApiGatewayBaseUrl } from "./api-url"
 import {
   modelSupportsInlineImages,
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
+import { modelToolsFromAgentDefinitions } from "./model-adapters"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
 import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tools/artifacts"
-import { BASH_TOOL_SPEC, createBashTool } from "./tools/bash"
-import { createReadTool, READ_TOOL_SPEC } from "./tools/read"
+import { createBashTool } from "./tools/bash"
+import { createReadTool } from "./tools/read"
 import { AgentToolResultMediaBridge } from "./tools/result-media"
-import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
+import { createViewFileTool } from "./tools/view-file"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
@@ -79,7 +80,7 @@ export async function createConversationAgentEnvironment(
           order: "asc",
         })
         .then((history) => history.messages),
-    modelSupportsInlineImages(agent.model, input.signal),
+    modelSupportsInlineImages(agent.model),
   ])
   const attachmentContext = await prepareAgentAttachments({
     projectId: context.id,
@@ -184,35 +185,40 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       resolveSandbox: () => ready,
       onPublished: (artifact) => fileRegistry.register(artifact.sandboxPath, artifact.fileRef),
     })
-  const tools = aiSdkToolsFromAgentDefinitions({
-    definitions: agent.tools,
-    valueTypesById: context.valueTypesById,
-    run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
-    connector: context.connector,
-    logger,
-    artifactsForToolCall,
-    toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-    errorDetails:
-      mode === "conversation"
-        ? { agentId: agent.id, runId }
-        : { agentId: agent.id, nodeRunId: runId },
-  })
+  const tools = [
+    ...modelToolsFromAgentDefinitions({
+      definitions: agent.tools,
+      valueTypesById: context.valueTypesById,
+      run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
+      connector: context.connector,
+      logger,
+      artifactsForToolCall,
+      toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
+      errorDetails:
+        mode === "conversation"
+          ? { agentId: agent.id, runId }
+          : { agentId: agent.id, nodeRunId: runId },
+    }),
+  ]
 
   let sandboxWasUsed = false
-  tools[VIEW_FILE_TOOL_SPEC.name] = createViewFileTool({
-    resolveSandbox: () => ready,
-    attachments: attachmentContext,
-    registry: fileRegistry,
-    artifactsForToolCall: ({ toolCallId, signal }) =>
-      artifactsForToolCall({ toolName: VIEW_FILE_TOOL_SPEC.name, toolCallId, signal }),
-    toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-  })
+  appendBuiltInTool(
+    tools,
+    createViewFileTool({
+      resolveSandbox: () => ready,
+      attachments: attachmentContext,
+      registry: fileRegistry,
+      artifactsForToolCall: ({ toolCallId, signal }) =>
+        artifactsForToolCall({ toolName: "view_file", toolCallId, signal }),
+      toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
+    })
+  )
   const resolveSandbox = () => {
     sandboxWasUsed = true
     return ready
   }
-  tools[READ_TOOL_SPEC.name] = createReadTool(resolveSandbox)
-  tools[BASH_TOOL_SPEC.name] = createBashTool(resolveSandbox)
+  appendBuiltInTool(tools, createReadTool(resolveSandbox))
+  appendBuiltInTool(tools, createBashTool(resolveSandbox))
 
   ready = provisionSandbox({
     context,
@@ -324,4 +330,13 @@ function disposeEnvironment(
   // rather than orphaning a machine that is still being torn down.
   onDetachedTeardown?.(teardown)
   return Promise.resolve()
+}
+
+function appendBuiltInTool(tools: ModelTool[], tool: ModelTool): void {
+  if (tools.some((candidate) => candidate.name === tool.name)) {
+    throw new Error(
+      `[SixbAgentWorker] Agent tool name '${tool.name}' is reserved by the worker runtime.`
+    )
+  }
+  tools.push(tool)
 }

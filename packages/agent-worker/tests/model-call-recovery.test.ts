@@ -23,6 +23,7 @@ function modelCall(): RecordAiModelCallInput {
     requesterGroupIds: ["support", "engineering"],
     providerId: "gateway",
     requestedModelId: "openai/gpt-5",
+    requestedReasoning: { budgetTokens: 4_096 },
     responseId: "response_1",
     usage: {
       inputTokens: 12,
@@ -66,6 +67,7 @@ describe("AI usage recovery", () => {
     expect(claimed.job.payload.record).toMatchObject({
       id: "usage_1",
       executionId,
+      requestedReasoning: { budgetTokens: 4_096 },
       occurredAt: "2026-07-01T12:00:00.000Z",
     })
     expect(claimed.job.payload.record).not.toHaveProperty("projectId")
@@ -86,7 +88,7 @@ describe("AI usage recovery", () => {
     })
   })
 
-  test("recovers pricing context and local valuation atomically for current jobs", async () => {
+  test("recovers route and completed-call valuation atomically for current jobs", async () => {
     const queues = new InMemoryQueues()
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
@@ -97,7 +99,25 @@ describe("AI usage recovery", () => {
     })
     await enqueueAiModelCallRecovery(queues.agents, {
       usage: modelCall(),
-      pricingContext: { serviceTier: "standard" },
+      cost: {
+        status: "rated",
+        money: { currency: "USD", amountNanos: "95000" },
+        components: [
+          {
+            meter: "tokens.input.total",
+            quantity: "12",
+            rateAmountNanosPerMillion: "1250000000",
+            chargeAmountNanos: "15000",
+          },
+          {
+            meter: "tokens.output.total",
+            quantity: "8",
+            rateAmountNanosPerMillion: "10000000000",
+            chargeAmountNanos: "80000",
+          },
+        ],
+      },
+      route: { providerId: "openai", modelId: "gpt-5-2026-08-01" },
       ratedAt: new Date("2026-07-01T12:00:01.000Z"),
     })
     const [claimed] = await queues.agents.claim({
@@ -109,7 +129,25 @@ describe("AI usage recovery", () => {
       throw new Error("Expected an AI usage recovery job.")
     }
     expect(claimed.job.payload.accounting).toEqual({
-      pricingContext: { serviceTier: "standard" },
+      cost: {
+        status: "rated",
+        money: { currency: "USD", amountNanos: "95000" },
+        components: [
+          {
+            meter: "tokens.input.total",
+            quantity: "12",
+            rateAmountNanosPerMillion: "1250000000",
+            chargeAmountNanos: "15000",
+          },
+          {
+            meter: "tokens.output.total",
+            quantity: "8",
+            rateAmountNanosPerMillion: "10000000000",
+            chargeAmountNanos: "80000",
+          },
+        ],
+      },
+      route: { providerId: "openai", modelId: "gpt-5-2026-08-01" },
       ratedAt: "2026-07-01T12:00:01.000Z",
     })
 
@@ -127,8 +165,16 @@ describe("AI usage recovery", () => {
         {
           cost: {
             status: "rated",
-            billingIdentity: { providerId: "vercel", modelId: "openai/gpt-5" },
-            pricingContext: { serviceTier: "standard" },
+            billingIdentity: { providerId: "gateway", modelId: "openai/gpt-5" },
+            pricingContext: {
+              routedProviderId: "openai",
+              routedModelId: "gpt-5-2026-08-01",
+            },
+            priceSource: {
+              sourceId: "model-rate-card",
+              sourceEntryId: "gateway/openai/gpt-5",
+            },
+            money: { currency: "USD", amountNanos: "95000" },
           },
         },
       ],

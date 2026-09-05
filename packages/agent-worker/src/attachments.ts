@@ -1,6 +1,7 @@
 import { posix } from "node:path"
 import type { AgentFileDataProjection, BlobInfo, BlobStorage, FileRef } from "@sixb/core"
 import { isAgentToolResult } from "@sixb/core/internal/agents"
+import type { LanguageModel } from "@sixb/core/models"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { NEVER_ABORTED_SIGNAL, waitForAbort } from "./abort"
 import { fileContentKey } from "./file-ref"
@@ -683,29 +684,11 @@ async function maybeImageData(input: {
   }
 }
 
-export async function modelSupportsInlineImages(
-  model: {
-    readonly supportedUrls?: PromiseLike<Record<string, RegExp[]>> | Record<string, RegExp[]>
-  },
-  signal: AbortSignal = NEVER_ABORTED_SIGNAL
-): Promise<boolean> {
-  signal.throwIfAborted()
-  try {
-    const supportedUrls = await waitForAbort(Promise.resolve(model.supportedUrls ?? {}), signal)
-    return Object.keys(supportedUrls).some((pattern) => mediaPatternMatchesImages(pattern))
-  } catch {
-    signal.throwIfAborted()
-    return false
-  }
-}
-
-function mediaPatternMatchesImages(pattern: string): boolean {
-  const normalized = pattern.toLowerCase()
+export function modelSupportsInlineImages(model: LanguageModel): boolean {
+  const { inputMediaTypes } = model.definition.capabilities
   return (
-    normalized === "*/*" ||
-    normalized === "image" ||
-    normalized === "image/*" ||
-    normalized.startsWith("image/")
+    inputMediaTypes === "any" ||
+    inputMediaTypes?.some((mediaType) => mediaType.toLowerCase().startsWith("image/")) === true
   )
 }
 

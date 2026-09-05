@@ -42,6 +42,55 @@ const Room = defineObjectType({
 const ontology = new OntologyRegistry({ sources: [Room] })
 
 describe("Postgres storage migrations", () => {
+  test("upgrades shipped AI cost reasons without losing valuations or constraints", async () => {
+    // Regression proof: skip migration 030 below, or change 026 to missingRateCard in place.
+    await withStorage(false, async (_storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
+        await sql.unsafe(`CREATE TABLE ai_model_call_usage (
+          project_id TEXT, id TEXT, provider_id TEXT, requested_model_id TEXT, occurred_at TEXT,
+          PRIMARY KEY (project_id, id)
+        )`)
+        await sql.unsafe(
+          "INSERT INTO ai_model_call_usage VALUES ('project', 'usage', 'mock', 'model', '2026-08-01')"
+        )
+        const context = {
+          exec: async (text: string) => {
+            await sql.unsafe(text)
+          },
+        }
+        await postgresStorageMigrations.steps
+          .find((step) => step.id === "026-ai-cost-accounting")
+          ?.up(context)
+        await sql.unsafe(`INSERT INTO ai_model_call_valuations (
+          project_id, usage_record_id, status, provider_id, model_id, reason, details, rated_at
+        ) VALUES ('project', 'usage', 'unpriceable', 'mock', 'model', 'missingCatalogEntry',
+          '{"pricingContext":{}}', '2026-08-01')`)
+        await postgresStorageMigrations.steps
+          .find((step) => step.id === "030-ai-cost-rate-card-reason")
+          ?.up(context)
+        const rows = await sql.unsafe<{ reason: string; details: { pricingContext: object } }[]>(
+          "SELECT reason, details FROM ai_model_call_valuations"
+        )
+        expect([...rows]).toEqual([{ reason: "missingRateCard", details: { pricingContext: {} } }])
+        // Bun 1.3.14's rejects matcher hangs on postgres.js's lazy PendingQuery thenable.
+        // Regression proof: remove Promise.resolve here and this test times out instead of finishing.
+        await expect(
+          Promise.resolve(
+            sql.unsafe("UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry'")
+          )
+        ).rejects.toThrow()
+        await expect(
+          Promise.resolve(sql.unsafe("DELETE FROM ai_model_call_usage"))
+        ).rejects.toThrow()
+      } finally {
+        await sql.end()
+      }
+    })
+  })
   test("migrateStorage writes schema-level migration history", async () => {
     await withStorage(false, async (storage, schemaName) => {
       const result = await migrateStorage(storage)
@@ -80,6 +129,8 @@ describe("Postgres storage migrations", () => {
             "026-ai-cost-accounting",
             "027-agent-context-checkpoints",
             "028-object-override-edit-times",
+            "029-ai-usage-requested-reasoning",
+            "030-ai-cost-rate-card-reason",
           ],
         },
       ])
@@ -279,6 +330,20 @@ describe("Postgres storage migrations", () => {
           id: "028-object-override-edit-times",
           status: "applied",
           version: 28,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "029-ai-usage-requested-reasoning",
+          status: "applied",
+          version: 29,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "030-ai-cost-rate-card-reason",
+          status: "applied",
+          version: 30,
         },
       ])
     })
@@ -1758,6 +1823,20 @@ describe("Postgres storage migrations", () => {
           id: "028-object-override-edit-times",
           status: "applied",
           version: 28,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "029-ai-usage-requested-reasoning",
+          status: "applied",
+          version: 29,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "030-ai-cost-rate-card-reason",
+          status: "applied",
+          version: 30,
         },
       ])
     } finally {

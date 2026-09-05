@@ -24,7 +24,22 @@ import { SharedBroker } from "../shared/sharedBroker"
 
 const assistant = defineAgent("assistant", {
   name: "Assistant",
-  model: {} as Parameters<typeof defineAgent>[1]["model"],
+  // Startup reads model metadata even though this fixture never executes agent runs.
+  // Regression proof: replace this binding with the former empty-object cast and run worker-group.e2e.ts.
+  model: {
+    providerId: "fixture",
+    modelId: "assistant",
+    definition: {
+      kind: "language",
+      providerId: "fixture",
+      modelId: "assistant",
+      capabilities: {},
+      contextWindow: 32_000,
+    },
+    async stream() {
+      throw new Error("The worker-group fixture does not execute agent runs.")
+    },
+  },
   instructions: "Assist the user.",
 })
 

@@ -19,6 +19,8 @@
     "scripts/**/*.ts",
     "packages/*/tests/**/*.ts",
     "packages/*/tests/**/*.tsx",
+    "models/*/tests/**/*.ts",
+    "models/*/tests/**/*.tsx",
     "connectors/*/tests/**/*.ts",
     "connectors/*/tests/**/*.tsx",
     "storage/*/tests/**/*.ts",

@@ -1,9 +1,9 @@
 import { posix } from "node:path"
 import type { AgentToolArtifacts, FileRef, JsonValue } from "@sixb/core"
 import { AgentToolPublicError } from "@sixb/core"
-import { type JSONSchema7, jsonSchema, type Tool, tool } from "ai"
-import { NEVER_ABORTED_SIGNAL } from "../abort"
+import type { JsonObject, ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "../attachments"
+import { agentToolErrorText } from "../model-adapters"
 import type { AgentSandboxFileRegistry } from "../sandbox-file-registry"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 import { inferAgentFileMediaType } from "./artifacts"
@@ -21,7 +21,7 @@ export const VIEW_FILE_TOOL_SPEC = {
     properties: { path: { type: "string", minLength: 1 } },
     required: ["path"],
     additionalProperties: false,
-  } satisfies JSONSchema7,
+  } satisfies JsonObject,
 } as const
 
 interface ViewFileInput {
@@ -40,56 +40,56 @@ export function createViewFileTool(input: {
     readonly output: JsonValue
     readonly signal: AbortSignal
     readonly toolCallId: string
-  }) => AgentToolModelOutput | PromiseLike<AgentToolModelOutput>
-}): Tool<ViewFileInput, JsonValue> {
-  const signalsByToolCallId = new Map<string, AbortSignal>()
-  return tool({
-    description: VIEW_FILE_TOOL_SPEC.description,
-    inputSchema: jsonSchema<ViewFileInput>(VIEW_FILE_TOOL_SPEC.inputSchema),
-    async execute({ path }, { abortSignal, toolCallId }): Promise<JsonValue> {
-      const signal = abortSignal ?? NEVER_ABORTED_SIGNAL
-      signalsByToolCallId.set(toolCallId, signal)
-      try {
-        signal.throwIfAborted()
-        const handle = await input.resolveSandbox()
-        const absolutePath = resolveSafeSandboxPath(handle.sandbox.workingDirectory, path)
-        const knownFileRef =
-          input.registry.get(absolutePath) ??
-          preparedFileRefAtPath(input.attachments, handle.sandbox.workingDirectory, absolutePath)
+  }) => AgentToolModelOutput | Promise<AgentToolModelOutput>
+}): ModelTool<ViewFileInput> {
+  return {
+    ...VIEW_FILE_TOOL_SPEC,
+    parseInput: parseViewFileInput,
+    async execute({ path }, { signal, toolCallId }): Promise<JsonValue> {
+      signal.throwIfAborted()
+      const handle = await input.resolveSandbox()
+      const absolutePath = resolveSafeSandboxPath(handle.sandbox.workingDirectory, path)
+      const knownFileRef =
+        input.registry.get(absolutePath) ??
+        preparedFileRefAtPath(input.attachments, handle.sandbox.workingDirectory, absolutePath)
 
-        let fileRef: FileRef
-        if (knownFileRef) {
-          fileRef = knownFileRef
-        } else {
-          const bytes = await readSandboxFile({ handle, absolutePath, signal })
-          const fileName = safePublishedFileName(posix.basename(absolutePath))
-          const artifact = await input.artifactsForToolCall({ toolCallId, signal }).put({
-            body: bytes,
-            fileName,
-            mediaType: inferAgentFileMediaType(bytes, fileName),
-          })
-          fileRef = artifact.fileRef
-        }
+      let fileRef: FileRef
+      if (knownFileRef) {
+        fileRef = knownFileRef
+      } else {
+        const bytes = await readSandboxFile({ handle, absolutePath, signal })
+        const fileName = safePublishedFileName(posix.basename(absolutePath))
+        const artifact = await input.artifactsForToolCall({ toolCallId, signal }).put({
+          body: bytes,
+          fileName,
+          mediaType: inferAgentFileMediaType(bytes, fileName),
+        })
+        fileRef = artifact.fileRef
+      }
 
-        // Prepared attachments and framework artifacts are immutable snapshots and can be reused.
-        // Arbitrary bash paths stay mutable, so do not cache their published snapshot at the source
-        // path; a later view_file call must read the path again.
-        if (knownFileRef) input.registry.register(absolutePath, fileRef)
-        return richViewFileResult(fileRef)
-      } catch (error) {
-        signalsByToolCallId.delete(toolCallId)
-        throw error
-      }
+      // Prepared attachments and framework artifacts are immutable snapshots and can be reused.
+      // Arbitrary bash paths stay mutable, so do not cache their published snapshot at the source
+      // path; a later view_file call must read the path again.
+      if (knownFileRef) input.registry.register(absolutePath, fileRef)
+      return richViewFileResult(fileRef)
     },
-    async toModelOutput({ output, toolCallId }) {
-      const signal = signalsByToolCallId.get(toolCallId) ?? NEVER_ABORTED_SIGNAL
-      try {
-        return await input.toolResultToModelOutput({ output, toolCallId, signal })
-      } finally {
-        signalsByToolCallId.delete(toolCallId)
-      }
+    toModelOutput(output, { toolCallId, signal }) {
+      return input.toolResultToModelOutput({ output, toolCallId, signal })
     },
-  })
+    errorText: agentToolErrorText,
+  }
+}
+
+function parseViewFileInput(value: unknown): ViewFileInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw viewFileError("input must be an object")
+  }
+  const input = value as Record<string, unknown>
+  if (Object.keys(input).some((key) => key !== "path")) {
+    throw viewFileError("input contains an unknown property")
+  }
+  if (typeof input.path !== "string") throw viewFileError("path must be a string")
+  return { path: input.path }
 }
 
 function preparedFileRefAtPath(

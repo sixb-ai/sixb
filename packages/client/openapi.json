@@ -5486,6 +5486,34 @@
                               "requestedModelId": {
                                 "type": "string"
                               },
+                              "requestedReasoning": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "provider-default",
+                                      "none",
+                                      "minimal",
+                                      "low",
+                                      "medium",
+                                      "high",
+                                      "xhigh",
+                                      "max"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "budgetTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      }
+                                    },
+                                    "required": ["budgetTokens"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "responseModelId": {
                                 "type": "string"
                               },
@@ -5651,6 +5679,9 @@
                                       "routedProviderId": {
                                         "type": "string"
                                       },
+                                      "routedModelId": {
+                                        "type": "string"
+                                      },
                                       "deploymentId": {
                                         "type": "string"
                                       },
@@ -5693,7 +5724,6 @@
                                       "sourceId",
                                       "sourceEntryId",
                                       "sourceVersion",
-                                      "sourceUrl",
                                       "observedAt"
                                     ],
                                     "additionalProperties": false
@@ -5725,6 +5755,8 @@
                                             "tokens.input.uncached",
                                             "tokens.input.cacheRead",
                                             "tokens.input.cacheWrite",
+                                            "tokens.input.cacheWrite5m",
+                                            "tokens.input.cacheWrite1h",
                                             "tokens.output.total",
                                             "tokens.output.text",
                                             "tokens.output.reasoning"
@@ -5806,6 +5838,9 @@
                                       "routedProviderId": {
                                         "type": "string"
                                       },
+                                      "routedModelId": {
+                                        "type": "string"
+                                      },
                                       "deploymentId": {
                                         "type": "string"
                                       },
@@ -5848,7 +5883,6 @@
                                       "sourceId",
                                       "sourceEntryId",
                                       "sourceVersion",
-                                      "sourceUrl",
                                       "observedAt"
                                     ],
                                     "additionalProperties": false
@@ -5857,7 +5891,7 @@
                                     "type": "string",
                                     "enum": [
                                       "missingBillingIdentity",
-                                      "missingCatalogEntry",
+                                      "missingRateCard",
                                       "missingUsageMeter",
                                       "unsupportedPricingDimension",
                                       "invalidUsageForFormula"
@@ -5872,6 +5906,8 @@
                                         "tokens.input.uncached",
                                         "tokens.input.cacheRead",
                                         "tokens.input.cacheWrite",
+                                        "tokens.input.cacheWrite5m",
+                                        "tokens.input.cacheWrite1h",
                                         "tokens.output.total",
                                         "tokens.output.text",
                                         "tokens.output.reasoning"
@@ -5883,13 +5919,7 @@
                                     "format": "date-time"
                                   }
                                 },
-                                "required": [
-                                  "status",
-                                  "pricingContext",
-                                  "priceSource",
-                                  "reason",
-                                  "ratedAt"
-                                ],
+                                "required": ["status", "pricingContext", "reason", "ratedAt"],
                                 "additionalProperties": false
                               }
                             ]
@@ -16175,6 +16205,43 @@
                           {
                             "type": "object",
                             "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["provider-state"]
+                              },
+                              "providerId": {
+                                "type": "string"
+                              },
+                              "data": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["type", "providerId", "data"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
                               "context": {
                                 "anyOf": [
                                   {
@@ -22913,15 +22980,31 @@
                         "type": "string"
                       },
                       "reasoning": {
-                        "type": "string",
-                        "enum": [
-                          "provider-default",
-                          "none",
-                          "minimal",
-                          "low",
-                          "medium",
-                          "high",
-                          "xhigh"
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "provider-default",
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "budgetTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": ["budgetTokens"],
+                            "additionalProperties": false
+                          }
                         ]
                       },
                       "groupIds": {
@@ -23016,15 +23099,31 @@
                       "type": "string"
                     },
                     "reasoning": {
-                      "type": "string",
-                      "enum": [
-                        "provider-default",
-                        "none",
-                        "minimal",
-                        "low",
-                        "medium",
-                        "high",
-                        "xhigh"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "provider-default",
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "budgetTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": ["budgetTokens"],
+                          "additionalProperties": false
+                        }
                       ]
                     },
                     "groupIds": {
@@ -23886,6 +23985,43 @@
                                     }
                                   },
                                   "required": ["type", "fileRef"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["provider-state"]
+                                    },
+                                    "providerId": {
+                                      "type": "string"
+                                    },
+                                    "data": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["type", "providerId", "data"],
                                   "additionalProperties": false
                                 },
                                 {

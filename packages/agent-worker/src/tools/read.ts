@@ -1,7 +1,8 @@
 import { posix } from "node:path"
 import { AgentToolPublicError, type CommandResult } from "@sixb/core"
-import { type JSONSchema7, jsonSchema, type Tool, tool } from "ai"
+import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import { AgentToolExecutionError } from "../errors"
+import { agentToolErrorText } from "../model-adapters"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
 const DEFAULT_LIMIT = 2_000
@@ -26,7 +27,7 @@ export const READ_TOOL_SPEC = {
     },
     required: ["path"],
     additionalProperties: false,
-  } satisfies JSONSchema7,
+  } satisfies JsonObject,
 } as const
 
 export interface ReadToolInput {
@@ -47,11 +48,11 @@ export interface ReadToolOutput {
 /** Build the bounded UTF-8 file reader from the run's lazy sandbox resolver. */
 export function createReadTool(
   resolveSandbox: () => Promise<AgentSandboxHandle>
-): Tool<ReadToolInput, ReadToolOutput> {
-  return tool({
-    description: READ_TOOL_SPEC.description,
-    inputSchema: jsonSchema<ReadToolInput>(READ_TOOL_SPEC.inputSchema),
-    async execute(input, { abortSignal }): Promise<ReadToolOutput> {
+): ModelTool<ReadToolInput> {
+  return {
+    ...READ_TOOL_SPEC,
+    parseInput: parseReadToolInput,
+    async execute(input, { signal }): Promise<JsonValue> {
       const path = normalizePath(input.path)
       const offset = positiveInteger(input.offset, 1, "offset")
       const limit = Math.min(positiveInteger(input.limit, DEFAULT_LIMIT, "limit"), DEFAULT_LIMIT)
@@ -74,15 +75,15 @@ export function createReadTool(
             cwd: sandbox.workingDirectory,
             env,
             timeout: READ_TIMEOUT_MS,
-            signal: abortSignal,
+            signal,
           }
         )
       } catch (error) {
-        abortSignal?.throwIfAborted()
+        signal.throwIfAborted()
         throw new AgentToolExecutionError("read", { cause: error })
       }
 
-      abortSignal?.throwIfAborted()
+      signal.throwIfAborted()
       if (result.exitCode !== 0) throwReadError(path, result.exitCode, result.stderr)
 
       const page = paginate(decodeBase64(result.stdout), path, offset, limit)
@@ -94,9 +95,30 @@ export function createReadTool(
         endLine,
         truncated: page.truncated,
         ...(page.truncated ? { nextOffset: endLine + 1 } : {}),
-      }
+      } as JsonValue
     },
-  })
+    errorText: agentToolErrorText,
+  }
+}
+
+function parseReadToolInput(value: unknown): ReadToolInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw publicError("input must be an object.")
+  }
+  const input = value as Record<string, unknown>
+  for (const key of Object.keys(input)) {
+    if (key !== "path" && key !== "offset" && key !== "limit") {
+      throw publicError(`input contains unknown property '${key}'.`)
+    }
+  }
+  const path = normalizePath(input.path)
+  const offset = input.offset === undefined ? undefined : positiveInteger(input.offset, 1, "offset")
+  const limit = input.limit === undefined ? undefined : positiveInteger(input.limit, 1, "limit")
+  return {
+    path,
+    ...(offset === undefined ? {} : { offset }),
+    ...(limit === undefined ? {} : { limit }),
+  }
 }
 
 function normalizePath(value: unknown): string {
@@ -110,9 +132,9 @@ function normalizePath(value: unknown): string {
   return normalized
 }
 
-function positiveInteger(value: number | undefined, fallback: number, field: string): number {
+function positiveInteger(value: unknown, fallback: number, field: string): number {
   if (value === undefined) return fallback
-  if (!Number.isSafeInteger(value) || value < 1) {
+  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1) {
     throw publicError(`${field} must be a positive integer.`)
   }
   return value

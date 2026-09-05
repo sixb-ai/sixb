@@ -1,22 +1,9 @@
 import { randomUUID } from "node:crypto"
-import { omitUndefinedObjectProperties } from "@sixb/core/internal/agents"
-import type {
-  AiPricingContext,
-  ReadonlyJsonObject,
-  RecordAiModelCallInput,
-} from "@sixb/core/storage"
+import type { ModelCallEndEvent, ModelUsage } from "@sixb/core/models"
+import type { ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
 import { normalizeAiModelCallRecord } from "@sixb/core/storage"
-import {
-  type LanguageModelCallEndEvent,
-  type LanguageModelCallStartEvent,
-  wrapLanguageModel,
-} from "ai"
-import {
-  aiModelCallUsageFromAiSdk,
-  aiPricingContextFromAiSdkCallStart,
-  aiPricingContextFromAiSdkUsage,
-} from "./ai-sdk-adapters"
 import { AgentUsageRecordingError } from "./errors"
+import { aiModelCallUsageFromModel } from "./model-adapters"
 import { recordAiModelCallAccounting } from "./model-call-accounting"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
 import type { AgentWorkerStorage, RecoverAiModelCall, RecoverAiModelCallInput } from "./types"
@@ -29,7 +16,6 @@ export interface AiModelCallRecorderInput {
   readonly executionId: string
   readonly attempt: number
   readonly requesterGroupIds: readonly string[]
-  readonly providerOptions?: unknown
   readonly recoverAiModelCall: RecoverAiModelCall
   /** Run identity used only in terminal recorder diagnostics. */
   readonly errorRunId: string
@@ -43,31 +29,13 @@ interface AiModelCallRecorderInternals {
   readonly recordAccounting?: (input: RecoverAiModelCallInput) => Promise<void>
 }
 
-interface ModelCallStartSnapshot {
-  readonly pricingContext: AiPricingContext
-}
-
-interface ModelCallResponseSnapshot {
-  readonly modelId?: string
-  readonly providerMetadata?: ReadonlyJsonObject
-  readonly pricingContext?: AiPricingContext
-}
-
-/**
- * Persist every completed provider call before the tool loop can begin another model step.
- *
- * Current storage records usage, allowlisted request billing context, and strict local valuation in
- * one transaction. AI SDK swallows lifecycle callback errors, so persistent failures still move to
- * durable recovery and are surfaced by `prepareStep` before another provider call.
- */
+/** Persist every completed provider call before another billable loop step can start. */
 export class AiModelCallRecorder {
   private readonly generateId: () => string
   private readonly now: () => Date
   private readonly retryDelaysMs: readonly number[]
   private readonly sleep: (ms: number) => Promise<void>
   private readonly recordAccounting: (input: RecoverAiModelCallInput) => Promise<void>
-  private readonly starts = new Map<string, ModelCallStartSnapshot>()
-  private readonly responses = new Map<string, ModelCallResponseSnapshot>()
   private recordingError: AgentUsageRecordingError | undefined
 
   constructor(
@@ -80,41 +48,16 @@ export class AiModelCallRecorder {
     this.sleep = internals.sleep ?? sleep
     this.recordAccounting =
       internals.recordAccounting ??
-      (async (input) => {
-        await recordAiModelCallAccounting({ storage: this.input.storage, ...input })
+      (async (recovery) => {
+        await recordAiModelCallAccounting({ storage: this.input.storage, ...recovery })
       })
   }
 
-  readonly onLanguageModelCallStart = async (event: LanguageModelCallStartEvent): Promise<void> => {
-    if (this.recordingError) return
-    this.starts.set(event.callId, {
-      pricingContext: aiPricingContextFromAiSdkCallStart(event, this.input.providerOptions),
-    })
-  }
-
-  readonly onLanguageModelCallEnd = async (event: LanguageModelCallEndEvent): Promise<void> => {
-    if (this.recordingError) return
+  readonly onModelCallEnd = async (event: ModelCallEndEvent): Promise<void> => {
+    if (this.recordingError) throw this.recordingError
 
     try {
-      const response = this.responses.get(event.responseId)
-      this.responses.delete(event.responseId)
-      const normalizedRawUsage =
-        event.usage.raw === undefined
-          ? undefined
-          : (omitUndefinedObjectProperties(event.usage.raw) as ReadonlyJsonObject)
-      const rawUsage =
-        normalizedRawUsage === undefined && response?.providerMetadata === undefined
-          ? undefined
-          : {
-              ...(normalizedRawUsage ?? {}),
-              ...(response?.providerMetadata === undefined
-                ? {}
-                : { providerMetadata: response.providerMetadata }),
-            }
       const occurredAt = this.now()
-      const start = this.starts.get(event.callId)
-      this.starts.delete(event.callId)
-      const responseModelId = response?.modelId
       const record: RecordAiModelCallInput = {
         id: this.generateId(),
         projectId: this.input.projectId,
@@ -122,21 +65,22 @@ export class AiModelCallRecorder {
         attempt: this.input.attempt,
         callId: event.callId,
         requesterGroupIds: this.input.requesterGroupIds,
-        providerId: event.provider,
+        providerId: event.providerId,
         requestedModelId: event.modelId,
-        ...(responseModelId === undefined ? {} : { responseModelId }),
+        ...(event.requestedReasoning === undefined
+          ? {}
+          : { requestedReasoning: event.requestedReasoning }),
+        ...(event.responseModelId === undefined ? {} : { responseModelId: event.responseModelId }),
         responseId: event.responseId,
-        usage: aiModelCallUsageFromAiSdk(event.usage),
-        ...(rawUsage === undefined ? {} : { rawUsage }),
+        usage: aiModelCallUsageFromModel(event.usage),
+        ...(event.usage.raw === undefined ? {} : { rawUsage: rawUsage(event.usage) }),
         occurredAt,
       }
       normalizeAiModelCallRecord(record)
       const recoveryInput: RecoverAiModelCallInput = {
         usage: record,
-        pricingContext: aiPricingContextFromAiSdkUsage(
-          { ...(start?.pricingContext ?? {}), ...(response?.pricingContext ?? {}) },
-          rawUsage
-        ),
+        cost: event.cost,
+        ...(event.route === undefined ? {} : { route: event.route }),
         ratedAt: new Date(occurredAt),
       }
 
@@ -174,84 +118,17 @@ export class AiModelCallRecorder {
           : new AgentUsageRecordingError(this.input.errorRunId, event.callId, false, {
               cause: error,
             })
+      throw this.recordingError
     }
-  }
-
-  /** Capture response model identities that AI SDK lifecycle callbacks do not expose. */
-  wrapModel(
-    model: Parameters<typeof wrapLanguageModel>[0]["model"]
-  ): ReturnType<typeof wrapLanguageModel> {
-    return wrapLanguageModel({
-      model,
-      middleware: {
-        specificationVersion: "v4",
-        wrapGenerate: async ({ doGenerate, model, params }) => {
-          const result = await doGenerate()
-          this.rememberResponse(
-            result.response,
-            result.providerMetadata,
-            aiPricingContextFromAiSdkCallStart(model, params.providerOptions)
-          )
-          return result
-        },
-        wrapStream: async ({ doStream, model, params }) => {
-          const result = await doStream()
-          const pricingContext = aiPricingContextFromAiSdkCallStart(model, params.providerOptions)
-          let response: { readonly id?: string; readonly modelId?: string } | undefined
-          return {
-            ...result,
-            stream: result.stream.pipeThrough(
-              new TransformStream({
-                transform: (part, controller) => {
-                  if (part.type === "response-metadata") response = part
-                  if (part.type === "finish") {
-                    this.rememberResponse(response, part.providerMetadata, pricingContext)
-                  }
-                  controller.enqueue(part)
-                },
-              })
-            ),
-          }
-        },
-      },
-    })
-  }
-
-  /** AI SDK invokes this before every step; a prior append failure prevents the next provider call. */
-  readonly prepareStep = (): undefined => {
-    this.assertHealthy()
-    return undefined
   }
 
   assertHealthy(): void {
     if (this.recordingError) throw this.recordingError
   }
+}
 
-  private rememberResponse(
-    response: { readonly id?: string; readonly modelId?: string } | undefined,
-    providerMetadata: unknown,
-    pricingContext: AiPricingContext
-  ): void {
-    if (!response?.id) return
-    const normalizedProviderMetadata =
-      providerMetadata === undefined
-        ? undefined
-        : (omitUndefinedObjectProperties(providerMetadata) as ReadonlyJsonObject)
-    if (
-      response.modelId === undefined &&
-      normalizedProviderMetadata === undefined &&
-      Object.keys(pricingContext).length === 0
-    ) {
-      return
-    }
-    this.responses.set(response.id, {
-      ...(response.modelId === undefined ? {} : { modelId: response.modelId }),
-      ...(normalizedProviderMetadata === undefined
-        ? {}
-        : { providerMetadata: normalizedProviderMetadata }),
-      ...(Object.keys(pricingContext).length === 0 ? {} : { pricingContext }),
-    })
-  }
+function rawUsage(usage: ModelUsage): ReadonlyJsonObject {
+  return structuredClone(usage.raw ?? {}) as ReadonlyJsonObject
 }
 
 async function retryOperation<TResult>(

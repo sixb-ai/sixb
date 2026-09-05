@@ -1,30 +1,78 @@
 import { type AgentDefinition, AgentDefinitionError } from "@sixb/core"
-
-export const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 128_000
-
-export interface AgentModelContextLimits {
-  readonly contextTokens: number
-  readonly inputTokens?: number
-}
+import {
+  defineLanguageModel,
+  type LanguageModel,
+  type LanguageModelDefinition,
+} from "@sixb/core/models"
 
 export interface AgentContextBudget {
   readonly windowTokens: number
   readonly inputBudgetTokens: number
   readonly reserveTokens: number
   readonly keepRecentTokens: number
-  readonly source: "config" | "models.dev" | "fallback"
+  readonly source: "config" | "model"
 }
 
-/** Resolve one agent's effective compaction budget from overrides, model limits, or fallback. */
+type ContextAgent = Pick<AgentDefinition, "id" | "model" | "loop">
+
+/** Resolve provider metadata once per model instance, before the worker accepts any jobs. */
+export async function resolveAgentContextBudgets(
+  agents: readonly ContextAgent[]
+): Promise<ReadonlyMap<string, AgentContextBudget>> {
+  const definitions = new Map<LanguageModel, Promise<LanguageModelDefinition>>()
+  const entries = await Promise.all(
+    agents.map(async (agent) => {
+      if (
+        agent.loop?.context?.windowTokens !== undefined ||
+        hasContextLimit(agent.model.definition)
+      ) {
+        return [agent.id, resolveAgentContextBudget(agent)] as const
+      }
+      let definition: LanguageModelDefinition
+      try {
+        let pending = definitions.get(agent.model)
+        if (!pending) {
+          pending = agent.model.resolveDefinition?.() ?? Promise.resolve(agent.model.definition)
+          definitions.set(agent.model, pending)
+        }
+        definition = defineLanguageModel(await pending)
+        if (
+          definition.providerId !== agent.model.providerId ||
+          definition.modelId !== agent.model.modelId
+        ) {
+          throw new TypeError("Provider metadata does not match the selected model.")
+        }
+      } catch (cause) {
+        const error = missingContextLimit(agent)
+        error.cause = cause
+        throw error
+      }
+      return [agent.id, resolveAgentContextBudget(agent, definition)] as const
+    })
+  )
+  return new Map(entries)
+}
+
+function hasContextLimit(definition: LanguageModelDefinition): boolean {
+  return definition.contextWindow !== undefined || definition.maxInputTokens !== undefined
+}
+
+function missingContextLimit(agent: ContextAgent): AgentDefinitionError {
+  return invalidBudget(
+    agent.id,
+    `limit could not be resolved for '${agent.model.providerId}/${agent.model.modelId}'. Configure loop.context.windowTokens or supply a model definition with contextWindow or maxInputTokens.`
+  )
+}
+
+/** Input-only limits are a conservative window: leave the same reserve without inventing a total. */
 export function resolveAgentContextBudget(
-  agent: Pick<AgentDefinition, "id" | "model" | "loop">,
-  modelLimits?: AgentModelContextLimits
+  agent: ContextAgent,
+  definition: LanguageModelDefinition = agent.model.definition
 ): AgentContextBudget {
   const config = agent.loop?.context
   const configuredWindow = config?.windowTokens
-  const discoveredLimits = configuredWindow === undefined ? modelLimits : undefined
-  const windowTokens =
-    configuredWindow ?? discoveredLimits?.contextTokens ?? DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS
+  const windowTokens = configuredWindow ?? definition.contextWindow ?? definition.maxInputTokens
+  if (windowTokens === undefined) throw missingContextLimit(agent)
   const reserveTokens = config?.reserveTokens ?? Math.min(16_384, Math.floor(windowTokens * 0.25))
 
   assertPositiveSafeInteger(agent.id, windowTokens, "windowTokens")
@@ -33,7 +81,9 @@ export function resolveAgentContextBudget(
     throw invalidBudget(agent.id, "reserveTokens must be less than the resolved context window.")
   }
   const inputBudgetTokens = Math.min(
-    discoveredLimits?.inputTokens ?? Number.POSITIVE_INFINITY,
+    configuredWindow === undefined
+      ? (definition.maxInputTokens ?? Number.POSITIVE_INFINITY)
+      : Number.POSITIVE_INFINITY,
     windowTokens - reserveTokens
   )
   if (!Number.isSafeInteger(inputBudgetTokens) || inputBudgetTokens <= 0) {
@@ -51,12 +101,7 @@ export function resolveAgentContextBudget(
     inputBudgetTokens,
     reserveTokens,
     keepRecentTokens,
-    source:
-      configuredWindow !== undefined
-        ? "config"
-        : discoveredLimits === undefined
-          ? "fallback"
-          : "models.dev",
+    source: configuredWindow !== undefined ? "config" : "model",
   })
 }
 

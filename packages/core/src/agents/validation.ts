@@ -1,4 +1,5 @@
 import { getInvalidJsonValueReason, isPlainRecord, type JsonValue } from "../json"
+import { isModelReasoning } from "../models"
 import {
   normalizeSchemaValue,
   type ObjectSchema,
@@ -13,10 +14,9 @@ import {
   type AgentContextConfig,
   type AgentDefinition,
   type AgentLoopConfig,
-  type AgentReasoningLevel,
+  type AgentReasoning,
   type AgentToolDefinition,
   type AgentToolInputSchema,
-  type DefineAgentConfig,
 } from "./types"
 
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
@@ -47,8 +47,7 @@ export function isAgentDefinition(value: unknown): value is AgentDefinition {
     typeof value.id === "string" &&
     typeof value.name === "string" &&
     typeof value.instructions === "string" &&
-    (value.reasoning === undefined || isAgentReasoningLevel(value.reasoning)) &&
-    (value.providerOptions === undefined || isProviderOptions(value.providerOptions)) &&
+    (value.reasoning === undefined || isModelReasoning(value.reasoning)) &&
     Array.isArray(value.groupIds) &&
     isAgentToolDefinitionArray(value.tools)
   )
@@ -205,43 +204,14 @@ function assertPositiveSafeInteger(value: unknown, field: string): asserts value
   }
 }
 
-export function assertValidReasoningLevel(reasoning: AgentReasoningLevel | undefined): void {
+export function assertValidAgentReasoning(reasoning: AgentReasoning | undefined): void {
   if (reasoning === undefined) {
     return
   }
-  if (!isAgentReasoningLevel(reasoning)) {
+  if (!isModelReasoning(reasoning)) {
     throw new AgentDefinitionError(
-      `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}.`
+      `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
     )
-  }
-}
-
-export function assertValidProviderOptions(
-  providerOptions: DefineAgentConfig["providerOptions"]
-): void {
-  if (providerOptions === undefined) {
-    return
-  }
-
-  const reason = getInvalidJsonValueReason(providerOptions, "providerOptions")
-  if (!isRecord(providerOptions) || reason) {
-    throw new AgentDefinitionError(
-      `[Sixb] Agent providerOptions must be a provider-keyed JSON object${reason ? `; ${reason}` : "."}`
-    )
-  }
-
-  for (const [provider, options] of Object.entries(providerOptions)) {
-    if (!provider.trim()) {
-      throw new AgentDefinitionError(
-        "[Sixb] Agent providerOptions provider names must not be empty."
-      )
-    }
-    const optionsReason = getInvalidJsonValueReason(options, `providerOptions.${provider}`)
-    if (!isRecord(options) || optionsReason) {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent providerOptions.${provider} must be a JSON object${optionsReason ? `; ${optionsReason}` : "."}`
-      )
-    }
   }
 }
 
@@ -291,24 +261,6 @@ function assertNoDuplicateGroupIds(agentId: string, groupIds: readonly string[])
     }
     seen.add(groupId)
   }
-}
-
-function isAgentReasoningLevel(value: unknown): value is AgentReasoningLevel {
-  return typeof value === "string" && (AGENT_REASONING_LEVELS as readonly string[]).includes(value)
-}
-
-function isProviderOptions(
-  value: unknown
-): value is NonNullable<DefineAgentConfig["providerOptions"]> {
-  if (!isRecord(value) || getInvalidJsonValueReason(value) !== undefined) {
-    return false
-  }
-  return Object.entries(value).every(
-    ([provider, options]) =>
-      provider.trim().length > 0 &&
-      isRecord(options) &&
-      getInvalidJsonValueReason(options) === undefined
-  )
 }
 
 function assertValidAgentToolSchema(

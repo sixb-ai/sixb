@@ -67,6 +67,7 @@ export function normalizeDurableParts(
       case "step-start":
         return [{ kind: "step-start" }]
       case "context":
+      case "provider-state":
         return []
       default:
         // Compile error if the core message part union grows: handle the new kind above.

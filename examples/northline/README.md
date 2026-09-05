@@ -35,7 +35,7 @@ AI_GATEWAY_API_KEY=your_key bun --filter @sixb/example-northline dev
 Without `AI_GATEWAY_API_KEY`, Northline still starts, syncs, and runs normally; only model-backed
 assistant turns are unavailable. To customize the assistant, edit
 [`agents/operations-assistant.ts`](./agents/operations-assistant.ts) and change the model passed to
-`gateway()` and the `instructions` prompt. Agent commands run through the local sandbox provider by
+`vercelGateway()` and the `instructions` prompt. Agent commands run through the local sandbox provider by
 default.
 
 To exercise an agent inside a workflow, open **Workflows → Agent service assessment** in Atlas and
@@ -72,8 +72,9 @@ Then, in one thread:
 
 The next response should continue normally, and every original message should remain visible in
 the thread. Outside this opt-in demonstration mode, Northline uses Sixb's automatic model-derived
-context budget. The worker resolves the selected model from its pinned Models.dev snapshot and
-falls back to a 128,000-token window when no exact catalog entry exists.
+context budget. At startup, the worker resolves missing limits through the selected model's
+provider catalog. If no limit is available, configure `loop.context.windowTokens` or supply a
+model definition; there is no assumed context window.
 
 ### Hosted sandbox
 
