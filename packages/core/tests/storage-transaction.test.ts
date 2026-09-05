@@ -409,7 +409,7 @@ function agentThreadInput(id: string) {
   return {
     id,
     projectId: "my-app",
-    agentId: "support",
+    actorId: "support",
     ownerPrincipal: { type: "user" as const, id: "user_1" },
     createdAt: new Date("2026-06-17T10:00:00.000Z"),
   }

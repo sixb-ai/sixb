@@ -49,7 +49,7 @@ describe("AI usage recovery", () => {
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
       projectId,
-      agentId: "assistant",
+      actorId: "assistant",
       runId: "run_1",
       executionId,
     })
@@ -95,7 +95,7 @@ describe("AI usage recovery", () => {
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
       projectId,
-      agentId: "assistant",
+      actorId: "assistant",
       runId: "run_1",
       executionId,
     })
@@ -143,7 +143,7 @@ describe("AI usage recovery", () => {
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
       projectId,
-      agentId: "assistant",
+      actorId: "assistant",
       runId: "run_1",
       executionId,
     })
@@ -195,7 +195,7 @@ describe("AI usage recovery", () => {
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
       projectId,
-      agentId: "assistant",
+      actorId: "assistant",
       runId: "run_1",
       executionId,
     })
@@ -288,7 +288,6 @@ describe("AI usage recovery", () => {
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
       projectId,
-      agentId: "assistant",
       runId: "run_1",
       executionId,
     })
@@ -344,7 +343,6 @@ describe("AI usage recovery", () => {
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
       projectId,
-      agentId: "assistant",
       runId: "run_1",
       executionId,
     })

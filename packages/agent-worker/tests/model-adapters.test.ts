@@ -95,13 +95,13 @@ describe("owned model adapters", () => {
         limit: input.limit,
         mode: input.mode,
         aborted: signal.aborted,
-        run: { id: run.id, agentId: run.agentId ?? null, threadId: run.threadId ?? null },
+        run,
       }))
-    const run = { id: "run-1", agentId: "research", threadId: "thread-1" }
+    const run = { kind: "conversation" as const, id: "run-1", threadId: "thread-1" }
     const [tool] = modelToolsFromAgentDefinitions({
       definitions: [definition],
       valueTypesById: new Map(),
-      run: { id: run.id, agentId: run.agentId, threadId: run.threadId },
+      run,
       connector: resolve,
       logger: noopLogger,
       ...toolRuntime,
@@ -143,7 +143,7 @@ describe("owned model adapters", () => {
       modelToolsFromAgentDefinitions({
         definitions: [definition, definition],
         valueTypesById: new Map(),
-        run: { id: "run-2", agentId: "agent" },
+        run: { kind: "conversation", id: "run-2", threadId: "thread" },
         connector,
         logger: noopLogger,
         ...toolRuntime,
@@ -153,7 +153,7 @@ describe("owned model adapters", () => {
     const [tool] = modelToolsFromAgentDefinitions({
       definitions: [definition],
       valueTypesById: new Map(),
-      run: { id: "run-2", agentId: "agent" },
+      run: { kind: "conversation", id: "run-2", threadId: "thread" },
       connector,
       logger: noopLogger,
       ...toolRuntime,
@@ -175,7 +175,7 @@ describe("owned model adapters", () => {
     const [tool] = modelToolsFromAgentDefinitions({
       definitions: [definition],
       valueTypesById: new Map(),
-      run: { id: "run-3", agentId: "agent" },
+      run: { kind: "conversation", id: "run-3", threadId: "thread" },
       connector,
       logger: noopLogger,
       ...toolRuntime,

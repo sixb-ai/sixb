@@ -20,6 +20,7 @@ export type { SecurityDefinitionCatalog, SecurityRegistryOptions } from "./regis
 export { SecurityRegistry } from "./registry"
 export type {
   AccessGrant,
+  AgentRunGrant,
   AppendGrant,
   ApplicationDefinition,
   ApplyGrant,

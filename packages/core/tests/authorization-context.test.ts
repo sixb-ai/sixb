@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import {
+  agent,
   applications,
   can,
   canAccessApplication,
   col,
   defineAction,
-  defineAgent,
   defineConnector,
   defineDataset,
   defineGroup,
@@ -23,6 +23,7 @@ import {
 } from "../src"
 import { createSessionCredential } from "../src/auth"
 import { resolveRoleGrants } from "../src/authorization"
+import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Contract = defineObjectType({
@@ -82,19 +83,7 @@ const invoicesPipelineStep = definePipelineStep("pipeline-invoices-step")
 const contractsPipeline = definePipeline("pipeline-contracts").then(contractsPipelineStep)
 const invoicesPipeline = definePipeline("pipeline-invoices").then(invoicesPipelineStep)
 
-const model = {} as Parameters<typeof defineAgent>[1]["model"]
-
-const contractAgent = defineAgent("contract-agent", {
-  name: "Contract Agent",
-  model,
-  instructions: "Help with contracts.",
-})
-
-const invoiceAgent = defineAgent("invoice-agent", {
-  name: "Invoice Agent",
-  model,
-  instructions: "Help with invoices.",
-})
+const model = testLanguageModel()
 
 const sendContract = defineAction("send-contract")
   .params({})
@@ -111,7 +100,7 @@ const contractOperator = defineRole("contract.operator", {
     can.apply(sendContract),
     can.run(syncContracts),
     can.run(contractsPipeline),
-    can.run(contractAgent),
+    can.run(agent),
   ],
 })
 
@@ -129,7 +118,7 @@ const adminOperator = defineRole("admin.operator", {
     can.run(every.workflow()),
     can.run(every.sync()),
     can.run(every.pipeline()),
-    can.run(every.agent()),
+    can.run(agent),
   ],
 })
 
@@ -147,7 +136,6 @@ describe("resolveAuthorizationContext", () => {
     workflowIds: new Set<string>(),
     syncIds: new Set(["sync-contracts", "sync-invoices"]),
     pipelineIds: new Set(["pipeline-contracts", "pipeline-invoices"]),
-    agentIds: new Set(["contract-agent", "invoice-agent"]),
     observableIds: new Set(["logs", "aiUsage"]),
     manageableIds: new Set(["aiUsage"]),
     getSubTypes: (objectTypeId: string) => (objectTypeId === "contract" ? ["signed-contract"] : []),
@@ -168,6 +156,25 @@ describe("resolveAuthorizationContext", () => {
         grants: resolveRoleGrants(role, universe),
       })),
     })
+
+  test("Agent execution, usage observation, and limit management remain independent", () => {
+    // Removal proof: making either usage grant imply another permission fails this matrix.
+    const cases = [
+      { grant: can.run(agent), run: true, observe: false, manage: false },
+      { grant: can.observe(agent.usage), run: false, observe: true, manage: false },
+      { grant: can.manage(agent.usage), run: false, observe: false, manage: true },
+    ]
+    for (const expected of cases) {
+      const role = defineRole("isolated-capability", {
+        grantedTo: [admins],
+        grants: [expected.grant],
+      })
+      const context = resolve([admins.id], [role])
+      expect(context.grants["run:agent"]).toBe(expected.run)
+      expect(context.grants["observe:aiUsage"].has("aiUsage")).toBe(expected.observe)
+      expect(context.grants["manage:aiUsage"].has("aiUsage")).toBe(expected.manage)
+    }
+  })
 
   test("application access becomes an allowlist when a role grants it", () => {
     const atlasAccess = defineRole("atlas.access", {
@@ -200,7 +207,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["apply:action"]).toEqual(new Set(["send-contract"]))
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
-    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
+    expect(context.grants["run:agent"]).toBe(true)
     expect(context.grants["observe:logs"]).toEqual(new Set())
   })
 
@@ -214,7 +221,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["view:dataset"]).toEqual(new Set(["raw.invoices"]))
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
-    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
+    expect(context.grants["run:agent"]).toBe(true)
   })
 
   test("principals without matching roles resolve to empty grants", () => {
@@ -227,7 +234,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:workflow"].size).toBe(0)
     expect(context.grants["run:sync"].size).toBe(0)
     expect(context.grants["run:pipeline"].size).toBe(0)
-    expect(context.grants["run:agent"].size).toBe(0)
+    expect(context.grants["run:agent"]).toBe(false)
   })
 
   test("expands broad grants to the registered universe", () => {
@@ -244,7 +251,7 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:pipeline"]).toEqual(
       new Set(["pipeline-contracts", "pipeline-invoices"])
     )
-    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent", "invoice-agent"]))
+    expect(context.grants["run:agent"]).toBe(true)
   })
 
   test("edit and append expand to the whole type universe but never to subtypes", () => {
@@ -325,18 +332,6 @@ describe("resolveAuthorizationContext", () => {
     expect(context.grants["run:pipeline"].has("pipeline-invoices")).toBe(false)
   })
 
-  test("except() excludes named agents and keeps the rest of the agent universe", () => {
-    const mostAgents = defineRole("most.agents", {
-      grantedTo: [admins],
-      grants: [can.run(every.agent().except([invoiceAgent]))],
-    })
-
-    const context = resolve(["admins"], [mostAgents])
-
-    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
-    expect(context.grants["run:agent"].has("invoice-agent")).toBe(false)
-  })
-
   test("except() excludes the named types and keeps the rest of the universe", () => {
     const mostObjects = defineRole("most.objects", {
       grantedTo: [admins],
@@ -376,7 +371,7 @@ describe("auth.createAuthorizationContext", () => {
       syncs: [syncContracts, syncInvoices],
       pipelines: [contractsPipeline, invoicesPipeline],
       actions: [sendContract],
-      agents: [contractAgent, invoiceAgent],
+      models: { language: [model] },
       groups: [commercial, finance],
       roles: [contractOperator, invoiceViewer],
       auth: { id: "test", kind: "dev" },
@@ -446,7 +441,7 @@ describe("auth.createAuthorizationContext", () => {
     expect(context.grants["apply:action"]).toEqual(new Set(["send-contract"]))
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
-    expect(context.grants["run:agent"]).toEqual(new Set(["contract-agent"]))
+    expect(context.grants["run:agent"]).toBe(true)
   })
 
   test("rejects unauthenticated requests", async () => {

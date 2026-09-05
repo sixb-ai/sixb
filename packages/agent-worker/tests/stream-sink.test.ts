@@ -11,7 +11,6 @@ function runRecord(status: ConversationAgentRunRecord["status"]): ConversationAg
     projectId: "project",
     executionId: "execution-1",
     threadId: "thread-1",
-    agentId: "agent-1",
     triggerMessageId: "message-1",
     requesterGroupIds: [],
     status,

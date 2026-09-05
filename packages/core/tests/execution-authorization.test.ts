@@ -4,7 +4,7 @@ import type { Principal } from "../src/auth"
 import { type AuthorizationContext, emptyGrantIndex } from "../src/authorization"
 import { isSixbError } from "../src/errors/internal"
 import {
-  createInheritedMainAgentExecutionRecord,
+  createInheritedAgentExecutionRecord,
   restoreAgentExecutionScope,
 } from "../src/execution/agent"
 import {
@@ -35,7 +35,7 @@ describe("runtime authorization capabilities", () => {
   test("snapshots principal authority and exposes only a defensive durable reference", () => {
     const context = authorizationContext({ type: "user", id: "user-1" }, "session-1")
     const groups = context.groupIds as string[]
-    const agentGrants = context.grants["run:agent"] as Set<string>
+    const workflowGrants = context.grants["run:workflow"] as Set<string>
     const authorization = createPrincipalRuntimeAuthorization({
       projectId: "project-1",
       context,
@@ -43,13 +43,13 @@ describe("runtime authorization capabilities", () => {
     })
 
     groups.push("late-group")
-    agentGrants.add("late-agent")
+    workflowGrants.add("late-workflow")
 
     const resolved = resolveRuntimeAuthorization(authorization)
     expect(resolved.type).toBe("principal")
     if (resolved.type !== "principal") throw new Error("expected principal authorization")
     expect(resolved.context.groupIds).toEqual(["group-1"])
-    expect(resolved.context.grants["run:agent"].has("late-agent")).toBe(false)
+    expect(resolved.context.grants["run:workflow"].has("late-workflow")).toBe(false)
 
     const firstRef = getAuthorizationRef(authorization)
     expect(firstRef).toEqual({
@@ -247,7 +247,7 @@ describe("execution scopes", () => {
   test("runs agents with service-account authority", () => {
     const principal = { type: "serviceAccount", id: agentServiceAccountId("research") } as const
     const scope = restoreAgentExecutionScope({
-      agentId: "research",
+      actorId: "research",
       runId: "agent-run-1",
       authorization: { type: "principal", context: authorizationContext(principal) },
       execution: {
@@ -264,7 +264,7 @@ describe("execution scopes", () => {
 
     expect(scope.execution.executor).toEqual({
       type: "agent",
-      agentId: "research",
+      actorId: "research",
       runId: "agent-run-1",
     })
     expect(scope.execution.requestedBy).toEqual({ type: "user", id: "user-1" })
@@ -284,7 +284,7 @@ describe("execution scopes", () => {
     const principal = { type: "serviceAccount", id: agentServiceAccountId("research") } as const
     expect(() =>
       restoreAgentExecutionScope({
-        agentId: "research",
+        actorId: "research",
         runId: "agent-run-2",
         authorization: {
           type: "principal",
@@ -326,7 +326,7 @@ describe("execution scopes", () => {
     })
   })
 
-  test("runs the main agent with its request parent's durable authority", () => {
+  test("runs the project Agent with its request parent's durable authority", () => {
     const parent = {
       id: "execution-request-1",
       projectId: "project-1",
@@ -342,7 +342,7 @@ describe("execution scopes", () => {
       createdAt: new Date("2026-01-01T00:00:00.000Z"),
     }
     const execution = {
-      ...createInheritedMainAgentExecutionRecord({
+      ...createInheritedAgentExecutionRecord({
         id: "execution-main-1",
         parent,
         runId: "main-run-1",
@@ -350,7 +350,6 @@ describe("execution scopes", () => {
       createdAt: new Date("2026-01-01T00:00:01.000Z"),
     }
     const scope = restoreAgentExecutionScope({
-      agentId: "main",
       runId: "main-run-1",
       authorization: {
         type: "principal",
@@ -361,7 +360,7 @@ describe("execution scopes", () => {
 
     expect(execution.authorizationRef).toEqual(parent.authorizationRef)
     expect(scope.execution).toMatchObject({
-      executor: { type: "agent", agentId: "main", runId: "main-run-1" },
+      executor: { type: "agent", runId: "main-run-1" },
       source: { type: "execution", executionId: parent.id },
       requestedBy: parent.requestedBy,
       correlationId: parent.correlationId,

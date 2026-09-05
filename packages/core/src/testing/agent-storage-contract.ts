@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test"
-import { MAIN_AGENT_ID } from "../agents/main"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../agents/message"
 import type { Principal } from "../auth"
 import type { SixbFailure } from "../errors/types"
@@ -67,7 +66,6 @@ function threadInput(overrides: Partial<CreateAgentThreadInput> = {}): CreateAge
   return {
     id: "thr_1",
     projectId,
-    agentId: "sales",
     ownerPrincipal: owner,
     createdAt: at("2026-06-23T10:00:00.000Z"),
     ...overrides,
@@ -92,7 +90,6 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
     id: "run_1",
     projectId,
     threadId: "thr_1",
-    agentId: "sales",
     triggerMessageId: "msg_user_1",
     spec: { model: { provider: "test", modelId: "large" } },
     executionId: "test_agent_execution:run_1",
@@ -136,16 +133,14 @@ async function createRunningParent(
   storage: AgentStorage,
   fixture: AgentStorageContractStorage
 ): Promise<void> {
-  await storage.threads.create(threadInput({ id: "parent_thread", agentId: MAIN_AGENT_ID }))
+  await storage.threads.create(threadInput({ id: "parent_thread" }))
   const parent = runInput({
     id: "parent_1",
     threadId: "parent_thread",
-    agentId: MAIN_AGENT_ID,
     execution: execution("parent_token"),
   })
   await createTestAgentExecution(fixture, {
     projectId,
-    agentId: MAIN_AGENT_ID,
     runId: parent.id,
     executionId: parent.executionId,
     authority: "inherited",
@@ -169,7 +164,6 @@ async function createSubagent(
   if (!parent || parent.kind !== "conversation") throw new Error("Expected child parent fixture")
   await createTestAgentExecution(fixture, {
     projectId: input.projectId,
-    agentId: MAIN_AGENT_ID,
     runId: input.id,
     executionId: input.executionId,
     sourceExecutionId: parent.executionId,
@@ -224,9 +218,9 @@ async function createRun(
 ) {
   await createTestAgentExecution(fixture, {
     projectId: input.projectId,
-    agentId: input.agentId,
     runId: input.id,
     executionId: input.executionId,
+    authority: "inherited",
   })
   return storage.runs.create(input)
 }
@@ -304,7 +298,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         const thread = await storage.threads.create(threadInput({ title: "Q3 pipeline" }))
         expect(thread).toMatchObject({
           id: "thr_1",
-          agentId: "sales",
           title: "Q3 pipeline",
           status: "active",
           activeRunId: null,
@@ -330,19 +323,17 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
     test("lists threads with filters, ordering, and pagination", async () => {
       await withStorage(async (storage) => {
         await storage.threads.create(
-          threadInput({ id: "thr_a", agentId: "sales", createdAt: at("2026-06-23T10:00:00.000Z") })
+          threadInput({ id: "thr_a", createdAt: at("2026-06-23T10:00:00.000Z") })
         )
         await storage.threads.create(
           threadInput({
             id: "thr_b",
-            agentId: "support",
             createdAt: at("2026-06-23T10:01:00.000Z"),
           })
         )
         await storage.threads.create(
           threadInput({
             id: "thr_c",
-            agentId: "sales",
             status: "archived",
             createdAt: at("2026-06-23T10:02:00.000Z"),
           })
@@ -353,25 +344,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         expect(all.threads.map((thread) => thread.id)).toEqual(["thr_a", "thr_b", "thr_c"])
         expect(all.total).toBe(3)
         expect(all.hasMore).toBe(false)
-
-        const sales = await storage.threads.list({ projectId, agentId: "sales", order: "asc" })
-        expect(sales.threads.map((thread) => thread.id)).toEqual(["thr_a", "thr_c"])
-
-        const visibleAgents = await storage.threads.list({
-          projectId,
-          agentIds: ["support"],
-          order: "asc",
-        })
-        expect(visibleAgents.threads.map((thread) => thread.id)).toEqual(["thr_b"])
-
-        const salesVisibleAgents = await storage.threads.list({
-          projectId,
-          agentId: "sales",
-          agentIds: ["support"],
-          order: "asc",
-        })
-        expect(salesVisibleAgents.threads).toEqual([])
-        expect(salesVisibleAgents.total).toBe(0)
 
         const active = await storage.threads.list({ projectId, statuses: ["active"], order: "asc" })
         expect(active.threads.map((thread) => thread.id)).toEqual(["thr_a", "thr_b"])
@@ -436,7 +408,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         await storage.threads.create(threadInput())
         const executionId = await createTestAgentExecution(fixture, {
           projectId,
-          agentId: "support",
+          actorId: "support",
           runId: "run_1",
         })
 
@@ -557,7 +529,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         })
         await createTestAgentExecution(fixture, {
           projectId,
-          agentId: MAIN_AGENT_ID,
           runId: wrongLineage.id,
           executionId: wrongLineage.executionId,
           sourceExecutionId: "unrelated_request_execution",
@@ -568,7 +539,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         const input = subagentInput("stale_parent_token")
         await createTestAgentExecution(fixture, {
           projectId,
-          agentId: MAIN_AGENT_ID,
           runId: input.id,
           executionId: input.executionId,
           sourceExecutionId: "test_agent_execution:parent_1",
@@ -603,7 +573,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         for (const input of inputs) {
           await createTestAgentExecution(fixture, {
             projectId,
-            agentId: MAIN_AGENT_ID,
             runId: input.id,
             executionId: input.executionId,
             sourceExecutionId: "test_agent_execution:parent_1",

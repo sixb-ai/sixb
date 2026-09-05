@@ -82,6 +82,9 @@ import subagentRunsSql from "./migrations/031-subagent-runs.sql" with { type: "t
 import conversationRunSpecSql from "./migrations/032-conversation-run-spec.sql" with {
   type: "text",
 }
+import retireAgentDefinitionsSql from "./migrations/033-retire-agent-definitions.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -169,6 +172,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("030-ai-usage-limits", aiUsageLimitsSql),
     sqliteSql("031-subagent-runs", subagentRunsSql),
     sqliteSql("032-conversation-run-spec", conversationRunSpecSql),
+    sqliteSql("033-retire-agent-definitions", retireAgentDefinitionsSql),
   ],
 })
 

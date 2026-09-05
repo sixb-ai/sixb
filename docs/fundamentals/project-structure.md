@@ -32,8 +32,6 @@ my-sixb-app/
 │   └── business-health.ts
 ├── workflows/
 │   └── invoice-reminder.ts
-├── agents/
-│   └── invoice-assistant.ts
 ├── skills/
 │   └── acme-writing-style/
 │       ├── SKILL.md
@@ -73,7 +71,6 @@ agent sandboxes.
 | `pipelines/` | Pipeline definitions | [Pipelines](../data/pipelines.md) |
 | `rules/` | Rule definitions | [Rules](../rules/overview.md) |
 | `workflows/` | Workflow definitions | [Workflows](../workflows/overview.md) |
-| `agents/` | Agent definitions | [Agents](../agents/overview.md) |
 | `skills/` | Agent Skills (`<name>/SKILL.md` plus references/assets/scripts) read by the agent worker | [Agents](../agents/overview.md) |
 | `security/groups/` | Group definitions | [Authorization](../auth/authorization.md) |
 | `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |

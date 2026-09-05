@@ -44,7 +44,8 @@ export interface WorkflowAgentNodeRunRecord {
   readonly projectId: string
   readonly nodeRunId: string
   readonly executionId: string
-  readonly agentId: string
+  /** Stable managed actor for the workflow + Agent step, not the step definition id. */
+  readonly actorId: string
   readonly status: WorkflowAgentNodeRunStatus
   readonly prompt: string
   readonly modelId?: string
@@ -63,7 +64,7 @@ export interface CreateWorkflowAgentNodeRunInput {
   readonly projectId: string
   readonly nodeRunId: string
   readonly executionId: string
-  readonly agentId: string
+  readonly actorId: string
   readonly prompt: string
   readonly createdAt?: Date
 }
@@ -118,7 +119,7 @@ export interface CancelWorkflowAgentNodeRunInput {
 
 export interface ListWorkflowAgentNodeRunsInput {
   readonly projectId: string
-  readonly agentId?: string
+  readonly actorId?: string
   readonly statuses?: readonly WorkflowAgentNodeRunStatus[]
   readonly limit?: number
   readonly offset?: number

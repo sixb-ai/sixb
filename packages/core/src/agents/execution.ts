@@ -5,7 +5,6 @@ import type { ModelCatalog } from "../models"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { SecurityDefinitionCatalog } from "../security"
 import type {
   AgentThreadRecord,
   ConversationAgentRunRecord,
@@ -24,17 +23,17 @@ import {
   requestAgentRun,
   retryAgentRun,
 } from "./request"
-import type { AgentDefinition } from "./types"
+import { assertNoAgentSelector } from "./retired-config"
+import type { AgentDescriptor } from "./types"
 
 export type ExecutionAgentRequestInput = Omit<RequestAgentRunInput, "principal">
 export type ListExecutionAgentThreadsInput = Omit<
   ListAgentThreadsInput,
-  "projectId" | "agentIds" | "ownerPrincipal"
+  "projectId" | "ownerPrincipal"
 >
 
 export interface CreateExecutionAgentThreadInput {
   readonly id?: string
-  readonly agentId: string
   readonly title?: string
 }
 
@@ -71,39 +70,40 @@ export interface ExecutionAgentRunResult extends Omit<RequestAgentRunResult, "ru
   readonly run: AgentRunView
 }
 
-export interface AgentsRuntime {
-  list(): readonly AgentDefinition[]
-  getById(agentId: string): AgentDefinition | null
+export interface AgentRuntime {
+  /** Null when no language models are configured or the caller cannot run the Agent. */
+  get(): AgentDescriptor | null
   readonly threads: AgentThreadsRuntime
   readonly runs: AgentRunsRuntime
 }
 
-export function createAgentsRuntime(
+export function createAgentRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  source: Pick<AgentsRuntime, "list" | "getById">,
-  security: SecurityDefinitionCatalog,
   models?: ModelCatalog
-): AgentsRuntime {
+): AgentRuntime {
   const principal = runtime.authorization?.principal ?? SYSTEM_PRINCIPAL
-  const allowed = (agentId: string) =>
-    isAllowed(runtime.authorization, { kind: "agent.run", agentId })
+  const allowed = () => isAllowed(runtime.authorization, { kind: "agent.run" })
 
-  const getThread = async (threadId: string) => {
+  const getVisibleThreadRecord = async (threadId: string): Promise<AgentThreadRecord | null> => {
     const thread =
       (await runtime.storage.agents?.threads.getById({
         projectId: runtime.projectId,
         id: threadId,
       })) ?? null
-    if (!thread || !allowed(thread.agentId)) return null
+    if (!thread || !allowed()) return null
     return runtime.authorization && !principalsEqual(principal, thread.ownerPrincipal)
       ? null
       : thread
   }
 
-  const getAgent = (agentId: string) => {
-    const agent = source.getById(agentId)
-    return agent && allowed(agentId) ? agent : null
+  const getAgent = (): AgentDescriptor | null => {
+    const model = models?.language.default
+    if (!model || !allowed()) return null
+    return {
+      name: "Sixb",
+      model: { provider: model.provider, modelId: model.modelId },
+    }
   }
 
   const getVisibleRunRecord = async (runId: string): Promise<ConversationAgentRunRecord | null> => {
@@ -113,8 +113,8 @@ export function createAgentsRuntime(
         id: runId,
       })) ?? null
     if (!run || run.kind !== "conversation") return null
-    const thread = await getThread(run.threadId)
-    return thread?.agentId === run.agentId ? run : null
+    const thread = await getVisibleThreadRecord(run.threadId)
+    return thread ? run : null
   }
 
   const getRun = async (runId: string): Promise<AgentRunView | null> => {
@@ -123,13 +123,13 @@ export function createAgentsRuntime(
   }
 
   return {
-    list: () => source.list().filter((agent) => allowed(agent.id)),
-    getById: getAgent,
+    get: getAgent,
     threads: {
       create: async (input) => {
-        const agent = getAgent(input.agentId)
+        assertNoAgentSelector(input)
+        const agent = getAgent()
         if (!agent) {
-          throw new AgentRequestError("agent_not_found", `[Sixb] Unknown agent '${input.agentId}'.`)
+          throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
         }
         const storage = runtime.storage.agents
         if (!storage) {
@@ -141,49 +141,40 @@ export function createAgentsRuntime(
         return storage.threads.create({
           id: input.id ?? createAgentThreadId(),
           projectId: runtime.projectId,
-          agentId: agent.id,
           ownerPrincipal: principal,
           ...(input.title === undefined ? {} : { title: input.title }),
         })
       },
-      getById: getThread,
-      list: (input = {}) => {
+      getById: getVisibleThreadRecord,
+      list: async (input = {}) => {
+        assertNoAgentSelector(input)
         const storage = runtime.storage.agents
-        if (!storage) return Promise.resolve({ threads: [], hasMore: false, total: 0 })
+        if (!storage || !allowed()) return { threads: [], hasMore: false, total: 0 }
         return storage.threads.list({
-          projectId: runtime.projectId,
           ...input,
-          agentIds: runtime.authorization
-            ? [...runtime.authorization.grants["run:agent"]]
-            : undefined,
+          projectId: runtime.projectId,
           ownerPrincipal: runtime.authorization ? principal : undefined,
         })
       },
     },
     runs: {
       request: async (input) => {
-        const agent = source.getById(input.agentId)
+        assertNoAgentSelector(input)
+        const agent = getAgent()
         if (!agent) {
-          throw new AgentRequestError("agent_not_found", `[Sixb] Unknown agent '${input.agentId}'.`)
+          throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
         }
-        assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
-        if (input.threadId && !(await getThread(input.threadId))) {
+        assertAuthorized(runtime, { kind: "agent.run" })
+        if (input.threadId && !(await getVisibleThreadRecord(input.threadId))) {
           throw new AgentRequestError(
             "thread_not_found",
             `[Sixb] Agent thread '${input.threadId}' not found.`
           )
         }
-        const result = await requestAgentRun(
-          runtime,
-          execution,
-          security,
-          agent,
-          {
-            ...input,
-            principal,
-          },
-          models?.language
-        )
+        const result = await requestAgentRun(runtime, execution, models?.language, {
+          ...input,
+          principal,
+        })
         return { ...result, run: await attachRunView(runtime, result.run) }
       },
       retry: async (runId) => {
@@ -191,23 +182,21 @@ export function createAgentsRuntime(
         if (!failedRun) {
           throw new AgentRequestError("run_not_found", `[Sixb] Agent run '${runId}' was not found.`)
         }
-        const agent = getAgent(failedRun.agentId)
+        const agent = getAgent()
         if (!agent) {
-          throw new AgentRequestError(
-            "agent_not_found",
-            `[Sixb] Unknown agent '${failedRun.agentId}'.`
-          )
+          throw new AgentRequestError("agent_not_found", "[Sixb] The project Agent is unavailable.")
         }
-        const result = await retryAgentRun(runtime, execution, security, agent, failedRun)
+        const result = await retryAgentRun(runtime, execution, models?.language, failedRun)
         return { ...result, run: await attachRunView(runtime, result.run) }
       },
       getById: getRun,
       listForThread: async (threadId, input = {}) => {
+        assertNoAgentSelector(input)
         const storage = runtime.storage.agents
-        if (!storage || !(await getThread(threadId))) return null
+        if (!storage || !(await getVisibleThreadRecord(threadId))) return null
         const result = await storage.runs.list({
-          projectId: runtime.projectId,
           ...input,
+          projectId: runtime.projectId,
           threadId,
         })
         return {

@@ -61,7 +61,6 @@ export async function runSubagent(input: {
       ],
       tools: context.tools,
       ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
-      ...(plan.caching === undefined ? {} : { caching: plan.caching }),
       maxSteps: plan.maxSteps,
       finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
       ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),

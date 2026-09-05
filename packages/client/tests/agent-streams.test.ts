@@ -12,7 +12,6 @@ function runSnapshotFrame(): string {
       id: "run-1",
       projectId: "proj",
       threadId: "thr-1",
-      agentId: "assistant",
       triggerMessageId: "msg-1",
       requestedBy: { type: "user", id: "usr-1" },
       status: "queued",
@@ -38,7 +37,6 @@ function agentRecordFrame(cursor: string): string {
         projectId: "proj",
         runId: "run-1",
         threadId: "thr-1",
-        agentId: "assistant",
         attempt: 1,
         occurredAt: "2026-01-01T00:00:00.000Z",
       },
@@ -55,7 +53,6 @@ function agentActivityFrame(status: "queued" | "running" | "succeeded"): string 
       projectId: "proj",
       runId: "run-1",
       threadId: "thr-1",
-      agentId: "assistant",
       status,
       attempt: status === "queued" ? 0 : 1,
       occurredAt: "2026-01-01T00:00:00.000Z",
@@ -121,6 +118,7 @@ describe("createAgentRunSocket", () => {
     expect(firstSubscribe.afterCursor).toBeUndefined()
 
     ws1.onmessage?.({ data: runSnapshotFrame() })
+    // Regression proof: requiring agentId in the snapshot parser silently drops this frame.
     ws1.onmessage?.({ data: agentRecordFrame("c5") })
     expect(snapshots).toEqual(["queued"])
     expect(received).toEqual([{ type: "agent.run.started", cursor: "c5" }])

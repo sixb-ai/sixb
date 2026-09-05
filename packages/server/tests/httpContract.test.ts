@@ -2052,7 +2052,7 @@ describe("SixbServer HTTP contract", () => {
         })
         const executionId = await createTestAgentExecution(sixb.storage, {
           projectId: sixb.id,
-          agentId: "device-resolver",
+          actorId: "device-resolver",
           runId: nodeRunId,
           sourceExecutionId: workflowExecutionId,
         })
@@ -2061,7 +2061,7 @@ describe("SixbServer HTTP contract", () => {
           projectId: sixb.id,
           nodeRunId,
           executionId,
-          agentId: "device-resolver",
+          actorId: "device-resolver",
           prompt: `Resolve node ${index}.`,
         })
       }
@@ -2142,7 +2142,7 @@ describe("SixbServer HTTP contract", () => {
       })
       const agentExecutionId = await createTestAgentExecution(sixb.storage, {
         projectId: sixb.id,
-        agentId: "device-resolver",
+        actorId: "device-resolver",
         runId: nodeRunId,
         sourceExecutionId: workflowExecutionId,
       })
@@ -2150,7 +2150,7 @@ describe("SixbServer HTTP contract", () => {
         projectId: sixb.id,
         nodeRunId,
         executionId: agentExecutionId,
-        agentId: "device-resolver",
+        actorId: "device-resolver",
         prompt: "Resolve fan-1.",
       })
       await runs.nodes.wait({ projectId: sixb.id, id: nodeRunId })
@@ -2204,7 +2204,7 @@ describe("SixbServer HTTP contract", () => {
           unvaluedCallCount: 1,
         },
       })
-      expect("agentId" in detail).toBe(false)
+      expect("actorId" in detail).toBe(false)
       expect(JSON.stringify(detail)).not.toContain("secret-execution-token")
 
       Object.defineProperty(sixb.storage, "aiCosts", { value: undefined })
@@ -2239,7 +2239,7 @@ describe("SixbServer HTTP contract", () => {
           },
         ],
       })
-      expect(JSON.stringify(cancelled)).not.toContain("agentId")
+      expect(JSON.stringify(cancelled)).not.toContain("actorId")
 
       const cancelledExecutionResponse = await fetch(
         `${baseUrl}/api/workflow-runs/${runId}/nodes/resolveDevice/agent-execution`
@@ -2298,7 +2298,7 @@ describe("SixbServer HTTP contract", () => {
       })
       const agentExecutionId = await createTestAgentExecution(sixb.storage, {
         projectId: sixb.id,
-        agentId: "device-resolver",
+        actorId: "device-resolver",
         runId: nodeRunId,
         sourceExecutionId: workflowExecutionId,
       })
@@ -2306,7 +2306,7 @@ describe("SixbServer HTTP contract", () => {
         projectId: sixb.id,
         nodeRunId,
         executionId: agentExecutionId,
-        agentId: "device-resolver",
+        actorId: "device-resolver",
         prompt: "Resolve fan-1.",
       })
       await runs.nodes.wait({ projectId: sixb.id, id: nodeRunId })

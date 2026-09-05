@@ -74,7 +74,7 @@ async function seededWorkerStorage(): Promise<AgentWorkerStorage> {
   const storage = workerStorage()
   await createTestAgentExecution(storage, {
     projectId: "project_1",
-    agentId: "assistant",
+    actorId: "assistant",
     runId: "run_1",
     executionId,
   })

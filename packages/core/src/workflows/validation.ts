@@ -6,7 +6,6 @@ import type { SchemaOrRef, ValueType } from "../ontology"
 import { validateSchemaOrRefValue } from "../ontology"
 import type { ScheduleDefinition } from "../schedules"
 import type { SecurityDefinitionCatalog } from "../security"
-import { workflowAgentStepActorId } from "./agent-step-identity"
 import { WorkflowDefinitionError, WorkflowValidationError } from "./errors"
 import type {
   AgentStepDefinition,
@@ -119,7 +118,6 @@ export function validateWorkflowsAtStartup(options: {
   workflows: readonly WorkflowDefinition[]
   registeredSchedules: ReadonlyMap<string, ScheduleDefinition>
   registeredActionIds: ReadonlySet<string>
-  registeredAgentIds: ReadonlySet<string>
   models?: ModelCatalog
   tools: AgentToolCatalog
 }): readonly WorkflowDefinition[] {
@@ -142,12 +140,6 @@ export function validateWorkflowsAtStartup(options: {
         )
       }
       if (node.type === "agent") {
-        const actorId = workflowAgentStepActorId(workflow.id, node.agentStep.id)
-        if (options.registeredAgentIds.has(actorId)) {
-          throw new WorkflowDefinitionError(
-            `Workflow "${workflow.id}" agent step "${node.id}" conflicts with registered agent "${actorId}".`
-          )
-        }
         validateWorkflowAgentStepRuntimeReferences(workflow.id, node.agentStep, options)
       }
     }

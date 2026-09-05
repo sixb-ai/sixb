@@ -8,8 +8,7 @@
  */
 
 import type { ActionDefinition } from "../actions/types"
-import type { AgentReference } from "../agents/main"
-import type { AgentDefinition } from "../agents/types"
+import type { AgentReference, AgentUsageReference } from "../agents/types"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
@@ -25,6 +24,7 @@ import {
 } from "./every"
 import type {
   AccessGrant,
+  AgentRunGrant,
   AppendGrant,
   ApplicationDefinition,
   ApplyGrant,
@@ -42,7 +42,7 @@ type GrantInput<TDefinition, TTarget extends BreadthTarget> =
   | BreadthSelector<TTarget>
 
 const VIEW_TARGETS = ["object", "dataset"] as const
-const RUN_TARGETS = ["workflow", "sync", "pipeline", "agent"] as const
+const RUN_TARGETS = ["workflow", "sync", "pipeline"] as const
 
 /**
  * Seven of the nine targets carry a `kind` discriminant naming themselves. The other two — an
@@ -53,7 +53,6 @@ const TARGET_BY_DEFINITION_KIND: Readonly<Partial<Record<string, BreadthTarget>>
   dataset: "dataset",
   sync: "sync",
   pipeline: "pipeline",
-  agent: "agent",
   workflow: "workflow",
   application: "application",
   connector: "connector",
@@ -188,18 +187,49 @@ function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant {
 function run(input: GrantInput<WorkflowDefinition, "workflow">): RunGrant<"workflow">
 function run(input: GrantInput<SyncDefinition, "sync">): RunGrant<"sync">
 function run(input: GrantInput<PipelineDefinition, "pipeline">): RunGrant<"pipeline">
-function run(input: GrantInput<AgentDefinition | AgentReference, "agent">): RunGrant<"agent">
+function run(input: AgentReference): AgentRunGrant
 function run(
-  input: GrantInput<
-    WorkflowDefinition | SyncDefinition | PipelineDefinition | AgentDefinition | AgentReference,
-    "workflow" | "sync" | "pipeline" | "agent"
-  >
-): RunGrant {
+  input:
+    | AgentReference
+    | GrantInput<
+        WorkflowDefinition | SyncDefinition | PipelineDefinition,
+        "workflow" | "sync" | "pipeline"
+      >
+): RunGrant | AgentRunGrant {
+  if (isAgentReference(input)) {
+    return { kind: "grant", capability: "run", target: "agent" }
+  }
   const { target, selection } = resolveGrant(input, "can.run", RUN_TARGETS)
   return { kind: "grant", capability: "run", target, selection }
 }
 
-function observe(target: "logs" | "aiUsage"): ObserveGrant {
+function isAgentReference(input: unknown): input is AgentReference {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    !isBreadthSelector(input) &&
+    "kind" in input &&
+    input.kind === "agent"
+  )
+}
+
+function isAgentUsageReference(input: unknown): input is AgentUsageReference {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    !isBreadthSelector(input) &&
+    "kind" in input &&
+    input.kind === "aiUsage"
+  )
+}
+
+function observe(input: "logs" | AgentUsageReference): ObserveGrant {
+  if (input !== "logs" && !isAgentUsageReference(input)) {
+    throw new SecurityValidationError('[Sixb] can.observe accepts "logs" or agent.usage.')
+  }
+  const target = input === "logs" ? "logs" : "aiUsage"
   return {
     kind: "grant",
     capability: "observe",
@@ -209,14 +239,16 @@ function observe(target: "logs" | "aiUsage"): ObserveGrant {
 }
 
 function manage(input: GrantInput<ConnectorDefinition, "connector">): ManageGrant<"connector">
-function manage(input: "aiUsage"): ManageGrant<"aiUsage">
-function manage(input: GrantInput<ConnectorDefinition, "connector"> | "aiUsage"): ManageGrant {
-  if (input === "aiUsage") {
+function manage(input: AgentUsageReference): ManageGrant<"aiUsage">
+function manage(
+  input: GrantInput<ConnectorDefinition, "connector"> | AgentUsageReference
+): ManageGrant {
+  if (isAgentUsageReference(input)) {
     return {
       kind: "grant",
       capability: "manage",
       target: "aiUsage",
-      selection: { all: false, ids: [input] },
+      selection: { all: false, ids: ["aiUsage"] },
     }
   }
   return {

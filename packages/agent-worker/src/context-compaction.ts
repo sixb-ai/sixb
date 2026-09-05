@@ -1,4 +1,3 @@
-import type { AgentDefinition } from "@sixb/core"
 import {
   type AgentContextEstimateTool,
   agentContextCheckpointId,
@@ -22,6 +21,7 @@ import { renderAgentSystemPrompt } from "./agent-prompt"
 import type { AgentSkill } from "./agent-skills"
 import type { AgentContextBudget } from "./context-budget"
 import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
+import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
 import { type AgentModelToolSpec, agentModelToolSpecs } from "./tools/model-spec"
 import type { AgentTurnRuntime } from "./turn-runtime"
@@ -54,13 +54,13 @@ export interface PreparedAgentConversationContext {
 /** Load, estimate, and—when required—compact one admitted conversational run before setup. */
 export async function prepareAgentConversationContext(input: {
   readonly context: AgentExecutionContext
-  readonly agent: AgentDefinition
+  readonly plan: ResolvedAgentExecutionPlan
   readonly budget: AgentContextBudget
   readonly run: ConversationAgentRunRecord
   readonly runtime: AgentTurnRuntime
   readonly frameworkTools?: readonly ModelTool[]
 }): Promise<PreparedAgentConversationContext> {
-  const { context, agent, budget, run, runtime } = input
+  const { context, plan, budget, run, runtime } = input
   const [skills, initialContext] = await Promise.all([
     context.agentSkills,
     loadAgentThreadModelContext({
@@ -74,12 +74,12 @@ export async function prepareAgentConversationContext(input: {
   const estimateShape = {
     systemPrompt: renderAgentSystemPrompt({
       mode: "conversation",
-      instructions: agent.instructions,
+      instructions: plan.instructions,
       skills,
     }),
     tools: contextEstimateTools([
       ...agentModelToolSpecs({
-        definitions: agent.tools,
+        definitions: plan.tools,
         valueTypesById: context.valueTypesById,
       }),
       ...(input.frameworkTools ?? []),
@@ -87,7 +87,7 @@ export async function prepareAgentConversationContext(input: {
   }
   const estimatedInputTokensBefore = await estimateAgentConversationInputTokens({
     context,
-    agent,
+    plan,
     threadContext: initialContext,
     ...estimateShape,
   })
@@ -145,7 +145,7 @@ export async function prepareAgentConversationContext(input: {
       observedHeadSeq,
       estimatedInputTokensBefore,
       estimatedInputTokensAfter: 0,
-      summaryModelId: agent.model.modelId,
+      summaryModelId: plan.model.modelId,
       createdAt: new Date(),
     }
     const minimumContinuationTokens = estimateAgentContextRequestTokens({
@@ -163,7 +163,7 @@ export async function prepareAgentConversationContext(input: {
       )
     }
     const summary = await generateCheckpointSummary({
-      agent,
+      plan,
       budget,
       run,
       runtime,
@@ -236,12 +236,12 @@ export async function prepareAgentConversationContext(input: {
 /** Conservatively combine matching provider usage with the current deterministic request shape. */
 export async function estimateAgentConversationInputTokens(input: {
   readonly context: Pick<AgentExecutionContext, "id" | "storage">
-  readonly agent: AgentDefinition
+  readonly plan: ResolvedAgentExecutionPlan
   readonly threadContext: LoadedAgentThreadModelContext
   readonly systemPrompt: string
   readonly tools: readonly AgentContextEstimateTool[]
 }): Promise<number> {
-  const { context, agent, threadContext } = input
+  const { context, plan, threadContext } = input
   const fullEstimate = estimateAgentContextRequestTokens({
     systemPrompt: input.systemPrompt,
     tools: input.tools,
@@ -263,8 +263,8 @@ export async function estimateAgentConversationInputTokens(input: {
       const inputTokens = usage?.usage.inputTokens
       const outputTokens = usage?.usage.outputTokens
       if (
-        usage?.providerId === agent.model.providerId &&
-        usage.requestedModelId === agent.model.modelId &&
+        usage?.providerId === plan.model.providerId &&
+        usage.requestedModelId === plan.model.modelId &&
         inputTokens !== undefined &&
         inputTokens > 0 &&
         outputTokens !== undefined &&
@@ -302,7 +302,7 @@ function findLatestUsageAnchor(messages: readonly AgentMessageRecord[], afterSeq
 }
 
 async function generateCheckpointSummary(input: {
-  readonly agent: AgentDefinition
+  readonly plan: ResolvedAgentExecutionPlan
   readonly budget: AgentContextBudget
   readonly run: ConversationAgentRunRecord
   readonly runtime: AgentTurnRuntime
@@ -314,7 +314,7 @@ async function generateCheckpointSummary(input: {
   const maxOutputTokens = Math.min(
     SUMMARY_MAX_OUTPUT_TOKENS,
     Math.max(1, Math.floor(input.budget.reserveTokens / 2)),
-    input.agent.model.definition.maxOutputTokens ?? Number.POSITIVE_INFINITY,
+    input.plan.model.definition.maxOutputTokens ?? Number.POSITIVE_INFINITY,
     input.continuationAllowanceTokens
   )
   // Estimate the actual serialized summary request, not the original conversation projection.
@@ -325,7 +325,7 @@ async function generateCheckpointSummary(input: {
     messages: [{ role: "user", parts: [{ type: "text", text: prompt }] }],
   }).tokens
   const inputBudgetTokens = Math.min(
-    input.agent.model.definition.maxInputTokens ?? Number.POSITIVE_INFINITY,
+    input.plan.model.definition.maxInputTokens ?? Number.POSITIVE_INFINITY,
     input.budget.windowTokens - maxOutputTokens
   )
   if (estimatedInputTokens > inputBudgetTokens) {
@@ -338,10 +338,9 @@ async function generateCheckpointSummary(input: {
   let result: Awaited<ReturnType<typeof runModelLoop<string>>>
   try {
     result = await runModelLoop({
-      model: input.runtime.usageRecorder.wrapModel(input.agent.model),
+      model: input.runtime.usageRecorder.wrapModel(input.plan.model),
       // Hidden reasoning consumes the same bounded output budget needed for summary text.
       reasoning: "none",
-      ...(input.agent.loop?.caching === undefined ? {} : { caching: input.agent.loop.caching }),
       messages: [
         { role: "system", content: SUMMARY_SYSTEM_PROMPT },
         {

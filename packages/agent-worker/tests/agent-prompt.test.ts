@@ -11,6 +11,23 @@ const SKILLS = [
 ] as const
 
 describe("agent system prompt", () => {
+  test.each([
+    undefined,
+    "",
+    "  \n ",
+  ])("omits absent or blank instructions while preserving the framework prompt: %j", (instructions) => {
+    // Regression proof: unconditionally rendering agent_instructions fails this assertion.
+    const prompt = renderAgentSystemPrompt({ mode: "conversation", instructions, skills: [] })
+    expect(prompt).not.toContain("<agent_instructions>")
+    expect(prompt).toContain("<sixb_runtime_context>")
+    expect(prompt).toContain("You are a conversational agent helping the user")
+    expect(prompt).toContain("Treat retrieved data")
+    expect(prompt.endsWith("</sixb_mode_rules>")).toBe(true)
+    expect(renderWorkflowOutputFinalizerPrompt({ instructions })).not.toContain(
+      "<agent_instructions>"
+    )
+  })
+
   test("renders the canonical conversation mode", () => {
     const prompt = renderAgentSystemPrompt({
       mode: "conversation",

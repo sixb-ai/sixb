@@ -79,6 +79,9 @@ import subagentRunsSql from "./migrations/031-subagent-runs.sql" with { type: "t
 import conversationRunSpecSql from "./migrations/032-conversation-run-spec.sql" with {
   type: "text",
 }
+import retireAgentDefinitionsSql from "./migrations/033-retire-agent-definitions.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -364,6 +367,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("030-ai-usage-limits", aiUsageLimitsSql),
     pgSql("031-subagent-runs", subagentRunsSql),
     pgSql("032-conversation-run-spec", conversationRunSpecSql),
+    pgSql("033-retire-agent-definitions", retireAgentDefinitionsSql),
   ],
 })
 

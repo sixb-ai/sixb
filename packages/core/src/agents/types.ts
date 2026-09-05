@@ -2,10 +2,9 @@ import type { BlobBody, FileRef } from "../blob-storage"
 import type { ConnectorRuntime } from "../connectors"
 import type { JsonPrimitive, JsonValue, ReadonlyJsonValue } from "../json"
 import type { Logger } from "../logging"
-import { type LanguageModel, MODEL_REASONING_LEVELS, type ModelReasoning } from "../models"
+import { type LanguageModelRef, MODEL_REASONING_LEVELS, type ModelReasoning } from "../models"
 import type { InferSchema } from "../ontology/inference"
 import type { Schema } from "../ontology/types"
-import type { GroupDefinition } from "../security"
 
 export type {
   AgentContextEntryInput,
@@ -14,35 +13,29 @@ export type {
   AgentContextPart,
 } from "./context"
 
+/** Public capability reference used by security grants such as `can.run(agent)`. */
+export interface AgentReference {
+  readonly kind: "agent"
+  readonly usage: AgentUsageReference
+}
+
+/** Project-wide AI accounting and limit capability, independent of permission to run the Agent. */
+export interface AgentUsageReference {
+  readonly kind: "aiUsage"
+}
+
+/** Public metadata for the project's conversational Agent. */
+export interface AgentDescriptor {
+  readonly name: string
+  readonly model: LanguageModelRef
+}
+
 export type AgentReasoning = ModelReasoning
 
 /** @deprecated Use {@link AgentReasoning}. */
 export type AgentReasoningLevel = AgentReasoning
 
 export const AGENT_REASONING_LEVELS = MODEL_REASONING_LEVELS
-
-export interface AgentContextConfig {
-  /** Override the provider context-window size inferred by the agent worker. */
-  readonly windowTokens?: number
-  /** Tokens reserved for the next response and compaction work. */
-  readonly reserveTokens?: number
-  /** Approximate recent-message budget retained verbatim after compaction. */
-  readonly keepRecentTokens?: number
-}
-
-/**
- * Loop / stop controls for an agent run.
- *
- * Consumed by the agent worker when it executes a run.
- */
-export interface AgentLoopConfig {
-  readonly stopWhen?: {
-    readonly maxSteps?: number
-  }
-  readonly context?: AgentContextConfig
-  /** Automatic provider prompt caching. Defaults to `auto`; use `off` to opt out. */
-  readonly caching?: "auto" | "off"
-}
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 type JsonifyAgentToolInput<T> = unknown extends T
@@ -68,14 +61,24 @@ export type InferAgentToolInputSchema<TInput extends AgentToolInputSchema> =
         readonly [K in keyof TInput]: JsonifyAgentToolInput<InferSchema<TInput[K]>>
       }>
 
-/** Identifies the definition-backed or headless Agent execution that invoked a tool. */
-export type AgentToolRunInfo = {
-  readonly id: string
-  readonly threadId?: string
-} & (
-  | { readonly agentId: string; readonly parentRunId?: never }
-  | { readonly parentRunId: string; readonly agentId?: never }
-)
+/** Identifies the conversational, workflow, or child Agent execution that invoked a tool. */
+export type AgentToolRunInfo =
+  | {
+      readonly kind: "conversation"
+      readonly id: string
+      readonly threadId: string
+    }
+  | {
+      readonly kind: "subagent"
+      readonly id: string
+      readonly parentRunId: string
+    }
+  | {
+      readonly kind: "workflow"
+      readonly id: string
+      readonly workflowId: string
+      readonly stepId: string
+    }
 
 /** Input accepted by the run-scoped artifact publisher exposed to agent tools. */
 export interface AgentToolArtifactPutInput {
@@ -179,43 +182,4 @@ export interface AgentToolInputBuilder<TName extends string> {
 
 export interface AgentToolDescriptionBuilder<TName extends string> {
   description(description: string): AgentToolInputBuilder<TName>
-}
-
-/**
- * Declarative config accepted by {@link defineAgent}.
- *
- * Every field is a static value. `instructions` is a plain string; widening it to
- * `string | (ctx) => string` later would be backwards-compatible.
- */
-export interface DefineAgentConfig {
-  readonly name: string
-  readonly description?: string
-  readonly model: LanguageModel
-  readonly reasoning?: AgentReasoning
-  readonly instructions: string
-  readonly groups?: readonly GroupDefinition[]
-  /** Reusable tools this agent is explicitly allowed to call. */
-  readonly tools?: readonly AgentToolDefinition[]
-  readonly loop?: AgentLoopConfig
-}
-
-/**
- * Agent definition registered with Sixb.
- *
- * Definitions are safe to export from `agents/` modules; the runtime loads and
- * registers them. The worker discovers executable models locally rather than receiving them
- * over the wire.
- */
-export interface AgentDefinition<TId extends string = string> {
-  readonly kind: "agent"
-  readonly id: TId
-  readonly name: string
-  readonly description?: string
-  readonly model: LanguageModel
-  readonly reasoning?: AgentReasoning
-  readonly instructions: string
-  readonly groupIds: readonly string[]
-  /** Selected tool definitions, normalized to an empty array when omitted. */
-  readonly tools: readonly AgentToolDefinition[]
-  readonly loop?: AgentLoopConfig
 }

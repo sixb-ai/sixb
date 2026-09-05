@@ -254,7 +254,6 @@ function isAgentRunSnapshot(value: unknown): value is AgentRunSnapshot {
     typeof value.id === "string" &&
     typeof value.projectId === "string" &&
     typeof value.threadId === "string" &&
-    typeof value.agentId === "string" &&
     typeof value.triggerMessageId === "string" &&
     (value.requestedBy === undefined ||
       (isRecord(value.requestedBy) &&

@@ -20,10 +20,8 @@ export interface AgentExecutionHost {
   withScope(scope: ExecutionScope): object
 }
 
-/** Whether a nested main-agent run can durably restore this request authority without widening it. */
-export function canInheritMainAgentRuntimeAuthorization(
-  authorization: RuntimeAuthorization
-): boolean {
+/** Whether a conversational Agent run can durably restore this request authority without widening it. */
+export function canInheritAgentRequestAuthorization(authorization: RuntimeAuthorization): boolean {
   const ref = getAuthorizationRef(authorization)
   return (
     ref.type === "disabled" ||
@@ -35,11 +33,11 @@ export function canInheritMainAgentRuntimeAuthorization(
 export function createAgentExecutionRecord(input: {
   readonly id: string
   readonly parent: ExecutionRecord
-  readonly agentId: string
+  readonly actorId: string
   readonly runId: string
   readonly principal: Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
 }): CreateExecutionInput {
-  assertAgentPrincipal(input.agentId, input.principal)
+  assertAgentPrincipal(input.actorId, input.principal)
   return {
     id: input.id,
     projectId: input.parent.projectId,
@@ -54,15 +52,6 @@ export function createAgentExecutionRecord(input: {
       principal: structuredClone(input.principal),
     },
   }
-}
-
-/** Build a main-agent execution that carries its direct request parent's authority reference. */
-export function createInheritedMainAgentExecutionRecord(input: {
-  readonly id: string
-  readonly parent: ExecutionRecord
-  readonly runId: string
-}): CreateExecutionInput {
-  return createInheritedAgentExecutionRecord(input)
 }
 
 /** Build an Agent execution that carries its parent's exact durable authority reference. */
@@ -104,7 +93,7 @@ export function bindDurableAgentExecution(
   host: AgentExecutionHost,
   input: {
     readonly execution: ExecutionRecord
-    readonly agentId?: string
+    readonly actorId?: string
     readonly runId: string
     readonly authorization: AgentExecutionAuthorization
   }
@@ -120,7 +109,7 @@ export function bindDurableAgentExecution(
 /** Restore one provider-validated Agent execution with its currently resolved grants. */
 export function restoreAgentExecutionScope(input: {
   readonly execution: ExecutionRecord
-  readonly agentId?: string
+  readonly actorId?: string
   readonly runId: string
   readonly authorization: AgentExecutionAuthorization
 }): ExecutionScope {
@@ -133,7 +122,7 @@ export function restoreAgentExecutionScope(input: {
       : { requestedBy: Object.freeze(structuredClone(input.execution.requestedBy)) }),
     executor: Object.freeze({
       type: "agent",
-      ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+      ...(input.actorId === undefined ? {} : { actorId: input.actorId }),
       runId: input.runId,
     }),
     source: Object.freeze(structuredClone(input.execution.source)),
@@ -144,7 +133,7 @@ export function restoreAgentExecutionScope(input: {
     authorization: createAgentRuntimeAuthorization({
       projectId: input.execution.projectId,
       executionId: input.execution.id,
-      ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+      ...(input.actorId === undefined ? {} : { actorId: input.actorId }),
       runId: input.runId,
       authority:
         input.authorization.type === "principal"
@@ -164,7 +153,7 @@ export function restoreAgentExecutionScope(input: {
 /** Validate that a durable record belongs to the exact resolved Agent execution. */
 export function assertAgentExecutionRecord(input: {
   readonly execution: ExecutionRecord
-  readonly agentId?: string
+  readonly actorId?: string
   readonly runId: string
   readonly authorization: AgentExecutionAuthorization
 }): void {
@@ -195,10 +184,10 @@ export function assertAgentExecutionRecord(input: {
   ) {
     invalidAgentExecution(input.execution.id, input.runId)
   }
-  if (input.agentId === undefined) {
+  if (input.actorId === undefined) {
     invalidAgentExecution(input.execution.id, input.runId)
   }
-  assertAgentPrincipal(input.agentId, authority.principal)
+  assertAgentPrincipal(input.actorId, authority.principal)
 }
 
 function assertInheritedAgentAuthority(
@@ -228,14 +217,14 @@ function assertInheritedAgentAuthority(
 }
 
 function assertAgentPrincipal(
-  agentId: string,
+  actorId: string,
   principal: Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
 ): void {
-  const expectedId = agentServiceAccountId(agentId)
+  const expectedId = agentServiceAccountId(actorId)
   if (principal.id !== expectedId) {
     throw new ExecutionStorageError(
       "invalid_input",
-      `[Sixb] Agent '${agentId}' execution authority must reference service account '${expectedId}'.`
+      `[Sixb] Agent '${actorId}' execution authority must reference service account '${expectedId}'.`
     )
   }
 }

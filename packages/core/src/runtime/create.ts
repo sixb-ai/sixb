@@ -1,6 +1,7 @@
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions"
-import type { AgentDefinition, AgentToolDefinition } from "../agents"
+import type { AgentToolDefinition } from "../agents"
+import { assertNoAgentDefinitions } from "../agents/retired-config"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap"
@@ -44,8 +45,6 @@ export interface CreateSixbOptions {
   ontologyMaintenance?: OntologyMaintenanceOptions
   ontologies?: readonly OntologySource[]
   actions?: readonly ActionDefinition[]
-  /** Agent definitions to register in addition to auto-discovered `agents/` exports. */
-  agents?: readonly AgentDefinition[]
   /** Models this project allows Sixb to use. The first of each kind is the default. */
   models?: ModelCatalogInput
   /** Project tools available to Agent runtimes. */
@@ -73,12 +72,13 @@ export interface CreateSixbOptions {
  *
  * The host auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
  * `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
- * `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`
+ * `rules/`, `workflows/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`.
  */
 export async function createSixb(
   options: CreateSixbOptions
 ): Promise<SixbHost<readonly OntologySource[]>> {
+  assertNoAgentDefinitions(options)
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
 
   const discoveredOntology = await discoverOntologySources(projectRoot)
@@ -122,7 +122,6 @@ export async function createSixb(
     groups: [...(options.groups ?? []), ...definitions.groups],
     roles: [...(options.roles ?? []), ...definitions.roles],
     membershipPolicies: [...(options.membershipPolicies ?? []), ...definitions.membershipPolicies],
-    agents: [...(options.agents ?? []), ...definitions.agents],
     models: options.models,
     tools: options.tools,
     auth: options.auth,

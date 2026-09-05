@@ -171,6 +171,7 @@ describe("Postgres storage migrations", () => {
             "030-ai-usage-limits",
             "031-subagent-runs",
             "032-conversation-run-spec",
+            "033-retire-agent-definitions",
           ],
         },
       ])
@@ -398,6 +399,13 @@ describe("Postgres storage migrations", () => {
           id: "032-conversation-run-spec",
           status: "applied",
           version: 32,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "033-retire-agent-definitions",
+          status: "applied",
+          version: 33,
         },
       ])
     })
@@ -1365,7 +1373,6 @@ describe("Postgres storage migrations", () => {
       await storage.agents.threads.create({
         id: "thr_1",
         projectId: "project-a",
-        agentId: "sales",
         ownerPrincipal: { type: "user", id: "usr_1" },
         createdAt: new Date("2026-06-23T10:00:00.000Z"),
       })
@@ -1373,7 +1380,7 @@ describe("Postgres storage migrations", () => {
       const thread = await storage.agents.threads.getById({ projectId: "project-a", id: "thr_1" })
       const tableNames = await readTableNames(schemaName)
 
-      expect(thread).toMatchObject({ id: "thr_1", agentId: "sales", messageCount: 0 })
+      expect(thread).toMatchObject({ id: "thr_1", messageCount: 0 })
       expect(tableNames).toEqual(
         expect.arrayContaining([
           "agent_threads",
@@ -1398,14 +1405,19 @@ describe("Postgres storage migrations", () => {
         foreign_table_name: "executions",
       })
       const agentRunColumns = await readTableColumns(schemaName, "agent_runs")
+      const agentThreadColumns = await readTableColumns(schemaName, "agent_threads")
       const workflowAgentNodeColumns = await readTableColumns(
         schemaName,
         "workflow_agent_node_runs"
       )
+      expect(workflowAgentNodeColumns).toContain("actor_id")
+      expect(workflowAgentNodeColumns).not.toContain("agent_id")
       expect(agentRunColumns).toContain("requester_group_ids")
       expect(agentRunColumns).toEqual(
         expect.arrayContaining(["kind", "parent_run_id", "spawn_key", "spec", "result"])
       )
+      expect(agentRunColumns).not.toContain("agent_id")
+      expect(agentThreadColumns).not.toContain("agent_id")
       expect(agentRunColumns).not.toContain("usage_input_tokens")
       expect(agentRunColumns).not.toContain("usage_output_tokens")
       expect(agentRunColumns).not.toContain("usage_total_tokens")
@@ -1939,6 +1951,13 @@ describe("Postgres storage migrations", () => {
           id: "032-conversation-run-spec",
           status: "applied",
           version: 32,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "033-retire-agent-definitions",
+          status: "applied",
+          version: 33,
         },
       ])
     } finally {

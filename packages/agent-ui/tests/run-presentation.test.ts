@@ -15,7 +15,6 @@ function run(input: Partial<AgentRun> & Pick<AgentRun, "id" | "status">): AgentR
   return {
     projectId: "project",
     threadId: "thread",
-    agentId: "assistant",
     triggerMessageId: "message-user",
     requestedBy: { type: "user", id: "user" },
     attempt: 0,

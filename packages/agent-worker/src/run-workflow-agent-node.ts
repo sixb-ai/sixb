@@ -108,7 +108,6 @@ export async function runWorkflowAgentNode(
       ],
       tools: input.context.tools,
       ...(input.plan.reasoning === undefined ? {} : { reasoning: input.plan.reasoning }),
-      ...(input.plan.caching === undefined ? {} : { caching: input.plan.caching }),
       maxSteps,
       finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
       ...(input.context.prepareStep === undefined

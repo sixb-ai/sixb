@@ -54,7 +54,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     throw createSixbError(
       "internal.unexpected",
       `[SixbAgentWorker] Agent run '${runId}' has no execution token.`,
-      { details: { agentId: run.agentId, runId } }
+      { details: { runId, threadId: run.threadId } }
     )
   }
   const agents = storage.agents
@@ -110,7 +110,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw createSixbError(
         "internal.unexpected",
         `[SixbAgentWorker] Agent run '${runId}' references missing execution '${run.executionId}'.`,
-        { details: { agentId: run.agentId, runId, executionId: run.executionId } }
+        { details: { runId, executionId: run.executionId } }
       )
     }
     runtime = createAgentTurnRuntime({
@@ -146,7 +146,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           status: "failed",
           at: completedAt,
           details: {
-            agentId: run.agentId,
             runId,
             threadId: run.threadId,
             timeoutMs: String(turnTimeoutMs),
@@ -185,7 +184,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ],
         tools,
         ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),
-        ...(plan.caching === undefined ? {} : { caching: plan.caching }),
         maxSteps,
         finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
@@ -204,10 +202,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     interruptedParts =
       result.status === "aborted"
         ? agentTraceFromPartialModelLoop(result.steps, result.partialContent, {
-            agentId: run.agentId,
+            threadId: run.threadId,
             runId,
           })
-        : agentTraceFromModelSteps(result.steps, { agentId: run.agentId, runId })
+        : agentTraceFromModelSteps(result.steps, { threadId: run.threadId, runId })
 
     const interruptedAfterModel = await finalizeIfInterrupted()
     if (interruptedAfterModel) return interruptedAfterModel

@@ -179,7 +179,6 @@ type is required.
 | `schedules/` | Scheduler entries |
 | `datasets/`, `connectors/`, `syncs/`, `pipelines/`, `projections/` | Data integration |
 | `rules/`, `workflows/` | Business logic |
-| `agents/` | Agent definitions |
 | `security/groups/`, `security/roles/`, `security/policies/` | Authorization |
 
 `app/` is **not** discovered — the app is served separately. See

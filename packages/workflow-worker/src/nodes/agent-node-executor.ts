@@ -82,7 +82,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
     const identity = await ensureManagedAgentExecutionIdentity({
       auth: context.runtime.storage.auth,
       projectId: context.runtime.projectId,
-      agentId: actorId,
+      actorId: actorId,
       name: `Workflow ${context.workflow.id} · ${node.agentStep.id}`,
       description: `Managed service account for workflow '${context.workflow.id}' agent step '${node.agentStep.id}'.`,
       groupIds: node.agentStep.groupIds,
@@ -110,7 +110,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
     const agentExecution = createAgentExecutionRecord({
       id: `exec_${randomUUID()}`,
       parent: parentExecution,
-      agentId: actorId,
+      actorId: actorId,
       runId: nodeRun.id,
       principal: identity.principal,
     })
@@ -137,7 +137,7 @@ export const agentNodeExecutor: WorkflowNodeExecutor<WorkflowAgentNodeDefinition
         projectId: context.runtime.projectId,
         nodeRunId: nodeRun.id,
         executionId: agentExecution.id,
-        agentId: actorId,
+        actorId: actorId,
         prompt,
         createdAt: waitingAt,
       })

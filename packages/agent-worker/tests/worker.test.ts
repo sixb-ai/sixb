@@ -5,18 +5,17 @@ import { join } from "node:path"
 import { exa } from "@sixb/connector-exa"
 import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
-  type AgentContextConfig,
-  type AgentDefinition,
-  type AgentReasoningLevel,
   AgentRequestError,
-  type AgentsRuntime,
+  type AgentRuntime,
+  type AgentToolArtifact,
   type AgentToolDefinition,
+  type AgentToolResult,
+  type AgentToolRunInfo,
   type BlobStorage,
   type Broker,
   type CommandResult,
   type ConnectorDefinition,
   type CreateSandboxOptions,
-  defineAgent,
   defineAgentStep,
   defineAgentTool,
   defineConnector,
@@ -43,9 +42,8 @@ import {
   createAgentRunExecutionToken,
   createAgentRunId,
   createSubagentRunId,
-  ensureAgentExecutionIdentity,
+  ensureManagedAgentExecutionIdentity,
   publishAgentRunCancel,
-  resolveAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
@@ -77,6 +75,7 @@ import {
   createTestWorkflowExecution,
 } from "@sixb/core/testing"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
+import { renderAgentSystemPrompt } from "../src/agent-prompt"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
@@ -103,6 +102,12 @@ const TEST_AGENT_API_BASE_URL = "http://localhost:3002/api/"
 const REQUESTER = { type: "user", id: "usr_requester" } as const
 const AGENT_PRINCIPAL = { type: "serviceAccount", id: "svc_agent_assistant" } as const
 const AGENT_RUNTIME_GROUP = defineGroup("agent-runtime", { label: "Agent runtime" })
+const TEST_PNG_BYTES = Uint8Array.from(
+  Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=",
+    "base64"
+  )
+)
 
 const USAGE: ModelUsage = {
   inputTokens: 10,
@@ -865,7 +870,112 @@ function workerOptions(
     ...options,
     apiBaseUrl: options.apiBaseUrl ?? TEST_AGENT_API_BASE_URL,
     idlePollMs: options.idlePollMs ?? 5,
+    defaultMaxSteps: options.defaultMaxSteps ?? 4,
   }
+}
+
+function artifactToolThenAnswerModel(
+  capture: {
+    readonly live?: (prompt: unknown) => void
+    readonly replay?: (prompt: unknown) => void
+    readonly viewed?: (prompt: unknown) => void
+  } = {}
+): WorkerTestModel {
+  let call = 0
+  return new WorkerTestModel({
+    modelId: "mock-model",
+    capabilities: { inputMediaTypes: ["image/png"], localTools: true },
+    stream: async (options) => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "image-call-1",
+            toolName: "create_image",
+            input: JSON.stringify({}),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 2) capture.live?.(options.messages)
+      if (call === 3) {
+        capture.replay?.(options.messages)
+        const promptJson = JSON.stringify(options.messages)
+        const sandboxPath = promptJson.match(/sandboxPath=\\"([^"]+generated\.png)\\"/)?.[1]
+        if (!sandboxPath) throw new Error("Expected replay attachment sandbox path.")
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "view-image-call-1",
+            toolName: "view_file",
+            input: JSON.stringify({ path: sandboxPath }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 4) capture.viewed?.(options.messages)
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "Created the image" },
+        { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function bashImageThenViewModel(captureViewed: (prompt: unknown) => void): WorkerTestModel {
+  let call = 0
+  return new WorkerTestModel({
+    modelId: "mock-model",
+    capabilities: { inputMediaTypes: ["image/png"], localTools: true },
+    stream: async (options) => {
+      call += 1
+      if (call === 1) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "bash-image-call-1",
+            toolName: "bash",
+            input: JSON.stringify({ command: "create-view-image" }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      if (call === 2) {
+        return stream([
+          { type: "stream-start", warnings: [] },
+          {
+            type: "tool-call",
+            toolCallId: "view-bash-image-call-1",
+            toolName: "view_file",
+            input: JSON.stringify({ path: "scratch/bash-image.png" }),
+          },
+          finish("tool-calls"),
+        ])
+      }
+      captureViewed(options.messages)
+      return stream([
+        { type: "stream-start", warnings: [] },
+        { type: "text-start", id: "t" },
+        { type: "text-delta", id: "t", delta: "Viewed the bash image" },
+        { type: "text-end", id: "t" },
+        finish("stop"),
+      ])
+    },
+  })
+}
+
+function testSystemPrompt(): string {
+  return renderAgentSystemPrompt({
+    mode: "conversation",
+    skills: [],
+  })
 }
 
 interface RecordedCommand {
@@ -952,6 +1062,10 @@ class RecordingSandbox implements Sandbox {
         durationMs: 1,
       }
     }
+    if (command === "bash" && script === "create-view-image") {
+      this.files.set(join(this.workingDirectory, "scratch", "bash-image.png"), TEST_PNG_BYTES)
+      return { exitCode: 0, stdout: "created image", stderr: "", durationMs: 1 }
+    }
     if (command === "bash" && script === "create-agent-output") {
       this.writeOutputFile("report.txt", "generated report")
       return {
@@ -1005,6 +1119,23 @@ class RecordingSandbox implements Sandbox {
             durationMs: 1,
           }
     }
+    if (
+      command === "bash" &&
+      typeof script === "string" &&
+      script.includes("sixb-read-view-file")
+    ) {
+      const encoded = options.env?.SIXB_VIEW_FILE_PATH_B64
+      const path = encoded ? Buffer.from(encoded, "base64").toString("utf-8") : ""
+      const bytes = this.files.get(path)
+      return bytes
+        ? {
+            exitCode: 0,
+            stdout: `${bytes.byteLength}\n${Buffer.from(bytes).toString("base64")}`,
+            stderr: "",
+            durationMs: 1,
+          }
+        : { exitCode: 2, stdout: "", stderr: "file not found", durationMs: 1 }
+    }
     if (command === "bash" && script === "print-sixb-env") {
       const env = options.env ?? {}
       return {
@@ -1012,7 +1143,7 @@ class RecordingSandbox implements Sandbox {
         stdout: [
           `base=${env.SIXB_API_BASE_URL ?? ""}`,
           `project=${env.SIXB_PROJECT_ID ?? ""}`,
-          `agent=${env.SIXB_AGENT_ID ?? ""}`,
+          `agent=${env.SIXB_ACTOR_ID ?? ""}`,
           `thread=${env.SIXB_THREAD_ID ?? ""}`,
           `run=${env.SIXB_RUN_ID ?? ""}`,
           `skills=${env.SIXB_SKILLS_DIR ?? ""}`,
@@ -1125,32 +1256,17 @@ function buildSixb(
   broker: Broker = new InMemoryBroker(),
   sandboxes: SandboxFactory = new RecordingSandboxFactory(),
   options: {
-    readonly reasoning?: AgentReasoningLevel
     readonly projectRoot?: string
     readonly agentTools?: readonly AgentToolDefinition[]
     readonly projectTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
-    readonly context?: AgentContextConfig
     readonly models?: ModelCatalogInput
   } = {}
 ): TestSixb {
-  const agent = defineAgent("assistant", {
-    name: "Assistant",
-    model,
-    ...(options.reasoning === undefined ? {} : { reasoning: options.reasoning }),
-    instructions: "You are a helpful test assistant.",
-    groups: [AGENT_RUNTIME_GROUP],
-    ...(options.agentTools === undefined ? {} : { tools: options.agentTools }),
-    loop: {
-      stopWhen: { maxSteps: 4 },
-      ...(options.context === undefined ? {} : { context: options.context }),
-    },
-  })
   return new SixbHost({
     id: PROJECT_ID,
     ontology: [],
-    agents: [agent],
-    ...(options.projectTools === undefined ? {} : { tools: options.projectTools }),
+    tools: options.projectTools ?? options.agentTools,
     ...(options.connectors === undefined ? {} : { connectors: options.connectors }),
     groups: [AGENT_RUNTIME_GROUP],
     broker,
@@ -1159,7 +1275,7 @@ function buildSixb(
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
     sandboxes,
-    ...(options.models === undefined ? {} : { models: options.models }),
+    models: options.models ?? { language: [model] },
     ...(options.projectRoot === undefined ? {} : { projectRoot: options.projectRoot }),
   })
 }
@@ -1297,7 +1413,7 @@ async function queueWorkflowAgentNode(input: {
   })
   const agentExecutionId = await createTestAgentExecution(sixb.storage, {
     projectId: PROJECT_ID,
-    agentId: actorId,
+    actorId: actorId,
     runId: nodeRunId,
     sourceExecutionId: executionId,
   })
@@ -1305,7 +1421,7 @@ async function queueWorkflowAgentNode(input: {
     projectId: PROJECT_ID,
     nodeRunId,
     executionId: agentExecutionId,
-    agentId: actorId,
+    actorId: actorId,
     prompt: "Resolve 'alpha'.",
   })
   await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
@@ -1414,14 +1530,12 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
   return storage as AgentWorkerStorage
 }
 
-function executionPlanFor(agent: AgentDefinition, defaultMaxSteps = 4) {
-  return resolveAgentExecutionPlan({ agent, defaultMaxSteps })
-}
-
-function requiredAgent(sixb: TestSixb, agentId = "assistant"): AgentDefinition {
-  const agent = sixb.definitions.agents.getById(agentId)
-  if (!agent) throw new Error(`Expected test agent '${agentId}'.`)
-  return agent
+function executionPlanFor(sixb: TestSixb, defaultMaxSteps = 4) {
+  return resolveAgentExecutionPlan({
+    models: sixb.definitions.models?.language,
+    tools: sixb.definitions.tools,
+    defaultMaxSteps,
+  })
 }
 
 async function buildAgentWorkerContext(
@@ -1445,13 +1559,9 @@ async function buildAgentWorkerContext(
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
   }
-  const agent = sixb.definitions.agents.getById("assistant")
-  if (!agent) throw new Error("Expected test agent.")
-  await ensureAgentExecutionIdentity({ auth: context.storage.auth, projectId: PROJECT_ID, agent })
   const runId = "direct-agent-worker-test"
   const executionId = await createTestAgentExecution(context.storage, {
     projectId: PROJECT_ID,
-    agentId: agent.id,
     runId,
   })
   const execution = await context.storage.executions.getById({
@@ -1459,35 +1569,26 @@ async function buildAgentWorkerContext(
     id: executionId,
   })
   if (!execution) throw new Error("Expected test Agent execution.")
-  const resolved = await resolveAgentExecutionAuthorization({
-    auth: context.storage.auth,
-    projectId: PROJECT_ID,
-    agentId: agent.id,
-    authorizationRef: execution.authorizationRef,
-    security: sixb.definitions.security,
-  })
   const agentSixb = bindDurableAgentExecution(sixb, {
     execution,
-    agentId: agent.id,
     runId,
-    authorization: { type: "principal", context: resolved.context },
+    authorization: { type: "disabled" },
   })
   return {
     ...context,
-    authorPrincipal: resolved.identity.principal,
     blobStorage: agentSixb.blobs,
     connector: agentSixb.connector,
   }
 }
 
-function requestAgent(sixb: TestSixb, input: Parameters<AgentsRuntime["runs"]["request"]>[0]) {
-  return createTestSixb(sixb).agents.runs.request(input)
+function requestAgent(sixb: TestSixb, input: Parameters<AgentRuntime["runs"]["request"]>[0]) {
+  return createTestSixb(sixb).agent.runs.request(input)
 }
 
 async function requestAgentAs(
   sixb: TestSixb,
   principal: typeof REQUESTER,
-  input: Parameters<AgentsRuntime["runs"]["request"]>[0]
+  input: Parameters<AgentRuntime["runs"]["request"]>[0]
 ) {
   const auth = sixb.storage.auth
   if (!auth) throw new Error("Expected auth storage.")
@@ -1499,10 +1600,26 @@ async function requestAgentAs(
       email: `${principal.id}@example.com`,
     })
   }
-  const grants = { ...emptyGrantIndex(), "run:agent": new Set([input.agentId]) }
-  return createTestSixb(sixb, {
-    authorization: { principal, groupIds: [], roleIds: [], grants },
-  }).agents.runs.request(input)
+  const sessionId = crypto.randomUUID()
+  await auth.sessions.create({
+    id: sessionId,
+    projectId: PROJECT_ID,
+    userId: principal.id,
+    strategyId: "test",
+    audience: "app",
+    tokenHash: sessionId,
+    createdAt: new Date(),
+    expiresAt: new Date(Date.now() + 60_000),
+  })
+  const grants = { ...emptyGrantIndex(), "run:agent": true }
+  return bindRequestExecution(sixb, {
+    request: new Request("http://localhost/test"),
+    authorization: {
+      type: "principal",
+      context: { principal, sessionId, groupIds: [], roleIds: [], grants },
+      credential: { type: "session", id: sessionId },
+    },
+  }).agent.runs.request(input)
 }
 
 function freshTestExecution() {
@@ -1616,7 +1733,6 @@ async function seedCompletedConversationTurn(input: {
   })
   const executionId = await createTestAgentExecution(input.sixb.storage, {
     projectId: PROJECT_ID,
-    agentId: "assistant",
     runId,
   })
   await storage.runs.create({
@@ -1624,7 +1740,6 @@ async function seedCompletedConversationTurn(input: {
     projectId: PROJECT_ID,
     executionId,
     threadId: input.threadId,
-    agentId: "assistant",
     triggerMessageId: userMessageId,
     spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
@@ -1829,7 +1944,7 @@ describe("AgentWorker", () => {
     })
     const sixb = buildSixb(model)
     const reporter = attachSixbErrorReporter(sixb, () => {})
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "queued first" })
+    const request = await requestAgent(sixb, { text: "queued first" })
     await sixb.storage.aiLimits?.createPolicy({
       id: "project_tokens_exhausted_after_queue",
       projectId: PROJECT_ID,
@@ -1878,6 +1993,26 @@ describe("AgentWorker", () => {
     expect(() => new AgentWorker(sixb, { apiBaseUrl: "" })).toThrow(
       "Agent workers require options.apiBaseUrl."
     )
+  })
+
+  test("rejects invalid turn timeout values at the worker boundary", () => {
+    const sixb = new SixbHost({
+      id: PROJECT_ID,
+      ontology: [],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+      sandboxes: new RecordingSandboxFactory(),
+    })
+    const invalidTimeouts = [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 2_147_483_648]
+
+    for (const turnTimeoutMs of invalidTimeouts) {
+      expect(() => new AgentWorker(sixb, workerOptions({ turnTimeoutMs }))).toThrow(
+        "Agent turn timeout must be a positive integer no greater than 2147483647ms."
+      )
+    }
   })
 
   test("does not provision Agent identities when the worker starts", async () => {
@@ -1970,7 +2105,6 @@ describe("AgentWorker", () => {
     await storage.threads.create({
       id: threadId,
       projectId: PROJECT_ID,
-      agentId: "assistant",
       ownerPrincipal: REQUESTER,
     })
     for (let index = 0; index < 5; index += 1) {
@@ -1986,7 +2120,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
-        agentId: "assistant",
         threadId,
         text: "Continue with the catalog-derived context budget.",
         model: { provider: selectedModel.providerId, modelId: selectedModel.modelId },
@@ -2003,7 +2136,8 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
-      expect(resolutions).toBe(1)
+      // Startup validation, execution preparation, and delegation guidance resolve independently.
+      expect(resolutions).toBe(3)
       await expect(
         storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
       ).resolves.toMatchObject({
@@ -2044,7 +2178,6 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const threadId = "compaction_thread"
     await storage.threads.create({
-      agentId: "assistant",
       id: threadId,
       projectId: PROJECT_ID,
       ownerPrincipal: REQUESTER,
@@ -2079,7 +2212,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
-        agentId: "assistant",
         threadId,
         text: "Continue from the latest completed turn.",
         reasoning: "high",
@@ -2179,7 +2311,6 @@ describe("AgentWorker", () => {
       expect(JSON.stringify(compactionPayloads)).not.toContain("## Goal")
 
       const secondRequest = await requestAgentAs(sixb, REQUESTER, {
-        agentId: "assistant",
         threadId,
         text: `second-compaction-${"y".repeat(3_000)}`,
       })
@@ -2235,7 +2366,6 @@ describe("AgentWorker", () => {
     await storage.threads.create({
       id: threadId,
       projectId: PROJECT_ID,
-      agentId: "assistant",
       ownerPrincipal: REQUESTER,
     })
     await seedCompletedConversationTurn({
@@ -2246,7 +2376,6 @@ describe("AgentWorker", () => {
       assistantText: "x".repeat(460_000),
     })
     const request = await requestAgentAs(sixb, REQUESTER, {
-      agentId: "assistant",
       threadId,
       text: "Continue.",
     })
@@ -2313,7 +2442,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const first = await requestAgent(sixb, {
-        agentId: "main",
         text: `Long historical input. ${"x".repeat(160_000)}`,
       })
       await waitFor(
@@ -2328,7 +2456,6 @@ describe("AgentWorker", () => {
       )
       const before = await listMessages(storage, first.run.threadId)
       const next = await requestAgent(sixb, {
-        agentId: "main",
         threadId: first.run.threadId,
         text: continuation,
         model: { provider: small.providerId, modelId: small.modelId },
@@ -2389,7 +2516,6 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const threadId = "oversized_turn_compaction_thread"
     await storage.threads.create({
-      agentId: "assistant",
       id: threadId,
       projectId: PROJECT_ID,
       ownerPrincipal: REQUESTER,
@@ -2406,7 +2532,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
-        agentId: "assistant",
         threadId,
         text: "Continue on.",
       })
@@ -2451,7 +2576,6 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const threadId = "failed_compaction_thread"
     await storage.threads.create({
-      agentId: "assistant",
       id: threadId,
       projectId: PROJECT_ID,
       ownerPrincipal: REQUESTER,
@@ -2471,7 +2595,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
-        agentId: "assistant",
         threadId,
         text: "This should not run after a partial summary.",
       })
@@ -2537,7 +2660,7 @@ describe("AgentWorker", () => {
       worker.decideExecutionError(
         claimed,
         createSixbError("internal.unexpected", "[SixbAgentWorker] Deterministic worker failure.", {
-          details: { agentId: "assistant", runId: "run-1" },
+          details: { runId: "run-1", threadId: "thread-1" },
         })
       )
     ).resolves.toEqual({ kind: "fail" })
@@ -2553,11 +2676,13 @@ describe("AgentWorker", () => {
       capturedSystem ??= system
     })
     let lookupCalls = 0
+    let toolRun: AgentToolRunInfo | undefined
     const lookupProject = defineAgentTool("lookup_project")
       .description("Look up a project.")
       .input({ query: "string" })
       .run(({ input, run }) => {
         lookupCalls += 1
+        toolRun = run
         return { project: "Project Alpha", query: input.query, runId: run.id }
       })
     const agentStep = defineAgentStep("resolve-project", {
@@ -2630,7 +2755,7 @@ describe("AgentWorker", () => {
     })
     const agentExecutionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      agentId: actorId,
+      actorId: actorId,
       runId: nodeRunId,
       sourceExecutionId: executionId,
     })
@@ -2638,7 +2763,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       nodeRunId,
       executionId: agentExecutionId,
-      agentId: actorId,
+      actorId: actorId,
       prompt: "Resolve 'alpha'.",
     })
     await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
@@ -2678,7 +2803,7 @@ describe("AgentWorker", () => {
       )
       expect(execution).toMatchObject({
         status: "succeeded",
-        agentId: actorId,
+        actorId: actorId,
         modelId: "mock-model",
         finishReason: "stop",
         attempt: 1,
@@ -2686,6 +2811,13 @@ describe("AgentWorker", () => {
       expect(execution.execution).toBeUndefined()
       expect(execution.trace).toBeArray()
       expect(lookupCalls).toBe(1)
+      // Regression proof: forwarding the managed actor id instead of step references fails here.
+      expect(toolRun).toEqual({
+        kind: "workflow",
+        id: nodeRunId,
+        workflowId: workflow.id,
+        stepId: agentStep.id,
+      })
       expect(recordedUsage).toHaveLength(3)
       expect(recordedUsage.map((usage) => usage.executionId)).toEqual([
         agentExecutionId,
@@ -2888,7 +3020,6 @@ describe("AgentWorker", () => {
         { label: "workflow preparation failure" }
       )
       await completion.wait()
-      await worker.stop()
       const task = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
       const node = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
       const workflow = await runs.getById({
@@ -3463,7 +3594,7 @@ describe("AgentWorker", () => {
     })
     const agentExecutionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      agentId: actorId,
+      actorId: actorId,
       runId: nodeRunId,
       sourceExecutionId: executionId,
     })
@@ -3471,7 +3602,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       nodeRunId,
       executionId: agentExecutionId,
-      agentId: actorId,
+      actorId: actorId,
       prompt: "Resolve 'alpha'.",
     })
     await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
@@ -3616,7 +3747,7 @@ describe("AgentWorker", () => {
     })
     const agentExecutionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      agentId: actorId,
+      actorId,
       runId: nodeRunId,
       sourceExecutionId: executionId,
     })
@@ -3624,7 +3755,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       nodeRunId,
       executionId: agentExecutionId,
-      agentId: actorId,
+      actorId,
       prompt: "Resolve 'alpha'.",
     })
     await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
@@ -3706,38 +3837,26 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("attributes managed identity creation to the framework", async () => {
+  test("attributes workflow managed identity creation to the framework", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
-    const agent = sixb.definitions.agents.getById("assistant")
-    if (!agent) {
-      throw new Error("Expected test agent.")
-    }
-    const context = await buildAgentWorkerContext(sixb, {
-      apiBaseUrl: "http://sixb-api.local/api/",
-    })
-    const identity = await ensureAgentExecutionIdentity({
-      auth: context.storage.auth,
+    const identity = await ensureManagedAgentExecutionIdentity({
+      auth: sixb.storage.auth,
       projectId: PROJECT_ID,
-      agent,
+      actorId: workflowAgentStepActorId("test", "review"),
+      name: "Review",
+      description: "Workflow task",
+      groupIds: [],
     })
-    // Admission may run in an HTTP or workflow process; it must not claim that the worker created
-    // the identity merely because the worker will eventually execute under it.
-    expect(identity.serviceAccount.createdByPrincipal).toEqual({
-      type: "system",
-      id: "system",
-    })
+    expect(identity.serviceAccount.createdByPrincipal).toEqual({ type: "system", id: "system" })
   })
 
   test("creates isolated gateway URLs and sandbox env per concurrent run environment", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const agent = sixb.definitions.agents.getById("assistant")
-    if (!agent) {
-      throw new Error("Expected test agent.")
-    }
+    const plan = executionPlanFor(sixb)
     const [firstRequest, secondRequest] = await Promise.all([
-      requestAgent(sixb, { agentId: "assistant", text: "first" }),
-      requestAgent(sixb, { agentId: "assistant", text: "second" }),
+      requestAgent(sixb, { text: "first" }),
+      requestAgent(sixb, { text: "second" }),
     ])
     const [firstRun, secondRun] = await Promise.all([
       reserveRequestedRun(sixb, firstRequest),
@@ -3750,12 +3869,12 @@ describe("AgentWorker", () => {
     const [firstEnvironment, secondEnvironment] = await Promise.all([
       createConversationAgentEnvironment({
         context,
-        plan: executionPlanFor(agent),
+        plan: plan,
         run: firstRun,
       }),
       createConversationAgentEnvironment({
         context,
-        plan: executionPlanFor(agent),
+        plan: plan,
         run: secondRun,
       }),
     ])
@@ -3803,7 +3922,7 @@ describe("AgentWorker", () => {
       expect(systemPrompt).toContain("Do not run `sixb --help`")
       expect(systemPrompt).toContain("sixb objects inspect <type> <id>")
       expect(systemPrompt).not.toContain("Available Agent Skills")
-      expect(systemPrompt).toContain("<agent_instructions>")
+      expect(systemPrompt).not.toContain("<agent_instructions>")
       expect(systemPrompt).not.toContain("/tmp/sixb-recording-sandbox")
 
       await firstEnvironment.dispose()
@@ -3825,17 +3944,13 @@ describe("AgentWorker", () => {
   test("materializes message attachments and manifest into the sandbox", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const agent = sixb.definitions.agents.getById("assistant")
-    if (!agent) {
-      throw new Error("Expected test agent.")
-    }
+    const plan = executionPlanFor(sixb)
     const fileRef = await sixb.blobStorage.put({
       body: new TextEncoder().encode("attachment contents"),
       fileName: "note.txt",
       mediaType: "text/plain",
     })
     const request = await requestAgent(sixb, {
-      agentId: "assistant",
       text: "read this",
       attachments: [fileRef],
     })
@@ -3846,7 +3961,7 @@ describe("AgentWorker", () => {
 
     const environment = await createConversationAgentEnvironment({
       context,
-      plan: executionPlanFor(agent),
+      plan: plan,
       run,
     })
     try {
@@ -3901,22 +4016,21 @@ describe("AgentWorker", () => {
       mediaType: "text/plain",
     })
     const request = await requestAgent(sixb, {
-      agentId: "assistant",
       text: "summarize",
       attachments: [fileRef],
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
-    const agent = requiredAgent(sixb)
+    const plan = executionPlanFor(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      plan: executionPlanFor(agent),
+      plan: plan,
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        plan: executionPlanFor(agent),
+        plan: plan,
         run,
         signal: new AbortController().signal,
       })
@@ -3960,22 +4074,21 @@ describe("AgentWorker", () => {
       mediaType: "image/png",
     })
     const request = await requestAgent(sixb, {
-      agentId: "assistant",
       text: "describe",
       attachments: [fileRef],
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
-    const agent = requiredAgent(sixb)
+    const plan = executionPlanFor(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      plan: executionPlanFor(agent),
+      plan: plan,
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        plan: executionPlanFor(agent),
+        plan: plan,
         run,
         signal: new AbortController().signal,
       })
@@ -4023,22 +4136,21 @@ describe("AgentWorker", () => {
       mediaType: "image/png",
     })
     const request = await requestAgent(sixb, {
-      agentId: "assistant",
       text: "describe",
       attachments: [fileRef],
     })
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
-    const agent = requiredAgent(sixb)
+    const plan = executionPlanFor(sixb)
     const environment = await createConversationAgentEnvironment({
       context,
-      plan: executionPlanFor(agent),
+      plan: plan,
       run,
     })
     try {
       await runAgentTurn({
         context: environment.turnContext,
-        plan: executionPlanFor(agent),
+        plan: plan,
         run,
         signal: new AbortController().signal,
       })
@@ -4109,11 +4221,8 @@ describe("AgentWorker", () => {
       },
     }
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const agent = sixb.definitions.agents.getById("assistant")
-    if (!agent) {
-      throw new Error("Expected test agent.")
-    }
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "hi" })
+    const plan = executionPlanFor(sixb)
+    const request = await requestAgent(sixb, { text: "hi" })
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb, {
       apiBaseUrl: "http://sixb-api.local/api/",
@@ -4123,7 +4232,7 @@ describe("AgentWorker", () => {
     // sandbox has not been built yet.
     const environment = await createConversationAgentEnvironment({
       context,
-      plan: executionPlanFor(agent),
+      plan: plan,
       run,
     })
     expect(environment.turnContext.systemPrompt).toContain("<sixb_runtime_context>")
@@ -4157,18 +4266,15 @@ describe("AgentWorker", () => {
       },
     }
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
-    const agent = sixb.definitions.agents.getById("assistant")
-    if (!agent) {
-      throw new Error("Expected test agent.")
-    }
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "hi" })
+    const plan = executionPlanFor(sixb)
+    const request = await requestAgent(sixb, { text: "hi" })
     const run = await reserveRequestedRun(sixb, request)
     const context = await buildAgentWorkerContext(sixb)
 
     let detached: Promise<void> | null = null
     const environment = await createConversationAgentEnvironment({
       context,
-      plan: executionPlanFor(agent),
+      plan: plan,
       run,
       onDetachedTeardown: (teardown) => {
         detached = teardown
@@ -4195,7 +4301,6 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
 
     const result = await requestAgentAs(sixb, REQUESTER, {
-      agentId: "assistant",
       text: "hello",
     })
 
@@ -4227,7 +4332,6 @@ describe("AgentWorker", () => {
     let result: Awaited<ReturnType<typeof requestAgent>>
     try {
       result = await requestAgentAs(sixb, REQUESTER, {
-        agentId: "assistant",
         text: "persist me",
       })
     } finally {
@@ -4263,7 +4367,7 @@ describe("AgentWorker", () => {
     console.error = () => {}
     let request: Awaited<ReturnType<typeof requestAgent>>
     try {
-      request = await requestAgent(sixb, { agentId: "assistant", text: "recover me" })
+      request = await requestAgent(sixb, { text: "recover me" })
     } finally {
       console.error = originalConsoleError
     }
@@ -4286,7 +4390,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("runs only the current agent's selected tools with connector, metadata, and logs", async () => {
+  test("runs project tools with connector, metadata, and logs", async () => {
     let connectorCalls = 0
     const knowledge = defineConnector("knowledge", {
       type: "knowledge",
@@ -4295,9 +4399,7 @@ describe("AgentWorker", () => {
         return { echo: (value: string) => `connected:${value}` }
       },
     })
-    let handlerContext:
-      | { readonly runId: string; readonly agentId: string; readonly threadId?: string }
-      | undefined
+    let handlerContext: { readonly runId: string; readonly threadId: string } | undefined
     let handlerSignal: AbortSignal | undefined
     let selectedCalls = 0
     let successfulReplay = ""
@@ -4306,49 +4408,26 @@ describe("AgentWorker", () => {
       .input({ value: "string" })
       .run(async ({ input, run, signal, connector, logger }) => {
         selectedCalls += 1
-        if (!run.agentId) throw new Error("Expected a definition-backed Agent run.")
-        handlerContext = { runId: run.id, agentId: run.agentId, threadId: run.threadId }
+        if (run.kind !== "conversation") throw new Error("Expected a conversation Agent run.")
+        handlerContext = { runId: run.id, threadId: run.threadId }
         handlerSignal = signal
         const client = await connector(knowledge)
         logger.info("selected tool called", { value: input.value })
         return { echoed: client.echo(input.value) }
       })
-    const research = defineAgent("research", {
-      name: "Research",
-      model: toolThenAnswerModel((prompt) => {
+    const sixb = buildSixb(
+      toolThenAnswerModel((prompt) => {
         successfulReplay = prompt
       }),
-      instructions: "Research with selected tools.",
-      groups: [AGENT_RUNTIME_GROUP],
-      tools: [selectedEcho],
-    })
-    let unselectedToolNames: readonly string[] = []
-    const plain = defineAgent("plain", {
-      name: "Plain",
-      model: answerModel((names) => {
-        unselectedToolNames = names
-      }),
-      instructions: "Answer without the research tool.",
-      groups: [AGENT_RUNTIME_GROUP],
-    })
-    const sixb = new SixbHost({
-      id: PROJECT_ID,
-      ontology: [],
-      agents: [research, plain],
-      connectors: [knowledge],
-      groups: [AGENT_RUNTIME_GROUP],
-      broker: new InMemoryBroker(),
-      storage: new InMemoryStorage(),
-      lakeStorage: new InMemoryLakeStorage(),
-      blobStorage: new InMemoryBlobStorage(),
-      queues: new InMemoryQueues(),
-      sandboxes: new RecordingSandboxFactory(),
-    })
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [selectedEcho], connectors: [knowledge] }
+    )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
     await worker.start()
     try {
-      const selectedRequest = await requestAgent(sixb, { agentId: research.id, text: "echo hi" })
+      const selectedRequest = await requestAgent(sixb, { text: "echo hi" })
       const selectedRun = await waitFor(
         async () => {
           const record = await storage.runs.getById({
@@ -4359,30 +4438,14 @@ describe("AgentWorker", () => {
         },
         { label: "selected tool run terminal" }
       )
-      const plainRequest = await requestAgent(sixb, { agentId: plain.id, text: "answer" })
-      await waitFor(
-        async () => {
-          const record = await storage.runs.getById({
-            projectId: PROJECT_ID,
-            id: plainRequest.run.id,
-          })
-          return record && record.status !== "queued" && record.status !== "running" ? record : null
-        },
-        { label: "unselected agent run terminal" }
-      )
-
       expect(selectedRun.status).toBe("succeeded")
       expect(selectedCalls).toBe(1)
       expect(connectorCalls).toBe(1)
       expect(handlerSignal).toBeInstanceOf(AbortSignal)
       expect(handlerContext).toEqual({
         runId: selectedRequest.run.id,
-        agentId: research.id,
         threadId: selectedRequest.run.threadId,
       })
-      expect(unselectedToolNames).toContain("bash")
-      expect(unselectedToolNames).not.toContain(selectedEcho.name)
-
       const messages = await listMessages(storage, selectedRequest.run.threadId)
       expect(
         messages
@@ -4395,7 +4458,6 @@ describe("AgentWorker", () => {
       })
 
       const followUp = await requestAgent(sixb, {
-        agentId: research.id,
         threadId: selectedRequest.run.threadId,
         text: "continue",
       })
@@ -4411,7 +4473,7 @@ describe("AgentWorker", () => {
 
       const logs = await waitFor(
         async () => {
-          const page = await sixb.logging.read({
+          const page = await sixb.logging!.read({
             run: { kind: "agent", id: selectedRequest.run.id },
           })
           return page.lines.length > 0 ? page.lines : null
@@ -4423,12 +4485,229 @@ describe("AgentWorker", () => {
         level: "info",
         message: "selected tool called",
         fields: {
-          agentId: research.id,
           threadId: selectedRequest.run.threadId,
           value: "hi",
         },
         context: { run: { kind: "agent", id: selectedRequest.run.id } },
       })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("publishes a selected tool artifact to blob storage and the run sandbox", async () => {
+    let published: AgentToolArtifact | undefined
+    let receivedToolCallId: string | undefined
+    let livePrompt: unknown
+    let replayPrompt: unknown
+    let viewedPrompt: unknown
+    const createImage = defineAgentTool("create_image")
+      .description("Create a test image.")
+      .input({})
+      .run(async ({ artifacts, toolCallId }) => {
+        receivedToolCallId = toolCallId
+        published = await artifacts.put({
+          body: TEST_PNG_BYTES,
+          fileName: "generated.png",
+          mediaType: "image/png",
+        })
+        return {
+          kind: "agentToolResult",
+          content: [
+            { type: "text", text: "Created an image." },
+            { type: "file", fileRef: published.fileRef },
+          ],
+        } satisfies AgentToolResult
+      })
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(
+      artifactToolThenAnswerModel({
+        live: (prompt) => {
+          livePrompt = prompt
+        },
+        replay: (prompt) => {
+          replayPrompt = prompt
+        },
+        viewed: (prompt) => {
+          viewedPrompt = prompt
+        },
+      }),
+      new InMemoryBroker(),
+      sandboxes,
+      { agentTools: [createImage] }
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, {
+        text: "create an image",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "tool artifact run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      expect(receivedToolCallId).toBe("image-call-1")
+      expect(published).toBeDefined()
+      if (!published) throw new Error("Expected the selected tool to publish an artifact.")
+
+      expect(
+        new Uint8Array(
+          await new Response(await sixb.blobStorage.open(published.fileRef.blobId)).arrayBuffer()
+        )
+      ).toEqual(TEST_PNG_BYTES)
+      const sandboxFile = sandboxes.sandboxes[0]?.writtenFiles.find((file) =>
+        file.path.includes(".sixb/agent/artifacts/")
+      )
+      expect(sandboxFile?.contents).toEqual(TEST_PNG_BYTES)
+      expect(published.sandboxPath).toEndWith("-generated.png")
+
+      const messages = await listMessages(storage, request.run.threadId)
+      const firstAssistant = messages.find(
+        (message) =>
+          message.role === "assistant" &&
+          message.parts.some(
+            (part) => part.type === "tool-call" && part.toolName === createImage.name
+          )
+      )
+      expect(
+        firstAssistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === createImage.name
+        )
+      ).toMatchObject({
+        state: "output-available",
+        output: {
+          kind: "agentToolResult",
+          content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
+        },
+      })
+      expect(firstAssistant?.parts.filter((part) => part.type === "file")).toEqual([
+        { type: "file", fileRef: published.fileRef },
+      ])
+      const richToolPartIndex = firstAssistant?.parts.findIndex(
+        (part) => part.type === "tool-call" && part.toolName === createImage.name
+      )
+      expect(richToolPartIndex).toBeGreaterThanOrEqual(0)
+      const durableJson = JSON.stringify(messages)
+      expect(durableJson).not.toContain("data:image")
+      expect(durableJson).not.toContain("iVBORw0KGgo")
+      expect(durableJson).not.toContain(published.sandboxPath)
+
+      const livePromptJson = JSON.stringify(livePrompt)
+      expect(livePromptJson).toContain("generated.png")
+      expect(livePromptJson).toContain("<tool_file")
+      expect(livePromptJson).toContain("<sixb_tool_files")
+      const livePromptMessages = Array.isArray(livePrompt) ? livePrompt : []
+      const liveToolResults = livePromptMessages.flatMap((message) => {
+        if (
+          typeof message !== "object" ||
+          message === null ||
+          !("role" in message) ||
+          message.role !== "tool" ||
+          !("content" in message) ||
+          !Array.isArray(message.content)
+        ) {
+          return []
+        }
+        return message.content.filter(
+          (part: unknown) =>
+            typeof part === "object" &&
+            part !== null &&
+            "type" in part &&
+            part.type === "tool-result"
+        )
+      })
+      // The native contract retains originalOutput for durable tracing, separately from model output.
+      const modelOutputs = liveToolResults.map((part: { output: unknown }) => part.output)
+      expect(JSON.stringify(modelOutputs)).not.toContain('"type":"file"')
+      if (typeof Bun.Image === "function") {
+        expect(
+          livePromptMessages.some(
+            (message) =>
+              typeof message === "object" &&
+              message !== null &&
+              "role" in message &&
+              message.role === "user" &&
+              "content" in message &&
+              Array.isArray(message.content) &&
+              message.content.some(
+                (part: unknown) =>
+                  typeof part === "object" &&
+                  part !== null &&
+                  "type" in part &&
+                  part.type === "file"
+              )
+          )
+        ).toBe(true)
+        expect(livePromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+      }
+
+      const followup = await requestAgent(sixb, {
+        threadId: request.run.threadId,
+        text: "inspect it again",
+      })
+      const replayRun = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({
+            projectId: PROJECT_ID,
+            id: followup.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "tool artifact replay run terminal" }
+      )
+      expect(replayRun.status).toBe("succeeded")
+
+      const replayPromptJson = JSON.stringify(replayPrompt)
+      expect(replayPromptJson).toContain("generated.png")
+      expect(replayPromptJson).toContain(
+        encodeURIComponent(`/parts/${richToolPartIndex}/output/content/1/fileRef`)
+      )
+      if (typeof Bun.Image === "function") {
+        expect(replayPromptJson).not.toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+      }
+      expect(
+        sandboxes.sandboxes[1]?.writtenFiles.some(
+          (file) =>
+            file.path.includes(".sixb/agent/attachments/") &&
+            file.path.endsWith(`tool-${richToolPartIndex}-1-generated.png`) &&
+            Buffer.from(file.contents).equals(Buffer.from(TEST_PNG_BYTES))
+        )
+      ).toBe(true)
+
+      const viewedPromptJson = JSON.stringify(viewedPrompt)
+      expect(viewedPromptJson).toContain("view_file")
+      if (typeof Bun.Image === "function") {
+        expect(viewedPromptJson).toContain(Buffer.from(TEST_PNG_BYTES).toString("base64"))
+      }
+      const replayMessages = await listMessages(storage, request.run.threadId)
+      const replayAssistant = replayMessages.find(
+        (message) =>
+          message.runId === followup.run.id &&
+          message.parts.some((part) => part.type === "tool-call" && part.toolName === "view_file")
+      )
+      expect(
+        replayAssistant?.parts.find(
+          (part) => part.type === "tool-call" && part.toolName === "view_file"
+        )
+      ).toMatchObject({
+        state: "output-available",
+        output: {
+          kind: "agentToolResult",
+          content: [{ type: "text" }, { type: "file", fileRef: published.fileRef }],
+        },
+      })
+      expect(
+        sandboxes.sandboxes[1]?.writtenFiles.filter((file) =>
+          file.path.includes(".sixb/agent/artifacts/")
+        )
+      ).toHaveLength(0)
     } finally {
       await worker.stop()
     }
@@ -4475,7 +4754,6 @@ describe("AgentWorker", () => {
       worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
       await worker.start()
       const request = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "search for connector tools",
       })
       const run = await waitFor(
@@ -4574,7 +4852,6 @@ describe("AgentWorker", () => {
       worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
       await worker.start()
       const request = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "fetch the Sixb docs",
       })
       const run = await waitFor(
@@ -4614,7 +4891,6 @@ describe("AgentWorker", () => {
       })
 
       const followUp = await requestAgent(sixb, {
-        agentId: "assistant",
         threadId: request.run.threadId,
         text: "continue",
       })
@@ -4651,7 +4927,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "fetch a URL outside the policy",
       })
       const run = await waitFor(
@@ -4702,7 +4977,7 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
     await worker.start()
     try {
-      const first = await requestAgent(sixb, { agentId: "assistant", text: "run the tool" })
+      const first = await requestAgent(sixb, { text: "run the tool" })
       const firstRun = await waitFor(
         async () => {
           const record = await storage.runs.getById({ projectId: PROJECT_ID, id: first.run.id })
@@ -4726,7 +5001,6 @@ describe("AgentWorker", () => {
       })
 
       const second = await requestAgent(sixb, {
-        agentId: "assistant",
         threadId: first.run.threadId,
         text: "continue",
       })
@@ -4755,7 +5029,6 @@ describe("AgentWorker", () => {
       const {
         run: { threadId, id: runId },
       } = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "echo hi",
       })
 
@@ -4778,8 +5051,7 @@ describe("AgentWorker", () => {
         id: run.executionId,
       })
       expect(durableExecution?.authorizationRef).toEqual({
-        type: "principal",
-        principal: { type: "serviceAccount", id: "svc_agent_assistant" },
+        type: "disabled",
       })
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
@@ -4809,10 +5081,7 @@ describe("AgentWorker", () => {
       const assistant = messages.find((message) => message.role === "assistant")
       expect(assistant).toBeDefined()
       expect(assistant?.runId).toBe(run.id)
-      expect(assistant?.authorPrincipal).toEqual({
-        type: "serviceAccount",
-        id: "svc_agent_assistant",
-      })
+      expect(assistant?.authorPrincipal).toBeUndefined()
 
       const parts = assistant?.parts ?? []
       expect(parts.some((part) => part.type === "reasoning")).toBe(true)
@@ -4831,18 +5100,12 @@ describe("AgentWorker", () => {
 
       await expect(
         auth.serviceAccounts.getById({ projectId: PROJECT_ID, id: "svc_agent_assistant" })
-      ).resolves.toMatchObject({
-        id: "svc_agent_assistant",
-        name: "Assistant",
-        status: "active",
-      })
+      ).resolves.toBeNull()
       const memberships = await auth.serviceAccountGroupMemberships.listForServiceAccount({
         projectId: PROJECT_ID,
         serviceAccountId: "svc_agent_assistant",
       })
-      expect(memberships.map((membership) => [membership.groupId, membership.source])).toEqual([
-        ["agent-runtime", "agent"],
-      ])
+      expect(memberships.map((membership) => [membership.groupId, membership.source])).toEqual([])
 
       const streamRecords = await listRunStreamRecords(sixb.broker, runId)
       const streamNames = streamRecords.map((record) => record.name)
@@ -4882,18 +5145,19 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("runs the main agent with project tools and inherited disabled authority", async () => {
+  test("runs the project Agent with project tools and inherited disabled authority", async () => {
     const model = toolThenAnswerModel()
     const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [model] },
       projectTools: [echoAgentTool],
     })
     const storage = agentStorageOf(sixb)
+    const bindScope = spyOn(sixb, "withScope")
     const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
     try {
-      const requested = await requestAgent(sixb, { agentId: "main", text: "echo hi" })
+      const requested = await requestAgent(sixb, { text: "echo hi" })
       const run = await waitFor(
         async () => {
           const current = await storage.runs.getById({
@@ -4907,7 +5171,7 @@ describe("AgentWorker", () => {
             ? current
             : null
         },
-        { label: "main agent run terminal" }
+        { label: "conversation Agent run terminal" }
       )
 
       expect(run.status).toBe("succeeded")
@@ -4916,12 +5180,14 @@ describe("AgentWorker", () => {
         id: run.executionId,
       })
       expect(execution?.authorizationRef).toEqual({ type: "disabled" })
-      await expect(
-        authStorageOf(sixb).serviceAccounts.getById({
-          projectId: PROJECT_ID,
-          id: "svc_agent_main",
-        })
-      ).resolves.toBeNull()
+      // Regression proof: restoring actorId in the worker's binding adds it to this executor.
+      const scope = bindScope.mock.calls.find(
+        ([scope]) => scope.execution.id === run.executionId
+      )?.[0]
+      expect(scope?.execution.executor).toEqual({ type: "agent", runId: run.id })
+      expect(
+        (await authStorageOf(sixb).serviceAccounts.list({ projectId: PROJECT_ID })).total
+      ).toBe(0)
 
       const assistant = (await listMessages(storage, run.threadId)).find(
         (message) => message.role === "assistant"
@@ -4937,6 +5203,7 @@ describe("AgentWorker", () => {
       ).toBe(true)
     } finally {
       await worker.stop()
+      bindScope.mockRestore()
     }
   })
 
@@ -4970,7 +5237,6 @@ describe("AgentWorker", () => {
     })
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, {
-      agentId: "main",
       text: "Delegate this research task.",
     })
     childRunId = createSubagentRunId(requested.run.id, "research")
@@ -5119,47 +5385,11 @@ describe("AgentWorker", () => {
     true,
   ])("fences a revoked child redelivery (concurrent takeover: %s)", async (takeover) => {
     const model = answerModel()
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      models: { language: [model] },
-    })
-    const auth = authStorageOf(sixb)
-    const sessionId = "session-agent"
-    await auth.users.create({
-      id: REQUESTER.id,
-      projectId: PROJECT_ID,
-      email: "requester@example.com",
-    })
-    await auth.sessions.create({
-      id: sessionId,
-      projectId: PROJECT_ID,
-      userId: REQUESTER.id,
-      strategyId: "test",
-      audience: "app",
-      tokenHash: "not-used-after-admission",
-      createdAt: new Date(),
-      expiresAt: new Date(Date.now() + 60_000),
-    })
-    const grants = { ...emptyGrantIndex(), "run:agent": new Set(["main"]) }
-    const scoped = bindRequestExecution(sixb, {
-      request: new Request("https://sixb.test/api/agent-threads/thread-1/messages"),
-      authorization: {
-        type: "principal",
-        context: {
-          principal: REQUESTER,
-          sessionId,
-          groupIds: [],
-          roleIds: [],
-          grants,
-        },
-        credential: { type: "session", id: sessionId },
-      },
-    })
-    const requested = await scoped.agents.runs.request({
-      agentId: "main",
-      text: "Delegate a task.",
-    })
+    const sixb = buildSixb(model)
     attachSixbErrorReporter(sixb, () => {})
     const storage = agentStorageOf(sixb)
+    const auth = authStorageOf(sixb)
+    const requested = await requestAgentAs(sixb, REQUESTER, { text: "Delegate a task." })
     // The parent is already running elsewhere; only the child's queue delivery runs in this test.
     const [parentJob] = await sixb.queues.agents.claim({
       projectId: PROJECT_ID,
@@ -5293,7 +5523,7 @@ describe("AgentWorker", () => {
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 60_000),
     })
-    const grants = { ...emptyGrantIndex(), "run:agent": new Set(["main"]) }
+    const grants = { ...emptyGrantIndex(), "run:agent": true }
     const scoped = bindRequestExecution(sixb, {
       request: new Request("https://sixb.test/api/agent-threads/thread-1/messages"),
       authorization: {
@@ -5308,8 +5538,7 @@ describe("AgentWorker", () => {
         credential: { type: "session", id: sessionId },
       },
     })
-    const requested = await scoped.agents.runs.request({
-      agentId: "main",
+    const requested = await scoped.agent.runs.request({
       text: "Delegate a task.",
     })
     attachSixbErrorReporter(sixb, () => {})
@@ -5423,7 +5652,7 @@ describe("AgentWorker", () => {
       models: { language: [parentModel, childModel] },
     })
     const storage = agentStorageOf(sixb)
-    const requested = await requestAgent(sixb, { agentId: "main", text: "Delegate this task." })
+    const requested = await requestAgent(sixb, { text: "Delegate this task." })
     const worker = new AgentWorker(sixb, workerOptions())
 
     await worker.start()
@@ -5517,7 +5746,6 @@ describe("AgentWorker", () => {
     })
     const storage = agentStorageOf(sixb)
     const requested = await requestAgent(sixb, {
-      agentId: "main",
       text: "Start background work, then finish.",
     })
     const childRunId = createSubagentRunId(requested.run.id, "background-work")
@@ -5594,7 +5822,7 @@ describe("AgentWorker", () => {
       createdAt: new Date(),
       expiresAt: new Date(Date.now() + 60_000),
     })
-    const grants = { ...emptyGrantIndex(), "run:agent": new Set(["main"]) }
+    const grants = { ...emptyGrantIndex(), "run:agent": true }
     const scoped = bindRequestExecution(sixb, {
       request: new Request("https://sixb.test/api/agent-threads/thread-1/messages"),
       authorization: {
@@ -5609,7 +5837,7 @@ describe("AgentWorker", () => {
         credential: { type: "session", id: sessionId },
       },
     })
-    const requested = await scoped.agents.runs.request({ agentId: "main", text: "hello" })
+    const requested = await scoped.agent.runs.request({ text: "hello" })
     const storage = agentStorageOf(sixb)
     const modelCalls = spyOn(model, "stream")
     const currentSession = auth.sessions.getById.bind(auth.sessions)
@@ -5641,8 +5869,8 @@ describe("AgentWorker", () => {
       })
     )
     const worker = new AgentWorker(workerHost, workerOptions())
-    const completion = observeQueueSettlement(sixb.queues.agents)
 
+    const completion = observeQueueSettlement(sixb.queues.agents)
     await worker.start()
     try {
       const run = await waitFor(
@@ -5696,14 +5924,21 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("rejects uncredentialed user authority before creating a main-agent thread", async () => {
+  test("rejects uncredentialed user authority before creating a conversation thread", async () => {
     const model = answerModel()
     const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [model] },
     })
 
     await expect(
-      requestAgentAs(sixb, REQUESTER, { agentId: "main", text: "hello" })
+      createTestSixb(sixb, {
+        authorization: {
+          principal: REQUESTER,
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "run:agent": true },
+        },
+      }).agent.runs.request({ text: "hello" })
     ).rejects.toMatchObject({ code: "authority_not_inheritable" })
     await expect(
       agentStorageOf(sixb).threads.list({ projectId: PROJECT_ID })
@@ -5716,7 +5951,7 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      const request = await requestAgent(sixb, { text: "echo hi" })
       const run = await waitFor(
         async () => {
           const record = await storage.runs.getById({
@@ -5806,7 +6041,7 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
-      const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      const request = await requestAgent(sixb, { text: "echo hi" })
       const run = await waitFor(
         async () => {
           const record = await storage.runs.getById({
@@ -5824,7 +6059,6 @@ describe("AgentWorker", () => {
         message: "Agent execution failed.",
         retryable: false,
         details: {
-          agentId: "assistant",
           runId: request.run.id,
           threadId: request.run.threadId,
         },
@@ -5852,7 +6086,6 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(answerModel())
     const executionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      agentId: "assistant",
       runId: "usage-recovery",
     })
     const aiUsage = aiUsageStorageOf(sixb)
@@ -5956,7 +6189,7 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(workerHost, workerOptions())
     await worker.start()
     try {
-      const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      const request = await requestAgent(sixb, { text: "echo hi" })
       const run = await waitFor(
         async () => {
           const record = await storage.runs.getById({
@@ -5974,7 +6207,6 @@ describe("AgentWorker", () => {
         message: "Agent execution failed.",
         retryable: false,
         details: {
-          agentId: "assistant",
           runId: request.run.id,
           threadId: request.run.threadId,
         },
@@ -6004,7 +6236,7 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 90, idlePollMs: 5 }))
     await worker.start()
     try {
-      const request = await requestAgent(sixb, { agentId: "assistant", text: "keep owning" })
+      const request = await requestAgent(sixb, { text: "keep owning" })
       await waitFor(
         async () => {
           if (!firstRenewedExpiration) return null
@@ -6028,7 +6260,7 @@ describe("AgentWorker", () => {
 
     await worker.start()
     try {
-      const first = await requestAgent(sixb, { agentId: "assistant", text: "first" })
+      const first = await requestAgent(sixb, { text: "first" })
       const firstRun = await waitFor(
         async () => {
           const run = await storage.runs.getById({ projectId: PROJECT_ID, id: first.run.id })
@@ -6039,7 +6271,6 @@ describe("AgentWorker", () => {
       expect(firstRun.status).toBe("succeeded")
 
       const second = await requestAgent(sixb, {
-        agentId: "assistant",
         threadId: first.run.threadId,
         text: "second",
       })
@@ -6079,7 +6310,7 @@ describe("AgentWorker", () => {
     console.error = () => {}
     await worker.start()
     try {
-      const request = await requestAgent(sixb, { agentId: "assistant", text: "recover" })
+      const request = await requestAgent(sixb, { text: "recover" })
       const finalRun = await waitFor(
         async () => {
           const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
@@ -6111,7 +6342,6 @@ describe("AgentWorker", () => {
       const {
         run: { threadId },
       } = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "use tools forever",
       })
 
@@ -6155,7 +6385,6 @@ describe("AgentWorker", () => {
       const {
         run: { threadId },
       } = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "run bash",
       })
 
@@ -6229,6 +6458,78 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("views and publishes an image created by bash", async () => {
+    let viewedPrompt: unknown
+    const sandboxes = new RecordingSandboxFactory()
+    const sixb = buildSixb(
+      bashImageThenViewModel((prompt) => {
+        viewedPrompt = prompt
+      }),
+      new InMemoryBroker(),
+      sandboxes
+    )
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, {
+        text: "create and inspect an image",
+      })
+      const run = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "bash view_file run terminal" }
+      )
+
+      expect(run.status).toBe("succeeded")
+      const assistant = (await listMessages(storage, request.run.threadId)).find(
+        (message) => message.role === "assistant"
+      )
+      const viewCall = assistant?.parts.find(
+        (part) => part.type === "tool-call" && part.toolName === "view_file"
+      )
+      expect(viewCall).toMatchObject({
+        state: "output-available",
+        output: {
+          kind: "agentToolResult",
+          content: [
+            { type: "text", text: expect.stringContaining("Prepared image") },
+            {
+              type: "file",
+              fileRef: { fileName: "bash-image.png", mediaType: "image/png" },
+            },
+          ],
+        },
+      })
+      const filePart = assistant?.parts.find((part) => part.type === "file")
+      expect(filePart).toMatchObject({
+        type: "file",
+        fileRef: { fileName: "bash-image.png", mediaType: "image/png" },
+      })
+      if (!filePart || filePart.type !== "file") throw new Error("Expected viewed image file.")
+      expect(
+        new Uint8Array(
+          await new Response(await sixb.blobStorage.open(filePart.fileRef.blobId)).arrayBuffer()
+        )
+      ).toEqual(TEST_PNG_BYTES)
+      expect(
+        sandboxes.sandboxes[0]?.writtenFiles.some((file) =>
+          file.path.includes(".sixb/agent/artifacts/")
+        )
+      ).toBe(true)
+      if (typeof Bun.Image === "function") {
+        expect(JSON.stringify(viewedPrompt)).toContain(
+          Buffer.from(TEST_PNG_BYTES).toString("base64")
+        )
+      }
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("attaches files written to the sandbox output directory to the assistant message", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(outputBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
@@ -6240,7 +6541,6 @@ describe("AgentWorker", () => {
       const {
         run: { threadId },
       } = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "create a report",
       })
 
@@ -6291,7 +6591,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "create a report",
       })
       await sandboxes.sandbox.listStarted
@@ -6337,7 +6636,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "create a report",
       })
       const run = await waitFor(
@@ -6412,7 +6710,6 @@ describe("AgentWorker", () => {
         const {
           run: { threadId },
         } = await requestAgent(sixb, {
-          agentId: "assistant",
           text: "draft a note",
         })
         const run = await waitFor(
@@ -6469,7 +6766,7 @@ describe("AgentWorker", () => {
     try {
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "check the project" })
+      } = await requestAgent(sixb, { text: "check the project" })
       const run = await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -6488,8 +6785,7 @@ describe("AgentWorker", () => {
       )
       expect(capturedSystem).toContain("Do not run `sixb --help`")
       expect(capturedSystem).toContain("Sixb agent CLI")
-      expect(capturedSystem).toContain("<agent_instructions>")
-      expect(capturedSystem).toContain("You are a helpful test assistant.")
+      expect(capturedSystem).not.toContain("<agent_instructions>")
       expect(capturedSystem).not.toContain("Available Agent Skills")
 
       const sandbox = sandboxes.sandboxes[0]
@@ -6513,7 +6809,6 @@ describe("AgentWorker", () => {
       const {
         run: { threadId, id: runId },
       } = await requestAgent(sixb, {
-        agentId: "assistant",
         text: "inspect sixb api context",
       })
 
@@ -6547,7 +6842,7 @@ describe("AgentWorker", () => {
         `http://localhost:3002/__sixb/agent-api/${encodeURIComponent(runId)}/`
       )
       expect(env?.SIXB_PROJECT_ID).toBe(PROJECT_ID)
-      expect(env?.SIXB_AGENT_ID).toBe("assistant")
+      expect(env?.SIXB_ACTOR_ID).toBeUndefined()
       expect(env?.SIXB_THREAD_ID).toBe(threadId)
       expect(env?.SIXB_RUN_ID).toBe(runId)
       expect(env?.SIXB_CONTEXT_DIR).toContain("/.sixb/agent")
@@ -6586,7 +6881,6 @@ describe("AgentWorker", () => {
       const runContext = JSON.parse(sandbox.readFileContents(env.SIXB_RUN_CONTEXT)) as unknown
       expect(runContext).toMatchObject({
         projectId: PROJECT_ID,
-        agentId: "assistant",
         threadId,
         runId,
         apiBaseUrl: env.SIXB_API_BASE_URL,
@@ -6647,7 +6941,7 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
     const auth = authStorageOf(sixb)
 
-    const firstRequest = await requestAgent(sixb, { agentId: "assistant", text: "first" })
+    const firstRequest = await requestAgent(sixb, { text: "first" })
 
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 2, idlePollMs: 10 }))
     await worker.start()
@@ -6661,7 +6955,7 @@ describe("AgentWorker", () => {
       })
       expect(firstInitiallyRunning?.status).toBe("running")
 
-      const secondRequest = await requestAgent(sixb, { agentId: "assistant", text: "second" })
+      const secondRequest = await requestAgent(sixb, { text: "second" })
 
       await waitFor(() => (controlled.startedCount() >= 2 ? true : null), {
         label: "two concurrent model streams started",
@@ -6743,7 +7037,7 @@ describe("AgentWorker", () => {
       reportCount += 1
     })
 
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "go" })
+    const request = await requestAgent(sixb, { text: "go" })
 
     const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10 }))
     await worker.start()
@@ -6811,7 +7105,7 @@ describe("AgentWorker", () => {
       { agentTools: [blockingEcho] }
     )
     const storage = agentStorageOf(sixb)
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "wait" })
+    const request = await requestAgent(sixb, { text: "wait" })
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
     await worker.start()
     try {
@@ -6839,7 +7133,7 @@ describe("AgentWorker", () => {
     // Regression proof: let prepareStep abort errors escape runModelLoop without its completed steps.
     const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "go" })
+    const request = await requestAgent(sixb, { text: "go" })
     const run = await storage.runs.start({
       projectId: PROJECT_ID,
       id: request.run.id,
@@ -6863,7 +7157,7 @@ describe("AgentWorker", () => {
           signal.throwIfAborted()
         },
       },
-      plan: executionPlanFor(requiredAgent(sixb)),
+      plan: executionPlanFor(sixb),
       run: requireConversationRun(run),
       signal: abort.signal,
     })
@@ -6888,7 +7182,7 @@ describe("AgentWorker", () => {
     const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
     const storage = agentStorageOf(sixb)
 
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "go" })
+    const request = await requestAgent(sixb, { text: "go" })
 
     const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10 }))
     await worker.start()
@@ -6961,7 +7255,7 @@ describe("AgentWorker", () => {
     try {
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      } = await requestAgent(sixb, { text: "echo hi" })
       await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -6993,7 +7287,7 @@ describe("AgentWorker", () => {
       await worker.start()
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      } = await requestAgent(sixb, { text: "echo hi" })
       const run = await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -7054,7 +7348,7 @@ describe("AgentWorker", () => {
       await worker.start()
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      } = await requestAgent(sixb, { text: "echo hi" })
       const run = await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -7078,7 +7372,7 @@ describe("AgentWorker", () => {
   test("drops non-JSON UI chunks without corrupting durable run state", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+    const request = await requestAgent(sixb, { text: "echo hi" })
     const run = await storage.runs.start({
       id: request.run.id,
       projectId: PROJECT_ID,
@@ -7116,7 +7410,7 @@ describe("AgentWorker", () => {
     const storage = agentStorageOf(sixb)
 
     // Open a thread and simulate a worker starting its queued run.
-    const first = await requestAgent(sixb, { agentId: "assistant", text: "first" })
+    const first = await requestAgent(sixb, { text: "first" })
     await storage.runs.start({
       id: first.run.id,
       projectId: PROJECT_ID,
@@ -7124,7 +7418,6 @@ describe("AgentWorker", () => {
     })
 
     const promise = requestAgent(sixb, {
-      agentId: "assistant",
       text: "second",
       threadId: first.run.threadId,
     })
@@ -7141,7 +7434,6 @@ describe("AgentWorker", () => {
     const {
       run: { id: runId },
     } = await requestAgent(sixb, {
-      agentId: "assistant",
       text: "echo hi",
     })
     const crashedRunId = runId
@@ -7203,7 +7495,6 @@ describe("AgentWorker", () => {
     const {
       run: { threadId, id: runId },
     } = await requestAgent(sixb, {
-      agentId: "assistant",
       text: "echo hi",
     })
 
@@ -7228,12 +7519,12 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
-        systemPrompt: "Test system prompt.",
+        systemPrompt: testSystemPrompt(),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
       },
-      plan: executionPlanFor(requiredAgent(sixb)),
+      plan: executionPlanFor(sixb),
       run: staleRun,
       signal: new AbortController().signal,
     })
@@ -7272,7 +7563,7 @@ describe("AgentWorker", () => {
       },
     })
     const sixb = buildSixb(model)
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "hello" })
+    const request = await requestAgent(sixb, { text: "hello" })
     const run = await reserveRequestedRun(sixb, request)
 
     await runAgentTurn({
@@ -7282,12 +7573,12 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: [],
-        systemPrompt: "<sixb_runtime_context>\nExtra sandbox context.\n</sixb_runtime_context>",
+        systemPrompt: testSystemPrompt(),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
       },
-      plan: executionPlanFor(requiredAgent(sixb)),
+      plan: executionPlanFor(sixb),
       run,
       signal: new AbortController().signal,
     })
@@ -7296,7 +7587,8 @@ describe("AgentWorker", () => {
     if (!capturedSystem) throw new Error("Expected a system prompt")
 
     expect(capturedSystem).toContain("<sixb_runtime_context>")
-    expect(capturedSystem).toContain("Extra sandbox context.")
+    expect(capturedSystem).toContain("inside a live Sixb project modeled as an ontology")
+    expect(capturedSystem).toContain("<sixb_mode_rules>")
   })
 
   test("passes agent reasoning into the owned model request", async () => {
@@ -7314,10 +7606,8 @@ describe("AgentWorker", () => {
         ])
       },
     })
-    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
-      reasoning: "high",
-    })
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "hello" })
+    const sixb = buildSixb(model)
+    const request = await requestAgent(sixb, { text: "hello" })
     const run = await reserveRequestedRun(sixb, request)
 
     await runAgentTurn({
@@ -7327,12 +7617,15 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: [],
-        systemPrompt: "Test system prompt.",
+        systemPrompt: testSystemPrompt(),
         streamSink: NOOP_STREAM_SINK,
         recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
       },
-      plan: executionPlanFor(requiredAgent(sixb)),
+      plan: {
+        ...executionPlanFor(sixb),
+        reasoning: "high",
+      },
       run,
       signal: new AbortController().signal,
     })
@@ -7377,7 +7670,7 @@ describe("AgentWorker", () => {
 
     await worker.start()
     try {
-      const request = await requestAgent(sixb, { agentId: "assistant", text: "hello" })
+      const request = await requestAgent(sixb, { text: "hello" })
       const run = await waitFor(
         async () => {
           const current = await agentStorageOf(sixb).runs.getById({
@@ -7422,7 +7715,7 @@ describe("AgentWorker", () => {
     try {
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "hi" })
+      } = await requestAgent(sixb, { text: "hi" })
       const run = await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -7436,7 +7729,7 @@ describe("AgentWorker", () => {
         code: "agent.execution_failed",
         message: "Agent execution failed.",
         retryable: false,
-        details: { agentId: "assistant", runId: run.id, threadId },
+        details: { runId: run.id, threadId },
       })
       expect(run.error?.at).toBe(run.completedAt?.toISOString())
       await reporter.flush()
@@ -7448,7 +7741,7 @@ describe("AgentWorker", () => {
         projectId: PROJECT_ID,
         attempt: 1,
         runKind: "agent",
-        run: { runId: run.id, agentId: "assistant" },
+        run: { runId: run.id, threadId },
         failure: run.error,
       })
       expect(reports[0]?.context.occurredAt).toBe(run.error?.at ?? "")
@@ -7494,7 +7787,7 @@ describe("AgentWorker", () => {
     try {
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "hi" })
+      } = await requestAgent(sixb, { text: "hi" })
       const run = await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -7508,7 +7801,7 @@ describe("AgentWorker", () => {
         code: "agent.execution_failed",
         message: "Agent execution failed.",
         retryable: false,
-        details: { agentId: "assistant", runId: run.id, threadId },
+        details: { runId: run.id, threadId },
       })
 
       // The turn threw before finalizing, so no assistant message was persisted.
@@ -7549,7 +7842,7 @@ describe("AgentWorker", () => {
     await worker.start()
     const {
       run: { threadId, id: runId },
-    } = await requestAgent(sixb, { agentId: "assistant", text: "hang" })
+    } = await requestAgent(sixb, { text: "hang" })
 
     // Wait until the run is reserved and in-flight, then stop the worker.
     await waitFor(
@@ -7589,7 +7882,7 @@ describe("AgentWorker", () => {
     try {
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+      } = await requestAgent(sixb, { text: "echo hi" })
       const run = await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -7617,7 +7910,7 @@ describe("AgentWorker", () => {
   test("rolls back the assistant message when finalization fails before redelivery", async () => {
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
-    const request = await requestAgent(sixb, { agentId: "assistant", text: "echo hi" })
+    const request = await requestAgent(sixb, { text: "echo hi" })
     const run = requireConversationRun(
       await storage.runs.start({
         id: request.run.id,
@@ -7635,7 +7928,7 @@ describe("AgentWorker", () => {
           storage: workerStorageOf(failingStorage),
           blobStorage: sixb.blobStorage,
           tools: echoTool,
-          systemPrompt: "Test system prompt.",
+          systemPrompt: testSystemPrompt(),
           streamSink: createBrokerStreamSink({
             broker: sixb.broker,
             projectId: PROJECT_ID,
@@ -7643,7 +7936,7 @@ describe("AgentWorker", () => {
           recoverAiModelCall: recoverAiModelCall(sixb),
           turnTimeoutMs: 60_000,
         },
-        plan: executionPlanFor(requiredAgent(sixb)),
+        plan: executionPlanFor(sixb),
         run,
         signal: new AbortController().signal,
       })
@@ -7675,7 +7968,7 @@ describe("AgentWorker", () => {
         storage: workerStorageOf(sixb.storage),
         blobStorage: sixb.blobStorage,
         tools: echoTool,
-        systemPrompt: "Test system prompt.",
+        systemPrompt: testSystemPrompt(),
         streamSink: createBrokerStreamSink({
           broker: sixb.broker,
           projectId: PROJECT_ID,
@@ -7683,7 +7976,7 @@ describe("AgentWorker", () => {
         recoverAiModelCall: recoverAiModelCall(sixb),
         turnTimeoutMs: 60_000,
       },
-      plan: executionPlanFor(requiredAgent(sixb)),
+      plan: executionPlanFor(sixb),
       run: reclaimed,
       signal: new AbortController().signal,
     })
@@ -7728,7 +8021,7 @@ describe("AgentWorker", () => {
     const worker = new AgentWorker(sixb, workerOptions({ turnTimeoutMs: 100 }))
     await worker.start()
     try {
-      const request = await requestAgent(sixb, { agentId: "assistant", text: "investigate" })
+      const request = await requestAgent(sixb, { text: "investigate" })
       await controlled.waitForStarted()
       await waitFor(
         async () => {
@@ -7788,7 +8081,7 @@ describe("AgentWorker", () => {
     try {
       const {
         run: { threadId },
-      } = await requestAgent(sixb, { agentId: "assistant", text: "hang" })
+      } = await requestAgent(sixb, { text: "hang" })
       const run = await waitFor(
         async () => {
           const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
@@ -7803,7 +8096,7 @@ describe("AgentWorker", () => {
         code: "agent.execution_failed",
         message: "Agent execution failed.",
         retryable: false,
-        details: { agentId: "assistant", runId: run.id, threadId },
+        details: { runId: run.id, threadId, timeoutMs: "50" },
       })
       expect(
         (await listRunStreamRecords(sixb.broker, run.id)).find(
@@ -7839,7 +8132,6 @@ describe("AgentWorker", () => {
     })
     const threadId = "preflight_compaction_timeout_thread"
     await storage.threads.create({
-      agentId: "assistant",
       id: threadId,
       projectId: PROJECT_ID,
       ownerPrincipal: REQUESTER,
@@ -7856,7 +8148,6 @@ describe("AgentWorker", () => {
     await worker.start()
     try {
       const request = await requestAgentAs(sixb, REQUESTER, {
-        agentId: "assistant",
         threadId,
         text: "Continue after compacting the thread.",
       })
@@ -7890,7 +8181,8 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("reports a queued run failed when its agent is no longer registered", async () => {
+  test("terminalizes a queued run whose model is unavailable", async () => {
+    // Regression proof: immediately failing permanent delivery errors leaves the main run queued.
     const sixb = buildSixb(toolThenAnswerModel())
     const storage = agentStorageOf(sixb)
     const reports: Array<{ error: Error; context: SixbErrorContext }> = []
@@ -7903,7 +8195,6 @@ describe("AgentWorker", () => {
     await storage.threads.create({
       id: threadId,
       projectId: PROJECT_ID,
-      agentId: "removed-agent",
       ownerPrincipal: REQUESTER,
     })
     await storage.messages.append({
@@ -7916,7 +8207,6 @@ describe("AgentWorker", () => {
     })
     const executionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      agentId: "removed-agent",
       runId,
     })
     await storage.runs.create({
@@ -7924,7 +8214,6 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       executionId,
       threadId,
-      agentId: "removed-agent",
       triggerMessageId,
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["engineering"],
@@ -7953,25 +8242,24 @@ describe("AgentWorker", () => {
         status: "failed",
         attempt: 1,
         error: {
-          code: "internal.unexpected",
+          code: "agent.execution_failed",
           retryable: false,
-          message: "An unexpected internal error occurred.",
-          details: { agentId: "removed-agent", runId, threadId },
+          message: "Agent execution failed.",
         },
       })
       await reporter.flush()
       expect(reports).toHaveLength(1)
       expect(reports[0]?.error).toMatchObject({
-        code: "internal.unexpected",
+        code: "agent.execution_failed",
         retryable: false,
-        message: "[SixbAgentWorker] Unknown agent 'removed-agent'.",
-        details: { agentId: "removed-agent", runId, threadId },
+        message:
+          "[SixbAgentWorker] The conversation's language model is not available in models.language.",
       })
       expect(reports[0]?.context).toMatchObject({
         projectId: PROJECT_ID,
         attempt: 1,
         runKind: "agent",
-        run: { runId, agentId: "removed-agent" },
+        run: { runId, threadId },
         failure: failed.error,
       })
       await expect(
@@ -7992,7 +8280,6 @@ describe("AgentWorker", () => {
     const {
       run: { threadId, id: activeRunId },
     } = await requestAgent(sixb, {
-      agentId: "assistant",
       text: "first",
     })
     const [queuedA] = await sixb.queues.agents.claim({

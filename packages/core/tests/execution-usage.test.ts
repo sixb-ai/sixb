@@ -7,7 +7,7 @@ async function createUsageStorage(runId = "run_1") {
   const storage = new InMemoryStorage()
   const executionId = await createTestAgentExecution(storage, {
     projectId: "project_1",
-    agentId: "assistant",
+    actorId: "assistant",
     runId,
   })
   return { storage: storage.aiUsage, executionId }

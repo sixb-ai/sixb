@@ -7,7 +7,7 @@
 
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentDefinition, AgentToolDefinition } from "../agents"
+import type { AgentToolDefinition } from "../agents"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -108,7 +108,6 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   projections?: readonly ProjectionDefinition[]
   rules?: readonly RuleDefinition[]
   workflows?: readonly WorkflowDefinition[]
-  agents?: readonly AgentDefinition[]
   models?: ModelCatalogInput
   /** Project tools available to Agent runtimes. */
   tools?: readonly AgentToolDefinition[]

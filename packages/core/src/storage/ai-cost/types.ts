@@ -152,9 +152,15 @@ export interface AiAccountingTimeBucket extends AiAccountingAggregate {
   readonly end: Date
 }
 
-export interface AiAccountingAgentBreakdown extends AiAccountingAggregate {
-  readonly agentId: string
-}
+export type AiAccountingAgentBreakdown = AiAccountingAggregate &
+  (
+    | { readonly kind: "agent" }
+    | {
+        readonly kind: "workflowAgent"
+        readonly workflowId: string
+        readonly agentStepId: string
+      }
+  )
 
 export interface AiAccountingWorkflowBreakdown extends AiAccountingAggregate {
   readonly workflowId: string
@@ -178,13 +184,12 @@ export interface AiAccountingOverview {
 export type AiAccountingAttribution =
   | {
       readonly kind: "agent"
-      readonly agentId: string
       readonly agentRunId: string
       readonly threadId: string
     }
   | {
       readonly kind: "workflowAgent"
-      readonly agentId: string
+      readonly agentStepId: string
       readonly nodeRunId: string
       readonly workflowId: string
       readonly workflowRunId: string

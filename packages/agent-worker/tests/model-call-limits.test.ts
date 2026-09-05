@@ -31,7 +31,6 @@ async function storageWithExecution() {
   const storage = new InMemoryStorage()
   await createTestAgentExecution(storage, {
     projectId,
-    agentId: "assistant",
     runId: "run_limits",
     executionId,
   })
