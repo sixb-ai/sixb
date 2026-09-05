@@ -1,4 +1,4 @@
 export { appendTelemetryBatch } from "./append-batch"
-export type { TelemetryHistoryOptions } from "./history"
-export { getTelemetryHistoryBatch } from "./history"
+export type { TelemetryHistoryBatchInput, TelemetryHistoryOptions } from "./history"
+export { getLatestTelemetryPoint, getTelemetryHistoryBatch } from "./history"
 export { writeTelemetryBatch } from "./write-batch"
