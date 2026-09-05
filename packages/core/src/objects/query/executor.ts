@@ -16,7 +16,7 @@ import type {
   ObjectRowLinks,
   QueryObjectsResult,
 } from "../../storage"
-import { linkBatchKey, objectBatchKey } from "../../storage"
+import { linkBatchKey, MAX_OBJECT_READ_FACETS, objectBatchKey } from "../../storage"
 import {
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -328,7 +328,7 @@ export async function facetObjects(
     normalize: false,
   })
   assertQueryViewable(input.projectId, validated, options)
-  const facets = validateFacetRequests(input.facets, validated.result.objectTypeIds, options)
+  const facets = validateObjectFacetRequests(input.facets, validated.result.objectTypeIds, options)
   const aggregateQuery = stripOuterRowShape(validated.query)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
@@ -1177,16 +1177,27 @@ function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
   }
 }
 
-function validateFacetRequests(
+/** @internal Shared pre-storage validation; intentionally absent from query barrels. */
+export function validateObjectFacetRequests(
   facets: readonly ObjectFacetRequest[],
   objectTypeIds: readonly string[],
-  options: QueryExecutorOptions
+  options: Pick<QueryExecutorOptions, "ontology" | "maxFacetLimit">
 ): ObjectFacetRequest[] {
   const issues: ObjectQueryValidationIssue[] = []
   const maxLimit = options.maxFacetLimit ?? DEFAULT_MAX_FACET_LIMIT
 
   if (facets.length === 0) {
     addFacetIssue(issues, "$.facets", "empty_facets", "At least one facet is required")
+  }
+
+  if (facets.length > MAX_OBJECT_READ_FACETS) {
+    throw new ObjectQueryValidationError([
+      {
+        path: "$.facets",
+        code: "too_many_facets",
+        message: `facets must include at most ${MAX_OBJECT_READ_FACETS} facet requests`,
+      },
+    ])
   }
 
   if (!Number.isInteger(maxLimit) || maxLimit <= 0) {

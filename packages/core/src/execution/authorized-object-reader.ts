@@ -20,15 +20,28 @@ import {
 } from "../objects/query"
 import { assertObjectQueryComplexity } from "../objects/query/complexity"
 import { ObjectQueryValidationError } from "../objects/query/errors"
+import { validateObjectFacetRequests } from "../objects/query/executor"
 import type { ObjectQuery } from "../objects/query/ir"
+import { preflightObjectQueryLinks } from "../objects/query/links"
+import {
+  createSelectedObjectQueryAdmission,
+  type SelectedObjectQueryAdmission,
+} from "../objects/query/selected-read-admission"
+import {
+  type AdmittedObjectQuery,
+  validateObjectQuery,
+  validateObjectQueryWithAdmission,
+} from "../objects/query/validate"
 import type { OntologyRegistry } from "../ontology"
 import type {
   CompiledObjectReadStep,
   LinkBatchKey,
+  ObjectFacetRequest,
   ObjectLinkRow,
   ObjectReadStorage,
   ObjectStorage,
 } from "../storage"
+import { MAX_OBJECT_READ_FACETS } from "../storage"
 import { captureExecutionScope, resolveExecutionScopeAuthorization } from "./authorization"
 import type { ExecutionScope, RuntimeAuthorization } from "./types"
 
@@ -65,6 +78,7 @@ class AuthorizedObjectReaderImpl {
   readonly #storage: ObjectReadStorage
   readonly #delegatedObjectTypeIds?: ReadonlySet<string>
   readonly #delegatedLinkDefinitions?: ReadonlySet<string>
+  readonly #delegatedQueryAdmission?: SelectedObjectQueryAdmission
 
   constructor(
     key: typeof readerConstructionKey,
@@ -90,6 +104,10 @@ class AuthorizedObjectReaderImpl {
     this.#delegatedLinkDefinitions =
       input.authority.type === "delegated"
         ? new Set(input.authority.objectRead.scope.steps.map(delegatedLinkDefinitionKey))
+        : undefined
+    this.#delegatedQueryAdmission =
+      input.authority.type === "delegated"
+        ? createSelectedObjectQueryAdmission(input.authority.objectRead.scope)
         : undefined
     this.#runtime = Object.freeze({
       projectId: input.scope.execution.projectId,
@@ -262,13 +280,13 @@ class AuthorizedObjectReaderImpl {
   async executeQuery(
     input: Omit<ExecuteObjectQueryInput, "projectId">
   ): Promise<ExecuteObjectQueryResult> {
-    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
     const includeTotal = snapshotReadValue(input.includeTotal)
+    const executionQuery = this.#admitDelegatedQuery(query)?.query ?? query
     return detachReadResult(
       await executeObjectQuery(
         {
-          query,
+          query: executionQuery,
           ...(includeTotal === undefined ? {} : { includeTotal }),
           projectId: this.#runtime.projectId,
         },
@@ -280,7 +298,6 @@ class AuthorizedObjectReaderImpl {
   async queryLinks(
     input: Omit<ExecuteObjectQueryLinksInput, "projectId">
   ): Promise<ExecuteObjectQueryLinksResult> {
-    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
     const request = snapshotReadValue({
       direction: input.direction,
@@ -289,9 +306,29 @@ class AuthorizedObjectReaderImpl {
       pageSize: input.pageSize,
       pageToken: input.pageToken,
     })
+    let executionQuery = query
+    const admission = this.#delegatedQueryAdmission
+    if (admission) {
+      const preflight = preflightObjectQueryLinks(
+        { query, ...request, projectId: this.#runtime.projectId },
+        { ontology: this.#ontology }
+      )
+      const admitted = validateObjectQueryWithAdmission(
+        preflight.validated.query,
+        { ontology: this.#ontology, normalize: false },
+        admission
+      )
+      admission.assertIncidentEdgeSelected({
+        state: admitted.admissionState,
+        ...(preflight.linkId === undefined ? {} : { linkId: preflight.linkId }),
+        direction: preflight.direction,
+        path: "$.linkId",
+      })
+      executionQuery = admitted.query
+    }
     const result = detachReadResult(
       await executeObjectQueryLinks(
-        { query, ...request, projectId: this.#runtime.projectId },
+        { query: executionQuery, ...request, projectId: this.#runtime.projectId },
         this.#queryExecutorOptions()
       )
     )
@@ -311,11 +348,11 @@ class AuthorizedObjectReaderImpl {
   async count(
     input: Omit<ExecuteObjectCountInput, "projectId">
   ): Promise<ExecuteObjectCountResult> {
-    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
+    const executionQuery = this.#admitDelegatedQuery(query)?.query ?? query
     return detachReadResult(
       await countObjects(
-        { query, projectId: this.#runtime.projectId },
+        { query: executionQuery, projectId: this.#runtime.projectId },
         this.#queryExecutorOptions()
       )
     )
@@ -324,11 +361,11 @@ class AuthorizedObjectReaderImpl {
   async exists(
     input: Omit<ExecuteObjectExistsInput, "projectId">
   ): Promise<ExecuteObjectExistsResult> {
-    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
+    const executionQuery = this.#admitDelegatedQuery(query)?.query ?? query
     return detachReadResult(
       await existsObjects(
-        { query, projectId: this.#runtime.projectId },
+        { query: executionQuery, projectId: this.#runtime.projectId },
         this.#queryExecutorOptions()
       )
     )
@@ -337,20 +374,53 @@ class AuthorizedObjectReaderImpl {
   async facet(
     input: Omit<ExecuteObjectFacetsInput, "projectId">
   ): Promise<ExecuteObjectFacetsResult> {
-    this.#assertDelegatedQueriesAdmitted()
     const query = snapshotAuthoredQuery(input.query)
-    const facets = snapshotReadValue(
-      input.facets.map((facet) => ({ propertyId: facet.propertyId, limit: facet.limit }))
-    )
+    const facets = snapshotFacetRequests(input.facets)
+    let executionQuery = query
+    let executionFacets = facets
+    const admission = this.#delegatedQueryAdmission
+    if (admission) {
+      // Terminal arguments are ordinary validation errors, not an authorization oracle. Validate
+      // them against the canonical result shape before raising any delegated-scope denial.
+      const validated = validateObjectQuery(query, { ontology: this.#ontology })
+      const normalizedFacets = validateObjectFacetRequests(facets, validated.result.objectTypeIds, {
+        ontology: this.#ontology,
+      })
+      const admitted = validateObjectQueryWithAdmission(
+        validated.query,
+        { ontology: this.#ontology, normalize: false },
+        admission
+      )
+      normalizedFacets.forEach((facet, index) => {
+        admission.assertPropertySelected({
+          state: admitted.admissionState,
+          propertyId: facet.propertyId,
+          use: "facet",
+          path: `$.facets[${index}].propertyId`,
+        })
+      })
+      executionQuery = admitted.query
+      executionFacets = normalizedFacets
+    }
     return detachReadResult(
       await facetObjects(
-        { query, facets, projectId: this.#runtime.projectId },
+        {
+          query: executionQuery,
+          facets: executionFacets,
+          projectId: this.#runtime.projectId,
+        },
         this.#queryExecutorOptions()
       )
     )
   }
 
   #queryExecutorOptions() {
+    if (this.#authority.type === "delegated") {
+      // The selected storage instance is the private execution capability. Passing the delegated
+      // runtime token into the generic executor would either reject this admitted query or tempt a
+      // forgeable bypass flag; neither is needed at this nominal boundary.
+      return { ontology: this.#ontology, storage: this.#storage }
+    }
     return {
       ontology: this.#ontology,
       storage: this.#storage,
@@ -359,6 +429,15 @@ class AuthorizedObjectReaderImpl {
         ? {}
         : { authorization: this.#runtime.authorization }),
     }
+  }
+
+  #admitDelegatedQuery(query: ObjectQuery): AdmittedObjectQuery | undefined {
+    if (!this.#delegatedQueryAdmission) return undefined
+    return validateObjectQueryWithAdmission(
+      query,
+      { ontology: this.#ontology },
+      this.#delegatedQueryAdmission
+    )
   }
 
   #assertObjectTypesViewable(objectTypeIds: readonly string[]): void {
@@ -402,14 +481,6 @@ class AuthorizedObjectReaderImpl {
       return this.#delegatedObjectTypeIds?.has(objectTypeId) ?? false
     }
     return isAllowed(this.#runtime.authorization, { kind: "object.view", objectTypeId })
-  }
-
-  #assertDelegatedQueriesAdmitted(): void {
-    if (this.#authority.type !== "delegated") return
-    throw new AuthorizationError(
-      "delegated:object.query",
-      "[Sixb] Object Query terminals require explicit selected-path admission under delegated authorization."
-    )
   }
 
   #isLinkViewable(link: ObjectLinkRow): boolean {
@@ -504,6 +575,36 @@ function detachReadResult<T>(value: T): T {
 /** Capture caller-owned values before authorization and execution. */
 function snapshotReadValue<T>(value: T): T {
   return structuredClone(value)
+}
+
+/** Bound and capture facet arguments before reading any caller-owned element. */
+function snapshotFacetRequests(facets: readonly ObjectFacetRequest[]): ObjectFacetRequest[] {
+  if (!Array.isArray(facets)) {
+    throw new ObjectQueryValidationError([
+      {
+        path: "$.facets",
+        code: "invalid_facets",
+        message: "facets must be an array",
+      },
+    ])
+  }
+  const length = facets.length
+  if (!Number.isSafeInteger(length) || length > MAX_OBJECT_READ_FACETS) {
+    throw new ObjectQueryValidationError([
+      {
+        path: "$.facets",
+        code: "too_many_facets",
+        message: `facets must include at most ${MAX_OBJECT_READ_FACETS} facet requests`,
+      },
+    ])
+  }
+
+  const snapshot: ObjectFacetRequest[] = []
+  for (let index = 0; index < length; index += 1) {
+    const facet = facets[index]
+    snapshot.push({ propertyId: facet.propertyId, limit: facet.limit })
+  }
+  return snapshot
 }
 
 /**
