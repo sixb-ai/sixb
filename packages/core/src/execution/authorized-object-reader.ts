@@ -2,6 +2,11 @@ import { assertAuthorized, isAllowed } from "../authorization"
 import { AuthorizationError } from "../authorization/errors"
 import type { AuthorizationContext } from "../authorization/types"
 import {
+  type AuthorizedOntologySelection,
+  type AuthorizedOntologyView,
+  createAuthorizedOntologyView,
+} from "../objects/authorized-ontology-view"
+import {
   countObjects,
   type ExecuteObjectCountInput,
   type ExecuteObjectCountResult,
@@ -80,6 +85,7 @@ class AuthorizedObjectReaderImpl {
   readonly #authority: ResolvedExecutionAuthority
   readonly #runtime: RuntimeReadAuthorization
   readonly #ontology: OntologyRegistry
+  #ontologyView?: AuthorizedOntologyView
   readonly #storage: ObjectReadStorage
   readonly #delegatedObjectTypeIds?: ReadonlySet<string>
   readonly #delegatedLinkDefinitions?: ReadonlySet<string>
@@ -129,6 +135,21 @@ class AuthorizedObjectReaderImpl {
         "[Sixb] AuthorizedObjectReader is not bound to this exact execution authority."
       )
     }
+  }
+
+  static ontologyView(reader: AuthorizedObjectReaderImpl): AuthorizedOntologyView {
+    const authority = reader.#authority
+    reader.#ontologyView ??= createAuthorizedOntologyView({
+      ontology: reader.#ontology,
+      selection: ontologySelectionForAuthority(authority, reader.#ontology),
+      ...(authority.type === "delegated"
+        ? {
+            assertOutputWithinLimit: (value: unknown) =>
+              assertObjectReadOutputWithinLimit(value, authority.objectRead.limits),
+          }
+        : {}),
+    })
+    return reader.#ontologyView
   }
 
   /** Project identity carried by this nominal reader capability. */
@@ -550,6 +571,11 @@ export function assertAuthorizedObjectReaderBinding(input: {
   AuthorizedObjectReaderImpl.assertBound(input.reader, input.scope)
 }
 
+/** Return inert metadata projected from the exact authority already owned by the reader. */
+export function getAuthorizedOntologyView(reader: AuthorizedObjectReader): AuthorizedOntologyView {
+  return AuthorizedObjectReaderImpl.ontologyView(reader)
+}
+
 function objectStorageForAuthority(
   authority: ResolvedExecutionAuthority,
   objectStorage: ObjectStorage
@@ -572,6 +598,31 @@ function assertNever(value: never): never {
   throw new Error(
     `[Sixb] Unsupported object reader authority '${String((value as { type?: unknown }).type)}'.`
   )
+}
+
+function ontologySelectionForAuthority(
+  authority: ResolvedExecutionAuthority,
+  ontology: OntologyRegistry
+): AuthorizedOntologySelection {
+  switch (authority.type) {
+    case "unrestricted":
+      return { kind: "all" }
+    case "principal":
+      return {
+        kind: "types",
+        objectTypeIds: ontology
+          .listObjectTypes()
+          .filter((objectType) =>
+            isAllowed(authority.context, {
+              kind: "object.view",
+              objectTypeId: objectType.id,
+            })
+          )
+          .map((objectType) => objectType.id),
+      }
+    case "delegated":
+      return { kind: "selected", scope: authority.objectRead.scope }
+  }
 }
 
 function delegatedLinkDefinitionKey(
