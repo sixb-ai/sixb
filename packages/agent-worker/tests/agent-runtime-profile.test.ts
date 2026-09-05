@@ -250,7 +250,7 @@ describe("agent runtime conformance", () => {
       sandbox,
       apiBaseUrl: `http://127.0.0.1:${server.port}`,
       projectId: PROJECT_ID,
-      agentId: "assistant",
+      actorId: "assistant",
       runId: "run-1",
       skills: [],
     })
@@ -274,7 +274,7 @@ describe("agent runtime conformance", () => {
       sandbox,
       apiBaseUrl: "http://gateway.invalid",
       projectId: PROJECT_ID,
-      agentId: "assistant",
+      actorId: "assistant",
       runId: "run-1",
       skills: [],
     })

@@ -1,15 +1,15 @@
-import type { AgentDefinition } from "@sixb/core"
+import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider"
 
-type ProviderOptions = AgentDefinition["providerOptions"]
+type ProviderOptions = LanguageModelV4CallOptions["providerOptions"]
 
 const GATEWAY_PROVIDER_IDS = new Set(["gateway", "gateway.language-model"])
 
 /**
  * Enable the Gateway's provider-neutral automatic caching without leaking provider policy into
- * project Agent definitions. Explicit project configuration always wins.
+ * the public Agent configuration. Explicit provider options always win.
  */
 export function withAutomaticPromptCaching(
-  model: AgentDefinition["model"],
+  model: LanguageModelV4,
   providerOptions: ProviderOptions
 ): ProviderOptions {
   if (!GATEWAY_PROVIDER_IDS.has(model.provider)) return providerOptions

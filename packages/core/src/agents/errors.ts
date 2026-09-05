@@ -39,13 +39,13 @@ export class AgentToolResultValidationError extends Error {
 }
 
 export type AgentRequestErrorCode =
+  | "agent_selector_removed"
   | "agent_not_found"
   | "model_not_found"
   | "invalid_model_selection"
   | "run_not_found"
   | "run_not_retryable"
   | "thread_not_found"
-  | "thread_agent_mismatch"
   | "active_run_exists"
   | "authority_not_inheritable"
   | "invalid_context"

@@ -6,7 +6,7 @@ import type {
   ObjectActionDefinition,
 } from "../actions"
 import type { ActionsRuntime } from "../actions/execution"
-import type { AgentsRuntime } from "../agents/execution"
+import type { AgentRuntime } from "../agents/execution"
 import type { AgentReasoningLevel, AgentToolDefinition } from "../agents/types"
 import type { Principal } from "../auth"
 import type { BlobsRuntime } from "../blob-storage/execution"
@@ -62,7 +62,7 @@ export interface StepRunContext<TInput extends Record<string, unknown>> {
 export interface WorkflowRuntimeFacade {
   readonly objects: ObjectsRuntime<readonly OntologySource[]>
   readonly actions: ActionsRuntime
-  readonly agents: AgentsRuntime
+  readonly agent: AgentRuntime
   readonly datasets: DatasetsRuntime
   readonly workflows: WorkflowsRuntime
   readonly syncs: SyncsRuntime

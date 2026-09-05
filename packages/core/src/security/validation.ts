@@ -8,10 +8,13 @@ import type {
   MembershipPolicyDefinition,
   RegisteredSecurityDefinitions,
   RoleDefinition,
+  Selection,
 } from "./types"
 
-/** Registered id universes keyed as the grant-kind table expects them. */
-type RegisteredUniverses = Partial<Record<GrantUniverseKey, ReadonlySet<string>>>
+/** Registered id universes and singleton capabilities available to role grants. */
+type RegisteredUniverses = Partial<Record<GrantUniverseKey, ReadonlySet<string>>> & {
+  readonly agentAvailable?: boolean
+}
 
 /**
  * Every grant capability, for validating grants that arrive from untyped code.
@@ -228,6 +231,13 @@ export function assertGrantDefinition(
     throw createError(`[Sixb] ${field} manage grant must not declare a target.`)
   }
 
+  if (value.capability === "run" && value.target === "agent") {
+    if (value.selection !== undefined) {
+      throw createError(`[Sixb] ${field} agent run grant must not declare a selection.`)
+    }
+    return
+  }
+
   assertSelection(value.selection, field, createError)
 }
 
@@ -235,7 +245,7 @@ function assertSelection(
   value: unknown,
   field: string,
   createError: CreateSecurityError
-): asserts value is GrantDefinition["selection"] {
+): asserts value is Selection {
   if (!isRecord(value) || typeof value.all !== "boolean") {
     throw createError(`[Sixb] ${field} grant must carry a selection from 'can' or a scope.`)
   }
@@ -303,8 +313,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   readonly syncIds?: ReadonlySet<string>
   /** Registered pipeline ids — when provided, pipeline run grants must reference them. */
   readonly pipelineIds?: ReadonlySet<string>
-  /** Registered agent ids — when provided, agent run grants must reference them. */
-  readonly agentIds?: ReadonlySet<string>
+  /** Whether the project's single conversational Agent is configured. */
+  readonly agentAvailable?: boolean
   /** Registered observability surfaces. */
   readonly observableIds?: ReadonlySet<string>
   /** Registered connector ids — when provided, manage grants must reference them. */
@@ -415,6 +425,15 @@ function assertGrantReferences(
   grant: GrantDefinition,
   registered: RegisteredUniverses
 ): void {
+  if (grant.capability === "run" && grant.target === "agent") {
+    const spec = GRANT_KINDS[grantKindOf(grant)]
+    if (!registered.agentAvailable) {
+      throw new SecurityValidationError(
+        `[Sixb] Role '${roleId}' grants ${grant.capability} on the project Agent, but it is unavailable. ${spec.fix}`
+      )
+    }
+    return
+  }
   const spec = GRANT_KINDS[grantKindOf(grant)]
   const universe = registered[spec.universeKey]
 

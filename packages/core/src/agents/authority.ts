@@ -13,7 +13,6 @@ import type {
   UserRecord,
 } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
-import type { AgentDefinition } from "./types"
 
 export type AgentExecutionAuthorization =
   | { readonly type: "principal"; readonly context: AuthorizationContext }
@@ -35,37 +34,21 @@ export interface AgentExecutionIdentity {
   readonly groupMemberships: readonly ServiceAccountGroupMembershipRecord[]
 }
 
-export function agentServiceAccountId(agentId: string): string {
-  return `svc_agent_${agentId}`
-}
-
-/** Ensure the definition-owned service account exists before an Agent execution is admitted. */
-export async function ensureAgentExecutionIdentity(input: {
-  readonly auth: AuthStorage | undefined
-  readonly projectId: string
-  readonly agent: AgentDefinition
-}): Promise<AgentExecutionIdentity> {
-  return ensureManagedAgentExecutionIdentity({
-    auth: input.auth,
-    projectId: input.projectId,
-    agentId: input.agent.id,
-    name: input.agent.name,
-    description: `Managed service account for agent '${input.agent.id}'.`,
-    groupIds: input.agent.groupIds,
-  })
+export function agentServiceAccountId(actorId: string): string {
+  return `svc_agent_${actorId}`
 }
 
 /** Ensure a framework-managed Agent actor exists with exactly its declared group memberships. */
 export async function ensureManagedAgentExecutionIdentity(input: {
   readonly auth: AuthStorage | undefined
   readonly projectId: string
-  readonly agentId: string
+  readonly actorId: string
   readonly name: string
   readonly description: string
   readonly groupIds: readonly string[]
 }): Promise<AgentExecutionIdentity> {
   const auth = requireAuthStorage(input.auth)
-  const id = agentServiceAccountId(input.agentId)
+  const id = agentServiceAccountId(input.actorId)
   const now = new Date()
   const loaded = await loadOrCreateAgentServiceAccount(auth, {
     id,
@@ -74,18 +57,18 @@ export async function ensureManagedAgentExecutionIdentity(input: {
     description: input.description,
     updatedAt: now,
   })
-  assertFrameworkManagedAgentServiceAccount(input.agentId, loaded)
-  assertActiveAgentServiceAccount(input.agentId, loaded)
+  assertFrameworkManagedAgentServiceAccount(input.actorId, loaded)
+  assertActiveAgentServiceAccount(input.actorId, loaded)
   const serviceAccount = await updateAgentServiceAccountMetadata(auth, {
     existing: loaded,
     name: input.name,
     description: input.description,
     updatedAt: now,
   })
-  assertActiveAgentServiceAccount(input.agentId, serviceAccount)
+  assertActiveAgentServiceAccount(input.actorId, serviceAccount)
 
   const groupMemberships = requireDefinitionOwnedGroupMemberships(
-    input.agentId,
+    input.actorId,
     await auth.serviceAccountGroupMemberships.reconcileForServiceAccount({
       projectId: input.projectId,
       serviceAccountId: id,
@@ -144,18 +127,18 @@ async function loadOrCreateAgentServiceAccount(
 }
 
 function assertActiveAgentServiceAccount(
-  agentId: string,
+  actorId: string,
   serviceAccount: ServiceAccountRecord
 ): void {
   if (serviceAccount.status === "suspended") {
     throw new Error(
-      `[Sixb] Agent '${agentId}' service account '${serviceAccount.id}' is suspended.`
+      `[Sixb] Agent '${actorId}' service account '${serviceAccount.id}' is suspended.`
     )
   }
 }
 
 function assertFrameworkManagedAgentServiceAccount(
-  agentId: string,
+  actorId: string,
   serviceAccount: ServiceAccountRecord
 ): void {
   if (
@@ -164,14 +147,14 @@ function assertFrameworkManagedAgentServiceAccount(
   ) {
     throw createSixbError(
       "agent.execution_failed",
-      `[Sixb] Agent '${agentId}' cannot use service account '${serviceAccount.id}' because it is not managed by Sixb.`,
-      { details: { agentId, serviceAccountId: serviceAccount.id } }
+      `[Sixb] Agent '${actorId}' cannot use service account '${serviceAccount.id}' because it is not managed by Sixb.`,
+      { details: { actorId, serviceAccountId: serviceAccount.id } }
     )
   }
 }
 
 function requireDefinitionOwnedGroupMemberships(
-  agentId: string,
+  actorId: string,
   memberships: readonly ServiceAccountGroupMembershipRecord[]
 ): readonly ServiceAccountGroupMembershipRecord[] {
   const externalGroupIds = memberships
@@ -180,8 +163,8 @@ function requireDefinitionOwnedGroupMemberships(
   if (externalGroupIds.length > 0) {
     throw createSixbError(
       "agent.execution_failed",
-      `[Sixb] Agent '${agentId}' service account has group memberships not managed by its definition: ${externalGroupIds.join(", ")}.`,
-      { details: { agentId, externalGroupIds } }
+      `[Sixb] Agent '${actorId}' service account has group memberships not managed by its definition: ${externalGroupIds.join(", ")}.`,
+      { details: { actorId, externalGroupIds } }
     )
   }
   return memberships
@@ -191,17 +174,17 @@ function requireDefinitionOwnedGroupMemberships(
 export async function resolveAgentExecutionAuthorization(input: {
   readonly auth: AuthStorage | undefined
   readonly projectId: string
-  readonly agentId: string
+  readonly actorId: string
   readonly authorizationRef: AuthorizationRef
   readonly security: SecurityDefinitionCatalog
 }): Promise<{ readonly identity: AgentExecutionIdentity; readonly context: AuthorizationContext }> {
   const auth = requireAuthStorage(input.auth)
-  const expectedId = agentServiceAccountId(input.agentId)
+  const expectedId = agentServiceAccountId(input.actorId)
   const principal =
     input.authorizationRef.type === "principal" ? input.authorizationRef.principal : null
   if (principal?.type !== "serviceAccount" || principal.id !== expectedId) {
     throw new Error(
-      `[Sixb] Agent '${input.agentId}' execution authority must reference service account '${expectedId}'.`
+      `[Sixb] Agent '${input.actorId}' execution authority must reference service account '${expectedId}'.`
     )
   }
 
@@ -212,10 +195,10 @@ export async function resolveAgentExecutionAuthorization(input: {
   if (!serviceAccount || serviceAccount.status !== "active") {
     throw new Error(`[Sixb] Agent service account '${principal.id}' is not active.`)
   }
-  assertFrameworkManagedAgentServiceAccount(input.agentId, serviceAccount)
+  assertFrameworkManagedAgentServiceAccount(input.actorId, serviceAccount)
 
   const groupMemberships = requireDefinitionOwnedGroupMemberships(
-    input.agentId,
+    input.actorId,
     await auth.serviceAccountGroupMemberships.listForServiceAccount({
       projectId: input.projectId,
       serviceAccountId: principal.id,
@@ -273,10 +256,6 @@ export async function resolveInheritedAgentExecutionAuthorization(input: {
     }),
   }
 }
-
-/** Compatibility name for the framework-owned conversation entry point. */
-export const resolveInheritedMainAgentExecutionAuthorization =
-  resolveInheritedAgentExecutionAuthorization
 
 function requireCredentialedUserAuthority(ref: AuthorizationRef): CredentialedUserAuthorizationRef {
   if (ref.type !== "principal" || ref.principal.type !== "user" || ref.credential === undefined) {

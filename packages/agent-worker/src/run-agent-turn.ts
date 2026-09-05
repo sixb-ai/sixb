@@ -66,7 +66,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     throw createSixbError(
       "internal.unexpected",
       `[SixbAgentWorker] Agent run '${runId}' has no execution token.`,
-      { details: { agentId: run.agentId, runId } }
+      { details: { runId, threadId: run.threadId } }
     )
   }
   const agents = storage.agents
@@ -214,7 +214,6 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
           status: "failed",
           at: completedAt,
           details: {
-            agentId: run.agentId,
             runId,
             threadId: run.threadId,
             timeoutMs: String(turnTimeoutMs),
@@ -256,7 +255,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       throw createSixbError(
         "internal.unexpected",
         `[SixbAgentWorker] Agent run '${runId}' produced no response message.`,
-        { details: { agentId: run.agentId, runId } }
+        { details: { runId, threadId: run.threadId } }
       )
     }
 

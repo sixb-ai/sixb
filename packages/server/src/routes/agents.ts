@@ -1,10 +1,4 @@
-import {
-  type AgentDefinition,
-  AgentRequestError,
-  type AgentRunView,
-  type FileRef,
-  type SixbHostView,
-} from "@sixb/core"
+import { AgentRequestError, type AgentRunView, type FileRef, type SixbHostView } from "@sixb/core"
 import { agentRunStreamId } from "@sixb/core/agents/streams"
 import { publishAgentRunCancel, publishAgentRunFinished } from "@sixb/core/internal/agents"
 import {
@@ -15,6 +9,7 @@ import {
   type AgentStorage,
   AgentStorageError,
   type AgentThreadRecord,
+  type ConversationAgentRunRecord,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
@@ -29,8 +24,7 @@ import {
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
-  AgentCatalogItemSchema,
-  AgentIdParamsSchema,
+  AgentDescriptorSchema,
   AgentMessageFileContentParamsSchema,
   AgentMessageListResponseSchema,
   AgentMessageSchema,
@@ -67,23 +61,10 @@ const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
     .regex(/^\/parts(?:\/|$)/, "Agent message file content paths must start with /parts/"),
 })
 
-function serializeAgent(agent: AgentDefinition): ReturnType<typeof AgentCatalogItemSchema.parse> {
-  return AgentCatalogItemSchema.parse({
-    id: agent.id,
-    name: agent.name,
-    description: agent.description,
-    modelId: agent.model.modelId,
-    reasoning: agent.reasoning,
-    groupIds: agent.groupIds,
-    loop: agent.loop,
-  })
-}
-
 function serializeThread(thread: AgentThreadRecord): ReturnType<typeof AgentThreadSchema.parse> {
   return AgentThreadSchema.parse({
     id: thread.id,
     projectId: thread.projectId,
-    agentId: thread.agentId,
     ownerPrincipal: thread.ownerPrincipal,
     title: thread.title,
     status: thread.status,
@@ -129,7 +110,6 @@ export function serializeAgentRun(run: AgentRunView): ReturnType<typeof AgentRun
     id: run.id,
     projectId: run.projectId,
     threadId: run.threadId,
-    agentId: run.agentId,
     triggerMessageId: run.triggerMessageId,
     requestedBy: run.requestedBy,
     status: run.status,
@@ -154,7 +134,7 @@ async function getAgentMessageFileContentThread(params: {
   readonly storage: AgentStorage
   readonly projectId: string
   readonly threadId: string
-}): Promise<AgentThreadRecord | null> {
+}): Promise<Pick<AgentThreadRecord, "id"> | null> {
   const { agentRun } = params.authState
   if (agentRun) {
     if (agentRun.projectId !== params.projectId || agentRun.threadId !== params.threadId) {
@@ -166,7 +146,7 @@ async function getAgentMessageFileContentThread(params: {
   if (!params.authState.sixb) {
     throw new Error("[SixbServer] Execution scope is not available for this route.")
   }
-  return params.authState.sixb.agents.threads.getById(params.threadId)
+  return params.authState.sixb.agent.threads.getById(params.threadId)
 }
 
 /** Publish the terminal record core owns; stream delivery stays best-effort at this boundary. */
@@ -211,7 +191,7 @@ function handleAgentRouteError(
         set.status = 403
         break
       case "storage_unavailable":
-      case "thread_agent_mismatch":
+      case "agent_selector_removed":
       case "invalid_context":
       case "invalid_model_selection":
       case "model_not_found":
@@ -299,36 +279,19 @@ async function agentMessageFileContentResponse(
 export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
-      "/api/agents",
+      "/api/agent",
       (context) => {
-        return requireRequestSixb(context).agents.list().map(serializeAgent)
-      },
-      {
-        response: { 200: AgentCatalogItemSchema.array() },
-        detail: {
-          summary: "List registered agents",
-          tags: [OPENAPI_TAGS.agents.name],
-          operationId: "listAgents",
-        },
-      }
-    )
-    .get(
-      "/api/agents/:agentId",
-      (context) => {
-        const { params, set } = context
-        const agent = requireRequestSixb(context).agents.getById(params.agentId)
+        const agent = requireRequestSixb(context).agent.get()
         if (!agent) {
-          set.status = 404
-          return { error: "Agent not found" }
+          context.set.status = 404
+          return { error: "Agent unavailable" }
         }
-
-        return serializeAgent(agent)
+        return AgentDescriptorSchema.parse(agent)
       },
       {
-        params: AgentIdParamsSchema,
-        response: { 200: AgentCatalogItemSchema, 404: ErrorResponseSchema },
+        response: { 200: AgentDescriptorSchema, 404: ErrorResponseSchema },
         detail: {
-          summary: "Get agent metadata",
+          summary: "Get the project Agent",
           tags: [OPENAPI_TAGS.agents.name],
           operationId: "getAgent",
         },
@@ -347,13 +310,12 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
 
           const parsed = AgentThreadListQuerySchema.parse(query)
           const listInput = {
-            agentId: parsed.agentId,
             statuses: parsed.status ? [parsed.status] : undefined,
             limit: parseOptionalInt(parsed.limit),
             offset: parseOptionalInt(parsed.offset),
             order: parsed.order,
           }
-          const result = await sixb.agents.threads.list(listInput)
+          const result = await sixb.agent.threads.list(listInput)
 
           return AgentThreadListResponseSchema.parse({
             threads: result.threads.map(serializeThread),
@@ -390,9 +352,8 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await sixb.agents.threads.create({
+          const thread = await sixb.agent.threads.create({
             ...(parsed.threadId === undefined ? {} : { id: parsed.threadId }),
-            agentId: parsed.agentId,
             ...(parsed.title === undefined ? {} : { title: parsed.title }),
           })
 
@@ -407,8 +368,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         response: {
           201: CreateAgentThreadResponseSchema,
           400: ErrorResponseSchema,
-          // No 403: an agent the caller cannot run is reported as 404 (see getAgentById above) so the
-          // response never discloses that a forbidden id exists.
+          // Match the descriptor endpoint: an unavailable or forbidden Agent returns 404.
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
           501: ErrorResponseSchema,
@@ -432,7 +392,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await sixb.agents.threads.getById(params.threadId)
+          const thread = await sixb.agent.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
@@ -469,7 +429,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await sixb.agents.threads.getById(params.threadId)
+          const thread = await sixb.agent.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
@@ -577,7 +537,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await sixb.agents.threads.getById(params.threadId)
+          const thread = await sixb.agent.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
@@ -585,7 +545,6 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
 
           const parsed = PostAgentMessageBodySchema.parse(body)
           const requestInput = {
-            agentId: thread.agentId,
             threadId: thread.id,
             text: parsed.text,
             model: parsed.model,
@@ -594,7 +553,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             context: parsed.context,
             messageId: parsed.messageId,
           }
-          const result = await sixb.agents.runs.request(requestInput)
+          const result = await sixb.agent.runs.request(requestInput)
 
           set.status = 202
           return PostAgentMessageResponseSchema.parse({
@@ -634,20 +593,20 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await sixb.agents.threads.getById(params.threadId)
+          const thread = await sixb.agent.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
           }
 
           const parsed = CancelAgentRunBodySchema.parse(body)
-          const run = await sixb.agents.runs.getById(parsed.runId)
+          const run = await sixb.agent.runs.getById(parsed.runId)
           if (!run || run.threadId !== thread.id) {
             set.status = 404
             return { error: "Agent run not found" }
           }
           let current = run
-          let cancelledWhileQueued = false
+          let cancelledRun: ConversationAgentRunRecord | undefined
           if (current.status === "queued") {
             try {
               const cancelled = await storage.runs.finishQueued({
@@ -659,7 +618,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
                 throw new Error(`[SixbServer] Agent run '${cancelled.id}' changed kind.`)
               }
               current = cancelled
-              cancelledWhileQueued = true
+              cancelledRun = cancelled
             } catch (error) {
               if (!(error instanceof AgentStorageError) || error.code !== "invalid_state") {
                 throw error
@@ -669,13 +628,8 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
               // it. Re-read so that pickup race becomes a running-run cancellation instead of an
               // invalid-state response. A retained control record is safe even if the worker has
               // not attached its cancel subscription yet.
-              const refreshed = await storage.runs.getById({ projectId: host.id, id: current.id })
-              if (
-                !refreshed ||
-                refreshed.kind !== "conversation" ||
-                refreshed.threadId !== thread.id ||
-                refreshed.agentId !== thread.agentId
-              ) {
+              const refreshed = await sixb.agent.runs.getById(current.id)
+              if (!refreshed || refreshed.threadId !== thread.id) {
                 set.status = 404
                 return { error: "Agent run not found" }
               }
@@ -683,8 +637,8 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             }
           }
 
-          if (cancelledWhileQueued) {
-            await publishQueuedRunCancellation(host, current)
+          if (cancelledRun) {
+            await publishQueuedRunCancellation(host, cancelledRun)
           } else if (current.status === "running") {
             await publishAgentRunCancel(host.broker, { projectId: host.id, runId: current.id })
           } else {
@@ -693,7 +647,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           }
 
           set.status = 202
-          const currentView = await sixb.agents.runs.getById(current.id)
+          const currentView = await sixb.agent.runs.getById(current.id)
           if (!currentView) {
             set.status = 404
             return { error: "Agent run not found" }
@@ -734,13 +688,13 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return missingAgentStorageResponse(set)
           }
 
-          const thread = await sixb.agents.threads.getById(params.threadId)
+          const thread = await sixb.agent.threads.getById(params.threadId)
           if (!thread) {
             set.status = 404
             return { error: "Agent thread not found" }
           }
 
-          const failedRun = await sixb.agents.runs.getById(params.runId)
+          const failedRun = await sixb.agent.runs.getById(params.runId)
           if (!failedRun || failedRun.threadId !== thread.id) {
             set.status = 404
             return { error: "Agent run not found" }
@@ -750,7 +704,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return { error: "Only failed agent runs can be retried" }
           }
 
-          const { run } = await sixb.agents.runs.retry(failedRun.id)
+          const { run } = await sixb.agent.runs.retry(failedRun.id)
 
           set.status = 202
           return RetryAgentRunResponseSchema.parse({
@@ -789,7 +743,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           }
 
           const parsed = AgentRunListQuerySchema.parse(query)
-          const result = await sixb.agents.runs.listForThread(params.threadId, {
+          const result = await sixb.agent.runs.listForThread(params.threadId, {
             statuses: parsed.status ? [parsed.status] : undefined,
             limit: parseOptionalInt(parsed.limit),
             offset: parseOptionalInt(parsed.offset),
@@ -836,7 +790,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             return missingAgentStorageResponse(set)
           }
 
-          const run = await sixb.agents.runs.getById(params.runId)
+          const run = await sixb.agent.runs.getById(params.runId)
           if (!run) {
             set.status = 404
             return { error: "Agent run not found" }

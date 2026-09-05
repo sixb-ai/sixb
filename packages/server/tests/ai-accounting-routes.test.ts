@@ -20,12 +20,10 @@ async function createApp(reportCost = false) {
   await storage.agents.threads.create({
     id: "thread_1",
     projectId,
-    agentId: "accounting-agent",
     ownerPrincipal: { type: "user", id: "user_1" },
   })
   const executionId = await createTestAgentExecution(storage, {
     projectId,
-    agentId: "accounting-agent",
     runId: "run_1",
     executionId: "execution_1",
   })
@@ -34,7 +32,6 @@ async function createApp(reportCost = false) {
     projectId,
     executionId,
     threadId: "thread_1",
-    agentId: "accounting-agent",
     triggerMessageId: "message_1",
     spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
@@ -98,13 +95,11 @@ async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
   await storage.agents.threads.create({
     id: "thread_1",
     projectId,
-    agentId: "main",
     ownerPrincipal: { type: "user", id: "user_1" },
     title: "Private research",
   })
   const parentExecutionId = await createTestAgentExecution(storage, {
     projectId,
-    agentId: "main",
     runId: parentRunId,
     authority: "inherited",
   })
@@ -113,7 +108,6 @@ async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
     projectId,
     executionId: parentExecutionId,
     threadId: "thread_1",
-    agentId: "main",
     triggerMessageId: "message_1",
     spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
@@ -128,7 +122,7 @@ async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
   })
   const childExecutionId = await createTestAgentExecution(storage, {
     projectId,
-    agentId: "child",
+    actorId: "child",
     runId: childRunId,
     sourceExecutionId: parentExecutionId,
     authority: "inherited",
@@ -178,7 +172,7 @@ async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
             principal: { type: "user", id: viewer.id },
             groupIds: [],
             roleIds: [],
-            grants: { ...emptyGrantIndex(), "run:agent": new Set(viewer.canRun ? ["main"] : []) },
+            grants: { ...emptyGrantIndex(), "run:agent": viewer.canRun },
           },
         })
       : null,
@@ -347,7 +341,6 @@ describe("AI accounting routes", () => {
           },
           attribution: {
             kind: "agent",
-            agentId: "accounting-agent",
             agentRunId: "run_1",
             threadId: "thread_1",
           },

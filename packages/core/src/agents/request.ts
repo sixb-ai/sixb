@@ -5,15 +5,13 @@ import { snapshotRequesterGroupIds } from "../auth/attribution"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import {
-  canInheritMainAgentRuntimeAuthorization,
-  createAgentExecutionRecord,
-  createInheritedMainAgentExecutionRecord,
+  canInheritAgentRequestAuthorization,
+  createInheritedAgentExecutionRecord,
 } from "../execution/agent"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
 import type { LanguageModelCatalog, LanguageModelRef } from "../models"
 import type { SixbRuntimeContext } from "../runtime/types"
-import type { SecurityDefinitionCatalog } from "../security"
 import {
   type AgentStorage,
   AgentStorageError,
@@ -22,19 +20,16 @@ import {
   type ConversationAgentRunSpec,
 } from "../storage/agents"
 import type { CreateExecutionInput } from "../storage/executions"
-import { ensureAgentExecutionIdentity, resolveAgentExecutionAuthorization } from "./authority"
 import type { AgentContextEntryInput } from "./context"
 import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
-import { MAIN_AGENT_ID } from "./main"
+import { assertNoAgentSelector } from "./retired-config"
 import { publishAgentRunActivity } from "./streams"
-import { AGENT_REASONING_LEVELS, type AgentDefinition, type AgentReasoningLevel } from "./types"
+import { AGENT_REASONING_LEVELS, type AgentReasoningLevel } from "./types"
 
 export interface RequestAgentRunInput {
-  /** The agent to run. */
-  readonly agentId: string
   /** The user's message that triggers the turn. */
   readonly text: string
   /** Blob-backed files attached to the trigger message. */
@@ -75,14 +70,13 @@ export interface RequestAgentRunResult {
 export async function requestAgentRun(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  security: SecurityDefinitionCatalog,
-  agent: AgentDefinition,
-  input: RequestAgentRunInput,
-  models?: LanguageModelCatalog
+  models: LanguageModelCatalog | undefined,
+  input: RequestAgentRunInput
 ): Promise<RequestAgentRunResult> {
-  assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
-  assertRequestAuthorityCanRunAgent(runtime, agent)
-  const spec = resolveConversationRunSpec({ agent, models, input })
+  assertNoAgentSelector(input)
+  assertAuthorized(runtime, { kind: "agent.run" })
+  assertRequestAuthorityCanRunAgent(runtime)
+  const spec = resolveConversationRunSpec({ models, input })
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
   // empty conversation behind. The resulting parts are the exact snapshot persisted below.
@@ -95,7 +89,6 @@ export async function requestAgentRun(
   const principal = runtime.authorization?.principal ?? input.principal ?? SYSTEM_PRINCIPAL
   const { thread, createdThread } = await resolveThread(agents, {
     projectId,
-    agentId: agent.id,
     threadId: input.threadId,
     title: input.title,
     principal,
@@ -110,13 +103,7 @@ export async function requestAgentRun(
   }
 
   const runId = createAgentRunId()
-  const durableExecution = await prepareDurableAgentExecution(
-    runtime,
-    execution,
-    security,
-    agent,
-    runId
-  )
+  const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   const requesterGroupIds = durableExecution.requestedBy
     ? await snapshotRequesterGroupIds({
         auth: runtime.storage.auth,
@@ -154,7 +141,6 @@ export async function requestAgentRun(
         projectId,
         executionId: durableExecution.id,
         threadId: thread.id,
-        agentId: agent.id,
         triggerMessageId,
         spec,
         requesterGroupIds,
@@ -181,18 +167,11 @@ export async function requestAgentRun(
 export async function retryAgentRun(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  security: SecurityDefinitionCatalog,
-  agent: AgentDefinition,
+  models: LanguageModelCatalog | undefined,
   failedRun: ConversationAgentRunRecord
 ): Promise<RequestAgentRunResult> {
-  assertAuthorized(runtime, { kind: "agent.run", agentId: agent.id })
-  assertRequestAuthorityCanRunAgent(runtime, agent)
-  if (failedRun.agentId !== agent.id) {
-    throw new AgentRequestError(
-      "agent_not_found",
-      `[Sixb] Agent run '${failedRun.id}' does not belong to agent '${agent.id}'.`
-    )
-  }
+  assertAuthorized(runtime, { kind: "agent.run" })
+  assertRequestAuthorityCanRunAgent(runtime)
   if (failedRun.status !== "failed") {
     throw new AgentRequestError(
       "run_not_retryable",
@@ -201,14 +180,18 @@ export async function retryAgentRun(
   }
 
   const agents = requireAgentStorage(runtime)
+  const thread = await agents.threads.getById({
+    projectId: runtime.projectId,
+    id: failedRun.threadId,
+  })
+  if (!thread) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      `[Sixb] Agent thread '${failedRun.threadId}' was not found.`
+    )
+  }
   const runId = createAgentRunId()
-  const durableExecution = await prepareDurableAgentExecution(
-    runtime,
-    execution,
-    security,
-    agent,
-    runId
-  )
+  const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   const requesterGroupIds = durableExecution.requestedBy
     ? await snapshotRequesterGroupIds({
         auth: runtime.storage.auth,
@@ -232,12 +215,11 @@ export async function retryAgentRun(
       projectId: runtime.projectId,
       executionId: durableExecution.id,
       threadId: failedRun.threadId,
-      agentId: agent.id,
       triggerMessageId: failedRun.triggerMessageId,
       spec:
         failedRun.spec ??
         resolveConversationRunSpec({
-          agent,
+          models,
           input: {},
         }),
       requesterGroupIds,
@@ -249,18 +231,17 @@ export async function retryAgentRun(
 }
 
 function resolveConversationRunSpec(input: {
-  readonly agent: AgentDefinition
   readonly models?: LanguageModelCatalog
   readonly input: Pick<RequestAgentRunInput, "model" | "reasoning">
 }): ConversationAgentRunSpec {
-  const selected = input.input.model ?? input.agent.model
-  const model =
-    input.models === undefined
-      ? selected.provider === input.agent.model.provider &&
-        selected.modelId === input.agent.model.modelId
-        ? selected
-        : null
-      : input.models.getByRef(selected)
+  if (!input.models) {
+    throw new AgentRequestError(
+      "model_not_found",
+      "[Sixb] Configure models.language before starting the Agent."
+    )
+  }
+  const selected = input.input.model ?? input.models.default
+  const model = input.models.getByRef(selected)
   if (model === null) {
     throw new AgentRequestError(
       "model_not_found",
@@ -268,7 +249,7 @@ function resolveConversationRunSpec(input: {
     )
   }
 
-  const reasoning = input.input.reasoning ?? input.agent.reasoning
+  const reasoning = input.input.reasoning
   if (
     reasoning !== undefined &&
     !(AGENT_REASONING_LEVELS as readonly string[]).includes(reasoning)
@@ -288,38 +269,8 @@ function resolveConversationRunSpec(input: {
 async function prepareDurableAgentExecution(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  security: SecurityDefinitionCatalog,
-  agent: AgentDefinition,
   runId: string
 ): Promise<CreateExecutionInput> {
-  // Transitional: run kind will replace the reserved id as the authority discriminator.
-  if (agent.id === MAIN_AGENT_ID) {
-    const parent = await ensureExecutionRecord(
-      runtime.storage.executions,
-      executionRecordInputFromRuntime({
-        execution,
-        runtimeAuthorization: runtime.runtimeAuthorization,
-      })
-    )
-    return createInheritedMainAgentExecutionRecord({
-      id: `exec_${randomUUID()}`,
-      parent,
-      runId,
-    })
-  }
-
-  const identity = await ensureAgentExecutionIdentity({
-    auth: runtime.storage.auth,
-    projectId: runtime.projectId,
-    agent,
-  })
-  const resolved = await resolveAgentExecutionAuthorization({
-    auth: runtime.storage.auth,
-    projectId: runtime.projectId,
-    agentId: agent.id,
-    authorizationRef: { type: "principal", principal: identity.principal },
-    security,
-  })
   const parent = await ensureExecutionRecord(
     runtime.storage.executions,
     executionRecordInputFromRuntime({
@@ -327,26 +278,18 @@ async function prepareDurableAgentExecution(
       runtimeAuthorization: runtime.runtimeAuthorization,
     })
   )
-  return createAgentExecutionRecord({
+  return createInheritedAgentExecutionRecord({
     id: `exec_${randomUUID()}`,
     parent,
-    agentId: agent.id,
     runId,
-    principal: resolved.identity.principal,
   })
 }
 
-function assertRequestAuthorityCanRunAgent(
-  runtime: SixbRuntimeContext,
-  agent: AgentDefinition
-): void {
-  if (
-    agent.id === MAIN_AGENT_ID &&
-    !canInheritMainAgentRuntimeAuthorization(runtime.runtimeAuthorization)
-  ) {
+function assertRequestAuthorityCanRunAgent(runtime: SixbRuntimeContext): void {
+  if (!canInheritAgentRequestAuthorization(runtime.runtimeAuthorization)) {
     throw new AgentRequestError(
       "authority_not_inheritable",
-      "[Sixb] The main Agent requires an authenticated user request or disabled authorization."
+      "[Sixb] The Agent requires an authenticated user request or disabled authorization."
     )
   }
 }
@@ -395,7 +338,6 @@ async function resolveThread(
   agents: AgentStorage,
   params: {
     readonly projectId: string
-    readonly agentId: string
     readonly threadId?: string
     readonly title?: string
     readonly principal: Principal
@@ -407,12 +349,6 @@ async function resolveThread(
       id: params.threadId,
     })
     if (existing) {
-      if (existing.agentId !== params.agentId) {
-        throw new AgentRequestError(
-          "thread_agent_mismatch",
-          `[Sixb] Agent thread '${existing.id}' belongs to agent '${existing.agentId}', not '${params.agentId}'.`
-        )
-      }
       return { thread: existing, createdThread: false }
     }
   }
@@ -420,7 +356,6 @@ async function resolveThread(
   const thread = await agents.threads.create({
     id: params.threadId ?? createAgentThreadId(),
     projectId: params.projectId,
-    agentId: params.agentId,
     ownerPrincipal: params.principal,
     ...(params.title === undefined ? {} : { title: params.title }),
   })

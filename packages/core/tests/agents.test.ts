@@ -1,31 +1,23 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
-import { dirname, join, resolve } from "node:path"
-import { pathToFileURL } from "node:url"
-import type { LanguageModelV4 } from "@ai-sdk/provider"
+import { dirname, join } from "node:path"
 import {
-  type AgentDefinition,
   AgentDefinitionError,
   type AgentToolDefinition,
   createSixb,
-  defineAgent,
   defineAgentTool,
-  defineGroup,
   defineObjectType,
-  isAgentDefinition,
   prop,
-  RuntimeError,
 } from "../src"
 import { AgentToolResultValidationError } from "../src/agents/errors"
+import { createTestSixb } from "../src/testing"
+import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
-const coreModuleUrl = pathToFileURL(resolve(import.meta.dir, "..", "src", "index.ts")).href
 const tempRoots = new Set<string>()
 
-// These tests don't execute runs, so a stub conforming to the model type is enough.
-const model = {} as LanguageModelV4
-const agentRuntime = defineGroup("agent-runtime", { label: "Agent runtime" })
+const model = testLanguageModel()
 
 const Room = defineObjectType({
   id: "Room",
@@ -54,36 +46,6 @@ async function writeProjectFile(
   const absolutePath = join(projectRoot, relativePath)
   await mkdir(dirname(absolutePath), { recursive: true })
   await writeFile(absolutePath, content, "utf-8")
-}
-
-// Fixture modules run through Bun (transpiled, not type-checked), so an inline
-// stub model is fine — the runtime only requires it to be present.
-function agentModule(id: string, name = "Agent"): string {
-  return `import { defineAgent } from "${coreModuleUrl}"
-
-export const ${id} = defineAgent("${id}", {
-  name: "${name}",
-  model: { specificationVersion: "v4", provider: "test", modelId: "test" },
-  instructions: "You assist the user.",
-})
-`
-}
-
-function agentWithToolModule(id: string): string {
-  return `import { defineAgent, defineAgentTool } from "${coreModuleUrl}"
-
-export const searchKnowledge = defineAgentTool("search_knowledge")
-  .description("Search project knowledge.")
-  .input({ query: "string" })
-  .run(({ input }) => ({ query: input.query, results: [] }))
-
-export const ${id} = defineAgent("${id}", {
-  name: "Agent with tools",
-  model: { specificationVersion: "v4", provider: "test", modelId: "test" },
-  instructions: "Use selected tools when needed.",
-  tools: [searchKnowledge],
-})
-`
 }
 
 function validateToolInput(input: unknown): void {
@@ -281,493 +243,49 @@ describe("defineAgentTool", () => {
   })
 })
 
-describe("defineAgent", () => {
-  test("builds an inert agent definition", () => {
-    const agent = defineAgent("sales", {
-      name: "Sales Assistant",
-      model,
-      instructions: "Assist.",
-    })
-
-    expect(agent.kind).toBe("agent")
-    expect(agent.id).toBe("sales")
-    expect(agent.name).toBe("Sales Assistant")
-    expect(agent.instructions).toBe("Assist.")
-    expect(agent.groupIds).toEqual([])
-    expect(agent.tools).toEqual([])
-    expect(agent.reasoning).toBeUndefined()
-    expect(agent.providerOptions).toBeUndefined()
-    expect(agent.description).toBeUndefined()
-    expect(agent.loop).toBeUndefined()
-    expect(Object.isFrozen(agent)).toBe(true)
-    expect(Object.isFrozen(agent.groupIds)).toBe(true)
-    expect(Object.isFrozen(agent.tools)).toBe(true)
-  })
-
-  test("keeps description, model options, groups, and loop when provided", () => {
-    const searchKnowledge = defineAgentTool("search_knowledge")
-      .description("Search project knowledge.")
-      .input({ query: "string" })
-      .run(({ input }) => ({ query: input.query }))
-    const agent = defineAgent("sales", {
-      name: "Sales Assistant",
-      description: "Quotes and contacts.",
-      model,
-      reasoning: "medium",
-      providerOptions: {
-        openai: {
-          reasoningSummary: "detailed",
-        },
-      },
-      instructions: "Assist.",
-      groups: [agentRuntime],
-      tools: [searchKnowledge],
-      loop: {
-        stopWhen: { maxSteps: 16 },
-        context: { windowTokens: 200_000 },
-        caching: "off",
-      },
-    })
-
-    expect(agent.description).toBe("Quotes and contacts.")
-    expect(agent.reasoning).toBe("medium")
-    expect(agent.providerOptions).toEqual({ openai: { reasoningSummary: "detailed" } })
-    expect(agent.groupIds).toEqual(["agent-runtime"])
-    expect(agent.tools).toEqual([searchKnowledge])
-    expect(agent.tools[0]).toBe(searchKnowledge)
-    expect(agent.loop).toEqual({
-      stopWhen: { maxSteps: 16 },
-      context: { windowTokens: 200_000 },
-      caching: "off",
-    })
-    expect(Object.isFrozen(agent.loop)).toBe(true)
-    expect(Object.isFrozen(agent.loop?.context)).toBe(true)
-    expect(() => {
-      ;(searchKnowledge as unknown as { name: string }).name = "bash"
-    }).toThrow(TypeError)
-  })
-
-  test("normalizes manually constructed tools before selecting them", async () => {
-    const input = { query: "string" } as { query: string }
-    const handlerResult = { results: ["sixb"] }
-    const manualTool = {
-      kind: "agentTool" as const,
-      name: "manual_search",
-      description: "Search manually.",
-      input,
-      handler: () => handlerResult,
-    } as AgentToolDefinition
-
-    const agent = defineAgent("manual", {
-      name: "Manual",
-      model,
-      instructions: "Use the selected tool.",
-      tools: [manualTool],
-    })
-    input.query = "boolean"
-
-    const selectedTool = agent.tools[0]
-    expect(selectedTool).not.toBe(manualTool)
-    expect(selectedTool?.input).toEqual({ query: "string" })
-    expect(Object.isFrozen(selectedTool)).toBe(true)
-    expect(Object.isFrozen(selectedTool?.input)).toBe(true)
-
-    const result = await selectedTool?.handler({ input: { query: "sixb" } } as never)
-    expect(result).toEqual({ results: ["sixb"] })
-    expect(result).not.toBe(handlerResult)
-  })
-
-  test("rejects empty id, name, and instructions", () => {
-    expect(() => defineAgent("", { name: "A", model, instructions: "x" })).toThrow(
-      AgentDefinitionError
-    )
-    expect(() => defineAgent("a", { name: "  ", model, instructions: "x" })).toThrow(
-      AgentDefinitionError
-    )
-    expect(() => defineAgent("a", { name: "A", model, instructions: " " })).toThrow(
-      AgentDefinitionError
-    )
-  })
-
-  test("rejects a missing model", () => {
-    expect(() =>
-      defineAgent("a", {
-        name: "A",
-        instructions: "x",
-        model: undefined as unknown as LanguageModelV4,
-      })
-    ).toThrow(AgentDefinitionError)
-  })
-
-  test("rejects invalid maxSteps loop settings", () => {
-    for (const maxSteps of [0, -1, 1.5, Number.POSITIVE_INFINITY, Number.NaN]) {
-      expect(() =>
-        defineAgent("bad", {
-          name: "Bad",
-          model,
-          instructions: "x",
-          loop: { stopWhen: { maxSteps } },
-        })
-      ).toThrow(AgentDefinitionError)
-    }
-  })
-
-  test("rejects invalid prompt caching settings", () => {
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        loop: { caching: "sometimes" as never },
-      })
-    ).toThrow("Agent loop.caching must be 'auto' or 'off'")
-  })
-
-  test("snapshots and validates context loop overrides", () => {
-    const configured = defineAgent("configured", {
-      name: "Configured",
-      model,
-      instructions: "x",
-      loop: {
-        context: {
-          windowTokens: 10_000,
-          reserveTokens: 2_000,
-          keepRecentTokens: 3_000,
-        },
-      },
-    })
-    expect(configured.loop?.context).toEqual({
-      windowTokens: 10_000,
-      reserveTokens: 2_000,
-      keepRecentTokens: 3_000,
-    })
-
-    const automatic = defineAgent("automatic", {
-      name: "Automatic",
-      model,
-      instructions: "x",
-      loop: { context: {} },
-    })
-    expect(automatic.loop?.context).toEqual({})
-
-    for (const context of [
-      { windowTokens: 0 },
-      { windowTokens: Number.MAX_SAFE_INTEGER + 1 },
-      { windowTokens: 100, reserveTokens: 0 },
-      { windowTokens: 100, keepRecentTokens: 1.5 },
-    ]) {
-      expect(() =>
-        defineAgent("bad-context", {
-          name: "Bad context",
-          model,
-          instructions: "x",
-          loop: { context },
-        })
-      ).toThrow(AgentDefinitionError)
-    }
-  })
-
-  test("rejects invalid reasoning settings", () => {
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        reasoning: "maximum" as never,
-      })
-    ).toThrow(AgentDefinitionError)
-  })
-
-  test("rejects invalid provider options", () => {
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        providerOptions: [] as never,
-      })
-    ).toThrow(AgentDefinitionError)
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        providerOptions: { openai: "fast" } as never,
-      })
-    ).toThrow(AgentDefinitionError)
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        providerOptions: { openai: { fn: () => undefined } } as never,
-      })
-    ).toThrow(AgentDefinitionError)
-  })
-
-  test("rejects invalid group definitions", () => {
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        groups: [{ kind: "not-a-group", id: "x" } as never],
-      })
-    ).toThrow(AgentDefinitionError)
-
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        groups: [agentRuntime, agentRuntime],
-      })
-    ).toThrow(AgentDefinitionError)
-  })
-
-  test("rejects invalid and duplicate tool definitions", () => {
-    const first = defineAgentTool("search")
-      .description("Search one source.")
-      .input({ query: "string" })
-      .run(() => ({ results: [] }))
-    const second = defineAgentTool("search")
-      .description("Search another source.")
-      .input({ query: "string" })
-      .run(() => ({ results: [] }))
-
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        tools: [first, second],
-      })
-    ).toThrow("duplicate tool name 'search'")
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        tools: [{ kind: "not-a-tool" } as never],
-      })
-    ).toThrow("only agent tool definitions")
-
-    const sparseTools = new Array<AgentToolDefinition>(1)
-    expect(() =>
-      defineAgent("bad", {
-        name: "Bad",
-        model,
-        instructions: "x",
-        tools: sparseTools,
-      })
-    ).toThrow("only agent tool definitions")
-  })
-})
-
-describe("isAgentDefinition", () => {
-  test("accepts a real agent definition", () => {
-    expect(isAgentDefinition(defineAgent("a", { name: "A", model, instructions: "x" }))).toBe(true)
-  })
-
-  test("rejects non-agents", () => {
-    expect(isAgentDefinition(null)).toBe(false)
-    expect(isAgentDefinition({ kind: "connector", id: "x" })).toBe(false)
-    // Right kind but missing required string fields.
-    expect(isAgentDefinition({ kind: "agent", id: "x" })).toBe(false)
-  })
-
-  test("rejects definitions whose tools array is sparse", () => {
-    const agent = defineAgent("a", { name: "A", model, instructions: "x" })
-    expect(isAgentDefinition({ ...agent, tools: new Array<AgentToolDefinition>(1) })).toBe(false)
-  })
-})
-
-describe("agent discovery + registry", () => {
-  test("returns no agents when agents/ is absent", async () => {
+describe("project Agent configuration", () => {
+  test("does not import the retired agents discovery directory", async () => {
     const projectRoot = await createTempProjectRoot()
-    const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
-
-    expect(sixb.definitions.agents.list()).toEqual([])
-    expect(sixb.definitions.agents.getById("sales")).toBeNull()
-  })
-
-  test("discovers agents from agents/ (incl. subfolders) and looks them up by id", async () => {
-    const projectRoot = await createTempProjectRoot()
-    await writeProjectFile(projectRoot, "agents/sales.ts", agentModule("sales", "Sales Assistant"))
     await writeProjectFile(
       projectRoot,
-      "agents/nested/support.ts",
-      agentModule("support", "Support")
+      "agents/old.ts",
+      'throw new Error("must not import legacy definitions")'
     )
-
-    const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
-
-    expect(
-      sixb.definitions.agents
-        .list()
-        .map((a) => a.id)
-        .sort()
-    ).toEqual(["sales", "support"])
-    expect(sixb.definitions.agents.getById("sales")?.name).toBe("Sales Assistant")
-    expect(sixb.definitions.agents.getById("unknown")).toBeNull()
-  })
-
-  test("discovers agents with selected tools without discovering tools themselves", async () => {
-    const projectRoot = await createTempProjectRoot()
-    await writeProjectFile(projectRoot, "agents/research.ts", agentWithToolModule("research"))
-
-    const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
-
-    expect(sixb.definitions.agents.list().map((agent) => agent.id)).toEqual(["research"])
-    expect(sixb.definitions.agents.getById("research")?.tools.map((tool) => tool.name)).toEqual([
-      "search_knowledge",
-    ])
-  })
-
-  test("ignores non-agent exports co-located in agents/", async () => {
-    const projectRoot = await createTempProjectRoot()
-    await writeProjectFile(projectRoot, "agents/sales.ts", agentModule("sales"))
-    await writeProjectFile(
-      projectRoot,
-      "agents/helpers.ts",
-      `export const helper = { hello: "world" }\n`
-    )
-
-    const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
-
-    expect(sixb.definitions.agents.list().map((a) => a.id)).toEqual(["sales"])
-  })
-
-  test("merges explicit agents with discovered ones", async () => {
-    const projectRoot = await createTempProjectRoot()
-    await writeProjectFile(projectRoot, "agents/sales.ts", agentModule("sales"))
-    const explicit = defineAgent("ops", { name: "Ops", model, instructions: "x" })
-
-    const sixb = await createSixb({
+    const host = await createSixb({
       projectRoot,
       ontologies: [Room],
-      agents: [explicit],
+      models: { language: [model] },
       ...createTestRuntimeDeps(),
     })
-
-    expect(
-      sixb.definitions.agents
-        .list()
-        .map((a) => a.id)
-        .sort()
-    ).toEqual(["ops", "sales"])
+    expect("agents" in host.definitions).toBe(false)
+    expect(createTestSixb(host).agent.get()?.name).toBe("Sixb")
   })
 
-  test("rejects duplicate agent ids", async () => {
+  test("revalidates and snapshots project tools at startup", async () => {
     const projectRoot = await createTempProjectRoot()
-    await writeProjectFile(projectRoot, "agents/sales.ts", agentModule("sales"))
-    const dup = defineAgent("sales", { name: "Dup", model, instructions: "x" })
-
-    await expect(
-      createSixb({ projectRoot, ontologies: [Room], agents: [dup], ...createTestRuntimeDeps() })
-    ).rejects.toThrow(RuntimeError)
-  })
-
-  test("rejects agents that reference unregistered execution groups", async () => {
-    const projectRoot = await createTempProjectRoot()
-    const agent = defineAgent("ops", {
-      name: "Ops",
-      model,
-      instructions: "x",
-      groups: [agentRuntime],
-    })
-
-    await expect(
-      createSixb({
-        projectRoot,
-        ontologies: [Room],
-        agents: [agent],
-        ...createTestRuntimeDeps(),
-      })
-    ).rejects.toThrow(AgentDefinitionError)
-  })
-
-  test("revalidates directly constructed tool definitions at startup", async () => {
-    const projectRoot = await createTempProjectRoot()
-    const manualTool = {
-      kind: "agentTool" as const,
-      name: "manual_search",
-      description: "Search manually.",
+    const tool: AgentToolDefinition = {
+      kind: "agentTool",
+      name: "lookup",
+      description: "Look up a value.",
       input: { query: "string" },
-      handler: () => null,
+      handler: async ({ input }) => ({ query: String(input.query) }),
     }
-    const manualAgent = {
-      kind: "agent" as const,
-      id: "manual",
-      name: "Manual",
-      model,
-      instructions: "Use the selected tool.",
-      groupIds: [],
-      tools: [manualTool],
-    } as AgentDefinition
-
-    manualTool.name = "bash"
-    expect(isAgentDefinition(manualAgent)).toBe(true)
-    await expect(
-      createSixb({
-        projectRoot,
-        ontologies: [Room],
-        agents: [manualAgent],
-        ...createTestRuntimeDeps(),
-      })
-    ).rejects.toThrow("reserved by the framework")
-  })
-
-  test("locks directly constructed tool definitions at startup", async () => {
-    const projectRoot = await createTempProjectRoot()
-    const input = { query: "string" }
-    const manualTool = {
-      kind: "agentTool" as const,
-      name: "manual_search",
-      description: "Search manually.",
-      input,
-      handler: () => null,
-    }
-    const manualAgent = {
-      kind: "agent" as const,
-      id: "manual",
-      name: "Manual",
-      model,
-      instructions: "Use the selected tool.",
-      groupIds: [],
-      tools: [manualTool],
-    } as AgentDefinition
-
-    await createSixb({
+    const config = {
       projectRoot,
       ontologies: [Room],
-      agents: [manualAgent],
+      models: { language: [model] },
       ...createTestRuntimeDeps(),
+    }
+    await expect(createSixb({ ...config, tools: [{ ...tool, name: "bash" }] })).rejects.toThrow(
+      /reserved/
+    )
+    const host = await createSixb({ ...config, tools: [tool] })
+    const registered = host.definitions.tools.getByName("lookup")!
+    expect(Object.isFrozen(registered)).toBe(true)
+    expect(Object.isFrozen(registered.input)).toBe(true)
+    expect(registered).not.toBe(tool)
+    expect(await registered.handler({ input: { query: "sixb" } } as never)).toEqual({
+      query: "sixb",
     })
-
-    expect(Object.isFrozen(manualAgent)).toBe(true)
-    expect(Object.isFrozen(manualAgent.tools)).toBe(true)
-    expect(Object.isFrozen(manualTool)).toBe(true)
-    expect(Object.isFrozen(input)).toBe(true)
-  })
-
-  test("accepts agents whose execution groups are registered", async () => {
-    const projectRoot = await createTempProjectRoot()
-    const agent = defineAgent("ops", {
-      name: "Ops",
-      model,
-      instructions: "x",
-      groups: [agentRuntime],
-    })
-
-    const sixb = await createSixb({
-      projectRoot,
-      ontologies: [Room],
-      agents: [agent],
-      groups: [agentRuntime],
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(sixb.definitions.agents.getById("ops")?.groupIds).toEqual(["agent-runtime"])
   })
 })

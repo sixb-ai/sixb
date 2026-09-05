@@ -1,4 +1,3 @@
-import { MAIN_AGENT_ID } from "../../agents/main"
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import { principalsEqual } from "../../auth"
 import { normalizeRequesterGroupIds } from "../../auth/attribution"
@@ -133,7 +132,6 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
     const record: AgentThreadRecord = {
       id: input.id,
       projectId: input.projectId,
-      agentId: input.agentId,
       ownerPrincipal: clone(input.ownerPrincipal),
       ...(input.title === undefined ? {} : { title: input.title }),
       status: input.status ?? "active",
@@ -155,12 +153,8 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
     const order = input.order ?? "desc"
     const statuses = input.statuses ? new Set(input.statuses) : null
-    const agentIds = input.agentIds ? new Set(input.agentIds) : null
-
     const filtered = [...this.state.threads.values()]
       .filter((thread) => thread.projectId === input.projectId)
-      .filter((thread) => (input.agentId ? thread.agentId === input.agentId : true))
-      .filter((thread) => (agentIds ? agentIds.has(thread.agentId) : true))
       .filter((thread) => (statuses ? statuses.has(thread.status) : true))
       .filter((thread) =>
         input.ownerPrincipal ? principalsEqual(thread.ownerPrincipal, input.ownerPrincipal) : true
@@ -195,10 +189,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      authority:
-        input.agentId === MAIN_AGENT_ID
-          ? { type: "inherited" }
-          : { type: "managed", agentId: input.agentId },
     })
     // No `await` between read and write: the in-memory critical section is atomic, so two concurrent
     // queued runs on the same thread cannot both win — the second observes `activeRunId` set.
@@ -242,7 +232,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
       projectId: input.projectId,
       executionId: input.executionId,
       threadId: input.threadId,
-      agentId: input.agentId,
       triggerMessageId: input.triggerMessageId,
       spec: clone(input.spec),
       requesterGroupIds: normalizeRequesterGroupIds(input.requesterGroupIds),
@@ -269,7 +258,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      authority: { type: "inherited" },
     })
 
     const runKey = key(input.projectId, input.id)
@@ -481,9 +469,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
       .filter((run) => (kinds ? kinds.has(run.kind) : true))
       .filter((run) =>
         input.threadId ? run.kind === "conversation" && run.threadId === input.threadId : true
-      )
-      .filter((run) =>
-        input.agentId ? run.kind === "conversation" && run.agentId === input.agentId : true
       )
       .filter((run) =>
         input.parentRunId ? run.kind === "subagent" && run.parentRunId === input.parentRunId : true

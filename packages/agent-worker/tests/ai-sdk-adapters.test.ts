@@ -100,19 +100,15 @@ describe("AI SDK agent adapters", () => {
             aborted: signal.aborted,
             toolCallId,
             hasArtifacts: artifacts === unusedArtifacts,
-            run: {
-              id: run.id,
-              agentId: run.agentId ?? null,
-              threadId: run.threadId ?? null,
-            },
+            run,
           }
         }
       )
-    const run = { id: "run-1", agentId: "research", threadId: "thread-1" }
+    const run = { kind: "conversation" as const, id: "run-1", threadId: "thread-1" }
     const tools = aiSdkToolsFromAgentDefinitions({
       definitions: [definition],
       valueTypesById: new Map(),
-      run: { id: run.id, agentId: run.agentId, threadId: run.threadId },
+      run,
       connector,
       logger,
     })
@@ -161,7 +157,7 @@ describe("AI SDK agent adapters", () => {
     const tools = aiSdkToolsFromAgentDefinitions({
       definitions: [definition],
       valueTypesById: new Map(),
-      run: { id: "run-2", agentId: "waiter" },
+      run: { kind: "workflow", id: "run-2", workflowId: "test-workflow", stepId: "waiter" },
       connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
       logger: noopLogger,
     })
@@ -189,7 +185,7 @@ describe("AI SDK agent adapters", () => {
       aiSdkToolsFromAgentDefinitions({
         definitions: [definition],
         valueTypesById: new Map(),
-        run: { id: "run-output", agentId: "creator" },
+        run: { kind: "workflow", id: "run-output", workflowId: "test-workflow", stepId: "creator" },
         connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
         logger: noopLogger,
         toolResultToModelOutput({ output: value }) {
@@ -234,7 +230,7 @@ describe("AI SDK agent adapters", () => {
       aiSdkToolsFromAgentDefinitions({
         definitions: [definition],
         valueTypesById: new Map(),
-        run: { id: "run-input", agentId: "quotes" },
+        run: { kind: "workflow", id: "run-input", workflowId: "test-workflow", stepId: "quotes" },
         connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
         logger: noopLogger,
       }),
@@ -313,7 +309,7 @@ describe("AI SDK agent adapters", () => {
     const tools = aiSdkToolsFromAgentDefinitions({
       definitions: [definition],
       valueTypesById: new Map(),
-      run: { id: "run-3", agentId: "broken" },
+      run: { kind: "workflow", id: "run-3", workflowId: "test-workflow", stepId: "broken" },
       connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
       logger: noopLogger,
     })
@@ -337,7 +333,12 @@ describe("AI SDK agent adapters", () => {
       aiSdkToolsFromAgentDefinitions({
         definitions: [definition],
         valueTypesById: new Map(),
-        run: { id: "run-project-error", agentId: "broken" },
+        run: {
+          kind: "workflow",
+          id: "run-project-error",
+          workflowId: "test-workflow",
+          stepId: "broken",
+        },
         connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
         logger: noopLogger,
       }),
@@ -363,7 +364,12 @@ describe("AI SDK agent adapters", () => {
       aiSdkToolsFromAgentDefinitions({
         definitions: [definition],
         valueTypesById: new Map(),
-        run: { id: "run-public-error", agentId: "broken" },
+        run: {
+          kind: "workflow",
+          id: "run-public-error",
+          workflowId: "test-workflow",
+          stepId: "broken",
+        },
         connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
         logger: noopLogger,
       }),
@@ -381,7 +387,7 @@ describe("AI SDK agent adapters", () => {
     const tools = aiSdkToolsFromAgentDefinitions({
       definitions: [definition],
       valueTypesById: new Map(),
-      run: { id: "run-4", agentId: "prototype" },
+      run: { kind: "workflow", id: "run-4", workflowId: "test-workflow", stepId: "prototype" },
       connector: (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"],
       logger: noopLogger,
     })

@@ -7,7 +7,6 @@ function thread(overrides: Partial<AgentThread> & Pick<AgentThread, "id">): Agen
   return {
     id,
     projectId: "project",
-    agentId: "analyst",
     ownerPrincipal: { type: "user", id: "user" },
     status: "active",
     activeRunId: null,
@@ -35,7 +34,7 @@ describe("filterThreadNavigation", () => {
   test("searches thread titles case-insensitively", () => {
     const threads = [
       thread({ id: "forecast", title: "Quarterly forecast" }),
-      thread({ id: "ops", agentId: "operator", title: "Deploy service" }),
+      thread({ id: "ops", title: "Deploy service" }),
     ]
 
     expect(filterThreadNavigation(threads, "FORECAST").map((item) => item.id)).toEqual(["forecast"])

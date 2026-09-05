@@ -243,7 +243,13 @@ export async function startSixbRuntime(
         await actionWorker.start()
       }
 
-      if (sixb.definitions.agents.list().length > 0 && sixb.storage.agents) {
+      if (
+        (sixb.definitions.models !== undefined ||
+          sixb.definitions.workflows
+            .list()
+            .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))) &&
+        sixb.storage.agents
+      ) {
         agentWorker = new AgentWorker(sixb, {
           apiBaseUrl: requireAgentApiBaseUrl(options.agentApiBaseUrl),
           concurrency: options.workerConcurrency?.agent,

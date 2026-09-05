@@ -5,7 +5,6 @@ import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import {
   type ActionDefinition,
-  type AgentDefinition,
   agent,
   applications,
   type ConnectorDefinition,
@@ -14,7 +13,6 @@ import {
   createSixb,
   type DatasetDefinition,
   defineAction,
-  defineAgent,
   defineConnector,
   defineDataset,
   defineGroup,
@@ -48,14 +46,6 @@ const Account = defineObjectType({
 
 const AccountSnapshot = defineDataset("account.snapshot", {
   schema: [col("id", "string")],
-})
-
-const model = {} as Parameters<typeof defineAgent>[1]["model"]
-
-const opsAgent = defineAgent("ops", {
-  name: "Ops Agent",
-  model,
-  instructions: "Assist operators.",
 })
 
 const sourceConnector = defineConnector("source", {
@@ -443,24 +433,10 @@ describe("role definitions", () => {
       target: "pipeline",
       selection: { all: true, except: ["normalize-accounts"] },
     })
-    expect(can.run(opsAgent)).toEqual({
-      kind: "grant",
-      capability: "run",
-      target: "agent",
-      selection: { all: false, ids: ["ops"] },
-    })
     expect(can.run(agent)).toEqual({
       kind: "grant",
       capability: "run",
       target: "agent",
-      selection: { all: false, ids: ["main"] },
-    })
-    expect(can.run(every.agent()).selection).toEqual({ all: true, except: [] })
-    expect(can.run(every.agent().except([opsAgent]))).toEqual({
-      kind: "grant",
-      capability: "run",
-      target: "agent",
-      selection: { all: true, except: ["ops"] },
     })
   })
 
@@ -534,7 +510,7 @@ describe("role definitions", () => {
       "[Sixb] can.view accepts object or dataset selectors, but received every.sync()."
     )
     expect(() => can.run(every.dataset() as never)).toThrow(
-      "[Sixb] can.run accepts workflow or sync or pipeline or agent selectors, but received every.dataset()."
+      "[Sixb] can.run accepts workflow or sync or pipeline selectors, but received every.dataset()."
     )
   })
 
@@ -543,7 +519,7 @@ describe("role definitions", () => {
     // and since neither is in `GRANT_KINDS`, startup died on `spec.universeKey` with a `TypeError`
     // naming neither the role nor the definition.
     expect(() => can.run(AccountSnapshot as never)).toThrow(
-      "[Sixb] can.run accepts workflow or sync or pipeline or agent definitions, but received one targeting dataset."
+      "[Sixb] can.run accepts workflow or sync or pipeline definitions, but received one targeting dataset."
     )
     expect(() => can.view(applications.atlas as never)).toThrow(
       "[Sixb] can.view accepts object or dataset definitions, but received one targeting application."
@@ -802,8 +778,8 @@ describe("role definitions", () => {
     )
   })
 
-  test("runtime registration rejects run grants on unknown agents", () => {
-    const role: RoleDefinition = {
+  test("runtime registration rejects legacy Agent grant selections", () => {
+    const role = {
       kind: "role",
       id: "agent.runner",
       grantedToGroupIds: ["commercial"],
@@ -815,10 +791,21 @@ describe("role definitions", () => {
           selection: { all: false, ids: ["missing"] },
         },
       ],
-    }
+    } as unknown as RoleDefinition
 
     expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
-      "unknown agent 'missing'"
+      "agent run grant must not declare a selection"
+    )
+  })
+
+  test("runtime registration rejects an Agent grant when no language model is configured", () => {
+    const role = defineRole("agent.runner", {
+      grantedTo: [commercial],
+      grants: [can.run(agent)],
+    })
+
+    expect(() => createRuntime({ groups: [commercial], roles: [role] })).toThrow(
+      "grants run on the project Agent, but it is unavailable"
     )
   })
 
@@ -927,7 +914,6 @@ function createRuntime(
     datasets?: readonly DatasetDefinition[]
     syncs?: readonly SyncDefinition[]
     pipelines?: readonly PipelineDefinition[]
-    agents?: readonly AgentDefinition[]
     connectors?: readonly ConnectorDefinition[]
   } = {}
 ): SixbHost<readonly [typeof Account]> {

@@ -1,6 +1,6 @@
 # Agents
 
-Sixb provides one main conversational agent. It calls a project language model, project tools,
+Sixb provides one conversational Agent. It calls a project language model, project tools,
 sandboxed `read` and `bash`, and an authorized Sixb API.
 
 Configure at least one language model to enable it. The first model is the default.
@@ -23,7 +23,7 @@ export const sixb = createSixb({
 ```
 
 The agent worker runs each turn through the existing durable run, stream, and sandbox lifecycle.
-When authentication is enabled, the main agent inherits the requesting user's current authority.
+When authentication is enabled, the Agent inherits the requesting user's current authority.
 The chat composer lists the configured models, their known capabilities, and supported reasoning
 levels. The selected values apply to the next turn and are stored on its durable run.
 Display metadata is refreshed from Models.dev through a bounded in-memory cache. The API falls back
@@ -31,9 +31,9 @@ to its embedded snapshot if the service is unavailable and never adds models to 
 
 ## Child agents
 
-The main agent can delegate focused tasks to headless child agents. It can choose any language
+The Agent can delegate focused tasks to headless child agents. It can choose any language
 model configured in `models.language`, continue working after a child starts, and wait only when it
-needs the result. Children are created at runtime rather than declared with `defineAgent`; no extra
+needs the result. Children are created at runtime; no extra
 project configuration is required.
 
 Each child:
@@ -47,46 +47,24 @@ Up to four children may be active per parent run. They execute on a separate wor
 parents cannot consume their capacity. Child agents cannot delegate again or start workflows in
 this first version.
 
-When several models are configured, the main Agent sees the default, base input/output prices, and
+When several models are configured, the Agent sees the default, base input/output prices, and
 context limits from Sixb's pinned Models.dev catalog when available. Runtime speed is not guessed;
 the default remains the fallback when there is no clear reason to select another model.
 
-## Defined agents
+## Workflow tasks
 
-`defineAgent` remains temporarily available for existing conversational agents. New workflow agent
-tasks are configured directly with `defineAgentStep`; see [Workflows](../workflows/overview.md).
-
-Put each definition in `agents/` and export it.
-
-```ts
-// agents/business-analyst.ts
-import { defineAgent } from "@sixb/core"
-import { gateway } from "ai"
-
-export const businessAnalyst = defineAgent("business-analyst", {
-  name: "Business Analyst",
-  description: "Investigates customers, invoices, projects, and follow-ups.",
-  model: gateway("deepseek/deepseek-v4-flash"),
-  instructions: [
-    "You are the business operations analyst for this project.",
-    "Ground answers in the data available through Sixb, and say when data is insufficient.",
-    "Prefer concise summaries with clear next actions.",
-  ].join("\n"),
-})
-```
-
-See [Defining agents](./defining-agents.md) for every config field.
+Use `defineAgentStep` for structured background work within a workflow. Its prompt, inputs, output
+schema, and execution groups belong to the step. See [Workflows](../workflows/overview.md).
 
 ## Core concepts
 
 | Concept | What it is |
 | --- | --- |
-| **Main agent** | The framework-owned conversational entry point, enabled by the project model catalog. |
-| **Defined agent** | A transitional `defineAgent` configuration for existing conversations. |
-| **Thread** | One conversation with an agent, owned by a principal. |
+| **Agent** | The framework-owned conversational entry point, enabled by the project model catalog. |
+| **Thread** | One conversation with the Agent, owned by a principal. |
 | **Run** | One turn. Posting a user message triggers a run. |
 | **Message** | A `system`, `user`, or `assistant` message made of `text`, `reasoning`, `step-start`, and `tool-call` parts. |
-| **Tools** | Project tools plus `read`, `view_file`, and `bash`; the main agent also gets `spawn_agent` and `wait_agent`. |
+| **Tools** | Project tools plus `read`, `view_file`, and `bash`; the Agent also gets `spawn_agent` and `wait_agent`. |
 
 ## Run an agent
 
@@ -114,7 +92,7 @@ in their respective boundaries, and persists the reply. See
 
 ## Related
 
-- [Defining agents](./defining-agents.md) — the `defineAgent` config.
+- [Configure the Agent](./defining-agents.md) — models, tools, and skills.
 - [Running and streaming](./running-and-streaming.md) — threads, the HTTP API, and the websocket.
 - [Tools and gateway](./tools-and-gateway.md) — selected worker tools, connector-backed web
   access, sandboxed file and command access, and scoped data access.

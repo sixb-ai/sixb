@@ -1,12 +1,9 @@
 import { join } from "node:path"
-import type { AgentDefinition } from "@sixb/core"
 import {
   createAgentRunExecutionToken,
   dispatchQueuedAgentRuns,
   dispatchQueuedSubagentRuns,
-  MAIN_AGENT_ID,
   publishAgentRunCancel,
-  resolveAgentExecutionAuthorization,
   resolveInheritedAgentExecutionAuthorization,
   subscribeAgentRunCancel,
   workflowAgentNodeQueueJobId,
@@ -20,12 +17,7 @@ import type { AgentRunExecution, AgentRunRecord, SubagentRunRecord } from "@sixb
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import {
-  type AgentContextBudget,
-  type AgentModelContextLimits,
-  DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
-  resolveAgentContextBudget,
-} from "./context-budget"
+import { DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS, resolveAgentContextBudget } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
 import {
   AgentExecutionLostError,
@@ -99,9 +91,7 @@ type Reservation<TRun extends AgentRunRecord = AgentRunRecord> =
  */
 export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAILURE_CODES> {
   private readonly host: AgentWorkerHost
-  private readonly agents: readonly AgentDefinition[]
   private readonly context: AgentWorkerContext | null
-  private contextBudgets: ReadonlyMap<string, AgentContextBudget> = new Map()
   private modelsDev: ModelsDevCatalog | null = null
   private readonly subagentWorker: SubagentQueueWorker
   /**
@@ -124,9 +114,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     })
 
     this.host = host
-    this.agents = host.definitions.agents.list()
     const hasAgentWork =
-      this.agents.length > 0 ||
+      host.definitions.models !== undefined ||
       host.definitions.workflows
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
@@ -143,10 +132,16 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         import("./models-dev/catalog"),
         this.context.agentSkills,
       ])
-      this.contextBudgets = resolveContextBudgets(
-        this.agents,
-        modelsDev.resolveModelsDevContextLimits
-      )
+      for (const entry of this.host.definitions.models?.language.list() ?? []) {
+        const budget = resolveAgentContextBudget(
+          modelsDev.resolveModelsDevContextLimits(entry.model)
+        )
+        if (budget.source === "fallback") {
+          console.warn(
+            `[SixbAgentWorker] Models.dev has no context limit for '${entry.provider}/${entry.modelId}'; using the ${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS}-token fallback.`
+          )
+        }
+      }
       this.modelsDev = modelsDev
     }
     await Promise.all([
@@ -241,47 +236,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
-    const agent = this.host.definitions.agents.getById(queuedRun.agentId)
-    if (!agent) {
-      const error = createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Unknown agent '${queuedRun.agentId}'.`,
-        { details: agentRunFailureDetails(queuedRun) }
-      )
-      if (queuedRun.status === "queued") {
-        const completedAt = new Date()
-        const failure = toAgentRunFailure(
-          createSixbError(
-            "internal.unexpected",
-            `[SixbAgentWorker] Agent '${queuedRun.agentId}' is not registered.`,
-            { details: agentRunFailureDetails(queuedRun) }
-          ),
-          {
-            status: "failed",
-            at: completedAt,
-            details: agentRunFailureDetails(queuedRun),
-          }
-        )
-        const failed = await context.storage.agents.runs.finishQueued({
-          projectId: context.id,
-          id: queuedRun.id,
-          status: "failed",
-          error: failure,
-          completedAt,
-        })
-        this.reportFailure(error, failed, job.attempt, failure)
-        await context.streamSink.publishRunFinished(failed)
-        return
-      }
-      throw error
-    }
     const plan = resolveAgentExecutionPlan({
-      agent,
       spec: queuedRun.spec,
       models: this.host.definitions.models?.language,
+      tools: this.host.definitions.tools,
       defaultMaxSteps: context.defaultMaxSteps,
     })
-    const executionAgent = plan.model === agent.model ? agent : { ...agent, model: plan.model }
 
     const durableExecution = await context.storage.executions.getById({
       projectId: context.id,
@@ -293,48 +253,25 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         `[SixbAgentWorker] Agent run '${runId}' references missing execution '${queuedRun.executionId}'.`,
         {
           details: {
-            agentId: queuedRun.agentId,
             runId,
+            threadId: queuedRun.threadId,
             executionId: queuedRun.executionId,
           },
         }
       )
     }
-    const executionContext = await (async () => {
-      // Transitional: run kind will replace the reserved id as the authority discriminator.
-      if (agent.id === MAIN_AGENT_ID) {
-        return createAgentExecutionContext({
-          context,
-          host: this.host,
-          execution: durableExecution,
-          agentId: agent.id,
-          runId: queuedRun.id,
-          authorization: await resolveInheritedAgentExecutionAuthorization({
-            auth: context.storage.auth,
-            projectId: context.id,
-            authorizationRef: durableExecution.authorizationRef,
-            security: this.host.definitions.security,
-          }),
-        })
-      }
-
-      const resolved = await resolveAgentExecutionAuthorization({
+    const executionContext = createAgentExecutionContext({
+      context,
+      host: this.host,
+      execution: durableExecution,
+      runId: queuedRun.id,
+      authorization: await resolveInheritedAgentExecutionAuthorization({
         auth: context.storage.auth,
         projectId: context.id,
-        agentId: agent.id,
         authorizationRef: durableExecution.authorizationRef,
         security: this.host.definitions.security,
-      })
-      return createAgentExecutionContext({
-        context,
-        host: this.host,
-        execution: durableExecution,
-        agentId: agent.id,
-        runId: queuedRun.id,
-        authorization: { type: "principal", context: resolved.context },
-        authorPrincipal: resolved.identity.principal,
-      })
-    })()
+      }),
+    })
 
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,
@@ -350,7 +287,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       throw createSixbError(
         "internal.unexpected",
         `[SixbAgentWorker] Agent run '${run.id}' has no execution token.`,
-        { details: { agentId: run.agentId, runId: run.id } }
+        { details: { runId: run.id, threadId: run.threadId } }
       )
     }
     let environment: AgentExecutionEnvironment | null = null
@@ -392,14 +329,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       })
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
-        agent: executionAgent,
-        budget:
-          queuedRun.spec === undefined
-            ? requiredContextBudget(this.contextBudgets, agent.id)
-            : resolveAgentContextBudget(
-                executionAgent,
-                requiredModelsDevCatalog(this.modelsDev).resolveModelsDevContextLimits(plan.model)
-              ),
+        plan,
+        budget: resolveAgentContextBudget(
+          requiredModelsDevCatalog(this.modelsDev).resolveModelsDevContextLimits(plan.model)
+        ),
         run,
         runtime,
       })
@@ -410,19 +343,13 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: turnSignal,
         messages: prepared.threadContext.retainedMessages,
         skills: prepared.skills,
-        ...(agent.id === MAIN_AGENT_ID
-          ? {
-              // Temporary: delegation belongs only to the framework main Agent while legacy
-              // definition-backed conversational agents remain supported.
-              frameworkTools: new SubagentCoordinator(
-                this.host,
-                context,
-                run,
-                durableExecution,
-                requiredModelsDevCatalog(this.modelsDev)
-              ).createTools(),
-            }
-          : {}),
+        frameworkTools: new SubagentCoordinator(
+          this.host,
+          context,
+          run,
+          durableExecution,
+          requiredModelsDevCatalog(this.modelsDev)
+        ).createTools(),
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       runtime.assertCanContinue()
@@ -675,20 +602,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
     // Known deterministic failures honor the catalog policy; uncoded dependency failures retain
     // the worker's bounded pre-start retry path below.
-    if (isSixbError(error) && !error.retryable) {
-      return { kind: "fail" }
-    }
+    const permanent = isSixbError(error) && !error.retryable
 
     // Storage/identity setup failed before queued→running. Keep the deterministic queue job alive;
     // if the dependency never recovers, record a visible pre-stream failure before dead-lettering.
-    if (claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS) {
+    if (!permanent && claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS) {
       return { kind: "retry", availableAt: backoff(PRESTART_RETRY_BACKOFF_MS) }
     }
-    if (claimed.job.type !== "agent.run.requested") {
-      return claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS
-        ? { kind: "retry", availableAt: backoff(PRESTART_RETRY_BACKOFF_MS) }
-        : { kind: "fail" }
-    }
+    if (claimed.job.type !== "agent.run.requested" || !this.context) return { kind: "fail" }
     const { runId } = claimed.job.payload
     const run = await this.requireContext().storage.agents.runs.getById({
       projectId: this.host.id,
@@ -1170,7 +1091,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       runKind: "agent",
       run:
         run.kind === "conversation"
-          ? { runId: run.id, agentId: run.agentId }
+          ? { runId: run.id, threadId: run.threadId }
           : { runId: run.id, parentRunId: run.parentRunId },
       failure,
     })
@@ -1252,49 +1173,6 @@ class SubagentQueueWorker extends QueueWorker<SubagentQueueJob, typeof AGENT_RUN
   ): QueueWorkerFailureDecision {
     return this.owner.onSubagentAbortError(claimed, error)
   }
-}
-
-function resolveContextBudgets(
-  agents: readonly AgentDefinition[],
-  resolveModelContextLimits: (
-    model: AgentDefinition["model"]
-  ) => AgentModelContextLimits | undefined
-): ReadonlyMap<string, AgentContextBudget> {
-  const budgets = new Map<string, AgentContextBudget>()
-  const warnedModels = new Set<string>()
-  for (const agent of agents) {
-    const modelLimits =
-      agent.loop?.context?.windowTokens === undefined
-        ? resolveModelContextLimits(agent.model)
-        : undefined
-    const budget = resolveAgentContextBudget(agent, modelLimits)
-    budgets.set(agent.id, budget)
-    if (budget.source !== "fallback") continue
-
-    const model = `${agent.model.provider}/${agent.model.modelId}`
-    if (warnedModels.has(model)) continue
-    warnedModels.add(model)
-    console.warn(
-      `[SixbAgentWorker] Models.dev has no context limit for '${model}'; using the ${DEFAULT_CONTEXT_WINDOW_LABEL} fallback. Configure loop.context.windowTokens to override it.`
-    )
-  }
-  return budgets
-}
-
-const DEFAULT_CONTEXT_WINDOW_LABEL = `${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token`
-
-function requiredContextBudget(
-  budgets: ReadonlyMap<string, AgentContextBudget>,
-  agentId: string
-): AgentContextBudget {
-  const budget = budgets.get(agentId)
-  if (!budget) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] Agent '${agentId}' has no resolved context budget.`
-    )
-  }
-  return budget
 }
 
 function requiredModelsDevCatalog(catalog: ModelsDevCatalog | null): ModelsDevCatalog {
@@ -1405,7 +1283,7 @@ function aiUsageRecoveryBackoffMs(attempt: number): number {
 
 function agentRunFailureDetails(run: AgentRunRecord): Readonly<Record<string, string>> {
   return run.kind === "conversation"
-    ? { agentId: run.agentId, runId: run.id, threadId: run.threadId }
+    ? { runId: run.id, threadId: run.threadId }
     : { parentRunId: run.parentRunId, runId: run.id }
 }
 

@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import type { LanguageModelV4 } from "@ai-sdk/provider"
 import {
   defineAction,
-  defineAgent,
   defineAgentStep,
   defineAgentTool,
   defineGroup,
@@ -31,7 +30,7 @@ import {
 } from "../src"
 import { schemaFieldsToJsonSchema, schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { createTestSixb } from "../src/testing"
-import { validateWorkflowDefinition, workflowAgentStepActorId } from "../src/workflows"
+import { validateWorkflowDefinition } from "../src/workflows"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Transaction = defineObjectType({
@@ -859,35 +858,6 @@ describe("SixbHost workflow registration", () => {
           ...createTestRuntimeDeps(),
         })
     ).toThrow(/references unknown group "finance"/)
-  })
-
-  test("rejects a registered agent that collides with a workflow task identity", () => {
-    const step = defineAgentStep("review", {
-      model: workflowModel,
-      instructions: "Review the invoice.",
-    })
-      .input({ transaction: ref(Transaction) })
-      .output({ invoice: ref(Invoice) })
-      .prompt(({ input }) => `Review '${input.transaction.primaryId}'.`)
-    const workflow: WorkflowDefinition = defineWorkflow("invoice-review")
-      .input({ transaction: ref(Transaction) })
-      .then(step)
-    const actorId = workflowAgentStepActorId(workflow.id, step.id)
-    const collidingAgent = defineAgent(actorId, {
-      name: "Colliding agent",
-      model: workflowModel,
-      instructions: "This identity is reserved by the workflow task.",
-    })
-
-    expect(
-      () =>
-        new SixbHost<readonly OntologySource[]>({
-          ontology: [Transaction, Invoice],
-          agents: [collidingAgent],
-          workflows: [workflow],
-          ...createTestRuntimeDeps(),
-        })
-    ).toThrow(/conflicts with registered agent/)
   })
 
   test("rejects duplicate workflow ids", () => {

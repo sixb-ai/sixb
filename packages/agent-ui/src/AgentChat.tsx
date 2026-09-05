@@ -74,9 +74,9 @@ export function AgentChat({
     <ThreadSidebar
       threads={conversation.threads}
       currentThreadId={threadId}
-      loading={conversation.agentsLoading}
+      loading={conversation.agentLoading}
       threadsError={
-        conversation.agentsError
+        conversation.agentError
           ? "Agent unavailable."
           : conversation.threadsError
             ? "Could not load threads."
@@ -99,11 +99,11 @@ export function AgentChat({
   )
 
   let content: ReactNode
-  if (conversation.agentsLoading) {
+  if (conversation.agentLoading) {
     content = <div className="h-full" aria-busy="true" />
-  } else if (conversation.agentsError) {
+  } else if (conversation.agentError) {
     content = <ErrorState title="Agent unavailable" description="Could not load the agent." />
-  } else if (conversation.agents.length === 0) {
+  } else if (!conversation.currentAgent) {
     content = (
       <div className="flex h-full items-center justify-center p-6">
         <EmptyState
@@ -117,7 +117,7 @@ export function AgentChat({
     content = (
       <ErrorState
         title="Conversation unavailable"
-        description="This conversation does not belong to the project agent or is no longer available."
+        description="This conversation is no longer available."
       />
     )
   } else {

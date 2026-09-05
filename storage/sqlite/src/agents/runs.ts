@@ -6,7 +6,6 @@ import {
   assertSubagentRunResult,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
-import { MAIN_AGENT_ID } from "@sixb/core/internal/agents"
 import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
@@ -52,10 +51,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      authority:
-        input.agentId === MAIN_AGENT_ID
-          ? { type: "inherited" }
-          : { type: "managed", agentId: input.agentId },
     })
 
     return this.db.transaction(() => {
@@ -69,7 +64,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
           `[SixbSqlite] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
         )
       }
-
       if (thread.active_run_id !== null) {
         throw new AgentStorageError(
           "active_run_exists",
@@ -87,14 +81,13 @@ export class SqliteAgentRunStore implements AgentRunStore {
               execution_id,
               kind,
               thread_id,
-              agent_id,
               trigger_message_id,
               spec,
               requester_group_ids,
               status,
               attempt,
               created_at
-            ) VALUES (?, ?, ?, 'conversation', ?, ?, ?, ?, ?, 'queued', 0, ?)
+            ) VALUES (?, ?, ?, 'conversation', ?, ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
@@ -102,7 +95,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.id,
             input.executionId,
             input.threadId,
-            input.agentId,
             input.triggerMessageId,
             JSON.stringify(input.spec),
             JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds)),
@@ -140,7 +132,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      authority: { type: "inherited" },
     })
 
     return this.db.transaction(() => {
@@ -461,11 +452,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
     if (input.threadId) {
       whereClauses.push("thread_id = ?")
       args.push(input.threadId)
-    }
-
-    if (input.agentId) {
-      whereClauses.push("agent_id = ?")
-      args.push(input.agentId)
     }
 
     if (input.parentRunId) {

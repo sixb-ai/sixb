@@ -1752,31 +1752,60 @@ export type GetAiAccountingOverviewResponses = {
       providerId: string
       modelId: string
     }>
-    agents: Array<{
-      modelCallCount: number
-      usage: {
-        inputTokens?: number
-        outputTokens?: number
-        totalTokens?: number
-        uncachedInputTokens?: number
-        cacheReadInputTokens?: number
-        cacheWriteInputTokens?: number
-        textOutputTokens?: number
-        reasoningOutputTokens?: number
-        reportingStatus: "complete" | "partial" | "unavailable"
-      }
-      costs: {
-        amounts: Array<{
-          currency: string
-          amountNanos: string
-        }>
-        reportedCallCount: number
-        ratedCallCount: number
-        unpriceableCallCount: number
-        unvaluedCallCount: number
-      }
-      agentId: string
-    }>
+    agents: Array<
+      | {
+          modelCallCount: number
+          usage: {
+            inputTokens?: number
+            outputTokens?: number
+            totalTokens?: number
+            uncachedInputTokens?: number
+            cacheReadInputTokens?: number
+            cacheWriteInputTokens?: number
+            textOutputTokens?: number
+            reasoningOutputTokens?: number
+            reportingStatus: "complete" | "partial" | "unavailable"
+          }
+          costs: {
+            amounts: Array<{
+              currency: string
+              amountNanos: string
+            }>
+            reportedCallCount: number
+            ratedCallCount: number
+            unpriceableCallCount: number
+            unvaluedCallCount: number
+          }
+          kind: "agent"
+        }
+      | {
+          modelCallCount: number
+          usage: {
+            inputTokens?: number
+            outputTokens?: number
+            totalTokens?: number
+            uncachedInputTokens?: number
+            cacheReadInputTokens?: number
+            cacheWriteInputTokens?: number
+            textOutputTokens?: number
+            reasoningOutputTokens?: number
+            reportingStatus: "complete" | "partial" | "unavailable"
+          }
+          costs: {
+            amounts: Array<{
+              currency: string
+              amountNanos: string
+            }>
+            reportedCallCount: number
+            ratedCallCount: number
+            unpriceableCallCount: number
+            unvaluedCallCount: number
+          }
+          kind: "workflowAgent"
+          workflowId: string
+          agentStepId: string
+        }
+    >
     workflows: Array<{
       modelCallCount: number
       usage: {
@@ -1873,13 +1902,12 @@ export type ListAiModelCallsResponses = {
       attribution?:
         | {
             kind: "agent"
-            agentId: string
             agentRunId: string
             threadId: string
           }
         | {
             kind: "workflowAgent"
-            agentId: string
+            agentStepId: string
             nodeRunId: string
             workflowId: string
             workflowRunId: string
@@ -2053,13 +2081,12 @@ export type ListAiModelCallGroupsResponses = {
       attribution?:
         | {
             kind: "agent"
-            agentId: string
             agentRunId: string
             threadId: string
           }
         | {
             kind: "workflowAgent"
-            agentId: string
+            agentStepId: string
             nodeRunId: string
             workflowId: string
             workflowRunId: string
@@ -2089,13 +2116,12 @@ export type ListAiModelCallGroupsResponses = {
         attribution?:
           | {
               kind: "agent"
-              agentId: string
               agentRunId: string
               threadId: string
             }
           | {
               kind: "workflowAgent"
-              agentId: string
+              agentStepId: string
               nodeRunId: string
               workflowId: string
               workflowRunId: string
@@ -8110,46 +8136,11 @@ export type HeadActionRunFileContentResponses = {
   206: unknown
 }
 
-export type ListAgentsData = {
+export type GetAgentData = {
   body?: never
   path?: never
   query?: never
-  url: "/api/agents"
-}
-
-export type ListAgentsResponses = {
-  /**
-   * Response for status 200
-   */
-  200: Array<{
-    id: string
-    name: string
-    description?: string
-    modelId?: string
-    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
-    groupIds: Array<string>
-    loop?: {
-      stopWhen?: {
-        maxSteps?: number
-      }
-      context?: {
-        windowTokens?: number
-        reserveTokens?: number
-        keepRecentTokens?: number
-      }
-    }
-  }>
-}
-
-export type ListAgentsResponse = ListAgentsResponses[keyof ListAgentsResponses]
-
-export type GetAgentData = {
-  body?: never
-  path: {
-    agentId: string
-  }
-  query?: never
-  url: "/api/agents/{agentId}"
+  url: "/api/agent"
 }
 
 export type GetAgentErrors = {
@@ -8168,21 +8159,10 @@ export type GetAgentResponses = {
    * Response for status 200
    */
   200: {
-    id: string
     name: string
-    description?: string
-    modelId?: string
-    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
-    groupIds: Array<string>
-    loop?: {
-      stopWhen?: {
-        maxSteps?: number
-      }
-      context?: {
-        windowTokens?: number
-        reserveTokens?: number
-        keepRecentTokens?: number
-      }
+    model: {
+      provider: string
+      modelId: string
     }
   }
 }
@@ -8193,7 +8173,6 @@ export type ListAgentThreadsData = {
   body?: never
   path?: never
   query?: {
-    agentId?: string
     status?: "active" | "archived"
     limit?: string
     offset?: string
@@ -8227,7 +8206,6 @@ export type ListAgentThreadsResponses = {
     threads: Array<{
       id: string
       projectId: string
-      agentId: string
       ownerPrincipal: {
         type: "user" | "serviceAccount" | "system"
         id: string
@@ -8249,7 +8227,6 @@ export type ListAgentThreadsResponse = ListAgentThreadsResponses[keyof ListAgent
 
 export type CreateAgentThreadData = {
   body: {
-    agentId: string
     title?: string
     threadId?: string
   }
@@ -8295,7 +8272,6 @@ export type CreateAgentThreadResponses = {
     thread: {
       id: string
       projectId: string
-      agentId: string
       ownerPrincipal: {
         type: "user" | "serviceAccount" | "system"
         id: string
@@ -8352,7 +8328,6 @@ export type GetAgentThreadResponses = {
   200: {
     id: string
     projectId: string
-    agentId: string
     ownerPrincipal: {
       type: "user" | "serviceAccount" | "system"
       id: string
@@ -8731,7 +8706,6 @@ export type PostAgentThreadMessageResponses = {
       id: string
       projectId: string
       threadId: string
-      agentId: string
       triggerMessageId: string
       requestedBy?: {
         type: "user" | "serviceAccount"
@@ -8962,7 +8936,6 @@ export type CancelAgentRunResponses = {
       id: string
       projectId: string
       threadId: string
-      agentId: string
       triggerMessageId: string
       requestedBy?: {
         type: "user" | "serviceAccount"
@@ -9096,7 +9069,6 @@ export type RetryAgentRunResponses = {
       id: string
       projectId: string
       threadId: string
-      agentId: string
       triggerMessageId: string
       requestedBy?: {
         type: "user" | "serviceAccount"
@@ -9228,7 +9200,6 @@ export type ListAgentThreadRunsResponses = {
       id: string
       projectId: string
       threadId: string
-      agentId: string
       triggerMessageId: string
       requestedBy?: {
         type: "user" | "serviceAccount"
@@ -9357,7 +9328,6 @@ export type GetAgentRunResponses = {
     id: string
     projectId: string
     threadId: string
-    agentId: string
     triggerMessageId: string
     requestedBy?: {
       type: "user" | "serviceAccount"

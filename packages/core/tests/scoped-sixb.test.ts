@@ -3,10 +3,10 @@ import {
   type ActionDefinition,
   type AuthorizationContext,
   AuthorizationError,
+  agent,
   can,
   col,
   defineAction,
-  defineAgent,
   defineAgentStep,
   defineConnector,
   defineDataset,
@@ -29,10 +29,12 @@ import {
   type StoredDomainEvent,
   type WorkflowDefinition,
 } from "../src"
-import { agentServiceAccountId, ensureAgentExecutionIdentity } from "../src/agents/authority"
+import { agentServiceAccountId } from "../src/agents/authority"
 import { restoreAgentExecutionScope } from "../src/execution/agent"
+import { bindRequestExecution } from "../src/execution/request"
 import type { AuthStorage } from "../src/storage"
 import { createTestSixb, type TestExecutionHost } from "../src/testing"
+import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
 const Contract = defineObjectType({
@@ -100,25 +102,10 @@ const contractPipeline: PipelineDefinition =
 const invoicePipeline: PipelineDefinition =
   definePipeline("invoice-pipeline").then(invoicePipelineStep)
 
-const model = {
-  provider: "test",
-  modelId: "test-model",
-} as Parameters<typeof defineAgent>[1]["model"]
-
-const contractAgent = defineAgent("contract-agent", {
-  name: "Contract Agent",
-  model,
-  instructions: "Help with contracts.",
-})
-
-const invoiceAgent = defineAgent("invoice-agent", {
-  name: "Invoice Agent",
-  model,
-  instructions: "Help with invoices.",
-})
+const model = testLanguageModel()
 
 const reviewContractWithAgent = defineAgentStep("review-contract-with-agent", {
-  model: contractAgent.model,
+  model: model,
   instructions: "Help with contracts.",
 })
   .input({ contract: ref(Contract) })
@@ -185,7 +172,7 @@ const operationsRunner = defineRole("operations.runner", {
     can.run(agentReviewContract),
     can.run(syncContracts),
     can.run(contractPipeline),
-    can.run(contractAgent),
+    can.run(agent),
   ],
 })
 
@@ -236,7 +223,7 @@ function createRuntime() {
     syncs: [syncContracts, syncInvoices],
     pipelines: [contractPipeline, invoicePipeline],
     workflows: [renewContract, agentReviewContract],
-    agents: [contractAgent, invoiceAgent],
+    models: { language: [model] },
     groups: [
       commercial,
       finance,
@@ -618,14 +605,13 @@ describe("bound Sixb operational access", () => {
 
     // A workflow grant authorizes the composite workflow, not direct access
     // to the agents used by its implementation.
-    expect(workflowOnlyPrincipal.agents.list()).toEqual([])
-    expect(workflowOnlyPrincipal.agents.getById("contract-agent")).toBeNull()
+    expect(workflowOnlyPrincipal.agent.get()).toBeNull()
+    expect(workflowOnlyPrincipal.agent.get()).toBeNull()
     expect(
-      workflowOnlyPrincipal.agents.runs.request({
-        agentId: "contract-agent",
+      workflowOnlyPrincipal.agent.runs.request({
         text: "Review this contract.",
       })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toMatchObject({ code: "agent_not_found" })
   })
 
   test("sync catalog narrows to runnable syncs", () => {
@@ -678,18 +664,10 @@ describe("bound Sixb operational access", () => {
     expect(operator.pipelines.getById("contract-pipeline")).toBeNull()
   })
 
-  test("agent catalog narrows to runnable agents", () => {
+  test("the project Agent is visible only with its run grant", () => {
     const host = createRuntime()
-    const _sixb = createTestSixb(host)
-
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    expect(runner.agents.list().map((agent) => agent.id)).toEqual(["contract-agent"])
-    expect(runner.agents.getById("contract-agent")?.id).toBe("contract-agent")
-    expect(runner.agents.getById("invoice-agent")).toBeNull()
-
-    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
-    expect(operator.agents.list()).toEqual([])
-    expect(operator.agents.getById("contract-agent")).toBeNull()
+    expect(bindPrincipal(host, contextFor(host, ["operations"])).agent.get()?.name).toBe("Sixb")
+    expect(bindPrincipal(host, contextFor(host, ["commercial"])).agent.get()).toBeNull()
   })
 
   test("agent run requests require can.run and retain the admission snapshot", async () => {
@@ -698,9 +676,25 @@ describe("bound Sixb operational access", () => {
     await seedPrincipal(host)
     await seedRequesterMemberships(host, ["operations", "commercial"])
 
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    const result = await runner.agents.runs.request({
-      agentId: "contract-agent",
+    await host.storage.auth!.sessions.create({
+      id: "scoped-test-session",
+      projectId: host.id,
+      userId: principal.id,
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: "test",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    const runner = bindRequestExecution(host, {
+      request: new Request("http://localhost/test"),
+      authorization: {
+        type: "principal",
+        context: { ...contextFor(host, ["operations"]), sessionId: "scoped-test-session" },
+        credential: { type: "session", id: "scoped-test-session" },
+      },
+    })
+    const result = await runner.agent.runs.request({
       text: "Summarize this account.",
     })
     expect(result.run.id).toBeString()
@@ -723,7 +717,7 @@ describe("bound Sixb operational access", () => {
       usage: { inputTokens: 12, outputTokens: 3 },
       occurredAt: new Date("2026-07-01T12:00:00.000Z"),
     })
-    await expect(runner.agents.runs.getById(result.run.id)).resolves.toMatchObject({
+    await expect(runner.agent.runs.getById(result.run.id)).resolves.toMatchObject({
       usage: {
         inputTokens: 12,
         outputTokens: 3,
@@ -746,40 +740,19 @@ describe("bound Sixb operational access", () => {
 
     const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
     expect(
-      operator.agents.runs.request({
-        agentId: "contract-agent",
+      operator.agent.runs.request({
         text: "Summarize this account.",
       })
-    ).rejects.toThrow(AuthorizationError)
+    ).rejects.toMatchObject({ code: "agent_not_found" })
   })
 
-  test("agent run admission never reactivates a suspended managed identity", async () => {
+  test("agent admission refuses uncredentialed principal authority", async () => {
     const host = createRuntime()
-    const _sixb = createTestSixb(host)
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    const agent = host.definitions.agents.getById("contract-agent")
-    const auth = host.storage.auth
-    if (!agent || !auth) throw new Error("Expected Agent definition and auth storage.")
-
-    await ensureAgentExecutionIdentity({ auth, projectId: host.id, agent })
-    await auth.serviceAccounts.update({
-      projectId: host.id,
-      id: agentServiceAccountId(agent.id),
-      status: "suspended",
+    const runner = createTestSixb(host, { authorization: contextFor(host, ["operations"]) })
+    await expect(runner.agent.runs.request({ text: "Must not run." })).rejects.toMatchObject({
+      code: "authority_not_inheritable",
     })
-    const thread = await runner.agents.threads.create({ agentId: agent.id })
-
-    await expect(
-      runner.agents.runs.request({
-        agentId: agent.id,
-        threadId: thread.id,
-        text: "This must not run.",
-      })
-    ).rejects.toThrow("is suspended")
-    await expect(host.storage.agents?.runs.list({ projectId: host.id })).resolves.toMatchObject({
-      runs: [],
-      total: 0,
-    })
+    expect((await host.storage.agents!.runs.list({ projectId: host.id })).runs).toEqual([])
   })
 
   test("agent threads require both the run grant and ownership", async () => {
@@ -787,20 +760,19 @@ describe("bound Sixb operational access", () => {
     const _sixb = createTestSixb(host)
     const ownerContext = contextFor(host, ["operations"])
     const owner = bindPrincipal(host, ownerContext)
-    const thread = await owner.agents.threads.create({ agentId: "contract-agent" })
+    const thread = await owner.agent.threads.create({})
 
-    expect(await owner.agents.threads.getById(thread.id)).toEqual(thread)
-    expect((await owner.agents.threads.list()).threads).toEqual([thread])
+    expect(await owner.agent.threads.getById(thread.id)).toEqual(thread)
+    expect((await owner.agent.threads.list()).threads).toEqual([thread])
 
     const other = bindPrincipal(host, {
       ...ownerContext,
       principal: { type: "user", id: "other-user" },
     })
-    expect(await other.agents.threads.getById(thread.id)).toBeNull()
-    expect((await other.agents.threads.list()).threads).toEqual([])
+    expect(await other.agent.threads.getById(thread.id)).toBeNull()
+    expect((await other.agent.threads.list()).threads).toEqual([])
     await expect(
-      other.agents.runs.request({
-        agentId: "contract-agent",
+      other.agent.runs.request({
         threadId: thread.id,
         text: "Read another user's thread.",
       })
@@ -1103,7 +1075,7 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
       roles: host.definitions.security.listResolvedRoles(),
     })
     const scope = restoreAgentExecutionScope({
-      agentId: "contract-agent",
+      actorId: "contract-agent",
       runId: "agent-run-1",
       authorization: { type: "principal", context: authorization },
       execution: {
@@ -1127,7 +1099,7 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
         authorization: scope.authorization,
         execution: {
           ...scope.execution,
-          executor: { type: "agent", agentId: "contract-agent", runId: "agent-run-2" },
+          executor: { type: "agent", actorId: "contract-agent", runId: "agent-run-2" },
         },
       })
     ).toThrow("agent authority does not match its execution binding")
@@ -1151,7 +1123,7 @@ describe("bound Sixb surface", () => {
     expect(Object.keys(scoped).sort()).toEqual(
       [
         "actions",
-        "agents",
+        "agent",
         "blobs",
         "connector",
         "datasets",
@@ -1210,7 +1182,7 @@ describe("bound Sixb surface", () => {
       ["getById", "list", "listLinks", "listObjects", "listTelemetry", "runs"].sort()
     )
     expect(Object.keys(scoped.rules).sort()).toEqual(["getById", "list", "states"])
-    expect(Object.keys(scoped.agents).sort()).toEqual(["getById", "list", "runs", "threads"])
+    expect(Object.keys(scoped.agent).sort()).toEqual(["get", "runs", "threads"])
     expect(Object.keys(scoped.events).sort()).toEqual(
       ["append", "canRead", "emit", "latestCursor", "read", "subscribe"].sort()
     )

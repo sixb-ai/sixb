@@ -1,5 +1,5 @@
+import type { LanguageModelV4, LanguageModelV4CallOptions } from "@ai-sdk/provider"
 import type {
-  AgentDefinition,
   AgentReasoningLevel,
   AgentStepDefinition,
   AgentToolCatalog,
@@ -20,49 +20,35 @@ const SUBAGENT_INSTRUCTIONS =
  * adapters resolve it before entering the shared execution path.
  */
 export interface ResolvedAgentExecutionPlan {
-  readonly model: AgentDefinition["model"]
+  readonly model: LanguageModelV4
   readonly reasoning?: AgentReasoningLevel
-  readonly providerOptions?: NonNullable<AgentDefinition["providerOptions"]>
-  readonly instructions: string
+  readonly providerOptions?: LanguageModelV4CallOptions["providerOptions"]
+  readonly instructions?: string
   readonly tools: readonly AgentToolDefinition[]
   readonly maxSteps: number
 }
 
-/** Adapt today's registered-agent definition to the source-neutral execution contract. */
+/** Resolve the project's conversational Agent without a static definition. */
 export function resolveAgentExecutionPlan(input: {
-  readonly agent: AgentDefinition
   readonly spec?: ConversationAgentRunSpec
   readonly models?: LanguageModelCatalog
+  readonly tools: AgentToolCatalog
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
-  const { agent, models, spec } = input
-  const modelRef = spec?.model ?? agent.model
-  const reasoning = spec ? spec.reasoning : agent.reasoning
-  const model =
-    models === undefined
-      ? modelRef.provider === agent.model.provider && modelRef.modelId === agent.model.modelId
-        ? agent.model
-        : null
-      : (models.getByRef(modelRef)?.model ?? null)
-  if (model === null) {
+  const modelRef = input.spec?.model ?? input.models?.default
+  const model = modelRef ? input.models?.getByRef(modelRef)?.model : undefined
+  if (!model) {
     throw createSixbError(
-      "internal.unexpected",
-      `[SixbAgentWorker] Agent '${agent.id}' references language model '${modelRef.provider}/${modelRef.modelId}', which is missing from the runtime catalog.`,
-      { details: { agentId: agent.id } }
+      "agent.execution_failed",
+      "[SixbAgentWorker] The conversation's language model is not available in models.language."
     )
   }
-
-  const providerOptions =
-    agent.loop?.caching === "off"
-      ? agent.providerOptions
-      : withAutomaticPromptCaching(model, agent.providerOptions)
-
+  const providerOptions = withAutomaticPromptCaching(model, undefined)
   return Object.freeze({
     model,
-    instructions: agent.instructions,
-    tools: agent.tools,
-    maxSteps: agent.loop?.stopWhen?.maxSteps ?? input.defaultMaxSteps,
-    ...(reasoning === undefined ? {} : { reasoning }),
+    tools: input.tools.list(),
+    maxSteps: input.defaultMaxSteps,
+    ...(input.spec?.reasoning === undefined ? {} : { reasoning: input.spec.reasoning }),
     ...(providerOptions === undefined ? {} : { providerOptions }),
   })
 }
@@ -154,7 +140,7 @@ export function resolveSubagentExecutionPlan(input: {
 function resolveWorkflowAgentStepModel(
   step: AgentStepDefinition,
   models: LanguageModelCatalog | undefined
-): AgentDefinition["model"] | null {
+): LanguageModelV4 | null {
   if (step.model === undefined) return models?.default.model ?? null
   if (models === undefined) return step.model
   return models.getByRef(step.model)?.model ?? null

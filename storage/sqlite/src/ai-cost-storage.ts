@@ -186,7 +186,7 @@ const SQLITE_ACCOUNTING_LIST_PAGE_SQL = `
       WHEN workflow_agent.node_run_id IS NOT NULL THEN 'workflowAgent'
       ELSE NULL
     END AS attribution_kind,
-    COALESCE(direct_agent.agent_id, workflow_agent.agent_id) AS attribution_agent_id,
+    workflow_node.node_id AS attribution_agent_step_id,
     direct_agent.id AS attribution_agent_run_id,
     direct_agent.thread_id AS attribution_thread_id,
     direct_agent.parent_run_id AS attribution_parent_run_id,
@@ -238,7 +238,12 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
       usage.text_output_tokens,
       usage.reasoning_output_tokens,
       usage.reporting_status,
-      COALESCE(direct_agent.agent_id, workflow_agent.agent_id) AS attribution_agent_id,
+      CASE
+        WHEN direct_agent.kind = 'conversation' THEN 'agent'
+        WHEN workflow_agent.node_run_id IS NOT NULL THEN 'workflowAgent'
+        ELSE NULL
+      END AS attribution_agent_kind,
+      workflow_node.node_id AS attribution_agent_step_id,
       workflow_node.workflow_id AS attribution_workflow_id,
       COALESCE(cost.status, 'unvalued') AS valuation_status,
       cost.currency AS amount_currency,
@@ -259,11 +264,11 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
       AND (? IS NULL OR usage.provider_id = ?)
       AND (? IS NULL OR usage.requested_model_id = ?)
   ), expanded AS (
-    SELECT 'totals' AS dimension, NULL AS key_1, NULL AS key_2, NULL AS bucket_start,
+    SELECT 'totals' AS dimension, NULL AS key_1, NULL AS key_2, NULL AS key_3, NULL AS bucket_start,
       classified.*
     FROM classified
     UNION ALL
-    SELECT 'series', NULL, NULL,
+    SELECT 'series', NULL, NULL, NULL,
       CASE ?
         WHEN 'hour' THEN strftime('%Y-%m-%dT%H:00:00.000Z', occurred_at)
         WHEN 'day' THEN strftime('%Y-%m-%dT00:00:00.000Z', occurred_at)
@@ -276,17 +281,18 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
       classified.*
     FROM classified
     UNION ALL
-    SELECT 'model', provider_id, requested_model_id, NULL, classified.* FROM classified
+    SELECT 'model', provider_id, requested_model_id, NULL, NULL, classified.* FROM classified
     UNION ALL
-    SELECT 'agent', attribution_agent_id, NULL, NULL, classified.*
-    FROM classified WHERE attribution_agent_id IS NOT NULL
+    SELECT 'agent', attribution_agent_kind, attribution_workflow_id, attribution_agent_step_id, NULL, classified.*
+    FROM classified WHERE attribution_agent_kind IS NOT NULL
     UNION ALL
-    SELECT 'workflow', attribution_workflow_id, NULL, NULL, classified.*
+    SELECT 'workflow', attribution_workflow_id, NULL, NULL, NULL, classified.*
     FROM classified WHERE attribution_workflow_id IS NOT NULL
   )
   SELECT dimension,
     key_1,
     key_2,
+    key_3,
     bucket_start,
     amount_currency,
     CAST(COUNT(*) AS TEXT) AS model_call_count,
@@ -318,7 +324,7 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
     CAST(SUM((amount_nanos / 1000000) % 1000000) AS TEXT) AS amount_middle,
     CAST(SUM(amount_nanos % 1000000) AS TEXT) AS amount_low
   FROM expanded
-  GROUP BY dimension, key_1, key_2, bucket_start, amount_currency
+  GROUP BY dimension, key_1, key_2, key_3, bucket_start, amount_currency
 `
 
 function accountingListFilterParameters(
@@ -378,7 +384,7 @@ interface UsageRow {
 
 interface JoinedRow extends UsageRow {
   readonly attribution_kind: "agent" | "subagent" | "workflowAgent" | null
-  readonly attribution_agent_id: string | null
+  readonly attribution_agent_step_id: string | null
   readonly attribution_agent_run_id: string | null
   readonly attribution_thread_id: string | null
   readonly attribution_parent_run_id: string | null
@@ -400,6 +406,7 @@ interface AggregateRow {
   readonly dimension: AiAccountingAggregateFragment["dimension"]
   readonly key_1: string | null
   readonly key_2: string | null
+  readonly key_3: string | null
   readonly bucket_start: string | null
   readonly amount_currency: string | null
   readonly model_call_count: string
@@ -443,7 +450,12 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
     row.dimension === "model"
       ? { providerId: required(row.key_1), modelId: required(row.key_2) }
       : row.dimension === "agent"
-        ? { agentId: required(row.key_1) }
+        ? {
+            agentKind: required(row.key_1) as "agent" | "workflowAgent",
+            ...(row.key_1 === "workflowAgent"
+              ? { workflowId: required(row.key_2), agentStepId: required(row.key_3) }
+              : {}),
+          }
         : row.dimension === "workflow"
           ? { workflowId: required(row.key_1) }
           : row.dimension === "series"
@@ -518,7 +530,6 @@ function accountingItemFromRow(row: JoinedRow): AiAccountingRecordSetItem {
       : row.attribution_kind === "agent"
         ? {
             kind: "agent" as const,
-            agentId: required(row.attribution_agent_id),
             agentRunId: required(row.attribution_agent_run_id),
             threadId: required(row.attribution_thread_id),
           }
@@ -530,7 +541,7 @@ function accountingItemFromRow(row: JoinedRow): AiAccountingRecordSetItem {
             }
           : {
               kind: "workflowAgent" as const,
-              agentId: required(row.attribution_agent_id),
+              agentStepId: required(row.attribution_agent_step_id),
               nodeRunId: required(row.attribution_node_run_id),
               workflowId: required(row.attribution_workflow_id),
               workflowRunId: required(row.attribution_workflow_run_id),

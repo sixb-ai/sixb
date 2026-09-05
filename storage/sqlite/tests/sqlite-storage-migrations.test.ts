@@ -238,6 +238,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 30,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "031-retire-agent-definitions",
+    status: "applied",
+    version: 31,
+  },
 ]
 
 afterEach(async () => {
@@ -1442,7 +1449,7 @@ describe("SQLite storage migrations", () => {
           requester_group_ids, status, created_at
         ) VALUES (
           'project-a', 'run-1', 'exec-run-1', 'thread-1', 'assistant', 'message-1',
-          '["agent-users"]', 'queued', '2026-01-01T00:00:02.000Z'
+          '["agent-users"]', 'succeeded', '2026-01-01T00:00:02.000Z'
         )
       `)
 
@@ -1479,6 +1486,21 @@ describe("SQLite storage migrations", () => {
       })
       db.query("UPDATE agent_runs SET spec = ? WHERE id = 'run-1'").run(spec)
       expect(db.query("SELECT spec FROM agent_runs WHERE id = 'run-1'").get()).toEqual({ spec })
+
+      const retireDefinitionsMigration = sqliteStorageMigrations.steps[migrationIndex + 2]
+      if (retireDefinitionsMigration?.id !== "031-retire-agent-definitions") {
+        throw new Error("SQLite retire-agent-definitions migration is missing.")
+      }
+      retireDefinitionsMigration.up(db)
+      expect(readMemoryTableColumns(db, "agent_runs")).not.toContain("agent_id")
+      expect(
+        db.query("SELECT kind, thread_id, trigger_message_id, spec FROM agent_runs").get()
+      ).toEqual({
+        kind: "conversation",
+        thread_id: "thread-1",
+        trigger_message_id: "message-1",
+        spec,
+      })
       expect(db.query("PRAGMA foreign_key_check").all()).toHaveLength(0)
     } finally {
       db.close()
@@ -1817,13 +1839,12 @@ describe("SQLite storage migrations", () => {
     await storage.agents.threads.create({
       id: "thr_1",
       projectId: "project-a",
-      agentId: "sales",
       ownerPrincipal: { type: "user", id: "usr_1" },
       createdAt: new Date("2026-06-23T10:00:00.000Z"),
     })
     await expect(
       storage.agents.threads.getById({ projectId: "project-a", id: "thr_1" })
-    ).resolves.toMatchObject({ id: "thr_1", agentId: "sales", messageCount: 0 })
+    ).resolves.toMatchObject({ id: "thr_1", messageCount: 0 })
 
     closeStorage(storage)
 
@@ -1847,11 +1868,16 @@ describe("SQLite storage migrations", () => {
       to: "id",
     })
     const agentRunColumns = readTableColumns(path, "agent_runs")
+    const agentThreadColumns = readTableColumns(path, "agent_threads")
     const workflowAgentNodeColumns = readTableColumns(path, "workflow_agent_node_runs")
+    expect(workflowAgentNodeColumns).toContain("actor_id")
+    expect(workflowAgentNodeColumns).not.toContain("agent_id")
     expect(agentRunColumns).toContain("requester_group_ids")
     expect(agentRunColumns).toEqual(
       expect.arrayContaining(["kind", "parent_run_id", "spawn_key", "spec", "result"])
     )
+    expect(agentRunColumns).not.toContain("agent_id")
+    expect(agentThreadColumns).not.toContain("agent_id")
     expect(agentRunColumns).not.toContain("usage_input_tokens")
     expect(agentRunColumns).not.toContain("usage_output_tokens")
     expect(agentRunColumns).not.toContain("usage_total_tokens")

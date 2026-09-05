@@ -86,13 +86,20 @@ export interface ApplyGrant {
   readonly selection: Selection
 }
 
-export type RunGrantTarget = "workflow" | "sync" | "pipeline" | "agent"
+export type RunGrantTarget = "workflow" | "sync" | "pipeline"
 
 export interface RunGrant<TTarget extends RunGrantTarget = RunGrantTarget> {
   readonly kind: "grant"
   readonly capability: "run"
   readonly target: TTarget
   readonly selection: Selection
+}
+
+/** Run the project's single conversational Agent. */
+export interface AgentRunGrant {
+  readonly kind: "grant"
+  readonly capability: "run"
+  readonly target: "agent"
 }
 
 export type ObserveGrantTarget = "logs"
@@ -118,6 +125,7 @@ export type GrantDefinition =
   | AppendGrant
   | ApplyGrant
   | RunGrant
+  | AgentRunGrant
   | ObserveGrant
   | ManageGrant
 

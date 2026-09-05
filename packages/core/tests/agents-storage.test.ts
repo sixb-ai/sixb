@@ -18,7 +18,6 @@ describe("InMemoryStorage agents", () => {
     await storage.agents.threads.create({
       id: "thr_1",
       projectId: "p",
-      agentId: "sales",
       ownerPrincipal: { type: "user", id: "usr_1" },
       createdAt: new Date("2026-06-23T10:00:00.000Z"),
     })
@@ -28,14 +27,13 @@ describe("InMemoryStorage agents", () => {
         if (!tx.auth) throw new Error("expected auth storage")
         const executionId = await createTestAgentExecution(
           { auth: tx.auth, executions: tx.executions },
-          { projectId: "p", agentId: "sales", runId: "run_1" }
+          { projectId: "p", runId: "run_1", authority: "inherited" }
         )
         await tx.agents?.runs.create({
           id: "run_1",
           projectId: "p",
           executionId,
           threadId: "thr_1",
-          agentId: "sales",
           triggerMessageId: "msg_1",
           spec: { model: { provider: "test", modelId: "test-model" } },
           requesterGroupIds: ["engineering"],
@@ -68,13 +66,11 @@ describe("InMemoryStorage agents", () => {
     await storage.agents.threads.create({
       id: "thr_1",
       projectId: "p",
-      agentId: "sales",
       ownerPrincipal: { type: "user", id: "usr_1" },
       createdAt: new Date("2026-06-23T10:00:00.000Z"),
     })
     const executionId = await createTestAgentExecution(storage, {
       projectId: "p",
-      agentId: "sales",
       runId: "run_1",
     })
     await storage.agents.runs.create({
@@ -82,7 +78,6 @@ describe("InMemoryStorage agents", () => {
       projectId: "p",
       executionId,
       threadId: "thr_1",
-      agentId: "sales",
       triggerMessageId: "msg_1",
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["engineering"],
@@ -136,7 +131,6 @@ describe("InMemoryStorage agents", () => {
       await store.threads.create({
         id: "thr_1",
         projectId: "p",
-        agentId: "sales",
         ownerPrincipal: { type: "user", id: "usr_1" },
         createdAt: new Date("2026-06-23T10:00:00.000Z"),
       })
@@ -144,7 +138,6 @@ describe("InMemoryStorage agents", () => {
       await store.threads.create({
         id: "thr_2",
         projectId: "p",
-        agentId: "sales",
         ownerPrincipal: { type: "user", id: "usr_1" },
         createdAt: new Date("2026-06-23T10:01:00.000Z"),
       })

@@ -2,7 +2,6 @@ import {
   type AgentToolDefinition,
   type AgentToolResult,
   type AgentToolRunContext,
-  defineAgent,
   defineAgentTool,
   defineConnector,
   type InferAgentToolInput,
@@ -53,8 +52,11 @@ const searchKnowledge = defineAgentTool("search_knowledge")
     logger.info("Searching", { limit, mode, active })
     signal.throwIfAborted()
     const runId: string = run.id
-    const agentId: string | undefined = run.agentId
-    const threadId: string | undefined = run.threadId
+    const workflowId: string | undefined = run.kind === "workflow" ? run.workflowId : undefined
+    const stepId: string | undefined = run.kind === "workflow" ? run.stepId : undefined
+    // @ts-expect-error Managed service-account identity is not part of the tool context.
+    run.agentId
+    const threadId: string | undefined = run.kind === "conversation" ? run.threadId : undefined
 
     // @ts-expect-error tool handlers receive no privileged Sixb runtime
     context.sixb
@@ -64,7 +66,8 @@ const searchKnowledge = defineAgentTool("search_knowledge")
       note: note ?? null,
       requestedAt,
       runId,
-      agentId: agentId ?? null,
+      workflowId: workflowId ?? null,
+      stepId: stepId ?? null,
       threadId: threadId ?? null,
     }
   })
@@ -84,13 +87,6 @@ type _searchKnowledgeInput = Expect<
 >
 
 const definition: AgentToolDefinition = searchKnowledge
-
-defineAgent("research", {
-  name: "Research",
-  model: {} as Parameters<typeof defineAgent>[1]["model"],
-  instructions: "Research questions.",
-  tools: [searchKnowledge],
-})
 
 // @ts-expect-error builder stages require a description before an input
 defineAgentTool("missing_description").input({})

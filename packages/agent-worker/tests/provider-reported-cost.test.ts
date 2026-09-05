@@ -41,7 +41,6 @@ async function storage() {
   const bundle = new InMemoryStorage()
   await createTestAgentExecution(bundle, {
     projectId: "project_1",
-    agentId: "main",
     runId: "run_1",
     executionId: "exec_1",
   })

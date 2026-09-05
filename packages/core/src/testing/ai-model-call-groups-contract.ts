@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import type { Storage } from "../storage/types"
+import { workflowAgentStepActorId } from "../workflows/agent-step-identity"
 import { createTestAgentExecution } from "./agent-execution"
 import type { AiStorageContractSuiteOptions } from "./ai-cost-storage-contract"
+import { createTestWorkflowExecution } from "./workflow-execution"
 
 export type AiModelCallGroupsContractStorage = Required<
-  Pick<Storage, "agents" | "aiUsage" | "aiCosts" | "executions">
+  Pick<Storage, "agents" | "aiUsage" | "aiCosts" | "executions" | "workflowRuns">
 >
 
 const projectId = "model-call-groups"
@@ -20,6 +22,63 @@ export function runAiModelCallGroupsContractSuite<T extends AiModelCallGroupsCon
   options: AiStorageContractSuiteOptions<T>
 ): void {
   describe(name, () => {
+    test("attributes workflow usage to step references and keeps same-named steps separate", async () => {
+      const storage = await options.createStorage()
+      try {
+        await options.setup?.(storage)
+        for (const [index, workflowId] of ["billing", "billing", "shipping"].entries()) {
+          await seedWorkflowCall(storage, workflowId, `workflow-run-${index}`)
+        }
+        const overview = await storage.aiCosts.queryProjectOverview({ ...range, bucket: "day" })
+        // Regression proof: grouping only by step id merges billing and shipping; exposing
+        // the actor id instead of the step references fails these exact projections.
+        expect(
+          overview.agents.map((entry) => ({
+            kind: entry.kind,
+            modelCallCount: entry.modelCallCount,
+            ...(entry.kind === "workflowAgent"
+              ? { workflowId: entry.workflowId, agentStepId: entry.agentStepId }
+              : {}),
+          }))
+        ).toEqual([
+          {
+            kind: "workflowAgent",
+            workflowId: "billing",
+            agentStepId: "review",
+            modelCallCount: 2,
+          },
+          {
+            kind: "workflowAgent",
+            workflowId: "shipping",
+            agentStepId: "review",
+            modelCallCount: 1,
+          },
+        ])
+        expect(overview.totals.costs.amounts).toEqual([{ currency: "USD", amountNanos: "30" }])
+        const calls = await storage.aiCosts.listModelCalls(range)
+        const groups = await storage.aiCosts.listModelCallGroups(range)
+        expect(calls.total).toBe(3)
+        expect(groups.total).toBe(3)
+        for (const call of calls.items) {
+          const runId = call.usage.callId
+          const workflowId = runId === "workflow-run-2" ? "shipping" : "billing"
+          const attribution = {
+            kind: "workflowAgent" as const,
+            workflowId,
+            agentStepId: "review",
+            workflowRunId: runId,
+            nodeRunId: `${runId}:node:0`,
+          }
+          expect(call.attribution).toEqual(attribution)
+          const group = groups.items.find((item) => item.executionId === call.usage.executionId)
+          expect(group?.attribution).toEqual(attribution)
+          expect(group?.executions[0]?.attribution).toEqual(attribution)
+        }
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
     test("paginates whole runs, keeps filtered parents, and preserves exact accounting", async () => {
       const storage = await options.createStorage()
       try {
@@ -120,17 +179,85 @@ export function runAiModelCallGroupsContractSuite<T extends AiModelCallGroupsCon
   })
 }
 
+async function seedWorkflowCall(
+  storage: AiModelCallGroupsContractStorage,
+  workflowId: string,
+  runId: string
+) {
+  const sourceExecutionId = await createTestWorkflowExecution(storage.executions, {
+    projectId,
+    workflowId,
+    runId,
+  })
+  await storage.workflowRuns.queue({
+    projectId,
+    id: runId,
+    workflowId,
+    executionId: sourceExecutionId,
+    input: {},
+    requesterGroupIds: [],
+  })
+  await storage.workflowRuns.start({ projectId, id: runId })
+  const nodeRunId = `${runId}:node:0`
+  await storage.workflowRuns.nodes.start({
+    projectId,
+    id: nodeRunId,
+    workflowId,
+    workflowRunId: runId,
+    nodeIndex: 0,
+    nodeType: "agent",
+    nodeId: "review",
+    nodeKey: "review",
+    input: {},
+  })
+  const actorId = workflowAgentStepActorId(workflowId, "review")
+  const executionId = await createTestAgentExecution(storage, {
+    projectId,
+    runId: nodeRunId,
+    actorId,
+    sourceExecutionId,
+  })
+  await storage.workflowRuns.agentNodes.create({
+    projectId,
+    nodeRunId,
+    executionId,
+    actorId,
+    prompt: "Review the task.",
+  })
+  const { record } = await storage.aiUsage.recordModelCall({
+    projectId,
+    id: `usage:${runId}`,
+    executionId,
+    attempt: 1,
+    callId: runId,
+    requesterGroupIds: [],
+    providerId: "test",
+    requestedModelId: "small",
+    responseId: runId,
+    usage: { inputTokens: 10, outputTokens: 5 },
+    occurredAt: new Date("2026-09-01T12:00:00Z"),
+  })
+  await storage.aiCosts.recordModelCallCost({
+    projectId,
+    usageRecordId: record.id,
+    status: "reported",
+    pricingContext: {},
+    reportSource: { providerId: "test", responseId: runId },
+    billingIdentity: { providerId: "test", modelId: "small" },
+    money: { currency: "USD", amountNanos: "10" },
+    ratedAt: new Date("2026-09-01T12:00:00Z"),
+  })
+}
+
 async function seed(storage: AiModelCallGroupsContractStorage) {
   await storage.agents.threads.create({
     id: "thread",
     projectId,
-    agentId: "main",
     ownerPrincipal: { type: "user", id: "user" },
   })
   for (const runId of ["parent", "second"]) {
     const executionId = await createTestAgentExecution(storage, {
       projectId,
-      agentId: "main",
       runId,
       executionId: `exec_${runId}`,
       authority: "inherited",
@@ -140,7 +267,6 @@ async function seed(storage: AiModelCallGroupsContractStorage) {
       projectId,
       executionId,
       threadId: "thread",
-      agentId: "main",
       triggerMessageId: `message_${runId}`,
       spec: { model: { provider: "parent-provider", modelId: "large" } },
       requesterGroupIds: [],
@@ -153,7 +279,7 @@ async function seed(storage: AiModelCallGroupsContractStorage) {
     if (runId === "parent") {
       const childExecution = await createTestAgentExecution(storage, {
         projectId,
-        agentId: "child",
+        actorId: "child",
         runId: "child",
         executionId: "exec_child",
         sourceExecutionId: executionId,

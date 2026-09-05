@@ -31,7 +31,7 @@ export type AuthzRequest =
   | { readonly kind: "workflow.run"; readonly workflowId: string }
   | { readonly kind: "sync.run"; readonly syncId: string }
   | { readonly kind: "pipeline.run"; readonly pipelineId: string }
-  | { readonly kind: "agent.run"; readonly agentId: string }
+  | { readonly kind: "agent.run" }
   | { readonly kind: "logs.observe" }
   | { readonly kind: "connector.manage"; readonly connectorId: string }
   | { readonly kind: "object.query"; readonly touchedObjectTypeIds: readonly string[] }
@@ -53,10 +53,9 @@ interface AuthorizedRuntime {
 // the single unit that both names a requirement and tests the grant index, so
 // the two can never drift. `kind` is the resolved-index key, so enforcement is
 // a direct lookup with no per-target dispatch.
-interface Atom {
-  readonly kind: GrantKind
-  readonly id: string
-}
+type Atom =
+  | { readonly kind: "run:agent" }
+  | { readonly kind: Exclude<GrantKind, "run:agent">; readonly id: string }
 
 function atomsFor(request: AuthzRequest): readonly Atom[] {
   switch (request.kind) {
@@ -79,7 +78,7 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
     case "pipeline.run":
       return [{ kind: "run:pipeline", id: request.pipelineId }]
     case "agent.run":
-      return [{ kind: "run:agent", id: request.agentId }]
+      return [{ kind: "run:agent" }]
     case "logs.observe":
       return [{ kind: "observe:logs", id: "logs" }]
     case "connector.manage":
@@ -90,11 +89,13 @@ function atomsFor(request: AuthzRequest): readonly Atom[] {
 }
 
 function atomKey(atom: Atom): string {
+  if (atom.kind === "run:agent") return atom.kind
   if (atom.kind === "observe:logs") return atom.kind
   return `${atom.kind}:${atom.id}`
 }
 
 function holds(grants: GrantIndex, atom: Atom): boolean {
+  if (atom.kind === "run:agent") return grants[atom.kind]
   return grants[atom.kind].has(atom.id)
 }
 
@@ -205,7 +206,7 @@ export function assertPrivileged(runtime: AuthorizedRuntime, operation: string):
  * Assert access to process providers that trusted executions and genuine agent runs may use.
  *
  * Agent provenance alone is not authority: the registered capability must be bound to the exact
- * same agent and run before this check succeeds.
+ * same execution identity and run before this check succeeds.
  */
 export function assertProviderAccess(
   runtime: AuthorizedRuntime,
@@ -223,7 +224,7 @@ export function assertProviderAccess(
     binding?.type === "agent" &&
     executor.type === "agent" &&
     binding.executionId === execution.id &&
-    binding.agentId === executor.agentId &&
+    binding.actorId === executor.actorId &&
     binding.runId === executor.runId
   ) {
     return
@@ -260,7 +261,7 @@ function deniedMessage(
     case "pipeline.run":
       return `[Sixb] Principal '${principalId}' is not allowed to run pipeline '${request.pipelineId}'.`
     case "agent.run":
-      return `[Sixb] Principal '${principalId}' is not allowed to run agent '${request.agentId}'.`
+      return `[Sixb] Principal '${principalId}' is not allowed to run the project Agent.`
     case "logs.observe":
       return `[Sixb] Principal '${principalId}' is not allowed to observe project logs.`
     case "connector.manage":

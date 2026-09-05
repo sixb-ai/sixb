@@ -78,8 +78,6 @@ function hasDefinitionCatalogs(value: Record<PropertyKey, unknown>): boolean {
     ]) &&
     isRecord(definitions.workflows) &&
     hasMethods(definitions.workflows, ["list", "getById"]) &&
-    isRecord(definitions.agents) &&
-    hasMethods(definitions.agents, ["list", "getById"]) &&
     isRecord(definitions.security) &&
     hasMethods(definitions.security, [
       "listGroups",

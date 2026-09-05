@@ -80,6 +80,9 @@ import subagentRunsSql from "./migrations/029-subagent-runs.sql" with { type: "t
 import conversationRunSpecSql from "./migrations/030-conversation-run-spec.sql" with {
   type: "text",
 }
+import retireAgentDefinitionsSql from "./migrations/031-retire-agent-definitions.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -165,6 +168,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("028-object-override-edit-times", objectOverrideEditTimesSql),
     sqliteSql("029-subagent-runs", subagentRunsSql),
     sqliteSql("030-conversation-run-spec", conversationRunSpecSql),
+    sqliteSql("031-retire-agent-definitions", retireAgentDefinitionsSql),
   ],
 })
 

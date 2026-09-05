@@ -8,8 +8,7 @@
  */
 
 import type { ActionDefinition } from "../actions/types"
-import type { AgentReference } from "../agents/main"
-import type { AgentDefinition } from "../agents/types"
+import type { AgentReference } from "../agents/types"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
@@ -25,6 +24,7 @@ import {
 } from "./every"
 import type {
   AccessGrant,
+  AgentRunGrant,
   AppendGrant,
   ApplicationDefinition,
   ApplyGrant,
@@ -42,7 +42,7 @@ type GrantInput<TDefinition, TTarget extends BreadthTarget> =
   | BreadthSelector<TTarget>
 
 const VIEW_TARGETS = ["object", "dataset"] as const
-const RUN_TARGETS = ["workflow", "sync", "pipeline", "agent"] as const
+const RUN_TARGETS = ["workflow", "sync", "pipeline"] as const
 
 /**
  * Seven of the nine targets carry a `kind` discriminant naming themselves. The other two — an
@@ -53,7 +53,6 @@ const TARGET_BY_DEFINITION_KIND: Readonly<Partial<Record<string, BreadthTarget>>
   dataset: "dataset",
   sync: "sync",
   pipeline: "pipeline",
-  agent: "agent",
   workflow: "workflow",
   application: "application",
   connector: "connector",
@@ -188,15 +187,31 @@ function apply(input: GrantInput<ActionDefinition, "action">): ApplyGrant {
 function run(input: GrantInput<WorkflowDefinition, "workflow">): RunGrant<"workflow">
 function run(input: GrantInput<SyncDefinition, "sync">): RunGrant<"sync">
 function run(input: GrantInput<PipelineDefinition, "pipeline">): RunGrant<"pipeline">
-function run(input: GrantInput<AgentDefinition | AgentReference, "agent">): RunGrant<"agent">
+function run(input: AgentReference): AgentRunGrant
 function run(
-  input: GrantInput<
-    WorkflowDefinition | SyncDefinition | PipelineDefinition | AgentDefinition | AgentReference,
-    "workflow" | "sync" | "pipeline" | "agent"
-  >
-): RunGrant {
+  input:
+    | AgentReference
+    | GrantInput<
+        WorkflowDefinition | SyncDefinition | PipelineDefinition,
+        "workflow" | "sync" | "pipeline"
+      >
+): RunGrant | AgentRunGrant {
+  if (isAgentReference(input)) {
+    return { kind: "grant", capability: "run", target: "agent" }
+  }
   const { target, selection } = resolveGrant(input, "can.run", RUN_TARGETS)
   return { kind: "grant", capability: "run", target, selection }
+}
+
+function isAgentReference(input: unknown): input is AgentReference {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    !isBreadthSelector(input) &&
+    "kind" in input &&
+    input.kind === "agent"
+  )
 }
 
 function observe(target: "logs"): ObserveGrant {

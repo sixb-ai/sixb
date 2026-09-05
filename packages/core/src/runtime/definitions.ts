@@ -1,5 +1,5 @@
 import type { ActionDefinitionCatalog } from "../actions"
-import type { AgentDefinition, AgentToolCatalog } from "../agents"
+import type { AgentToolCatalog } from "../agents"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ModelCatalog } from "../models"
@@ -22,7 +22,6 @@ export interface DefinitionCatalog<TDefinition> {
 export interface SixbDefinitions {
   readonly ontology: OntologyDefinitionCatalog
   readonly actions: ActionDefinitionCatalog
-  readonly agents: DefinitionCatalog<AgentDefinition>
   readonly tools: AgentToolCatalog
   readonly connectors: DefinitionCatalog<ConnectorDefinition>
   readonly datasets: DefinitionCatalog<DatasetDefinition>

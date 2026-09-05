@@ -12,7 +12,6 @@
  */
 
 import type { ActionDefinition } from "../actions/types"
-import type { AgentDefinition } from "../agents/types"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ObjectType } from "../ontology"
@@ -30,7 +29,6 @@ export const BREADTH_TARGETS = [
   "workflow",
   "sync",
   "pipeline",
-  "agent",
   "application",
   "connector",
 ] as const
@@ -44,7 +42,6 @@ interface BreadthTargetInput {
   workflow: WorkflowDefinition
   sync: SyncDefinition
   pipeline: PipelineDefinition
-  agent: AgentDefinition
   application: ApplicationDefinition
   connector: ConnectorDefinition
 }
@@ -106,7 +103,6 @@ export const every = {
   workflow: (): BreadthSelector<"workflow"> => all("workflow"),
   sync: (): BreadthSelector<"sync"> => all("sync"),
   pipeline: (): BreadthSelector<"pipeline"> => all("pipeline"),
-  agent: (): BreadthSelector<"agent"> => all("agent"),
   application: (): BreadthSelector<"application"> => all("application"),
   connector: (): BreadthSelector<"connector"> => all("connector"),
 }

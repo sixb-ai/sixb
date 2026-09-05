@@ -1,7 +1,15 @@
-import type { OntologySource, Sixb, SixbHostView } from "../src"
+import type { AgentRunView, OntologySource, Sixb, SixbHostView } from "../src"
+import type { AgentThreadRecord } from "../src/storage"
 
 declare const sixb: Sixb<readonly OntologySource[]>
 declare const host: SixbHostView
+declare const thread: AgentThreadRecord
+declare const run: AgentRunView
+
+// @ts-expect-error A conversation's public identity is its thread, not a defined Agent.
+void thread.agentId
+// @ts-expect-error Public runs use runId/threadId; the storage identity stays internal.
+void run.agentId
 
 // The host owns validated definitions and process lifecycle, not domain operations.
 void host.definitions.actions.list()
@@ -27,7 +35,7 @@ void host.blobs
 void sixb.objects.list({})
 void sixb.actions.list()
 void sixb.workflows.list()
-void sixb.agents.list()
+void sixb.agent.get()
 void sixb.datasets.list()
 void sixb.syncs.list()
 void sixb.pipelines.list()

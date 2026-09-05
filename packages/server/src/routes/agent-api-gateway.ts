@@ -6,7 +6,6 @@ import {
   type AgentExecutionAuthorization,
   isAllowedAgentApiRequest,
   isValidAgentApiGatewayCapability,
-  MAIN_AGENT_ID,
   resolveAgentExecutionAuthorization,
   resolveInheritedAgentExecutionAuthorization,
 } from "@sixb/core/internal/agents"
@@ -211,7 +210,7 @@ type GatewayRunState = {
   readonly agentRun?: ConversationAgentRunRecord
 } & (
   | { readonly authority: "inherited" }
-  | { readonly authority: "managed"; readonly agentId: string }
+  | { readonly authority: "managed"; readonly actorId: string }
 )
 
 function toGatewayRunState(
@@ -238,10 +237,7 @@ function toGatewayRunState(
       agentExecution: { kind: "conversation", runId: storedRun.id } as const,
       agentRun: storedRun,
     }
-    if (storedRun.agentId === MAIN_AGENT_ID) {
-      return { ...common, authority: "inherited" }
-    }
-    return { ...common, authority: "managed", agentId: storedRun.agentId }
+    return { ...common, authority: "inherited" }
   }
 
   if (!workflowRun) return null
@@ -250,10 +246,7 @@ function toGatewayRunState(
     runId: workflowRun.nodeRunId,
     agentExecution: { kind: "workflow", nodeRunId: workflowRun.nodeRunId } as const,
   }
-  if (workflowRun.agentId === MAIN_AGENT_ID) {
-    return { ...common, authority: "inherited" }
-  }
-  return { ...common, authority: "managed", agentId: workflowRun.agentId }
+  return { ...common, authority: "managed", actorId: workflowRun.actorId }
 }
 
 async function resolveGatewayRunAuthorization(input: {
@@ -281,14 +274,14 @@ async function resolveGatewayRunAuthorization(input: {
   const resolved = await resolveAgentExecutionAuthorization({
     auth: input.auth,
     projectId: input.host.id,
-    agentId: input.runState.agentId,
+    actorId: input.runState.actorId,
     authorizationRef: input.execution.authorizationRef,
     security: input.host.definitions.security,
   })
   const authorization = { type: "principal", context: resolved.context } as const
   assertAgentExecutionRecord({
     execution: input.execution,
-    agentId: input.runState.agentId,
+    actorId: input.runState.actorId,
     runId: input.runState.runId,
     authorization,
   })

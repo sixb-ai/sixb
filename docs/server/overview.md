@@ -78,7 +78,7 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Action runs    | `GET /api/action-runs`, `GET /api/action-runs/:runId`                                | [Actions](../actions/overview.md)               |
 | Ontology       | `GET /api/object-types`, `GET /api/object-types/:objectTypeId`                       | [Ontology](../ontology/overview.md)             |
 | Events (WS)    | `GET /ws/events`                                                                     | [Events](../events/overview.md)                 |
-| Agents         | `GET /api/agents`, `/api/agent-threads`, `.../messages`, `/api/agent-runs/:runId`, `GET /ws/agents` | [Agents](../agents/overview.md)  |
+| Agents         | `GET /api/agent`, `/api/agent-threads`, `.../messages`, `/api/agent-runs/:runId`, `GET /ws/agents` | [Agents](../agents/overview.md)  |
 | Logs           | `GET /api/logs`, `GET /ws/logs`                                                      | [Logging](../logging/overview.md)               |
 | Workflows      | `GET /api/workflows`, `/api/workflow-runs`, `/api/workflows/:id/runs`                | [Workflows](../workflows/overview.md)           |
 | Interventions  | `/api/workflow-interventions`, `.../:id/submit`, `.../:id/cancel`                    | [Interventions](../workflows/interventions.md)  |

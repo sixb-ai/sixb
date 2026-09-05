@@ -491,7 +491,7 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
       projectId: input.projectId,
       executionId: input.executionId,
       nodeRunId: input.nodeRunId,
-      agentId: input.agentId,
+      actorId: input.actorId,
       workflowExecutionId: parent.execution_id,
     })
 
@@ -499,14 +499,14 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
       this.db
         .query(`
           INSERT INTO workflow_agent_node_runs (
-            project_id, node_run_id, execution_id, agent_id, status, prompt, attempt, created_at
+            project_id, node_run_id, execution_id, actor_id, status, prompt, attempt, created_at
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `)
         .run(
           input.projectId,
           input.nodeRunId,
           input.executionId,
-          input.agentId,
+          input.actorId,
           "queued",
           input.prompt,
           0,
@@ -659,9 +659,9 @@ export class SqliteWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRunSt
     if (hasEmptyStatuses(input)) return { runs: [], total: 0, hasMore: false }
     const whereClauses = ["project_id = ?"]
     const args: SqliteValue[] = [input.projectId]
-    if (input.agentId) {
-      whereClauses.push("agent_id = ?")
-      args.push(input.agentId)
+    if (input.actorId) {
+      whereClauses.push("actor_id = ?")
+      args.push(input.actorId)
     }
     appendRunListFilters(whereClauses, args, input)
     const result = queryRunList<WorkflowAgentNodeRunDatabaseRow>({
@@ -1073,7 +1073,7 @@ interface WorkflowAgentNodeRunDatabaseRow {
   project_id: string
   node_run_id: string
   execution_id: string
-  agent_id: string
+  actor_id: string
   status: WorkflowAgentNodeRunRecord["status"]
   prompt: string
   model_id: string | null
@@ -1107,7 +1107,7 @@ function rowToWorkflowAgentNodeRunRecord(
     projectId: row.project_id,
     nodeRunId: row.node_run_id,
     executionId: row.execution_id,
-    agentId: row.agent_id,
+    actorId: row.actor_id,
     status: row.status,
     prompt: row.prompt,
     ...(row.model_id ? { modelId: row.model_id } : {}),

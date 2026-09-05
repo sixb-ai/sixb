@@ -1,9 +1,9 @@
 import {
   cancelAgentRunMutation,
   createAgentThreadMutation,
+  getAgentOptions,
   getAgentThreadOptions,
   getAgentThreadQueryKey,
-  listAgentsOptions,
   listAgentThreadMessagesOptions,
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsOptions,
@@ -47,10 +47,7 @@ interface PendingUser {
   messageId: string | null
 }
 
-const AGENT_ID = "main"
-
 const THREAD_LIST_QUERY = {
-  agentId: AGENT_ID,
   limit: String(THREAD_PAGE_SIZE),
   order: "desc" as const,
 }
@@ -79,7 +76,7 @@ export function useAgentConversation({
   onThreadCreated,
 }: UseAgentConversationInput) {
   const queryClient = useQueryClient()
-  const agentsQuery = useQuery(listAgentsOptions())
+  const agentQuery = useQuery(getAgentOptions())
   const modelsQuery = useQuery(listModelsOptions())
   const refreshThreads = () =>
     queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
@@ -106,10 +103,7 @@ export function useAgentConversation({
     refetchInterval:
       !embedded && (!activityStream.connected || activityStream.error) ? 10_000 : false,
   })
-  const agents = useMemo(
-    () => (agentsQuery.data ?? []).filter((candidate) => candidate.id === AGENT_ID),
-    [agentsQuery.data]
-  )
+  const currentAgent = agentQuery.data
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
   const [modelPreference, setModelPreference] = useState(readModelPreference)
   const selectedModel = resolveSelectedModel(models, modelPreference)
@@ -119,7 +113,6 @@ export function useAgentConversation({
     [threadsQuery.data]
   )
   const threadTotal = threadsQuery.data?.pages[0]?.total ?? threads.length
-  const draftAgentId = threadId === null ? (agents[0]?.id ?? null) : null
 
   const threadQuery = useQuery({
     ...getAgentThreadOptions({ path: { threadId: threadId ?? "" } }),
@@ -129,8 +122,7 @@ export function useAgentConversation({
     threadId !== null
       ? (threadQuery.data ?? threads.find((candidate) => candidate.id === threadId) ?? null)
       : null
-  const threadUnavailable =
-    threadId !== null && !threadQuery.isLoading && (thread === null || thread.agentId !== AGENT_ID)
+  const threadUnavailable = threadId !== null && !threadQuery.isLoading && thread === null
 
   const messagesQuery = useQuery({
     ...listAgentThreadMessagesOptions({
@@ -274,9 +266,9 @@ export function useAgentConversation({
         return
       }
 
-      if (!draftAgentId) return
+      if (!currentAgent) return
       const created = await createThread.mutateAsync({
-        body: { agentId: draftAgentId, title: deriveTitle(text) },
+        body: { title: deriveTitle(text) },
       })
       createdThreadId = created.thread.id
       setPendingUser({ threadId: createdThreadId, text, attachments, context, messageId: null })
@@ -376,12 +368,7 @@ export function useAgentConversation({
     writeModelPreference(preference)
   }
 
-  const currentAgent = agents[0]
-  const agentThreads = currentAgent
-    ? threads
-        .filter((entry) => entry.agentId === currentAgent.id && entry.id !== threadId)
-        .slice(0, 8)
-    : []
+  const agentThreads = threads.filter((entry) => entry.id !== threadId).slice(0, 8)
   const pendingUserForThread =
     pendingUser &&
     pendingUser.threadId === threadId &&
@@ -390,9 +377,8 @@ export function useAgentConversation({
       : null
 
   return {
-    agents,
-    agentsLoading: agentsQuery.isLoading,
-    agentsError: agentsQuery.isError,
+    agentLoading: agentQuery.isLoading,
+    agentError: agentQuery.isError,
     models,
     modelsLoading: modelsQuery.isLoading,
     modelsError: modelsQuery.isError,

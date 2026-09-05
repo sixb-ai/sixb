@@ -11,7 +11,6 @@ async function prepareCheckpointCandidate(storage: TestStorage): Promise<void> {
   await agents.threads.create({
     id: "thr_lock_order",
     projectId: "p",
-    agentId: "sales",
     ownerPrincipal: { type: "user", id: "usr_1" },
   })
   await agents.messages.append({
@@ -25,7 +24,6 @@ async function prepareCheckpointCandidate(storage: TestStorage): Promise<void> {
 
   const firstExecutionId = await createTestAgentExecution(storage, {
     projectId: "p",
-    agentId: "sales",
     runId: "run_1",
   })
   await agents.runs.create({
@@ -33,7 +31,6 @@ async function prepareCheckpointCandidate(storage: TestStorage): Promise<void> {
     projectId: "p",
     executionId: firstExecutionId,
     threadId: "thr_lock_order",
-    agentId: "sales",
     triggerMessageId: "msg_1",
     spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
@@ -71,7 +68,6 @@ async function prepareCheckpointCandidate(storage: TestStorage): Promise<void> {
   })
   const secondExecutionId = await createTestAgentExecution(storage, {
     projectId: "p",
-    agentId: "sales",
     runId: "run_2",
   })
   await agents.runs.create({
@@ -79,7 +75,6 @@ async function prepareCheckpointCandidate(storage: TestStorage): Promise<void> {
     projectId: "p",
     executionId: secondExecutionId,
     threadId: "thr_lock_order",
-    agentId: "sales",
     triggerMessageId: "msg_3",
     spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
@@ -129,7 +124,6 @@ describe("PostgresStorage agents", () => {
       await storage.agents.threads.create({
         id: "thr_1",
         projectId: "p",
-        agentId: "sales",
         ownerPrincipal: { type: "user", id: "usr_1" },
         createdAt: new Date("2026-06-23T10:00:00.000Z"),
       })
@@ -139,14 +133,13 @@ describe("PostgresStorage agents", () => {
           if (!tx.auth) throw new Error("expected auth storage")
           const executionId = await createTestAgentExecution(
             { auth: tx.auth, executions: tx.executions },
-            { projectId: "p", agentId: "sales", runId: "run_1" }
+            { projectId: "p", runId: "run_1", authority: "inherited" }
           )
           await tx.agents?.runs.create({
             id: "run_1",
             projectId: "p",
             executionId,
             threadId: "thr_1",
-            agentId: "sales",
             triggerMessageId: "msg_1",
             spec: { model: { provider: "test", modelId: "test-model" } },
             requesterGroupIds: ["engineering"],

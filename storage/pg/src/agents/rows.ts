@@ -20,7 +20,6 @@ import type { SQLClient, SqlParameter } from "../pg-client"
 export interface AgentThreadRow {
   project_id: string
   id: string
-  agent_id: string
   owner_principal_type: Principal["type"]
   owner_principal_id: string
   title: string | null
@@ -38,7 +37,6 @@ export interface AgentRunRow {
   execution_id: string
   kind: AgentRunRecord["kind"]
   thread_id: string | null
-  agent_id: string | null
   trigger_message_id: string | null
   parent_run_id: string | null
   spawn_key: string | null
@@ -97,7 +95,6 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
   return {
     id: row.id,
     projectId: row.project_id,
-    agentId: row.agent_id,
     ownerPrincipal: { type: row.owner_principal_type, id: row.owner_principal_id },
     title: row.title ?? undefined,
     status: row.status,
@@ -136,14 +133,13 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     completedAt: row.completed_at ? new Date(row.completed_at) : undefined,
   }
   if (row.kind === "conversation") {
-    if (!row.thread_id || !row.agent_id || !row.trigger_message_id) {
+    if (!row.thread_id || !row.trigger_message_id) {
       throw new Error(`[SixbPg] Conversational Agent run '${row.id}' has invalid persisted fields.`)
     }
     return {
       ...base,
       kind: "conversation",
       threadId: row.thread_id,
-      agentId: row.agent_id,
       triggerMessageId: row.trigger_message_id,
       ...(row.spec === null ? {} : { spec: parseJsonColumn<ConversationAgentRunSpec>(row.spec) }),
     }

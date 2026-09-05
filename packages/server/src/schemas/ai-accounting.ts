@@ -61,9 +61,14 @@ export const AiAccountingOverviewResponseSchema = z.object({
     })
   ),
   agents: z.array(
-    AiAccountingAggregateSchema.extend({
-      agentId: z.string(),
-    })
+    z.discriminatedUnion("kind", [
+      AiAccountingAggregateSchema.extend({ kind: z.literal("agent") }),
+      AiAccountingAggregateSchema.extend({
+        kind: z.literal("workflowAgent"),
+        workflowId: z.string(),
+        agentStepId: z.string(),
+      }),
+    ])
   ),
   workflows: z.array(
     AiAccountingAggregateSchema.extend({
@@ -170,13 +175,12 @@ export const AiModelCallAccountingItemSchema = z.object({
     .discriminatedUnion("kind", [
       z.object({
         kind: z.literal("agent"),
-        agentId: z.string(),
         agentRunId: z.string(),
         threadId: z.string(),
       }),
       z.object({
         kind: z.literal("workflowAgent"),
-        agentId: z.string(),
+        agentStepId: z.string(),
         nodeRunId: z.string(),
         workflowId: z.string(),
         workflowRunId: z.string(),
