@@ -328,6 +328,132 @@ defineAction("writebackOnly")
   .params({})
   .writeback(async () => {})
 
+// Regression check: remove the intersected handler that validates WritebackResult from both builders
+// in actions/types/definitions.ts, then run `bun --filter @sixb/core typecheck`.
+// The non-JSON cases below must fail with unused @ts-expect-error directives.
+const globalWriteback = defineAction("globalWritebackResult").params({})
+const objectWriteback = defineAction("objectWritebackResult").on(Room).params({})
+const writebackDate = new Date("2026-01-01T00:00:00.000Z")
+
+// @ts-expect-error Date must be serialized explicitly
+globalWriteback.writeback(() => writebackDate)
+// @ts-expect-error async results must also be JSON
+globalWriteback.writeback(async () => writebackDate)
+// @ts-expect-error nested Date values are not JSON
+globalWriteback.writeback(() => ({ rows: [{ at: writebackDate }] }))
+// @ts-expect-error nested async Date values are not JSON
+globalWriteback.writeback(async () => ({ rows: [{ at: writebackDate }] }))
+// @ts-expect-error Date must be serialized explicitly
+objectWriteback.writeback(() => writebackDate)
+// @ts-expect-error async results must also be JSON
+objectWriteback.writeback(async () => writebackDate)
+// @ts-expect-error nested Date values are not JSON
+objectWriteback.writeback(() => ({ rows: [{ at: writebackDate }] }))
+// @ts-expect-error nested async Date values are not JSON
+objectWriteback.writeback(async () => ({ rows: [{ at: writebackDate }] }))
+
+// @ts-expect-error bigint is not JSON
+globalWriteback.writeback(() => 1n)
+// @ts-expect-error functions are not JSON
+objectWriteback.writeback(() => () => "result")
+// @ts-expect-error Map is not a JSON object
+globalWriteback.writeback(async () => new Map([["id", "ext_1"]]))
+// @ts-expect-error undefined is only accepted as the entire result
+objectWriteback.writeback(() => ({ at: undefined }))
+
+interface WritebackReceipt {
+  readonly id: string
+  readonly metadata: { readonly at: string }
+  readonly note?: string
+}
+
+const writebackReceipt: WritebackReceipt = {
+  id: "receipt_1",
+  metadata: { at: writebackDate.toISOString() },
+}
+globalWriteback
+  .writeback(() => writebackReceipt)
+  .edits(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, WritebackReceipt>>
+  })
+objectWriteback
+  .writeback(async () => ({ receipts: [writebackReceipt] as const }))
+  .edits(({ writeback }) => {
+    type _result = Expect<
+      Equal<typeof writeback, { readonly receipts: readonly [WritebackReceipt] }>
+    >
+  })
+
+interface InvalidWritebackReceipt {
+  readonly at: Date
+}
+const invalidWritebackReceipt: InvalidWritebackReceipt = { at: writebackDate }
+// @ts-expect-error JSON validation also checks fields of interfaces
+globalWriteback.writeback(() => invalidWritebackReceipt)
+// @ts-expect-error nested async interfaces must also have JSON fields
+objectWriteback.writeback(async () => ({ receipts: [invalidWritebackReceipt] }))
+
+const unknownWritebackResult: unknown = writebackReceipt
+// @ts-expect-error unknown external results must be validated before returning them
+globalWriteback.writeback(() => unknownWritebackResult)
+
+globalWriteback
+  .writeback(() => ({
+    at: writebackDate.toISOString(),
+    values: ["paid", 1, true, null] as const,
+  }))
+  .edits(({ writeback }) => {
+    type _result = Expect<
+      Equal<
+        typeof writeback,
+        { readonly at: string; readonly values: readonly ["paid", 1, true, null] }
+      >
+    >
+  })
+  .effects(({ writeback }) => {
+    type _values = Expect<Equal<typeof writeback.values, readonly ["paid", 1, true, null]>>
+  })
+
+objectWriteback
+  .writeback(async () => [writebackDate.toISOString(), { status: "paid" }] as const)
+  .edits(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, readonly [string, { readonly status: "paid" }]>>
+  })
+  .effects(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, readonly [string, { readonly status: "paid" }]>>
+  })
+
+globalWriteback
+  .writeback(() => {})
+  .edits(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, null>>
+  })
+globalWriteback
+  .writeback(async () => {})
+  .edits(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, null>>
+  })
+objectWriteback
+  .writeback(() => {})
+  .edits(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, null>>
+  })
+objectWriteback
+  .writeback(async () => {})
+  .edits(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, null>>
+  })
+globalWriteback
+  .writeback(() => undefined)
+  .edits(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, null>>
+  })
+objectWriteback
+  .writeback(async () => null)
+  .edits(({ writeback }) => {
+    type _result = Expect<Equal<typeof writeback, null>>
+  })
+
 defineAction("editsOnly")
   .params({})
   .edits(({ objects }) => {
