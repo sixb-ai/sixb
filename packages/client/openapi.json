@@ -19935,6 +19935,16 @@
               }
             }
           },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Response for status 500",
             "content": {
@@ -19994,6 +20004,16 @@
           },
           "403": {
             "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
             "content": {
               "application/json": {
                 "schema": {
@@ -20069,6 +20089,16 @@
               }
             }
           },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Response for status 500",
             "content": {
@@ -20136,6 +20166,16 @@
               }
             }
           },
+          "413": {
+            "description": "Response for status 413",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Response for status 500",
             "content": {
@@ -20195,6 +20235,16 @@
           },
           "403": {
             "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Response for status 413",
             "content": {
               "application/json": {
                 "schema": {

@@ -239,4 +239,19 @@ describe("OpenAPI docs", () => {
       }
     }
   })
+
+  test("documents bounded object-query request bodies", async () => {
+    const app = createDocsApi()
+    const spec = await fetchDocsJsonWithoutWarnings(app)
+
+    for (const path of [
+      "/api/objects/query",
+      "/api/objects/query/links",
+      "/api/objects/query/count",
+      "/api/objects/query/exists",
+      "/api/objects/query/facets",
+    ]) {
+      expect(spec.paths?.[path]?.post?.responses, path).toHaveProperty("413")
+    }
+  })
 })
