@@ -9,16 +9,15 @@ import type {
   ServiceAccountRecord,
 } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
+import { agentServiceAccountId } from "./identity"
 import type { AgentDefinition } from "./types"
+
+export { agentServiceAccountId } from "./identity"
 
 export interface AgentExecutionIdentity {
   readonly serviceAccount: ServiceAccountRecord
   readonly principal: Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
   readonly groupMemberships: readonly ServiceAccountGroupMembershipRecord[]
-}
-
-export function agentServiceAccountId(agentId: string): string {
-  return `svc_agent_${agentId}`
 }
 
 /** Ensure the definition-owned service account exists before an Agent execution is admitted. */

@@ -10,6 +10,7 @@ import type { ConnectorService } from "../connectors/service"
 import { createDatasetsRuntime, type DatasetsRuntime } from "../datasets/execution"
 import { createEventsRuntime, type EventsRuntime } from "../events/execution"
 import type { ExecutionContext } from "../execution"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import { createLogsRuntime, type LogsRuntime } from "../logging/execution"
 import type { LoggingService } from "../logging/service"
 import { createObjectsRuntime, type ObjectsRuntime } from "../objects/execution"
@@ -59,6 +60,10 @@ export function createBoundSixb<TOntologySources extends readonly OntologySource
   dependencies: SixbDependencies,
   execution: ExecutionContext
 ): Sixb<TOntologySources> {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   const sixb: Sixb<TOntologySources> = {
     execution,
     ...createExecutionFacades<TOntologySources>(runtime, execution, dependencies),

@@ -1,11 +1,14 @@
+import { isDeepStrictEqual } from "node:util"
+import { agentServiceAccountId } from "../agents/identity"
 import type { Principal } from "../auth"
-import { emptyGrantSets, GRANT_KIND_KEYS } from "../authorization/grant-kinds"
+import { GRANT_KIND_KEYS, type GrantKind } from "../authorization/grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "../authorization/types"
 import { createSixbError } from "../errors/internal"
 import {
   type AuthorizablePrincipal,
   type AuthorizationRef,
   createRuntimeAuthorizationCapability,
+  type ExecutionContext,
   type ExecutionScope,
   isRuntimeAuthorizationCapability,
   type KernelOperation,
@@ -20,8 +23,6 @@ export type ResolvedRuntimeAuthorization =
       readonly projectId: string
       readonly context: AuthorizationContext
       readonly ref: Extract<AuthorizationRef, { readonly type: "principal" }>
-      /** Process-local binding used by provider façades that explicitly support agent runs. */
-      readonly executionBinding?: AgentExecutionBinding
     }
   | {
       readonly type: "unrestricted"
@@ -39,53 +40,52 @@ type PrincipalAuthorizationContext = Omit<AuthorizationContext, "principal"> & {
   readonly principal: AuthorizablePrincipal
 }
 
-interface AgentExecutionBinding {
-  readonly type: "agent"
-  readonly executionId: string
-  readonly agentId: string
-  readonly runId: string
+interface RuntimeAuthorizationRegistration {
+  readonly resolved: RegisteredRuntimeAuthorization
+  readonly execution: ExecutionContext
 }
 
-const registeredAuthorizations = new WeakMap<RuntimeAuthorization, RegisteredRuntimeAuthorization>()
+const registeredAuthorizations = new WeakMap<
+  RuntimeAuthorization,
+  RuntimeAuthorizationRegistration
+>()
 
 export function createPrincipalRuntimeAuthorization(input: {
-  readonly projectId: string
+  readonly execution: ExecutionContext
   readonly context: AuthorizationContext
   readonly credential?: Extract<AuthorizationRef, { readonly type: "principal" }>["credential"]
 }): RuntimeAuthorization {
+  if (input.execution.executor.type !== "request") {
+    throw new Error("[Sixb] Principal runtime authorization requires a request execution.")
+  }
   return createRegisteredPrincipalAuthorization(input)
 }
 
 /** Register service-account authority bound to one exact agent run. */
 export function createAgentRuntimeAuthorization(input: {
-  readonly projectId: string
+  readonly execution: ExecutionContext
   readonly context: AuthorizationContext
-  readonly executionId: string
-  readonly agentId: string
-  readonly runId: string
 }): RuntimeAuthorization {
   if (input.context.principal.type !== "serviceAccount") {
     throw new Error("[Sixb] Agent execution authority must belong to a service account.")
   }
-  assertNonEmpty(input.executionId, "Execution id")
-  assertNonEmpty(input.agentId, "Agent id")
-  assertNonEmpty(input.runId, "Agent run id")
-  return createRegisteredPrincipalAuthorization(input, {
-    type: "agent",
-    executionId: input.executionId,
-    agentId: input.agentId,
-    runId: input.runId,
-  })
+  if (input.execution.executor.type !== "agent") {
+    throw new Error("[Sixb] Agent runtime authorization requires an Agent execution.")
+  }
+  const expectedPrincipalId = agentServiceAccountId(input.execution.executor.agentId)
+  if (input.context.principal.id !== expectedPrincipalId) {
+    throw new Error(
+      `[Sixb] Agent '${input.execution.executor.agentId}' execution authority must reference service account '${expectedPrincipalId}'.`
+    )
+  }
+  return createRegisteredPrincipalAuthorization(input)
 }
 
-function createRegisteredPrincipalAuthorization(
-  input: {
-    readonly projectId: string
-    readonly context: AuthorizationContext
-    readonly credential?: Extract<AuthorizationRef, { readonly type: "principal" }>["credential"]
-  },
-  executionBinding?: AgentExecutionBinding
-): RuntimeAuthorization {
+function createRegisteredPrincipalAuthorization(input: {
+  readonly execution: ExecutionContext
+  readonly context: AuthorizationContext
+  readonly credential?: Extract<AuthorizationRef, { readonly type: "principal" }>["credential"]
+}): RuntimeAuthorization {
   const context = snapshotAuthorizationContext(input.context)
   const credential = input.credential ? snapshotCredential(input.credential) : undefined
   assertCredentialMatchesContext(context, credential)
@@ -94,41 +94,44 @@ function createRegisteredPrincipalAuthorization(
     principal: context.principal,
     ...(credential === undefined ? {} : { credential }),
   })
-  return register({
+  return register(input.execution, {
     type: "principal",
-    projectId: input.projectId,
+    projectId: input.execution.projectId,
     context,
     ref,
-    ...(executionBinding === undefined
-      ? {}
-      : { executionBinding: Object.freeze({ ...executionBinding }) }),
   })
 }
 
-export function createDisabledRuntimeAuthorization(projectId: string): RuntimeAuthorization {
-  return register({ type: "unrestricted", projectId, ref: Object.freeze({ type: "disabled" }) })
+export function createDisabledRuntimeAuthorization(
+  execution: ExecutionContext
+): RuntimeAuthorization {
+  return register(execution, {
+    type: "unrestricted",
+    projectId: execution.projectId,
+    ref: Object.freeze({ type: "disabled" }),
+  })
 }
 
 export function createTrustedPrimitiveRuntimeAuthorization(input: {
-  readonly projectId: string
+  readonly execution: ExecutionContext
   readonly primitive: TrustedPrimitiveRef
 }): RuntimeAuthorization {
   const primitive = snapshotTrustedPrimitive(input.primitive)
-  return register({
+  return register(input.execution, {
     type: "unrestricted",
-    projectId: input.projectId,
+    projectId: input.execution.projectId,
     ref: Object.freeze({ type: "trustedPrimitive", primitive }),
   })
 }
 
 export function createKernelRuntimeAuthorization(input: {
-  readonly projectId: string
+  readonly execution: ExecutionContext
   readonly operation: KernelOperation
 }): RuntimeAuthorization {
   const operation = snapshotKernelOperation(input.operation)
-  return register({
+  return register(input.execution, {
     type: "unrestricted",
-    projectId: input.projectId,
+    projectId: input.execution.projectId,
     ref: Object.freeze({ type: "kernel", operation }),
   })
 }
@@ -137,7 +140,28 @@ export function resolveRuntimeAuthorization(authorization: unknown): ResolvedRun
   if (!isRuntimeAuthorizationCapability(authorization)) {
     return { type: "denied" }
   }
-  return registeredAuthorizations.get(authorization) ?? { type: "denied" }
+  return registeredAuthorizations.get(authorization)?.resolved ?? { type: "denied" }
+}
+
+/**
+ * Resolve authority from a runtime already admitted by `SixbHost.withScope`.
+ *
+ * Bound runtime facades carry no second execution value to recombine. Any lower-level boundary
+ * that receives an `ExecutionContext` separately must use `resolveExecutionScopeAuthorization`.
+ */
+export function resolveRuntimeAuthorizationForProject(input: {
+  readonly projectId: unknown
+  readonly runtimeAuthorization?: unknown
+}): ResolvedRuntimeAuthorization {
+  const resolved = resolveRuntimeAuthorization(input.runtimeAuthorization)
+  if (
+    resolved.type === "denied" ||
+    typeof input.projectId !== "string" ||
+    resolved.projectId !== input.projectId
+  ) {
+    return { type: "denied" }
+  }
+  return resolved
 }
 
 export function getAuthorizationRef(authorization: RuntimeAuthorization): AuthorizationRef {
@@ -202,7 +226,22 @@ export function resolveExecutionScopeAuthorization(
     )
   }
 
-  const { execution } = scope
+  const registration = registeredAuthorizations.get(scope.authorization)
+  if (!registration || !executionMatchesBinding(registration.execution, scope.execution)) {
+    throw invalidExecutionAuthority(
+      scope.execution.id,
+      "authority is bound to different execution provenance"
+    )
+  }
+
+  assertResolvedAuthorizationMatchesExecution(resolved, scope.execution)
+  return resolved
+}
+
+function assertResolvedAuthorizationMatchesExecution(
+  resolved: RegisteredRuntimeAuthorization,
+  execution: ExecutionContext
+): void {
   switch (execution.executor.type) {
     case "request":
       if (
@@ -214,7 +253,6 @@ export function resolveExecutionScopeAuthorization(
       if (resolved.ref.type === "principal") {
         if (
           resolved.type !== "principal" ||
-          resolved.executionBinding !== undefined ||
           !principalsEqual(execution.requestedBy, resolved.ref.principal)
         ) {
           throw invalidExecutionAuthority(
@@ -222,9 +260,9 @@ export function resolveExecutionScopeAuthorization(
             "request authority does not match its requested-by principal"
           )
         }
-        return resolved
+        return
       }
-      if (resolved.ref.type === "disabled" && execution.requestedBy === undefined) return resolved
+      if (resolved.ref.type === "disabled" && execution.requestedBy === undefined) return
       throw invalidExecutionAuthority(
         execution.id,
         "request execution requires principal or explicitly disabled authority"
@@ -242,7 +280,7 @@ export function resolveExecutionScopeAuthorization(
           "trusted primitive authority does not match its executor"
         )
       }
-      return resolved
+      return
 
     case "agent":
       if (
@@ -250,17 +288,14 @@ export function resolveExecutionScopeAuthorization(
         resolved.ref.type !== "principal" ||
         resolved.ref.principal.type !== "serviceAccount" ||
         resolved.ref.credential !== undefined ||
-        resolved.executionBinding?.type !== "agent" ||
-        resolved.executionBinding.executionId !== execution.id ||
-        resolved.executionBinding.agentId !== execution.executor.agentId ||
-        resolved.executionBinding.runId !== execution.executor.runId
+        execution.source.type !== "execution"
       ) {
         throw invalidExecutionAuthority(
           execution.id,
           "agent authority does not match its execution binding"
         )
       }
-      return resolved
+      return
 
     case "kernel":
       if (
@@ -274,7 +309,7 @@ export function resolveExecutionScopeAuthorization(
           "kernel authority does not match its executor"
         )
       }
-      return resolved
+      return
   }
 }
 
@@ -293,20 +328,112 @@ function invalidExecutionAuthority(executionId: string, reason: string): Error {
   )
 }
 
-function register(input: RegisteredRuntimeAuthorization): RuntimeAuthorization {
+function register(
+  execution: ExecutionContext,
+  input: RegisteredRuntimeAuthorization
+): RuntimeAuthorization {
   assertNonEmpty(input.projectId, "Authorization project id")
+  const executionBinding = snapshotExecutionContext(execution)
+  if (input.projectId !== executionBinding.projectId) {
+    throw new Error(
+      `[Sixb] Runtime authorization belongs to project '${input.projectId}', not execution project '${executionBinding.projectId}'.`
+    )
+  }
+  assertResolvedAuthorizationMatchesExecution(input, executionBinding)
   const authorization = createRuntimeAuthorizationCapability()
-  registeredAuthorizations.set(authorization, Object.freeze(input))
+  registeredAuthorizations.set(
+    authorization,
+    Object.freeze({ resolved: Object.freeze(input), execution: executionBinding })
+  )
   return authorization
+}
+
+function executionMatchesBinding(binding: ExecutionContext, execution: ExecutionContext): boolean {
+  try {
+    return isDeepStrictEqual(binding, snapshotExecutionContext(execution))
+  } catch {
+    return false
+  }
+}
+
+function snapshotExecutionContext(execution: ExecutionContext): ExecutionContext {
+  assertNonEmpty(execution.id, "Execution id")
+  assertNonEmpty(execution.projectId, "Execution project id")
+  assertNonEmpty(execution.correlationId, "Execution correlation id")
+  return Object.freeze({
+    id: execution.id,
+    projectId: execution.projectId,
+    ...(execution.requestedBy === undefined
+      ? {}
+      : { requestedBy: snapshotAuthorizablePrincipal(execution.requestedBy) }),
+    executor: snapshotExecutionExecutor(execution.executor),
+    source: snapshotExecutionSource(execution.source),
+    correlationId: execution.correlationId,
+  })
+}
+
+function snapshotExecutionExecutor(
+  executor: ExecutionContext["executor"]
+): ExecutionContext["executor"] {
+  switch (executor.type) {
+    case "request":
+      assertNonEmpty(executor.requestId, "Execution request id")
+      return Object.freeze({ type: "request", requestId: executor.requestId })
+    case "primitive": {
+      const primitive = snapshotTrustedPrimitive(executor)
+      return Object.freeze({ type: "primitive", ...primitive })
+    }
+    case "agent":
+      assertNonEmpty(executor.agentId, "Execution Agent id")
+      assertNonEmpty(executor.runId, "Execution Agent run id")
+      return Object.freeze({ type: "agent", agentId: executor.agentId, runId: executor.runId })
+    case "kernel":
+      return Object.freeze({
+        type: "kernel",
+        operation: snapshotKernelOperation(executor.operation),
+      })
+  }
+  throw new Error(
+    `[Sixb] Unknown execution executor type '${String((executor as { type?: unknown }).type)}'.`
+  )
+}
+
+function snapshotExecutionSource(source: ExecutionContext["source"]): ExecutionContext["source"] {
+  switch (source.type) {
+    case "http":
+      assertNonEmpty(source.requestId, "Execution source request id")
+      return Object.freeze({ type: "http", requestId: source.requestId })
+    case "webhook":
+      assertNonEmpty(source.deliveryId, "Execution source delivery id")
+      return Object.freeze({ type: "webhook", deliveryId: source.deliveryId })
+    case "schedule":
+    case "event":
+      assertNonEmpty(source.eventId, "Execution source event id")
+      return Object.freeze({ type: source.type, eventId: source.eventId })
+    case "datasetVersion":
+      assertNonEmpty(source.datasetId, "Execution source dataset id")
+      assertNonEmpty(source.versionId, "Execution source dataset version id")
+      return Object.freeze({
+        type: "datasetVersion",
+        datasetId: source.datasetId,
+        versionId: source.versionId,
+      })
+    case "execution":
+      assertNonEmpty(source.executionId, "Execution source execution id")
+      return Object.freeze({ type: "execution", executionId: source.executionId })
+  }
+  throw new Error(
+    `[Sixb] Unknown execution source type '${String((source as { type?: unknown }).type)}'.`
+  )
 }
 
 function snapshotAuthorizationContext(
   context: AuthorizationContext
 ): PrincipalAuthorizationContext {
   const principal = snapshotAuthorizablePrincipal(context.principal)
-  const grants = emptyGrantSets()
+  const grants = {} as Record<GrantKind, ReadonlySet<string>>
   for (const kind of GRANT_KIND_KEYS) {
-    grants[kind] = new Set(context.grants[kind])
+    grants[kind] = new ImmutableGrantSet(context.grants[kind])
   }
   const frozenGrants: GrantIndex = Object.freeze(grants)
   return Object.freeze({
@@ -316,6 +443,68 @@ function snapshotAuthorizationContext(
     roleIds: Object.freeze([...context.roleIds]),
     grants: frozenGrants,
   })
+}
+
+/** Read-only Set semantics with no mutable handle hidden behind the TypeScript interface. */
+class ImmutableGrantSet implements ReadonlySet<string> {
+  readonly #values: Set<string>
+  readonly [Symbol.toStringTag] = "Set"
+
+  constructor(values: Iterable<string>) {
+    this.#values = new Set(values)
+    Object.freeze(this)
+  }
+
+  get size(): number {
+    return this.#values.size
+  }
+
+  has(value: string): boolean {
+    return this.#values.has(value)
+  }
+
+  entries(): ReturnType<Set<string>["entries"]> {
+    return this.#values.entries()
+  }
+
+  keys(): ReturnType<Set<string>["keys"]> {
+    return this.#values.keys()
+  }
+
+  values(): ReturnType<Set<string>["values"]> {
+    return this.#values.values()
+  }
+
+  [Symbol.iterator](): ReturnType<Set<string>[typeof Symbol.iterator]> {
+    return this.#values[Symbol.iterator]()
+  }
+
+  forEach(
+    callback: (value: string, valueAgain: string, set: ReadonlySet<string>) => void,
+    thisArg?: unknown
+  ): void {
+    for (const value of this.#values) {
+      callback.call(thisArg, value, value, this)
+    }
+  }
+
+  add(_value: string): never {
+    throw immutableGrantSetMutation()
+  }
+
+  delete(_value: string): never {
+    throw immutableGrantSetMutation()
+  }
+
+  clear(): never {
+    throw immutableGrantSetMutation()
+  }
+}
+
+Object.freeze(ImmutableGrantSet.prototype)
+
+function immutableGrantSetMutation(): Error {
+  return new Error("[Sixb] Runtime authorization grants are immutable.")
 }
 
 function snapshotAuthorizablePrincipal(principal: Principal): AuthorizablePrincipal {

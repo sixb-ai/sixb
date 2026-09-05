@@ -1,4 +1,5 @@
 import { assertAuthorized } from "../authorization"
+import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import {
   createPrimitiveExecutionRecord,
   ensureExecutionRecord,
@@ -42,6 +43,10 @@ export async function requestPipelineRun(
   pipeline: PipelineDefinition,
   options: PipelineRunRequestOptions = {}
 ): Promise<PipelineRunRequestResult> {
+  resolveExecutionScopeAuthorization(runtime.projectId, {
+    execution,
+    authorization: runtime.runtimeAuthorization,
+  })
   assertAuthorized(runtime, { kind: "pipeline.run", pipelineId: pipeline.id })
   if (!runtime.storage.pipelineRuns) {
     throw new PipelineError("[Sixb] Pipeline run storage is not configured.")

@@ -138,7 +138,7 @@ export async function executeObjectQuery(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  assertQueryViewable(validated, options)
+  assertQueryViewable(input.projectId, validated, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -206,7 +206,7 @@ export async function countObjects(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  assertQueryViewable(validated, options)
+  assertQueryViewable(input.projectId, validated, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -267,7 +267,7 @@ export async function existsObjects(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  assertQueryViewable(validated, options)
+  assertQueryViewable(input.projectId, validated, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -328,7 +328,7 @@ export async function facetObjects(
     maxRefs: options.maxRefs,
     normalize: false,
   })
-  assertQueryViewable(validated, options)
+  assertQueryViewable(input.projectId, validated, options)
   const facets = validateFacetRequests(input.facets, validated.result.objectTypeIds, options)
   const aggregateQuery = stripOuterRowShape(validated.query)
   const capabilities = options.storage.queryCapabilities()
@@ -388,16 +388,20 @@ export async function facetObjects(
 // Authorization happens at planning time: a scoped query must hold a view
 // grant for every object type it touches, before any storage call runs.
 function assertQueryViewable(
+  projectId: string,
   validated: ValidatedObjectQuery,
   authorization: Pick<QueryExecutorOptions, "authorization" | "runtimeAuthorization">
 ): void {
   // The query engine is also a storage-level utility. Authorization is activated by a runtime
   // context; execution SDKs always provide a registered capability, including auth-disabled ones.
   if (!authorization.runtimeAuthorization && !authorization.authorization) return
-  assertAuthorized(authorization, {
-    kind: "object.query",
-    touchedObjectTypeIds: validated.touchedObjectTypeIds,
-  })
+  assertAuthorized(
+    { projectId, ...authorization },
+    {
+      kind: "object.query",
+      touchedObjectTypeIds: validated.touchedObjectTypeIds,
+    }
+  )
 }
 
 interface ExpansionResolutionContext {
