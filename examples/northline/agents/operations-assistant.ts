@@ -28,6 +28,15 @@ export const lookupResponsePolicy = defineAgentTool("lookup_response_policy")
     }
   })
 
+const compactionDemoContext =
+  process.env.NORTHLINE_AGENT_COMPACTION_DEMO === "1"
+    ? {
+        windowTokens: 8_000,
+        reserveTokens: 4_000,
+        keepRecentTokens: 700,
+      }
+    : undefined
+
 export const operationsAssistant = defineAgent("operations-assistant", {
   name: "Operations Assistant",
   description: "A demo agent showing how to add an AI assistant to a Sixb app.",
@@ -46,5 +55,8 @@ export const operationsAssistant = defineAgent("operations-assistant", {
       "change the model passed to vercelGateway(), and replace these instructions with their own prompt.",
   ].join("\n"),
   tools: [lookupResponsePolicy],
-  loop: { stopWhen: { maxSteps: 12 } },
+  loop: {
+    stopWhen: { maxSteps: 12 },
+    ...(compactionDemoContext ? { context: compactionDemoContext } : {}),
+  },
 })

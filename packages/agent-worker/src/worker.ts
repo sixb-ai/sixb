@@ -324,7 +324,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: executionContext,
         run,
         signal: turnSignal,
-        providerOptions: agent.providerOptions,
       })
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
@@ -726,7 +725,7 @@ function resolveContextBudgets(
     budgets.set(agent.id, budget)
     if (budget.source !== "fallback") continue
 
-    const model = `${agent.model.provider}/${agent.model.modelId}`
+    const model = `${agent.model.providerId}/${agent.model.modelId}`
     if (warnedModels.has(model)) continue
     warnedModels.add(model)
     console.warn(

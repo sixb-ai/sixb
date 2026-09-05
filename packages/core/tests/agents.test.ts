@@ -328,7 +328,11 @@ describe("defineAgent", () => {
       instructions: "Assist.",
       groups: [agentRuntime],
       tools: [searchKnowledge],
-      loop: { stopWhen: { maxSteps: 16 } },
+      loop: {
+        stopWhen: { maxSteps: 16 },
+        context: { windowTokens: 200_000 },
+        caching: "off",
+      },
     })
 
     expect(agent.description).toBe("Quotes and contacts.")
@@ -336,7 +340,13 @@ describe("defineAgent", () => {
     expect(agent.groupIds).toEqual(["agent-runtime"])
     expect(agent.tools).toEqual([searchKnowledge])
     expect(agent.tools[0]).toBe(searchKnowledge)
-    expect(agent.loop).toEqual({ stopWhen: { maxSteps: 16 } })
+    expect(agent.loop).toEqual({
+      stopWhen: { maxSteps: 16 },
+      context: { windowTokens: 200_000 },
+      caching: "off",
+    })
+    expect(Object.isFrozen(agent.loop)).toBe(true)
+    expect(Object.isFrozen(agent.loop?.context)).toBe(true)
     expect(() => {
       ;(searchKnowledge as unknown as { name: string }).name = "bash"
     }).toThrow(TypeError)
@@ -424,6 +434,61 @@ describe("defineAgent", () => {
           model,
           instructions: "x",
           loop: { stopWhen: { maxSteps } },
+        })
+      ).toThrow(AgentDefinitionError)
+    }
+  })
+
+  test("rejects invalid prompt caching settings", () => {
+    expect(() =>
+      defineAgent("bad", {
+        name: "Bad",
+        model,
+        instructions: "x",
+        loop: { caching: "sometimes" as never },
+      })
+    ).toThrow("Agent loop.caching must be 'auto' or 'off'")
+  })
+
+  test("snapshots and validates context loop overrides", () => {
+    const configured = defineAgent("configured", {
+      name: "Configured",
+      model,
+      instructions: "x",
+      loop: {
+        context: {
+          windowTokens: 10_000,
+          reserveTokens: 2_000,
+          keepRecentTokens: 3_000,
+        },
+      },
+    })
+    expect(configured.loop?.context).toEqual({
+      windowTokens: 10_000,
+      reserveTokens: 2_000,
+      keepRecentTokens: 3_000,
+    })
+
+    const automatic = defineAgent("automatic", {
+      name: "Automatic",
+      model,
+      instructions: "x",
+      loop: { context: {} },
+    })
+    expect(automatic.loop?.context).toEqual({})
+
+    for (const context of [
+      { windowTokens: 0 },
+      { windowTokens: Number.MAX_SAFE_INTEGER + 1 },
+      { windowTokens: 100, reserveTokens: 0 },
+      { windowTokens: 100, keepRecentTokens: 1.5 },
+    ]) {
+      expect(() =>
+        defineAgent("bad-context", {
+          name: "Bad context",
+          model,
+          instructions: "x",
+          loop: { context },
         })
       ).toThrow(AgentDefinitionError)
     }

@@ -1,4 +1,4 @@
-CREATE TABLE ai_model_call_valuations (
+CREATE TABLE ai_model_call_valuations_next (
   project_id TEXT NOT NULL CHECK (length(trim(project_id)) > 0),
   usage_record_id TEXT NOT NULL CHECK (length(trim(usage_record_id)) > 0),
   status TEXT NOT NULL CHECK (status IN ('rated', 'unpriceable')),
@@ -13,7 +13,7 @@ CREATE TABLE ai_model_call_valuations (
   reason TEXT CHECK (
     reason IS NULL OR reason IN (
       'missingBillingIdentity',
-      'missingCatalogEntry',
+      'missingRateCard',
       'missingUsageMeter',
       'unsupportedPricingDimension',
       'invalidUsageForFormula'
@@ -49,9 +49,18 @@ CREATE TABLE ai_model_call_valuations (
   )
 );
 
-CREATE INDEX idx_ai_model_call_usage_provider_model_time
-  ON ai_model_call_usage (project_id, provider_id, requested_model_id, occurred_at, id);
-CREATE INDEX idx_ai_model_call_usage_model_time
-  ON ai_model_call_usage (project_id, requested_model_id, occurred_at, id);
+INSERT INTO ai_model_call_valuations_next (
+  project_id, usage_record_id, status, provider_id, model_id,
+  currency, amount_nanos, reason, details, rated_at
+)
+SELECT project_id, usage_record_id, status, provider_id, model_id,
+  currency, amount_nanos,
+  CASE WHEN reason = 'missingCatalogEntry' THEN 'missingRateCard' ELSE reason END,
+  details, rated_at
+FROM ai_model_call_valuations;
+
+DROP TABLE ai_model_call_valuations;
+ALTER TABLE ai_model_call_valuations_next RENAME TO ai_model_call_valuations;
+
 CREATE INDEX idx_ai_model_call_valuations_summary
   ON ai_model_call_valuations (project_id, status, currency, usage_record_id);

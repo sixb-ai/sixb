@@ -25,7 +25,7 @@ import {
   WorkflowDefinitionError,
 } from "../src"
 import type { LanguageModel } from "../src/models"
-import { schemaRecordToJsonSchema } from "../src/ontology/internal"
+import { schemaFieldsToJsonSchema, schemaRecordToJsonSchema } from "../src/ontology/internal"
 import { createTestSixb } from "../src/testing"
 import { validateWorkflowDefinition } from "../src/workflows"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -248,6 +248,46 @@ describe("schemaRecordToJsonSchema", () => {
         valueTypesById: new Map(),
       })
     ).toThrow("unknown value type 'MissingEvidence'")
+  })
+
+  test("projects configured optional and nullable fields without weakening reference shapes", () => {
+    expect(
+      schemaFieldsToJsonSchema({
+        fields: {
+          attempt: {
+            schema: ref(Invoice),
+            required: true,
+          },
+          note: {
+            schema: "string",
+          },
+          reviewedAt: {
+            schema: "timestamp",
+            nullable: true,
+          },
+        },
+        valueTypesById: new Map(),
+      })
+    ).toEqual({
+      type: "object",
+      properties: {
+        attempt: {
+          type: "object",
+          properties: {
+            objectTypeId: { type: "string", const: "Invoice" },
+            primaryId: { type: "string" },
+          },
+          required: ["objectTypeId", "primaryId"],
+          additionalProperties: false,
+        },
+        note: { type: "string" },
+        reviewedAt: {
+          anyOf: [{ type: "string", format: "date-time" }, { type: "null" }],
+        },
+      },
+      required: ["attempt"],
+      additionalProperties: false,
+    })
   })
 })
 

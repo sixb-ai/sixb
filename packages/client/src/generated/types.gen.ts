@@ -1140,6 +1140,7 @@ export type CreateAuthInvitationData = {
     destinationId?: "atlas" | "app"
     expiresAt?: string
     returnTo?: string
+    revealLink?: boolean
   }
   path?: never
   query?: never
@@ -1205,6 +1206,10 @@ export type CreateAuthInvitationResponses = {
     }
     delivery: {
       status: "sent" | "skipped" | "rate_limited" | "not_supported"
+      link?: {
+        url: string
+        expiresAt?: string
+      }
     }
   }
 }
@@ -7254,6 +7259,9 @@ export type GetActionResponses = {
       edits: boolean
       effects: boolean
     }
+    inputSchema: {
+      [key: string]: unknown
+    }
   }
 }
 
@@ -8014,6 +8022,11 @@ export type ListAgentsResponses = {
       stopWhen?: {
         maxSteps?: number
       }
+      context?: {
+        windowTokens?: number
+        reserveTokens?: number
+        keepRecentTokens?: number
+      }
     }
   }>
 }
@@ -8065,6 +8078,11 @@ export type GetAgentResponses = {
     loop?: {
       stopWhen?: {
         maxSteps?: number
+      }
+      context?: {
+        windowTokens?: number
+        reserveTokens?: number
+        keepRecentTokens?: number
       }
     }
   }
@@ -8502,6 +8520,11 @@ export type ListAgentThreadMessagesResponses = {
         path?: string
         message: string
       }>
+      compaction?: {
+        checkpointId: string
+        summary: string
+        createdAt: string
+      }
       /**
        * Any JSON-compatible value.
        */

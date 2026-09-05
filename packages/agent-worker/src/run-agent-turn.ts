@@ -20,9 +20,10 @@ import { AgentTurnTimeoutError } from "./errors"
 import { type AgentRunFailure, toAgentExecutionFailure } from "./failure"
 import { appendMessageAndFinishRunOrThrow, finishRunOrThrow } from "./finalize"
 import { agentTraceFromModelSteps, agentTraceFromPartialModelLoop } from "./model-adapters"
-import { AiModelCallRecorder } from "./model-call-recorder"
 import { collectAgentOutputAttachments } from "./output-attachments"
-import { loadAgentThreadModelContext } from "./thread-context"
+import { monitorSandboxReadiness } from "./sandbox-readiness"
+import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
+import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
 export const DEFAULT_MAX_STEPS = 25
@@ -35,6 +36,10 @@ export interface RunAgentTurnInput {
   readonly run: AgentRunRecord
   /** The worker's shutdown signal. */
   readonly signal: AbortSignal
+  /** Shared with preflight when this turn performed compaction. */
+  readonly runtime?: AgentTurnRuntime
+  /** Preflight's retained projection, avoiding a second storage read in the worker path. */
+  readonly threadContext?: LoadedAgentThreadModelContext
 }
 
 /** Drive one provider-neutral model/tool turn to completion and persist it. */
@@ -52,11 +57,13 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
   const agents = storage.agents
 
-  const threadContext = await loadAgentThreadModelContext({
-    storage: agents,
-    projectId,
-    threadId: run.threadId,
-  })
+  const threadContext =
+    input.threadContext ??
+    (await loadAgentThreadModelContext({
+      storage: agents,
+      projectId,
+      threadId: run.threadId,
+    }))
   const attachmentContext =
     context.attachmentContext ??
     (context.apiBaseUrl
@@ -88,40 +95,21 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   })
 
   const maxSteps = agent.loop?.stopWhen?.maxSteps ?? defaultMaxSteps
-  const usageRecorder = new AiModelCallRecorder({
-    storage,
-    projectId,
-    executionId: run.executionId,
-    attempt: run.attempt,
-    requesterGroupIds: run.requesterGroupIds,
-    recoverAiModelCall: context.recoverAiModelCall,
-    errorRunId: runId,
-  })
-
-  const timeoutAbort = new AbortController()
-  let timedOut = false
-  const timeoutTimer = setTimeout(() => {
-    timedOut = true
-    timeoutAbort.abort()
-  }, turnTimeoutMs)
-
-  // Sandbox provisioning runs beside the first model call. A failure aborts the turn promptly and
-  // takes precedence over the synthetic abort it causes.
-  const provisionAbort = new AbortController()
-  let provisionError: unknown
-  context.sandboxReady?.catch((error) => {
-    provisionError = error
-    provisionAbort.abort()
-  })
-
-  const abortSignal = AbortSignal.any([signal, timeoutAbort.signal, provisionAbort.signal])
+  const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
+  // Preflight and the answer share accounting and one deadline. Direct callers own their runtime.
+  const ownsRuntime = input.runtime === undefined
+  const runtime = input.runtime ?? createAgentTurnRuntime({ context, run, signal })
+  const usageRecorder = runtime.usageRecorder
+  const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   let interruptedParts: readonly AgentMessagePart[] | undefined
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
-    if (signal.reason instanceof QueueDeliveryLeaseLostError) throw signal.reason
+    if (runtime.sourceSignal.reason instanceof QueueDeliveryLeaseLostError) {
+      throw runtime.sourceSignal.reason
+    }
     usageRecorder.assertHealthy()
-    if (provisionError !== undefined) throw provisionError
-    if (timedOut) {
+    sandboxReadiness.throwIfFailed()
+    if (runtime.timedOut()) {
       const completedAt = new Date()
       return finalizeInterruptedTurn({
         storage,
@@ -176,6 +164,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         ],
         tools,
         ...(agent.reasoning === undefined ? {} : { reasoning: agent.reasoning }),
+        ...(agent.loop?.caching === undefined ? {} : { caching: agent.loop.caching }),
         maxSteps,
         finalStepInstruction: DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
         ...(context.prepareStep === undefined ? {} : { prepareStep: context.prepareStep }),
@@ -272,7 +261,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     await context.streamSink.publishRunFinished(finalizedRun)
     return finalizedRun
   } finally {
-    clearTimeout(timeoutTimer)
+    if (ownsRuntime) runtime.dispose()
   }
 }
 

@@ -24,6 +24,11 @@ const model = gateway("anthropic/claude-sonnet-4.5", {
 const definitions = await gateway.catalog.list()
 ```
 
+Gateway requests enable automatic prompt caching by default. Explicit
+`providerOptions.gateway.caching` values are preserved. Per-call `maxOutputTokens` limits
+(including compaction summaries) are capped by a stricter configured `request.max_output_tokens`
+or model-definition maximum.
+
 The remote catalog is cached in memory. Constructing a model and ordinary inference never fetch it.
 A structured-output call consults it when support is otherwise unknown, then uses the native strict
 response format or transparently falls back to one required, nonparallel JSON function. A catalog

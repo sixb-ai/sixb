@@ -5,6 +5,7 @@ import {
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
   projectAgentThreadModelContext,
+  runModelLoop,
   selectAgentContextCompactionBoundary,
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
@@ -16,7 +17,6 @@ import type {
   AgentRunRecord,
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
-import { generateText } from "ai"
 import { renderAgentSystemPrompt } from "./agent-prompt"
 import type { AgentSkill } from "./agent-skills"
 import type { AgentContextBudget } from "./context-budget"
@@ -244,7 +244,7 @@ export async function estimateAgentConversationInputTokens(input: {
       const inputTokens = usage?.usage.inputTokens
       const outputTokens = usage?.usage.outputTokens
       if (
-        usage?.providerId === agent.model.provider &&
+        usage?.providerId === agent.model.providerId &&
         usage.requestedModelId === agent.model.modelId &&
         inputTokens !== undefined &&
         inputTokens > 0 &&
@@ -290,25 +290,29 @@ async function generateCheckpointSummary(input: {
   readonly previousCheckpoint: AgentContextCheckpointRecord | null
   readonly messages: readonly AgentMessageRecord[]
 }): Promise<string> {
-  let result: Awaited<ReturnType<typeof generateText>>
+  let result: Awaited<ReturnType<typeof runModelLoop<string>>>
   try {
-    result = await generateText({
-      model: input.runtime.usageRecorder.wrapModel(input.agent.model),
+    result = await runModelLoop({
+      model: input.agent.model,
       // Hidden reasoning consumes the same bounded output budget needed for summary text.
       reasoning: "none",
-      ...(input.agent.providerOptions === undefined
-        ? {}
-        : { providerOptions: input.agent.providerOptions }),
-      system: SUMMARY_SYSTEM_PROMPT,
-      prompt: summaryPrompt(input.previousCheckpoint, input.messages),
+      ...(input.agent.loop?.caching === undefined ? {} : { caching: input.agent.loop.caching }),
+      messages: [
+        { role: "system", content: SUMMARY_SYSTEM_PROMPT },
+        {
+          role: "user",
+          content: [
+            { type: "text", text: summaryPrompt(input.previousCheckpoint, input.messages) },
+          ],
+        },
+      ],
+      maxSteps: 1,
       maxOutputTokens: Math.min(
         SUMMARY_MAX_OUTPUT_TOKENS,
         Math.max(1, Math.floor(input.budget.reserveTokens / 2))
       ),
-      prepareStep: input.runtime.usageRecorder.prepareStep,
-      onLanguageModelCallStart: input.runtime.usageRecorder.onLanguageModelCallStart,
-      onLanguageModelCallEnd: input.runtime.usageRecorder.onLanguageModelCallEnd,
-      abortSignal: input.runtime.signal,
+      onModelCallEnd: input.runtime.usageRecorder.onModelCallEnd,
+      signal: input.runtime.signal,
     })
   } catch (error) {
     input.runtime.assertCanContinue()
@@ -321,7 +325,14 @@ async function generateCheckpointSummary(input: {
   }
   input.runtime.assertCanContinue()
 
-  const summary = result.text.trim()
+  if (result.status === "aborted") {
+    throw new AgentContextCompactionError(
+      "summary_failed",
+      input.run.id,
+      "Context summary was aborted."
+    )
+  }
+  const summary = result.output.trim()
   if (result.finishReason !== "stop" || summary.length === 0) {
     throw new AgentContextCompactionError(
       "summary_failed",

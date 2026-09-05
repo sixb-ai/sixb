@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test"
 import type { BlobStorage, FileRef, JsonValue } from "@sixb/core"
 import { InMemoryBlobStorage } from "@sixb/core"
 import type { LanguageModel, ModelMessage } from "@sixb/core/models"
-import { AgentToolResultMediaBridge } from "../src/tool-result-media"
+import { AgentToolResultMediaBridge } from "../src/tools/result-media"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])

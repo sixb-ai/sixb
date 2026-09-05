@@ -1,4 +1,19 @@
 import { AgentToolPublicError } from "@sixb/core"
+import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
+
+/** A thread could not complete its required preflight compaction. */
+export class AgentContextCompactionError extends Error {
+  readonly name = "AgentContextCompactionError"
+
+  constructor(
+    readonly code: AgentCompactionFailureCode,
+    readonly runId: string,
+    message: string,
+    options?: ErrorOptions
+  ) {
+    super(`[SixbAgentWorker] ${message}`, options)
+  }
+}
 
 /** A completed provider call was not recorded synchronously, so this turn must stop. */
 export class AgentUsageRecordingError extends Error {

@@ -80,6 +80,13 @@ export const AgentLoopConfigSchema = z.object({
       maxSteps: z.number().int().positive().optional(),
     })
     .optional(),
+  context: z
+    .object({
+      windowTokens: z.number().int().positive().optional(),
+      reserveTokens: z.number().int().positive().optional(),
+      keepRecentTokens: z.number().int().positive().optional(),
+    })
+    .optional(),
 })
 
 export const AgentReasoningLevelSchema = ModelReasoningLevelSchema
@@ -204,6 +211,12 @@ export const AgentRunDiagnosticSchema = z.object({
   message: z.string(),
 })
 
+export const AgentMessageCompactionSchema = z.object({
+  checkpointId: z.string(),
+  summary: z.string(),
+  createdAt: z.string(),
+})
+
 export const AgentMessageSchema = z.object({
   id: z.string(),
   projectId: z.string(),
@@ -215,6 +228,8 @@ export const AgentMessageSchema = z.object({
   parts: z.array(AgentMessagePartSchema),
   /** Platform-authored annotations associated with this message's run. */
   annotations: z.array(AgentRunDiagnosticSchema),
+  /** A durable context summary created before this response's model call. */
+  compaction: AgentMessageCompactionSchema.optional(),
   metadata: JsonValueSchema.optional(),
   contentVersion: z.number(),
   createdAt: z.string(),

@@ -5,6 +5,7 @@ import {
   resolveAgentContextBudget,
 } from "../src/context-budget"
 import { resolveModelsDevContextLimits } from "../src/models-dev/catalog"
+import { WorkerTestModel } from "./worker-model-fixture"
 
 function agent(
   provider: string,
@@ -13,7 +14,7 @@ function agent(
 ): Pick<AgentDefinition, "id" | "model" | "loop"> {
   return {
     id: "assistant",
-    model: { provider, modelId } as AgentDefinition["model"],
+    model: new WorkerTestModel({ providerId: provider, modelId }),
     ...(context === undefined ? {} : { loop: { context } }),
   }
 }
@@ -23,8 +24,30 @@ function resolveBudget(definition: Pick<AgentDefinition, "id" | "model" | "loop"
 }
 
 describe("agent context budget resolution", () => {
+  test("prefers owned model metadata over the fallback catalog", () => {
+    // Regression proof: ignore definition.contextWindow in resolveAgentContextBudget.
+    const definition = agent("vercel-ai-gateway", "openai/gpt-5.4")
+    const configured = {
+      ...definition,
+      model: new WorkerTestModel({
+        definition: { ...definition.model.definition, contextWindow: 32_000 },
+      }),
+    }
+    expect(resolveBudget(configured)).toMatchObject({ windowTokens: 32_000, source: "model" })
+    expect(
+      resolveBudget({ ...configured, loop: { context: { windowTokens: 16_000 } } })
+    ).toMatchObject({ windowTokens: 16_000, source: "config" })
+  })
+
+  test("maps the owned Gateway provider to the context catalog", () => {
+    // Regression proof: remove the vercel-ai-gateway provider binding.
+    expect(resolveBudget(agent("vercel-ai-gateway", "openai/gpt-5.4"))).toMatchObject({
+      windowTokens: 1_050_000,
+      source: "models.dev",
+    })
+  })
   test("uses the exact Models.dev context and input limits", () => {
-    expect(resolveBudget(agent("openai.responses", "gpt-5.4"))).toEqual({
+    expect(resolveBudget(agent("openai", "gpt-5.4"))).toEqual({
       windowTokens: 1_050_000,
       inputBudgetTokens: 922_000,
       reserveTokens: 16_384,
@@ -33,8 +56,8 @@ describe("agent context budget resolution", () => {
     })
   })
 
-  test("maps reviewed AI SDK provider namespaces without fuzzy model matching", () => {
-    expect(resolveBudget(agent("gateway", "openai/gpt-5.4"))).toMatchObject({
+  test("uses exact provider identities without fuzzy model matching", () => {
+    expect(resolveBudget(agent("vercel-ai-gateway", "openai/gpt-5.4"))).toMatchObject({
       windowTokens: 1_050_000,
       source: "models.dev",
     })
@@ -48,9 +71,7 @@ describe("agent context budget resolution", () => {
   })
 
   test("treats an explicit window as authoritative", () => {
-    expect(
-      resolveBudget(agent("openai.responses", "gpt-5.4", { windowTokens: 1_500_000 }))
-    ).toEqual({
+    expect(resolveBudget(agent("openai", "gpt-5.4", { windowTokens: 1_500_000 }))).toEqual({
       windowTokens: 1_500_000,
       inputBudgetTokens: 1_483_616,
       reserveTokens: 16_384,
@@ -62,7 +83,7 @@ describe("agent context budget resolution", () => {
   test("applies advanced overrides to a catalog-derived window", () => {
     expect(
       resolveBudget(
-        agent("openai.responses", "gpt-5.4", {
+        agent("openai", "gpt-5.4", {
           reserveTokens: 200_000,
           keepRecentTokens: 10_000,
         })

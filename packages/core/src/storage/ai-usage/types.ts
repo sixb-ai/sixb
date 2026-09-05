@@ -83,6 +83,11 @@ export interface SummarizeAiUsageExecutionsInput {
   readonly executionIds: readonly string[]
 }
 
+export interface GetLatestAiModelCallForExecutionInput {
+  readonly projectId: string
+  readonly executionId: string
+}
+
 /** Durable, provider-neutral accounting for completed language-model calls. */
 export interface AiUsageStorage {
   /**
@@ -90,6 +95,11 @@ export interface AiUsageStorage {
    * ID, and response ID; retrying that identity returns the existing record with `created: false`.
    */
   recordModelCall(input: RecordAiModelCallInput): Promise<RecordAiModelCallResult>
+
+  /** Latest completed provider call for one execution, ordered by occurrence and stable id. */
+  getLatestForExecution(
+    input: GetLatestAiModelCallForExecutionInput
+  ): Promise<AiModelCallUsageRecord | null>
 
   /** Aggregate normalized usage and call presence across every attempt of one execution. */
   summarizeExecution(input: SummarizeAiUsageExecutionInput): Promise<AiUsageExecutionSummary>

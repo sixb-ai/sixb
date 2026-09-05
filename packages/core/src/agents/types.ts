@@ -21,6 +21,15 @@ export type AgentReasoningLevel = AgentReasoning
 
 export const AGENT_REASONING_LEVELS = MODEL_REASONING_LEVELS
 
+export interface AgentContextConfig {
+  /** Override the provider context-window size inferred by the agent worker. */
+  readonly windowTokens?: number
+  /** Tokens reserved for the next response and compaction work. */
+  readonly reserveTokens?: number
+  /** Approximate recent-message budget retained verbatim after compaction. */
+  readonly keepRecentTokens?: number
+}
+
 /**
  * Loop / stop controls for an agent run.
  *
@@ -30,6 +39,9 @@ export interface AgentLoopConfig {
   readonly stopWhen?: {
     readonly maxSteps?: number
   }
+  readonly context?: AgentContextConfig
+  /** Automatic provider prompt caching. Defaults to `auto`; use `off` to opt out. */
+  readonly caching?: "auto" | "off"
 }
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}

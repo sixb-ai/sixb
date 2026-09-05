@@ -44,6 +44,27 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Vercel AI Gateway provider", () => {
+  test("honors summary output limits and automatic caching controls on the wire", async () => {
+    // Regression proof: omit max_output_tokens or providerOptions from prepareRequest.
+    const bodies: Record<string, unknown>[] = []
+    const provider = createVercelGateway({
+      apiKey: "test",
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    const model = provider("openai/gpt-5", { request: { max_output_tokens: 2_048 } })
+    await model.stream(request({ maxOutputTokens: 512 }))
+    await model.stream(request({ maxOutputTokens: 4_096, caching: "off" }))
+    expect(bodies.map((body) => body.max_output_tokens)).toEqual([512, 2_048])
+    expect(bodies[0]?.providerOptions).toEqual({ gateway: { caching: "auto" } })
+    expect(bodies[1]?.providerOptions).toBeUndefined()
+    await expect(model.stream(request({ maxOutputTokens: 0 }))).rejects.toThrow(
+      "positive safe integer"
+    )
+    expect(bodies).toHaveLength(2)
+  })
   test("keeps schemas outside the strict Responses subset on the tool fallback", () => {
     expect(
       gatewayOutputSchema({

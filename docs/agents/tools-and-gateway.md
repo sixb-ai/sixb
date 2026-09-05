@@ -263,6 +263,12 @@ workflow task. It combines project-authored `instructions` with runtime guidance
 worker-owned rules that preserve the mode's approval, output, and user-communication boundaries.
 Prompt composition is not worker configuration.
 
+Runtime guidance includes the top-level CLI command catalog, so agents do not need to run `sixb
+--help` to discover capabilities. Exact references retain a fast path: `objects get` before
+relationship inspection, `actions get` before request, and JSON parameters through stdin. Narrow
+group or command help remains available when exact arguments are unknown. `actions request --wait`
+returns the terminal run in the same command when it finishes within 25 seconds.
+
 ## Agent Skills in the sandbox
 
 When a project defines Agent Skills under `skills/<name>/SKILL.md`, each run receives them under

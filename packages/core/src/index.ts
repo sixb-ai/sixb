@@ -77,7 +77,12 @@ export type {
   ActionRuntimeFacade,
   ActionSubject,
   ActionTargetObject,
+  ActionTelemetryHistoryBatchInput,
+  ActionTelemetryHistoryBatchResult,
+  ActionTelemetryHistorySeriesInput,
   ActionTelemetryObjectSet,
+  ActionTelemetryPropertyToken,
+  ActionTelemetryReadFacade,
   ActionValidationContext,
   ActionValidator,
   ActionWritebackContext,
@@ -950,6 +955,7 @@ export type {
 // ── Agents ──────────────────────────────────────────────────
 
 export type {
+  AgentContextConfig,
   AgentContextEntryInput,
   AgentContextInput,
   AgentContextOrigin,

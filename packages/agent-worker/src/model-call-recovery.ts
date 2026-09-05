@@ -16,7 +16,7 @@ import {
   AiUsageStorageError,
   normalizeAiModelCallRecord,
 } from "@sixb/core/storage"
-import { recordAiModelCallAccounting } from "./ai-pricing/accounting"
+import { recordAiModelCallAccounting } from "./model-call-accounting"
 import type { AgentWorkerStorage, RecoverAiModelCallInput } from "./types"
 
 const AGENT_AI_USAGE_RECOVERY_JOB_PREFIX = "agt_usage_job_"

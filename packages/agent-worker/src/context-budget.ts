@@ -12,7 +12,7 @@ export interface AgentContextBudget {
   readonly inputBudgetTokens: number
   readonly reserveTokens: number
   readonly keepRecentTokens: number
-  readonly source: "config" | "models.dev" | "fallback"
+  readonly source: "config" | "model" | "models.dev" | "fallback"
 }
 
 /** Resolve one agent's effective compaction budget from overrides, model limits, or fallback. */
@@ -22,7 +22,13 @@ export function resolveAgentContextBudget(
 ): AgentContextBudget {
   const config = agent.loop?.context
   const configuredWindow = config?.windowTokens
-  const discoveredLimits = configuredWindow === undefined ? modelLimits : undefined
+  const modelWindow = agent.model.definition.contextWindow
+  const discoveredLimits =
+    configuredWindow === undefined
+      ? modelWindow === undefined
+        ? modelLimits
+        : { contextTokens: modelWindow }
+      : undefined
   const windowTokens =
     configuredWindow ?? discoveredLimits?.contextTokens ?? DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS
   const reserveTokens = config?.reserveTokens ?? Math.min(16_384, Math.floor(windowTokens * 0.25))
@@ -54,9 +60,11 @@ export function resolveAgentContextBudget(
     source:
       configuredWindow !== undefined
         ? "config"
-        : discoveredLimits === undefined
-          ? "fallback"
-          : "models.dev",
+        : modelWindow !== undefined
+          ? "model"
+          : discoveredLimits === undefined
+            ? "fallback"
+            : "models.dev",
   })
 }
 
