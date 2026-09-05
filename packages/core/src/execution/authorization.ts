@@ -5,6 +5,15 @@ import { GRANT_KIND_KEYS, type GrantKind } from "../authorization/grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "../authorization/types"
 import { createSixbError } from "../errors/internal"
 import {
+  type ObjectReadExecutionLimits,
+  snapshotObjectReadExecutionLimits,
+} from "../storage/objects/execution-limits"
+import { compileSelectedObjectReadScope } from "../storage/objects/read-scope"
+import type {
+  CompiledSelectedObjectReadScope,
+  SelectedObjectReadScope,
+} from "../storage/objects/types"
+import {
   type AuthorizablePrincipal,
   type AuthorizationRef,
   createRuntimeAuthorizationCapability,
@@ -29,7 +38,18 @@ export type ResolvedRuntimeAuthorization =
       readonly projectId: string
       readonly ref: Exclude<AuthorizationRef, { readonly type: "principal" }>
     }
+  | {
+      readonly type: "delegated"
+      readonly projectId: string
+      readonly objectRead: DelegatedObjectReadAuthorization
+    }
   | { readonly type: "denied" }
+
+/** Immutable process-local object-read authority. It has no durable representation. */
+export interface DelegatedObjectReadAuthorization {
+  readonly scope: CompiledSelectedObjectReadScope
+  readonly limits: ObjectReadExecutionLimits
+}
 
 type RegisteredRuntimeAuthorization = Exclude<
   ResolvedRuntimeAuthorization,
@@ -112,6 +132,33 @@ export function createDisabledRuntimeAuthorization(
   })
 }
 
+/** Register exact object-read authority without fabricating a principal identity. */
+export function createDelegatedRuntimeAuthorization(input: {
+  readonly execution: ExecutionContext
+  readonly objectRead: {
+    readonly selection: SelectedObjectReadScope
+    readonly limits: ObjectReadExecutionLimits
+  }
+}): RuntimeAuthorization {
+  const execution = input.execution
+  const objectReadInput = input.objectRead
+  if (execution.executor.type !== "request" || execution.requestedBy !== undefined) {
+    throw new Error(
+      "[Sixb] Delegated runtime authorization requires a request execution without a principal."
+    )
+  }
+
+  const objectRead = Object.freeze({
+    scope: compileSelectedObjectReadScope(objectReadInput.selection),
+    limits: snapshotObjectReadExecutionLimits(objectReadInput.limits),
+  })
+  return register(execution, {
+    type: "delegated",
+    projectId: execution.projectId,
+    objectRead,
+  })
+}
+
 export function createTrustedPrimitiveRuntimeAuthorization(input: {
   readonly execution: ExecutionContext
   readonly primitive: TrustedPrimitiveRef
@@ -168,6 +215,11 @@ export function getAuthorizationRef(authorization: RuntimeAuthorization): Author
   const resolved = resolveRuntimeAuthorization(authorization)
   if (resolved.type === "denied") {
     throw new Error("[Sixb] Runtime authorization is not a registered Core capability.")
+  }
+  if (resolved.type === "delegated") {
+    throw new Error(
+      "[Sixb] Delegated runtime authorization cannot cross a durable execution boundary."
+    )
   }
   return cloneAuthorizationRef(resolved.ref)
 }
@@ -264,11 +316,8 @@ function assertResolvedAuthorizationMatchesExecution(
       ) {
         throw invalidExecutionAuthority(execution.id, "request source does not match its executor")
       }
-      if (resolved.ref.type === "principal") {
-        if (
-          resolved.type !== "principal" ||
-          !principalsEqual(execution.requestedBy, resolved.ref.principal)
-        ) {
+      if (resolved.type === "principal") {
+        if (!principalsEqual(execution.requestedBy, resolved.ref.principal)) {
           throw invalidExecutionAuthority(
             execution.id,
             "request authority does not match its requested-by principal"
@@ -276,14 +325,22 @@ function assertResolvedAuthorizationMatchesExecution(
         }
         return
       }
-      if (resolved.ref.type === "disabled" && execution.requestedBy === undefined) return
+      if (
+        resolved.type === "unrestricted" &&
+        resolved.ref.type === "disabled" &&
+        execution.requestedBy === undefined
+      ) {
+        return
+      }
+      if (resolved.type === "delegated" && execution.requestedBy === undefined) return
       throw invalidExecutionAuthority(
         execution.id,
-        "request execution requires principal or explicitly disabled authority"
+        "request execution requires principal, delegated, or explicitly disabled authority"
       )
 
     case "primitive":
       if (
+        resolved.type !== "unrestricted" ||
         resolved.ref.type !== "trustedPrimitive" ||
         resolved.ref.primitive.kind !== execution.executor.kind ||
         resolved.ref.primitive.id !== execution.executor.id ||
@@ -313,6 +370,7 @@ function assertResolvedAuthorizationMatchesExecution(
 
     case "kernel":
       if (
+        resolved.type !== "unrestricted" ||
         resolved.ref.type !== "kernel" ||
         execution.requestedBy !== undefined ||
         resolved.ref.operation.type !== execution.executor.operation.type ||

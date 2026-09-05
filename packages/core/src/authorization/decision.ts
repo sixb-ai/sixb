@@ -122,6 +122,12 @@ export function isAllowed(
 
 export function assertAuthorized(runtime: AuthorizedRuntime, request: AuthzRequest): void {
   const resolved = assertRuntimeAuthorizationBound(runtime)
+  if (resolved.type === "delegated") {
+    throw new AuthorizationError(
+      `delegated:${request.kind}`,
+      `[Sixb] Operation '${request.kind}' is not covered by delegated authorization.`
+    )
+  }
   const authorization = resolved.type === "principal" ? resolved.context : undefined
   const decision = evaluate(authorization, request)
   if (decision.allowed) {

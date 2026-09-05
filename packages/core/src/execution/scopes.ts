@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../authorization"
+import type { ObjectReadExecutionLimits, SelectedObjectReadScope } from "../storage"
 import {
+  createDelegatedRuntimeAuthorization,
   createDisabledRuntimeAuthorization,
   createKernelRuntimeAuthorization,
   createPrincipalRuntimeAuthorization,
@@ -47,6 +49,26 @@ export function createDisabledRequestScope(input: {
   return Object.freeze({
     execution,
     authorization: createDisabledRuntimeAuthorization(execution),
+  })
+}
+
+/** Internal request scope carrying only a finite object-read selection. */
+export function createDelegatedRequestScope(input: {
+  readonly projectId: string
+  readonly requestId: string
+  readonly correlationId: string
+  readonly objectRead: {
+    readonly selection: SelectedObjectReadScope
+    readonly limits: ObjectReadExecutionLimits
+  }
+}): ExecutionScope {
+  const execution = createRequestExecution(input)
+  return Object.freeze({
+    execution,
+    authorization: createDelegatedRuntimeAuthorization({
+      execution,
+      objectRead: input.objectRead,
+    }),
   })
 }
 
