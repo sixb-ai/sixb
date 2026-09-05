@@ -45,6 +45,7 @@ export function closeSqliteStoreConnection(connection: SqliteStoreConnection): v
 }
 
 const activeImmediateTransactions = new WeakSet<Database>()
+const activeDeferredReadTransactions = new WeakSet<Database>()
 
 export function runImmediateTransaction<T>(db: Database, run: () => T): T {
   if (activeImmediateTransactions.has(db)) {
@@ -91,6 +92,37 @@ export async function runImmediateTransactionAsync<T>(
     throw error
   } finally {
     activeImmediateTransactions.delete(db)
+  }
+}
+
+/**
+ * Run a multi-statement read against one proven SQLite snapshot.
+ *
+ * A provider-owned immediate transaction already has a stable snapshot and may be reused. Any
+ * other pre-existing transaction is rejected because this provider cannot prove who owns it or
+ * which lifecycle will close it.
+ */
+export function runDeferredReadTransaction<T>(db: Database, run: () => T): T {
+  if (activeImmediateTransactions.has(db) || activeDeferredReadTransactions.has(db)) {
+    return run()
+  }
+  if (db.inTransaction) {
+    throw new Error(
+      "[SixbSqlite] Selected object reads cannot join an unverified SQLite transaction."
+    )
+  }
+
+  db.run("BEGIN DEFERRED")
+  activeDeferredReadTransactions.add(db)
+  try {
+    const result = run()
+    db.run("COMMIT")
+    return result
+  } catch (error) {
+    rollbackQuietly(db)
+    throw error
+  } finally {
+    activeDeferredReadTransactions.delete(db)
   }
 }
 
