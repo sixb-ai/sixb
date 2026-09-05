@@ -1,12 +1,14 @@
 import type {
   AiBillableMeter,
+  AiCostEstimate,
   AiModelCallCostRecord,
   AiPriceSource,
   AiPricingContext,
 } from "./types"
-import { normalizeAiPricingContext } from "./validation"
+import { normalizeAiCostEstimate, normalizeAiPricingContext } from "./validation"
 
 export interface AiModelCallCostDetails {
+  readonly estimate?: AiCostEstimate
   readonly pricingContext: AiPricingContext
   readonly priceSource?: Omit<AiPriceSource, "observedAt"> & {
     readonly observedAt: string
@@ -17,6 +19,7 @@ export interface AiModelCallCostDetails {
 
 export function aiModelCallCostDetails(record: AiModelCallCostRecord): AiModelCallCostDetails {
   return {
+    ...(record.estimate === undefined ? {} : { estimate: record.estimate }),
     pricingContext: record.pricingContext,
     ...(record.priceSource === undefined
       ? {}
@@ -41,6 +44,9 @@ export function parseAiModelCallCostDetails(value: unknown): AiModelCallCostDeta
   const components = parsed.components
   const missingMeters = parsed.missingMeters
   return {
+    ...(parsed.estimate === undefined
+      ? {}
+      : { estimate: normalizeAiCostEstimate(parsed.estimate) }),
     pricingContext: pricingContextFromUnknown(parsed.pricingContext),
     ...(priceSource === undefined
       ? {}

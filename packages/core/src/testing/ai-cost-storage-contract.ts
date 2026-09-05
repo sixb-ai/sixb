@@ -98,7 +98,56 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
           })
         ).resolves.toMatchObject({
           total: 1,
-          items: [{ usage: { id: "usage_1" }, cost: ratedCost(), valuationStatus: "rated" }],
+          items: [
+            {
+              usage: {
+                id: "usage_1",
+              },
+              cost: ratedCost(),
+              valuationStatus: "rated",
+            },
+          ],
+        })
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
+    test("retains an estimate beside an inline provider cost without double counting", async () => {
+      // Removal proof: drop estimate from the cost codec/normalizer, or sum it into the selected cost.
+      const storage = await fixture()
+      try {
+        const local = ratedCost()
+        const estimate = {
+          status: "rated" as const,
+          money: local.money,
+          components: local.components,
+        }
+        const report: AiModelCallCostRecord = {
+          ...local,
+          status: "rated",
+          money: { currency: "USD", amountNanos: "80000" },
+          components: [],
+          priceSource: { ...priceSource("generation-1"), sourceId: "provider-reported" },
+          estimate,
+        }
+        await Promise.all([
+          storage.recordModelCallCost(report),
+          storage.recordModelCallCost(report),
+        ])
+        expect(
+          (await storage.summarizeExecutions({ projectId, executionIds: [executionId] }))[0]
+            ?.amounts
+        ).toEqual([{ currency: "USD", amountNanos: "80000" }])
+        const page = await storage.listModelCalls({
+          projectId,
+          from: new Date("2026-08-01"),
+          to: new Date("2026-08-02"),
+          valuationStatus: "rated",
+        })
+        expect(page.items[0]?.cost).toMatchObject({
+          money: { amountNanos: "80000" },
+          estimate,
         })
       } finally {
         await options.cleanup?.(storage)
@@ -117,7 +166,12 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
           reason: "unsupportedPricingDimension",
           ratedAt: new Date("2026-08-03T12:00:00.200Z"),
         }
-        await storage.recordModelCallCost(unpriceableCost())
+        // Historical API allowed a report source even when no charge was available. This is
+        // ambiguous history, not a provider cost. Regression proof: classify solely by sourceId.
+        await storage.recordModelCallCost({
+          ...unpriceableCost(),
+          priceSource: { ...priceSource("unavailable-report"), sourceId: "provider-reported" },
+        })
         await storage.recordModelCallCost(deploymentCost)
         await expect(
           storage.listModelCalls({
@@ -236,6 +290,16 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
         const mismatchError = await storage.recordModelCallCost(mismatch).catch((value) => value)
         expect(mismatchError).toBeInstanceOf(AiCostStorageError)
         expect((mismatchError as AiCostStorageError).code).toBe("cost_mismatch")
+        // Removal proof: skip the estimate check in aiModelCallCostMatchesUsage; this is accepted.
+        await expect(
+          storage.recordModelCallCost({
+            ...base,
+            money: { currency: "USD", amountNanos: "1" },
+            components: [],
+            priceSource: { ...base.priceSource, sourceId: "provider-reported" },
+            estimate: { status: "rated", money: mismatch.money, components: mismatch.components },
+          })
+        ).rejects.toMatchObject({ code: "cost_mismatch" })
       } finally {
         await options.cleanup?.(storage)
       }

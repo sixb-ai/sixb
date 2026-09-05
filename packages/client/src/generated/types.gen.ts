@@ -1868,6 +1868,11 @@ export type ListAiModelCallsResponses = {
             }
         responseModelId?: string
         responseId: string
+        providerIds: {
+          requestId?: string
+          responseId?: string
+          generationId?: string
+        } | null
         usage: {
           inputTokens?: number
           outputTokens?: number
@@ -1899,6 +1904,50 @@ export type ListAiModelCallsResponses = {
       cost?:
         | {
             status: "rated"
+            source: "estimate" | "provider" | "unknown"
+            estimate?:
+              | {
+                  status: "rated"
+                  money: {
+                    currency: string
+                    amountNanos: string
+                  }
+                  components: Array<{
+                    meter:
+                      | "tokens.input.total"
+                      | "tokens.input.uncached"
+                      | "tokens.input.cacheRead"
+                      | "tokens.input.cacheWrite"
+                      | "tokens.input.cacheWrite5m"
+                      | "tokens.input.cacheWrite1h"
+                      | "tokens.output.total"
+                      | "tokens.output.text"
+                      | "tokens.output.reasoning"
+                    quantity: string
+                    rateAmountNanosPerMillion: string
+                    chargeAmountNanos: string
+                  }>
+                }
+              | {
+                  status: "unpriceable"
+                  reason:
+                    | "missingBillingIdentity"
+                    | "missingRateCard"
+                    | "missingUsageMeter"
+                    | "unsupportedPricingDimension"
+                    | "invalidUsageForFormula"
+                  missingMeters?: Array<
+                    | "tokens.input.total"
+                    | "tokens.input.uncached"
+                    | "tokens.input.cacheRead"
+                    | "tokens.input.cacheWrite"
+                    | "tokens.input.cacheWrite5m"
+                    | "tokens.input.cacheWrite1h"
+                    | "tokens.output.total"
+                    | "tokens.output.text"
+                    | "tokens.output.reasoning"
+                  >
+                }
             billingIdentity: {
               providerId: string
               modelId: string
@@ -1945,6 +1994,50 @@ export type ListAiModelCallsResponses = {
           }
         | {
             status: "unpriceable"
+            source: "estimate" | "provider" | "unknown"
+            estimate?:
+              | {
+                  status: "rated"
+                  money: {
+                    currency: string
+                    amountNanos: string
+                  }
+                  components: Array<{
+                    meter:
+                      | "tokens.input.total"
+                      | "tokens.input.uncached"
+                      | "tokens.input.cacheRead"
+                      | "tokens.input.cacheWrite"
+                      | "tokens.input.cacheWrite5m"
+                      | "tokens.input.cacheWrite1h"
+                      | "tokens.output.total"
+                      | "tokens.output.text"
+                      | "tokens.output.reasoning"
+                    quantity: string
+                    rateAmountNanosPerMillion: string
+                    chargeAmountNanos: string
+                  }>
+                }
+              | {
+                  status: "unpriceable"
+                  reason:
+                    | "missingBillingIdentity"
+                    | "missingRateCard"
+                    | "missingUsageMeter"
+                    | "unsupportedPricingDimension"
+                    | "invalidUsageForFormula"
+                  missingMeters?: Array<
+                    | "tokens.input.total"
+                    | "tokens.input.uncached"
+                    | "tokens.input.cacheRead"
+                    | "tokens.input.cacheWrite"
+                    | "tokens.input.cacheWrite5m"
+                    | "tokens.input.cacheWrite1h"
+                    | "tokens.output.total"
+                    | "tokens.output.text"
+                    | "tokens.output.reasoning"
+                  >
+                }
             billingIdentity?: {
               providerId: string
               modelId: string

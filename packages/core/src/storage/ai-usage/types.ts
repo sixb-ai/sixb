@@ -32,6 +32,7 @@ export interface AiUsageExecutionSummary {
 
 /** Input for an idempotent model-call ledger append. */
 export interface RecordAiModelCallInput {
+  readonly providerIds?: import("../../models/events").ModelProviderIds
   readonly id: string
   readonly projectId: string
   /** Immutable execution-ledger record that owns this provider call. */

@@ -1728,7 +1728,7 @@ describe("AgentWorker", () => {
   test("automatically checkpoints with the selected model's catalog budget", async () => {
     const summaryPrompts: LanguageModelRequest["messages"][] = []
     const modelId = "gemini-2.5-flash-image"
-    // Regression proof: skip resolveAgentContextBudgets in worker startup; this model has no local limit.
+    // Regression proof: execute the registered model instead of this.models' prepared binding.
     const answeringModel = compactingAnswerModel({
       provider: "google",
       modelId,
@@ -1743,10 +1743,17 @@ describe("AgentWorker", () => {
       providerId: answeringModel.providerId,
       modelId: answeringModel.modelId,
       definition,
-      stream: (request) => answeringModel.stream(request),
-      resolveDefinition: async () => {
+      stream: async () => {
+        throw new Error("Must execute the resolved binding")
+      },
+      resolve: async () => {
         resolutions += 1
-        return { ...definition, contextWindow: 32_768 }
+        return {
+          providerId: answeringModel.providerId,
+          modelId: answeringModel.modelId,
+          definition: { ...definition, contextWindow: 32_768 },
+          stream: (request: LanguageModelRequest) => answeringModel.stream(request),
+        }
       },
     })
     const storage = agentStorageOf(sixb)
@@ -2198,7 +2205,16 @@ describe("AgentWorker", () => {
       })
     const agent = defineAgent("workflow-resolver", {
       name: "Workflow resolver",
-      model,
+      // Regression proof: omit input.models in workflow-node-execution's agent lookup.
+      model: {
+        providerId: model.providerId,
+        modelId: model.modelId,
+        definition: model.definition,
+        stream: async () => {
+          throw new Error("Workflow must execute the prepared binding")
+        },
+        resolve: async () => model,
+      },
       instructions: "Resolve the best project.",
       groups: [AGENT_RUNTIME_GROUP],
       tools: [lookupProject],

@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { defineLanguageModel, modelReasoningSupportIssue, rateModelCall } from "../src/models"
+import {
+  defineLanguageModel,
+  defineModelRateCard,
+  modelReasoningSupportIssue,
+  rateModelCall,
+} from "../src/models"
 
 describe("model definitions and rate cards", () => {
   test("rates token, cache, and tier meters in exact nanodollars", () => {
@@ -87,7 +92,6 @@ describe("model definitions and rate cards", () => {
       providerId: "test",
       modelId: "test/model",
       capabilities,
-      rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "2" },
     })
     capabilities.reasoning.canDisable = false
 
@@ -110,13 +114,7 @@ describe("model definitions and rate cards", () => {
       capabilities: {},
     })
     expect(() =>
-      defineLanguageModel({
-        kind: "language",
-        providerId: "test",
-        modelId: "bad",
-        capabilities: {},
-        rateCard: { currency: "USD", unit: "million-tokens", input: "free", output: "2" },
-      })
+      defineModelRateCard({ currency: "USD", unit: "million-tokens", input: "free", output: "2" })
     ).toThrow("nonnegative decimal")
   })
 

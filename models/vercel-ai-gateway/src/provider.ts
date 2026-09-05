@@ -1,6 +1,7 @@
 import {
   assertJsonObject,
   defineLanguageModel,
+  defineModelRateCard,
   isJsonObject,
   type JsonObject,
   type JsonValue,
@@ -13,6 +14,7 @@ import {
   type LanguageModelStreamEvent,
   MODEL_REASONING_EFFORTS,
   type ModelCapabilities,
+  type ModelCostTracking,
   type ModelFinishReason,
   type ModelMessage,
   ModelProviderError,
@@ -22,6 +24,7 @@ import {
   type ModelUsage,
   modelReasoningSupportIssue,
   type ProviderData,
+  rateModelCall,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { withAutomaticPromptCaching } from "./provider-caching"
@@ -51,6 +54,8 @@ export interface VercelGatewayOptions {
 }
 
 export interface VercelGatewayModelOptions {
+  /** Optional token estimate, retained independently of inline Gateway charges. */
+  readonly rateCard?: LanguageModelRateCard
   readonly request?: JsonObject
   /** AI Gateway routing, fallback, caching, and provider-specific options. */
   readonly providerOptions?: JsonObject
@@ -77,22 +82,28 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
   assertPositiveIntegerOption(options.catalogTtlMs, "catalogTtlMs")
   assertNonnegativeInteger(options.maxRetries, "maxRetries")
   assertPositiveIntegerOption(options.maxRetryDelayMs, "maxRetryDelayMs")
-  const transport: GatewayTransport = { ...options, baseUrl }
+  const transport: GatewayTransport = {
+    ...options,
+    apiKey:
+      options.apiKey ?? (() => process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN),
+    baseUrl,
+  }
   const configuredModels = configuredModelDefinitions(options.models ?? [])
   const catalog = new RemoteVercelGatewayCatalog(transport, configuredModels)
   const model = (modelId: string, modelOptions: VercelGatewayModelOptions = {}) => {
-    if (!modelId.trim()) {
-      throw new TypeError("[SixbVercelGateway] Model id must not be empty.")
-    }
+    if (!modelId.trim()) throw new TypeError("[SixbVercelGateway] Model id must not be empty.")
     return new VercelGatewayLanguageModel(
       transport,
       catalog,
       modelId,
-      modelOptions,
+      structuredClone(modelOptions),
       configuredModels.get(modelId)
     )
   }
-  return Object.assign(model, { providerId: PROVIDER_ID as typeof PROVIDER_ID, catalog })
+  return Object.assign(model, {
+    providerId: PROVIDER_ID as typeof PROVIDER_ID,
+    catalog,
+  })
 }
 
 interface GatewayTransport extends VercelGatewayOptions {
@@ -124,6 +135,12 @@ export const vercelGateway = createVercelGateway({
 })
 
 class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
+  private readonly rateCards = new Map<string, LanguageModelRateCard>()
+
+  estimate(modelId: string, usage: ModelUsage) {
+    const card = this.rateCards.get(modelId)
+    return rateModelCall({ usage, rateCard: card && defineModelRateCard(card) })
+  }
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
   private loadedAt = 0
 
@@ -185,6 +202,15 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       const definition = catalogDefinition(entry)
       return definition ? [definition] : []
     })
+    const rateCards = new Map<string, LanguageModelRateCard>()
+    for (const entry of body.data) {
+      const model = object(entry)
+      const id = string(model?.id)
+      const card = modelRateCard(object(model?.pricing))
+      if (id && card) rateCards.set(id, card)
+    }
+    this.rateCards.clear()
+    for (const [id, card] of rateCards) this.rateCards.set(id, card)
     const merged = new Map(discovered.map((definition) => [definition.modelId, definition]))
     for (const definition of this.supplied.values()) merged.set(definition.modelId, definition)
     return Object.freeze([...merged.values()])
@@ -199,7 +225,6 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
   const tags = stringArray(model.tags)
   const parameters = stringArray(model.supported_parameters)
   const inputModalities = stringArray(object(model.modalities)?.input)
-  const rateCard = modelRateCard(object(model.pricing))
   const released = integer(model.released)
   const description = string(model.description)
   const name = string(model.name)
@@ -234,7 +259,6 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
       ...(tools ? { localTools: true, parallelToolCalls: true } : {}),
       ...(parameters.includes("response_format") ? { nativeStructuredOutput: true } : {}),
     },
-    ...(rateCard === undefined ? {} : { rateCard }),
   })
 }
 
@@ -345,15 +369,31 @@ class VercelGatewayLanguageModel implements LanguageModel {
   readonly providerId = PROVIDER_ID
   readonly modelId: string
   readonly definition: LanguageModelDefinition
+  readonly costTracking: ModelCostTracking
 
   constructor(
     private readonly transport: GatewayTransport,
-    private readonly catalog: VercelGatewayCatalog,
+    private readonly catalog: RemoteVercelGatewayCatalog,
     modelId: string,
     private readonly options: VercelGatewayModelOptions,
-    configuredDefinition: LanguageModelDefinition | undefined
+    configuredDefinition: LanguageModelDefinition | undefined,
+    private readonly metadataResolved = false
   ) {
     this.modelId = modelId
+    const rateCard = options.rateCard && defineModelRateCard(options.rateCard)
+    this.costTracking = {
+      // A model-only card cannot price routing overrides or provider-native tool charges.
+      estimate: ({ usage, route, responseModelId }) =>
+        options.providerOptions ||
+        options.request ||
+        options.providerTools?.length ||
+        (route?.modelId !== undefined && route.modelId !== modelId) ||
+        (responseModelId !== undefined && responseModelId !== modelId)
+          ? { status: "unpriceable", reason: "missing-rate-card" }
+          : rateCard
+            ? rateModelCall({ usage, rateCard })
+            : catalog.estimate(modelId, usage),
+    }
     if (options.request !== undefined) {
       assertJsonObject(options.request, "model request options")
     }
@@ -370,16 +410,20 @@ class VercelGatewayLanguageModel implements LanguageModel {
   }
 
   async resolveDefinition(): Promise<LanguageModelDefinition> {
-    const definition = await this.catalog.get(this.modelId)
-    return definition === undefined
-      ? this.definition
-      : new VercelGatewayLanguageModel(
-          this.transport,
-          this.catalog,
-          this.modelId,
-          this.options,
-          definition
-        ).definition
+    return (await this.resolve()).definition
+  }
+
+  async resolve(options?: { readonly offline?: boolean }): Promise<LanguageModel> {
+    if (this.metadataResolved) return this
+    const definition = options?.offline ? this.definition : await this.catalog.get(this.modelId)
+    return new VercelGatewayLanguageModel(
+      this.transport,
+      this.catalog,
+      this.modelId,
+      this.options,
+      definition ?? this.definition,
+      true
+    )
   }
 
   async stream(request: LanguageModelRequest) {
@@ -441,12 +485,12 @@ class VercelGatewayLanguageModel implements LanguageModel {
     ) {
       throw new TypeError("[SixbVercelGateway] maxOutputTokens must be a positive safe integer.")
     }
-    const configuredMaxOutputTokens =
-      positiveInteger(extra.max_output_tokens) ?? this.definition.maxOutputTokens
-    const maxOutputTokens =
-      request.maxOutputTokens === undefined
-        ? undefined
-        : Math.min(request.maxOutputTokens, configuredMaxOutputTokens ?? request.maxOutputTokens)
+    const ceilings = [
+      request.maxOutputTokens,
+      positiveInteger(extra.max_output_tokens),
+      this.definition.maxOutputTokens,
+    ].filter((value): value is number => value !== undefined)
+    const maxOutputTokens = ceilings.length === 0 ? undefined : Math.min(...ceilings)
     for (const reserved of [
       "model",
       "input",
@@ -542,7 +586,10 @@ class VercelGatewayLanguageModel implements LanguageModel {
     const declared = this.definition.capabilities.nativeStructuredOutput
     if (declared !== undefined) return declared
     try {
-      return (await this.catalog.get(this.modelId))?.capabilities.nativeStructuredOutput === true
+      return (
+        !this.metadataResolved &&
+        (await this.catalog.get(this.modelId))?.capabilities.nativeStructuredOutput === true
+      )
     } catch {
       return false
     }
@@ -622,6 +669,7 @@ class ResponseState {
       if (id || modelId) {
         events.push({
           type: "response-metadata",
+          providerIds: gatewayProviderIds(response, this.requestId),
           ...(id ? { id } : {}),
           ...(modelId ? { modelId } : {}),
         })
@@ -794,6 +842,10 @@ class ResponseState {
       const metadata = gatewayMetadata(response)
       const reportedCost = gatewayReportedCost(metadata)
       const route = gatewayRoute(metadata)
+      events.push({
+        type: "response-metadata",
+        providerIds: gatewayProviderIds(response, this.requestId),
+      })
       this.finished = true
       events.push({
         type: "finish",
@@ -992,6 +1044,17 @@ function normalizeUsage(raw: JsonObject | undefined): ModelUsage {
       : { textOutputTokens: Math.max(0, outputTokens - (reasoning ?? 0)) }),
     ...(reasoning === undefined ? {} : { reasoningOutputTokens: reasoning }),
     raw,
+  }
+}
+
+function gatewayProviderIds(response: JsonObject | undefined, requestId?: string) {
+  const id = string(response?.id)
+  const metadata = response && gatewayMetadata(response)
+  const generation = string(metadata?.generationId) || string(metadata?.generation_id) || id
+  return {
+    ...(requestId ? { requestId } : {}),
+    ...(id ? { responseId: id } : {}),
+    ...(generation && /^gen_[A-Za-z0-9]+$/.test(generation) ? { generationId: generation } : {}),
   }
 }
 

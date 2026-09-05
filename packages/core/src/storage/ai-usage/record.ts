@@ -1,5 +1,6 @@
 import { normalizeRequesterGroupIds } from "../../auth/attribution"
 import { assertJsonValue, isPlainRecord } from "../../json"
+import { normalizeModelProviderIds } from "../../models/events"
 import { isModelReasoning } from "../../models/language-model"
 import type { AiModelCallUsageRecord, RecordAiModelCallInput } from "./types"
 import { normalizeAiModelCallUsage } from "./usage"
@@ -32,6 +33,9 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
     callId: input.callId,
     requesterGroupIds,
     providerId: input.providerId,
+    ...(input.providerIds === undefined
+      ? {}
+      : { providerIds: normalizeModelProviderIds(input.providerIds) }),
     requestedModelId: input.requestedModelId,
     ...(requestedReasoning === undefined ? {} : { requestedReasoning }),
     ...(input.responseModelId === undefined ? {} : { responseModelId: input.responseModelId }),

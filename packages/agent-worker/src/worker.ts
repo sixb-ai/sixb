@@ -11,12 +11,13 @@ import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
+import type { LanguageModel } from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import { type AgentContextBudget, resolveAgentContextBudgets } from "./context-budget"
+import { type AgentContextBudget, prepareAgentModels } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
 import {
   AgentExecutionLostError,
@@ -84,6 +85,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
   private contextBudgets: ReadonlyMap<string, AgentContextBudget> = new Map()
+  private models: ReadonlyMap<string, LanguageModel> = new Map()
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -111,11 +113,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   override async start(): Promise<void> {
     if (this.context) {
-      const [budgets] = await Promise.all([
-        resolveAgentContextBudgets(this.agents),
+      const [prepared] = await Promise.all([
+        prepareAgentModels(this.agents),
         this.context.agentSkills,
       ])
-      this.contextBudgets = budgets
+      this.contextBudgets = prepared.budgets
+      this.models = prepared.models
     }
     await super.start()
   }
@@ -177,6 +180,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         delivery,
         watchForCancel: (runId) => this.watchForCancel(runId),
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
+        models: this.models,
       })
       return
     }
@@ -195,7 +199,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
-    const agent = this.host.definitions.agents.getById(queuedRun.agentId)
+    const registered = this.host.definitions.agents.getById(queuedRun.agentId)
+    const agent = registered && {
+      ...registered,
+      model: this.models.get(registered.id) ?? registered.model,
+    }
     if (!agent) {
       const error = createSixbError(
         "internal.unexpected",

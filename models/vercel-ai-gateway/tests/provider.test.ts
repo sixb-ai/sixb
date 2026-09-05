@@ -44,6 +44,86 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Vercel AI Gateway provider", () => {
+  test("captures native generation and request IDs from the streaming response", async () => {
+    // Removal proof: omit gatewayProviderIds from response metadata.
+    const provider = createVercelGateway({
+      apiKey: "key",
+      fetch: async () => {
+        const response = sseResponse([
+          { type: "response.created", response: { id: "gen_123" } },
+          {
+            type: "response.completed",
+            response: { id: "gen_123", status: "completed", usage: {} },
+          },
+        ])
+        response.headers.set("x-request-id", "req-native")
+        return response
+      },
+    })
+    const events = await collect((await provider("model").stream(request())).events)
+    expect(events).toContainEqual({
+      type: "response-metadata",
+      id: "gen_123",
+      providerIds: { generationId: "gen_123", responseId: "gen_123", requestId: "req-native" },
+    })
+  })
+  test("pins resolved capabilities and output ceiling for generation", async () => {
+    // Regression proof: return the original binding from resolve(), or omit definition.maxOutputTokens
+    // from prepareRequest's ceiling calculation, or remove the metadataResolved capability guard.
+    // Refreshing the catalog must not change this binding.
+    // Removing the construction-time options snapshot must also fail the output-limit assertion.
+    let catalogs = 0
+    const bodies: Record<string, unknown>[] = []
+    const provider = createVercelGateway({
+      apiKey: "configured-key",
+      fetch: async (url, init) => {
+        if (String(url).endsWith("/models")) {
+          catalogs += 1
+          return Response.json({
+            data: [
+              {
+                id: "creator/model",
+                type: "language",
+                context_window: 64_000,
+                max_tokens: catalogs === 1 ? 512 : 1_024,
+                supported_parameters: catalogs === 1 ? [] : ["response_format"],
+              },
+            ],
+          })
+        }
+        expect(new Headers(init?.headers).get("authorization")).toBe("Bearer configured-key")
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    const options = { request: { max_output_tokens: 9_000 } }
+    const model = provider("creator/model", options)
+    options.request.max_output_tokens = 1
+    const resolved = await model.resolve!()
+    expect(resolved.definition.contextWindow).toBe(64_000)
+    expect(resolved.definition.maxOutputTokens).toBe(512)
+    await provider.catalog.refresh()
+    await resolved.stream(
+      request({
+        responseFormat: {
+          type: "json",
+          name: "answer",
+          schema: {
+            type: "object",
+            properties: { answer: { type: "string" } },
+            required: ["answer"],
+            additionalProperties: false,
+          },
+        },
+      })
+    )
+    await resolved.stream(request({ maxOutputTokens: 100 }))
+    expect(bodies.map((body) => body.max_output_tokens)).toEqual([512, 100])
+    expect(bodies[0]?.tools).toEqual([expect.objectContaining({ name: "sixb_structured_output" })])
+    expect(bodies[0]?.text).toBeUndefined()
+    expect(model.definition.contextWindow).toBeUndefined()
+    expect(await resolved.resolve!()).toBe(resolved)
+  })
   test("resolves model context through the shared catalog without mutating the binding", async () => {
     // Regression proof: remove resolveDefinition or expire the pending loadPromise before loadedAt is set.
     let calls = 0
@@ -114,7 +194,7 @@ describe("Vercel AI Gateway provider", () => {
     })
     const model = provider("creator/unknown")
     await expect(model.resolveDefinition?.()).rejects.toThrow("catalog unavailable")
-    expect(await model.resolveDefinition?.()).toBe(model.definition)
+    expect(await model.resolveDefinition?.()).toEqual(model.definition)
     expect(model.definition.contextWindow).toBeUndefined()
     expect(calls).toBe(2)
   })
@@ -274,11 +354,17 @@ describe("Vercel AI Gateway provider", () => {
     })
     expect(events).toEqual([
       { type: "stream-start" },
-      { type: "response-metadata", id: "resp-1", modelId: "resolved-model" },
+      {
+        type: "response-metadata",
+        id: "resp-1",
+        modelId: "resolved-model",
+        providerIds: { responseId: "resp-1" },
+      },
       { type: "text-start", id: "message-1:text:0" },
       { type: "text-delta", id: "message-1:text:0", delta: "Hel" },
       { type: "text-delta", id: "message-1:text:0", delta: "lo" },
       { type: "text-end", id: "message-1:text:0" },
+      { type: "response-metadata", providerIds: { responseId: "resp-1" } },
       {
         type: "finish",
         finishReason: "stop",
@@ -618,7 +704,7 @@ describe("Vercel AI Gateway provider", () => {
     ])
     expect(events.slice(0, 5)).toEqual([
       { type: "stream-start" },
-      { type: "response-metadata", id: "resp-tools" },
+      { type: "response-metadata", id: "resp-tools", providerIds: { responseId: "resp-tools" } },
       { type: "tool-input-start", id: "fc-1", toolName: "echo" },
       { type: "tool-input-delta", id: "fc-1", delta: '{"value":' },
       { type: "tool-input-delta", id: "fc-1", delta: '"hi"}' },
@@ -786,21 +872,25 @@ describe("Vercel AI Gateway provider", () => {
         parallelToolCalls: true,
         nativeStructuredOutput: true,
       },
-      rateCard: {
-        currency: "USD",
-        unit: "million-tokens",
-        input: {
-          default: "1",
-          tiers: [
-            { minTokens: 0, maxTokens: 100_000, price: "1" },
-            { minTokens: 100_000, price: "2.5" },
-          ],
-        },
-        output: "4",
-        cacheReadInput: "0.1",
-      },
     })
     expect(await gateway.catalog.list()).toHaveLength(1)
+    // Regression proof: omit the routed/response model check; a fallback gets the requested model's price.
+    expect(
+      gateway("creator/reasoner").costTracking?.estimate({
+        usage: { inputTokens: 1, uncachedInputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0 },
+        route: { modelId: "other/model" },
+      })
+    ).toEqual({ status: "unpriceable", reason: "missing-rate-card" })
+    expect(
+      gateway("creator/reasoner").costTracking?.estimate({
+        usage: {
+          inputTokens: 200_000,
+          uncachedInputTokens: 200_000,
+          outputTokens: 10,
+          cacheReadInputTokens: 0,
+        },
+      })
+    ).toMatchObject({ status: "rated", money: { amountNanos: "500040000" } })
     expect(requests).toBe(1)
     await gateway.catalog.refresh()
     expect(requests).toBe(2)

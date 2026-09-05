@@ -44,6 +44,37 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Anthropic provider", () => {
+  test("uses configured credentials, metadata, and snapshotted request options", async () => {
+    // Removal proof: omit configuredModels or the model-options snapshot.
+    const options = { maxOutputTokens: 512, request: { temperature: 0.2 } }
+    const bodies: Record<string, unknown>[] = []
+    const provider = createAnthropic({
+      apiKey: "configured-key",
+      models: [
+        {
+          kind: "language",
+          providerId: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          contextWindow: 64_000,
+          maxOutputTokens: 1_024,
+          capabilities: { nativeStructuredOutput: true },
+        },
+      ],
+      fetch: async (url, init) => {
+        expect(String(url)).toEndWith("/messages")
+        expect(new Headers(init?.headers).get("x-api-key")).toBe("configured-key")
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    const model = provider("claude-sonnet-4-5", options)
+    options.request.temperature = 0.9
+    expect(model.definition.contextWindow).toBe(64_000)
+    expect(await provider.catalog.get(model.modelId)).toMatchObject({ contextWindow: 64_000 })
+    const resolved = await model.resolve!({ offline: true })
+    await resolved.stream(request({ maxOutputTokens: 900 }))
+    expect(bodies[0]).toMatchObject({ max_tokens: 512, temperature: 0.2 })
+  })
   test("resolves model input limits through the shared catalog without mutating the binding", async () => {
     // Regression proof: remove resolveDefinition or expire the pending loadPromise before loadedAt is set.
     let calls = 0
@@ -92,7 +123,6 @@ describe("Anthropic provider", () => {
           modelId: "claude-sonnet-4-5",
           maxInputTokens: 123_000,
           capabilities: {},
-          rateCard: { currency: "USD", unit: "million-tokens", input: "3", output: "15" },
         },
       ],
       fetch: async () => {
@@ -100,11 +130,13 @@ describe("Anthropic provider", () => {
       },
     })
     const model = provider("claude-sonnet-4-5", {
+      rateCard: { currency: "USD", unit: "million-tokens", input: "3", output: "15" },
       providerTools: [{ type: "web_search_20250305", name: "web_search" }],
     })
     const definition = await model.resolveDefinition?.()
     expect(definition?.maxInputTokens).toBe(123_000)
-    expect(definition?.rateCard).toBeUndefined()
+    expect(definition).not.toHaveProperty("rateCard")
+    expect(model.costTracking?.estimate({ usage: {} }).status).toBe("unpriceable")
   })
 
   test("reports catalog failures, retries later, and does not invent unknown model limits", async () => {
@@ -118,7 +150,7 @@ describe("Anthropic provider", () => {
     })
     const model = provider("custom-model", { maxOutputTokens: 512 })
     await expect(model.resolveDefinition?.()).rejects.toThrow("catalog unavailable")
-    expect(await model.resolveDefinition?.()).toBe(model.definition)
+    expect(await model.resolveDefinition?.()).toEqual(model.definition)
     expect(model.definition.maxInputTokens).toBeUndefined()
     expect(calls).toBe(2)
   })
@@ -306,7 +338,12 @@ describe("Anthropic provider", () => {
     })
     expect(events).toEqual([
       { type: "stream-start" },
-      { type: "response-metadata", id: "msg-1", modelId: "claude-opus-5-20260724" },
+      {
+        type: "response-metadata",
+        id: "msg-1",
+        modelId: "claude-opus-5-20260724",
+        providerIds: { responseId: "msg-1" },
+      },
       { type: "reasoning-start", id: "content:0" },
       { type: "reasoning-delta", id: "content:0", delta: "Think" },
       {
@@ -878,19 +915,26 @@ describe("Anthropic provider", () => {
         nativeStructuredOutput: true,
         providerExecutedTools: true,
       },
-      rateCard: {
-        input: "5",
-        output: "25",
-        cacheReadInput: "0.5",
-        cacheWriteInput5m: "6.25",
-        cacheWriteInput1h: "10",
-      },
     })
     expect(definitions[1]?.capabilities.reasoning).toBe(false)
-    expect(definitions[1]?.rateCard).toMatchObject({ input: "2", output: "10" })
+    expect(definitions[0]).not.toHaveProperty("rateCard")
+    expect(
+      provider("claude-opus-5").costTracking?.estimate({
+        usage: {
+          inputTokens: 100,
+          uncachedInputTokens: 100,
+          outputTokens: 10,
+          cacheReadInputTokens: 0,
+          cacheWrite5mInputTokens: 0,
+          cacheWrite1hInputTokens: 0,
+        },
+      })
+    ).toMatchObject({ status: "rated", money: { amountNanos: "750000" } })
   })
 
   test("builds request-specific rate cards without loading the catalog", () => {
+    // Regression proof for overrides: remove the no-modifier return in model-details.ts;
+    // the explicitly negotiated cache rate below is overwritten by the family multiplier.
     let requests = 0
     const provider = createAnthropic({
       fetch: async () => {
@@ -906,20 +950,44 @@ describe("Anthropic provider", () => {
       },
     })
 
-    expect(model.definition).toMatchObject({
-      rateCard: {
-        input: "11",
-        output: "55",
-        cacheReadInput: "1.1",
-        cacheWriteInput5m: "13.75",
-        cacheWriteInput1h: "22",
-      },
-    })
+    expect(model.definition).not.toHaveProperty("rateCard")
+    expect(
+      model.costTracking?.estimate({
+        usage: {
+          inputTokens: 100,
+          uncachedInputTokens: 100,
+          outputTokens: 10,
+          cacheReadInputTokens: 0,
+          cacheWrite5mInputTokens: 0,
+          cacheWrite1hInputTokens: 0,
+        },
+      })
+    ).toMatchObject({ status: "rated", money: { amountNanos: "1650000" } })
     const serverToolModel = provider("claude-opus-5", {
       providerTools: [{ type: "web_search_20260209", name: "web_search" }],
     })
-    expect(serverToolModel.definition.rateCard).toBeUndefined()
+    expect(
+      serverToolModel.costTracking?.estimate({ usage: { inputTokens: 100, outputTokens: 10 } })
+    ).toEqual({ status: "unpriceable", reason: "missing-rate-card" })
     expect(requests).toBe(0)
+    expect(
+      provider("claude-sonnet-4-5", {
+        rateCard: {
+          currency: "USD",
+          unit: "million-tokens",
+          input: "3",
+          output: "15",
+          cacheReadInput: "0.2",
+        },
+      }).costTracking?.estimate({
+        usage: {
+          inputTokens: 100,
+          uncachedInputTokens: 0,
+          cacheReadInputTokens: 100,
+          outputTokens: 10,
+        },
+      })
+    ).toMatchObject({ status: "rated", money: { amountNanos: "170000" } })
   })
 
   test("retries retryable pre-stream responses and preserves pause_turn", async () => {

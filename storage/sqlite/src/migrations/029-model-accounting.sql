@@ -1,3 +1,16 @@
+-- Call-time model configuration and provider identity. Historical identity remains unknown.
+ALTER TABLE ai_model_call_usage
+  ADD COLUMN requested_reasoning TEXT
+  CHECK (
+    requested_reasoning IS NULL OR (
+      json_valid(requested_reasoning) AND
+      json_type(requested_reasoning) IN ('text', 'object')
+    )
+  );
+ALTER TABLE ai_model_call_usage ADD COLUMN provider_ids TEXT
+  CHECK (provider_ids IS NULL OR json_valid(provider_ids));
+
+-- Upgrade the shipped valuation reason while retaining the selected-cost projection.
 CREATE TABLE ai_model_call_valuations_next (
   project_id TEXT NOT NULL CHECK (length(trim(project_id)) > 0),
   usage_record_id TEXT NOT NULL CHECK (length(trim(usage_record_id)) > 0),

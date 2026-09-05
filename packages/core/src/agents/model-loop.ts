@@ -24,7 +24,12 @@ import type {
   ModelToolResultPart,
   ProviderData,
 } from "../models/messages"
-import { type ModelCallCost, type ModelReportedCost, rateModelCall } from "../models/pricing"
+import {
+  estimateModelCall,
+  type ModelCallCost,
+  type ModelReportedCost,
+  rateModelCall,
+} from "../models/pricing"
 import type { ModelOutput, ModelTool } from "../models/tools"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
@@ -75,6 +80,7 @@ export type ModelLoopResult<TOutput = string> =
     }
 
 interface CompletedResponse {
+  readonly providerIds?: import("../models/events").ModelProviderIds
   readonly content: readonly ModelAssistantPart[]
   readonly toolCalls: readonly ParsedToolCall[]
   readonly finishReason: ModelFinishReason
@@ -114,7 +120,6 @@ export async function runModelLoop<TOutput = string>(
   }))
   const messages: ModelMessage[] = [...input.messages]
   const steps: ModelStep[] = []
-  const modelDefinition = input.model.definition
   const generateCallId = input.generateCallId ?? (() => `model_call_${randomUUID()}`)
   const callIds = new Set<string>()
 
@@ -192,21 +197,26 @@ export async function runModelLoop<TOutput = string>(
     }
     const response = accumulator.complete()
     const responseId = response.responseId ?? `${callId}:response`
-    const cost = rateModelCall({
+    const estimate = estimateModelCall(input.model, {
       usage: response.usage,
-      ...(modelDefinition.rateCard === undefined ? {} : { rateCard: modelDefinition.rateCard }),
-      reported: response.reportedCost,
+      route: response.route,
+      responseModelId: response.responseModelId,
     })
+    const cost = response.reportedCost
+      ? rateModelCall({ usage: response.usage, reported: response.reportedCost })
+      : estimate
     await input.onModelCallEnd?.({
       callId,
       providerId: input.model.providerId,
       modelId: input.model.modelId,
       responseId,
+      ...(response.providerIds === undefined ? {} : { providerIds: response.providerIds }),
       ...(response.responseModelId === undefined
         ? {}
         : { responseModelId: response.responseModelId }),
       usage: response.usage,
       cost,
+      ...(response.reportedCost === undefined ? {} : { estimate }),
       ...(input.reasoning === undefined ? {} : { requestedReasoning: input.reasoning }),
       ...(response.route === undefined ? {} : { route: response.route }),
     })
@@ -556,6 +566,7 @@ class StreamAccumulator {
   private rawFinishReason: string | undefined
   private usage: ModelUsage = {}
   private responseId: string | undefined
+  private providerIds: import("../models/events").ModelProviderIds | undefined
   private responseModelId: string | undefined
   private projectionError: Error | undefined
   private reportedCost: ModelReportedCost | undefined
@@ -579,6 +590,7 @@ class StreamAccumulator {
       case "response-metadata":
         this.requireStarted(event.type)
         this.responseId = event.id ?? this.responseId
+        if (event.providerIds) this.providerIds = { ...this.providerIds, ...event.providerIds }
         this.responseModelId = event.modelId ?? this.responseModelId
         return
       case "text-start":
@@ -663,6 +675,7 @@ class StreamAccumulator {
       ...(this.rawFinishReason === undefined ? {} : { rawFinishReason: this.rawFinishReason }),
       usage: this.usage,
       ...(this.responseId === undefined ? {} : { responseId: this.responseId }),
+      ...(this.providerIds === undefined ? {} : { providerIds: this.providerIds }),
       ...(this.responseModelId === undefined ? {} : { responseModelId: this.responseModelId }),
       ...(this.projectionError === undefined ? {} : { projectionError: this.projectionError }),
       ...(this.reportedCost === undefined ? {} : { reportedCost: this.reportedCost }),

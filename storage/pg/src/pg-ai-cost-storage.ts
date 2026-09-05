@@ -10,6 +10,7 @@ import {
   parseAiModelCallCostDetails,
   toAccountingItem,
 } from "@sixb/core/internal/ai-cost-storage-provider"
+import { normalizeModelProviderIds } from "@sixb/core/models"
 import type { ReadonlyJsonObject } from "@sixb/core/storage"
 import {
   type AiAccountingOverview,
@@ -315,6 +316,7 @@ interface UsageRow {
   readonly reasoning_output_tokens: number | string | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: ReadonlyJsonObject | string | null
+  readonly provider_ids: Record<string, unknown> | string | null
   readonly occurred_at: Date | string
   readonly recorded_at: Date | string
 }
@@ -494,6 +496,13 @@ function usageFromRow(row: UsageRow, requesterGroupIds: readonly string[]): AiMo
     callId: row.call_id,
     requesterGroupIds,
     providerId: row.provider_id,
+    ...(row.provider_ids === null
+      ? {}
+      : {
+          providerIds: normalizeModelProviderIds(
+            typeof row.provider_ids === "string" ? JSON.parse(row.provider_ids) : row.provider_ids
+          ),
+        }),
     requestedModelId: row.requested_model_id,
     ...(row.response_model_id === null ? {} : { responseModelId: row.response_model_id }),
     responseId: row.response_id,
@@ -574,6 +583,7 @@ function costRecord(input: {
       ? undefined
       : { ...details.priceSource, observedAt: new Date(details.priceSource.observedAt) }
   const base = {
+    ...(details.estimate === undefined ? {} : { estimate: details.estimate }),
     projectId: input.projectId,
     usageRecordId: input.usageId,
     pricingContext: details.pricingContext,

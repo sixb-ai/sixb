@@ -3,6 +3,7 @@ import type { LanguageModelDefinitionCatalog, ModelDefinitionCatalog } from "./c
 import type { LanguageModelDefinition } from "./definitions"
 import type { LanguageModelStreamEvent } from "./events"
 import type { ModelMessage } from "./messages"
+import type { ModelCostTracking } from "./pricing"
 
 export const MODEL_REASONING_EFFORTS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const
 
@@ -80,6 +81,13 @@ export interface LanguageModel {
   readonly providerId: string
   readonly modelId: string
   readonly definition: LanguageModelDefinition
+  readonly costTracking?: ModelCostTracking
+  /**
+   * Return an executable model pinned to operational metadata, preserving model identity.
+   * `offline` requires a local snapshot without catalog I/O. Workers retain this model
+   * for generation and compaction; later catalog refreshes must not change its capabilities/limits.
+   */
+  resolve?(options?: { readonly offline?: boolean }): Promise<LanguageModel>
   /** Resolve provider metadata without mutating definition. May perform a bounded catalog request. */
   resolveDefinition?(): Promise<LanguageModelDefinition>
   stream(request: LanguageModelRequest): Promise<LanguageModelStream>

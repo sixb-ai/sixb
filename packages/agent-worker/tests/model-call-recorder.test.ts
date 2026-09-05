@@ -31,6 +31,7 @@ function callEndEvent(): ModelCallEndEvent {
       },
     },
     responseId: "response_1",
+    providerIds: { generationId: "gen_1", requestId: "req_1" },
     cost: {
       status: "reported",
       money: { currency: "USD", amountNanos: "42000" },
@@ -82,6 +83,7 @@ async function seededWorkerStorage(): Promise<AgentWorkerStorage> {
 
 describe("AiModelCallRecorder", () => {
   test("retries and records one complete provider call with stable identity", async () => {
+    // Removal proof: omit providerIds in the recorder's usage input.
     const inputs: RecoverAiModelCallInput[] = []
     const delays: number[] = []
     let attempts = 0
@@ -117,6 +119,7 @@ describe("AiModelCallRecorder", () => {
         requestedReasoning: "high",
         responseModelId: "openai/gpt-5-2026-08-01",
         responseId: "response_1",
+        providerIds: { generationId: "gen_1", requestId: "req_1" },
         usage: {
           inputTokens: 12,
           outputTokens: 8,

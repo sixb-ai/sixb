@@ -34,7 +34,7 @@ export interface ModelCatalogInput {
   readonly language: readonly LanguageModel[]
 }
 
-/** Identify one provider binding and model selection. */
+/** Identify a model by its provider and model ID. */
 export function modelRef(model: LanguageModel): string {
   return `${model.providerId}/${model.modelId}`
 }

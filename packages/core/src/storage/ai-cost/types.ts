@@ -63,13 +63,27 @@ export type AiUnpriceableReason =
   | "invalidUsageForFormula"
 
 interface AiModelCallCostRecordBase {
+  /** Local estimate retained independently when an inline provider cost is selected. */
+  readonly estimate?: AiCostEstimate
   readonly projectId: string
   readonly usageRecordId: string
   readonly pricingContext: AiPricingContext
   readonly ratedAt: Date
 }
 
-/** Exact cost from an immutable price source. Provider-reported totals may omit components. */
+export type AiCostEstimate =
+  | {
+      readonly status: "rated"
+      readonly money: AiMoney
+      readonly components: readonly AiCostComponent[]
+    }
+  | {
+      readonly status: "unpriceable"
+      readonly reason: AiUnpriceableReason
+      readonly missingMeters?: readonly AiBillableMeter[]
+    }
+
+/** Selected monetary valuation; its observation/provenance distinguishes estimates from reports. */
 export interface AiRatedModelCallCostRecord extends AiModelCallCostRecordBase {
   readonly status: "rated"
   readonly billingIdentity: AiBillingIdentity
@@ -95,6 +109,7 @@ export interface SummarizeAiCostExecutionsInput {
 }
 
 export interface AiCostSummary {
+  /** Selected request valuations, never the sum of competing observations or period reports. */
   readonly amounts: readonly AiMoney[]
   readonly ratedCallCount: number
   readonly unpriceableCallCount: number
@@ -188,7 +203,7 @@ export interface ListAiModelCallAccountingResult {
   readonly total: number
 }
 
-/** Immutable model-call costs plus execution and project accounting reads. */
+/** Immutable call-time costs. Inline provider costs take precedence over local estimates. */
 export interface AiCostStorage {
   recordModelCallCost(input: AiModelCallCostRecord): Promise<void>
   summarizeExecutions(input: SummarizeAiCostExecutionsInput): Promise<readonly AiCostSummary[]>

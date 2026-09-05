@@ -52,7 +52,7 @@ describe("atomic AI accounting storage", () => {
           projectId: result.record.projectId,
           usageRecordId: result.record.id,
           status: "rated",
-          billingIdentity: { providerId: "test-provider", modelId: "test-model" },
+          billingIdentity: { providerId: "anthropic.messages", modelId: "claude-opus-4-8" },
           pricingContext: {},
           priceSource: {
             sourceId: "test-catalog",

@@ -6,7 +6,7 @@ import type {
   ModelTool,
   ModelUiChunk,
 } from "../src/models"
-import { ModelStreamError, StructuredOutputError } from "../src/models"
+import { ModelStreamError, rateModelCall, StructuredOutputError } from "../src/models"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
 
 const USAGE = {
@@ -73,6 +73,114 @@ const echo: ModelTool<{ value: string }> = {
 }
 
 describe("runModelLoop", () => {
+  test("retains native IDs independently of the internal fallback response identity", async () => {
+    // Removal proof: omit providerIds from CompletedResponse or onModelCallEnd.
+    const calls: ModelCallEndEvent[] = []
+    for (const providerIds of [undefined, { generationId: "gen_1", requestId: "req_1" }]) {
+      await runModelLoop({
+        model: modelFromCalls([
+          [
+            { type: "stream-start" },
+            { type: "response-metadata", ...(providerIds ? { providerIds } : {}) },
+            finish(),
+          ],
+        ]),
+        messages: [],
+        maxSteps: 1,
+        signal: new AbortController().signal,
+        onModelCallEnd: async (event) => {
+          calls.push(event)
+        },
+      })
+    }
+    expect(calls[0]?.responseId).toContain(":response")
+    expect(calls[0]?.providerIds).toBeUndefined()
+    expect(calls[1]?.providerIds).toEqual({ generationId: "gen_1", requestId: "req_1" })
+  })
+  test("retains a provider-owned estimate alongside an inline report", async () => {
+    // Regression proof: omit estimate from onModelCallEnd; this must fail even though cost is reported.
+    const calls: ModelCallEndEvent[] = []
+    const model = Object.assign(
+      modelFromCalls([
+        [
+          { type: "stream-start" },
+          {
+            type: "finish",
+            finishReason: "stop",
+            usage: USAGE,
+            reportedCost: { money: { currency: "USD", amountNanos: "12" } },
+          },
+        ],
+      ]),
+      {
+        costTracking: {
+          estimate: ({ usage }: { usage: typeof USAGE }) =>
+            rateModelCall({
+              usage,
+              rateCard: {
+                currency: "USD",
+                unit: "million-tokens",
+                input: "1",
+                output: "2",
+                cacheReadInput: "0.1",
+              },
+            }),
+        },
+      }
+    )
+    await runModelLoop({
+      model,
+      messages: [],
+      maxSteps: 1,
+      signal: new AbortController().signal,
+      onModelCallEnd: (event) => {
+        calls.push(event)
+      },
+    })
+    expect(calls[0]).toMatchObject({
+      cost: { status: "reported", money: { amountNanos: "12" } },
+      estimate: { status: "rated", money: { amountNanos: "16200" } },
+    })
+  })
+
+  test("estimation failure cannot discard completed usage or an inline report", async () => {
+    // Regression proof: call costTracking.estimate directly without the failure boundary.
+    const calls: ModelCallEndEvent[] = []
+    const model = Object.assign(
+      modelFromCalls([
+        [
+          { type: "stream-start" },
+          {
+            type: "finish",
+            finishReason: "stop",
+            usage: USAGE,
+            reportedCost: { money: { currency: "USD", amountNanos: "12" } },
+          },
+        ],
+      ]),
+      {
+        costTracking: {
+          estimate: () => {
+            throw new Error("unavailable estimator")
+          },
+        },
+      }
+    )
+    await runModelLoop({
+      model,
+      messages: [],
+      maxSteps: 1,
+      signal: new AbortController().signal,
+      onModelCallEnd: (event) => {
+        calls.push(event)
+      },
+    })
+    expect(calls[0]).toMatchObject({
+      usage: USAGE,
+      cost: { status: "reported" },
+      estimate: { status: "unpriceable" },
+    })
+  })
   test("forwards and validates per-call output limits", async () => {
     // Regression proof: remove maxOutputTokens from the model.stream request or its validation.
     const model = new MockLanguageModel({

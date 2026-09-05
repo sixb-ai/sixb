@@ -6,12 +6,33 @@ import type {
   ModelToolResultPart,
   ProviderData,
 } from "./messages"
-import type { ModelCallCost, ModelReportedCost } from "./pricing"
+import type { ModelCallCost, ModelCostEstimate, ModelReportedCost } from "./pricing"
 
 export interface ModelRoute {
   /** Provider selected by a routing gateway, when it differs from the provider being called. */
   readonly providerId?: string
   readonly modelId?: string
+}
+
+/** Only identifiers supplied by the provider. Internal call/response fallback IDs never belong here. */
+export type ModelProviderIds = {
+  readonly requestId?: string
+  readonly responseId?: string
+  readonly generationId?: string
+}
+
+export function normalizeModelProviderIds(value: unknown): ModelProviderIds {
+  if (typeof value !== "object" || value === null || Array.isArray(value))
+    throw new TypeError("[Sixb] Provider identifiers must be an object.")
+  const result: { requestId?: string; responseId?: string; generationId?: string } = {}
+  for (const [key, id] of Object.entries(value)) {
+    if (key !== "requestId" && key !== "responseId" && key !== "generationId") continue
+    if (id === undefined) continue
+    if (typeof id !== "string" || !id.trim())
+      throw new TypeError(`[Sixb] Provider ${key} must be nonblank.`)
+    result[key] = id
+  }
+  return Object.freeze(result)
 }
 
 export type ModelFinishReason =
@@ -41,6 +62,7 @@ export type LanguageModelStreamEvent =
   | { readonly type: "stream-start" }
   | {
       readonly type: "response-metadata"
+      readonly providerIds?: ModelProviderIds
       readonly id?: string
       readonly modelId?: string
     }
@@ -146,6 +168,9 @@ export type ModelUiChunk =
   | { readonly type: "error"; readonly errorText: string }
 
 export interface ModelCallEndEvent {
+  readonly providerIds?: ModelProviderIds
+  /** Retained independently when the selected display cost is provider-reported. */
+  readonly estimate?: ModelCostEstimate
   readonly callId: string
   readonly providerId: string
   readonly modelId: string

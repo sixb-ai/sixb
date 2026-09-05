@@ -1,5 +1,21 @@
 import type { LanguageModelRateCard, ModelTokenPrice } from "./definitions"
-import type { ModelUsage } from "./events"
+import type { ModelRoute, ModelUsage } from "./events"
+import type { LanguageModel } from "./language-model"
+
+/** Optional local financial enrichment cannot discard a completed, billable call. */
+export function estimateModelCall(
+  model: LanguageModel,
+  input: Parameters<ModelCostTracking["estimate"]>[0]
+): ModelCostEstimate {
+  try {
+    return model.costTracking?.estimate(input) ?? rateModelCall({ usage: input.usage })
+  } catch {
+    console.warn(
+      "[Sixb] Model cost estimation failed; preserving usage and available provider cost."
+    )
+    return { status: "unpriceable", reason: "missing-rate-card" }
+  }
+}
 
 export interface ModelMoney {
   readonly currency: "USD"
@@ -10,6 +26,17 @@ export interface ModelMoney {
 export interface ModelReportedCost {
   readonly money: ModelMoney
   readonly providerId?: string
+}
+
+/** A local estimate is never a provider-reported charge. No financial API is required to run. */
+export type ModelCostEstimate = Exclude<ModelCallCost, { status: "reported" }>
+
+export interface ModelCostTracking {
+  estimate(input: {
+    readonly usage: ModelUsage
+    readonly route?: ModelRoute
+    readonly responseModelId?: string
+  }): ModelCostEstimate
 }
 
 export type ModelCostMeter =
@@ -42,6 +69,16 @@ export type ModelCallCost =
     }
 
 /** Prefer the provider's bill over rate-card estimates, then rate complete token meters locally. */
+export function rateModelCall(input: {
+  readonly usage: ModelUsage
+  readonly rateCard?: LanguageModelRateCard
+  readonly reported?: undefined
+}): ModelCostEstimate
+export function rateModelCall(input: {
+  readonly usage: ModelUsage
+  readonly rateCard?: LanguageModelRateCard
+  readonly reported?: ModelReportedCost
+}): ModelCallCost
 export function rateModelCall(input: {
   readonly usage: ModelUsage
   readonly rateCard?: LanguageModelRateCard

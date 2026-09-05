@@ -11,14 +11,12 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
-import { defineLanguageModel } from "@sixb/core/models"
+import { defineLanguageModel, type LanguageModel } from "@sixb/core/models"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-type TestLanguageModel = ModelCatalogInput["language"][number]
-
 // The route only serializes catalog metadata, so a minimal owned-contract stub is enough.
-function testModel(providerId: string, modelId: string): TestLanguageModel {
+function testModel(providerId: string, modelId: string): LanguageModel {
   return {
     providerId,
     modelId,

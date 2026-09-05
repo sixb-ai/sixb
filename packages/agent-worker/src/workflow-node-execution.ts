@@ -20,6 +20,7 @@ import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
 import { createWorkflowNodeFailure } from "@sixb/core/internal/workflows"
+import type { LanguageModel } from "@sixb/core/models"
 import type {
   AgentQueueJob,
   AgentQueueJobFailureCode,
@@ -52,6 +53,7 @@ import {
 import type { AgentWorkerContext, AgentWorkerHost } from "./types"
 
 export interface ExecuteWorkflowAgentNodeInput {
+  readonly models?: ReadonlyMap<string, LanguageModel>
   readonly context: AgentWorkerContext
   readonly host: AgentWorkerHost
   readonly job: AgentWorkflowNodeRequestedQueueJob
@@ -353,7 +355,11 @@ async function loadWorkflowAgentNodeExecution(
       { details: workflowAgentErrorDetails(executionRecord.agentId, nodeRun) }
     )
   }
-  const agent = host.definitions.agents.getById(executionRecord.agentId)
+  const registered = host.definitions.agents.getById(executionRecord.agentId)
+  const agent = registered && {
+    ...registered,
+    model: input.models?.get(registered.id) ?? registered.model,
+  }
   if (!agent || agent.id !== node.agentStep.agent.id) {
     throw createSixbError(
       "internal.unexpected",

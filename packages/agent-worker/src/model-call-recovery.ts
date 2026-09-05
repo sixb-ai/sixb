@@ -99,6 +99,9 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
     callId: record.callId,
     requesterGroupIds: [...record.requesterGroupIds],
     providerId: record.providerId,
+    ...(record.providerIds === undefined
+      ? {}
+      : { providerIds: structuredClone(record.providerIds) }),
     requestedModelId: record.requestedModelId,
     ...(record.requestedReasoning === undefined
       ? {}
@@ -114,6 +117,7 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
 function toAccountingPayload(input: RecoverAiModelCallInput): AgentAiUsageAccountingPayload {
   return {
     cost: structuredClone(input.cost),
+    ...(input.estimate === undefined ? {} : { estimate: structuredClone(input.estimate) }),
     ...(input.route === undefined ? {} : { route: structuredClone(input.route) }),
     ratedAt: input.ratedAt.toISOString(),
   }
@@ -151,6 +155,9 @@ function accountingFromQueuePayload(
   if (!accounting) return undefined
   return {
     cost: structuredClone(accounting.cost),
+    ...(accounting.estimate === undefined
+      ? {}
+      : { estimate: structuredClone(accounting.estimate) }),
     ...(accounting.route === undefined ? {} : { route: structuredClone(accounting.route) }),
     ratedAt: parseDate(accounting.ratedAt, job.id, "ratedAt"),
   }

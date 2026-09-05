@@ -1,4 +1,4 @@
-import { isModelReasoning } from "@sixb/core/models"
+import { isModelReasoning, normalizeModelProviderIds } from "@sixb/core/models"
 import type { ReadonlyJsonObject } from "@sixb/core/storage"
 import {
   type AiModelCallUsageInput,
@@ -37,6 +37,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
           attempt,
           call_id,
           provider_id,
+          provider_ids,
           requested_model_id,
           requested_reasoning,
           response_model_id,
@@ -60,6 +61,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
           ${record.attempt},
           ${record.callId},
           ${record.providerId},
+          ${record.providerIds === undefined ? null : JSON.stringify(record.providerIds)}::jsonb,
           ${record.requestedModelId},
           ${
             record.requestedReasoning === undefined
@@ -188,6 +190,13 @@ export class PgAiUsageStorage implements AiUsageStorage {
       callId: row.call_id,
       requesterGroupIds: groupRows.map((group) => group.group_id),
       providerId: row.provider_id,
+      ...(row.provider_ids === null
+        ? {}
+        : {
+            providerIds: normalizeModelProviderIds(
+              typeof row.provider_ids === "string" ? JSON.parse(row.provider_ids) : row.provider_ids
+            ),
+          }),
       requestedModelId: row.requested_model_id,
       ...(row.requested_reasoning === null
         ? {}
@@ -247,6 +256,7 @@ interface AiUsageRow {
   readonly attempt: number | string
   readonly call_id: string
   readonly provider_id: string
+  readonly provider_ids: Record<string, unknown> | string | null
   readonly requested_model_id: string
   readonly requested_reasoning: string | Record<string, unknown> | null
   readonly response_model_id: string | null

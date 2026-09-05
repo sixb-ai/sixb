@@ -4,6 +4,12 @@ import { ModelReasoningSchema } from "./models"
 
 const IntegerStringSchema = z.string().regex(/^\d+$/)
 const IsoDateSchema = z.string().datetime({ offset: true })
+const CurrencySchema = z.string().regex(/^[A-Z]{3}$/)
+
+export const AiMoneySchema = z.object({
+  currency: CurrencySchema,
+  amountNanos: IntegerStringSchema,
+})
 
 export const AiAccountingBucketSchema = z.enum(["hour", "day", "week"])
 export const AiValuationStatusSchema = z.enum(["rated", "unpriceable", "unvalued"])
@@ -24,11 +30,6 @@ export const AiModelCallAccountingListQuerySchema = AiAccountingRangeQuerySchema
   valuationStatus: AiValuationStatusSchema.optional(),
   limit: IntegerStringSchema.optional(),
   offset: IntegerStringSchema.optional(),
-})
-
-export const AiMoneySchema = z.object({
-  currency: z.string().regex(/^[A-Z]{3}$/),
-  amountNanos: IntegerStringSchema,
 })
 
 export const AiCostSummarySchema = z.object({
@@ -115,9 +116,32 @@ const AiPriceSourceSchema = z.object({
   observedAt: IsoDateSchema,
 })
 
+const AiCostSourceSchema = z.enum(["estimate", "provider", "unknown"])
+const AiUnpriceableReasonSchema = z.enum([
+  "missingBillingIdentity",
+  "missingRateCard",
+  "missingUsageMeter",
+  "unsupportedPricingDimension",
+  "invalidUsageForFormula",
+])
+const AiCostEstimateSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("rated"),
+    money: AiMoneySchema,
+    components: z.array(AiCostComponentSchema),
+  }),
+  z.object({
+    status: z.literal("unpriceable"),
+    reason: AiUnpriceableReasonSchema,
+    missingMeters: z.array(AiCostComponentSchema.shape.meter).optional(),
+  }),
+])
+
 const AiModelCallCostSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("rated"),
+    source: AiCostSourceSchema,
+    estimate: AiCostEstimateSchema.optional(),
     billingIdentity: AiBillingIdentitySchema,
     pricingContext: AiPricingContextSchema,
     priceSource: AiPriceSourceSchema,
@@ -127,16 +151,12 @@ const AiModelCallCostSchema = z.discriminatedUnion("status", [
   }),
   z.object({
     status: z.literal("unpriceable"),
+    source: AiCostSourceSchema,
+    estimate: AiCostEstimateSchema.optional(),
     billingIdentity: AiBillingIdentitySchema.optional(),
     pricingContext: AiPricingContextSchema,
     priceSource: AiPriceSourceSchema.optional(),
-    reason: z.enum([
-      "missingBillingIdentity",
-      "missingRateCard",
-      "missingUsageMeter",
-      "unsupportedPricingDimension",
-      "invalidUsageForFormula",
-    ]),
+    reason: AiUnpriceableReasonSchema,
     missingMeters: z.array(AiCostComponentSchema.shape.meter).optional(),
     ratedAt: IsoDateSchema,
   }),
@@ -152,6 +172,13 @@ const AiModelCallUsageRecordSchema = z.object({
   requestedReasoning: ModelReasoningSchema.optional(),
   responseModelId: z.string().optional(),
   responseId: z.string(),
+  providerIds: z
+    .object({
+      requestId: z.string().optional(),
+      responseId: z.string().optional(),
+      generationId: z.string().optional(),
+    })
+    .nullable(),
   usage: AiUsageSummarySchema,
   occurredAt: IsoDateSchema,
   recordedAt: IsoDateSchema,

@@ -55,7 +55,6 @@ export interface LanguageModelDefinition extends ModelDefinition {
   readonly maxInputTokens?: number
   readonly maxOutputTokens?: number
   readonly capabilities: ModelCapabilities
-  readonly rateCard?: LanguageModelRateCard
 }
 
 export function defineLanguageModel(definition: LanguageModelDefinition): LanguageModelDefinition {
@@ -70,11 +69,10 @@ export function defineLanguageModel(definition: LanguageModelDefinition): Langua
   assertOptionalString(definition.releaseDate, "releaseDate")
   assertOptionalString(definition.knowledgeCutoff, "knowledgeCutoff")
   const tags = freezeStrings(definition.tags, "tags")
-  const capabilities = freezeCapabilities(definition.capabilities)
+  const capabilities = defineModelCapabilities(definition.capabilities)
   assertOptionalPositiveInteger(definition.contextWindow, "contextWindow")
   assertOptionalPositiveInteger(definition.maxInputTokens, "maxInputTokens")
   assertOptionalPositiveInteger(definition.maxOutputTokens, "maxOutputTokens")
-  if (definition.rateCard) assertLanguageModelRateCard(definition.rateCard)
   return Object.freeze({
     kind: "language",
     providerId: definition.providerId,
@@ -95,14 +93,11 @@ export function defineLanguageModel(definition: LanguageModelDefinition): Langua
       ? {}
       : { maxOutputTokens: definition.maxOutputTokens }),
     capabilities,
-    ...(definition.rateCard === undefined ? {} : { rateCard: freezeRateCard(definition.rateCard) }),
   })
 }
 
-function freezeCapabilities(capabilities: ModelCapabilities): ModelCapabilities {
-  if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
-    throw new TypeError("[Sixb] Model capabilities must be an object.")
-  }
+function defineModelCapabilities(capabilities: unknown): ModelCapabilities {
+  assertRecord(capabilities, "capabilities")
   const inputMediaTypes =
     capabilities.inputMediaTypes === "any"
       ? "any"
@@ -114,29 +109,31 @@ function freezeCapabilities(capabilities: ModelCapabilities): ModelCapabilities 
     }
   }
   const reasoning = freezeReasoningCapabilities(capabilities.reasoning)
+  const flags: {
+    localTools?: boolean
+    parallelToolCalls?: boolean
+    nativeStructuredOutput?: boolean
+    providerExecutedTools?: boolean
+  } = {}
+  for (const key of [
+    "localTools",
+    "parallelToolCalls",
+    "nativeStructuredOutput",
+    "providerExecutedTools",
+  ] as const) {
+    const value = capabilities[key]
+    if (typeof value === "boolean") flags[key] = value
+  }
   return Object.freeze({
     ...(inputMediaTypes === undefined ? {} : { inputMediaTypes }),
     ...(reasoning === undefined ? {} : { reasoning }),
-    ...(capabilities.localTools === undefined ? {} : { localTools: capabilities.localTools }),
-    ...(capabilities.parallelToolCalls === undefined
-      ? {}
-      : { parallelToolCalls: capabilities.parallelToolCalls }),
-    ...(capabilities.nativeStructuredOutput === undefined
-      ? {}
-      : { nativeStructuredOutput: capabilities.nativeStructuredOutput }),
-    ...(capabilities.providerExecutedTools === undefined
-      ? {}
-      : { providerExecutedTools: capabilities.providerExecutedTools }),
+    ...flags,
   })
 }
 
-function freezeReasoningCapabilities(
-  reasoning: ModelCapabilities["reasoning"]
-): ModelCapabilities["reasoning"] {
+function freezeReasoningCapabilities(reasoning: unknown): ModelCapabilities["reasoning"] {
   if (reasoning === undefined || reasoning === false) return reasoning
-  if (!reasoning || typeof reasoning !== "object" || Array.isArray(reasoning)) {
-    throw new TypeError("[Sixb] Model capability 'reasoning' must be false or an object.")
-  }
+  assertRecord(reasoning, "reasoning")
   if (reasoning.canDisable !== undefined && typeof reasoning.canDisable !== "boolean") {
     throw new TypeError("[Sixb] Model reasoning capability 'canDisable' must be boolean.")
   }
@@ -150,33 +147,33 @@ function freezeReasoningCapabilities(
 }
 
 function freezeReasoningEfforts(
-  efforts: ModelReasoningCapabilities["efforts"]
+  efforts: unknown
 ): readonly (typeof MODEL_REASONING_EFFORTS)[number][] | undefined {
   if (efforts === undefined) return undefined
   if (!Array.isArray(efforts)) {
     throw new TypeError("[Sixb] Model reasoning capability 'efforts' must be an array.")
   }
-  const allowed = MODEL_REASONING_EFFORTS as readonly string[]
   const seen = new Set<string>()
-  for (const effort of efforts) {
-    if (!allowed.includes(effort)) {
-      throw new TypeError(`[Sixb] Model reasoning effort '${String(effort)}' is invalid.`)
-    }
-    if (seen.has(effort)) {
-      throw new TypeError(`[Sixb] Model reasoning effort '${effort}' is duplicated.`)
-    }
-    seen.add(effort)
-  }
-  return Object.freeze([...efforts])
+  return Object.freeze(
+    efforts.map((value: unknown) => {
+      const effort = MODEL_REASONING_EFFORTS.find((allowed) => allowed === value)
+      if (effort === undefined) {
+        throw new TypeError(`[Sixb] Model reasoning effort '${String(value)}' is invalid.`)
+      }
+      if (seen.has(effort)) {
+        throw new TypeError(`[Sixb] Model reasoning effort '${effort}' is duplicated.`)
+      }
+      seen.add(effort)
+      return effort
+    })
+  )
 }
 
 function freezeReasoningBudgetCapabilities(
-  budget: ModelReasoningCapabilities["budgetTokens"]
+  budget: unknown
 ): ModelReasoningBudgetCapabilities | undefined {
   if (budget === undefined) return undefined
-  if (!budget || typeof budget !== "object" || Array.isArray(budget)) {
-    throw new TypeError("[Sixb] Model reasoning capability 'budgetTokens' must be an object.")
-  }
+  assertRecord(budget, "reasoning budgetTokens")
   assertOptionalNonnegativeInteger(budget.min, "capabilities.reasoning.budgetTokens.min")
   assertOptionalNonnegativeInteger(budget.max, "capabilities.reasoning.budgetTokens.max")
   if (budget.min !== undefined && budget.max !== undefined && budget.max < budget.min) {
@@ -190,7 +187,9 @@ function freezeReasoningBudgetCapabilities(
   })
 }
 
-function freezeRateCard(rateCard: LanguageModelRateCard): LanguageModelRateCard {
+/** Validate and snapshot provider-owned pricing independently of operational model metadata. */
+export function defineModelRateCard(rateCard: LanguageModelRateCard): LanguageModelRateCard {
+  assertLanguageModelRateCard(rateCard)
   return Object.freeze({
     currency: "USD",
     unit: "million-tokens",
@@ -228,20 +227,37 @@ function freezeTokenPrice(price: ModelTokenPrice): ModelTokenPrice {
       })
 }
 
-function assertLanguageModelRateCard(rateCard: LanguageModelRateCard): void {
+function assertLanguageModelRateCard(rateCard: unknown): asserts rateCard is LanguageModelRateCard {
+  assertRecord(rateCard, "rate card")
   if (rateCard.currency !== "USD" || rateCard.unit !== "million-tokens") {
     throw new TypeError("[Sixb] Model rate cards must use USD per million tokens.")
   }
-  for (const [meter, value] of Object.entries(rateCard)) {
-    if (meter === "currency" || meter === "unit") continue
+  for (const meter of [
+    "input",
+    "output",
+    "cacheReadInput",
+    "cacheWriteInput",
+    "cacheWriteInput5m",
+    "cacheWriteInput1h",
+  ] as const) {
+    const value = rateCard[meter]
+    if (value === undefined && meter !== "input" && meter !== "output") continue
     if (typeof value === "string") {
       assertPrice(value, meter)
       continue
     }
+    assertRecord(value, `price '${meter}'`)
     assertPrice(value.default, `${meter}.default`)
+    if (!Array.isArray(value.tiers))
+      throw new TypeError(`[Sixb] Model price '${meter}' tiers must be an array.`)
     let previousMax = 0
     for (const [index, tier] of value.tiers.entries()) {
-      if (!Number.isSafeInteger(tier.minTokens) || tier.minTokens < 0) {
+      assertRecord(tier, `price '${meter}' tier ${index}`)
+      if (
+        typeof tier.minTokens !== "number" ||
+        !Number.isSafeInteger(tier.minTokens) ||
+        tier.minTokens < 0
+      ) {
         throw new TypeError(`[Sixb] Model price '${meter}' tier ${index} has an invalid minimum.`)
       }
       if (index > 0 && tier.minTokens < previousMax) {
@@ -251,7 +267,9 @@ function assertLanguageModelRateCard(rateCard: LanguageModelRateCard): void {
       }
       if (
         tier.maxTokens !== undefined &&
-        (!Number.isSafeInteger(tier.maxTokens) || tier.maxTokens <= tier.minTokens)
+        (typeof tier.maxTokens !== "number" ||
+          !Number.isSafeInteger(tier.maxTokens) ||
+          tier.maxTokens <= tier.minTokens)
       ) {
         throw new TypeError(`[Sixb] Model price '${meter}' tier ${index} has an invalid maximum.`)
       }
@@ -261,8 +279,8 @@ function assertLanguageModelRateCard(rateCard: LanguageModelRateCard): void {
   }
 }
 
-function assertPrice(value: string, meter: string): void {
-  if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) {
+function assertPrice(value: unknown, meter: string): asserts value is string {
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) {
     throw new TypeError(`[Sixb] Model price '${meter}' must be a nonnegative decimal string.`)
   }
 }
@@ -277,8 +295,14 @@ function assertOptionalPositiveInteger(value: number | undefined, field: string)
   }
 }
 
-function assertOptionalNonnegativeInteger(value: number | undefined, field: string): void {
-  if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
+function assertOptionalNonnegativeInteger(
+  value: unknown,
+  field: string
+): asserts value is number | undefined {
+  if (
+    value !== undefined &&
+    (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0)
+  ) {
     throw new TypeError(`[Sixb] Model ${field} must be a nonnegative safe integer.`)
   }
 }
@@ -289,13 +313,15 @@ function assertOptionalString(value: string | undefined, field: string): void {
   }
 }
 
-function freezeStrings(
-  value: readonly string[] | undefined,
-  field: string
-): readonly string[] | undefined {
+function freezeStrings(value: unknown, field: string): readonly string[] | undefined {
   if (value === undefined) return undefined
   if (!Array.isArray(value) || value.some((entry) => typeof entry !== "string" || !entry.trim())) {
     throw new TypeError(`[Sixb] Model ${field} must contain nonempty strings.`)
   }
   return Object.freeze([...value])
+}
+
+function assertRecord(value: unknown, field: string): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== "object" || Array.isArray(value))
+    throw new TypeError(`[Sixb] Model ${field} must be an object.`)
 }

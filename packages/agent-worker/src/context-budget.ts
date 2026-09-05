@@ -19,38 +19,81 @@ type ContextAgent = Pick<AgentDefinition, "id" | "model" | "loop">
 export async function resolveAgentContextBudgets(
   agents: readonly ContextAgent[]
 ): Promise<ReadonlyMap<string, AgentContextBudget>> {
-  const definitions = new Map<LanguageModel, Promise<LanguageModelDefinition>>()
+  return (await prepareAgentModels(agents)).budgets
+}
+
+/** Keep the exact resolved binding beside the budget derived from it. */
+export async function prepareAgentModels(agents: readonly ContextAgent[]): Promise<{
+  readonly models: ReadonlyMap<string, LanguageModel>
+  readonly budgets: ReadonlyMap<string, AgentContextBudget>
+}> {
+  const models = new Map<string, LanguageModel>()
+  const definitions = new Map<LanguageModel, Promise<LanguageModel>>()
+  const localDefinitions = new Map<LanguageModel, Promise<LanguageModel>>()
   const entries = await Promise.all(
     agents.map(async (agent) => {
-      if (
-        agent.loop?.context?.windowTokens !== undefined ||
-        hasContextLimit(agent.model.definition)
-      ) {
-        return [agent.id, resolveAgentContextBudget(agent)] as const
-      }
-      let definition: LanguageModelDefinition
+      const offline =
+        agent.loop?.context?.windowTokens !== undefined || hasContextLimit(agent.model.definition)
+      const snapshots = offline ? localDefinitions : definitions
+      let model: LanguageModel
       try {
-        let pending = definitions.get(agent.model)
+        let pending = snapshots.get(agent.model)
         if (!pending) {
-          pending = agent.model.resolveDefinition?.() ?? Promise.resolve(agent.model.definition)
-          definitions.set(agent.model, pending)
+          pending = resolveModelSnapshot(agent.model, offline)
+          snapshots.set(agent.model, pending)
         }
-        definition = defineLanguageModel(await pending)
+        model = await pending
+        const definition = defineLanguageModel(model.definition)
         if (
           definition.providerId !== agent.model.providerId ||
           definition.modelId !== agent.model.modelId
         ) {
           throw new TypeError("Provider metadata does not match the selected model.")
         }
+        if (model.providerId !== agent.model.providerId || model.modelId !== agent.model.modelId) {
+          throw new TypeError("Resolved model does not match the requested model.")
+        }
       } catch (cause) {
         const error = missingContextLimit(agent)
         error.cause = cause
         throw error
       }
-      return [agent.id, resolveAgentContextBudget(agent, definition)] as const
+      models.set(agent.id, model)
+      return [agent.id, resolveAgentContextBudget(agent, model.definition)] as const
     })
   )
-  return new Map(entries)
+  return { models, budgets: new Map(entries) }
+}
+
+async function resolveModelSnapshot(
+  model: LanguageModel,
+  offline: boolean
+): Promise<LanguageModel> {
+  if (model.resolve) return model.resolve({ offline })
+  const definition = defineLanguageModel(
+    offline ? model.definition : ((await model.resolveDefinition?.()) ?? model.definition)
+  )
+  // Custom models can keep the older metadata hook. Bind their stream receiver and enforce the
+  // resolved output ceiling without mutating the original executable object.
+  return Object.freeze({
+    providerId: model.providerId,
+    modelId: model.modelId,
+    definition,
+    costTracking: model.costTracking,
+    stream: (request: Parameters<LanguageModel["stream"]>[0]) =>
+      model.stream({
+        ...request,
+        ...(definition.maxOutputTokens === undefined
+          ? {}
+          : {
+              maxOutputTokens: Math.min(
+                request.maxOutputTokens ?? definition.maxOutputTokens,
+                definition.maxOutputTokens
+              ),
+            }),
+      }),
+    resolveDefinition: async () => definition,
+  })
 }
 
 function hasContextLimit(definition: LanguageModelDefinition): boolean {

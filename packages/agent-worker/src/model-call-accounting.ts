@@ -28,7 +28,29 @@ export async function recordAiModelCallAccounting(
     const usage = await aiUsage.recordModelCall(input.usage)
     // Usage deduplicates provider lifecycle replays by execution/call identity. Always attach the
     // valuation to the canonical row it returns, not the fresh candidate ID from a replay.
-    await aiCosts.recordModelCallCost(modelCostRecord(input, usage.record.id))
+    const canonical = { ...input, usage: usage.record, ratedAt: usage.record.recordedAt }
+    const record = modelCostRecord(canonical, usage.record.id)
+    const estimate =
+      input.cost.status !== "reported" || input.estimate === undefined
+        ? undefined
+        : modelCostRecord({ ...canonical, cost: input.estimate }, usage.record.id)
+    await aiCosts.recordModelCallCost({
+      ...record,
+      ...(estimate === undefined
+        ? {}
+        : {
+            estimate:
+              estimate.status === "rated"
+                ? { status: "rated", money: estimate.money, components: estimate.components }
+                : {
+                    status: "unpriceable",
+                    reason: estimate.reason,
+                    ...(estimate.missingMeters === undefined
+                      ? {}
+                      : { missingMeters: estimate.missingMeters }),
+                  },
+          }),
+    })
     return usage
   })
 }

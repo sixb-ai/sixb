@@ -1,9 +1,11 @@
+import { assertJsonObject } from "../../json"
 import type { AiModelCallUsage, AiModelCallUsageRecord } from "../ai-usage"
 import { normalizeAiModelCallUsage } from "../ai-usage"
 import type {
   AiBillableMeter,
   AiBillingIdentity,
   AiCostComponent,
+  AiCostEstimate,
   AiModelCallCostRecord,
   AiPriceSource,
   AiPricingContext,
@@ -27,7 +29,7 @@ const METER_ORDER: Readonly<Record<AiBillableMeter, number>> = {
   "tokens.output.text": 7,
   "tokens.output.reasoning": 8,
 }
-const METERS = new Set(Object.keys(METER_ORDER))
+const METERS = new Set(Object.keys(METER_ORDER) as AiBillableMeter[])
 const UNPRICEABLE_REASONS = new Set<AiUnpriceableReason>([
   "missingBillingIdentity",
   "missingRateCard",
@@ -81,6 +83,7 @@ export function normalizeAiModelCallCostRecord(
   assertNonBlank(input.projectId, "cost record projectId")
   assertNonBlank(input.usageRecordId, "cost record usageRecordId")
   const base = {
+    ...(input.estimate === undefined ? {} : { estimate: normalizeAiCostEstimate(input.estimate) }),
     projectId: input.projectId,
     usageRecordId: input.usageRecordId,
     pricingContext: normalizeAiPricingContext(input.pricingContext),
@@ -111,6 +114,17 @@ export function aiModelCallCostMatchesUsage(
 ): boolean {
   if (record.projectId !== usageRecord.projectId || record.usageRecordId !== usageRecord.id) {
     return false
+  }
+  if (record.estimate?.status === "rated") {
+    const usage = normalizeAiModelCallUsage(usageRecord.usage)
+    const components = new Map(
+      record.estimate.components.map((component) => [component.meter, component])
+    )
+    if (
+      !inputComponentsMatchUsage(components, usage) ||
+      !outputComponentsMatchUsage(components, usage)
+    )
+      return false
   }
   if (record.status === "unpriceable") return true
   if (record.components.length === 0 && isExternalValuationSource(record.priceSource.sourceId)) {
@@ -222,6 +236,75 @@ function normalizeRatedCost(
     billingIdentity,
     money: { currency: normalizeCurrency(input.money.currency), amountNanos },
     components,
+  }
+}
+
+export function normalizeAiCostEstimate(value: unknown): AiCostEstimate {
+  assertJsonObject(value, "AI cost estimate")
+  if (value.status === "rated") {
+    assertJsonObject(value.money, "estimate money")
+    const { currency, amountNanos } = value.money
+    if (
+      typeof currency !== "string" ||
+      typeof amountNanos !== "string" ||
+      !Array.isArray(value.components)
+    )
+      throw new TypeError("[Sixb] Invalid cost estimate money or components.")
+    const components = value.components
+      .map((component) => {
+        assertJsonObject(component, "estimate component")
+        const meter = [...METERS].find((meter) => meter === component.meter)
+        if (
+          !meter ||
+          typeof component.quantity !== "string" ||
+          typeof component.rateAmountNanosPerMillion !== "string" ||
+          typeof component.chargeAmountNanos !== "string"
+        )
+          throw new TypeError("[Sixb] Invalid cost estimate component.")
+        return normalizeCostComponent({
+          meter,
+          quantity: component.quantity,
+          rateAmountNanosPerMillion: component.rateAmountNanosPerMillion,
+          chargeAmountNanos: component.chargeAmountNanos,
+        })
+      })
+      .sort(compareComponents)
+    if (
+      !components.length ||
+      new Set(components.map((c) => c.meter)).size !== components.length ||
+      parseNonnegativeInt64(amountNanos, "estimate amountNanos").toString() !==
+        sumComponents(components)
+    )
+      throw new TypeError(
+        "[Sixb] Estimate must contain unique meters whose charges equal its total."
+      )
+    return {
+      status: "rated",
+      money: { currency: normalizeCurrency(currency), amountNanos },
+      components,
+    }
+  }
+  const reason = [...UNPRICEABLE_REASONS].find((reason) => reason === value.reason)
+  if (value.status !== "unpriceable" || !reason)
+    throw new TypeError("[Sixb] Invalid cost estimate status or reason.")
+  let missingMeters: readonly AiBillableMeter[] | undefined
+  if (value.missingMeters !== undefined) {
+    if (!Array.isArray(value.missingMeters))
+      throw new TypeError("[Sixb] Invalid estimate missing meters.")
+    missingMeters = normalizeMissingMeters(
+      value.missingMeters.map((input) => {
+        const meter = [...METERS].find((meter) => meter === input)
+        if (!meter) throw new TypeError("[Sixb] Invalid estimate missing meter.")
+        return meter
+      })
+    )
+  }
+  if (reason === "missingUsageMeter" && !missingMeters)
+    throw new TypeError("[Sixb] Missing usage estimate requires missingMeters.")
+  return {
+    status: "unpriceable",
+    reason,
+    ...(missingMeters === undefined ? {} : { missingMeters }),
   }
 }
 

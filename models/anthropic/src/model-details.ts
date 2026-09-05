@@ -83,6 +83,7 @@ export function applyAnthropicRateCardModifiers(
   const speed = request?.speed
   const fast = speed === "fast" && /^claude-opus-(?:5|4-8)(?:-|$)/.test(modelId)
   const residency = request?.inference_geo === "us"
+  if (!fast && !residency) return rateCard
   const baseInput = fast ? "10" : scalarPrice(rateCard.input)
   const baseOutput = fast ? "50" : scalarPrice(rateCard.output)
   // Custom tiered definitions remain authoritative; request modifiers cannot be represented

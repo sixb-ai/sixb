@@ -69,6 +69,35 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
   }
 
   describe(label, () => {
+    test("retains native provider IDs across reads and replay", async () => {
+      // Regression proof: omit providerIds in normalization or a storage row codec.
+      await withStorage(async (storage) => {
+        const providerIds = {
+          requestId: "request-native",
+          responseId: "response-native",
+          generationId: "gen_native",
+        }
+        await storage.recordModelCall(modelCallInput({ providerIds }))
+        const latest = await storage.getLatestForExecution({
+          projectId,
+          executionId: agentExecutionId,
+        })
+        expect(latest?.providerIds).toEqual(providerIds)
+        const replay = await storage.recordModelCall(modelCallInput())
+        expect(replay.created).toBe(false)
+        expect(replay.record.providerIds).toEqual(providerIds)
+        await storage.recordModelCall(
+          modelCallInput({ id: "legacy", callId: "legacy", occurredAt: at("2026-06-24T00:00:00Z") })
+        )
+        expect(
+          (await storage.getLatestForExecution({ projectId, executionId: agentExecutionId }))
+            ?.providerIds
+        ).toBeUndefined()
+        await expect(
+          storage.recordModelCall(modelCallInput({ providerIds: { requestId: " " } }))
+        ).rejects.toThrow("requestId")
+      })
+    })
     test("records normalized usage and one canonical row per requester group", async () => {
       await withStorage(async (storage) => {
         const result = await storage.recordModelCall(

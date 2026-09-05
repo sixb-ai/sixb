@@ -24,7 +24,7 @@ credentials, headers, beta features, transport, or inline definitions:
 import { createAnthropic } from "@sixb/anthropic"
 
 const provider = createAnthropic({
-  apiKey: process.env.MY_ANTHROPIC_KEY,
+  apiKey: () => process.env.MY_ANTHROPIC_KEY,
   betas: ["example-beta"],
 })
 
@@ -37,6 +37,15 @@ const model = provider("claude-opus-5", {
 
 const definitions = await provider.catalog.list()
 ```
+
+Share the configured provider or model through normal imports. Agents accept the returned
+`LanguageModel` directly. An optional project catalog uses `models: { language: [model] }`.
+
+`await model.resolve?.()` returns an executable metadata snapshot from the effective catalog.
+Workers retain it for both generation and compaction. `{ offline: true }` pins locally available
+metadata without fetching; workers use it with explicit context overrides or known local limits.
+Resolved bindings never consult the catalog again for capabilities. Unresolved direct bindings
+retain the structured-output discovery behavior below.
 
 `maxOutputTokens` is optional. Anthropic requires `max_tokens` on every Messages request, so the
 adapter resolves an omitted value to the selected Claude model's provider-owned output limit (128K,
@@ -68,11 +77,17 @@ Exact budgets must be at least 1,024 tokens and below the model call's `maxOutpu
 efforts fail locally and are never silently rounded to another level. The live catalog normalizes
 Anthropic's effort and thinking-mode flags into `definition.capabilities.reasoning`.
 
-The model definition is built synchronously from provider defaults, configured definitions, and the
-local rate card. Constructing a model and ordinary inference never fetch the cached, paginated
+The model definition is built synchronously from provider defaults and configured definitions.
+Pricing lives separately in `model.costTracking.estimate({ usage })`. Its exact token calculation
+produces an **estimate**, with the applied rates retained as evidence. Optional negotiated rates
+can be supplied as `anthropic(modelId, { rateCard })`; they are not model metadata.
+Constructing a model and ordinary inference never fetch the cached, paginated
 catalog. A structured-output call consults it only when native support is otherwise unknown; a
-catalog failure safely selects the JSON-tool fallback. Server tools omit the local rate card when
+catalog failure safely selects the JSON-tool fallback. Server tools disable token-only estimates when
 their additional charges would make a token-only total incomplete.
+
+Cost estimates use local rates and the completed call's usage. Native provider request and response
+IDs are retained with usage for troubleshooting.
 
 Retryable `429` and `5xx` responses are retried only before a stream begins. `maxRetries`,
 `maxRetryDelayMs`, and `catalogTtlMs` are configurable. Provider request IDs and retry hints are

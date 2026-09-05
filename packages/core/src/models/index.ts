@@ -18,7 +18,7 @@ export type {
   ModelTokenPrice,
   ModelUnitPrice,
 } from "./definitions"
-export { defineLanguageModel } from "./definitions"
+export { defineLanguageModel, defineModelRateCard } from "./definitions"
 export {
   ModelProviderError,
   ModelStreamError,
@@ -30,11 +30,13 @@ export type {
   ModelCallEndEvent,
   ModelFinishReason,
   ModelLoopPartial,
+  ModelProviderIds,
   ModelRoute,
   ModelStep,
   ModelUiChunk,
   ModelUsage,
 } from "./events"
+export { normalizeModelProviderIds } from "./events"
 export type {
   LanguageModel,
   LanguageModelProvider,
@@ -72,7 +74,9 @@ export type {
 export type {
   ModelCallCost,
   ModelCostComponent,
+  ModelCostEstimate,
   ModelCostMeter,
+  ModelCostTracking,
   ModelMoney,
   ModelReportedCost,
 } from "./pricing"

@@ -1,7 +1,11 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentContextConfig } from "@sixb/core"
 import { defineLanguageModel, type LanguageModelDefinition } from "@sixb/core/models"
-import { resolveAgentContextBudget, resolveAgentContextBudgets } from "../src/context-budget"
+import {
+  prepareAgentModels,
+  resolveAgentContextBudget,
+  resolveAgentContextBudgets,
+} from "../src/context-budget"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 function agent(limits: Partial<LanguageModelDefinition> = {}, context?: AgentContextConfig) {
@@ -21,6 +25,44 @@ function agent(limits: Partial<LanguageModelDefinition> = {}, context?: AgentCon
 }
 
 describe("agent context budget resolution", () => {
+  test("pins custom metadata and clamps execution to its resolved output ceiling", async () => {
+    // Regression proof: return the original model from resolveModelSnapshot instead of the wrapper.
+    const base = agent()
+    const outputs: (number | undefined)[] = []
+    const model = {
+      ...base.model,
+      providerId: base.model.providerId,
+      modelId: base.model.modelId,
+      definition: base.model.definition,
+      resolveDefinition: async () =>
+        defineLanguageModel({
+          ...base.model.definition,
+          contextWindow: 32_000,
+          maxOutputTokens: 400,
+          capabilities: { inputMediaTypes: ["image/png"] },
+        }),
+      async stream(request: import("@sixb/core/models").LanguageModelRequest) {
+        expect(this).toBe(model)
+        outputs.push(request.maxOutputTokens)
+        return { events: (async function* () {})() }
+      },
+    }
+    const prepared = await prepareAgentModels([{ ...base, model }])
+    const resolved = prepared.models.get(base.id)!
+    expect(resolved.definition.capabilities.inputMediaTypes).toEqual(["image/png"])
+    expect(prepared.budgets.get(base.id)?.windowTokens).toBe(resolved.definition.contextWindow!)
+    for (const maxOutputTokens of [undefined, 100, 900]) {
+      await resolved.stream({
+        callId: "test",
+        tools: [],
+        messages: [],
+        signal: new AbortController().signal,
+        maxOutputTokens,
+      })
+    }
+    expect(outputs).toEqual([400, 100, 400])
+    expect(model.definition.contextWindow).toBeUndefined()
+  })
   // Regression proof: remove maxInputTokens from the budget calculation or restore the fixed fallback.
   test("respects separate context and input limits", () => {
     expect(

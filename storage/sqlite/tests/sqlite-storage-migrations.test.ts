@@ -227,16 +227,9 @@ const expectedStorageMigrationRows = [
   {
     adapter_id: SQLITE_STORAGE_ADAPTER_ID,
     checksum_length: 64,
-    id: "029-ai-usage-requested-reasoning",
+    id: "029-model-accounting",
     status: "applied",
     version: 29,
-  },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "030-ai-cost-rate-card-reason",
-    status: "applied",
-    version: 30,
   },
 ]
 
@@ -251,8 +244,8 @@ afterEach(async () => {
 })
 
 describe("SQLite storage migrations", () => {
-  test("upgrades shipped AI cost reasons without losing valuations or constraints", () => {
-    // Regression proof: skip migration 030 below, or change 026 to missingRateCard in place.
+  test("upgrades model accounting in one step without losing historical evidence or constraints", () => {
+    // Regression proof: omit 029's reason conversion or native ID columns, or change shipped 026.
     const db = new Database(":memory:")
     try {
       db.run(`PRAGMA foreign_keys = ON;
@@ -266,15 +259,60 @@ describe("SQLite storage migrations", () => {
         project_id, usage_record_id, status, provider_id, model_id, reason, details, rated_at
       ) VALUES ('project', 'usage', 'unpriceable', 'mock', 'model', 'missingCatalogEntry',
         '{"pricingContext":{}}', '2026-08-01');`)
-      sqliteStorageMigrations.steps
-        .find((step) => step.id === "030-ai-cost-rate-card-reason")
-        ?.up(db)
-      expect(db.query("SELECT reason, details FROM ai_model_call_valuations").get()).toEqual({
-        reason: "missingRateCard",
-        details: '{"pricingContext":{}}',
-      })
+      for (const sourceId of ["provider-reported", "model-rate-card", "unknown-old-source"]) {
+        db.run(
+          "INSERT INTO ai_model_call_usage VALUES ('project', ?, 'mock', 'model', '2026-08-01')",
+          [sourceId]
+        )
+        const details = JSON.stringify({
+          pricingContext: {},
+          priceSource: {
+            sourceId,
+            sourceEntryId: "model",
+            sourceVersion: "v1",
+            observedAt: "2026-08-01T00:00:00.000Z",
+          },
+          components: [
+            {
+              meter: "tokens.input.total",
+              quantity: "10",
+              rateAmountNanosPerMillion: "1000000000",
+              chargeAmountNanos: "10000",
+            },
+          ],
+        })
+        db.run(
+          `INSERT INTO ai_model_call_valuations (project_id, usage_record_id, status,
+          provider_id, model_id, currency, amount_nanos, details, rated_at)
+          VALUES ('project', ?, 'rated', 'mock', 'model', 'USD', 10000, ?, '2026-08-01')`,
+          [sourceId, details]
+        )
+      }
+      db.run(
+        `UPDATE ai_model_call_valuations SET details = '{"pricingContext":{},"priceSource":{"sourceId":"provider-reported","sourceEntryId":"missing-report","sourceVersion":"v1","observedAt":"2026-08-01T00:00:00.000Z"}}' WHERE usage_record_id = 'usage'`
+      )
+      const before = db
+        .query(
+          "SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id"
+        )
+        .all()
+      sqliteStorageMigrations.steps.find((step) => step.id === "029-model-accounting")!.up(db)
+      expect(
+        db
+          .query("SELECT reason FROM ai_model_call_valuations WHERE usage_record_id = 'usage'")
+          .get()
+      ).toEqual({ reason: "missingRateCard" })
+      expect(
+        db
+          .query(
+            "SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id"
+          )
+          .all()
+      ).toEqual(before)
       expect(() =>
-        db.run("UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry'")
+        db.run(
+          "UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry' WHERE usage_record_id = 'usage'"
+        )
       ).toThrow()
       expect(() => db.run("DELETE FROM ai_model_call_usage")).toThrow()
       expect(db.query("PRAGMA foreign_key_check").all()).toEqual([])
@@ -285,6 +323,21 @@ describe("SQLite storage migrations", () => {
           )
           .get()
       ).not.toBeNull()
+      expect(db.query("SELECT COUNT(*) AS count FROM ai_model_call_valuations").get()).toEqual({
+        count: 4,
+      })
+      expect(
+        db
+          .query(
+            "SELECT COUNT(*) AS count FROM ai_model_call_usage WHERE requested_reasoning IS NULL"
+          )
+          .get()
+      ).toEqual({ count: 4 })
+      expect(
+        db
+          .query("SELECT COUNT(*) AS count FROM ai_model_call_usage WHERE provider_ids IS NULL")
+          .get()
+      ).toEqual({ count: 4 })
     } finally {
       db.close()
     }

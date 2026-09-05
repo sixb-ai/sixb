@@ -38,6 +38,7 @@ import { AiUsageDateRangeControl } from "../components/AiUsageDateRangeControl"
 import { utcAccountingRangeForCalendarDays } from "../lib/aiUsageDateRange"
 
 const PAGE_SIZE = 25
+
 const ALL = "__all__"
 
 type Overview = GetAiAccountingOverviewResponse
@@ -287,7 +288,11 @@ export function AiUsagePage() {
             <AiUsageMetricCard
               label="Tracked cost"
               value={selectedAmount ? formatMoney(selectedAmount) : "—"}
-              description={currency ? `Valued calls in ${currency}` : "No valued calls"}
+              description={
+                currency
+                  ? `Selected costs in ${currency}: reports with estimate fallback`
+                  : "No valued calls"
+              }
               icon={<CircleDollarSign className="size-4" />}
               sparkline={costSeries.map((point) => ({
                 timestamp: point.at,
@@ -355,20 +360,20 @@ export function AiUsagePage() {
                 ]}
                 xFormatter={(value) => formatBucketLabel(value, bucket)}
                 valueFormatter={(value) => formatChartMoney(value, currency)}
-                emptyLabel="No catalog-estimated cost in this range"
+                emptyLabel="No selected cost in this range"
                 ariaLabel="Catalog-estimated AI cost over time"
               />
             </ChartCard>
             <ChartCard
               className="h-full"
               title="Estimated cost by requested model"
-              description="Highest catalog-estimated cost for the selected currency"
+              description="Highest selected cost for the selected currency"
             >
               <AiUsageBreakdown
                 data={modelCosts}
                 valueLabel="Estimated cost"
                 valueFormatter={(value) => formatChartMoney(value, currency)}
-                emptyLabel="No catalog-estimated model cost in this range"
+                emptyLabel="No selected model cost in this range"
                 ariaLabel="Catalog-estimated AI cost by requested model"
               />
             </ChartCard>
@@ -412,7 +417,7 @@ export function AiUsagePage() {
               {agentCosts.length > 1 ? (
                 <ChartCard
                   title="Estimated cost by agent"
-                  description="Highest catalog-estimated cost in this range"
+                  description="Highest selected cost in this range"
                 >
                   <AiUsageBreakdown
                     data={agentCosts}
@@ -425,7 +430,7 @@ export function AiUsagePage() {
               {workflowCosts.length > 1 ? (
                 <ChartCard
                   title="Estimated cost by workflow"
-                  description="Highest catalog-estimated workflow Agent nodes in this range"
+                  description="Highest selected cost for workflow Agent nodes in this range"
                 >
                   <AiUsageBreakdown
                     data={workflowCosts}
@@ -553,12 +558,27 @@ function ModelCallsTable({
                           ? ""
                           : ` · ${formatReasoning(call.usage.requestedReasoning)}`}
                       </p>
+                      {call.usage.providerIds ? (
+                        <div className="break-all text-xs text-muted-foreground">
+                          {Object.entries(call.usage.providerIds)
+                            .map(([key, value]) => `${key}: ${value}`)
+                            .join(" · ")}
+                        </div>
+                      ) : null}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs tabular-nums">
                       {formatOptionalTokens(call.usage.usage.totalTokens)}
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums">
                       {call.cost?.status === "rated" ? formatMoney(call.cost.money) : "—"}
+                      {call.cost?.estimate && (
+                        <p className="mt-1 font-sans text-muted-foreground">
+                          Estimate:{" "}
+                          {call.cost.estimate.status === "rated"
+                            ? formatMoney(call.cost.estimate.money)
+                            : unpriceableReasonLabel(call.cost.estimate.reason)}
+                        </p>
+                      )}
                     </TableCell>
                     <TableCell>
                       <ValuationBadge call={call} />
@@ -573,16 +593,21 @@ function ModelCallsTable({
           </Table>
         </div>
         <div className="flex items-center justify-between border-t px-6 py-3">
+          (
           <p className="text-xs text-muted-foreground">
             {total === 0
               ? "0 calls"
               : `${(offset + 1).toLocaleString()}–${Math.min(offset + calls.length, total).toLocaleString()} of ${total.toLocaleString()}`}
           </p>
+          ){" "}
           <div className="flex gap-2">
+            (
             <Button variant="outline" size="sm" disabled={offset === 0} onClick={onPrevious}>
               Previous
             </Button>
+            ){" "}
             <Button variant="outline" size="sm" disabled={!hasMore} onClick={onNext}>
+              {" "}
               Next
             </Button>
           </div>
@@ -622,7 +647,9 @@ function ValuationBadge({ call }: { call: ModelCall }) {
   const title =
     call.cost?.status === "unpriceable"
       ? unpriceableReasonLabel(call.cost.reason)
-      : valuationStatusLabel(call.valuationStatus)
+      : call.cost?.status === "rated"
+        ? costSourceLabel(call.cost.source)
+        : valuationStatusLabel(call.valuationStatus)
   return (
     <Badge
       variant="outline"
@@ -636,6 +663,14 @@ function ValuationBadge({ call }: { call: ModelCall }) {
       {title}
     </Badge>
   )
+}
+
+function costSourceLabel(source: "estimate" | "provider" | "unknown"): string {
+  return source === "provider"
+    ? "Provider-reported"
+    : source === "estimate"
+      ? "Estimated"
+      : "Unclassified"
 }
 
 function AccountingQualityNotice({
@@ -653,7 +688,7 @@ function AccountingQualityNotice({
   }
   if (coverage < 100) {
     messages.push(
-      `${overview.totals.costs.unpriceableCallCount + overview.totals.costs.unvaluedCallCount} calls do not have a catalog-estimated cost`
+      `${overview.totals.costs.unpriceableCallCount + overview.totals.costs.unvaluedCallCount} calls do not have a reported or estimated cost`
     )
   }
   const reviewStatus = overview.totals.costs.unpriceableCallCount > 0 ? "unpriceable" : "unvalued"
@@ -702,9 +737,7 @@ function AccountingInsights({
     <Card className="h-full">
       <CardHeader>
         <CardTitle>Efficiency and coverage</CardTitle>
-        <CardDescription>
-          Token composition and confidence in catalog-estimated cost
-        </CardDescription>
+        <CardDescription>Token composition and coverage of selected costs</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -730,7 +763,7 @@ function AccountingInsights({
           <div
             className="flex h-2.5 overflow-hidden rounded-full bg-muted"
             role="img"
-            aria-label={`${coverage.toFixed(1)}% of calls have a catalog-estimated cost`}
+            aria-label={`${coverage.toFixed(1)}% of calls have a selected cost`}
           >
             {valuationBreakdown.map((item) => (
               <div

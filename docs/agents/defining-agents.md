@@ -40,7 +40,7 @@ export const supportAgent = defineAgent("support-agent", {
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
 | `name` | `string` | Yes | Display name shown in catalogs and pickers. |
-| `model` | `LanguageModel` | Yes | A provider-neutral Sixb language model (see below). |
+| `model` | `LanguageModel` | Yes | A model returned by calling a provider. |
 | `instructions` | `string` | Yes | The system prompt. |
 | `description` | `string` | No | Short summary for catalogs. |
 | `reasoning` | reasoning preference | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`, or `{ budgetTokens }`. |
@@ -50,8 +50,9 @@ export const supportAgent = defineAgent("support-agent", {
 
 ## The model
 
-`model` is a `LanguageModel` from `@sixb/core/models`, not a string. Provider packages construct
-models and own their provider-specific configuration. Vercel AI Gateway is callable directly:
+`model` accepts a `LanguageModel` from `@sixb/core/models`. Provider packages construct models and
+own their provider-specific configuration.
+Vercel AI Gateway is callable directly:
 
 ```ts
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
@@ -61,6 +62,41 @@ model: vercelGateway("openai/gpt-5.5", {
   providerOptions: { gateway: { order: ["openai", "azure"] } },
 })
 ```
+
+`maxOutputTokens` is optional for known models. Providers supply the default output ceiling;
+set it when you want a lower cap. It limits output rather than targeting a response length.
+Per-call limits, including compaction summary limits, can lower that ceiling.
+
+## Shared provider configuration
+
+The default providers read their normal environment credentials lazily. For custom credentials,
+headers, or other provider settings, create a provider and share it through imports:
+
+```ts
+// lib/models.ts
+import { createAnthropic } from "@sixb/anthropic"
+
+export const anthropic = createAnthropic({
+  apiKey: () => process.env.SUPPORT_ANTHROPIC_KEY,
+})
+
+export const supportModel = anthropic("claude-sonnet-4-5")
+```
+
+```ts
+// agents/support.ts
+import { defineAgent } from "@sixb/core"
+import { supportModel } from "../lib/models"
+
+export const support = defineAgent("support", {
+  name: "Support",
+  model: supportModel,
+  instructions: "Help customers using verified information.",
+})
+```
+
+Models made by the same provider share its transport configuration and cached catalog.
+Create another provider instance when another credential or configuration is needed.
 
 ## The project model catalog
 
@@ -79,8 +115,12 @@ export const sixb = createSixb({
 })
 ```
 
-The first entry of each kind is the project default. Sixb identifies each entry by the model you
-configured — you never author an id or an alias. Configure the same model twice and startup fails.
+The first entry is the project default. Entries are `LanguageModel`s, identified by
+`providerId/modelId`. Duplicate entries fail startup. You can reuse an imported model:
+
+```ts
+models: { language: [supportModel] }
+```
 
 An entry is the binding, not only the vendor model: the same vendor model reached through Vercel AI
 Gateway and through a direct provider are distinct entries because they route and bill differently.
@@ -157,8 +197,14 @@ Direct-provider models retain their provider-specific caching behavior.
 
 Sixb automatically checkpoints long conversations before their next model request exceeds the
 selected model's context window. At startup, the worker uses locally available model limits or
-calls the model's `resolveDefinition()` to fetch metadata through its provider's cached catalog.
-An explicit `loop.context.windowTokens` avoids that lookup and allows offline startup.
+calls the model's `resolve()` to fetch metadata through its provider's cached catalog and retain
+an executable snapshot. Execution, media/reasoning capabilities, per-call output limits, and
+compaction then use that same snapshot. An explicit `loop.context.windowTokens` avoids that lookup
+and allows offline startup. Known local limits also use an offline snapshot. Refreshing a provider
+catalog does not change a running worker's prepared models; restart the worker to resolve again.
+Custom models may implement `resolve({ offline })`; it must preserve provider and model identity,
+pin operational metadata, and avoid network lookup when `offline` is true. The older
+`resolveDefinition()` hook remains supported with a bound stream and resolved output ceiling.
 If no limit is available, startup fails with instructions to configure a window or supply a model
 definition; Sixb does not assume a default context size.
 
@@ -185,6 +231,25 @@ loop: {
 smaller of 16,384 or 25% of the resolved window. `keepRecentTokens` defaults to the smaller of
 20,000 or half the resolved input budget. All three fields are optional; omitting `context` keeps
 automatic compaction enabled with model-derived defaults.
+
+## Usage and costs
+
+Sixb records completed model calls, including compaction summaries, before another billable step
+starts. Token estimates come from the model integration's optional `costTracking`, independently
+of operational metadata such as context limits. Inline provider costs are retained separately.
+
+Atlas displays a **selected cost** for each call: an inline provider cost when available, otherwise
+a local estimate, otherwise unknown. When both are available, the local estimate appears alongside
+the provider cost. Totals count each call once. Gateway charges describe Gateway billing.
+
+Usage and cost are recorded atomically and recovered idempotently after a storage failure.
+`storage.aiCosts.listModelCalls()` returns the immutable call-time cost and its optional estimate.
+Native request, response, and generation IDs are retained when supplied by the provider and exposed
+through the model-call API and Atlas. Internal fallback response IDs are stored separately.
+
+Storage migration `029-model-accounting` adds requested reasoning and native provider IDs, and
+updates the historical missing-price reason while preserving existing valuations. Estimates use
+local provider rates and require no administrative credentials or financial API requests.
 
 ## Discovery
 

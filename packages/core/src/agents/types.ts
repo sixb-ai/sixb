@@ -201,9 +201,8 @@ export interface DefineAgentConfig {
  * Agent definition registered with Sixb.
  *
  * Definitions are safe to export from `agents/` modules; the runtime loads and
- * registers them. The agent worker runs them as streaming turns. The `model` is a language model
- * instance and is therefore not serialisable — the worker
- * resolves a definition from its own discovery rather than over the wire.
+ * registers them. The worker discovers executable models locally rather than receiving them
+ * over the wire.
  */
 export interface AgentDefinition<TId extends string = string> {
   readonly kind: "agent"
