@@ -1,8 +1,8 @@
 import { appendFileSync } from "node:fs"
+import type { ModelCatalogInput } from "@sixb/core"
 import {
   col,
   type DatasetDefinition,
-  defineAgent,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -21,27 +21,6 @@ import {
   type StorageMigrator,
 } from "@sixb/core"
 import { SharedBroker } from "../shared/sharedBroker"
-
-const assistant = defineAgent("assistant", {
-  name: "Assistant",
-  // Startup reads model metadata even though this fixture never executes agent runs.
-  // Regression proof: replace this binding with the former empty-object cast and run worker-group.e2e.ts.
-  model: {
-    providerId: "fixture",
-    modelId: "assistant",
-    definition: {
-      kind: "language",
-      providerId: "fixture",
-      modelId: "assistant",
-      capabilities: {},
-      contextWindow: 32_000,
-    },
-    async stream() {
-      throw new Error("The worker-group fixture does not execute agent runs.")
-    },
-  },
-  instructions: "Assist the user.",
-})
 
 const sandboxes: SandboxFactory = {
   async create() {
@@ -196,6 +175,23 @@ export const sixb = new SixbHost({
   syncs: [ordersSync],
   pipelines: [normalizePipeline],
   projections: [orderProjection],
-  agents: [assistant],
+  models: {
+    language: [
+      {
+        providerId: "test",
+        modelId: "test",
+        definition: {
+          kind: "language",
+          providerId: "test",
+          modelId: "test",
+          capabilities: {},
+          contextWindow: 32_000,
+        },
+        stream: async () => {
+          throw new Error("Unused fixture model")
+        },
+      } satisfies ModelCatalogInput["language"][number],
+    ],
+  },
   sandboxes,
 })

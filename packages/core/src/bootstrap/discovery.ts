@@ -10,7 +10,6 @@ import { readdir } from "node:fs/promises"
 import { join, relative } from "node:path"
 import { pathToFileURL } from "node:url"
 import { isActionDefinition } from "../actions"
-import { isAgentDefinition } from "../agents"
 import { isConnectorDefinition } from "../connectors"
 import { isDatasetDefinition } from "../datasets"
 import type { OntologyDocumentInput, OntologySource } from "../ontology/registry"
@@ -73,7 +72,6 @@ export async function discoverOntologySources(
 
 type DiscoveryModuleKind =
   | "action"
-  | "agent"
   | "connector"
   | "dataset"
   | "group"
@@ -138,7 +136,6 @@ const definitionDiscoveryRegistry = {
     kind: "membershipPolicy",
     isDefinition: isMembershipPolicyDefinition,
   },
-  agents: { directory: ["agents"], kind: "agent", isDefinition: isAgentDefinition },
 } as const satisfies Record<string, DefinitionDiscoveryFamily<unknown>>
 
 type DefinitionFromFamily<TFamily> =

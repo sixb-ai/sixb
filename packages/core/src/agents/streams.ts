@@ -29,7 +29,6 @@ export interface AgentRunActivityEvent {
   readonly projectId: string
   readonly runId: string
   readonly threadId: string
-  readonly agentId: string
   readonly status: AgentRunRecord["status"]
   readonly attempt: number
   readonly occurredAt: string
@@ -52,7 +51,6 @@ export function agentRunActivityEvent(
     projectId: run.projectId,
     runId: run.id,
     threadId: run.threadId,
-    agentId: run.agentId,
     status: run.status,
     attempt: run.attempt,
     occurredAt: occurredAt.toISOString(),
@@ -67,7 +65,6 @@ export function isAgentRunActivityEvent(value: unknown): value is AgentRunActivi
     typeof value.projectId === "string" &&
     typeof value.runId === "string" &&
     typeof value.threadId === "string" &&
-    typeof value.agentId === "string" &&
     isAgentRunStatus(value.status) &&
     typeof value.attempt === "number" &&
     Number.isFinite(value.attempt) &&
@@ -121,13 +118,11 @@ type AgentRunStreamEventBase = {
 } & (
   | {
       readonly threadId: string
-      readonly agentId: string
       readonly parentRunId?: never
     }
   | {
       readonly parentRunId: string
       readonly threadId?: never
-      readonly agentId?: never
     }
 )
 
@@ -293,7 +288,7 @@ export function agentRunStreamEventBase(
     occurredAt: occurredAt.toISOString(),
   }
   return run.kind === "conversation"
-    ? { ...common, threadId: run.threadId, agentId: run.agentId }
+    ? { ...common, threadId: run.threadId }
     : { ...common, parentRunId: run.parentRunId }
 }
 
@@ -312,13 +307,8 @@ export function isAgentRunStreamEvent(value: unknown): value is AgentRunStreamEv
     return false
   }
   const hasConversationLineage =
-    typeof value.threadId === "string" &&
-    typeof value.agentId === "string" &&
-    value.parentRunId === undefined
-  const hasSubagentLineage =
-    typeof value.parentRunId === "string" &&
-    value.threadId === undefined &&
-    value.agentId === undefined
+    typeof value.threadId === "string" && value.parentRunId === undefined
+  const hasSubagentLineage = typeof value.parentRunId === "string" && value.threadId === undefined
   if (!hasConversationLineage && !hasSubagentLineage) return false
 
   switch (value.type) {

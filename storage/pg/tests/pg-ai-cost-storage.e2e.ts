@@ -58,19 +58,17 @@ test("PgAiCostStorage returns direct agent attribution with each model-call page
     await storage.agents.threads.create({
       id: "thread_1",
       projectId: "project_1",
-      agentId: "research",
       ownerPrincipal: { type: "user", id: "user_1" },
     })
     const executionId = await createTestAgentExecution(
       { auth: storage.auth, executions: storage.executions },
-      { projectId: "project_1", agentId: "research", runId: "run_1" }
+      { projectId: "project_1", runId: "run_1", authority: "inherited" }
     )
     await storage.agents.runs.create({
       id: "run_1",
       projectId: "project_1",
       executionId,
       threadId: "thread_1",
-      agentId: "research",
       triggerMessageId: "message_1",
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
@@ -100,7 +98,6 @@ test("PgAiCostStorage returns direct agent attribution with each model-call page
         {
           attribution: {
             kind: "agent",
-            agentId: "research",
             agentRunId: "run_1",
             threadId: "thread_1",
           },
@@ -121,12 +118,10 @@ test("PgAiCostStorage returns child-agent attribution with each model-call page"
     await storage.agents.threads.create({
       id: "thread_1",
       projectId: "project_1",
-      agentId: "main",
       ownerPrincipal: { type: "user", id: "user_1" },
     })
     const parentExecutionId = await createTestAgentExecution(storage, {
       projectId: "project_1",
-      agentId: "main",
       runId: parentRunId,
       authority: "inherited",
     })
@@ -135,7 +130,6 @@ test("PgAiCostStorage returns child-agent attribution with each model-call page"
       projectId: "project_1",
       executionId: parentExecutionId,
       threadId: "thread_1",
-      agentId: "main",
       triggerMessageId: "message_1",
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["users"],
@@ -150,7 +144,7 @@ test("PgAiCostStorage returns child-agent attribution with each model-call page"
     })
     const childExecutionId = await createTestAgentExecution(storage, {
       projectId: "project_1",
-      agentId: "child",
+      actorId: "child",
       runId: childRunId,
       sourceExecutionId: parentExecutionId,
       authority: "inherited",

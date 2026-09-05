@@ -199,8 +199,6 @@ import type {
   ListActionRunsResponses,
   ListActionsData,
   ListActionsResponses,
-  ListAgentsData,
-  ListAgentsResponses,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesErrors,
   ListAgentThreadMessagesResponses,
@@ -1971,24 +1969,13 @@ export const headActionRunFileContent = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * List registered agents
- */
-export const listAgents = <ThrowOnError extends boolean = false>(
-  options?: Options<ListAgentsData, ThrowOnError>
-) =>
-  (options?.client ?? client).get<ListAgentsResponses, unknown, ThrowOnError>({
-    url: "/api/agents",
-    ...options,
-  })
-
-/**
- * Get agent metadata
+ * Get the project Agent
  */
 export const getAgent = <ThrowOnError extends boolean = false>(
-  options: Options<GetAgentData, ThrowOnError>
+  options?: Options<GetAgentData, ThrowOnError>
 ) =>
-  (options.client ?? client).get<GetAgentResponses, GetAgentErrors, ThrowOnError>({
-    url: "/api/agents/{agentId}",
+  (options?.client ?? client).get<GetAgentResponses, GetAgentErrors, ThrowOnError>({
+    url: "/api/agent",
     ...options,
   })
 

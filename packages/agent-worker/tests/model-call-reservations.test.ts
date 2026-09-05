@@ -20,7 +20,6 @@ async function setup(events: () => AsyncIterable<LanguageModelStreamEvent>) {
   await createTestAgentExecution(storage, {
     projectId,
     executionId,
-    agentId: "assistant",
     runId: "run",
   })
   const controller = createAiModelCallLimitController({ storage, projectId, requesterGroupIds: [] })

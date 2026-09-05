@@ -26,13 +26,12 @@ describe("SqliteStorage agents", () => {
       await storage.agents.threads.create({
         id: "thread",
         projectId: "project",
-        agentId: "sales",
         ownerPrincipal: { type: "user", id: "user" },
       })
       const executionId = await createTestAgentExecution(storage, {
         projectId: "project",
-        agentId: "sales",
         runId: "run",
+        authority: "inherited",
       })
       await expect(
         storage.agents.runs.create({
@@ -40,7 +39,6 @@ describe("SqliteStorage agents", () => {
           projectId: "project",
           executionId,
           threadId: "thread",
-          agentId: "sales",
           triggerMessageId: "message",
           spec: { model: { provider: "test", modelId: "test-model" } },
           requesterGroupIds: [],
@@ -61,7 +59,6 @@ describe("SqliteStorage agents", () => {
       await storage.agents.threads.create({
         id: "thr_1",
         projectId: "p",
-        agentId: "sales",
         ownerPrincipal: { type: "user", id: "usr_1" },
         createdAt: new Date("2026-06-23T10:00:00.000Z"),
       })
@@ -80,7 +77,6 @@ describe("SqliteStorage agents", () => {
       await storage.agents.threads.create({
         id: "thr_1",
         projectId: "p",
-        agentId: "sales",
         ownerPrincipal: { type: "user", id: "usr_1" },
         createdAt: new Date("2026-06-23T10:00:00.000Z"),
       })
@@ -90,14 +86,13 @@ describe("SqliteStorage agents", () => {
           if (!tx.auth) throw new Error("expected auth storage")
           const executionId = await createTestAgentExecution(
             { auth: tx.auth, executions: tx.executions },
-            { projectId: "p", agentId: "sales", runId: "run_1" }
+            { projectId: "p", runId: "run_1", authority: "inherited" }
           )
           await tx.agents?.runs.create({
             id: "run_1",
             projectId: "p",
             executionId,
             threadId: "thr_1",
-            agentId: "sales",
             triggerMessageId: "msg_1",
             spec: { model: { provider: "test", modelId: "test-model" } },
             requesterGroupIds: ["engineering"],

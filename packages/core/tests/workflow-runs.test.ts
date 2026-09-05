@@ -833,7 +833,7 @@ describe("InMemoryWorkflowRunStorage", () => {
     if (!workflowRun) throw new Error("Expected workflow run.")
     const wrongExecutionId = await createTestAgentExecution(storage.root, {
       projectId: "my-app",
-      agentId: "resolver",
+      actorId: "resolver",
       runId: "wf-run-agent:node:0",
       executionId: "test_agent_execution:wrong-parent",
       sourceExecutionId: "unrelated-workflow-execution",
@@ -843,13 +843,13 @@ describe("InMemoryWorkflowRunStorage", () => {
         projectId: "my-app",
         nodeRunId: "wf-run-agent:node:0",
         executionId: wrongExecutionId,
-        agentId: "resolver",
+        actorId: "resolver",
         prompt: "Resolve txn_1.",
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
     const executionId = await createTestAgentExecution(storage.root, {
       projectId: "my-app",
-      agentId: "resolver",
+      actorId: "resolver",
       runId: "wf-run-agent:node:0",
       sourceExecutionId: workflowRun.executionId,
     })
@@ -857,7 +857,7 @@ describe("InMemoryWorkflowRunStorage", () => {
       projectId: "my-app",
       nodeRunId: "wf-run-agent:node:0",
       executionId,
-      agentId: "resolver",
+      actorId: "resolver",
       prompt: "Resolve txn_1.",
     })
     expect(execution).toMatchObject({ status: "queued", attempt: 0 })

@@ -42,7 +42,7 @@ export async function assertWorkflowAgentNodeRunExecution(input: {
   readonly projectId: string
   readonly executionId: string
   readonly nodeRunId: string
-  readonly agentId: string
+  readonly actorId: string
   readonly workflowExecutionId: string
 }): Promise<void> {
   const execution = await findAgentRunExecution({
@@ -50,7 +50,7 @@ export async function assertWorkflowAgentNodeRunExecution(input: {
     projectId: input.projectId,
     executionId: input.executionId,
     runId: input.nodeRunId,
-    authority: { type: "managed", serviceAccountId: agentServiceAccountId(input.agentId) },
+    authority: { type: "managed", serviceAccountId: agentServiceAccountId(input.actorId) },
   })
   if (
     !execution ||

@@ -23,7 +23,6 @@ export class PgAgentThreadStore implements AgentThreadStore {
         INSERT INTO agent_threads (
           project_id,
           id,
-          agent_id,
           owner_principal_type,
           owner_principal_id,
           title,
@@ -33,7 +32,6 @@ export class PgAgentThreadStore implements AgentThreadStore {
         ) VALUES (
           ${input.projectId},
           ${input.id},
-          ${input.agentId},
           ${input.ownerPrincipal.type},
           ${input.ownerPrincipal.id},
           ${input.title ?? null},
@@ -66,27 +64,13 @@ export class PgAgentThreadStore implements AgentThreadStore {
   }
 
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
-    if (
-      (input.statuses !== undefined && input.statuses.length === 0) ||
-      (input.agentIds !== undefined && input.agentIds.length === 0)
-    ) {
+    if (input.statuses !== undefined && input.statuses.length === 0) {
       return { threads: [], hasMore: false, total: 0 }
     }
 
     const whereClauses = ["project_id = $1"]
     const params: SqlParameter[] = [input.projectId]
     let index = 2
-
-    if (input.agentId) {
-      whereClauses.push(`agent_id = $${index++}`)
-      params.push(input.agentId)
-    }
-
-    if (input.agentIds) {
-      const placeholders = input.agentIds.map(() => `$${index++}`)
-      whereClauses.push(`agent_id IN (${placeholders.join(", ")})`)
-      params.push(...input.agentIds)
-    }
 
     if (input.statuses) {
       const placeholders = input.statuses.map(() => `$${index++}`)

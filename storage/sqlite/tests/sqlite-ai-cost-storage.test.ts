@@ -138,7 +138,7 @@ describe("SqliteStorage AI accounting", () => {
       })
       const executionId = await createTestAgentExecution(storage, {
         projectId: "project_1",
-        agentId: "research",
+        actorId: "research",
         runId: nodeRunId,
         sourceExecutionId: workflowExecutionId,
       })
@@ -146,7 +146,7 @@ describe("SqliteStorage AI accounting", () => {
         projectId: "project_1",
         nodeRunId,
         executionId,
-        agentId: "research",
+        actorId: "research",
         prompt: "Research the incident.",
       })
       await storage.aiUsage.recordModelCall({
@@ -191,7 +191,7 @@ describe("SqliteStorage AI accounting", () => {
           {
             attribution: {
               kind: "workflowAgent",
-              agentId: "research",
+              agentStepId: "research-step",
               nodeRunId,
               workflowId,
               workflowRunId,
@@ -212,12 +212,10 @@ describe("SqliteStorage AI accounting", () => {
       await storage.agents.threads.create({
         id: "thread_1",
         projectId: "project_1",
-        agentId: "main",
         ownerPrincipal: { type: "user", id: "user_1" },
       })
       const parentExecutionId = await createTestAgentExecution(storage, {
         projectId: "project_1",
-        agentId: "main",
         runId: parentRunId,
         authority: "inherited",
       })
@@ -226,7 +224,6 @@ describe("SqliteStorage AI accounting", () => {
         projectId: "project_1",
         executionId: parentExecutionId,
         threadId: "thread_1",
-        agentId: "main",
         triggerMessageId: "message_1",
         spec: { model: { provider: "test", modelId: "test-model" } },
         requesterGroupIds: ["users"],
@@ -241,7 +238,7 @@ describe("SqliteStorage AI accounting", () => {
       })
       const childExecutionId = await createTestAgentExecution(storage, {
         projectId: "project_1",
-        agentId: "child",
+        actorId: "child",
         runId: childRunId,
         sourceExecutionId: parentExecutionId,
         authority: "inherited",
@@ -303,19 +300,17 @@ describe("SqliteStorage AI accounting", () => {
       await storage.agents.threads.create({
         id: "thread_1",
         projectId: "project_1",
-        agentId: "research",
         ownerPrincipal: { type: "user", id: "user_1" },
       })
       const executionId = await createTestAgentExecution(
         { auth: storage.auth, executions: storage.executions },
-        { projectId: "project_1", agentId: "research", runId: "run_1" }
+        { projectId: "project_1", runId: "run_1", authority: "inherited" }
       )
       await storage.agents.runs.create({
         id: "run_1",
         projectId: "project_1",
         executionId,
         threadId: "thread_1",
-        agentId: "research",
         triggerMessageId: "message_1",
         spec: { model: { provider: "test", modelId: "test-model" } },
         requesterGroupIds: [],
@@ -384,7 +379,7 @@ describe("SqliteStorage AI accounting", () => {
           modelCallCount: 1,
           costs: { ratedCallCount: 1, unpriceableCallCount: 0 },
         },
-        agents: [{ agentId: "research", modelCallCount: 1 }],
+        agents: [{ kind: "agent", modelCallCount: 1 }],
         workflows: [],
       })
       await expect(
@@ -398,7 +393,6 @@ describe("SqliteStorage AI accounting", () => {
           {
             attribution: {
               kind: "agent",
-              agentId: "research",
               agentRunId: "run_1",
               threadId: "thread_1",
             },

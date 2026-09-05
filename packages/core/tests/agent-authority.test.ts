@@ -4,16 +4,16 @@ import {
   agentServiceAccountId,
   ensureManagedAgentExecutionIdentity,
   resolveAgentExecutionAuthorization,
-  resolveInheritedMainAgentExecutionAuthorization,
+  resolveInheritedAgentExecutionAuthorization,
 } from "../src/agents/authority"
 import { SecurityRegistry } from "../src/security"
 
-const projectId = "main-agent-authority"
+const projectId = "agent-authority"
 const userId = "user-1"
 const now = new Date("2026-09-02T12:00:00.000Z")
 const security = new SecurityRegistry({})
 
-describe("main agent authority", () => {
+describe("conversation Agent authority", () => {
   test("revalidates access tokens and preserves their group constraint", async () => {
     const storage = new InMemoryStorage()
     await storage.auth.users.create({
@@ -50,7 +50,7 @@ describe("main agent authority", () => {
       credential: { type: "accessToken", id: "token-1" },
     } as const
 
-    const resolved = await resolveInheritedMainAgentExecutionAuthorization({
+    const resolved = await resolveInheritedAgentExecutionAuthorization({
       auth: storage.auth,
       projectId,
       authorizationRef: ref,
@@ -69,7 +69,7 @@ describe("main agent authority", () => {
       revokedAt: now,
     })
     await expect(
-      resolveInheritedMainAgentExecutionAuthorization({
+      resolveInheritedAgentExecutionAuthorization({
         auth: storage.auth,
         projectId,
         authorizationRef: ref,
@@ -83,8 +83,8 @@ describe("main agent authority", () => {
 describe("managed agent authority", () => {
   test("does not adopt a service account created outside the Agent runtime", async () => {
     const storage = new InMemoryStorage()
-    const agentId = "workflow:billing:step:review"
-    const serviceAccountId = agentServiceAccountId(agentId)
+    const actorId = "workflow:billing:step:review"
+    const serviceAccountId = agentServiceAccountId(actorId)
     await storage.auth.serviceAccounts.create({
       id: serviceAccountId,
       projectId,
@@ -98,7 +98,7 @@ describe("managed agent authority", () => {
       ensureManagedAgentExecutionIdentity({
         auth: storage.auth,
         projectId,
-        agentId,
+        actorId,
         name: "Billing review",
         description: "Managed workflow Agent task.",
         groupIds: ["billing"],
@@ -108,11 +108,11 @@ describe("managed agent authority", () => {
 
   test("fails closed when a managed Agent receives an external group membership", async () => {
     const storage = new InMemoryStorage()
-    const agentId = "workflow:billing:step:review"
+    const actorId = "workflow:billing:step:review"
     const identity = await ensureManagedAgentExecutionIdentity({
       auth: storage.auth,
       projectId,
-      agentId,
+      actorId,
       name: "Billing review",
       description: "Managed workflow Agent task.",
       groupIds: ["billing"],
@@ -129,7 +129,7 @@ describe("managed agent authority", () => {
       resolveAgentExecutionAuthorization({
         auth: storage.auth,
         projectId,
-        agentId,
+        actorId,
         authorizationRef: { type: "principal", principal: identity.principal },
         security,
       })

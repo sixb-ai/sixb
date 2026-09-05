@@ -31,7 +31,7 @@ import type {
   WorkflowRunStorage,
 } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
-import { prepareAgentModels } from "./context-budget"
+import { prepareAgentModel } from "./context-budget"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
 import { AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
@@ -157,7 +157,7 @@ export async function executeWorkflowAgentNode(
     const resolved = await resolveAgentExecutionAuthorization({
       auth: context.storage.auth,
       projectId: context.id,
-      agentId: actorId,
+      actorId,
       authorizationRef: durableExecution.authorizationRef,
       security: input.host.definitions.security,
     })
@@ -165,21 +165,20 @@ export async function executeWorkflowAgentNode(
       context,
       host: input.host,
       execution: durableExecution,
-      agentId: actorId,
+      actorId,
       runId: nodeRun.id,
       authorization: { type: "principal", context: resolved.context },
       authorPrincipal: resolved.identity.principal,
     })
-    const prepared = await prepareAgentModels([{ id: actorId, ...configuredPlan }])
-    const model = prepared.models.get(actorId)
-    if (!model)
-      throw new Error("[SixbAgentWorker] Workflow task model preparation returned no model.")
-    const plan = Object.freeze({ ...configuredPlan, model })
+    const prepared = await prepareAgentModel(configuredPlan)
+    const plan = Object.freeze({ ...configuredPlan, model: prepared.model })
     preparationComplete = true
     environment = await createWorkflowAgentNodeEnvironment({
       context: executionContext,
       plan,
       run: reserved,
+      workflowId: workflow.id,
+      stepId: node.agentStep.id,
       nodeInput: nodeRun.input,
       errorDetails: workflowAgentErrorDetails(nodeRun),
       signal: turnSignal,
@@ -396,7 +395,7 @@ async function resolveWorkflowAgentNodeExecution(
     )
   }
   const actorId = workflowAgentStepActorId(workflow.id, node.agentStep.id)
-  if (executionRecord.agentId !== actorId) {
+  if (executionRecord.actorId !== actorId) {
     throw createSixbError(
       "internal.unexpected",
       `[SixbAgentWorker] Workflow agent step '${node.agentStep.id}' execution identity does not match its definition.`,

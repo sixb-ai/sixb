@@ -35,7 +35,6 @@ import { createTestBrowserPolicy } from "./helpers"
 const projectId = "agent-ws-test-project"
 const runId = "agt_run_ws_1"
 const threadId = "thr_ws_1"
-const agentId = "business-analyst"
 
 describe("parseAgentStreamMessage", () => {
   test("accepts subscribe, replay, and unsubscribe messages", () => {
@@ -114,24 +113,30 @@ describe("/ws/agents", () => {
           runId,
           afterCursor: null,
         })
-        expect(await nextWsMessage(ws)).toMatchObject({
+        const replay = await nextWsMessage(ws)
+        expect(replay).toMatchObject({
           type: "record",
           record: { cursor: started?.cursor, name: "agent.run.started" },
         })
-        expect(await nextWsMessage(ws)).toMatchObject({
+        expect(replay).not.toHaveProperty("record.payload.agentId")
+        const snapshot = await nextWsMessage(ws)
+        expect(snapshot).toMatchObject({
           type: "run.snapshot",
           run: { id: runId, status: "running", attempt: 1 },
         })
+        expect(snapshot).not.toHaveProperty("run.agentId")
 
         const [chunk] = await appendAgentStreamRecord(sixb, {
           type: "agent.ui.chunk",
           runId,
           chunkIndex: 0,
         })
-        expect(await nextWsMessage(ws)).toMatchObject({
+        const live = await nextWsMessage(ws)
+        expect(live).toMatchObject({
           type: "record",
           record: { cursor: chunk?.cursor, name: "agent.ui.chunk" },
         })
+        expect(live).not.toHaveProperty("record.payload.agentId")
 
         ws.send(JSON.stringify({ type: "unsubscribe" }))
         expect(await nextWsMessage(ws)).toEqual({ type: "unsubscribed", runId })
@@ -150,12 +155,10 @@ describe("/ws/agents", () => {
       await agents.threads.create({
         id: threadId,
         projectId,
-        agentId,
         ownerPrincipal: { type: "system", id: "system" },
       })
       const executionId = await createTestAgentExecution(sixb.storage, {
         projectId,
-        agentId,
         runId,
       })
       await agents.runs.create({
@@ -163,7 +166,6 @@ describe("/ws/agents", () => {
         projectId,
         executionId,
         threadId,
-        agentId,
         triggerMessageId: "msg_queued",
         spec: { model: { provider: "test", modelId: "test-model" } },
         requesterGroupIds: [],
@@ -292,12 +294,10 @@ describe("canAccessAgentRunStream", () => {
     await agents.threads.create({
       id: threadId,
       projectId,
-      agentId,
       ownerPrincipal: owner,
     })
     const executionId = await createTestAgentExecution(sixb.storage, {
       projectId,
-      agentId,
       runId,
     })
     await agents.runs.create({
@@ -305,14 +305,13 @@ describe("canAccessAgentRunStream", () => {
       projectId,
       executionId,
       threadId,
-      agentId,
       triggerMessageId: "msg_ws_1",
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: ["support-users"],
     })
 
     await expect(
-      canAccessAgentRunStream(requestSdk(sixb, authz(owner, [agentId])), runId)
+      canAccessAgentRunStream(requestSdk(sixb, authz(owner, true)), runId)
     ).resolves.toEqual({
       ok: true,
     })
@@ -322,7 +321,7 @@ describe("canAccessAgentRunStream", () => {
     })
     await expect(
       canAccessAgentRunStream(
-        requestSdk(sixb, authz({ type: "user", id: "usr_other" }, [agentId])),
+        requestSdk(sixb, authz({ type: "user", id: "usr_other" }, true)),
         runId
       )
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
@@ -343,18 +342,17 @@ describe("canAccessAgentRunStream", () => {
     await agentStorage(sixb).threads.create({
       id: threadId,
       projectId,
-      agentId,
       ownerPrincipal: owner,
     })
 
     await expect(
-      canAccessAgentRunStream(requestSdk(sixb, authz(owner, [agentId])), "agt_run_missing")
+      canAccessAgentRunStream(requestSdk(sixb, authz(owner, true)), "agt_run_missing")
     ).resolves.toEqual({ ok: false, message: "Agent run not found." })
   })
 })
 
 describe("canAccessAgentThreadActivity", () => {
-  test("filters project activity to visible, agent-matching threads", async () => {
+  test("filters project activity by durable run, thread, project, and owner", async () => {
     const sixb = createSixbInstance<readonly OntologySource[]>({
       id: projectId,
       ontology: [],
@@ -369,36 +367,45 @@ describe("canAccessAgentThreadActivity", () => {
     await agentStorage(sixb).threads.create({
       id: threadId,
       projectId,
-      agentId,
       ownerPrincipal: owner,
     })
+    await advanceDurableRun(sixb, { type: "agent.run.started", runId })
     const event = {
       schemaVersion: 1 as const,
       type: "agent.run.activity" as const,
       projectId,
       runId,
       threadId,
-      agentId,
       status: "running" as const,
       attempt: 1,
       occurredAt: "2026-01-01T00:00:00.000Z",
     }
 
     await expect(
-      canAccessAgentThreadActivity(requestSdk(sixb, authz(owner, [agentId])), event)
+      canAccessAgentThreadActivity(requestSdk(sixb, authz(owner, true)), event)
     ).resolves.toBe(true)
     await expect(
       canAccessAgentThreadActivity(
-        requestSdk(sixb, authz({ type: "user", id: "usr_other" }, [agentId])),
+        requestSdk(sixb, authz({ type: "user", id: "usr_other" }, true)),
         event
       )
     ).resolves.toBe(false)
-    await expect(
-      canAccessAgentThreadActivity(requestSdk(sixb, authz(owner, [agentId])), {
-        ...event,
-        agentId: "other-agent",
-      })
-    ).resolves.toBe(false)
+    await expect(canAccessAgentThreadActivity(requestSdk(sixb, authz(owner)), event)).resolves.toBe(
+      false
+    )
+    // Regression proof: authorizing solely by thread accepts the forged run/project below.
+    for (const mismatch of [
+      { runId: "unknown-run" },
+      { threadId: "other-thread" },
+      { projectId: "other-project" },
+    ]) {
+      await expect(
+        canAccessAgentThreadActivity(requestSdk(sixb, authz(owner, true)), {
+          ...event,
+          ...mismatch,
+        })
+      ).resolves.toBe(false)
+    }
   })
 })
 
@@ -510,7 +517,6 @@ async function advanceDurableRun(
     await agents.threads.create({
       id: threadId,
       projectId,
-      agentId,
       ownerPrincipal: { type: "system", id: "system" },
     })
   }
@@ -520,7 +526,6 @@ async function advanceDurableRun(
   if (!run) {
     const executionId = await createTestAgentExecution(sixb.storage, {
       projectId,
-      agentId,
       runId: input.runId,
     })
     run = await agents.runs.create({
@@ -528,7 +533,6 @@ async function advanceDurableRun(
       projectId,
       executionId,
       threadId,
-      agentId,
       triggerMessageId: `msg_${input.runId}`,
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
@@ -567,7 +571,6 @@ function agentStreamPayload(
     projectId,
     runId: input.runId,
     threadId,
-    agentId,
     attempt: 1,
     occurredAt: "2026-06-27T16:00:00.000Z",
   }
@@ -716,12 +719,12 @@ function decodeWsData(value: unknown): string {
   return String(value)
 }
 
-function authz(principal: Principal, agentIds: readonly string[] = []): AuthorizationContext {
+function authz(principal: Principal, canRunAgent = false): AuthorizationContext {
   return {
     principal,
     groupIds: [],
     roleIds: [],
-    grants: { ...emptyGrantIndex(), "run:agent": new Set(agentIds) },
+    grants: { ...emptyGrantIndex(), "run:agent": canRunAgent },
   }
 }
 

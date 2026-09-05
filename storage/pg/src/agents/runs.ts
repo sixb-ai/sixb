@@ -5,7 +5,6 @@ import {
   assertSubagentRunResult,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
-import { MAIN_AGENT_ID } from "@sixb/core/internal/agents"
 import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
@@ -48,10 +47,6 @@ export class PgAgentRunStore implements AgentRunStore {
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      authority:
-        input.agentId === MAIN_AGENT_ID
-          ? { type: "inherited" }
-          : { type: "managed", agentId: input.agentId },
     })
 
     try {
@@ -68,7 +63,6 @@ export class PgAgentRunStore implements AgentRunStore {
             `[SixbPg] Agent thread '${input.threadId}' not found for project '${input.projectId}'.`
           )
         }
-
         if (thread.active_run_id !== null) {
           throw new AgentStorageError(
             "active_run_exists",
@@ -83,7 +77,6 @@ export class PgAgentRunStore implements AgentRunStore {
             execution_id,
             kind,
             thread_id,
-            agent_id,
             trigger_message_id,
             spec,
             requester_group_ids,
@@ -96,7 +89,6 @@ export class PgAgentRunStore implements AgentRunStore {
             ${input.executionId},
             ${"conversation"},
             ${input.threadId},
-            ${input.agentId},
             ${input.triggerMessageId},
             ${JSON.stringify(input.spec)}::text::jsonb,
             ${JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds))}::text::jsonb,
@@ -137,7 +129,6 @@ export class PgAgentRunStore implements AgentRunStore {
       projectId: input.projectId,
       executionId: input.executionId,
       runId: input.id,
-      authority: { type: "inherited" },
     })
 
     try {
@@ -418,11 +409,6 @@ export class PgAgentRunStore implements AgentRunStore {
     if (input.threadId) {
       whereClauses.push(`thread_id = $${index++}`)
       params.push(input.threadId)
-    }
-
-    if (input.agentId) {
-      whereClauses.push(`agent_id = $${index++}`)
-      params.push(input.agentId)
     }
 
     if (input.parentRunId) {

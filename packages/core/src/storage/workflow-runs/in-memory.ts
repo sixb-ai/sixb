@@ -628,7 +628,7 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
       projectId: input.projectId,
       executionId: input.executionId,
       nodeRunId: input.nodeRunId,
-      agentId: input.agentId,
+      actorId: input.actorId,
       workflowExecutionId: workflowRun.executionId,
     })
     if (node.status !== "running") {
@@ -655,7 +655,7 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
       projectId: input.projectId,
       nodeRunId: input.nodeRunId,
       executionId: input.executionId,
-      agentId: input.agentId,
+      actorId: input.actorId,
       status: "queued",
       prompt: input.prompt,
       attempt: 0,
@@ -747,7 +747,7 @@ export class InMemoryWorkflowAgentNodeRunStorage implements WorkflowAgentNodeRun
     const order = input.order ?? "desc"
     const filtered = [...this.runs.values()]
       .filter((run) => run.projectId === input.projectId)
-      .filter((run) => (input.agentId ? run.agentId === input.agentId : true))
+      .filter((run) => (input.actorId ? run.actorId === input.actorId : true))
       .filter((run) => (statuses ? statuses.has(run.status) : true))
       .sort((a, b) =>
         order === "asc"

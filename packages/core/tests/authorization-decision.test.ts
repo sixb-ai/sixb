@@ -33,7 +33,7 @@ function context(grants: {
   run?: readonly string[]
   syncs?: readonly string[]
   pipelines?: readonly string[]
-  agents?: readonly string[]
+  agent?: boolean
   logs?: boolean
 }): AuthorizationContext {
   return {
@@ -51,7 +51,7 @@ function context(grants: {
       "run:workflow": new Set(grants.run ?? []),
       "run:sync": new Set(grants.syncs ?? []),
       "run:pipeline": new Set(grants.pipelines ?? []),
-      "run:agent": new Set(grants.agents ?? []),
+      "run:agent": grants.agent ?? false,
       "observe:logs": new Set(grants.logs ? ["logs"] : []),
     },
   }
@@ -203,18 +203,17 @@ describe("evaluate", () => {
     })
   })
 
-  test("agent.run checks agent grants", () => {
-    expect(
-      evaluate(context({ agents: ["ops"] }), {
-        kind: "agent.run",
-        agentId: "ops",
-      })
-    ).toEqual({ allowed: true, requirements: ["run:agent:ops"], missing: [] })
+  test("agent.run checks the project Agent grant", () => {
+    expect(evaluate(context({ agent: true }), { kind: "agent.run" })).toEqual({
+      allowed: true,
+      requirements: ["run:agent"],
+      missing: [],
+    })
 
-    expect(evaluate(context({}), { kind: "agent.run", agentId: "ops" })).toEqual({
+    expect(evaluate(context({}), { kind: "agent.run" })).toEqual({
       allowed: false,
-      requirements: ["run:agent:ops"],
-      missing: ["run:agent:ops"],
+      requirements: ["run:agent"],
+      missing: ["run:agent"],
     })
   })
 

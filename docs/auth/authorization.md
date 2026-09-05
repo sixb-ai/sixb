@@ -96,17 +96,17 @@ A grant pairs a capability with the definitions it covers. Eight capability buil
 | `run:workflow` | `can.run(...)` | Start workflows | [Workflows](../workflows/overview.md) |
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
-| `run:agent` | `can.run(...)` | Run agents and read their threads | [Agents](../agents/overview.md) |
+| `run:agent` | `can.run(agent)` | Run the project Agent and read its threads | [Agents](../agents/overview.md) |
 | `manage:connector` | `can.manage(...)` | Authorize, select, disconnect, and revoke OAuth connector accounts | [Connectors](../data/connectors.md) |
-| `manage:aiUsage` | `can.manage("aiUsage")` | Create, edit, disable, and delete AI usage limits | [AI usage limits](../agents/usage-limits.md) |
+| `manage:aiUsage` | `can.manage(agent.usage)` | Create, edit, disable, and delete AI usage limits | [AI usage limits](../agents/usage-limits.md) |
 | `observe:logs` | `can.observe("logs")` | Read captured run logs | [Logging](../logging/overview.md) |
-| `observe:aiUsage` | `can.observe("aiUsage")` | Read project AI accounting and limit status | [AI usage limits](../agents/usage-limits.md) |
+| `observe:aiUsage` | `can.observe(agent.usage)` | Read project AI accounting and limit status | [AI usage limits](../agents/usage-limits.md) |
 
 `can.access` accepts the built-in `applications.atlas` and `applications.app` definitions.
-`can.view` resolves to `view:object` or `view:dataset` from the definition you pass; `can.run`
-picks between `run:workflow`, `run:sync`, `run:pipeline`, and `run:agent` the same way. Each is
-type-checked, so mixing target families in one call does not compile. `can.manage` accepts connector
-definitions or the `"aiUsage"` project surface. `can.observe` accepts `"logs"` or `"aiUsage"`;
+`can.view` resolves to `view:object` or `view:dataset` from the definition you pass. `can.run`
+accepts workflow, sync, and pipeline definitions; `can.run(agent)` grants the project's single
+Agent. Each is type-checked, so mixing target families in one call does not compile. `can.manage`
+accepts connector definitions or `agent.usage`. `can.observe` accepts `"logs"` or `agent.usage`;
 these independently gate captured [logs](../logging/overview.md) and
 [AI accounting](../agents/usage-limits.md).
 
@@ -132,10 +132,10 @@ Each builder takes one definition, a list, or a breadth selector.
 | Every workflow | `can.run(every.workflow())` |
 | Every sync | `can.run(every.sync())` |
 | Every pipeline | `can.run(every.pipeline())` |
-| Every agent | `can.run(every.agent())` |
+| Project Agent | `can.run(agent)` |
 | Every connector | `can.manage(every.connector())` |
-| Observe AI usage | `can.observe("aiUsage")` |
-| Manage AI limits | `can.manage("aiUsage")` |
+| Observe AI usage | `can.observe(agent.usage)` |
+| Manage AI limits | `can.manage(agent.usage)` |
 | Every application | `can.access(every.application())` |
 | Everything but a few | `can.view(every.object().except([Customer]))` |
 
@@ -346,7 +346,7 @@ handles, and process lifecycle stay on `SixbHost`.
 | `workflows.list`, `workflows.getById` | `run:workflow` |
 | `syncs.list`, `syncs.getById` | `run:sync` |
 | `pipelines.list`, `pipelines.getById` | `run:pipeline` |
-| `agents.request`, `agents.list`, `agents.getById`, `agents.threads.*`, `agents.runs.*` | `run:agent` |
+| `agent.get`, `agent.threads.*`, `agent.runs.*` | `run:agent` |
 | `events.read` | subject visibility (see below) |
 
 ### Why writing needs the read grant too

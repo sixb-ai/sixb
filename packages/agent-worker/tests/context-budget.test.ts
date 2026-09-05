@@ -1,16 +1,14 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import type { AgentContextConfig } from "@sixb/core"
 import {
   defineLanguageModel,
   type LanguageModelDefinition,
   ModelCatalogUnavailableError,
 } from "@sixb/core/models"
-import { prepareAgentModels, resolveAgentContextBudget } from "../src/context-budget"
+import { prepareAgentModel, resolveAgentContextBudget } from "../src/context-budget"
 import { WorkerTestModel } from "./worker-model-fixture"
 
-function agent(limits: Partial<LanguageModelDefinition> = {}, context?: AgentContextConfig) {
+function selection(limits: Partial<LanguageModelDefinition> = {}) {
   return {
-    id: "assistant",
     model: new WorkerTestModel({
       definition: defineLanguageModel({
         kind: "language",
@@ -20,28 +18,24 @@ function agent(limits: Partial<LanguageModelDefinition> = {}, context?: AgentCon
         ...limits,
       }),
     }),
-    ...(context === undefined ? {} : { loop: { context } }),
   }
 }
 
 describe("agent context budget resolution", () => {
   test("uses each agent's output reserve as its execution ceiling", async () => {
-    // Removal proof: store the unbounded model in prepareAgentModels; requests exceed the reserve.
-    const base = agent({ contextWindow: 32_768, maxOutputTokens: 16_384 })
+    // Removal proof: store the unbounded model in prepareAgentModel; requests exceed the reserve.
+    const base = selection({ contextWindow: 32_768, maxOutputTokens: 16_384 })
     const outputs: (number | undefined)[] = []
     base.model.stream = async (request) => {
       outputs.push(request.maxOutputTokens)
       return { events: (async function* () {})() }
     }
-    const prepared = await prepareAgentModels([
-      base,
-      { ...base, id: "reasoner", reasoning: { budgetTokens: 10_000 } },
-    ])
-    for (const id of [base.id, "reasoner"]) {
-      const model = prepared.models.get(id)!
-      const budget = prepared.budgets.get(id)!
+    const prepared = await Promise.all(
+      [base, { ...base, reasoning: { budgetTokens: 10_000 } }].map(prepareAgentModel)
+    )
+    for (const { model, budget } of prepared) {
       await model.stream({
-        callId: id,
+        callId: "call",
         tools: [],
         messages: [],
         signal: new AbortController().signal,
@@ -50,18 +44,15 @@ describe("agent context budget resolution", () => {
     }
     expect(outputs).toEqual([8_192, 10_001])
     await expect(
-      prepareAgentModels([
-        {
-          ...base,
-          reasoning: { budgetTokens: 10_000 },
-          loop: { context: { reserveTokens: 8_192 } },
-        },
-      ])
+      prepareAgentModel({
+        ...selection({ contextWindow: 32_768, maxOutputTokens: 8_192 }),
+        reasoning: { budgetTokens: 10_000 },
+      })
     ).rejects.toThrow("reasoning")
   })
   test("pins custom metadata and clamps execution to its resolved output ceiling", async () => {
     // Regression proof: store the original model instead of the bounded prepared model.
-    const base = agent()
+    const base = selection()
     const outputs: (number | undefined)[] = []
     const model = {
       ...base.model,
@@ -84,10 +75,10 @@ describe("agent context budget resolution", () => {
         return { events: (async function* () {})() }
       },
     }
-    const prepared = await prepareAgentModels([{ ...base, model }])
-    const resolved = prepared.models.get(base.id)!
+    const prepared = await prepareAgentModel({ ...base, model })
+    const resolved = prepared.model
     expect(resolved.definition.capabilities.inputMediaTypes).toEqual(["image/png"])
-    expect(prepared.budgets.get(base.id)?.windowTokens).toBe(resolved.definition.contextWindow!)
+    expect(prepared.budget.windowTokens).toBe(resolved.definition.contextWindow!)
     for (const maxOutputTokens of [undefined, 100, 900]) {
       await resolved.stream({
         callId: "test",
@@ -103,7 +94,7 @@ describe("agent context budget resolution", () => {
   // Regression proof: remove maxInputTokens from the budget calculation.
   test("respects separate context and input limits", () => {
     expect(
-      resolveAgentContextBudget(agent({ contextWindow: 1_050_000, maxInputTokens: 922_000 }))
+      resolveAgentContextBudget(selection({ contextWindow: 1_050_000, maxInputTokens: 922_000 }))
     ).toEqual({
       windowTokens: 1_050_000,
       inputBudgetTokens: 922_000,
@@ -114,41 +105,16 @@ describe("agent context budget resolution", () => {
   })
 
   test("reserves space conservatively when only an input limit is known", () => {
-    expect(resolveAgentContextBudget(agent({ maxInputTokens: 32_000 }))).toMatchObject({
+    expect(resolveAgentContextBudget(selection({ maxInputTokens: 32_000 }))).toMatchObject({
       windowTokens: 32_000,
       inputBudgetTokens: 24_000,
       source: "model",
     })
   })
 
-  test("treats an explicit window as authoritative", () => {
-    expect(
-      resolveAgentContextBudget(
-        agent({ contextWindow: 32_000, maxInputTokens: 24_000 }, { windowTokens: 1_500_000 })
-      )
-    ).toEqual({
-      windowTokens: 1_500_000,
-      inputBudgetTokens: 1_483_616,
-      reserveTokens: 16_384,
-      keepRecentTokens: 20_000,
-      source: "config",
-    })
-  })
-
-  test("applies advanced overrides to a model-derived window", () => {
-    expect(
-      resolveAgentContextBudget(
-        agent(
-          { contextWindow: 1_050_000, maxInputTokens: 922_000 },
-          { reserveTokens: 200_000, keepRecentTokens: 10_000 }
-        )
-      )
-    ).toMatchObject({ inputBudgetTokens: 850_000, keepRecentTokens: 10_000, source: "model" })
-  })
-
   // Regression proof: remove the fallback in resolveAgentContextBudget.
-  test("uses the 128k fallback only when no model limit or override is available", () => {
-    expect(resolveAgentContextBudget(agent())).toEqual({
+  test("uses the 128k fallback only when no model limit is available", () => {
+    expect(resolveAgentContextBudget(selection())).toEqual({
       windowTokens: 128_000,
       inputBudgetTokens: 111_616,
       reserveTokens: 16_384,
@@ -157,18 +123,18 @@ describe("agent context budget resolution", () => {
     })
   })
 
-  test("rejects overrides that cannot produce a safe input budget", () => {
+  test("rejects reasoning budgets that exhaust the context window", () => {
     expect(() =>
-      resolveAgentContextBudget(agent({}, { windowTokens: 10_000, reserveTokens: 10_000 }))
+      resolveAgentContextBudget({
+        ...selection({ contextWindow: 10_000 }),
+        reasoning: { budgetTokens: 10_000 },
+      })
     ).toThrow("reserveTokens must be less than the resolved context window")
-    expect(() =>
-      resolveAgentContextBudget(agent({}, { windowTokens: 10_000, keepRecentTokens: 9_000 }))
-    ).toThrow("keepRecentTokens must be less than the resolved input budget")
   })
 
-  // Regression proof: skip model resolution or remove its per-instance cache.
-  test("resolves shared model instances once with separate budgets for each agent", async () => {
-    const base = agent()
+  // Regression proof: skip model resolution and the discovered window is lost.
+  test("resolves model metadata without mutating the configured binding", async () => {
+    const base = selection()
     let calls = 0
     const model = Object.assign(base.model, {
       resolve: async () => {
@@ -178,19 +144,15 @@ describe("agent context budget resolution", () => {
         })
       },
     })
-    const { budgets } = await prepareAgentModels([
-      { ...base, model },
-      { ...base, id: "other", model, loop: { context: { reserveTokens: 4_000 } } },
-    ])
+    const { budget } = await prepareAgentModel({ ...base, model })
     expect(calls).toBe(1)
-    expect(budgets.get("assistant")?.inputBudgetTokens).toBe(24_000)
-    expect(budgets.get("other")?.inputBudgetTokens).toBe(28_000)
+    expect(budget.inputBudgetTokens).toBe(24_000)
     expect(model.definition.contextWindow).toBeUndefined()
   })
 
   test("does not conflate different bindings of the same provider and model", async () => {
     const bindings = [32_000, 64_000].map((contextWindow, index) => {
-      const base = agent()
+      const base = selection()
       return {
         ...base,
         id: `agent-${index}`,
@@ -202,16 +164,15 @@ describe("agent context budget resolution", () => {
         }),
       }
     })
-    const { budgets } = await prepareAgentModels(bindings)
-    expect([...budgets.values()].map((budget) => budget.windowTokens)).toEqual([32_000, 64_000])
+    const prepared = await Promise.all(bindings.map(prepareAgentModel))
+    expect(prepared.map(({ budget }) => budget.windowTokens)).toEqual([32_000, 64_000])
   })
 
-  test("starts offline with an explicit override or sufficient local metadata", async () => {
+  test("starts offline with sufficient local metadata", async () => {
     let calls = 0
     for (const base of [
-      agent({}, { windowTokens: 32_000 }),
-      agent({ contextWindow: 32_000 }),
-      agent({ maxInputTokens: 32_000 }),
+      selection({ contextWindow: 32_000 }),
+      selection({ maxInputTokens: 32_000 }),
     ]) {
       const model = Object.assign(base.model, {
         resolve: async (options?: { offline?: boolean }) => {
@@ -220,9 +181,7 @@ describe("agent context budget resolution", () => {
           throw new Error("offline")
         },
       })
-      expect(
-        (await prepareAgentModels([{ ...base, model }])).budgets.get("assistant")?.windowTokens
-      ).toBe(32_000)
+      expect((await prepareAgentModel({ ...base, model })).budget.windowTokens).toBe(32_000)
     }
     expect(calls).toBe(0)
   })
@@ -233,7 +192,7 @@ describe("agent context budget resolution", () => {
     true,
   ])("starts and warns once per model (catalog unavailable: %s)", async (unavailable) => {
     const warning = spyOn(console, "warn").mockImplementation(() => {})
-    const base = agent()
+    const base = selection()
     try {
       const modes: (boolean | undefined)[] = []
       const model = Object.assign(base.model, {
@@ -243,12 +202,9 @@ describe("agent context budget resolution", () => {
           return base.model
         },
       })
-      const prepared = await prepareAgentModels([
-        { ...base, model },
-        { ...base, id: "other", model },
-      ])
-      expect(prepared.budgets.get(base.id)?.source).toBe("fallback")
-      expect(prepared.models.get(base.id)?.definition.maxOutputTokens).toBe(16_384)
+      const prepared = await prepareAgentModel({ ...base, model })
+      expect(prepared.budget.source).toBe("fallback")
+      expect(prepared.model.definition.maxOutputTokens).toBe(16_384)
       expect(modes).toEqual(unavailable ? [false, true] : [false])
       expect(warning).toHaveBeenCalledTimes(1)
       expect(warning.mock.calls[0]?.[0]).toContain("128,000")
@@ -259,7 +215,7 @@ describe("agent context budget resolution", () => {
   })
 
   test("rejects invalid definitions, arbitrary resolver failures, and mismatched identities", async () => {
-    const base = agent()
+    const base = selection()
     for (const resolve of [
       async () => {
         throw new Error("resolver bug")
@@ -274,10 +230,10 @@ describe("agent context budget resolution", () => {
         }),
     ]) {
       const model = Object.assign(base.model, { resolve })
-      await expect(prepareAgentModels([{ ...base, model }])).rejects.toThrow()
+      await expect(prepareAgentModel({ ...base, model })).rejects.toThrow()
     }
-    const invalid = agent()
+    const invalid = selection()
     Object.assign(invalid.model, { definition: { ...invalid.model.definition, contextWindow: -1 } })
-    await expect(prepareAgentModels([invalid])).rejects.toThrow()
+    await expect(prepareAgentModel(invalid)).rejects.toThrow()
   })
 })

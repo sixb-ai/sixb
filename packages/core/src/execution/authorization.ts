@@ -1,5 +1,5 @@
 import type { Principal } from "../auth"
-import { emptyGrantSets, GRANT_KIND_KEYS } from "../authorization/grant-kinds"
+import { emptyGrantSets, TARGETED_GRANT_KIND_KEYS } from "../authorization/grant-kinds"
 import type { AuthorizationContext, GrantIndex } from "../authorization/types"
 import { createSixbError } from "../errors/internal"
 import {
@@ -44,7 +44,7 @@ type PrincipalAuthorizationContext = Omit<AuthorizationContext, "principal"> & {
 interface AgentExecutionBinding {
   readonly type: "agent"
   readonly executionId: string
-  readonly agentId?: string
+  readonly actorId?: string
   readonly runId: string
 }
 
@@ -62,7 +62,7 @@ export function createPrincipalRuntimeAuthorization(input: {
 export function createAgentRuntimeAuthorization(input: {
   readonly projectId: string
   readonly executionId: string
-  readonly agentId?: string
+  readonly actorId?: string
   readonly runId: string
   readonly authority:
     | {
@@ -76,12 +76,12 @@ export function createAgentRuntimeAuthorization(input: {
     | { readonly type: "disabled" }
 }): RuntimeAuthorization {
   assertNonEmpty(input.executionId, "Execution id")
-  if (input.agentId !== undefined) assertNonEmpty(input.agentId, "Agent id")
+  if (input.actorId !== undefined) assertNonEmpty(input.actorId, "Agent actor id")
   assertNonEmpty(input.runId, "Agent run id")
   const executionBinding: AgentExecutionBinding = {
     type: "agent",
     executionId: input.executionId,
-    ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+    ...(input.actorId === undefined ? {} : { actorId: input.actorId }),
     runId: input.runId,
   }
 
@@ -276,7 +276,7 @@ export function resolveExecutionScopeAuthorization(
       if (
         resolved.executionBinding?.type !== "agent" ||
         resolved.executionBinding.executionId !== execution.id ||
-        resolved.executionBinding.agentId !== execution.executor.agentId ||
+        resolved.executionBinding.actorId !== execution.executor.actorId ||
         resolved.executionBinding.runId !== execution.executor.runId
       ) {
         throw invalidExecutionAuthority(
@@ -334,7 +334,8 @@ function snapshotAuthorizationContext(
 ): PrincipalAuthorizationContext {
   const principal = snapshotAuthorizablePrincipal(context.principal)
   const grants = emptyGrantSets()
-  for (const kind of GRANT_KIND_KEYS) {
+  grants["run:agent"] = context.grants["run:agent"]
+  for (const kind of TARGETED_GRANT_KIND_KEYS) {
     grants[kind] = new Set(context.grants[kind])
   }
   const frozenGrants: GrantIndex = Object.freeze(grants)

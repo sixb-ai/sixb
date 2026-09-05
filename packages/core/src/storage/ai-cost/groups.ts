@@ -47,13 +47,12 @@ export interface AiModelCallGroupRow {
   readonly amount_high: string | null
   readonly amount_middle: string | null
   readonly amount_low: string | null
-  readonly root_agent_id: string | null
   readonly root_agent_run_id: string | null
   readonly root_thread_id: string | null
   readonly direct_kind: string | null
   readonly direct_run_id: string | null
   readonly parent_run_id: string | null
-  readonly workflow_agent_id: string | null
+  readonly workflow_agent_step_id: string | null
   readonly workflow_node_run_id: string | null
   readonly workflow_id: string | null
   readonly workflow_run_id: string | null
@@ -63,22 +62,21 @@ export function aiModelCallGroupFragmentFromRow(
   row: AiModelCallGroupRow
 ): AiModelCallGroupFragment {
   let attribution: AiAccountingAttribution | undefined
-  if (row.root_agent_run_id && row.root_agent_id && row.root_thread_id) {
+  if (row.root_agent_run_id && row.root_thread_id) {
     attribution = {
       kind: "agent",
-      agentId: row.root_agent_id,
       agentRunId: row.root_agent_run_id,
       threadId: row.root_thread_id,
     }
   } else if (
-    row.workflow_agent_id &&
+    row.workflow_agent_step_id &&
     row.workflow_node_run_id &&
     row.workflow_id &&
     row.workflow_run_id
   ) {
     attribution = {
       kind: "workflowAgent",
-      agentId: row.workflow_agent_id,
+      agentStepId: row.workflow_agent_step_id,
       nodeRunId: row.workflow_node_run_id,
       workflowId: row.workflow_id,
       workflowRunId: row.workflow_run_id,

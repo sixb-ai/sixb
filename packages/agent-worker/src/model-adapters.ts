@@ -31,8 +31,9 @@ import { agentModelToolSpecFromDefinition } from "./tools/model-spec"
 import type { AgentToolModelOutput } from "./tools/result-output"
 
 export type AgentErrorDetails =
-  | { readonly agentId: string; readonly runId: string }
+  | { readonly threadId: string; readonly runId: string }
   | { readonly parentRunId: string; readonly runId: string }
+  | { readonly workflowId: string; readonly agentStepId: string; readonly runId: string }
   | {
       readonly agentStepId: string
       readonly workflowId: string
@@ -127,9 +128,14 @@ function modelToolFromAgentDefinition(
 }
 
 function agentToolRunErrorDetails(run: AgentToolRunInfo): AgentErrorDetails {
-  return run.agentId === undefined
-    ? { parentRunId: run.parentRunId, runId: run.id }
-    : { agentId: run.agentId, runId: run.id }
+  switch (run.kind) {
+    case "conversation":
+      return { threadId: run.threadId, runId: run.id }
+    case "subagent":
+      return { parentRunId: run.parentRunId, runId: run.id }
+    case "workflow":
+      return { workflowId: run.workflowId, agentStepId: run.stepId, runId: run.id }
+  }
 }
 
 type ToolOutcome =

@@ -31,7 +31,6 @@ function runRecord(
     projectId: "stream-records-tests",
     executionId: "exec_agt_run_1",
     threadId: "agt_thr_1",
-    agentId: "assistant",
     triggerMessageId: "agt_msg_1",
     requesterGroupIds: [],
     status: "cancelled",
@@ -77,6 +76,8 @@ describe("agent run stream records", () => {
       occurredAt: OCCURRED_AT.toISOString(),
     })
     expect(isAgentRunActivityEvent(event)).toBe(true)
+    // Regression proof: restoring agentId in either event builder fails these absence checks.
+    expect(event).not.toHaveProperty("agentId")
     expect(isAgentRunActivityEvent({ ...event, status: "thinking" })).toBe(false)
   })
 
@@ -92,7 +93,6 @@ describe("agent run stream records", () => {
       projectId: "stream-records-tests",
       runId: "agt_run_1",
       threadId: "agt_thr_1",
-      agentId: "assistant",
       attempt: 2,
       status: "failed",
       finishReason: "error",
@@ -117,7 +117,9 @@ describe("agent run stream records", () => {
       occurredAt: "2026-01-02T03:04:05.000Z",
     })
     expect(isAgentRunStreamEvent(event)).toBe(true)
-    expect(isAgentRunStreamEvent({ ...event, threadId: "agt_thr_1", agentId: "main" })).toBe(false)
+    expect(isAgentRunStreamEvent({ ...event, threadId: "agt_thr_1", agentId: "legacy" })).toBe(
+      false
+    )
 
     await publishAgentRunFinished(broker, run)
     const activity = await broker.read({
@@ -147,7 +149,6 @@ describe("agent run stream records", () => {
       projectId: "stream-records-tests",
       runId: "agt_run_1",
       threadId: "agt_thr_1",
-      agentId: "assistant",
       attempt: 1,
       occurredAt: OCCURRED_AT.toISOString(),
       reason: "threshold" as const,

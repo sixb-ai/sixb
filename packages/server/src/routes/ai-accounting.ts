@@ -63,7 +63,10 @@ function serializeOverview(overview: AiAccountingOverview) {
       ...serializeAggregate(model),
     })),
     agents: overview.agents.map((agent) => ({
-      agentId: agent.agentId,
+      kind: agent.kind,
+      ...(agent.kind === "workflowAgent"
+        ? { workflowId: agent.workflowId, agentStepId: agent.agentStepId }
+        : {}),
       ...serializeAggregate(agent),
     })),
     workflows: overview.workflows.map((workflow) => ({
@@ -169,7 +172,7 @@ async function serializeGroup(
   // Accounting is project-wide; conversation titles and delegation keys remain private.
   const thread =
     group.attribution?.kind === "agent" && sixb
-      ? await sixb.agents.threads.getById(group.attribution.threadId)
+      ? await sixb.agent.threads.getById(group.attribution.threadId)
       : null
   const childIds = thread
     ? group.executions.flatMap((execution) =>

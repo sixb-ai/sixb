@@ -185,7 +185,6 @@ export class InMemoryStorage implements Storage {
     if (directRun?.kind === "conversation") {
       return {
         kind: "agent",
-        agentId: directRun.agentId,
         agentRunId: directRun.id,
         threadId: directRun.threadId,
       }
@@ -209,7 +208,7 @@ export class InMemoryStorage implements Storage {
     if (!node) return undefined
     return {
       kind: "workflowAgent",
-      agentId: agentRun.agentId,
+      agentStepId: node.nodeId,
       nodeRunId: agentRun.nodeRunId,
       workflowId: node.workflowId,
       workflowRunId: node.workflowRunId,

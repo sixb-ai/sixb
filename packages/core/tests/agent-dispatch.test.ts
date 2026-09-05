@@ -9,12 +9,10 @@ async function createQueuedRun(storage: InMemoryStorage, id = "run-1") {
   await storage.agents.threads.create({
     id: `thread-${id}`,
     projectId: PROJECT_ID,
-    agentId: "assistant",
     ownerPrincipal: { type: "system", id: "system" },
   })
   const executionId = await createTestAgentExecution(storage, {
     projectId: PROJECT_ID,
-    agentId: "assistant",
     runId: id,
   })
   return storage.agents.runs.create({
@@ -22,7 +20,6 @@ async function createQueuedRun(storage: InMemoryStorage, id = "run-1") {
     projectId: PROJECT_ID,
     executionId,
     threadId: `thread-${id}`,
-    agentId: "assistant",
     triggerMessageId: `message-${id}`,
     spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],

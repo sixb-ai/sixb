@@ -1,4 +1,4 @@
-import { applications, can, defineRole, every } from "@sixb/core"
+import { agent, applications, can, defineRole, every } from "@sixb/core"
 import { acknowledgeNote } from "../../actions/acknowledge-note"
 import { teamNotesDataset } from "../../datasets/auth-data"
 import { Note } from "../../ontology/note"
@@ -30,7 +30,7 @@ export const securityAdminFullAccess = defineRole("security-admin.full-access", 
     can.apply(every.action()),
     can.run(every.workflow()),
     can.observe("logs"),
-    can.observe("aiUsage"),
-    can.manage("aiUsage"),
+    can.observe(agent.usage),
+    can.manage(agent.usage),
   ],
 })

@@ -448,6 +448,7 @@ export type {
 
 export type {
   AccessGrant,
+  AgentRunGrant,
   AppendGrant,
   ApplicationDefinition,
   ApplyGrant,
@@ -846,8 +847,8 @@ export type { ActionRunsRuntime, ActionsRuntime } from "./actions/execution"
 export type {
   AgentRunListResult,
   AgentRunsRuntime,
+  AgentRuntime,
   AgentRunView,
-  AgentsRuntime,
   AgentThreadsRuntime,
   ExecutionAgentRunResult,
 } from "./agents/execution"
@@ -974,18 +975,16 @@ export type {
 // ── Agents ──────────────────────────────────────────────────
 
 export type {
-  AgentContextConfig,
   AgentContextEntryInput,
   AgentContextInput,
   AgentContextOrigin,
   AgentContextPart,
-  AgentDefinition,
+  AgentDescriptor,
   AgentFileDataProjection,
   AgentFileDataResolverInput,
   AgentFilePart,
   AgentInboundUiMessage,
   AgentInboundUiMessagePart,
-  AgentLoopConfig,
   AgentMessage,
   AgentMessagePart,
   AgentMessagePartType,
@@ -1029,7 +1028,7 @@ export type {
   AgentUiMessage,
   AgentUiMessagePart,
   AgentUiToolPart,
-  DefineAgentConfig,
+  AgentUsageReference,
   InferAgentToolInput,
   InferAgentToolInputSchema,
   RequestAgentRunInput,
@@ -1043,14 +1042,13 @@ export {
   agent,
   agentContext,
   agentContextIdentity,
-  defineAgent,
   defineAgentTool,
-  isAgentDefinition,
   MAX_AGENT_APP_STATE_ENTRY_BYTES,
   MAX_AGENT_APP_STATE_TOTAL_BYTES,
   MAX_AGENT_CONTEXT_ENTRIES,
   requestAgentRun,
 } from "./agents"
+export type { AgentThreadRecord, ListAgentThreadsResult } from "./storage/agents"
 
 // ── Models ──────────────────────────────────────────────────
 

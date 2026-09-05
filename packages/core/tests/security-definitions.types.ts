@@ -1,5 +1,5 @@
 import type { AuthSessionAudience, SecurityContext } from "../src"
-import { applications, can, defineGroup, defineMembershipPolicy } from "../src"
+import { agent, applications, can, defineGroup, defineMembershipPolicy } from "../src"
 
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
@@ -9,7 +9,11 @@ const securityAdmins = defineGroup("security-admins")
 const commercial = defineGroup("commercial")
 
 can.observe("logs")
+can.observe(agent.usage)
+can.manage(agent.usage)
+// @ts-expect-error AI usage permissions use the typed project capability reference.
 can.observe("aiUsage")
+// @ts-expect-error AI usage permissions use the typed project capability reference.
 can.manage("aiUsage")
 // @ts-expect-error observe only accepts registered observability surfaces.
 can.observe("events")

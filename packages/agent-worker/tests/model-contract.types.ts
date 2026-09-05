@@ -1,10 +1,9 @@
-import type { AgentDefinition, AgentMessage } from "@sixb/core"
+import type { AgentMessage } from "@sixb/core"
 import type { ModelLoopResult, RunModelLoopInput } from "@sixb/core/internal/agents"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type { LanguageModel, ModelMessage, ModelTool } from "@sixb/core/models"
 
 declare const model: LanguageModel
-declare const agent: AgentDefinition
 declare const messages: readonly AgentMessage[]
 declare const tools: readonly ModelTool[]
 declare const signal: AbortSignal
@@ -12,10 +11,10 @@ declare const signal: AbortSignal
 const modelMessages: readonly ModelMessage[] = toModelMessages(messages)
 const _modelLoop = runModelLoop({
   model,
-  messages: [{ role: "system", content: agent.instructions }, ...modelMessages],
+  messages: [{ role: "system", content: "Follow project instructions." }, ...modelMessages],
   tools,
-  reasoning: agent.reasoning,
-  maxSteps: agent.loop?.stopWhen?.maxSteps ?? 100,
+  reasoning: "high",
+  maxSteps: 100,
   signal,
 })
 

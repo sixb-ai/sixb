@@ -27,17 +27,18 @@ aggregate limit is exhausted.
 
 ## Authorization
 
-AI accounting and current consumption require `can.observe("aiUsage")`. Reading policy definitions
-requires either observation or the separate `can.manage("aiUsage")` grant, while policy changes
-require management.
+AI accounting and current consumption require `can.observe(agent.usage)`. Reading policy definitions
+requires either observation or the separate `can.manage(agent.usage)` grant, while policy changes
+require management. These project-wide grants cover conversations, workflow tasks, and sub-agents;
+`can.run(agent)` grants neither observation nor management.
 
 ```ts
-import { can, defineRole } from "@sixb/core"
+import { agent, can, defineRole } from "@sixb/core"
 import { financeAdmins } from "../groups/finance-admins"
 
 export const aiUsageOperators = defineRole("ai-usage.operators", {
   grantedTo: [financeAdmins],
-  grants: [can.observe("aiUsage"), can.manage("aiUsage")],
+  grants: [can.observe(agent.usage), can.manage(agent.usage)],
 })
 ```
 

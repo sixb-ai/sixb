@@ -13,7 +13,7 @@ export interface PrepareAgentSandboxApiContextInput {
   readonly sandbox: Sandbox
   readonly apiBaseUrl: string
   readonly projectId: string
-  readonly agentId?: string
+  readonly actorId?: string
   readonly threadId?: string
   readonly runId: string
   readonly attachments?: PreparedAgentAttachmentContext
@@ -42,7 +42,7 @@ export async function prepareAgentSandboxApiContext(
   const runContext = JSON.stringify(
     {
       projectId: input.projectId,
-      ...(input.agentId === undefined ? {} : { agentId: input.agentId }),
+      ...(input.actorId === undefined ? {} : { actorId: input.actorId }),
       ...(input.threadId ? { threadId: input.threadId } : {}),
       runId: input.runId,
       runtimeProfile: AGENT_RUNTIME_PROFILE,
@@ -103,7 +103,7 @@ export async function prepareAgentSandboxApiContext(
       SIXB_OUTPUT_DIR: outputDir,
       SIXB_OUTPUT_STAGING_DIR: outputStagingDir,
       SIXB_PROJECT_ID: input.projectId,
-      ...(input.agentId === undefined ? {} : { SIXB_AGENT_ID: input.agentId }),
+      ...(input.actorId === undefined ? {} : { SIXB_ACTOR_ID: input.actorId }),
       ...(input.threadId ? { SIXB_THREAD_ID: input.threadId } : {}),
       SIXB_RUN_ID: input.runId,
     },

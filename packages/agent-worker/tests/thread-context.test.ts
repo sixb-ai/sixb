@@ -1,10 +1,9 @@
 import { expect, test } from "bun:test"
-import { defineAgent, InMemoryBlobStorage, InMemoryStorage, type Storage } from "@sixb/core"
+import { InMemoryBlobStorage, InMemoryStorage, type Storage } from "@sixb/core"
 import { toModelMessages } from "@sixb/core/internal/agents"
 import type { ModelMessage, ModelUsage } from "@sixb/core/models"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { NOOP_STREAM_SINK } from "../src/stream-sink"
 import type { AgentWorkerStorage } from "../src/types"
@@ -58,7 +57,6 @@ async function seedThread(withCheckpoint: boolean) {
   await agents.threads.create({
     id: threadId,
     projectId,
-    agentId: "assistant",
     ownerPrincipal: { type: "user", id: "user" },
   })
   await agents.messages.append({
@@ -72,7 +70,6 @@ async function seedThread(withCheckpoint: boolean) {
 
   const firstExecutionId = await createTestAgentExecution(storage, {
     projectId,
-    agentId: "assistant",
     runId: "run_1",
   })
   await agents.runs.create({
@@ -80,7 +77,6 @@ async function seedThread(withCheckpoint: boolean) {
     projectId,
     executionId: firstExecutionId,
     threadId,
-    agentId: "assistant",
     triggerMessageId: "message_1",
     spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
@@ -118,7 +114,6 @@ async function seedThread(withCheckpoint: boolean) {
   })
   const secondExecutionId = await createTestAgentExecution(storage, {
     projectId,
-    agentId: "assistant",
     runId: "run_2",
   })
   await agents.runs.create({
@@ -126,7 +121,6 @@ async function seedThread(withCheckpoint: boolean) {
     projectId,
     executionId: secondExecutionId,
     threadId,
-    agentId: "assistant",
     triggerMessageId: "message_3",
     spec: { model: { provider: "test", modelId: "test-model" } },
     requesterGroupIds: [],
@@ -169,13 +163,14 @@ async function seedThread(withCheckpoint: boolean) {
 async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
   const seeded = await seedThread(withCheckpoint)
   let prompt: readonly ModelMessage[] | undefined
-  const agent = defineAgent("assistant", {
-    name: "Assistant",
+  const plan = {
     instructions: "Answer clearly.",
     model: captureModel((value) => {
       prompt = value
     }),
-  })
+    tools: [],
+    maxSteps: 4,
+  }
 
   await runAgentTurn({
     context: {
@@ -189,7 +184,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       recoverAiModelCall: async () => {},
       turnTimeoutMs: 60_000,
     },
-    plan: resolveAgentExecutionPlan({ agent, defaultMaxSteps: 4 }),
+    plan,
     run: seeded.run,
     signal: new AbortController().signal,
   })
