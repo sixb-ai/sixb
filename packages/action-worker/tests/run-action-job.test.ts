@@ -1171,7 +1171,7 @@ describe("runActionJob", () => {
       .params({})
       .writeback(
         ({ signal }) =>
-          new Promise((_resolve, reject) => {
+          new Promise<never>((_resolve, reject) => {
             enteredWriteback?.()
             signal.addEventListener(
               "abort",
