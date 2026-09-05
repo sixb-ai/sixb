@@ -90,6 +90,12 @@ const delegatedScope = createDelegatedRequestScope({
     },
     limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 1_024 },
   },
+  actionApply: [
+    {
+      actionId: "approve",
+      subject: { objectTypeId: "quote", primaryId: "quote-1" },
+    },
+  ],
 })
 const delegatedRuntime = {
   projectId: "decision-test",

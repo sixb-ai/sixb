@@ -1,5 +1,9 @@
-import { assertAuthorized } from "../authorization"
-import { resolveExecutionScopeAuthorization } from "../execution/authorization"
+import { AuthorizationError, assertAuthorized, canViewActionRun } from "../authorization"
+import {
+  getAuthorizationRef,
+  resolveExecutionScopeAuthorization,
+  resolveRuntimeAuthorizationForProject,
+} from "../execution/authorization"
 import {
   createPrimitiveExecutionRecord,
   ensureExecutionRecord,
@@ -16,6 +20,7 @@ import {
   type ActionRunStorage,
   isTerminalActionRun,
 } from "../storage"
+import { admitDelegatedObjectAction, assertDelegatedActionTarget } from "./delegated-admission"
 import { dispatchActionRun } from "./run-dispatch"
 import { createActionRunId } from "./run-id"
 import type { ActionDefinition, ActionSubject } from "./types"
@@ -84,20 +89,46 @@ export async function requestAction(
   execution: ExecutionContext,
   input: RequestActionInput
 ): Promise<RequestActionResult> {
-  resolveExecutionScopeAuthorization(runtime.projectId, {
+  // Capture the three process-local capabilities before caller-owned request getters can run.
+  const projectId = runtime.projectId
+  const runtimeAuthorization = runtime.runtimeAuthorization
+  const objectReader = runtime.objectReader
+  const request = snapshotActionRequest(input)
+  const authorization = resolveExecutionScopeAuthorization(projectId, {
     execution,
-    authorization: runtime.runtimeAuthorization,
+    authorization: runtimeAuthorization,
   })
-  requireActionRunStorage(runtime)
-  const action = getActionDefinition(runtime, input.actionId)
+  const subject = request.subject
+  const delegatedSubject =
+    authorization.type === "delegated"
+      ? assertDelegatedActionTarget({
+          authorization,
+          actionId: request.actionId,
+          subject,
+        })
+      : undefined
+  const action = getActionDefinition(runtime, request.actionId)
   const actionId = action.id
-  const rawParams: Record<string, unknown> = input.params ?? {}
-  const subject: ActionSubject = input.subject ?? { kind: "none" }
+  const rawParams = request.params
 
-  assertAuthorized(runtime, { kind: "action.apply", actionId })
-  if (action.binding.kind === "object") {
+  if (authorization.type === "delegated") {
+    await admitDelegatedObjectAction({
+      objectReader,
+      runtimeAuthorization,
+      execution,
+      authorization,
+      action,
+      subject: delegatedSubject!,
+    })
+  } else {
+    assertAuthorized({ projectId, runtimeAuthorization }, { kind: "action.apply", actionId })
+  }
+  if (authorization.type !== "delegated" && action.binding.kind === "object") {
     // Object actions also require visibility of the subject's object type.
-    assertAuthorized(runtime, { kind: "object.view", objectTypeId: action.binding.objectType.id })
+    assertAuthorized(
+      { projectId, runtimeAuthorization },
+      { kind: "object.view", objectTypeId: action.binding.objectType.id }
+    )
   }
 
   validateActionSubject(action, subject)
@@ -112,22 +143,26 @@ export async function requestAction(
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
 
+  // `dispatchActionRun` checks an existing run id before creating its durable execution. Keep
+  // process-local delegation outside that oracle until durable grant provenance is implemented.
+  void getAuthorizationRef(runtimeAuthorization)
+
   return dispatchActionRun({
     errorReporterHost: runtime,
-    projectId: runtime.projectId,
+    projectId,
     storage: runtime.storage,
     queue: runtime.queues.actions,
     events: runtime.events,
     actionId,
     subject,
     params: actionParams,
-    runId: input.runId,
+    runId: request.runId,
     createExecution: async (executionId, runId) => {
       const caller = await ensureExecutionRecord(
         runtime.storage.executions,
         executionRecordInputFromRuntime({
           execution,
-          runtimeAuthorization: runtime.runtimeAuthorization,
+          runtimeAuthorization,
         })
       )
       return createPrimitiveExecutionRecord({
@@ -136,6 +171,24 @@ export async function requestAction(
         origin: { type: "execution", parent: caller },
       })
     },
+  })
+}
+
+function snapshotActionRequest(input: RequestActionInput): {
+  readonly actionId: string
+  readonly subject: ActionSubject
+  readonly params: Record<string, unknown>
+  readonly runId?: string
+} {
+  const actionId = input.actionId
+  const subject = input.subject
+  const params = input.params
+  const runId = input.runId
+  return structuredClone({
+    actionId,
+    subject: subject ?? { kind: "none" },
+    params: params ?? {},
+    ...(runId === undefined ? {} : { runId }),
   })
 }
 
@@ -163,9 +216,28 @@ export async function waitForActionRun(
   runtime: SixbRuntimeContext,
   input: WaitForActionRunInput
 ): Promise<ActionRunRecord> {
+  const projectId = runtime.projectId
+  const runtimeAuthorization = runtime.runtimeAuthorization
+  const request = {
+    runId: input.runId,
+    timeoutMs: input.timeoutMs,
+    signal: input.signal,
+  }
+  const authorization = resolveRuntimeAuthorizationForProject({
+    projectId,
+    runtimeAuthorization,
+  })
+  if (authorization.type === "denied") {
+    throw new AuthorizationError(
+      "runtime:unbound",
+      "[Sixb] Protected operations require registered runtime authorization for this project."
+    )
+  }
+  // Polling cannot be delegated safely until durable runs carry their originating grant.
+  if (authorization.type === "delegated") void getAuthorizationRef(runtimeAuthorization)
   const actionRuns = requireActionRunStorage(runtime)
-  const timeoutMs = input.timeoutMs ?? DEFAULT_ACTION_WAIT_TIMEOUT_MS
-  const signal = input.signal
+  const timeoutMs = request.timeoutMs ?? DEFAULT_ACTION_WAIT_TIMEOUT_MS
+  const signal = request.signal
   const startedAt = Date.now()
 
   if (signal?.aborted) {
@@ -218,10 +290,14 @@ export async function waitForActionRun(
       checking = true
       try {
         const record = await actionRuns.getById({
-          projectId: runtime.projectId,
-          id: input.runId,
+          projectId,
+          id: request.runId,
         })
-        if (record && isTerminalActionRun(record)) {
+        const visible =
+          record &&
+          (authorization.type === "unrestricted" ||
+            (authorization.type === "principal" && canViewActionRun(authorization.context, record)))
+        if (visible && isTerminalActionRun(record)) {
           cleanup()
           resolve(record)
           return
@@ -240,7 +316,7 @@ export async function waitForActionRun(
 
     timer = setTimeout(
       () => {
-        rejectWith(new ActionRunTimeoutError({ runId: input.runId, timeoutMs }))
+        rejectWith(new ActionRunTimeoutError({ runId: request.runId, timeoutMs }))
       },
       Math.max(0, timeoutMs - (Date.now() - startedAt))
     )
@@ -255,7 +331,7 @@ export async function waitForActionRun(
           events.some(
             (event) =>
               (event.type === "action.completed" || event.type === "action.failed") &&
-              event.payload.runId === input.runId
+              event.payload.runId === request.runId
           )
         ) {
           void check()
