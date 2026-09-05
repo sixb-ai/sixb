@@ -32,6 +32,11 @@ import {
   validateObjectQuery,
   validateObjectQueryWithAdmission,
 } from "../objects/query/validate"
+import {
+  admitTelemetryHistoryReadWorkload,
+  type TelemetryHistoryReadAdmission,
+  type TelemetryHistoryReadWorkloadInput,
+} from "../objects/telemetry/workload"
 import type { OntologyRegistry } from "../ontology"
 import type {
   CompiledObjectReadStep,
@@ -420,6 +425,13 @@ class AuthorizedObjectReaderImpl {
   assertVisibleOutputWithinLimit(value: unknown): void {
     if (this.#authority.type !== "delegated") return
     assertObjectReadOutputWithinLimit(value, this.#authority.objectRead.limits)
+  }
+
+  /** Admit adjacent telemetry work without exposing which authority policy was selected. */
+  admitTelemetryHistoryRead(
+    input: TelemetryHistoryReadWorkloadInput
+  ): TelemetryHistoryReadAdmission {
+    return admitTelemetryHistoryReadWorkload(input, this.#authority.type === "delegated")
   }
 
   #queryExecutorOptions() {
