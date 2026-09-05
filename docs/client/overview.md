@@ -84,6 +84,38 @@ Failed and cancelled terminal runs reject with `ActionRunFailedError`; timeouts
 reject with `ActionRunTimeoutError`. Keep the generated `requestAction()` when
 you only need enqueue acknowledgement.
 
+### Rendering object files
+
+Use `objectFileContentUrl` for an object property's image source or download link:
+
+```tsx
+import { objectFileContentUrl } from "@sixb/client"
+
+const logoUrl = objectFileContentUrl({
+  objectTypeId: "Organization",
+  objectId: organization.primaryId,
+  pathSegments: ["logo"],
+  fileRef: organization.properties.logo,
+  disposition: "inline",
+})
+
+<img src={logoUrl} alt="Organization logo" />
+```
+
+Call it with the current `FileRef` when rendering. After saving a replacement and
+refetching the object, its URL changes, so the browser loads the new image. Unchanged
+references produce the same URL. Filename, media type, and logical path changes also
+change the URL. Use `disposition: "attachment"` for download links.
+
+`pathSegments` starts at the property name; the helper adds `/properties` and escapes
+JSON pointer segments. It uses the shared client's base URL, or a supplied `client`
+override, and supports relative URLs for same-origin apps and SSR.
+
+The generated `v` query value is an opaque cache key, not a historical-file selector.
+The endpoint always resolves the current property and revalidates privately cached
+content. Native images and links use browser credentials; a URL cannot carry the
+client's bearer headers. Bearer-only callers should fetch content through the SDK.
+
 ## /query: typed object queries
 
 `@sixb/client/query` exposes `objects(Type).query()` — the same fluent query

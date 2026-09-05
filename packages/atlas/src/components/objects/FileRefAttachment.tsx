@@ -1,4 +1,4 @@
-import { client } from "@sixb/client"
+import { objectFileContentUrl } from "@sixb/client"
 import { type FileRef, fileNameFor } from "@sixb/core/blob-storage"
 import {
   Attachment,
@@ -12,7 +12,7 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Download, Eye, FileIcon, FileImage, FileText } from "lucide-react"
-import { fileMediaLabel, formatFileSize, objectFileContentUrl } from "../../lib/files"
+import { fileMediaLabel, formatFileSize } from "../../lib/files"
 
 export interface FileRefAttachmentProps {
   readonly fileRef: FileRef
@@ -29,10 +29,9 @@ export function FileRefAttachment({
 }: FileRefAttachmentProps) {
   const fileName = fileNameFor(fileRef)
   const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
-  const baseUrl = client.getConfig().baseUrl ?? window.location.origin
-  const context = { objectTypeId, primaryId, pathSegments }
-  const inlineUrl = objectFileContentUrl({ baseUrl, context })
-  const downloadUrl = objectFileContentUrl({ baseUrl, context, disposition: "attachment" })
+  const source = { objectTypeId, objectId: primaryId, pathSegments, fileRef }
+  const inlineUrl = objectFileContentUrl(source)
+  const downloadUrl = objectFileContentUrl({ ...source, disposition: "attachment" })
   const { Icon, className } = fileIconPresentation(fileRef.mediaType, fileName)
 
   return (

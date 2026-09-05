@@ -64,6 +64,31 @@ const run = await requestActionAndWait({
 })
 ```
 
+### Object file URLs
+
+Use the current `FileRef` to build image sources and download links:
+
+```tsx
+import { objectFileContentUrl } from "@sixb/client"
+
+<img
+  src={objectFileContentUrl({
+    objectTypeId: "Organization",
+    objectId: organization.primaryId,
+    pathSegments: ["logo"],
+    fileRef: organization.properties.logo,
+    disposition: "inline",
+  })}
+  alt="Organization logo"
+/>
+```
+
+The helper uses the configured client base URL (or an optional `client` override).
+After replacing the file and refetching the object, the new reference produces a new
+URL. Unchanged references keep the same URL; content and metadata edits change it.
+Use `disposition: "attachment"` for downloads. The version query is a cache key, not
+a historical-file selector; the server still resolves and authorizes the current property.
+
 ### React Query hooks
 
 ```tsx

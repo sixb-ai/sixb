@@ -205,7 +205,7 @@ describe("OpenAPI docs", () => {
           | Record<string, { content?: Record<string, { schema?: unknown }> }>
           | undefined
         expect(responses, `${method.toUpperCase()} ${path}`).toBeDefined()
-        for (const status of ["200", "206", "400", "404", "416"]) {
+        for (const status of ["200", "206", "304", "400", "404", "416"]) {
           expect(responses, `${method.toUpperCase()} ${path}`).toHaveProperty(status)
         }
       }

@@ -79,4 +79,5 @@ export const CompleteFileUploadBodySchema = z.object({
 export const FileContentQuerySchema = z.object({
   path: z.string().min(1),
   disposition: z.enum(["inline", "attachment"]).optional(),
+  v: z.string().optional().describe("Client cache key; the route still resolves the current file"),
 })

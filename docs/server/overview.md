@@ -131,6 +131,19 @@ messages — `/api/action-runs/:runId/files/content`, `/api/workflow-runs/:runId
 `.../nodes/:nodeKey/files/content`, and
 `/api/agent-threads/:threadId/messages/:messageId/files/content`.
 
+These contextual URLs resolve the current reference, so responses use
+`Cache-Control: private, no-cache`. Browsers can store the bytes but must revalidate
+before reuse. GET and HEAD support `If-None-Match` and return `304` for an unchanged
+representation after checking access and blob existence. ETags include the content
+identity and effective response metadata. `If-Range` accepts a matching strong ETag;
+other validators cause the full representation to be returned.
+
+For object images and download links, use the client's
+[`objectFileContentUrl`](../client/overview.md#rendering-object-files) helper. Its
+content-aware URL changes when a refetched property changes, prompting an existing
+image element to load the new file. The optional `v` query parameter is only a client
+cache key; it does not select an old blob or enable immutable caching.
+
 > **Pre-0.1 limit — upload sessions are in-memory.** Neither `@sixb/pg` nor `@sixb/sqlite`
 > implements `fileUploadSessions`, so every session opened by `POST /api/files/uploads` lives in
 > the serving process: it does not survive a restart and is not shared across replicas. Route a

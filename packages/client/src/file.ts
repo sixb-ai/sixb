@@ -1,6 +1,7 @@
 import type { FileRef } from "@sixb/core"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { isSixbApiError, type SixbClient } from "./api"
+import { client as sharedClient } from "./generated/client.gen"
 import {
   abortFileUpload,
   completeFileUpload,
@@ -10,6 +11,41 @@ import {
   uploadFileRaw,
 } from "./generated/sdk.gen"
 import { computeStreamingBlobDigest } from "./sha256"
+
+export interface ObjectFileContentUrlInput {
+  readonly objectTypeId: string
+  readonly objectId: string
+  /** Property path segments, without the leading `properties` segment. */
+  readonly pathSegments: readonly string[]
+  readonly fileRef: FileRef
+  readonly disposition?: "inline" | "attachment"
+  readonly client?: SixbClient
+}
+
+/** Build a rendering/download URL that changes with the file's content or metadata. */
+export function objectFileContentUrl(input: ObjectFileContentUrlInput): string {
+  if (!input.objectTypeId || !input.objectId || input.pathSegments.length === 0) {
+    throw new Error("[SixbClient] File content URLs require an object type, ID, and property path.")
+  }
+  const client = input.client ?? sharedClient
+  const { digest, fileName, mediaType, logicalPath } = input.fileRef
+  return client.buildUrl({
+    baseUrl: client.getConfig().baseUrl,
+    url: "/api/objects/{objectTypeId}/{objectId}/files/content",
+    path: { objectTypeId: input.objectTypeId, objectId: input.objectId },
+    query: {
+      path: `/properties/${input.pathSegments
+        .map((segment) => segment.replaceAll("~", "~0").replaceAll("/", "~1"))
+        .join("/")}`,
+      disposition: input.disposition,
+      // Opaque cache key, not a historical-file selector. Include per-reference metadata.
+      // Encode each field so Elysia won't interpret commas in filenames as an array.
+      v: [digest, fileName ?? "", mediaType ?? "", logicalPath ?? ""]
+        .map(encodeURIComponent)
+        .join(":"),
+    },
+  })
+}
 
 export type SixbFileUploadStage =
   | "hash"

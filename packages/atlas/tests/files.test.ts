@@ -5,7 +5,6 @@ import {
   classifyFileValue,
   fileMediaLabel,
   formatFileSize,
-  objectFileContentUrl,
   workflowNodeFileContentUrl,
   workflowRunFileContentUrl,
 } from "../src/lib/files"
@@ -29,22 +28,6 @@ describe("Atlas file helpers", () => {
     expect(classifyFileValue({ ...fileRef, blobId: "blob_tampered" }).kind).toBe("none")
     // A mixed array is not treated as a file list.
     expect(classifyFileValue([fileRef, "not-a-file"]).kind).toBe("none")
-  })
-
-  test("builds object-bound file content URLs with JSON pointer escaping", () => {
-    const url = objectFileContentUrl({
-      baseUrl: "https://atlas.test/app",
-      context: {
-        objectTypeId: "document type",
-        primaryId: "doc/1",
-        pathSegments: ["attachments", "a/b", "tilde~name"],
-      },
-      disposition: "attachment",
-    })
-
-    expect(url).toBe(
-      "https://atlas.test/api/objects/document%20type/doc%2F1/files/content?path=%2Fproperties%2Fattachments%2Fa%7E1b%2Ftilde%7E0name&disposition=attachment"
-    )
   })
 
   test("builds run-bound file content URLs", () => {
