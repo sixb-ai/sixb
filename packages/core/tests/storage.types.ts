@@ -2,6 +2,7 @@ import type {
   ConsumeConnectorAuthorizationAttemptInput,
   InMemoryConnectorConnectionStorageSnapshot,
   ObjectQueryCapabilities,
+  ObjectReadStorage,
   ObjectStorage,
   OntologyOutboxFailureCode,
   OntologyOutboxRecord,
@@ -76,3 +77,12 @@ const providerQuerySurface: Pick<ObjectStorage, "queryCapabilities" | "queryObje
 }
 
 void providerQuerySurface
+
+const objectReader = {} as ObjectReadStorage
+void objectReader.selectsObjectProperties
+void objectReader.listLinksBatch
+void objectReader.queryLinks
+// @ts-expect-error Internal materialization reads are deliberately absent from the safe reader.
+void objectReader.listIncidentLinksBatch
+// @ts-expect-error Background reconciliation reads are deliberately absent from the safe reader.
+void objectReader.listByPrimaryIdPage

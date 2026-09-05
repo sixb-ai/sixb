@@ -13,7 +13,7 @@ export function objectBatchKey(objectTypeId: string, primaryId: string): ObjectB
   return JSON.stringify([objectTypeId, primaryId]) as ObjectBatchKey
 }
 
-/** Collision-safe key for outgoing-link batch-read results. */
+/** Collision-safe key for directional link batch-read results, keyed by the requested object. */
 export function linkBatchKey(objectTypeId: string, objectId: string, linkId: string): LinkBatchKey {
   return JSON.stringify([objectTypeId, objectId, linkId]) as LinkBatchKey
 }

@@ -21,6 +21,7 @@ import type {
   ObjectFacetResult,
   ObjectLinkRow,
   ObjectQueryCapabilities,
+  ObjectReadStorage,
   ObjectRow,
   ObjectStorage,
   QueryObjectLinksInput,
@@ -614,6 +615,18 @@ export class InMemoryObjectStorage implements ObjectStorage {
     return bucket.get(params.primaryId) ?? null
   }
 
+  async selectsObjectProperties(
+    params: Parameters<ObjectReadStorage["selectsObjectProperties"]>[0]
+  ): Promise<readonly boolean[]> {
+    const objects = await this.getByPrimaryIdBatch({
+      projectId: params.projectId,
+      items: params.items,
+    })
+    return params.items.map((item) =>
+      objects.has(objectBatchKey(item.objectTypeId, item.primaryId))
+    )
+  }
+
   async listLinks(params: {
     projectId: string
     objectTypeId: string
@@ -671,6 +684,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
 
   async listLinksBatch(params: {
     projectId: string
+    direction?: LinkDirection
     items: readonly { objectTypeId: string; objectId: string; linkId: string }[]
   }): Promise<Map<LinkBatchKey, ObjectLinkRow[]>> {
     const result = new Map<LinkBatchKey, ObjectLinkRow[]>()
@@ -680,6 +694,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
         objectTypeId: item.objectTypeId,
         objectId: item.objectId,
         linkId: item.linkId,
+        direction: params.direction,
       })
       if (rows.length > 0) {
         result.set(linkBatchKey(item.objectTypeId, item.objectId, item.linkId), [...rows])
