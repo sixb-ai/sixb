@@ -30,6 +30,11 @@ Gateway requests enable automatic prompt caching by default. Explicit
 or model-definition maximum.
 
 The remote catalog is cached in memory. Constructing a model and ordinary inference never fetch it.
+`await model.resolveDefinition?.()` resolves metadata from that same catalog without mutating
+`model.definition`, preserving configured definitions and binding options. Agent workers call it
+at startup when context limits are missing locally. Explicit `loop.context.windowTokens` or locally
+supplied limits avoid that network lookup. Gateway `context_window` maps to `contextWindow`;
+configured definitions can additionally supply a separate `maxInputTokens` limit.
 A structured-output call consults it when support is otherwise unknown, then uses the native strict
 response format or transparently falls back to one required, nonparallel JSON function. A catalog
 failure safely selects the fallback. Gateway-reported cost is authoritative; route-dependent prices

@@ -76,10 +76,16 @@ describe("Postgres storage migrations", () => {
           "SELECT reason, details FROM ai_model_call_valuations"
         )
         expect([...rows]).toEqual([{ reason: "missingRateCard", details: { pricingContext: {} } }])
+        // Bun 1.3.14's rejects matcher hangs on postgres.js's lazy PendingQuery thenable.
+        // Regression proof: remove Promise.resolve here and this test times out instead of finishing.
         await expect(
-          sql.unsafe("UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry'")
+          Promise.resolve(
+            sql.unsafe("UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry'")
+          )
         ).rejects.toThrow()
-        await expect(sql.unsafe("DELETE FROM ai_model_call_usage")).rejects.toThrow()
+        await expect(
+          Promise.resolve(sql.unsafe("DELETE FROM ai_model_call_usage"))
+        ).rejects.toThrow()
       } finally {
         await sql.end()
       }
@@ -1824,6 +1830,13 @@ describe("Postgres storage migrations", () => {
           id: "029-ai-usage-requested-reasoning",
           status: "applied",
           version: 29,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "030-ai-cost-rate-card-reason",
+          status: "applied",
+          version: 30,
         },
       ])
     } finally {

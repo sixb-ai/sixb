@@ -1699,19 +1699,56 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("rejects startup before accepting work when the selected model has no context limit", async () => {
+    // Regression proof: restore a fixed context fallback or skip budget resolution in start().
+    const base = toolThenAnswerModel()
+    const { contextWindow: _contextWindow, ...definition } = base.definition
+    let resolutions = 0
+    const sixb = buildSixb({
+      providerId: base.providerId,
+      modelId: base.modelId,
+      definition,
+      stream: () => {
+        throw new Error("must not run inference")
+      },
+      resolveDefinition: async () => {
+        resolutions += 1
+        return definition
+      },
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    try {
+      await expect(worker.start()).rejects.toThrow("loop.context.windowTokens")
+      expect(resolutions).toBe(1)
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("automatically checkpoints with the selected model's catalog budget", async () => {
     const summaryPrompts: LanguageModelRequest["messages"][] = []
     const modelId = "gemini-2.5-flash-image"
-    const sixb = buildSixb(
-      compactingAnswerModel({
-        provider: "google",
-        modelId,
-        captureSummaryPrompt: (prompt) => {
-          summaryPrompts.push(prompt)
-        },
-        captureAnswerPrompt: () => {},
-      })
-    )
+    // Regression proof: skip resolveAgentContextBudgets in worker startup; this model has no local limit.
+    const answeringModel = compactingAnswerModel({
+      provider: "google",
+      modelId,
+      captureSummaryPrompt: (prompt) => {
+        summaryPrompts.push(prompt)
+      },
+      captureAnswerPrompt: () => {},
+    })
+    const { contextWindow: _contextWindow, ...definition } = answeringModel.definition
+    let resolutions = 0
+    const sixb = buildSixb({
+      providerId: answeringModel.providerId,
+      modelId: answeringModel.modelId,
+      definition,
+      stream: (request) => answeringModel.stream(request),
+      resolveDefinition: async () => {
+        resolutions += 1
+        return { ...definition, contextWindow: 32_768 }
+      },
+    })
     const storage = agentStorageOf(sixb)
     const threadId = "automatic_compaction_thread"
     await storage.threads.create({
@@ -1749,6 +1786,7 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
+      expect(resolutions).toBe(1)
       await expect(
         storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
       ).resolves.toMatchObject({

@@ -59,7 +59,13 @@ export class WorkerTestModel implements LanguageModel {
         nativeStructuredOutput: true,
       }
     this.definition = defineLanguageModel(
-      options.definition ?? { kind: "language", providerId, modelId, capabilities }
+      options.definition ?? {
+        kind: "language",
+        providerId,
+        modelId,
+        capabilities,
+        contextWindow: 128_000,
+      }
     )
     this.providerId = this.definition.providerId
     this.modelId = this.definition.modelId

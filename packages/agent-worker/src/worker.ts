@@ -16,12 +16,7 @@ import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import {
-  type AgentContextBudget,
-  type AgentModelContextLimits,
-  DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
-  resolveAgentContextBudget,
-} from "./context-budget"
+import { type AgentContextBudget, resolveAgentContextBudgets } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
 import {
   AgentExecutionLostError,
@@ -116,14 +111,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   override async start(): Promise<void> {
     if (this.context) {
-      const [modelsDev] = await Promise.all([
-        import("./models-dev/catalog"),
+      const [budgets] = await Promise.all([
+        resolveAgentContextBudgets(this.agents),
         this.context.agentSkills,
       ])
-      this.contextBudgets = resolveContextBudgets(
-        this.agents,
-        modelsDev.resolveModelsDevContextLimits
-      )
+      this.contextBudgets = budgets
     }
     await super.start()
   }
@@ -707,35 +699,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
   }
 }
-
-function resolveContextBudgets(
-  agents: readonly AgentDefinition[],
-  resolveModelContextLimits: (
-    model: AgentDefinition["model"]
-  ) => AgentModelContextLimits | undefined
-): ReadonlyMap<string, AgentContextBudget> {
-  const budgets = new Map<string, AgentContextBudget>()
-  const warnedModels = new Set<string>()
-  for (const agent of agents) {
-    const modelLimits =
-      agent.loop?.context?.windowTokens === undefined
-        ? resolveModelContextLimits(agent.model)
-        : undefined
-    const budget = resolveAgentContextBudget(agent, modelLimits)
-    budgets.set(agent.id, budget)
-    if (budget.source !== "fallback") continue
-
-    const model = `${agent.model.providerId}/${agent.model.modelId}`
-    if (warnedModels.has(model)) continue
-    warnedModels.add(model)
-    console.warn(
-      `[SixbAgentWorker] Models.dev has no context limit for '${model}'; using the ${DEFAULT_CONTEXT_WINDOW_LABEL} fallback. Configure loop.context.windowTokens to override it.`
-    )
-  }
-  return budgets
-}
-
-const DEFAULT_CONTEXT_WINDOW_LABEL = `${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token`
 
 function requiredContextBudget(
   budgets: ReadonlyMap<string, AgentContextBudget>,

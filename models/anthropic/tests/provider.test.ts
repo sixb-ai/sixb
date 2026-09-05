@@ -44,6 +44,84 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Anthropic provider", () => {
+  test("resolves model input limits through the shared catalog without mutating the binding", async () => {
+    // Regression proof: remove resolveDefinition or expire the pending loadPromise before loadedAt is set.
+    let calls = 0
+    const provider = createAnthropic({
+      apiKey: "test",
+      fetch: async (_url, init) => {
+        calls += 1
+        expect(init?.signal).toBeInstanceOf(AbortSignal)
+        return Response.json({
+          data: [
+            {
+              id: "claude-sonnet-4-5",
+              type: "model",
+              max_input_tokens: 200_000,
+              max_tokens: 64_000,
+              capabilities: {},
+            },
+          ],
+          has_more: false,
+        })
+      },
+    })
+    const model = provider("claude-sonnet-4-5", { capabilities: { localTools: false } })
+    const original = model.definition
+    expect(calls).toBe(0)
+    const [resolved, other] = await Promise.all([
+      model.resolveDefinition?.(),
+      provider("claude-sonnet-4-5").resolveDefinition?.(),
+    ])
+    expect(calls).toBe(1)
+    expect(resolved).toMatchObject({ maxInputTokens: 200_000, capabilities: { localTools: false } })
+    expect(resolved?.contextWindow).toBeUndefined()
+    expect(other?.maxInputTokens).toBe(200_000)
+    expect(model.definition).toBe(original)
+    expect(model.definition.maxInputTokens).toBeUndefined()
+    await model.resolveDefinition?.()
+    expect(calls).toBe(1)
+  })
+
+  test("resolves supplied definitions offline and preserves binding pricing modifiers", async () => {
+    const provider = createAnthropic({
+      models: [
+        {
+          kind: "language",
+          providerId: "anthropic",
+          modelId: "claude-sonnet-4-5",
+          maxInputTokens: 123_000,
+          capabilities: {},
+          rateCard: { currency: "USD", unit: "million-tokens", input: "3", output: "15" },
+        },
+      ],
+      fetch: async () => {
+        throw new Error("must not fetch")
+      },
+    })
+    const model = provider("claude-sonnet-4-5", {
+      providerTools: [{ type: "web_search_20250305", name: "web_search" }],
+    })
+    const definition = await model.resolveDefinition?.()
+    expect(definition?.maxInputTokens).toBe(123_000)
+    expect(definition?.rateCard).toBeUndefined()
+  })
+
+  test("reports catalog failures, retries later, and does not invent unknown model limits", async () => {
+    let calls = 0
+    const provider = createAnthropic({
+      apiKey: "test",
+      fetch: async () => {
+        if (++calls === 1) throw new Error("catalog unavailable")
+        return Response.json({ data: [], has_more: false })
+      },
+    })
+    const model = provider("custom-model", { maxOutputTokens: 512 })
+    await expect(model.resolveDefinition?.()).rejects.toThrow("catalog unavailable")
+    expect(await model.resolveDefinition?.()).toBe(model.definition)
+    expect(model.definition.maxInputTokens).toBeUndefined()
+    expect(calls).toBe(2)
+  })
   test("honors per-call summary limits without raising the model ceiling", async () => {
     // Regression proof: use this.maxOutputTokens unconditionally in prepareRequest.
     const bodies: Record<string, unknown>[] = []
@@ -787,7 +865,7 @@ describe("Anthropic provider", () => {
       modelId: "claude-opus-5",
       name: "Claude Opus 5",
       releaseDate: "2026-07-24",
-      contextWindow: 1_000_000,
+      maxInputTokens: 1_000_000,
       maxOutputTokens: 128_000,
       capabilities: {
         inputMediaTypes: ["image/jpeg", "image/png", "image/gif", "image/webp", "application/pdf"],

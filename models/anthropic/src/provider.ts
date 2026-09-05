@@ -157,7 +157,10 @@ class RemoteAnthropicCatalog implements AnthropicCatalog {
 
   private load(): Promise<readonly LanguageModelDefinition[]> {
     const ttl = this.transport.catalogTtlMs ?? DEFAULT_CATALOG_TTL_MS
-    if (this.loadPromise && Date.now() - this.loadedAt >= ttl) this.loadPromise = undefined
+    if (this.loadPromise && this.loadedAt !== 0 && Date.now() - this.loadedAt >= ttl) {
+      this.loadPromise = undefined
+      this.loadedAt = 0
+    }
     this.loadPromise ??= this.fetchDefinitions()
       .then((definitions) => {
         this.loadedAt = Date.now()
@@ -224,7 +227,7 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
   ]
   const releaseDate = date(string(model?.created_at))
   const name = string(model?.display_name)
-  const contextWindow = positiveInteger(model?.max_input_tokens)
+  const maxInputTokens = positiveInteger(model?.max_input_tokens)
   const maxOutputTokens = positiveInteger(model?.max_tokens)
   const providerTools = ["code_execution", "web_search", "web_fetch"].some((name) =>
     supported(capabilities, name)
@@ -238,7 +241,7 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
     ...(name ? { name } : {}),
     family: "Claude",
     ...(releaseDate ? { releaseDate } : {}),
-    ...(contextWindow === undefined ? {} : { contextWindow }),
+    ...(maxInputTokens === undefined ? {} : { maxInputTokens }),
     ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
     capabilities: {
       ...(inputMediaTypes.length === 0 ? {} : { inputMediaTypes }),
@@ -318,6 +321,20 @@ class AnthropicLanguageModel implements LanguageModel {
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
       ...(rateCard === undefined ? {} : { rateCard }),
     })
+  }
+
+  async resolveDefinition(): Promise<LanguageModelDefinition> {
+    const definition = await this.catalog.get(this.modelId)
+    // Reapply this binding's capabilities and pricing modifiers to the catalog metadata.
+    return definition === undefined
+      ? this.definition
+      : new AnthropicLanguageModel(
+          this.transport,
+          this.catalog,
+          this.modelId,
+          this.options,
+          definition
+        ).definition
   }
 
   async stream(request: LanguageModelRequest) {
