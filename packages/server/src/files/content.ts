@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { type BlobInfo, type BlobStorage, type FileRef, isFileRef } from "@sixb/core"
 import { BlobStorageError, supportsRangeRead } from "@sixb/core/blob-storage/server"
 import { ZodError } from "zod"
@@ -10,6 +11,8 @@ export interface FileContentResponseInput {
   readonly disposition?: FileContentDisposition
   readonly head?: boolean
   readonly rangeHeader?: string | null
+  readonly ifNoneMatchHeader?: string | null
+  readonly ifRangeHeader?: string | null
 }
 
 export interface FileContentQuery {
@@ -82,6 +85,9 @@ export function fileContentGetResponses(options: FileContentResponsesOptions = {
         },
       },
     },
+    304: {
+      description: "File representation is unchanged; reuse the privately cached content",
+    },
     400: {
       description: "Response for status 400",
       content: {
@@ -112,6 +118,9 @@ export function fileContentHeadResponses(options: FileContentResponsesOptions = 
     },
     206: {
       description: "Partial file content headers",
+    },
+    304: {
+      description: "File representation is unchanged; reuse the privately cached content",
     },
     400: {
       description: "Response for status 400",
@@ -146,7 +155,18 @@ export async function createFileContentResponse(
 
   const canReadRange = supportsRangeRead(input.blobStorage)
   const headers = fileContentHeaders(input.fileRef, stat, input.disposition, canReadRange)
-  if (canReadRange && input.rangeHeader) {
+  const etag = headers.get("etag")!
+  if (matchesIfNoneMatch(input.ifNoneMatchHeader, etag)) {
+    headers.delete("content-length")
+    return new Response(null, { status: 304, headers })
+  }
+
+  // Date validators are unsupported: only a strong ETag can validate a range.
+  if (
+    canReadRange &&
+    input.rangeHeader &&
+    (input.ifRangeHeader == null || input.ifRangeHeader.trim() === etag)
+  ) {
     const range = parseSingleByteRange(input.rangeHeader, stat.sizeBytes)
     if (!range) {
       return rangeNotSatisfiableResponse(stat.sizeBytes)
@@ -213,6 +233,8 @@ export async function createContextualFileContentResponse<TQuery extends FileCon
       disposition: parsed.disposition,
       head: input.head,
       rangeHeader: input.request.headers.get("range"),
+      ifNoneMatchHeader: input.request.headers.get("if-none-match"),
+      ifRangeHeader: input.request.headers.get("if-range"),
     })
     if (!response) {
       return fileContentNotFound(input.set, missingMessage)
@@ -251,6 +273,13 @@ function blobMatchesFileRef(stat: BlobInfo, fileRef: FileRef): boolean {
     stat.blobId === fileRef.blobId &&
     stat.digest === fileRef.digest &&
     stat.sizeBytes === fileRef.sizeBytes
+  )
+}
+
+function matchesIfNoneMatch(header: string | null | undefined, etag: string): boolean {
+  return (
+    header?.trim() === "*" ||
+    (header?.split(",").some((value) => value.trim().replace(/^W\//, "") === etag) ?? false)
   )
 }
 
@@ -307,12 +336,16 @@ function fileContentHeaders(
   headers.set("content-type", mediaType)
   headers.set("content-length", stat.sizeBytes.toString())
   headers.set("content-disposition", contentDispositionHeader(disposition, fileNameFor(fileRef)))
-  headers.set("etag", `"${fileRef.digest}"`)
+  // Metadata belongs to the reference, not the blob; changing it must also invalidate caches.
+  const representation = JSON.stringify([
+    fileRef.digest,
+    mediaType,
+    headers.get("content-disposition"),
+  ])
+  headers.set("etag", `"sha256:${createHash("sha256").update(representation).digest("hex")}"`)
   headers.set("x-content-type-options", "nosniff")
-  // Blobs are content-addressed and immutable, so responses can be cached
-  // aggressively — but only privately: reads are grant-enforced and must never
-  // land in a shared cache.
-  headers.set("cache-control", "private, max-age=31536000, immutable")
+  // The containing record is mutable even though its referenced blob is immutable.
+  headers.set("cache-control", "private, no-cache")
   if (canReadRange) {
     headers.set("accept-ranges", "bytes")
   }

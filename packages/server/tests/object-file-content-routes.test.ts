@@ -91,6 +91,8 @@ async function createObjectFileApi(options: { readonly auth?: boolean } = {}) {
       new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
     ),
     storage,
+    blobStorage,
+    setup,
   }
 }
 
@@ -134,6 +136,101 @@ function contentRequest(
 }
 
 describe("object file content routes", () => {
+  // Regression for #527: restoring the immutable cache policy or removing conditional
+  // handling in src/files/content.ts must make these cache tests fail.
+  test("revalidates cached content against the current property", async () => {
+    const { app, setup, blobStorage } = await createObjectFileApi()
+    const path = "/api/objects/document/doc-1/files/content?path=/properties/pdf"
+    const initial = await app.fetch(contentRequest(path))
+    expect(initial.headers.get("cache-control")).toBe("private, no-cache")
+    const etag = initial.headers.get("etag")!
+    await initial.text()
+
+    for (const method of ["GET", "HEAD"]) {
+      for (const validator of [etag, `"other", W/${etag}`, "*"]) {
+        const response = await app.fetch(
+          contentRequest(path, {
+            method,
+            headers: { "if-none-match": validator, range: "bytes=0-3" },
+          })
+        )
+        expect(response.status).toBe(304)
+        expect(response.headers.get("etag")).toBe(etag)
+        expect(response.headers.get("cache-control")).toBe("private, no-cache")
+        expect(response.headers.get("content-range")).toBeNull()
+        expect(await response.text()).toBe("")
+      }
+    }
+
+    const replacement = await blobStorage.put({
+      body: new TextEncoder().encode("replacement pdf"),
+      mediaType: "application/pdf",
+    })
+    await setup.objects.upsert("document", { id: "doc-1", pdf: replacement })
+    const updated = await app.fetch(contentRequest(path, { headers: { "if-none-match": etag } }))
+    expect(updated.status).toBe(200)
+    expect(updated.headers.get("etag")).not.toBe(etag)
+    expect(await updated.text()).toBe("replacement pdf")
+
+    await setup.objects.upsert("document", {
+      id: "doc-1",
+      pdf: { ...replacement, fileName: "renamed.txt", mediaType: "text/plain" },
+    })
+    const renamed = await app.fetch(
+      contentRequest(path, { headers: { "if-none-match": updated.headers.get("etag")! } })
+    )
+    expect(renamed.status).toBe(200)
+    expect(renamed.headers.get("content-type")).toBe("text/plain")
+    expect(renamed.headers.get("content-disposition")).toContain("renamed.txt")
+    expect(await renamed.text()).toBe("replacement pdf")
+  })
+
+  test("honors ranges only when If-Range strongly matches the current representation", async () => {
+    const { app } = await createObjectFileApi()
+    const path = "/api/objects/document/doc-1/files/content?path=/properties/pdf"
+    const initial = await app.fetch(contentRequest(path))
+    const etag = initial.headers.get("etag")!
+    await initial.text()
+
+    for (const validator of [etag, `W/${etag}`, '"old-file"', "Wed, 01 Jul 2026 00:00:00 GMT"]) {
+      const response = await app.fetch(
+        contentRequest(path, { headers: { range: "bytes=0-3", "if-range": validator } })
+      )
+      expect(response.status).toBe(validator === etag ? 206 : 200)
+      expect(response.headers.get("cache-control")).toBe("private, no-cache")
+      expect(await response.text()).toBe(validator === etag ? "%PDF" : "%PDF test")
+    }
+  })
+
+  test("treats version queries as cache keys, not historical file selectors", async () => {
+    const { app } = await createObjectFileApi()
+    const query = new URLSearchParams({
+      path: "/properties/pdf",
+      v: `sha256%3A${"0".repeat(64)}:old%2Cname.pdf:application%2Fpdf:`,
+    })
+    const response = await app.fetch(
+      contentRequest(`/api/objects/document/doc-1/files/content?${query}`)
+    )
+    expect(response.status).toBe(200)
+    expect(response.headers.get("cache-control")).toBe("private, no-cache")
+    expect(await response.text()).toBe("%PDF test")
+  })
+
+  test("checks visibility and existence before conditional responses", async () => {
+    const { app, storage } = await createObjectFileApi({ auth: true })
+    const viewer = await seedSession(storage, ["document-viewers"])
+    for (const path of [
+      "/api/objects/invoice/inv-1/files/content?path=/properties/pdf",
+      "/api/objects/document/missing/files/content?path=/properties/pdf",
+      "/api/objects/document/doc-1/files/content?path=/properties/missing",
+    ]) {
+      const response = await app.fetch(
+        contentRequest(path, { headers: { ...viewer, "if-none-match": "*" } })
+      )
+      expect(response.status).toBe(404)
+    }
+  })
+
   test("streams object-bound FileRef content with browser viewer headers", async () => {
     const { app } = await createObjectFileApi()
 

@@ -17512,6 +17512,9 @@
               }
             }
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -17573,6 +17576,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -17593,6 +17605,9 @@
           "206": {
             "description": "Partial file content headers"
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -17654,6 +17669,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -17692,6 +17716,9 @@
               }
             }
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -17762,6 +17789,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -17782,6 +17818,9 @@
           "206": {
             "description": "Partial file content headers"
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -17852,6 +17891,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -20566,6 +20614,9 @@
               }
             }
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -20625,6 +20676,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -20645,6 +20705,9 @@
           "206": {
             "description": "Partial file content headers"
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -20704,6 +20767,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -23055,6 +23127,9 @@
               }
             }
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -23116,6 +23191,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -23136,6 +23220,9 @@
           "206": {
             "description": "Partial file content headers"
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -23197,6 +23284,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -25555,6 +25651,9 @@
               }
             }
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -25624,6 +25723,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]
@@ -25644,6 +25752,9 @@
           "206": {
             "description": "Partial file content headers"
           },
+          "304": {
+            "description": "File representation is unchanged; reuse the privately cached content"
+          },
           "400": {
             "description": "Response for status 400",
             "content": {
@@ -25713,6 +25824,15 @@
             "schema": {
               "type": "string",
               "enum": ["inline", "attachment"]
+            }
+          },
+          {
+            "name": "v",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Client cache key; the route still resolves the current file"
             }
           }
         ]

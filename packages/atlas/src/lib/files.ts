@@ -64,21 +64,6 @@ export function formatFileSize(sizeBytes: number): string {
   return `${value.toLocaleString(undefined, { maximumFractionDigits })} ${units[unitIndex]}`
 }
 
-export function objectFileContentUrl(input: {
-  readonly baseUrl: string
-  readonly context: FileValueContext
-  readonly disposition?: "attachment" | "inline"
-}): string {
-  return contextualFileContentUrl({
-    baseUrl: input.baseUrl,
-    routePath: `/api/objects/${encodeURIComponent(input.context.objectTypeId)}/${encodeURIComponent(
-      input.context.primaryId
-    )}/files/content`,
-    jsonPointerPath: ["properties", ...input.context.pathSegments],
-    disposition: input.disposition,
-  })
-}
-
 export function actionRunFileContentUrl(input: {
   readonly baseUrl: string
   readonly runId: string

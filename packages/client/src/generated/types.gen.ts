@@ -6058,6 +6058,10 @@ export type GetWorkflowRunFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/workflow-runs/{runId}/files/content"
 }
@@ -6106,6 +6110,10 @@ export type HeadWorkflowRunFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/workflow-runs/{runId}/files/content"
 }
@@ -6152,6 +6160,10 @@ export type GetWorkflowNodeRunFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content"
 }
@@ -6201,6 +6213,10 @@ export type HeadWorkflowNodeRunFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content"
 }
@@ -7103,6 +7119,10 @@ export type GetObjectFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/objects/{objectTypeId}/{objectId}/files/content"
 }
@@ -7147,6 +7167,10 @@ export type HeadObjectFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/objects/{objectTypeId}/{objectId}/files/content"
 }
@@ -7997,6 +8021,10 @@ export type GetActionRunFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/action-runs/{runId}/files/content"
 }
@@ -8045,6 +8073,10 @@ export type HeadActionRunFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/action-runs/{runId}/files/content"
 }
@@ -8826,6 +8858,10 @@ export type GetAgentMessageFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content"
 }
@@ -8875,6 +8911,10 @@ export type HeadAgentMessageFileContentData = {
   query: {
     path: string
     disposition?: "inline" | "attachment"
+    /**
+     * Client cache key; the route still resolves the current file
+     */
+    v?: string
   }
   url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content"
 }
