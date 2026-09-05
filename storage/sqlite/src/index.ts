@@ -13,6 +13,7 @@ import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal
 import {
   createAgentOperationScope,
   createAuthOperationScope,
+  createObjectOperationScope,
   createOntologyOperationScope,
   createOperationScopedFacade,
   createStorageOperationScope,
@@ -140,7 +141,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     const readTimeseries = path
       ? new SqliteTimeseriesStorage({ connection: this.readConnection })
       : stores.timeseries
-    this.objects = createOperationScopedFacade(readObjects, readScope)
+    this.objects = createObjectOperationScope(readObjects, readScope)
     this.ontology = createOntologyOperationScope(stores.ontology, ontologyScope)
     this.auth = createAuthOperationScope(stores.auth, scope)
     this.executions = createOperationScopedFacade(stores.executions, scope)

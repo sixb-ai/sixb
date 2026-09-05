@@ -1,6 +1,8 @@
 import { AsyncLocalStorage } from "node:async_hooks"
 import type { AgentStorage } from "./agents"
 import type { AuthStorage } from "./auth"
+import type { ObjectStorage } from "./objects"
+import { createGuardedObjectReadStorage, requireObjectReadScopeFactory } from "./objects/guard"
 import type { OntologyStorage } from "./ontology"
 import type { WorkflowRunStorage } from "./workflow-runs"
 
@@ -228,6 +230,20 @@ export function createOntologyOperationScope<T extends OntologyStorage>(
     sources: createOperationScopedFacade(target.sources, scope),
     materializations: createOperationScopedFacade(target.materializations, scope),
     outbox: createOperationScopedFacade(target.outbox, scope),
+  }) as T
+}
+
+/** Keep synchronously created selected readers inside the provider's root operation scope. */
+export function createObjectOperationScope<T extends ObjectStorage>(
+  target: T,
+  scope: StorageOperationScope
+): T {
+  const factory = requireObjectReadScopeFactory(target)
+  return createOperationScopedFacade<ObjectStorage>(target, scope, {
+    createSelectedReadScope: (params) => {
+      scope.assertAvailable()
+      return createGuardedObjectReadStorage(factory.createSelectedReadScope(params), scope)
+    },
   }) as T
 }
 
