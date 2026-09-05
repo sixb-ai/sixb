@@ -5,7 +5,11 @@ the output ceiling configured on the model.
 
 Callable Anthropic provider for Sixb's core model contract. It uses the native Messages API and a
 small provider-owned rate card for Anthropic's published family prices. Current model metadata and
-limits remain available through the explicit catalog API.
+limits are available through the catalog API and `await model.resolveDefinition?.()`.
+The resolver uses the shared, cached provider catalog, preserves configured definitions and binding
+options, and does not mutate `model.definition`. Anthropic's `max_input_tokens` is exposed as
+`maxInputTokens`, not as a shared input/output context window. Agent workers resolve missing limits
+at startup; an explicit `loop.context.windowTokens` or locally supplied limit avoids network access.
 
 ```ts
 import { anthropic } from "@sixb/anthropic"

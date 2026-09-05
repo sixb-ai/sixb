@@ -51,6 +51,8 @@ export interface LanguageModelDefinition extends ModelDefinition {
   readonly kind: "language"
   readonly knowledgeCutoff?: string
   readonly contextWindow?: number
+  /** Maximum input tokens, distinct from a shared input/output context window. */
+  readonly maxInputTokens?: number
   readonly maxOutputTokens?: number
   readonly capabilities: ModelCapabilities
   readonly rateCard?: LanguageModelRateCard
@@ -70,6 +72,7 @@ export function defineLanguageModel(definition: LanguageModelDefinition): Langua
   const tags = freezeStrings(definition.tags, "tags")
   const capabilities = freezeCapabilities(definition.capabilities)
   assertOptionalPositiveInteger(definition.contextWindow, "contextWindow")
+  assertOptionalPositiveInteger(definition.maxInputTokens, "maxInputTokens")
   assertOptionalPositiveInteger(definition.maxOutputTokens, "maxOutputTokens")
   if (definition.rateCard) assertLanguageModelRateCard(definition.rateCard)
   return Object.freeze({
@@ -85,6 +88,9 @@ export function defineLanguageModel(definition: LanguageModelDefinition): Langua
       ? {}
       : { knowledgeCutoff: definition.knowledgeCutoff }),
     ...(definition.contextWindow === undefined ? {} : { contextWindow: definition.contextWindow }),
+    ...(definition.maxInputTokens === undefined
+      ? {}
+      : { maxInputTokens: definition.maxInputTokens }),
     ...(definition.maxOutputTokens === undefined
       ? {}
       : { maxOutputTokens: definition.maxOutputTokens }),

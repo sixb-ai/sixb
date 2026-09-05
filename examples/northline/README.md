@@ -72,8 +72,9 @@ Then, in one thread:
 
 The next response should continue normally, and every original message should remain visible in
 the thread. Outside this opt-in demonstration mode, Northline uses Sixb's automatic model-derived
-context budget. The worker resolves the selected model from its pinned Models.dev snapshot and
-falls back to a 128,000-token window when no exact catalog entry exists.
+context budget. At startup, the worker resolves missing limits through the selected model's
+provider catalog. If no limit is available, configure `loop.context.windowTokens` or supply a
+model definition; there is no assumed context window.
 
 ### Hosted sandbox
 

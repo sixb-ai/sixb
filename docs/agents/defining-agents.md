@@ -156,10 +156,15 @@ loop: { caching: "off" }
 Direct-provider models retain their provider-specific caching behavior.
 
 Sixb automatically checkpoints long conversations before their next model request exceeds the
-selected model's context window. The worker prefers the owned model definition's context window,
-then resolves exact model limits from its pinned Models.dev snapshot. If neither is available,
-it uses a conservative 128,000-token window and logs one startup
-warning for that provider/model pair.
+selected model's context window. At startup, the worker uses locally available model limits or
+calls the model's `resolveDefinition()` to fetch metadata through its provider's cached catalog.
+An explicit `loop.context.windowTokens` avoids that lookup and allows offline startup.
+If no limit is available, startup fails with instructions to configure a window or supply a model
+definition; Sixb does not assume a default context size.
+
+Model definitions distinguish `contextWindow` (shared input/output capacity) from `maxInputTokens`.
+When both are known, the input budget respects both limits. When only an input limit is known,
+Sixb uses it as a conservative window and still leaves the configured output reserve.
 
 The full transcript remains unchanged. Only the model-facing view becomes a continuation summary
 plus recent complete turns.

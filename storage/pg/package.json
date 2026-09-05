@@ -33,7 +33,7 @@
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "bun test --preload ./tests/setup.ts ./tests/*.e2e.ts",
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 90 --max 600 bun test --preload ./tests/setup.ts ./tests/*.e2e.ts",
     "prepack": "bun run build"
   },
   "dependencies": {

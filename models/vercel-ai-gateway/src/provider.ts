@@ -150,7 +150,10 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
 
   private load(): Promise<readonly LanguageModelDefinition[]> {
     const ttl = this.transport.catalogTtlMs ?? DEFAULT_CATALOG_TTL_MS
-    if (this.loadPromise && Date.now() - this.loadedAt >= ttl) this.loadPromise = undefined
+    if (this.loadPromise && this.loadedAt !== 0 && Date.now() - this.loadedAt >= ttl) {
+      this.loadPromise = undefined
+      this.loadedAt = 0
+    }
     this.loadPromise ??= this.fetchDefinitions()
       .then((definitions) => {
         this.loadedAt = Date.now()
@@ -364,6 +367,19 @@ class VercelGatewayLanguageModel implements LanguageModel {
       ...(configuredDefinition ?? fallbackDefinition(modelId)),
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
     })
+  }
+
+  async resolveDefinition(): Promise<LanguageModelDefinition> {
+    const definition = await this.catalog.get(this.modelId)
+    return definition === undefined
+      ? this.definition
+      : new VercelGatewayLanguageModel(
+          this.transport,
+          this.catalog,
+          this.modelId,
+          this.options,
+          definition
+        ).definition
   }
 
   async stream(request: LanguageModelRequest) {

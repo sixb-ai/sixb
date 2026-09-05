@@ -44,6 +44,80 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Vercel AI Gateway provider", () => {
+  test("resolves model context through the shared catalog without mutating the binding", async () => {
+    // Regression proof: remove resolveDefinition or expire the pending loadPromise before loadedAt is set.
+    let calls = 0
+    const provider = createVercelGateway({
+      apiKey: "test",
+      fetch: async (_url, init) => {
+        calls += 1
+        expect(init?.signal).toBeInstanceOf(AbortSignal)
+        return Response.json({
+          data: [
+            {
+              id: "creator/model",
+              type: "language",
+              context_window: 200_000,
+              max_tokens: 32_000,
+              tags: ["tool-use"],
+            },
+          ],
+        })
+      },
+    })
+    const model = provider("creator/model", { capabilities: { localTools: false } })
+    const original = model.definition
+    expect(calls).toBe(0)
+    const [resolved, other] = await Promise.all([
+      model.resolveDefinition?.(),
+      provider("creator/model").resolveDefinition?.(),
+    ])
+    expect(calls).toBe(1)
+    expect(resolved).toMatchObject({ contextWindow: 200_000, capabilities: { localTools: false } })
+    expect(other?.contextWindow).toBe(200_000)
+    expect(model.definition).toBe(original)
+    expect(model.definition.contextWindow).toBeUndefined()
+    await model.resolveDefinition?.()
+    expect(calls).toBe(1)
+  })
+
+  test("resolves supplied definitions offline", async () => {
+    const provider = createVercelGateway({
+      models: [
+        {
+          kind: "language",
+          providerId: "vercel-ai-gateway",
+          modelId: "creator/model",
+          contextWindow: 123_000,
+          maxInputTokens: 100_000,
+          capabilities: {},
+        },
+      ],
+      fetch: async () => {
+        throw new Error("must not fetch")
+      },
+    })
+    expect(await provider("creator/model").resolveDefinition?.()).toMatchObject({
+      contextWindow: 123_000,
+      maxInputTokens: 100_000,
+    })
+  })
+
+  test("reports catalog failures, retries later, and does not invent unknown model limits", async () => {
+    let calls = 0
+    const provider = createVercelGateway({
+      apiKey: "test",
+      fetch: async () => {
+        if (++calls === 1) throw new Error("catalog unavailable")
+        return Response.json({ data: [] })
+      },
+    })
+    const model = provider("creator/unknown")
+    await expect(model.resolveDefinition?.()).rejects.toThrow("catalog unavailable")
+    expect(await model.resolveDefinition?.()).toBe(model.definition)
+    expect(model.definition.contextWindow).toBeUndefined()
+    expect(calls).toBe(2)
+  })
   test("honors summary output limits and automatic caching controls on the wire", async () => {
     // Regression proof: omit max_output_tokens or providerOptions from prepareRequest.
     const bodies: Record<string, unknown>[] = []

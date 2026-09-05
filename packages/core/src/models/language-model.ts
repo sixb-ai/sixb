@@ -80,6 +80,8 @@ export interface LanguageModel {
   readonly providerId: string
   readonly modelId: string
   readonly definition: LanguageModelDefinition
+  /** Resolve provider metadata without mutating definition. May perform a bounded catalog request. */
+  resolveDefinition?(): Promise<LanguageModelDefinition>
   stream(request: LanguageModelRequest): Promise<LanguageModelStream>
 }
 

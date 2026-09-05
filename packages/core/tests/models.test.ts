@@ -4,6 +4,26 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createSixb, defineAgent, defineObjectType, prop } from "../src"
 import { createModelCatalog, defineLanguageModel, type LanguageModel } from "../src/models"
+
+test("model definitions preserve and validate distinct input limits", () => {
+  // Regression proof: omit maxInputTokens from defineLanguageModel's output or validation.
+  const definition = {
+    kind: "language" as const,
+    providerId: "mock",
+    modelId: "model",
+    capabilities: {},
+    contextWindow: 200_000,
+    maxInputTokens: 180_000,
+  }
+  expect(defineLanguageModel(definition)).toMatchObject({
+    contextWindow: 200_000,
+    maxInputTokens: 180_000,
+  })
+  for (const maxInputTokens of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+    expect(() => defineLanguageModel({ ...definition, maxInputTokens })).toThrow("maxInputTokens")
+  }
+})
+
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const tempRoots = new Set<string>()
