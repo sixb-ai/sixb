@@ -16,10 +16,6 @@ import { LanguageModelRefSchema } from "./models"
 export const AgentRunFailureSchema: z.ZodType<SixbFailure<AgentRunFailureCode>> =
   sixbFailureSchema(AGENT_RUN_FAILURE_CODES)
 
-export const AgentIdParamsSchema = z.object({
-  agentId: z.string().min(1),
-})
-
 export const AgentThreadParamsSchema = z.object({
   threadId: z.string().min(1),
 })
@@ -74,53 +70,34 @@ export const AgentContextPartSchema = AgentContextEntryInputSchema.extend({
   type: z.literal("context"),
 })
 
-export const AgentLoopConfigSchema = z.object({
-  stopWhen: z
-    .object({
-      maxSteps: z.number().int().positive().optional(),
-    })
-    .optional(),
-  context: z
-    .object({
-      windowTokens: z.number().int().positive().optional(),
-      reserveTokens: z.number().int().positive().optional(),
-      keepRecentTokens: z.number().int().positive().optional(),
-    })
-    .optional(),
-})
-
 export const AgentReasoningLevelSchema = z.enum(AGENT_REASONING_LEVELS)
 
-export const AgentCatalogItemSchema = z.object({
-  id: z.string(),
+export const AgentDescriptorSchema = z.object({
   name: z.string(),
-  description: z.string().optional(),
-  modelId: z.string().optional(),
-  reasoning: AgentReasoningLevelSchema.optional(),
-  groupIds: z.array(z.string()),
-  loop: AgentLoopConfigSchema.optional(),
+  model: LanguageModelRefSchema,
 })
 
 export const AgentThreadStatusSchema = z.enum(["active", "archived"])
 
-export const AgentThreadListQuerySchema = z.object({
-  agentId: z.string().optional(),
-  status: AgentThreadStatusSchema.optional(),
-  limit: z.string().optional(),
-  offset: z.string().optional(),
-  order: z.enum(["asc", "desc"]).optional(),
-})
+export const AgentThreadListQuerySchema = z
+  .object({
+    status: AgentThreadStatusSchema.optional(),
+    limit: z.string().optional(),
+    offset: z.string().optional(),
+    order: z.enum(["asc", "desc"]).optional(),
+  })
+  .strict()
 
-export const CreateAgentThreadBodySchema = z.object({
-  agentId: z.string().min(1),
-  title: z.string().trim().min(1).optional(),
-  threadId: z.string().trim().min(1).optional(),
-})
+export const CreateAgentThreadBodySchema = z
+  .object({
+    title: z.string().trim().min(1).optional(),
+    threadId: z.string().trim().min(1).optional(),
+  })
+  .strict()
 
 export const AgentThreadSchema = z.object({
   id: z.string(),
   projectId: z.string(),
-  agentId: z.string(),
   ownerPrincipal: AgentPrincipalSchema,
   title: z.string().optional(),
   status: AgentThreadStatusSchema,
@@ -241,14 +218,16 @@ export const AgentMessageListResponseSchema = z.object({
   total: z.number(),
 })
 
-export const PostAgentMessageBodySchema = z.object({
-  text: z.string().trim().min(1),
-  model: LanguageModelRefSchema.optional(),
-  reasoning: AgentReasoningLevelSchema.optional(),
-  attachments: z.array(FileRefSchema).optional(),
-  context: z.array(AgentContextEntryInputSchema).max(MAX_AGENT_CONTEXT_ENTRIES).optional(),
-  messageId: z.string().trim().min(1).optional(),
-})
+export const PostAgentMessageBodySchema = z
+  .object({
+    text: z.string().trim().min(1),
+    model: LanguageModelRefSchema.optional(),
+    reasoning: AgentReasoningLevelSchema.optional(),
+    attachments: z.array(FileRefSchema).optional(),
+    context: z.array(AgentContextEntryInputSchema).max(MAX_AGENT_CONTEXT_ENTRIES).optional(),
+    messageId: z.string().trim().min(1).optional(),
+  })
+  .strict()
 
 export const CancelAgentRunBodySchema = z.object({
   runId: z.string().trim().min(1),
@@ -268,7 +247,6 @@ export const AgentRunSchema = z.object({
   id: z.string(),
   projectId: z.string(),
   threadId: z.string(),
-  agentId: z.string(),
   triggerMessageId: z.string(),
   requestedBy: AgentAuthorizablePrincipalSchema.optional(),
   status: AgentRunStatusSchema,

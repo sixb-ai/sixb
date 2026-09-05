@@ -5110,108 +5110,231 @@
                     "agents": {
                       "type": "array",
                       "items": {
-                        "type": "object",
-                        "properties": {
-                          "modelCallCount": {
-                            "type": "integer",
-                            "minimum": 0
-                          },
-                          "usage": {
+                        "anyOf": [
+                          {
                             "type": "object",
                             "properties": {
-                              "inputTokens": {
+                              "modelCallCount": {
                                 "type": "integer",
                                 "minimum": 0
                               },
-                              "outputTokens": {
-                                "type": "integer",
-                                "minimum": 0
+                              "usage": {
+                                "type": "object",
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "totalTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reportingStatus": {
+                                    "type": "string",
+                                    "enum": ["complete", "partial", "unavailable"]
+                                  }
+                                },
+                                "required": ["reportingStatus"],
+                                "additionalProperties": false
                               },
-                              "totalTokens": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "uncachedInputTokens": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "cacheReadInputTokens": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "cacheWriteInputTokens": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "textOutputTokens": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "reasoningOutputTokens": {
-                                "type": "integer",
-                                "minimum": 0
-                              },
-                              "reportingStatus": {
-                                "type": "string",
-                                "enum": ["complete", "partial", "unavailable"]
-                              }
-                            },
-                            "required": ["reportingStatus"],
-                            "additionalProperties": false
-                          },
-                          "costs": {
-                            "type": "object",
-                            "properties": {
-                              "amounts": {
-                                "type": "array",
-                                "items": {
-                                  "type": "object",
-                                  "properties": {
-                                    "currency": {
-                                      "type": "string",
-                                      "pattern": "^[A-Z]{3}$"
-                                    },
-                                    "amountNanos": {
-                                      "type": "string",
-                                      "pattern": "^\\d+$"
+                              "costs": {
+                                "type": "object",
+                                "properties": {
+                                  "amounts": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "currency": {
+                                          "type": "string",
+                                          "pattern": "^[A-Z]{3}$"
+                                        },
+                                        "amountNanos": {
+                                          "type": "string",
+                                          "pattern": "^\\d+$"
+                                        }
+                                      },
+                                      "required": ["currency", "amountNanos"],
+                                      "additionalProperties": false
                                     }
                                   },
-                                  "required": ["currency", "amountNanos"],
-                                  "additionalProperties": false
-                                }
+                                  "reportedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "ratedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "unpriceableCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "unvaluedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "amounts",
+                                  "reportedCallCount",
+                                  "ratedCallCount",
+                                  "unpriceableCallCount",
+                                  "unvaluedCallCount"
+                                ],
+                                "additionalProperties": false
                               },
-                              "reportedCallCount": {
+                              "kind": {
+                                "type": "string",
+                                "enum": ["agent"]
+                              }
+                            },
+                            "required": ["modelCallCount", "usage", "costs", "kind"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "modelCallCount": {
                                 "type": "integer",
                                 "minimum": 0
                               },
-                              "ratedCallCount": {
-                                "type": "integer",
-                                "minimum": 0
+                              "usage": {
+                                "type": "object",
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "totalTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reportingStatus": {
+                                    "type": "string",
+                                    "enum": ["complete", "partial", "unavailable"]
+                                  }
+                                },
+                                "required": ["reportingStatus"],
+                                "additionalProperties": false
                               },
-                              "unpriceableCallCount": {
-                                "type": "integer",
-                                "minimum": 0
+                              "costs": {
+                                "type": "object",
+                                "properties": {
+                                  "amounts": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "currency": {
+                                          "type": "string",
+                                          "pattern": "^[A-Z]{3}$"
+                                        },
+                                        "amountNanos": {
+                                          "type": "string",
+                                          "pattern": "^\\d+$"
+                                        }
+                                      },
+                                      "required": ["currency", "amountNanos"],
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "reportedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "ratedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "unpriceableCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "unvaluedCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "amounts",
+                                  "reportedCallCount",
+                                  "ratedCallCount",
+                                  "unpriceableCallCount",
+                                  "unvaluedCallCount"
+                                ],
+                                "additionalProperties": false
                               },
-                              "unvaluedCallCount": {
-                                "type": "integer",
-                                "minimum": 0
+                              "kind": {
+                                "type": "string",
+                                "enum": ["workflowAgent"]
+                              },
+                              "workflowId": {
+                                "type": "string"
+                              },
+                              "agentStepId": {
+                                "type": "string"
                               }
                             },
                             "required": [
-                              "amounts",
-                              "reportedCallCount",
-                              "ratedCallCount",
-                              "unpriceableCallCount",
-                              "unvaluedCallCount"
+                              "modelCallCount",
+                              "usage",
+                              "costs",
+                              "kind",
+                              "workflowId",
+                              "agentStepId"
                             ],
                             "additionalProperties": false
-                          },
-                          "agentId": {
-                            "type": "string"
                           }
-                        },
-                        "required": ["modelCallCount", "usage", "costs", "agentId"],
-                        "additionalProperties": false
+                        ]
                       }
                     },
                     "workflows": {
@@ -5569,9 +5692,6 @@
                                     "type": "string",
                                     "enum": ["agent"]
                                   },
-                                  "agentId": {
-                                    "type": "string"
-                                  },
                                   "agentRunId": {
                                     "type": "string"
                                   },
@@ -5579,7 +5699,7 @@
                                     "type": "string"
                                   }
                                 },
-                                "required": ["kind", "agentId", "agentRunId", "threadId"],
+                                "required": ["kind", "agentRunId", "threadId"],
                                 "additionalProperties": false
                               },
                               {
@@ -5589,7 +5709,7 @@
                                     "type": "string",
                                     "enum": ["workflowAgent"]
                                   },
-                                  "agentId": {
+                                  "agentStepId": {
                                     "type": "string"
                                   },
                                   "nodeRunId": {
@@ -5604,7 +5724,7 @@
                                 },
                                 "required": [
                                   "kind",
-                                  "agentId",
+                                  "agentStepId",
                                   "nodeRunId",
                                   "workflowId",
                                   "workflowRunId"
@@ -6166,9 +6286,6 @@
                                     "type": "string",
                                     "enum": ["agent"]
                                   },
-                                  "agentId": {
-                                    "type": "string"
-                                  },
                                   "agentRunId": {
                                     "type": "string"
                                   },
@@ -6176,7 +6293,7 @@
                                     "type": "string"
                                   }
                                 },
-                                "required": ["kind", "agentId", "agentRunId", "threadId"],
+                                "required": ["kind", "agentRunId", "threadId"],
                                 "additionalProperties": false
                               },
                               {
@@ -6186,7 +6303,7 @@
                                     "type": "string",
                                     "enum": ["workflowAgent"]
                                   },
-                                  "agentId": {
+                                  "agentStepId": {
                                     "type": "string"
                                   },
                                   "nodeRunId": {
@@ -6201,7 +6318,7 @@
                                 },
                                 "required": [
                                   "kind",
-                                  "agentId",
+                                  "agentStepId",
                                   "nodeRunId",
                                   "workflowId",
                                   "workflowRunId"
@@ -6310,9 +6427,6 @@
                                           "type": "string",
                                           "enum": ["agent"]
                                         },
-                                        "agentId": {
-                                          "type": "string"
-                                        },
                                         "agentRunId": {
                                           "type": "string"
                                         },
@@ -6320,7 +6434,7 @@
                                           "type": "string"
                                         }
                                       },
-                                      "required": ["kind", "agentId", "agentRunId", "threadId"],
+                                      "required": ["kind", "agentRunId", "threadId"],
                                       "additionalProperties": false
                                     },
                                     {
@@ -6330,7 +6444,7 @@
                                           "type": "string",
                                           "enum": ["workflowAgent"]
                                         },
-                                        "agentId": {
+                                        "agentStepId": {
                                           "type": "string"
                                         },
                                         "nodeRunId": {
@@ -6345,7 +6459,7 @@
                                       },
                                       "required": [
                                         "kind",
-                                        "agentId",
+                                        "agentStepId",
                                         "nodeRunId",
                                         "workflowId",
                                         "workflowRunId"
@@ -23463,116 +23577,11 @@
         ]
       }
     },
-    "/api/agents": {
+    "/api/agent": {
       "get": {
-        "summary": "List registered agents",
-        "tags": ["Agents"],
-        "operationId": "listAgents",
-        "responses": {
-          "200": {
-            "description": "Response for status 200",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "type": "object",
-                    "properties": {
-                      "id": {
-                        "type": "string"
-                      },
-                      "name": {
-                        "type": "string"
-                      },
-                      "description": {
-                        "type": "string"
-                      },
-                      "modelId": {
-                        "type": "string"
-                      },
-                      "reasoning": {
-                        "type": "string",
-                        "enum": [
-                          "provider-default",
-                          "none",
-                          "minimal",
-                          "low",
-                          "medium",
-                          "high",
-                          "xhigh"
-                        ]
-                      },
-                      "groupIds": {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        }
-                      },
-                      "loop": {
-                        "type": "object",
-                        "properties": {
-                          "stopWhen": {
-                            "type": "object",
-                            "properties": {
-                              "maxSteps": {
-                                "type": "integer",
-                                "exclusiveMinimum": true,
-                                "minimum": 0
-                              }
-                            },
-                            "additionalProperties": false
-                          },
-                          "context": {
-                            "type": "object",
-                            "properties": {
-                              "windowTokens": {
-                                "type": "integer",
-                                "exclusiveMinimum": true,
-                                "minimum": 0
-                              },
-                              "reserveTokens": {
-                                "type": "integer",
-                                "exclusiveMinimum": true,
-                                "minimum": 0
-                              },
-                              "keepRecentTokens": {
-                                "type": "integer",
-                                "exclusiveMinimum": true,
-                                "minimum": 0
-                              }
-                            },
-                            "additionalProperties": false
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    },
-                    "required": ["id", "name", "groupIds"],
-                    "additionalProperties": false
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/agents/{agentId}": {
-      "get": {
-        "summary": "Get agent metadata",
+        "summary": "Get the project Agent",
         "tags": ["Agents"],
         "operationId": "getAgent",
-        "parameters": [
-          {
-            "name": "agentId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "minLength": 1
-            }
-          }
-        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -23581,76 +23590,26 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": {
-                      "type": "string"
-                    },
                     "name": {
                       "type": "string"
                     },
-                    "description": {
-                      "type": "string"
-                    },
-                    "modelId": {
-                      "type": "string"
-                    },
-                    "reasoning": {
-                      "type": "string",
-                      "enum": [
-                        "provider-default",
-                        "none",
-                        "minimal",
-                        "low",
-                        "medium",
-                        "high",
-                        "xhigh"
-                      ]
-                    },
-                    "groupIds": {
-                      "type": "array",
-                      "items": {
-                        "type": "string"
-                      }
-                    },
-                    "loop": {
+                    "model": {
                       "type": "object",
                       "properties": {
-                        "stopWhen": {
-                          "type": "object",
-                          "properties": {
-                            "maxSteps": {
-                              "type": "integer",
-                              "exclusiveMinimum": true,
-                              "minimum": 0
-                            }
-                          },
-                          "additionalProperties": false
+                        "provider": {
+                          "type": "string",
+                          "minLength": 1
                         },
-                        "context": {
-                          "type": "object",
-                          "properties": {
-                            "windowTokens": {
-                              "type": "integer",
-                              "exclusiveMinimum": true,
-                              "minimum": 0
-                            },
-                            "reserveTokens": {
-                              "type": "integer",
-                              "exclusiveMinimum": true,
-                              "minimum": 0
-                            },
-                            "keepRecentTokens": {
-                              "type": "integer",
-                              "exclusiveMinimum": true,
-                              "minimum": 0
-                            }
-                          },
-                          "additionalProperties": false
+                        "modelId": {
+                          "type": "string",
+                          "minLength": 1
                         }
                       },
+                      "required": ["provider", "modelId"],
                       "additionalProperties": false
                     }
                   },
-                  "required": ["id", "name", "groupIds"],
+                  "required": ["name", "model"],
                   "additionalProperties": false
                 }
               }
@@ -23682,14 +23641,6 @@
         "tags": ["Agent Threads"],
         "operationId": "listAgentThreads",
         "parameters": [
-          {
-            "name": "agentId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
           {
             "name": "status",
             "in": "query",
@@ -23744,9 +23695,6 @@
                           "projectId": {
                             "type": "string"
                           },
-                          "agentId": {
-                            "type": "string"
-                          },
                           "ownerPrincipal": {
                             "type": "object",
                             "properties": {
@@ -23789,7 +23737,6 @@
                         "required": [
                           "id",
                           "projectId",
-                          "agentId",
                           "ownerPrincipal",
                           "status",
                           "activeRunId",
@@ -23865,10 +23812,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "agentId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "title": {
                     "type": "string",
                     "minLength": 1
@@ -23878,7 +23821,6 @@
                     "minLength": 1
                   }
                 },
-                "required": ["agentId"],
                 "additionalProperties": false
               }
             },
@@ -23886,10 +23828,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "agentId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "title": {
                     "type": "string",
                     "minLength": 1
@@ -23899,7 +23837,6 @@
                     "minLength": 1
                   }
                 },
-                "required": ["agentId"],
                 "additionalProperties": false
               }
             },
@@ -23907,10 +23844,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "agentId": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "title": {
                     "type": "string",
                     "minLength": 1
@@ -23920,7 +23853,6 @@
                     "minLength": 1
                   }
                 },
-                "required": ["agentId"],
                 "additionalProperties": false
               }
             }
@@ -23941,9 +23873,6 @@
                           "type": "string"
                         },
                         "projectId": {
-                          "type": "string"
-                        },
-                        "agentId": {
                           "type": "string"
                         },
                         "ownerPrincipal": {
@@ -23988,7 +23917,6 @@
                       "required": [
                         "id",
                         "projectId",
-                        "agentId",
                         "ownerPrincipal",
                         "status",
                         "activeRunId",
@@ -24106,9 +24034,6 @@
                     "projectId": {
                       "type": "string"
                     },
-                    "agentId": {
-                      "type": "string"
-                    },
                     "ownerPrincipal": {
                       "type": "object",
                       "properties": {
@@ -24151,7 +24076,6 @@
                   "required": [
                     "id",
                     "projectId",
-                    "agentId",
                     "ownerPrincipal",
                     "status",
                     "activeRunId",
@@ -25457,9 +25381,6 @@
                         "threadId": {
                           "type": "string"
                         },
-                        "agentId": {
-                          "type": "string"
-                        },
                         "triggerMessageId": {
                           "type": "string"
                         },
@@ -25723,7 +25644,6 @@
                         "id",
                         "projectId",
                         "threadId",
-                        "agentId",
                         "triggerMessageId",
                         "status",
                         "attempt",
@@ -26108,9 +26028,6 @@
                         "threadId": {
                           "type": "string"
                         },
-                        "agentId": {
-                          "type": "string"
-                        },
                         "triggerMessageId": {
                           "type": "string"
                         },
@@ -26374,7 +26291,6 @@
                         "id",
                         "projectId",
                         "threadId",
-                        "agentId",
                         "triggerMessageId",
                         "status",
                         "attempt",
@@ -26511,9 +26427,6 @@
                         "threadId": {
                           "type": "string"
                         },
-                        "agentId": {
-                          "type": "string"
-                        },
                         "triggerMessageId": {
                           "type": "string"
                         },
@@ -26777,7 +26690,6 @@
                         "id",
                         "projectId",
                         "threadId",
-                        "agentId",
                         "triggerMessageId",
                         "status",
                         "attempt",
@@ -26934,9 +26846,6 @@
                             "type": "string"
                           },
                           "threadId": {
-                            "type": "string"
-                          },
-                          "agentId": {
                             "type": "string"
                           },
                           "triggerMessageId": {
@@ -27202,7 +27111,6 @@
                           "id",
                           "projectId",
                           "threadId",
-                          "agentId",
                           "triggerMessageId",
                           "status",
                           "attempt",
@@ -27310,9 +27218,6 @@
                       "type": "string"
                     },
                     "threadId": {
-                      "type": "string"
-                    },
-                    "agentId": {
                       "type": "string"
                     },
                     "triggerMessageId": {
@@ -27578,7 +27483,6 @@
                     "id",
                     "projectId",
                     "threadId",
-                    "agentId",
                     "triggerMessageId",
                     "status",
                     "attempt",

@@ -8,7 +8,7 @@
  * entry in `GRANT_KINDS` plus the compile errors that forces at every consumer.
  */
 
-import type { GrantDefinition } from "../security/types"
+import type { AgentRunGrant, GrantDefinition } from "../security/types"
 
 export type GrantKind =
   | "access:application"
@@ -24,6 +24,9 @@ export type GrantKind =
   | "observe:logs"
   | "manage:connector"
 
+export type SingletonGrantKind = "run:agent"
+export type TargetedGrantKind = Exclude<GrantKind, SingletonGrantKind>
+
 /** Registered id universes a grant kind ranges over, plus subtype expansion. */
 export interface GrantUniverse {
   readonly applicationIds: ReadonlySet<string>
@@ -33,7 +36,6 @@ export interface GrantUniverse {
   readonly workflowIds: ReadonlySet<string>
   readonly syncIds: ReadonlySet<string>
   readonly pipelineIds: ReadonlySet<string>
-  readonly agentIds: ReadonlySet<string>
   readonly observableIds: ReadonlySet<string>
   readonly connectorIds: ReadonlySet<string>
   readonly getSubTypes: (objectTypeId: string) => readonly string[]
@@ -42,7 +44,7 @@ export interface GrantUniverse {
 /** The registered-id sets a grant kind validates against (no subtype hook). */
 export type GrantUniverseKey = Exclude<keyof GrantUniverse, "getSubTypes">
 
-interface GrantKindSpec {
+interface TargetedGrantKindSpec {
   /** Registered universe the grant's ids must belong to. */
   readonly universeKey: GrantUniverseKey
   /** Subject noun used in validation errors ("unknown <subject> '<id>'"). */
@@ -53,11 +55,22 @@ interface GrantKindSpec {
   readonly expandsSubtypes?: true
 }
 
+interface SingletonGrantKindSpec {
+  /** Project-wide capability with no resource selection; resolves to a boolean. */
+  readonly singleton: true
+  readonly subject: string
+  readonly fix: string
+}
+
 /**
  * The exhaustive grant-kind table. A new grant family is one entry here; the
- * `Record<GrantKind, …>` makes every omission a compile error.
+ * mapped type makes every omission a compile error.
  */
-export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
+export const GRANT_KINDS: {
+  readonly [TKind in GrantKind]: TKind extends SingletonGrantKind
+    ? SingletonGrantKindSpec
+    : TargetedGrantKindSpec
+} = {
   "access:application": {
     universeKey: "applicationIds",
     subject: "application",
@@ -108,9 +121,9 @@ export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
     fix: "Add it to 'pipelines/' or pass it to createSixb({ pipelines }).",
   },
   "run:agent": {
-    universeKey: "agentIds",
+    singleton: true,
     subject: "agent",
-    fix: "Add it to 'agents/' or pass it to createSixb({ agents }).",
+    fix: "Configure models.language and use the exported agent reference in can.run(agent).",
   },
   "observe:logs": {
     universeKey: "observableIds",
@@ -125,8 +138,14 @@ export const GRANT_KINDS: Record<GrantKind, GrantKindSpec> = {
 }
 
 export const GRANT_KIND_KEYS = Object.keys(GRANT_KINDS) as readonly GrantKind[]
+export const TARGETED_GRANT_KIND_KEYS = GRANT_KIND_KEYS.filter(
+  (kind): kind is TargetedGrantKind => kind !== "run:agent"
+)
 
 /** The grant kind a stored grant resolves to. */
+export function grantKindOf(grant: AgentRunGrant): SingletonGrantKind
+export function grantKindOf(grant: Exclude<GrantDefinition, AgentRunGrant>): TargetedGrantKind
+export function grantKindOf(grant: GrantDefinition): GrantKind
 export function grantKindOf(grant: GrantDefinition): GrantKind {
   switch (grant.capability) {
     case "access":
@@ -148,11 +167,24 @@ export function grantKindOf(grant: GrantDefinition): GrantKind {
   }
 }
 
-/** A fresh, mutable grant index with one empty id set per kind. */
-export function emptyGrantSets(): Record<GrantKind, Set<string>> {
-  const sets = {} as Record<GrantKind, Set<string>>
-  for (const kind of GRANT_KIND_KEYS) {
-    sets[kind] = new Set<string>()
+/** Mutable grant index: booleans for singleton capabilities, id sets for selected resources. */
+export type MutableGrantIndex = {
+  [TKind in GrantKind]: TKind extends SingletonGrantKind ? boolean : Set<string>
+}
+
+export function emptyGrantSets(): MutableGrantIndex {
+  return {
+    "access:application": new Set(),
+    "view:object": new Set(),
+    "view:dataset": new Set(),
+    "edit:object": new Set(),
+    "append:telemetry": new Set(),
+    "apply:action": new Set(),
+    "run:workflow": new Set(),
+    "run:sync": new Set(),
+    "run:pipeline": new Set(),
+    "run:agent": false,
+    "observe:logs": new Set(),
+    "manage:connector": new Set(),
   }
-  return sets
 }

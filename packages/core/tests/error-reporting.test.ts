@@ -261,7 +261,7 @@ describe("Sixb error reporting", () => {
     reportRunFailure(host, new Error("run failed"), {
       projectId: PROJECT_ID,
       runKind: "agent",
-      run: { runId: "agent-run-1", agentId: "assistant" },
+      run: { runId: "agent-run-1", threadId: "thread-1" },
       failure: unexpectedFailure("run failed"),
     })
 

@@ -1,8 +1,8 @@
 import { appendFileSync } from "node:fs"
+import type { ModelCatalogInput } from "@sixb/core"
 import {
   col,
   type DatasetDefinition,
-  defineAgent,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -21,12 +21,6 @@ import {
   type StorageMigrator,
 } from "@sixb/core"
 import { SharedBroker } from "../shared/sharedBroker"
-
-const assistant = defineAgent("assistant", {
-  name: "Assistant",
-  model: {} as Parameters<typeof defineAgent>[1]["model"],
-  instructions: "Assist the user.",
-})
 
 const sandboxes: SandboxFactory = {
   async create() {
@@ -181,6 +175,21 @@ export const sixb = new SixbHost({
   syncs: [ordersSync],
   pipelines: [normalizePipeline],
   projections: [orderProjection],
-  agents: [assistant],
+  models: {
+    language: [
+      {
+        specificationVersion: "v4",
+        provider: "test",
+        modelId: "test",
+        supportedUrls: {},
+        doGenerate: async () => {
+          throw new Error("Unused fixture model")
+        },
+        doStream: async () => {
+          throw new Error("Unused fixture model")
+        },
+      } satisfies ModelCatalogInput["language"][number],
+    ],
+  },
   sandboxes,
 })

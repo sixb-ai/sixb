@@ -1,17 +1,12 @@
 import { ActionRegistry } from "../actions"
 import type { ActionDefinition } from "../actions/types"
-import type { AgentDefinition, AgentToolDefinition } from "../agents"
-import {
-  createMainAgentDefinition,
-  MAIN_AGENT_ID,
-  validateAgentGroupReferences,
-  validateAgentToolsAtStartup,
-} from "../agents"
+import type { AgentToolDefinition } from "../agents"
+import { assertNoAgentDefinitions } from "../agents/retired-config"
 import { createAgentToolCatalog } from "../agents/tool-catalog"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
-import { createModelCatalog, type ModelCatalog, type ModelCatalogInput } from "../models"
+import { createModelCatalog, type ModelCatalogInput } from "../models"
 import { OntologyRegistry } from "../ontology"
 import type { PipelineDefinition } from "../pipelines/types"
 import { ProjectionRegistry } from "../projections"
@@ -46,7 +41,6 @@ interface DefinitionOptions {
   readonly projections?: readonly ProjectionDefinition[]
   readonly rules?: readonly RuleDefinition[]
   readonly workflows?: readonly WorkflowDefinition[]
-  readonly agents?: readonly AgentDefinition[]
   readonly tools?: readonly AgentToolDefinition[]
   readonly models?: ModelCatalogInput
   readonly groups?: readonly GroupDefinition[]
@@ -63,32 +57,13 @@ interface ResolvedDefinitions extends SixbDefinitions {
 
 /** Resolve and cross-validate every registered definition before runtime services are composed. */
 export function resolveDefinitions(options: DefinitionOptions): ResolvedDefinitions {
+  assertNoAgentDefinitions(options)
   const ontology = new OntologyRegistry({ sources: options.ontology })
   const actionRegistry = new ActionRegistry({ actions: options.actions ?? [], ontology })
   const registeredActionIds = new Set(actionRegistry.list().map((action) => action.id))
 
-  const configuredAgents = options.agents ?? []
   const models = options.models === undefined ? undefined : createModelCatalog(options.models)
   const tools = createAgentToolCatalog(options.tools)
-  // Transitional: remove this adapter with defineAgent and the static Agent catalog.
-  if (configuredAgents.some((agent) => agent.id === MAIN_AGENT_ID)) {
-    throw new RuntimeError(
-      `[Sixb] Agent id '${MAIN_AGENT_ID}' is reserved by the framework-owned main agent.`
-    )
-  }
-  const agents =
-    models === undefined
-      ? configuredAgents
-      : [
-          createMainAgentDefinition({
-            model: models.language.default.model,
-            tools: tools.list(),
-          }),
-          ...configuredAgents,
-        ]
-  validateAgentToolsAtStartup(agents)
-  validateAgentModelReferences(agents, models)
-  const agentsById = indexUniqueDefinitions("agent", agents)
   const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])
 
   // Datasets resolve first because syncs, pipelines, projections, and security depend on them.
@@ -150,7 +125,6 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     workflows: options.workflows ?? [],
     registeredSchedules: schedulesById,
     registeredActionIds,
-    registeredAgentIds: new Set(agentsById.keys()),
     ...(models === undefined ? {} : { models }),
     tools,
   })
@@ -166,11 +140,10 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     workflowIds: new Set(workflowsById.keys()),
     syncIds: new Set(syncsById.keys()),
     pipelineIds: new Set(pipelinesById.keys()),
-    agentIds: new Set(agentsById.keys()),
+    agentAvailable: models !== undefined,
     connectorIds: new Set(connectorsById.keys()),
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),
   })
-  validateAgentGroupReferences(agents, security)
   validateWorkflowAgentStepGroupReferences(workflows, security)
 
   const projectionRegistry = new ProjectionRegistry({
@@ -186,7 +159,6 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   return Object.freeze({
     ontology,
     actions: actionRegistry,
-    agents: createDefinitionCatalog(agentsById),
     tools,
     connectors: createDefinitionCatalog(connectorsById),
     datasets: createDefinitionCatalog(datasetsById),
@@ -265,29 +237,6 @@ function validateScheduleReferences(
     if (!schedulesById.has(reference.scheduleId)) {
       throw new RuntimeError(
         `${consumerKind} '${consumerId}' references unknown schedule '${reference.scheduleId}'. Add it to 'schedules' in createSixb() or export it from 'schedules/'.`
-      )
-    }
-  }
-}
-
-/**
- * Keep every agent on a model the project actually allows.
- *
- * Only enforced once a project configures `models`; without a catalog an agent's model is its own
- * declaration, which is the pre-catalog behavior.
- */
-function validateAgentModelReferences(
-  agents: readonly AgentDefinition[],
-  models: ModelCatalog | undefined
-): void {
-  if (models === undefined) {
-    return
-  }
-  for (const agent of agents) {
-    const ref = { provider: agent.model.provider, modelId: agent.model.modelId }
-    if (models.language.getByRef(ref) === null) {
-      throw new RuntimeError(
-        `[Sixb] Agent '${agent.id}' uses unknown language model '${ref.provider}/${ref.modelId}'. Add it to 'models.language' in createSixb().`
       )
     }
   }

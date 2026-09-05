@@ -82,7 +82,7 @@ export async function canAccessAgentRunStream(
   sixb: Sixb<readonly OntologySource[]>,
   runId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
-  const run = await sixb.agents.runs.getById(runId)
+  const run = await sixb.agent.runs.getById(runId)
   if (!run) {
     return { ok: false, message: "Agent run not found." }
   }
@@ -93,8 +93,8 @@ export async function canAccessAgentThreadActivity(
   sixb: Sixb<readonly OntologySource[]>,
   event: AgentRunActivityEvent
 ): Promise<boolean> {
-  const thread = await sixb.agents.threads.getById(event.threadId)
-  return thread?.agentId === event.agentId
+  const run = await sixb.agent.runs.getById(event.runId)
+  return run?.projectId === event.projectId && run.threadId === event.threadId
 }
 
 export function registerAgentStreamRoutes(app: Elysia, server: SixbServer) {
@@ -318,7 +318,7 @@ async function sendVisibleActivityRecords(
     events.map((event) => canAccessAgentThreadActivity(sixb, event))
   )
   for (const [index, event] of events.entries()) {
-    if (visible[index]) safeSend(ws, { type: "activity", event })
+    if (visible[index]) safeSend(ws, { type: "activity", event: serializeStreamPayload(event) })
   }
 }
 
@@ -401,7 +401,7 @@ async function sendRunSnapshot(
   runId: string
 ): Promise<boolean> {
   try {
-    const run = await sixb.agents.runs.getById(runId)
+    const run = await sixb.agent.runs.getById(runId)
     if (!run) {
       safeSend(ws, { type: "error", message: "Agent run not found." })
       return false
@@ -422,8 +422,19 @@ function sendRecords(
   records: readonly BrokerRecord[]
 ): void {
   for (const record of records) {
-    safeSend(ws, { type: "record", record })
+    safeSend(ws, {
+      type: "record",
+      record: { ...record, payload: serializeStreamPayload(record.payload) },
+    })
   }
+}
+
+/** Stored records may predate the public contract; do not re-expose their retired selector. */
+function serializeStreamPayload(payload: unknown): unknown {
+  if (payload === null || typeof payload !== "object" || Array.isArray(payload)) return payload
+  if (!("agentId" in payload)) return payload
+  const { agentId: _agentId, ...event } = payload
+  return event
 }
 
 function errorMessage(error: unknown): string {

@@ -1,5 +1,5 @@
 import { type ActionsRuntime, createActionsRuntime } from "../actions/execution"
-import { type AgentsRuntime, createAgentsRuntime } from "../agents/execution"
+import { type AgentRuntime, createAgentRuntime } from "../agents/execution"
 import { type BlobsRuntime, createBlobsRuntime } from "../blob-storage/execution"
 import type { BlobStorage } from "../blob-storage/types"
 import { registerConnectorConnectionsRuntime } from "../connectors/connections/capability"
@@ -36,7 +36,7 @@ export interface Sixb<
   readonly pipelines: PipelinesRuntime
   readonly projections: ProjectionsRuntime
   readonly rules: RulesRuntime
-  readonly agents: AgentsRuntime
+  readonly agent: AgentRuntime
   readonly events: EventsRuntime
   readonly logs: LogsRuntime
   readonly schedules: SchedulesRuntime
@@ -95,13 +95,7 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
     pipelines: createPipelinesRuntime(runtime, execution, dependencies.definitions.pipelines),
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),
-    agents: createAgentsRuntime(
-      runtime,
-      execution,
-      dependencies.definitions.agents,
-      dependencies.definitions.security,
-      dependencies.definitions.models
-    ),
+    agent: createAgentRuntime(runtime, execution, dependencies.definitions.models),
     events: createEventsRuntime(runtime),
     logs: createLogsRuntime(runtime, dependencies.logging),
     schedules: createSchedulesRuntime(dependencies.definitions.schedules),

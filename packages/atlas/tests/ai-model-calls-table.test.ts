@@ -22,7 +22,7 @@ const data: ListAiModelCallGroupsResponse = {
       executionId: "parent",
       label: "Workplace forecast",
       canOpenThread: true,
-      attribution: { kind: "agent", agentId: "main", agentRunId: "run", threadId: "thread" },
+      attribution: { kind: "agent", agentRunId: "run", threadId: "thread" },
       firstCallAt: time,
       lastCallAt: time,
       modelCallCount: 9,

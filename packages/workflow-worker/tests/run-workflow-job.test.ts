@@ -852,7 +852,7 @@ describe("runWorkflowJob", () => {
       nodeRunId: node!.id,
     })
     expect(execution).toMatchObject({
-      agentId: workflowAgentStepActorId(workflow.id, configuredStep.id),
+      actorId: workflowAgentStepActorId(workflow.id, configuredStep.id),
       status: "queued",
       prompt: "Resolve transaction 'txn_1'.",
     })

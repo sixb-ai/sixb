@@ -63,6 +63,8 @@ export interface CreateSubagentEnvironmentInput extends CreateAgentEnvironmentIn
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
   readonly run: WorkflowAgentNodeRunRecord
+  readonly workflowId: string
+  readonly stepId: string
   readonly nodeInput: WorkflowIOSnapshot
   readonly errorDetails: AgentErrorDetails
 }
@@ -104,10 +106,10 @@ export async function createConversationAgentEnvironment(
   return startAgentEnvironment({
     mode: "conversation",
     context,
-    agentId: run.agentId,
     plan,
     runId: run.id,
     threadId: run.threadId,
+    toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
     apiBaseUrl,
     attachmentContext,
     skills,
@@ -132,6 +134,7 @@ export async function createSubagentEnvironment(
     plan,
     runId: run.id,
     parentRunId: run.parentRunId,
+    toolRun: { kind: "subagent", id: run.id, parentRunId: run.parentRunId },
     apiBaseUrl: createAgentApiGatewayBaseUrl({
       apiBaseUrl: context.apiBaseUrl,
       projectId: context.id,
@@ -168,9 +171,15 @@ export async function createWorkflowAgentNodeEnvironment(
   return startAgentEnvironment({
     mode: "workflow-task",
     context,
-    agentId: run.agentId,
+    actorId: run.actorId,
     plan,
     runId: run.nodeRunId,
+    toolRun: {
+      kind: "workflow",
+      id: run.nodeRunId,
+      workflowId: input.workflowId,
+      stepId: input.stepId,
+    },
     apiBaseUrl: createAgentApiGatewayBaseUrl({
       apiBaseUrl: context.apiBaseUrl,
       projectId: context.id,
@@ -185,7 +194,8 @@ export async function createWorkflowAgentNodeEnvironment(
 }
 
 interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
-  readonly agentId?: string
+  readonly toolRun: AgentToolRunInfo
+  readonly actorId?: string
   readonly parentRunId?: string
   readonly mode: AgentExecutionMode
   readonly runId: string
@@ -202,7 +212,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
  * Sandbox boot stays concurrent with the model call; sandbox tools await it only when used.
  */
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
-  const { mode, context, agentId, plan, runId, threadId, apiBaseUrl, attachmentContext, skills } =
+  const { mode, context, actorId, plan, runId, threadId, apiBaseUrl, attachmentContext, skills } =
     input
 
   const logSession = resolveLoggingService(context.id, context.logging).startExecution({
@@ -210,11 +220,10 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     id: runId,
   })
   const logger = logSession.logger.child({
-    ...(agentId === undefined ? {} : { agentId }),
+    ...(actorId === undefined ? {} : { actorId }),
     ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
     ...(threadId ? { threadId } : {}),
   })
-  const toolRun = agentToolRunInfo({ runId, agentId, parentRunId: input.parentRunId, threadId })
   let ready: Promise<AgentSandboxHandle>
   const fileRegistry = new AgentSandboxFileRegistry()
   const artifactBudget = new AgentToolArtifactBudget()
@@ -237,16 +246,12 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   const tools = aiSdkToolsFromAgentDefinitions({
     definitions: plan.tools,
     valueTypesById: context.valueTypesById,
-    run: toolRun,
+    run: input.toolRun,
     connector: context.connector,
     logger,
     artifactsForToolCall,
     toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
-    errorDetails:
-      input.errorDetails ??
-      (agentId === undefined
-        ? { parentRunId: input.parentRunId ?? "unknown", runId }
-        : { agentId, runId }),
+    errorDetails: input.errorDetails,
   })
 
   let sandboxWasUsed = false
@@ -275,7 +280,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
 
   ready = provisionSandbox({
     context,
-    agentId,
+    actorId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
     apiBaseUrl,
     apiOrigin: new URL(apiBaseUrl).origin,
@@ -320,25 +325,6 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   }
 }
 
-function agentToolRunInfo(input: {
-  readonly runId: string
-  readonly agentId?: string
-  readonly parentRunId?: string
-  readonly threadId?: string
-}): AgentToolRunInfo {
-  if (input.agentId !== undefined) {
-    return {
-      id: input.runId,
-      agentId: input.agentId,
-      ...(input.threadId === undefined ? {} : { threadId: input.threadId }),
-    }
-  }
-  if (input.parentRunId !== undefined) {
-    return { id: input.runId, parentRunId: input.parentRunId }
-  }
-  throw new Error(`[SixbAgentWorker] Agent run '${input.runId}' has no execution identity.`)
-}
-
 function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentContext {
   return {
     entries: [],
@@ -351,7 +337,7 @@ function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentConte
 
 interface ProvisionSandboxInput {
   readonly context: AgentExecutionContext
-  readonly agentId?: string
+  readonly actorId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
   readonly apiBaseUrl: string
   readonly apiOrigin: string
@@ -360,7 +346,7 @@ interface ProvisionSandboxInput {
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
-  const { context, agentId, run, apiBaseUrl, apiOrigin, skills } = input
+  const { context, actorId, run, apiBaseUrl, apiOrigin, skills } = input
   let sandbox: Sandbox | null = null
   try {
     sandbox = await context.sandboxes.create({
@@ -370,7 +356,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       sandbox,
       apiBaseUrl,
       projectId: context.id,
-      ...(agentId === undefined ? {} : { agentId }),
+      ...(actorId === undefined ? {} : { actorId }),
       ...(run.threadId ? { threadId: run.threadId } : {}),
       runId: run.id,
       attachments: input.attachmentContext,

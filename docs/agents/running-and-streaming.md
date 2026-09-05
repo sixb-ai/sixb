@@ -1,7 +1,7 @@
 # Running and streaming
 
-A defined agent does nothing until a conversation drives it. You drive it over HTTP — create a
-thread, post a message, follow the run — and stream the run live over a websocket.
+Start a conversation over HTTP — create a thread, post a message, follow the run — and stream
+the response live over a websocket.
 
 ## Threads, runs, and messages
 
@@ -16,10 +16,9 @@ thread, post a message, follow the run — and stream the run live over a websoc
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/api/agents` | List agents you can run. |
-| `GET` | `/api/agents/:agentId` | Get one agent. |
-| `GET` | `/api/agent-threads` | List threads (filter by `agentId`, `status`). |
-| `POST` | `/api/agent-threads` | Create a thread (`{ agentId, title?, threadId? }`). |
+| `GET` | `/api/agent` | Get the project Agent (requires its run grant). |
+| `GET` | `/api/agent-threads` | List threads (filter by `status`). |
+| `POST` | `/api/agent-threads` | Create a thread (`{ title?, threadId? }`). |
 | `GET` | `/api/agent-threads/:threadId` | Get a thread. |
 | `GET` | `/api/agent-threads/:threadId/messages` | List a thread's messages. |
 | `POST` | `/api/agent-threads/:threadId/messages` | Post a user message — **triggers a run**. |
@@ -28,6 +27,15 @@ thread, post a message, follow the run — and stream the run live over a websoc
 | `POST` | `/api/agent-threads/:threadId/cancel` | Cancel the thread's queued or running run (`{ runId }`). |
 | `GET` | `/api/agent-runs/:runId` | Get a run's status. |
 | `GET` | `/api/agent-threads/:threadId/messages/:messageId/files/content` | Download a file attached to a message. |
+
+## Execution-bound SDK
+
+```ts
+const thread = await sixb.agent.threads.create({ title: "Invoice review" })
+const { run } = await sixb.agent.runs.request({ threadId: thread.id, text: "Which invoices are overdue?" })
+```
+
+Use the request-bound SDK so the run inherits the authenticated user's authority.
 
 ## Trigger a run
 
@@ -40,7 +48,6 @@ returns the canonical durable run:
   "run": {
     "id": "run_...",
     "threadId": "thr_...",
-    "agentId": "accounts",
     "triggerMessageId": "msg_...",
     "requestedBy": { "type": "user", "id": "usr_..." },
     "status": "queued",
@@ -112,6 +119,7 @@ several turns appears as several groups.
 - Date, provider, model, and valuation filters apply to calls. A parent remains visible when only
   its children match. Pagination counts initiating runs, not individual calls.
 - Conversation titles and delegation names are shown only when you can access the conversation.
+- Workflow calls carry `workflowId` and `agentStepId`; cost breakdowns group by this pair across runs.
 - `GET /api/ai/model-call-groups` returns filtered summaries; `GET /api/ai/model-calls` with
   `executionId` provides the paginated call detail.
 
@@ -181,6 +189,6 @@ client too.
 
 ## Related
 
-- [Defining agents](./defining-agents.md)
+- [Configure the Agent](./defining-agents.md)
 - [Authorization](./authorization.md) — who can create threads and run agents.
 - [Building apps](../apps/overview.md) — mounting the `@sixb/agent-ui` chat in a custom app.

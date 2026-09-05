@@ -608,7 +608,7 @@ describe("SqliteWorkflowRunStorage", () => {
     if (!workflowRun) throw new Error("Expected workflow run.")
     const wrongExecutionId = await createTestAgentExecution(root, {
       projectId: "my-app",
-      agentId: "resolver-agent",
+      actorId: "resolver-agent",
       runId: "wf-run-agent:node:0",
       executionId: "test_agent_execution:wrong-parent",
       sourceExecutionId: "unrelated-workflow-execution",
@@ -618,13 +618,13 @@ describe("SqliteWorkflowRunStorage", () => {
         projectId: "my-app",
         nodeRunId: "wf-run-agent:node:0",
         executionId: wrongExecutionId,
-        agentId: "resolver-agent",
+        actorId: "resolver-agent",
         prompt: "Resolve tr_1.",
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
     const executionId = await createTestAgentExecution(root, {
       projectId: "my-app",
-      agentId: "resolver-agent",
+      actorId: "resolver-agent",
       runId: "wf-run-agent:node:0",
       sourceExecutionId: workflowRun.executionId,
     })
@@ -632,7 +632,7 @@ describe("SqliteWorkflowRunStorage", () => {
       projectId: "my-app",
       nodeRunId: "wf-run-agent:node:0",
       executionId,
-      agentId: "resolver-agent",
+      actorId: "resolver-agent",
       prompt: "Resolve tr_1.",
     })
     const running = await storage.agentNodes.start({

@@ -83,7 +83,7 @@ async function createInMemoryStorage(): Promise<InMemoryStorage> {
   const bundle = new InMemoryStorage()
   await createTestAgentExecution(bundle, {
     projectId: "project_1",
-    agentId: "assistant",
+    actorId: "assistant",
     runId: "run_1",
     executionId,
   })
@@ -260,7 +260,7 @@ describe("AiModelCallRecorder", () => {
     const bundle = new InMemoryStorage()
     await createTestAgentExecution(bundle, {
       projectId: "project_1",
-      agentId: "assistant",
+      actorId: "assistant",
       runId: "run_1",
       executionId,
     })
@@ -307,7 +307,7 @@ describe("AiModelCallRecorder", () => {
     const bundle = new InMemoryStorage()
     await createTestAgentExecution(bundle, {
       projectId: "project_1",
-      agentId: "assistant",
+      actorId: "assistant",
       runId: "run_1",
       executionId,
     })

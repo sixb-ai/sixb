@@ -9,31 +9,34 @@ export async function createTestAgentExecution(
   storage: { readonly auth?: AuthStorage; readonly executions: ExecutionStorage },
   input: {
     readonly projectId: string
-    readonly agentId: string
+    readonly actorId?: string
     readonly runId: string
     readonly executionId?: string
     readonly sourceExecutionId?: string
-    /** Defaults to the definition-backed Agent service account. */
+    /** Conversational runs inherit authority; workflow fixtures use managed authority. */
     readonly authority?: "managed" | "inherited"
   }
 ): Promise<string> {
-  const authority = input.authority ?? "managed"
-  const serviceAccountId = agentServiceAccountId(input.agentId)
+  const authority = input.authority ?? (input.actorId === undefined ? "inherited" : "managed")
+  if (authority === "managed" && input.actorId === undefined) {
+    throw new Error("Managed Agent execution fixtures require an agent id.")
+  }
+  const serviceAccountId = input.actorId ? agentServiceAccountId(input.actorId) : undefined
   if (authority === "managed") {
     const auth = storage.auth
     if (!auth) throw new Error("Managed Agent execution fixtures require auth storage.")
     const serviceAccount = await auth.serviceAccounts.getById({
       projectId: input.projectId,
-      id: serviceAccountId,
+      id: serviceAccountId!,
     })
     if (!serviceAccount) {
       const now = new Date()
       try {
         await auth.serviceAccounts.create({
-          id: serviceAccountId,
+          id: serviceAccountId!,
           projectId: input.projectId,
-          name: `Test Agent ${input.agentId}`,
-          description: `Test service account for Agent '${input.agentId}'.`,
+          name: `Test Agent ${input.actorId}`,
+          description: `Test service account for Agent '${input.actorId}'.`,
           status: "active",
           createdByPrincipal: SYSTEM_PRINCIPAL,
           createdAt: now,
@@ -83,7 +86,7 @@ export async function createTestAgentExecution(
         ? structuredClone(parent.authorizationRef)
         : {
             type: "principal",
-            principal: { type: "serviceAccount", id: serviceAccountId },
+            principal: { type: "serviceAccount", id: serviceAccountId! },
           },
   })
   return executionId

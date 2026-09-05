@@ -59,7 +59,7 @@ export interface WaitedSubagentResult {
   readonly error?: { readonly code: string; readonly message: string }
 }
 
-/** Run-scoped boundary used by the main Agent's framework-owned delegation tools. */
+/** Run-scoped boundary used by the parent Agent's framework-owned delegation tools. */
 export class SubagentCoordinator {
   private readonly models: LanguageModelCatalog
 

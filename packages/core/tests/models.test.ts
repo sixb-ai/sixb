@@ -3,8 +3,9 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import type { LanguageModelV4 } from "@ai-sdk/provider"
-import { createSixb, defineAgent, defineAgentTool, defineObjectType, prop } from "../src"
+import { createSixb, defineAgentTool, defineObjectType, prop } from "../src"
 import { createModelCatalog } from "../src/models"
+import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const tempRoots = new Set<string>()
@@ -170,7 +171,7 @@ describe("createModelCatalog", () => {
 })
 
 describe("createSixb models", () => {
-  test("registers the configured catalog and a framework-owned main agent", async () => {
+  test("configures the project Agent from models and tools", async () => {
     const projectRoot = await createTempProjectRoot()
     const lookup = defineAgentTool("lookup")
       .description("Look up project data.")
@@ -186,11 +187,11 @@ describe("createSixb models", () => {
     })
 
     expect(sixb.definitions.models?.language.default.model).toBe(gpt)
-    expect(sixb.definitions.agents.list().map((agent) => agent.id)).toEqual(["main"])
-    expect(sixb.definitions.agents.getById("main")?.model).toBe(gpt)
-    expect(sixb.definitions.agents.getById("main")?.tools.map((tool) => tool.name)).toEqual([
-      "lookup",
-    ])
+    expect("agents" in sixb.definitions).toBe(false)
+    expect(createTestSixb(sixb).agent.get()).toEqual({
+      name: "Sixb",
+      model: { provider: gpt.provider, modelId: gpt.modelId },
+    })
     expect(sixb.definitions.tools.getByName("lookup")?.name).toBe("lookup")
   })
 
@@ -200,25 +201,20 @@ describe("createSixb models", () => {
     const sixb = await createSixb({ projectRoot, ontologies: [Room], ...createTestRuntimeDeps() })
 
     expect(sixb.definitions.models).toBeUndefined()
-    expect(sixb.definitions.agents.list()).toEqual([])
+    expect(createTestSixb(sixb).agent.get()).toBeNull()
   })
 
-  test("reserves the main agent id for the framework", async () => {
+  test("rejects retired agents configuration even from JavaScript", async () => {
     const projectRoot = await createTempProjectRoot()
-    const userMain = defineAgent("main", {
-      name: "User main",
-      model: gpt,
-      instructions: "Answer questions.",
-    })
-
     await expect(
       createSixb({
         projectRoot,
         ontologies: [Room],
-        agents: [userMain],
         ...createTestRuntimeDeps(),
+        // @ts-expect-error retired configuration must also fail at runtime
+        agents: [],
       })
-    ).rejects.toThrow(/Agent id 'main' is reserved by the framework-owned main agent/)
+    ).rejects.toThrow(/Agent definitions are no longer supported/)
   })
 
   test("validates project tools as one catalog", async () => {
@@ -241,46 +237,5 @@ describe("createSixb models", () => {
         ...createTestRuntimeDeps(),
       })
     ).rejects.toThrow(/Project tools contain duplicate tool name 'lookup'/)
-  })
-
-  test("rejects an agent whose model is outside the configured catalog", async () => {
-    const projectRoot = await createTempProjectRoot()
-    const stray = defineAgent("stray", {
-      name: "Stray",
-      model: testModel("openai", "gpt-5.4"),
-      instructions: "Answer questions.",
-    })
-
-    // Proven by removal: drop the `validateAgentModelReferences` call in `resolveDefinitions` and
-    // this fails. Matched on the message because a bare `RuntimeError` is also what an unrelated
-    // startup failure in a temp project throws.
-    await expect(
-      createSixb({
-        projectRoot,
-        ontologies: [Room],
-        agents: [stray],
-        models: { language: [gpt] },
-        ...createTestRuntimeDeps(),
-      })
-    ).rejects.toThrow(/Agent 'stray' uses unknown language model 'openai\/gpt-5\.4'/)
-  })
-
-  test("accepts an agent whose model is in the configured catalog", async () => {
-    const projectRoot = await createTempProjectRoot()
-    const known = defineAgent("known", {
-      name: "Known",
-      model: gpt,
-      instructions: "Answer questions.",
-    })
-
-    const sixb = await createSixb({
-      projectRoot,
-      ontologies: [Room],
-      agents: [known],
-      models: { language: [gpt] },
-      ...createTestRuntimeDeps(),
-    })
-
-    expect(sixb.definitions.agents.getById("known")?.name).toBe("Known")
   })
 })

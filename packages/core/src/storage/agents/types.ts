@@ -13,7 +13,6 @@ export type AgentThreadStatus = "active" | "archived"
 export interface AgentThreadRecord {
   readonly id: string
   readonly projectId: string
-  readonly agentId: string
   /** Who owns/opened the thread. Reuses the canonical auth principal (gains `agent` later for free). */
   readonly ownerPrincipal: Principal
   readonly title?: string
@@ -29,7 +28,6 @@ export interface AgentThreadRecord {
 export interface CreateAgentThreadInput {
   readonly id: string
   readonly projectId: string
-  readonly agentId: string
   readonly ownerPrincipal: Principal
   readonly title?: string
   readonly status?: AgentThreadStatus
@@ -39,9 +37,6 @@ export interface CreateAgentThreadInput {
 
 export interface ListAgentThreadsInput {
   readonly projectId: string
-  readonly agentId?: string
-  /** Optional allowlist intersected with `agentId` when both are provided. Empty means no rows. */
-  readonly agentIds?: readonly string[]
   readonly statuses?: readonly AgentThreadStatus[]
   readonly ownerPrincipal?: Principal
   readonly limit?: number
@@ -173,7 +168,6 @@ interface AgentRunRecordBase {
 export interface ConversationAgentRunRecord extends AgentRunRecordBase {
   readonly kind: "conversation"
   readonly threadId: string
-  readonly agentId: string
   readonly triggerMessageId: string
   /** Immutable model selection captured at admission. Absent only on runs predating this field. */
   readonly spec?: ConversationAgentRunSpec
@@ -218,7 +212,6 @@ export interface CreateAgentRunInput {
   readonly projectId: string
   readonly executionId: string
   readonly threadId: string
-  readonly agentId: string
   readonly triggerMessageId: string
   readonly spec: ConversationAgentRunSpec
   readonly requesterGroupIds: readonly string[]
@@ -297,7 +290,6 @@ export interface ListAgentRunsInput {
   readonly projectId: string
   readonly kinds?: readonly AgentRunKind[]
   readonly threadId?: string
-  readonly agentId?: string
   readonly parentRunId?: string
   readonly statuses?: readonly AgentRunStatus[]
   /** Effective start time; runs that never started use `createdAt`. */

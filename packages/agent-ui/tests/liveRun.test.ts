@@ -7,7 +7,6 @@ const BASE_EVENT = {
   projectId: "project",
   runId: "run",
   threadId: "thread",
-  agentId: "agent",
   attempt: 1,
   occurredAt: "2026-06-27T00:00:00.000Z",
 } as const

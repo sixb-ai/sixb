@@ -8,16 +8,18 @@
  */
 
 import type { Principal } from "../auth/types"
-import { emptyGrantSets, type GrantKind } from "./grant-kinds"
+import { emptyGrantSets, type GrantKind, type SingletonGrantKind } from "./grant-kinds"
 
 /**
- * Grants resolved to concrete id sets, keyed by grant kind (`view:object`,
- * `run:sync`, …). Broad grants and object subtypes are already expanded, so
- * enforcement is a single `grants[kind].has(id)` lookup. Keyed by `GrantKind`
+ * Grants keyed by kind (`view:object`, `run:sync`, …). Resource selections resolve
+ * to id sets; project-wide singleton capabilities resolve to booleans.
+ * Broad grants and object subtypes are already expanded. Keyed by `GrantKind`
  * so a new grant family adds one key, not a new bucket every consumer must
  * learn.
  */
-export type GrantIndex = Readonly<Record<GrantKind, ReadonlySet<string>>>
+export type GrantIndex = Readonly<{
+  [TKind in GrantKind]: TKind extends SingletonGrantKind ? boolean : ReadonlySet<string>
+}>
 
 /**
  * A grant index that grants nothing, as the base for a hand-built context — typically in tests.

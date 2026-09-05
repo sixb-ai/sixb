@@ -99,7 +99,7 @@ export async function executeWorkflowAgentNode(
   const resolved = await resolveAgentExecutionAuthorization({
     auth: context.storage.auth,
     projectId: context.id,
-    agentId: actorId,
+    actorId: actorId,
     authorizationRef: durableExecution.authorizationRef,
     security: input.host.definitions.security,
   })
@@ -107,7 +107,7 @@ export async function executeWorkflowAgentNode(
     context,
     host: input.host,
     execution: durableExecution,
-    agentId: actorId,
+    actorId: actorId,
     runId: nodeRun.id,
     authorization: { type: "principal", context: resolved.context },
     authorPrincipal: resolved.identity.principal,
@@ -161,6 +161,8 @@ export async function executeWorkflowAgentNode(
       context: executionContext,
       plan,
       run: reserved,
+      workflowId: workflow.id,
+      stepId: node.agentStep.id,
       nodeInput: nodeRun.input,
       errorDetails: workflowAgentErrorDetails(nodeRun),
       signal: turnSignal,
@@ -359,7 +361,7 @@ async function loadWorkflowAgentNodeExecution(
     )
   }
   const actorId = workflowAgentStepActorId(workflow.id, node.agentStep.id)
-  if (executionRecord.agentId !== actorId) {
+  if (executionRecord.actorId !== actorId) {
     throw createSixbError(
       "internal.unexpected",
       `[SixbAgentWorker] Workflow agent step '${node.agentStep.id}' execution identity does not match its definition.`,

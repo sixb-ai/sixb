@@ -2,7 +2,7 @@
 
 Runs conversation and headless workflow-agent queue jobs for a Sixb project.
 
-The worker claims durable conversation runs created by `sixb.agents.request(...)` and agent workflow
+The worker claims durable conversation runs created by `sixb.agent.runs.request(...)` and agent workflow
 nodes parked by the workflow worker. It starts or reclaims the execution, renews queue ownership,
 records each completed provider call, and finalizes the conversation or workflow node.
 
@@ -19,7 +19,7 @@ await worker.start()
 ```
 
 `sixb` must provide `storage.agents`, `storage.aiUsage`, `storage.aiCosts`, `storage.auth`,
-`queues.agents`, `agents`, `broker`, and `sandboxes`.
+`queues.agents`, `definitions.models` (or workflow agent steps), `broker`, and `sandboxes`.
 
 ## Execution Model
 
@@ -133,5 +133,5 @@ The terminal run state is stored on the run record:
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.
 - `turnTimeoutMs`: wall-clock turn budget; defaults to 10 minutes.
-- `defaultMaxSteps`: model step cap when an agent does not specify one; defaults to `25`.
+- `defaultMaxSteps`: framework model step cap; defaults to `25`.
 - `idlePollMs`: queue polling interval while idle.

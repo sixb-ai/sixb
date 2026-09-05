@@ -59,7 +59,8 @@ export interface AiAccountingAggregateFragment {
   readonly start?: Date
   readonly providerId?: string
   readonly modelId?: string
-  readonly agentId?: string
+  readonly agentKind?: "agent" | "workflowAgent"
+  readonly agentStepId?: string
   readonly workflowId?: string
   readonly modelCallCount: string
   readonly usage: {
@@ -155,8 +156,18 @@ export function buildAiAccountingOverview(
       JSON.stringify([item.usage.providerId, item.usage.requestedModelId]),
       item
     )
-    if (item.attribution?.kind === "agent" || item.attribution?.kind === "workflowAgent") {
-      appendGrouped(agentItems, item.attribution.agentId, item)
+    if (item.attribution?.kind === "agent") {
+      appendGrouped(agentItems, JSON.stringify(["agent"]), item)
+    } else if (item.attribution?.kind === "workflowAgent") {
+      appendGrouped(
+        agentItems,
+        JSON.stringify([
+          "workflowAgent",
+          item.attribution.workflowId,
+          item.attribution.agentStepId,
+        ]),
+        item
+      )
     }
     if (item.attribution?.kind === "workflowAgent") {
       appendGrouped(workflowItems, item.attribution.workflowId, item)
@@ -174,7 +185,21 @@ export function buildAiAccountingOverview(
     })
     .sort(compareModelBreakdowns)
   const agents: AiAccountingAgentBreakdown[] = [...agentItems]
-    .map(([agentId, grouped]) => ({ agentId, ...aggregateAccountingItems(grouped) }))
+    .map(([key, grouped]) => {
+      const [kind, workflowId, agentStepId] = JSON.parse(key) as [
+        "agent" | "workflowAgent",
+        string?,
+        string?,
+      ]
+      return kind === "agent"
+        ? { kind, ...aggregateAccountingItems(grouped) }
+        : {
+            kind,
+            workflowId: requiredFragmentString(workflowId, "workflowId"),
+            agentStepId: requiredFragmentString(agentStepId, "agentStepId"),
+            ...aggregateAccountingItems(grouped),
+          }
+    })
     .sort(compareAgentBreakdowns)
   const workflows: AiAccountingWorkflowBreakdown[] = [...workflowItems]
     .map(([workflowId, grouped]) => ({ workflowId, ...aggregateAccountingItems(grouped) }))
@@ -230,7 +255,14 @@ export function buildAiAccountingOverviewFromFragments(
         )
         break
       case "agent":
-        target = getFragmentAccumulator(agents, requiredFragmentString(fragment.agentId, "agentId"))
+        target = getFragmentAccumulator(
+          agents,
+          JSON.stringify([
+            requiredFragmentString(fragment.agentKind, "agentKind"),
+            fragment.workflowId,
+            fragment.agentStepId,
+          ])
+        )
         break
       case "workflow":
         target = getFragmentAccumulator(
@@ -257,7 +289,21 @@ export function buildAiAccountingOverviewFromFragments(
       })
       .sort(compareModelBreakdowns),
     agents: [...agents]
-      .map(([agentId, value]) => ({ agentId, ...finishAggregateFragment(value) }))
+      .map(([key, value]) => {
+        const [kind, workflowId, agentStepId] = JSON.parse(key) as [
+          "agent" | "workflowAgent",
+          string?,
+          string?,
+        ]
+        return kind === "agent"
+          ? { kind, ...finishAggregateFragment(value) }
+          : {
+              kind,
+              workflowId: requiredFragmentString(workflowId, "workflowId"),
+              agentStepId: requiredFragmentString(agentStepId, "agentStepId"),
+              ...finishAggregateFragment(value),
+            }
+      })
       .sort(compareAgentBreakdowns),
     workflows: [...workflows]
       .map(([workflowId, value]) => ({ workflowId, ...finishAggregateFragment(value) }))
@@ -576,7 +622,16 @@ function compareAgentBreakdowns(
   left: AiAccountingAgentBreakdown,
   right: AiAccountingAgentBreakdown
 ): number {
-  return right.modelCallCount - left.modelCallCount || left.agentId.localeCompare(right.agentId)
+  return (
+    right.modelCallCount - left.modelCallCount ||
+    agentBreakdownKey(left).localeCompare(agentBreakdownKey(right))
+  )
+}
+
+function agentBreakdownKey(value: AiAccountingAgentBreakdown): string {
+  return value.kind === "agent"
+    ? "agent"
+    : JSON.stringify(["workflowAgent", value.workflowId, value.agentStepId])
 }
 
 function compareWorkflowBreakdowns(

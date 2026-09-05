@@ -6,7 +6,7 @@ import { toAgentExecutionFailure } from "../src/failure"
 
 const at = new Date("2026-08-14T12:00:00.000Z")
 const details = {
-  agentId: "assistant",
+  actorId: "assistant",
   runId: "agt_run_1",
   threadId: "agt_thr_1",
 }
@@ -26,7 +26,7 @@ describe("Agent execution failure", () => {
 
   test("preserves coded internal invariants without exposing their message", () => {
     const error = createSixbError("internal.unexpected", "Execution state is inconsistent.", {
-      details: { agentId: details.agentId, runId: details.runId },
+      details: { actorId: details.actorId, runId: details.runId },
     })
 
     expect(toAgentExecutionFailure(error, { status: "failed", at, details })).toEqual({
@@ -34,7 +34,7 @@ describe("Agent execution failure", () => {
       message: "An unexpected internal error occurred.",
       retryable: false,
       at: at.toISOString(),
-      details: { agentId: details.agentId, runId: details.runId },
+      details: { actorId: details.actorId, runId: details.runId },
     })
   })
 

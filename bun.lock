@@ -524,10 +524,10 @@
       "name": "@sixb/agent-worker",
       "version": "0.1.4",
       "dependencies": {
+        "@ai-sdk/provider": "^4.0.0",
         "ai": "^7.0.4",
       },
       "devDependencies": {
-        "@ai-sdk/provider": "^4.0.0",
         "@sixb/connector-exa": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/sandboxes-local": "workspace:*",

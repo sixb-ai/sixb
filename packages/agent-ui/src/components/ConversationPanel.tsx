@@ -1,17 +1,7 @@
 import type { AgentReasoningLevel } from "@sixb/core"
-import {
-  Button,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-  Spinner,
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@sixb/ui/components"
+import { Button, Popover, PopoverContent, PopoverTrigger, Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { History, Info, PanelLeft, Pencil, Search } from "lucide-react"
+import { History, PanelLeft, Pencil, Search } from "lucide-react"
 import { useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import type { LiveRunState } from "../liveRun"
@@ -367,7 +357,6 @@ function AgentIdentity({ agent }: { agent: Agent | undefined }) {
 
 function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolean }) {
   const name = agent?.name ?? "Agent"
-  const description = agent?.description?.trim()
 
   if (!compact) {
     return (
@@ -376,7 +365,6 @@ function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolea
           <p className="min-w-0 truncate text-2xl font-semibold tracking-tight text-foreground md:text-3xl">
             {name}
           </p>
-          {description ? <AgentInfo name={name} description={description} /> : null}
         </div>
       </div>
     )
@@ -393,30 +381,8 @@ function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolea
         >
           {name}
         </p>
-        {description ? <AgentInfo name={name} description={description} /> : null}
       </div>
     </div>
-  )
-}
-
-function AgentInfo({ name, description }: { name: string; description: string }) {
-  return (
-    <TooltipProvider delayDuration={150}>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <button
-            type="button"
-            aria-label={`About ${name}`}
-            className="flex size-8 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <Info className="size-4" aria-hidden="true" />
-          </button>
-        </TooltipTrigger>
-        <TooltipContent side="top" sideOffset={8} className="max-w-72 leading-5">
-          {description}
-        </TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
   )
 }
 

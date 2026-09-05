@@ -34,13 +34,11 @@ export {
 export type { AgentExecutionAuthorization, AgentExecutionIdentity } from "./authority"
 export {
   agentServiceAccountId,
-  ensureAgentExecutionIdentity,
   ensureManagedAgentExecutionIdentity,
   resolveAgentExecutionAuthorization,
   resolveInheritedAgentExecutionAuthorization,
-  resolveInheritedMainAgentExecutionAuthorization,
 } from "./authority"
-export { defineAgent, defineAgentTool } from "./builders"
+export { defineAgentTool } from "./builders"
 export type {
   AgentContextEntryInput,
   AgentContextInput,
@@ -102,14 +100,6 @@ export {
   createSubagentExecutionId,
   createSubagentRunId,
 } from "./ids"
-export type { AgentReference } from "./main"
-export {
-  agent,
-  createMainAgentDefinition,
-  MAIN_AGENT_ID,
-  MAIN_AGENT_INSTRUCTIONS,
-  MAIN_AGENT_NAME,
-} from "./main"
 export {
   AGENT_MESSAGE_CONTENT_VERSION,
   type AgentFilePart,
@@ -123,6 +113,7 @@ export {
   type AgentToolCallPart,
   type AgentToolCallState,
 } from "./message"
+export { agent } from "./reference"
 export {
   type RequestAgentRunInput,
   type RequestAgentRunResult,
@@ -161,10 +152,9 @@ export { projectAgentThreadModelContext } from "./thread-context-projection"
 export type { AgentToolCatalog } from "./tool-catalog"
 export { isAgentToolResult } from "./tool-result"
 export type {
-  AgentContextConfig,
-  AgentDefinition,
-  AgentLoopConfig,
+  AgentDescriptor,
   AgentReasoningLevel,
+  AgentReference,
   AgentToolArtifact,
   AgentToolArtifactPutInput,
   AgentToolArtifacts,
@@ -181,16 +171,12 @@ export type {
   AgentToolRunContext,
   AgentToolRunInfo,
   AgentToolTextContent,
-  DefineAgentConfig,
   InferAgentToolInput,
   InferAgentToolInputSchema,
 } from "./types"
 export { AGENT_REASONING_LEVELS } from "./types"
 export {
   AGENT_RESERVED_TOOL_NAMES,
-  isAgentDefinition,
   isAgentToolDefinition,
-  validateAgentGroupReferences,
-  validateAgentToolsAtStartup,
   validateAndNormalizeAgentToolInput,
 } from "./validation"

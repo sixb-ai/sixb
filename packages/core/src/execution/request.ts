@@ -9,13 +9,15 @@ export type { ActionRunsRuntime, ActionsRuntime } from "../actions/execution"
 export type {
   AgentRunListResult,
   AgentRunsRuntime,
+  AgentRuntime,
   AgentRunView,
-  AgentsRuntime,
   AgentThreadsRuntime,
   CreateExecutionAgentThreadInput,
   ExecutionAgentRequestInput,
+  ExecutionAgentRunResult,
   ListExecutionAgentThreadsInput,
 } from "../agents/execution"
+export type { AgentDescriptor } from "../agents/types"
 export type { AuthorizationContext } from "../authorization"
 export type { DatasetsRuntime } from "../datasets/execution"
 export type { EventsRuntime } from "../events/execution"
@@ -35,6 +37,7 @@ export type {
 } from "../projections/execution"
 export type { RuleStatesRuntime, RulesRuntime } from "../rules/execution"
 export type { Sixb } from "../runtime/sixb"
+export type { AgentThreadRecord, ListAgentThreadsResult } from "../storage/agents"
 export type { SyncRunsRuntime, SyncsRuntime } from "../syncs/execution"
 export type {
   LatestWorkflowRunListResult,

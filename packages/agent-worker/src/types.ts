@@ -44,8 +44,8 @@ export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<voi
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
- * cohosting passes the host directly. Registered agents and workflow Agent steps provide execution
- * configuration; when configured, the model catalog provides the authoritative live model binding.
+ * cohosting passes the host directly. Project capabilities and workflow Agent steps provide execution
+ * configuration; the model catalog provides the conversational Agent's live model binding.
  * Models are non-serialisable and never sent over the wire.
  */
 export interface AgentWorkerHost extends AgentExecutionHost {
@@ -55,7 +55,7 @@ export interface AgentWorkerHost extends AgentExecutionHost {
   readonly queues: Queues
   readonly definitions: Pick<
     SixbDefinitions,
-    "agents" | "workflows" | "ontology" | "security" | "models" | "tools"
+    "workflows" | "ontology" | "security" | "models" | "tools"
   >
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string
@@ -128,7 +128,7 @@ export interface AgentWorkerOptions {
   readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
-  /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 25. */
+  /** Framework model step cap per turn. Defaults to 25. */
   readonly defaultMaxSteps?: number
   /**
    * Wall-clock budget for a single turn, in ms. A turn that exceeds it is aborted and recorded

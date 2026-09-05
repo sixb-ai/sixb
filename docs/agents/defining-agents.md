@@ -1,176 +1,71 @@
-# Defining agents
+# Configure the Agent
 
-`defineAgent(id, config)` creates an agent. The `id` is its stable identifier (used in routes and
-threads) and must be unique across all agents. The call validates the config and returns an
-`AgentDefinition` you export from `agents/`.
-
-```ts
-// agents/invoice-assistant.ts
-import { defineAgent } from "@sixb/core"
-import { gateway } from "ai"
-
-export const invoiceAssistant = defineAgent("invoice-assistant", {
-  name: "Invoice Assistant",
-  description: "Tracks outstanding invoices, overdue accounts, and payment follow-ups.",
-  model: gateway("openai/gpt-5.5"),
-  reasoning: "medium",
-  instructions: [
-    "You are this project's invoicing assistant.",
-    "Focus on invoices, balances, due dates, and reminder status.",
-    "Never claim a reminder was sent unless the data shows it.",
-  ].join("\n"),
-  providerOptions: {
-    openai: { reasoningSummary: "detailed" },
-  },
-})
-```
-
-## Config
-
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `name` | `string` | Yes | Display name shown in catalogs and pickers. |
-| `model` | `LanguageModelV4` | Yes | An AI SDK model instance (see below). |
-| `instructions` | `string` | Yes | The system prompt. |
-| `description` | `string` | No | Short summary for catalogs. |
-| `reasoning` | reasoning level | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
-| `providerOptions` | provider-keyed object | No | Per-provider passthrough, e.g. `{ openai: { ... } }`. |
-| `groups` | `GroupDefinition[]` | No | Gate who can use the agent and what it can reach. See [Authorization](./authorization.md). |
-| `tools` | `AgentToolDefinition[]` | No | Worker-side tools this agent is explicitly allowed to call. Defaults to none. |
-| `loop` | `AgentLoopConfig` | No | Step cap, prompt caching, and optional context-budget overrides. |
-
-## The model
-
-`model` is an [AI SDK](https://sdk.vercel.ai) `LanguageModelV4` instance, not a string. The simplest
-source is the `ai` gateway; any provider that returns a `LanguageModelV4` works.
-
-```ts
-import { gateway } from "ai"
-
-model: gateway("deepseek/deepseek-v4-flash")
-model: gateway("openai/gpt-5.5")
-```
+Sixb provides one conversational Agent. Configure its capabilities on the project, not a separate
+agent definition.
 
 ## The project model catalog
 
-A project can declare the models Sixb is allowed to use. Configuring the catalog enables the
-framework-owned main agent, using the first language model by default. Existing defined agents must
-also use a model from the catalog.
-
 ```ts
+import { createSixb } from "@sixb/core"
 import { gateway } from "ai"
+import { searchKnowledge } from "./ai/tools"
 
 export const sixb = createSixb({
-  // ...
+  // ...storage, broker, queues, sandboxes
   models: {
     language: [gateway("openai/gpt-5.5"), gateway("anthropic/claude-sonnet-4.6")],
   },
+  tools: [searchKnowledge],
 })
 ```
 
-The first entry of each kind is the project default. The AI SDK model's `{ provider, modelId }` pair
-identifies its binding; you never author another id or alias. Two instances with the same pair are
-the same catalog entry, so configuring both fails at startup.
+| Configuration | Behavior |
+| --- | --- |
+| `models.language` | AI SDK model instances the Agent and its children may use. The first is the default. |
+| `tools` | Reusable `defineAgentTool` definitions available to the Agent and its children. |
+| `sandboxes` | Sandbox factory used for isolated file and CLI access on each run. |
+| `skills/` | Project instructions, procedures, and references loaded when relevant. |
 
-An entry is the binding, not the vendor's model: `gateway("openai/gpt-5.5")` and
-`openai("gpt-5.5")` are two entries, because they route and bill differently. An agent's `model`
-has to match one of them.
+The model's `{ provider, modelId }` pair identifies its binding; no additional id is needed. Two
+bindings for the same vendor model may coexist (for example Gateway and a direct provider), but
+duplicate pairs are rejected.
 
-## Instructions vs Agent Skills
+The composer lets users choose the model and reasoning for each turn. Without a selection, Sixb
+uses the first language model and the provider's default reasoning. It does not automatically route
+simple messages to a smaller model.
 
-Keep `instructions` short and always relevant: the agent role, hard behavioral rules, and domain
-boundaries. Put larger company standards, examples, templates, and repeatable procedures in Agent
-Skills instead:
+## Instructions and tools
 
-```txt
-skills/acme-writing-style/SKILL.md
-skills/acme-writing-style/references/examples.md
-```
+Sixb owns the conversational baseline prompt and sandbox guidance. Put domain-specific procedures
+in Agent Skills, for example `skills/invoice-review/SKILL.md`. Only skill names and descriptions are
+advertised up front; the Agent reads the full instructions when needed.
 
-Project skills are installed into each run sandbox under `$SIXB_SKILLS_DIR`. The worker advertises
-only each skill's `name` and `description` up front, and the agent reads the full `SKILL.md` when the
-skill is relevant.
+Omitting `tools` removes project-defined tools, not the framework's sandbox tools or authorized Sixb
+CLI. Permissions still control access to project data. See [Tools and gateway](./tools-and-gateway.md)
+and [Authorization](./authorization.md).
 
-## Tools
+Workflow tasks use `defineAgentStep` with their own prompt, optional model, selected tools, and
+execution groups. They are not additional chat agents. See [Agent steps](../workflows/overview.md).
 
-`tools` is an explicit per-agent capability grant:
+## Conversation limits
 
-```ts
-export const researcher = defineAgent("researcher", {
-  name: "Researcher",
-  model: gateway("openai/gpt-5.5"),
-  instructions: "Research approved sources and cite them.",
-  tools: [webSearch, webFetch],
-})
-```
+The worker defaults to 25 model steps per turn and a 10-minute timeout. At the step limit, it asks
+for a final answer without further tools; a later user message starts a new turn. Gateway prompt
+caching is enabled automatically.
 
-Omitting it gives the agent no selected worker tools. Sixb still supplies sandboxed `read` and
-`bash`. See [Tools and gateway](./tools-and-gateway.md) for custom tools and Exa web access.
+Long conversations are compacted using the selected model's limits from the worker's embedded
+Models.dev snapshot. Unknown models use a 128,000-token fallback with a warning. The full transcript
+is preserved; only model input becomes a summary plus recent turns.
 
-## Loop and context budget
+## Upgrading from defined agents
 
-An agent runs a tool-calling loop: the model produces output, may call tools, sees the results, and
-continues until it stops or hits `loop.stopWhen.maxSteps` (default 25).
-
-```ts
-loop: { stopWhen: { maxSteps: 12 } }
-```
-
-For Gateway models, Sixb enables the Gateway's automatic prompt caching by default and records
-cache reads and writes in AI usage. Provider details stay out of project prompts and
-`providerOptions`. Opt out only when the workload requires it:
-
-```ts
-loop: { caching: "off" }
-```
-
-Direct-provider models are unchanged unless their AI SDK binding implements caching implicitly.
-
-Sixb automatically checkpoints long conversations before their next model request exceeds the
-selected model's context window. The worker resolves exact model limits from its pinned Models.dev
-snapshot. If no exact entry exists, it uses a conservative 128,000-token window and logs one startup
-warning for that provider/model pair.
-
-The full transcript remains unchanged. Only the model-facing view becomes a continuation summary
-plus recent complete turns.
-
-Use `loop.context` only when a model deployment or workload needs an explicit override:
-
-```ts
-loop: {
-  stopWhen: { maxSteps: 12 },
-  caching: "auto",
-  context: {
-    windowTokens: 200_000,
-  },
-}
-```
-
-`windowTokens` overrides the catalog and is authoritative when set. `reserveTokens` defaults to the
-smaller of 16,384 or 25% of the resolved window. `keepRecentTokens` defaults to the smaller of
-20,000 or half the resolved input budget. All three fields are optional; omitting `context` keeps
-automatic compaction enabled with model-derived defaults.
-
-## Discovery
-
-`createSixb()` discovers exported agents from `agents/` automatically. To register one explicitly,
-pass it as well — the lists merge, and duplicate ids are rejected:
-
-```ts
-import { createSixb } from "@sixb/core"
-import { businessAnalyst } from "./agents/business-analyst"
-
-export const sixb = createSixb({
-  id: "acme-corp",
-  agents: [businessAnalyst], // merged with discovered agents/ exports
-  // ...
-})
-```
+- Replace `defineAgent` and `createSixb({ agents })` with project `models` and `tools`.
+- Move reusable instructions into `skills/`; `agents/` is no longer discovered.
+- Use `sixb.agent` and `GET /api/agent`.
+- Existing conversation history is preserved without its former Agent identity.
 
 ## Related
 
-- [Authorization](./authorization.md) — `groups` and what they gate.
-- [Tools and gateway](./tools-and-gateway.md) — selected worker tools plus sandboxed `read` and
-  `bash`.
-- [Running and streaming](./running-and-streaming.md) — drive a defined agent.
-- [Runtime](../runtime/overview.md) and [project structure](../fundamentals/project-structure.md).
+- [Running and streaming](./running-and-streaming.md)
+- [Tools and gateway](./tools-and-gateway.md)
+- [Authorization](./authorization.md)

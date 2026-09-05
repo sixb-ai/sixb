@@ -261,7 +261,7 @@ describe("GET /api/models", () => {
     ])
   })
 
-  test("accepts a configured model and reasoning level for a main-agent turn", async () => {
+  test("accepts a configured model and reasoning level for an Agent turn", async () => {
     const app = createApp({
       language: [
         testModel("gateway", "openai/gpt-5.4"),
@@ -272,7 +272,7 @@ describe("GET /api/models", () => {
       new Request("http://localhost/api/agent-threads", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agentId: "main" }),
+        body: JSON.stringify({}),
       })
     )
     const { thread } = (await threadResponse.json()) as { thread: { id: string } }
@@ -304,7 +304,7 @@ describe("GET /api/models", () => {
       new Request("http://localhost/api/agent-threads", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ agentId: "main" }),
+        body: JSON.stringify({}),
       })
     )
     const { thread } = (await threadResponse.json()) as { thread: { id: string } }

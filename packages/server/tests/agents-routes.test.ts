@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import type { ModelCatalogInput } from "@sixb/core"
 import {
+  agent,
   can,
-  defineAgent,
   defineGroup,
   defineObjectType,
   defineRole,
-  every,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -29,19 +29,26 @@ import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
 // Minimal stand-in: these route tests never invoke the model (the worker does), so a partial shape
-// cast through unknown is enough to satisfy defineAgent's type.
+// cast through unknown is enough to satisfy the model catalog type.
 const model = {
-  specificationVersion: "v3",
+  specificationVersion: "v4",
   provider: "test",
   modelId: "test-model",
-} as unknown as Parameters<typeof defineAgent>[1]["model"]
+  supportedUrls: {},
+  doGenerate: async () => {
+    throw new Error("Must not invoke the route test model")
+  },
+  doStream: async () => {
+    throw new Error("Must not invoke the route test model")
+  },
+} satisfies ModelCatalogInput["language"][number]
 
 const FAILURE: SixbFailure<AgentRunFailureCode> = {
   code: "internal.unexpected",
   message: "dispatch failed",
   retryable: false,
   at: "2026-06-27T10:00:02.000Z",
-  details: { agentId: "assistant" },
+  details: { runId: "run-failed", threadId: "thread-failed" },
 }
 
 type StartedRunInput = Omit<Parameters<AgentStorage["runs"]["create"]>[0], "executionId" | "spec"> &
@@ -54,8 +61,8 @@ function testExecution(token = createAgentRunExecutionToken()) {
 async function createStartedRun(storage: InMemoryStorage, input: StartedRunInput) {
   const executionId = await createTestAgentExecution(storage, {
     projectId: input.projectId,
-    agentId: input.agentId,
     runId: input.id,
+    authority: "inherited",
   })
   await storage.agents.runs.create({
     ...input,
@@ -70,24 +77,6 @@ async function createStartedRun(storage: InMemoryStorage, input: StartedRunInput
     startedAt: input.startedAt,
   })
 }
-
-const assistant = defineAgent("assistant", {
-  name: "Support Assistant",
-  description: "Answers support questions.",
-  model,
-  reasoning: "medium",
-  instructions: "Do not expose this over HTTP.",
-  loop: {
-    stopWhen: { maxSteps: 4 },
-    context: { windowTokens: 10_000 },
-  },
-})
-
-const ops = defineAgent("ops", {
-  name: "Ops Agent",
-  model,
-  instructions: "Internal ops instructions.",
-})
 
 const Invoice = defineObjectType({
   id: "Invoice",
@@ -109,22 +98,22 @@ const agentOnlyUsers = defineGroup("agent-only-users")
 
 const supportAgentRunner = defineRole("support.agent-runner", {
   grantedTo: [supportUsers],
-  grants: [can.run(assistant), can.view(Invoice)],
+  grants: [can.run(agent), can.view(Invoice)],
 })
 
 const opsAgentRunner = defineRole("ops.agent-runner", {
   grantedTo: [opsUsers],
-  grants: [can.run(ops)],
+  grants: [can.run(agent)],
 })
 
 const adminAgentRunner = defineRole("admin.agent-runner", {
   grantedTo: [admins],
-  grants: [can.run(every.agent())],
+  grants: [can.run(agent)],
 })
 
 const agentOnlyRunner = defineRole("agent-only.runner", {
   grantedTo: [agentOnlyUsers],
-  grants: [can.run(assistant)],
+  grants: [can.run(agent)],
 })
 
 function createRuntime(options: { readonly auth?: boolean } = {}) {
@@ -133,7 +122,7 @@ function createRuntime(options: { readonly auth?: boolean } = {}) {
   const sixb = new SixbHost<readonly OntologySource[]>({
     id: "agent-route-tests",
     ontology: [Invoice],
-    agents: [assistant, ops],
+    models: { language: [model] },
     broker: new InMemoryBroker(),
     storage,
     lakeStorage: new InMemoryLakeStorage(),
@@ -210,6 +199,61 @@ function jsonRequest(
 }
 
 describe("agent routes", () => {
+  test("rejects legacy selectors instead of silently retargeting a request", async () => {
+    const { app, storage, sixb } = createApp()
+    for (const request of [
+      jsonRequest("/api/agent-threads", "POST", { agentId: "legacy" }),
+      new Request("http://localhost/api/agent-threads?agentId=legacy"),
+    ]) {
+      const response = await app.fetch(request)
+      expect(response.status).toBeGreaterThanOrEqual(400)
+      expect(response.status).toBeLessThan(500)
+    }
+    expect((await storage.agents.threads.list({ projectId: sixb.id })).total).toBe(0)
+  })
+
+  test("continues an existing conversation", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const session = await seedSession(storage, "usr_history")
+    const thread = await storage.agents.threads.create({
+      projectId: sixb.id,
+      id: "legacy-thread",
+      ownerPrincipal: { type: "user", id: "usr_history" },
+    })
+    const executionId = await createTestAgentExecution(storage, {
+      projectId: sixb.id,
+      runId: "legacy-run",
+      authority: "inherited",
+    })
+    await storage.agents.runs.create({
+      projectId: sixb.id,
+      id: "legacy-run",
+      executionId,
+      threadId: thread.id,
+      triggerMessageId: "legacy-message",
+      requesterGroupIds: [],
+      spec: { model: { provider: "test", modelId: "test-model" } },
+    })
+    await storage.agents.runs.finishQueued({
+      projectId: sixb.id,
+      id: "legacy-run",
+      status: "failed",
+    })
+    const response = await app.fetch(
+      jsonRequest(
+        `/api/agent-threads/${thread.id}/messages`,
+        "POST",
+        { text: "Continue" },
+        session.csrfHeaders
+      )
+    )
+    expect(response.status).toBe(202)
+    expect(
+      (await storage.agents.messages.list({ projectId: sixb.id, threadId: thread.id })).total
+    ).toBe(1)
+    expect((await storage.agents.runs.list({ projectId: sixb.id })).total).toBe(2)
+  })
+
   test("authorizes object context and persists the exact context snapshot", async () => {
     const { app, storage, sixb } = createApp({ auth: true })
     const support = await seedSession(storage, "usr_context", ["support-users"])
@@ -221,7 +265,7 @@ describe("agent routes", () => {
       })
 
     const agentOnlyThreadResponse = await app.fetch(
-      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant" }, agentOnly.csrfHeaders)
+      jsonRequest("/api/agent-threads", "POST", {}, agentOnly.csrfHeaders)
     )
     const agentOnlyThread = (await agentOnlyThreadResponse.json()) as { thread: { id: string } }
     const deniedContext = await app.fetch(
@@ -249,7 +293,7 @@ describe("agent routes", () => {
     ).resolves.toMatchObject({ total: 0 })
 
     const threadResponse = await app.fetch(
-      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant" }, support.csrfHeaders)
+      jsonRequest("/api/agent-threads", "POST", {}, support.csrfHeaders)
     )
     const thread = (await threadResponse.json()) as { thread: { id: string } }
     const context = [
@@ -300,7 +344,6 @@ describe("agent routes", () => {
     const thread = await storage.agents.threads.create({
       id: "thread-missing-context",
       projectId: sixb.id,
-      agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
 
@@ -328,98 +371,45 @@ describe("agent routes", () => {
     ).resolves.toMatchObject({ total: 0 })
   })
 
-  test("lists and reads registered agents without private runtime fields", async () => {
+  test("describes the project Agent without exposing its executable configuration", async () => {
     const { app } = createApp()
-
-    const listResponse = await app.fetch(new Request("http://localhost/api/agents"))
-    expect(listResponse.status).toBe(200)
-    const agents = (await listResponse.json()) as Record<string, unknown>[]
-
-    expect(agents).toEqual([
-      {
-        id: "assistant",
-        name: "Support Assistant",
-        description: "Answers support questions.",
-        modelId: "test-model",
-        reasoning: "medium",
-        groupIds: [],
-        loop: {
-          stopWhen: { maxSteps: 4 },
-          context: { windowTokens: 10_000 },
-        },
-      },
-      {
-        id: "ops",
-        name: "Ops Agent",
-        modelId: "test-model",
-        groupIds: [],
-      },
-    ])
-    expect("instructions" in agents[0]).toBe(false)
-    expect("model" in agents[0]).toBe(false)
-
-    const getResponse = await app.fetch(new Request("http://localhost/api/agents/assistant"))
-    expect(getResponse.status).toBe(200)
-    expect(await getResponse.json()).toMatchObject({ id: "assistant", name: "Support Assistant" })
-
-    const missingResponse = await app.fetch(new Request("http://localhost/api/agents/missing"))
-    expect(missingResponse.status).toBe(404)
-    expect(await missingResponse.json()).toEqual({ error: "Agent not found" })
+    const response = await app.fetch(new Request("http://localhost/api/agent"))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      name: "Sixb",
+      model: { provider: "test", modelId: "test-model" },
+    })
+    for (const path of ["/api/agents", "/api/agents/assistant"]) {
+      expect((await app.fetch(new Request(`http://localhost${path}`))).status).toBe(404)
+    }
   })
 
-  test("narrows the agent catalog and rejects thread creation without can.run", async () => {
+  test("requires can.run(agent) to access the Agent", async () => {
     const { app, storage } = createApp({ auth: true })
     const support = await seedSession(storage, "usr_support", ["support-users"])
-    const opsSession = await seedSession(storage, "usr_ops", ["ops-users"])
-    const admin = await seedSession(storage, "usr_admin", ["admins"])
     const noAccess = await seedSession(storage, "usr_none", [])
-
-    const supportList = await app.fetch(
-      new Request("http://localhost/api/agents", { headers: support.headers })
-    )
-    expect(((await supportList.json()) as { id: string }[]).map((agent) => agent.id)).toEqual([
-      "assistant",
-    ])
-
-    const hidden = await app.fetch(
-      new Request("http://localhost/api/agents/ops", { headers: support.headers })
-    )
-    expect(hidden.status).toBe(404)
-
-    const opsList = await app.fetch(
-      new Request("http://localhost/api/agents", { headers: opsSession.headers })
-    )
-    expect(((await opsList.json()) as { id: string }[]).map((agent) => agent.id)).toEqual(["ops"])
-
-    const adminList = await app.fetch(
-      new Request("http://localhost/api/agents", { headers: admin.headers })
-    )
-    expect(((await adminList.json()) as { id: string }[]).map((agent) => agent.id)).toEqual([
-      "assistant",
-      "ops",
-    ])
-
-    const deniedThread = await app.fetch(
-      jsonRequest(
-        "/api/agent-threads",
-        "POST",
-        { agentId: "assistant", title: "Denied" },
-        noAccess.csrfHeaders
-      )
-    )
-    // An ungranted agent is hidden: creation 404s (agent not found) rather than 403, so the
-    // response does not disclose that the agent id exists.
-    expect(deniedThread.status).toBe(404)
-
-    const allowedThread = await app.fetch(
-      jsonRequest(
-        "/api/agent-threads",
-        "POST",
-        { agentId: "assistant", title: "Allowed" },
-        support.csrfHeaders
-      )
-    )
-    expect(allowedThread.status).toBe(201)
+    expect(
+      (await app.fetch(new Request("http://localhost/api/agent", { headers: support.headers })))
+        .status
+    ).toBe(200)
+    expect(
+      (await app.fetch(new Request("http://localhost/api/agent", { headers: noAccess.headers })))
+        .status
+    ).toBe(404)
+    expect(
+      (
+        await app.fetch(
+          jsonRequest("/api/agent-threads", "POST", { title: "Denied" }, noAccess.csrfHeaders)
+        )
+      ).status
+    ).toBe(404)
+    expect(
+      (
+        await app.fetch(
+          jsonRequest("/api/agent-threads", "POST", { title: "Allowed" }, support.csrfHeaders)
+        )
+      ).status
+    ).toBe(201)
   })
 
   test("creates a thread, posts a message, and exposes a durable queued run", async () => {
@@ -427,7 +417,6 @@ describe("agent routes", () => {
 
     const createThreadResponse = await app.fetch(
       jsonRequest("/api/agent-threads", "POST", {
-        agentId: "assistant",
         title: "Pipeline check",
       })
     )
@@ -436,16 +425,17 @@ describe("agent routes", () => {
       thread: { id: string; ownerPrincipal: unknown; title: string }
     }
     expect(createThreadBody.thread.title).toBe("Pipeline check")
+    expect(createThreadBody.thread).not.toHaveProperty("agentId")
     expect(createThreadBody.thread.ownerPrincipal).toEqual({ type: "system", id: "system" })
 
     const listThreadsResponse = await app.fetch(
-      new Request("http://localhost/api/agent-threads?agentId=assistant&limit=5")
+      new Request("http://localhost/api/agent-threads?limit=5")
     )
     expect(listThreadsResponse.status).toBe(200)
     expect(await listThreadsResponse.json()).toMatchObject({
       total: 1,
       hasMore: false,
-      threads: [{ id: createThreadBody.thread.id, agentId: "assistant", messageCount: 0 }],
+      threads: [{ id: createThreadBody.thread.id, messageCount: 0 }],
     })
 
     const attachment = await sixb.blobStorage.put({
@@ -478,6 +468,7 @@ describe("agent routes", () => {
         streamId: `agents.runs.${postMessageBody.run.id}`,
       },
     })
+    expect(postMessageBody.run).not.toHaveProperty("agentId")
 
     await expect(
       storage.agents.runs.getById({ projectId: sixb.id, id: postMessageBody.run.id })
@@ -553,12 +544,12 @@ describe("agent routes", () => {
     const { app } = createApp()
 
     const first = await app.fetch(
-      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant", threadId: "thr-dup" })
+      jsonRequest("/api/agent-threads", "POST", { threadId: "thr-dup" })
     )
     expect(first.status).toBe(201)
 
     const second = await app.fetch(
-      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant", threadId: "thr-dup" })
+      jsonRequest("/api/agent-threads", "POST", { threadId: "thr-dup" })
     )
     expect(second.status).toBe(409)
     const body = (await second.json()) as { error: string }
@@ -573,7 +564,6 @@ describe("agent routes", () => {
     const thread = await storage.agents.threads.create({
       id: "thr-diagnostics",
       projectId: sixb.id,
-      agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
     const executionToken = createAgentRunExecutionToken()
@@ -581,7 +571,6 @@ describe("agent routes", () => {
       id: "run-diagnostics",
       projectId: sixb.id,
       threadId: thread.id,
-      agentId: "assistant",
       triggerMessageId: "trigger-diagnostics",
       requesterGroupIds: [],
       execution: testExecution(executionToken),
@@ -635,7 +624,6 @@ describe("agent routes", () => {
     const thread = await storage.agents.threads.create({
       id: "thr-compaction",
       projectId: sixb.id,
-      agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
     for (const message of [
@@ -658,7 +646,6 @@ describe("agent routes", () => {
       id: "run-compaction",
       projectId: sixb.id,
       threadId: thread.id,
-      agentId: "assistant",
       triggerMessageId: "msg-current-user",
       requesterGroupIds: [],
       execution: testExecution(executionToken),
@@ -722,14 +709,12 @@ describe("agent routes", () => {
     const thread = await storage.agents.threads.create({
       id: "thread-active",
       projectId: sixb.id,
-      agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
     await createStartedRun(storage, {
       id: "run-active",
       projectId: sixb.id,
       threadId: thread.id,
-      agentId: "assistant",
       triggerMessageId: "msg-existing",
       requesterGroupIds: [],
       execution: testExecution(),
@@ -749,8 +734,7 @@ describe("agent routes", () => {
 
   test("cancels a queued run before a worker starts it", async () => {
     const { app, storage, sixb } = createApp()
-    const request = await createTestSixb(sixb).agents.runs.request({
-      agentId: "assistant",
+    const request = await createTestSixb(sixb).agent.runs.request({
       text: "wait",
     })
 
@@ -796,8 +780,7 @@ describe("agent routes", () => {
 
   test("cancels a run when worker startup races queued cancellation", async () => {
     const { app, storage, sixb } = createApp()
-    const request = await createTestSixb(sixb).agents.runs.request({
-      agentId: "assistant",
+    const request = await createTestSixb(sixb).agent.runs.request({
       text: "pick this up",
     })
     const originalFinishQueued = storage.agents.runs.finishQueued.bind(storage.agents.runs)
@@ -841,7 +824,7 @@ describe("agent routes", () => {
     const { app, storage, sixb } = createApp({ auth: true })
     const session = await seedSession(storage, "usr_retry", ["support-users", "admins"])
     const createThreadResponse = await app.fetch(
-      jsonRequest("/api/agent-threads", "POST", { agentId: "assistant" }, session.csrfHeaders)
+      jsonRequest("/api/agent-threads", "POST", {}, session.csrfHeaders)
     )
     expect(createThreadResponse.status).toBe(201)
     const thread = (await createThreadResponse.json()) as { thread: { id: string } }
@@ -849,7 +832,7 @@ describe("agent routes", () => {
       jsonRequest(
         `/api/agent-threads/${thread.thread.id}/messages`,
         "POST",
-        { text: "try this" },
+        { text: "try this", reasoning: "medium" },
         session.csrfHeaders
       )
     )
@@ -962,8 +945,7 @@ describe("agent routes", () => {
 
   test("rolls back partial-message deletion when retry admission fails", async () => {
     const { app, storage, sixb } = createApp()
-    const first = await createTestSixb(sixb).agents.runs.request({
-      agentId: "assistant",
+    const first = await createTestSixb(sixb).agent.runs.request({
       text: "first attempt",
     })
     const execution = testExecution()
@@ -990,8 +972,7 @@ describe("agent routes", () => {
       })
     })
 
-    const second = await createTestSixb(sixb).agents.runs.request({
-      agentId: "assistant",
+    const second = await createTestSixb(sixb).agent.runs.request({
       threadId: first.run.threadId,
       text: "another turn",
     })
@@ -1016,14 +997,12 @@ describe("agent routes", () => {
     const thread = await storage.agents.threads.create({
       id: "thread-run",
       projectId: sixb.id,
-      agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
     const run = await createStartedRun(storage, {
       id: "run-readable",
       projectId: sixb.id,
       threadId: thread.id,
-      agentId: "assistant",
       triggerMessageId: "msg-user",
       requesterGroupIds: [],
       modelId: "test-model",
@@ -1058,7 +1037,6 @@ describe("agent routes", () => {
     expect(body).toMatchObject({
       id: run.id,
       threadId: thread.id,
-      agentId: "assistant",
       status: "running",
       modelId: "test-model",
       attempt: 1,
@@ -1080,6 +1058,7 @@ describe("agent routes", () => {
       startedAt: "2026-06-27T10:00:01.000Z",
     })
     expect("execution" in body).toBe(false)
+    expect(body).not.toHaveProperty("agentId")
 
     Object.defineProperty(storage, "aiCosts", { value: undefined })
     const unavailableResponse = await app.fetch(
@@ -1099,12 +1078,10 @@ describe("agent routes", () => {
     const thread = await storage.agents.threads.create({
       id: "thread-run-list",
       projectId: sixb.id,
-      agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
     const firstExecutionId = await createTestAgentExecution(storage, {
       projectId: sixb.id,
-      agentId: "assistant",
       runId: "run-list-1",
     })
     await storage.agents.runs.create({
@@ -1112,7 +1089,6 @@ describe("agent routes", () => {
       projectId: sixb.id,
       executionId: firstExecutionId,
       threadId: thread.id,
-      agentId: "assistant",
       triggerMessageId: "msg-list-1",
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
@@ -1124,7 +1100,6 @@ describe("agent routes", () => {
     })
     const secondExecutionId = await createTestAgentExecution(storage, {
       projectId: sixb.id,
-      agentId: "assistant",
       runId: "run-list-2",
     })
     await storage.agents.runs.create({
@@ -1132,7 +1107,6 @@ describe("agent routes", () => {
       projectId: sixb.id,
       executionId: secondExecutionId,
       threadId: thread.id,
-      agentId: "assistant",
       triggerMessageId: "msg-list-2",
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
@@ -1175,14 +1149,12 @@ describe("agent routes", () => {
     const thread = await storage.agents.threads.create({
       id: "thread-cancel",
       projectId: sixb.id,
-      agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
     const run = await createStartedRun(storage, {
       id: "run-cancel",
       projectId: sixb.id,
       threadId: thread.id,
-      agentId: "assistant",
       triggerMessageId: "msg-user",
       requesterGroupIds: [],
       execution: testExecution(),
@@ -1216,14 +1188,12 @@ describe("agent routes", () => {
     const otherThread = await storage.agents.threads.create({
       id: "thread-other",
       projectId: sixb.id,
-      agentId: "assistant",
       ownerPrincipal: { type: "system", id: "system" },
     })
     const otherRun = await createStartedRun(storage, {
       id: "run-other",
       projectId: sixb.id,
       threadId: otherThread.id,
-      agentId: "assistant",
       triggerMessageId: "msg-other",
       requesterGroupIds: [],
       execution: testExecution(),
@@ -1240,20 +1210,10 @@ describe("agent routes", () => {
     const other = await seedSession(storage, "usr_other")
 
     const ownerThreadResponse = await app.fetch(
-      jsonRequest(
-        "/api/agent-threads",
-        "POST",
-        { agentId: "assistant", title: "Owner thread" },
-        owner.csrfHeaders
-      )
+      jsonRequest("/api/agent-threads", "POST", { title: "Owner thread" }, owner.csrfHeaders)
     )
     const otherThreadResponse = await app.fetch(
-      jsonRequest(
-        "/api/agent-threads",
-        "POST",
-        { agentId: "assistant", title: "Other thread" },
-        other.csrfHeaders
-      )
+      jsonRequest("/api/agent-threads", "POST", { title: "Other thread" }, other.csrfHeaders)
     )
     expect(ownerThreadResponse.status).toBe(201)
     expect(otherThreadResponse.status).toBe(201)
@@ -1262,9 +1222,8 @@ describe("agent routes", () => {
     await storage.agents.threads.create({
       id: "owner-ops-thread",
       projectId: sixb.id,
-      agentId: "ops",
       ownerPrincipal: { type: "user", id: "usr_owner" },
-      title: "Owned but ungranted",
+      title: "Existing conversation",
     })
 
     const ownerList = await app.fetch(
@@ -1272,8 +1231,10 @@ describe("agent routes", () => {
     )
     expect(ownerList.status).toBe(200)
     expect(await ownerList.json()).toMatchObject({
-      total: 1,
-      threads: [{ id: ownerThread.thread.id, ownerPrincipal: { type: "user", id: "usr_owner" } }],
+      total: 2,
+      threads: expect.arrayContaining(
+        [{ id: "owner-ops-thread" }].map((item) => expect.objectContaining(item))
+      ),
     })
 
     const hiddenOwnedThread = await app.fetch(
@@ -1281,7 +1242,8 @@ describe("agent routes", () => {
         headers: owner.headers,
       })
     )
-    expect(hiddenOwnedThread.status).toBe(404)
+    expect(hiddenOwnedThread.status).toBe(200)
+    expect(await hiddenOwnedThread.json()).toMatchObject({ id: "owner-ops-thread" })
 
     const hiddenThread = await app.fetch(
       new Request(`http://localhost/api/agent-threads/${otherThread.thread.id}`, {

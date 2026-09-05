@@ -66,7 +66,6 @@ import {
   getWorkflowRunFileContent,
   listActionRuns,
   listActions,
-  listAgents,
   listAgentThreadMessages,
   listAgentThreadRuns,
   listAgentThreads,
@@ -296,8 +295,6 @@ import type {
   ListActionRunsResponse,
   ListActionsData,
   ListActionsResponse,
-  ListAgentsData,
-  ListAgentsResponse,
   ListAgentThreadMessagesData,
   ListAgentThreadMessagesError,
   ListAgentThreadMessagesResponse,
@@ -3442,38 +3439,13 @@ export const getActionRunFileContentOptions = (options: Options<GetActionRunFile
     queryKey: getActionRunFileContentQueryKey(options),
   })
 
-export const listAgentsQueryKey = (options?: Options<ListAgentsData>) =>
-  createQueryKey("listAgents", options)
-
-/**
- * List registered agents
- */
-export const listAgentsOptions = (options?: Options<ListAgentsData>) =>
-  queryOptions<
-    ListAgentsResponse,
-    DefaultError,
-    ListAgentsResponse,
-    ReturnType<typeof listAgentsQueryKey>
-  >({
-    queryFn: async ({ queryKey, signal }) => {
-      const { data } = await listAgents({
-        ...options,
-        ...queryKey[0],
-        signal,
-        throwOnError: true,
-      })
-      return data
-    },
-    queryKey: listAgentsQueryKey(options),
-  })
-
-export const getAgentQueryKey = (options: Options<GetAgentData>) =>
+export const getAgentQueryKey = (options?: Options<GetAgentData>) =>
   createQueryKey("getAgent", options)
 
 /**
- * Get agent metadata
+ * Get the project Agent
  */
-export const getAgentOptions = (options: Options<GetAgentData>) =>
+export const getAgentOptions = (options?: Options<GetAgentData>) =>
   queryOptions<
     GetAgentResponse,
     GetAgentError,

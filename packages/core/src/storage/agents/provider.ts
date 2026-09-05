@@ -1,5 +1,4 @@
 import { isDeepStrictEqual } from "node:util"
-import { agentServiceAccountId } from "../../agents/authority"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
 import { isFileRef } from "../../blob-storage"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
@@ -60,22 +59,13 @@ export async function assertAgentRunExecution(input: {
   readonly projectId: string
   readonly executionId: string
   readonly runId: string
-  readonly authority:
-    | { readonly type: "managed"; readonly agentId: string }
-    | { readonly type: "inherited" }
 }): Promise<ExecutionRecord> {
   const execution = await findAgentRunExecution({
     executions: input.executions,
     projectId: input.projectId,
     executionId: input.executionId,
     runId: input.runId,
-    authority:
-      input.authority.type === "inherited"
-        ? { type: "inherited" }
-        : {
-            type: "managed",
-            serviceAccountId: agentServiceAccountId(input.authority.agentId),
-          },
+    authority: { type: "inherited" },
   })
   if (!execution) {
     throw new AgentStorageError(

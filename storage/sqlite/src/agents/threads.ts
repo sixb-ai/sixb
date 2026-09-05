@@ -25,7 +25,6 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           INSERT INTO agent_threads (
             project_id,
             id,
-            agent_id,
             owner_principal_type,
             owner_principal_id,
             title,
@@ -35,13 +34,12 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             message_count,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
         `
         )
         .run(
           input.projectId,
           input.id,
-          input.agentId,
           input.ownerPrincipal.type,
           input.ownerPrincipal.id,
           input.title ?? null,
@@ -72,25 +70,12 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
   }
 
   async list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult> {
-    if (
-      (input.statuses !== undefined && input.statuses.length === 0) ||
-      (input.agentIds !== undefined && input.agentIds.length === 0)
-    ) {
+    if (input.statuses !== undefined && input.statuses.length === 0) {
       return { threads: [], hasMore: false, total: 0 }
     }
 
     const whereClauses = ["project_id = ?"]
     const args: SqliteValue[] = [input.projectId]
-
-    if (input.agentId) {
-      whereClauses.push("agent_id = ?")
-      args.push(input.agentId)
-    }
-
-    if (input.agentIds) {
-      whereClauses.push(`agent_id IN (${input.agentIds.map(() => "?").join(", ")})`)
-      args.push(...input.agentIds)
-    }
 
     if (input.statuses) {
       whereClauses.push(`status IN (${input.statuses.map(() => "?").join(", ")})`)

@@ -6,18 +6,9 @@ import {
   type ValueType,
   validateSchemaValue,
 } from "../ontology"
-import type { GroupDefinition, SecurityDefinitionCatalog } from "../security"
+import type { GroupDefinition } from "../security"
 import { AgentDefinitionError } from "./errors"
-import {
-  AGENT_REASONING_LEVELS,
-  type AgentContextConfig,
-  type AgentDefinition,
-  type AgentLoopConfig,
-  type AgentReasoningLevel,
-  type AgentToolDefinition,
-  type AgentToolInputSchema,
-  type DefineAgentConfig,
-} from "./types"
+import type { AgentToolDefinition, AgentToolInputSchema } from "./types"
 
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
 const AGENT_TOOL_PRIMITIVE_SCHEMAS = new Set([
@@ -44,20 +35,6 @@ export function assertNonEmpty(value: string, field: string): void {
   if (!value.trim()) {
     throw new AgentDefinitionError(`[Sixb] Agent ${field} must not be empty.`)
   }
-}
-
-export function isAgentDefinition(value: unknown): value is AgentDefinition {
-  return (
-    isRecord(value) &&
-    value.kind === "agent" &&
-    typeof value.id === "string" &&
-    typeof value.name === "string" &&
-    typeof value.instructions === "string" &&
-    (value.reasoning === undefined || isAgentReasoningLevel(value.reasoning)) &&
-    (value.providerOptions === undefined || isProviderOptions(value.providerOptions)) &&
-    Array.isArray(value.groupIds) &&
-    isAgentToolDefinitionArray(value.tools)
-  )
 }
 
 export function isAgentToolDefinition(value: unknown): value is AgentToolDefinition {
@@ -149,108 +126,6 @@ export function validateAndNormalizeAgentToolInput(
   )
 }
 
-/** Revalidate and lock tool definitions supplied directly to the runtime. */
-export function validateAgentToolsAtStartup(agents: readonly AgentDefinition[]): void {
-  for (const agent of agents) {
-    if (!isAgentDefinition(agent)) {
-      throw new AgentDefinitionError("[Sixb] Agents must contain only valid agent definitions.")
-    }
-
-    assertValidAgentToolDefinitions(agent.id, agent.tools)
-    for (const tool of agent.tools) {
-      deepFreeze(tool.input)
-      Object.freeze(tool)
-    }
-    Object.freeze(agent.tools)
-    Object.freeze(agent)
-  }
-}
-
-export function resolveAgentLoopConfig(
-  loop: AgentLoopConfig | undefined
-): AgentLoopConfig | undefined {
-  if (loop === undefined) return undefined
-
-  const maxSteps = loop?.stopWhen?.maxSteps
-  if (maxSteps !== undefined && (!Number.isSafeInteger(maxSteps) || maxSteps <= 0)) {
-    throw new AgentDefinitionError(
-      "[Sixb] Agent loop.stopWhen.maxSteps must be a positive safe integer."
-    )
-  }
-  if (loop.caching !== undefined && loop.caching !== "auto" && loop.caching !== "off") {
-    throw new AgentDefinitionError("[Sixb] Agent loop.caching must be 'auto' or 'off'.")
-  }
-
-  const context = loop.context ? snapshotAgentContextConfig(loop.context) : undefined
-  return Object.freeze({
-    ...(loop.stopWhen === undefined
-      ? {}
-      : { stopWhen: Object.freeze({ ...(maxSteps === undefined ? {} : { maxSteps }) }) }),
-    ...(context === undefined ? {} : { context }),
-    ...(loop.caching === undefined ? {} : { caching: loop.caching }),
-  })
-}
-
-function snapshotAgentContextConfig(context: AgentContextConfig): AgentContextConfig {
-  const snapshot: Record<string, number> = {}
-  for (const field of ["windowTokens", "reserveTokens", "keepRecentTokens"] as const) {
-    const value = context[field]
-    if (value === undefined) continue
-    assertPositiveSafeInteger(value, field)
-    snapshot[field] = value
-  }
-
-  return Object.freeze(snapshot)
-}
-
-function assertPositiveSafeInteger(value: unknown, field: string): asserts value is number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0) {
-    throw new AgentDefinitionError(
-      `[Sixb] Agent loop.context.${field} must be a positive safe integer.`
-    )
-  }
-}
-
-export function assertValidReasoningLevel(reasoning: AgentReasoningLevel | undefined): void {
-  if (reasoning === undefined) {
-    return
-  }
-  if (!isAgentReasoningLevel(reasoning)) {
-    throw new AgentDefinitionError(
-      `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}.`
-    )
-  }
-}
-
-export function assertValidProviderOptions(
-  providerOptions: DefineAgentConfig["providerOptions"]
-): void {
-  if (providerOptions === undefined) {
-    return
-  }
-
-  const reason = getInvalidJsonValueReason(providerOptions, "providerOptions")
-  if (!isRecord(providerOptions) || reason) {
-    throw new AgentDefinitionError(
-      `[Sixb] Agent providerOptions must be a provider-keyed JSON object${reason ? `; ${reason}` : "."}`
-    )
-  }
-
-  for (const [provider, options] of Object.entries(providerOptions)) {
-    if (!provider.trim()) {
-      throw new AgentDefinitionError(
-        "[Sixb] Agent providerOptions provider names must not be empty."
-      )
-    }
-    const optionsReason = getInvalidJsonValueReason(options, `providerOptions.${provider}`)
-    if (!isRecord(options) || optionsReason) {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent providerOptions.${provider} must be a JSON object${optionsReason ? `; ${optionsReason}` : "."}`
-      )
-    }
-  }
-}
-
 export function groupIdsFromDefinitions(
   agentId: string,
   groups: readonly GroupDefinition[] | undefined
@@ -270,22 +145,6 @@ export function groupIdsFromDefinitions(
   return Object.freeze(groupIds)
 }
 
-export function validateAgentGroupReferences(
-  agents: readonly AgentDefinition[],
-  security: SecurityDefinitionCatalog
-): void {
-  for (const agent of agents) {
-    assertNoDuplicateGroupIds(agent.id, agent.groupIds)
-    for (const groupId of agent.groupIds) {
-      if (!security.getGroupById(groupId)) {
-        throw new AgentDefinitionError(
-          `[Sixb] Agent '${agent.id}' groups references unknown group '${groupId}'. Add it to 'security/groups/' or pass it to createSixb({ groups }).`
-        )
-      }
-    }
-  }
-}
-
 function assertNoDuplicateGroupIds(agentId: string, groupIds: readonly string[]): void {
   const seen = new Set<string>()
   for (const groupId of groupIds) {
@@ -297,24 +156,6 @@ function assertNoDuplicateGroupIds(agentId: string, groupIds: readonly string[])
     }
     seen.add(groupId)
   }
-}
-
-function isAgentReasoningLevel(value: unknown): value is AgentReasoningLevel {
-  return typeof value === "string" && (AGENT_REASONING_LEVELS as readonly string[]).includes(value)
-}
-
-function isProviderOptions(
-  value: unknown
-): value is NonNullable<DefineAgentConfig["providerOptions"]> {
-  if (!isRecord(value) || getInvalidJsonValueReason(value) !== undefined) {
-    return false
-  }
-  return Object.entries(value).every(
-    ([provider, options]) =>
-      provider.trim().length > 0 &&
-      isRecord(options) &&
-      getInvalidJsonValueReason(options) === undefined
-  )
 }
 
 function assertValidAgentToolSchema(
@@ -395,18 +236,6 @@ function invalidAgentToolSchema(toolName: string, path: string): AgentDefinition
   return new AgentDefinitionError(
     `[Sixb] Agent tool '${toolName}' ${path} must be a valid Sixb schema.`
   )
-}
-
-function isAgentToolDefinitionArray(value: unknown): value is readonly AgentToolDefinition[] {
-  if (!Array.isArray(value)) {
-    return false
-  }
-  for (let index = 0; index < value.length; index += 1) {
-    if (!Object.hasOwn(value, index) || !isAgentToolDefinition(value[index])) {
-      return false
-    }
-  }
-  return true
 }
 
 export function assertValidAgentToolDefinitions(

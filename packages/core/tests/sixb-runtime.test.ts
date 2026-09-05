@@ -143,7 +143,7 @@ describe("SixbHost runtime", () => {
     expect(sixb.rules.list()).toEqual([])
     expect(sixb.projections.list()).toEqual([])
     expect(sixb.workflows.list()).toEqual([])
-    expect(sixb.agents.list()).toEqual([])
+    expect(sixb.agent.get()).toBeNull()
 
     for (const removedRootMember of [
       "listObjects",

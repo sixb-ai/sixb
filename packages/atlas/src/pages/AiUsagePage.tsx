@@ -166,8 +166,12 @@ export function AiUsagePage() {
       return amount
         ? [
             {
-              key: agent.agentId,
-              label: agent.agentId,
+              key:
+                agent.kind === "agent"
+                  ? "agent"
+                  : JSON.stringify([agent.workflowId, agent.agentStepId]),
+              label:
+                agent.kind === "agent" ? "Agent" : `${agent.workflowId} · ${agent.agentStepId}`,
               value: nanosToChartValue(amount.amountNanos),
             },
           ]

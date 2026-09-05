@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { defineAgent, InMemoryStorage, type Storage } from "@sixb/core"
+import { InMemoryStorage, type Storage } from "@sixb/core"
 import {
   estimateAgentContextMessagesTokens,
   estimateAgentContextRequestTokens,
@@ -28,7 +28,6 @@ describe("agent conversation context estimation", () => {
     await agents.threads.create({
       id: threadId,
       projectId,
-      agentId: "assistant",
       ownerPrincipal: { type: "user", id: "user" },
     })
     const user = await agents.messages.append({
@@ -41,7 +40,6 @@ describe("agent conversation context estimation", () => {
     })
     const executionId = await createTestAgentExecution(storage, {
       projectId,
-      agentId: "assistant",
       runId: "run_1",
     })
     await agents.runs.create({
@@ -49,7 +47,6 @@ describe("agent conversation context estimation", () => {
       projectId,
       executionId,
       threadId,
-      agentId: "assistant",
       triggerMessageId: user.id,
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
@@ -86,11 +83,12 @@ describe("agent conversation context estimation", () => {
     })
 
     const model = new MockLanguageModelV4({ modelId: "mock-model" })
-    const agent = defineAgent("assistant", {
-      name: "Assistant",
+    const plan = {
       model,
       instructions: "Answer clearly.",
-    })
+      tools: [],
+      maxSteps: 4,
+    }
     await storage.aiUsage.recordModelCall({
       id: "usage_1",
       projectId,
@@ -108,7 +106,7 @@ describe("agent conversation context estimation", () => {
     const messages: readonly AgentMessageRecord[] = [user, assistant, trailing]
     const estimate = await estimateAgentConversationInputTokens({
       context: { id: projectId, storage: requireWorkerStorage(storage) },
-      agent,
+      plan,
       threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
       systemPrompt: "This full fallback prompt should not be counted.",
       tools: [],
@@ -128,7 +126,7 @@ describe("agent conversation context estimation", () => {
     await expect(
       estimateAgentConversationInputTokens({
         context: { id: projectId, storage: requireWorkerStorage(storage) },
-        agent,
+        plan,
         threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
         systemPrompt: expandedSystemPrompt,
         tools: [],
@@ -167,7 +165,7 @@ describe("agent conversation context estimation", () => {
     await expect(
       estimateAgentConversationInputTokens({
         context: { id: projectId, storage: requireWorkerStorage(storage) },
-        agent,
+        plan,
         threadContext: {
           checkpoint,
           retainedMessages: retainedAfterCheckpoint,
@@ -185,7 +183,6 @@ describe("agent conversation context estimation", () => {
     await agents.threads.create({
       id: threadId,
       projectId,
-      agentId: "assistant",
       ownerPrincipal: { type: "user", id: "user" },
     })
     const user = await agents.messages.append({
@@ -198,7 +195,6 @@ describe("agent conversation context estimation", () => {
     })
     const executionId = await createTestAgentExecution(storage, {
       projectId,
-      agentId: "assistant",
       runId: "fallback_run",
     })
     await agents.runs.create({
@@ -206,7 +202,6 @@ describe("agent conversation context estimation", () => {
       projectId,
       executionId,
       threadId,
-      agentId: "assistant",
       triggerMessageId: user.id,
       spec: { model: { provider: "test", modelId: "test-model" } },
       requesterGroupIds: [],
@@ -229,11 +224,12 @@ describe("agent conversation context estimation", () => {
     })
 
     const model = new MockLanguageModelV4({ modelId: "mock-model" })
-    const agent = defineAgent("assistant", {
-      name: "Assistant",
+    const plan = {
       model,
       instructions: "Answer clearly.",
-    })
+      tools: [],
+      maxSteps: 4,
+    }
     await storage.aiUsage.recordModelCall({
       id: "usage_zero",
       projectId,
@@ -257,7 +253,7 @@ describe("agent conversation context estimation", () => {
     await expect(
       estimateAgentConversationInputTokens({
         context: { id: projectId, storage: requireWorkerStorage(storage) },
-        agent,
+        plan,
         threadContext: { checkpoint: null, retainedMessages: messages, modelMessages: messages },
         systemPrompt: "System",
         tools: [],
