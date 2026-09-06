@@ -24,6 +24,7 @@ import {
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import { requestedReasoningFromRow } from "./pg-ai-usage-storage"
 import type { PgStoreClient } from "./transactions"
 import { runPgTransaction } from "./transactions"
 
@@ -304,6 +305,7 @@ interface UsageRow {
   readonly call_id: string
   readonly provider_id: string
   readonly requested_model_id: string
+  readonly requested_reasoning: string | Record<string, unknown> | null
   readonly response_model_id: string | null
   readonly response_id: string
   readonly input_tokens: number | string | null
@@ -504,6 +506,9 @@ function usageFromRow(row: UsageRow, requesterGroupIds: readonly string[]): AiMo
           ),
         }),
     requestedModelId: row.requested_model_id,
+    ...(row.requested_reasoning === null
+      ? {}
+      : { requestedReasoning: requestedReasoningFromRow(row.requested_reasoning) }),
     ...(row.response_model_id === null ? {} : { responseModelId: row.response_model_id }),
     responseId: row.response_id,
     usage: {

@@ -61,6 +61,10 @@ support and the schema fits the native decoder. Otherwise the adapter transparen
 required, nonparallel JSON tool. In both cases Sixb validates the completed value against the
 original application contract.
 
+Local tools use the same schema transformation as native structured output: unsupported decoder
+constraints move into descriptions, while Sixb validates inputs against the original tool contract.
+Schemas with open objects are sent unchanged with `strict: false` to preserve their allowed keys.
+
 Native server tools can be supplied beside Sixb's local tools:
 
 ```ts
@@ -70,7 +74,9 @@ const model = anthropic("claude-sonnet-5", {
 ```
 
 Agent and model-loop reasoning uses the shared provider-neutral preference. Anthropic named efforts
-map directly to `output_config.effort`; exact budgets map to native manual thinking:
+map to `output_config.effort` and enable adaptive thinking on Claude Sonnet 4.6 and Claude Opus
+4.6–4.8, where thinking otherwise defaults to off. Claude 5 models already enable thinking by
+default. Exact budgets map to native manual thinking:
 
 ```ts
 reasoning: "high"

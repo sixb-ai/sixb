@@ -24,6 +24,7 @@ import {
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import { requestedReasoningFromRow } from "./ai-usage-storage"
 import { isUniqueConstraintError } from "./storage-errors"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
@@ -356,6 +357,7 @@ interface UsageRow {
   readonly call_id: string
   readonly provider_id: string
   readonly requested_model_id: string
+  readonly requested_reasoning: string | null
   readonly response_model_id: string | null
   readonly response_id: string
   readonly input_tokens: number | null
@@ -543,6 +545,9 @@ function usageFromRow(row: UsageRow, requesterGroupIds: readonly string[]): AiMo
       ? {}
       : { providerIds: normalizeModelProviderIds(JSON.parse(row.provider_ids)) }),
     requestedModelId: row.requested_model_id,
+    ...(row.requested_reasoning === null
+      ? {}
+      : { requestedReasoning: requestedReasoningFromRow(row.requested_reasoning) }),
     ...(row.response_model_id === null ? {} : { responseModelId: row.response_model_id }),
     responseId: row.response_id,
     usage: {

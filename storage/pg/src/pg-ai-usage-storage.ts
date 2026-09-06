@@ -319,7 +319,7 @@ function rawUsageFromRow(value: Exclude<AiUsageRow["raw_usage"], null>): Readonl
   return typeof value === "string" ? (JSON.parse(value) as ReadonlyJsonObject) : value
 }
 
-function requestedReasoningFromRow(
+export function requestedReasoningFromRow(
   value: Exclude<AiUsageRow["requested_reasoning"], null>
 ): AiModelCallUsageRecord["requestedReasoning"] {
   const parsed: unknown =

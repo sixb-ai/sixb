@@ -113,6 +113,25 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
       }
     })
 
+    test("retains named, budgeted, and absent reasoning in accounting listings", async () => {
+      // Regression proof: omit requested_reasoning in either SQL accounting usageFromRow decoder.
+      const storage = await fixture()
+      try {
+        const page = await storage.listModelCalls({
+          projectId,
+          from: new Date("2026-08-01T00:00:00.000Z"),
+          to: new Date("2026-08-02T00:00:00.000Z"),
+        })
+        expect(page.items.map(({ usage }) => [usage.id, usage.requestedReasoning])).toEqual([
+          ["usage_1", "high"],
+          ["usage_2", { budgetTokens: 4_096 }],
+          ["usage_3", undefined],
+        ])
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
     test("retains an estimate beside an inline provider cost without double counting", async () => {
       // Removal proof: drop estimate from the cost codec/normalizer, or sum it into the selected cost.
       const storage = await fixture()
@@ -334,9 +353,15 @@ export async function seedAiCostStorageContractUsage(
   }
 
   for (const fixture of [
-    { id: "usage_1", model: "openai/gpt-5", input: 12, output: 8 },
-    { id: "usage_2", model: "unpriced/model", input: 1, output: 1 },
-    { id: "usage_3", model: "openai/gpt-5", input: 2, output: 3 },
+    { id: "usage_1", model: "openai/gpt-5", input: 12, output: 8, reasoning: "high" as const },
+    {
+      id: "usage_2",
+      model: "unpriced/model",
+      input: 1,
+      output: 1,
+      reasoning: { budgetTokens: 4_096 },
+    },
+    { id: "usage_3", model: "openai/gpt-5", input: 2, output: 3, reasoning: undefined },
   ]) {
     await usage.recordModelCall({
       id: fixture.id,
@@ -347,6 +372,7 @@ export async function seedAiCostStorageContractUsage(
       requesterGroupIds: [],
       providerId: "gateway",
       requestedModelId: fixture.model,
+      ...(fixture.reasoning === undefined ? {} : { requestedReasoning: fixture.reasoning }),
       responseId: `response_${projectId}_${fixture.id}`,
       usage: {
         inputTokens: fixture.input,

@@ -349,7 +349,9 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
   }
 }
 
-function requestedReasoningFromRow(value: string): AiModelCallUsageRecord["requestedReasoning"] {
+export function requestedReasoningFromRow(
+  value: string
+): AiModelCallUsageRecord["requestedReasoning"] {
   const parsed: unknown = JSON.parse(value)
   if (!isModelReasoning(parsed)) {
     throw new Error("[SixbSqlite] Stored AI usage requested reasoning is invalid.")

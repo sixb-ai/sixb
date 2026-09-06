@@ -1,7 +1,10 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { runModelLoop } from "@sixb/core/internal/agents"
+import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
 import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
+import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
+import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
+import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
 import { anthropic, createAnthropic } from "../src"
 import { decodeServerSentEvents } from "../src/sse"
 import { anthropicOutputSchema } from "../src/structured-output"
@@ -44,6 +47,189 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Anthropic provider", () => {
+  test("sanitizes strict tool schemas while preserving local validation constraints", async () => {
+    // Regression proof: restore input_schema: tool.inputSchema with unconditional strict: true.
+    let body: unknown
+    const provider = createAnthropic({
+      fetch: async (_url, init) => {
+        body = JSON.parse(String(init?.body))
+        return sseResponse([])
+      },
+    })
+    const openSchema = {
+      type: "object",
+      properties: { metadata: { type: "object", additionalProperties: { type: "string" } } },
+      required: ["metadata"],
+      additionalProperties: false,
+    }
+    await provider("claude-sonnet-5").stream(
+      request({
+        tools: [
+          READ_TOOL_SPEC,
+          VIEW_FILE_TOOL_SPEC,
+          { name: "metadata", description: "Save arbitrary metadata.", inputSchema: openSchema },
+        ],
+      })
+    )
+    expect(body).toMatchObject({
+      tools: [
+        {
+          name: "read",
+          strict: true,
+          input_schema: {
+            ...READ_TOOL_SPEC.inputSchema,
+            properties: {
+              path: READ_TOOL_SPEC.inputSchema.properties.path,
+              offset: {
+                type: "integer",
+                description: "One-based start line. Default: 1.\nminimum: 1.",
+              },
+              limit: {
+                type: "integer",
+                description: "Requested line count. Default and maximum: 2,000.\nminimum: 1.",
+              },
+            },
+          },
+        },
+        {
+          name: "view_file",
+          strict: true,
+          input_schema: {
+            ...VIEW_FILE_TOOL_SPEC.inputSchema,
+            properties: { path: { type: "string", description: "min length: 1." } },
+          },
+        },
+        { name: "metadata", strict: false, input_schema: openSchema },
+      ],
+    })
+    const encoded = JSON.stringify(body)
+    expect(encoded).not.toContain('"minimum"')
+    expect(encoded).not.toContain('"minLength"')
+    expect(READ_TOOL_SPEC.inputSchema.properties.offset.minimum).toBe(1)
+    expect(VIEW_FILE_TOOL_SPEC.inputSchema.properties.path.minLength).toBe(1)
+  })
+
+  test.each([
+    false,
+    true,
+  ])("replays durable Anthropic tool outcomes (error: %s)", async (failTool) => {
+    // Regression proof: copy the call's providerMetadata onto toolResultModelPart again.
+    const bodies: Record<string, unknown>[] = []
+    const provider = createAnthropic({
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        const toolCall = bodies.length === 1
+        return sseResponse([
+          { type: "message_start", message: { id: `msg-${bodies.length}`, usage: {} } },
+          {
+            type: "content_block_start",
+            index: 0,
+            content_block: toolCall
+              ? { type: "tool_use", id: "toolu-1", name: "lookup", input: {} }
+              : { type: "text", text: "Done." },
+          },
+          { type: "content_block_stop", index: 0 },
+          { type: "message_delta", delta: { stop_reason: toolCall ? "tool_use" : "end_turn" } },
+          { type: "message_stop" },
+        ])
+      },
+    })
+    const model = provider("claude-sonnet-5")
+    const initial = request()
+    const first = await runModelLoop({
+      model,
+      messages: initial.messages,
+      signal: initial.signal,
+      maxSteps: 2,
+      tools: [
+        {
+          name: "lookup",
+          description: "Look up a value.",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          parseInput: (value) => value,
+          execute: async () => {
+            if (failTool) throw new Error("lookup failed")
+            return "sunny"
+          },
+          errorText: () => "lookup failed",
+        },
+      ],
+    })
+    const parts = agentTraceFromModelSteps(first.steps)
+    const replay = toModelMessages([{ role: "assistant", parts }])
+    const second = await runModelLoop({
+      model,
+      messages: [
+        ...initial.messages,
+        ...replay,
+        { role: "user", content: [{ type: "text", text: "Continue." }] },
+      ],
+      signal: initial.signal,
+      maxSteps: 1,
+    })
+    expect(second.status).toBe("completed")
+    expect(bodies[2]?.messages).toEqual([
+      ...initial.messages,
+      {
+        role: "assistant",
+        content: [{ type: "tool_use", id: "toolu-1", name: "lookup", input: {} }],
+      },
+      {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "toolu-1",
+            content: failTool ? "lookup failed" : "sunny",
+            ...(failTool ? { is_error: true } : {}),
+          },
+        ],
+      },
+      { role: "assistant", content: [{ type: "text", text: "Done." }] },
+      { role: "user", content: [{ type: "text", text: "Continue." }] },
+    ])
+  })
+
+  test.each([
+    "claude-sonnet-4-6",
+    "claude-opus-4-6",
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-opus-4-6-20260205",
+  ])("activates adaptive thinking for named effort on %s", async (modelId) => {
+    // Regression proof: return only { effort: reasoning } in anthropicReasoningRequest.
+    const bodies: Record<string, unknown>[] = []
+    const provider = createAnthropic({
+      models: [
+        {
+          kind: "language",
+          providerId: "anthropic",
+          modelId,
+          capabilities: { reasoning: { canDisable: true, efforts: ["low", "medium", "high"] } },
+        },
+      ],
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([])
+      },
+    })
+    const model = await provider(modelId).resolve!({ offline: true })
+    for (const reasoning of ["low", "medium", "high", "none", "provider-default"] as const) {
+      await model.stream(request({ reasoning }))
+    }
+    await model.stream(request())
+    expect(
+      bodies.map((body) => ({ thinking: body.thinking, output_config: body.output_config }))
+    ).toEqual([
+      { thinking: { type: "adaptive" }, output_config: { effort: "low" } },
+      { thinking: { type: "adaptive" }, output_config: { effort: "medium" } },
+      { thinking: { type: "adaptive" }, output_config: { effort: "high" } },
+      { thinking: { type: "disabled" }, output_config: undefined },
+      { thinking: undefined, output_config: undefined },
+      { thinking: undefined, output_config: undefined },
+    ])
+  })
+
   test("uses configured credentials, metadata, and snapshotted request options", async () => {
     // Removal proof: omit configuredModels or the model-options snapshot.
     const options = { maxOutputTokens: 512, request: { temperature: 0.2 } }
@@ -327,7 +513,7 @@ describe("Anthropic provider", () => {
       ],
       tools: [
         { type: "web_search_20260209", name: "web_search" },
-        { name: "echo", strict: true },
+        { name: "echo", strict: false },
       ],
       tool_choice: { type: "auto" },
       output_config: {

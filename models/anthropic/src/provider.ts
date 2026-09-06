@@ -427,12 +427,15 @@ class AnthropicLanguageModel implements LanguageModel {
     const useOutputTool = request.responseFormat !== undefined && nativeOutputSchema === undefined
     const tools: JsonObject[] = [
       ...(this.options.providerTools ?? []),
-      ...request.tools.map((tool) => ({
-        name: tool.name,
-        description: tool.description,
-        input_schema: tool.inputSchema,
-        strict: true,
-      })),
+      ...request.tools.map((tool) => {
+        const schema = anthropicOutputSchema(tool.inputSchema)
+        return {
+          name: tool.name,
+          description: tool.description,
+          input_schema: schema ?? tool.inputSchema,
+          strict: schema !== undefined,
+        }
+      }),
       ...(useOutputTool
         ? [
             {
@@ -977,7 +980,13 @@ function anthropicReasoningRequest(
       )
       return {}
     }
-    return { effort: reasoning }
+    // These adaptive-capable models default to thinking off; effort alone does not enable it.
+    // Claude 5 models already enable thinking by default, and earlier models use manual budgets.
+    const enableAdaptive = /^claude-(?:opus-4-[678]|sonnet-4-6)(?:-|$)/.test(modelId)
+    return {
+      effort: reasoning,
+      ...(enableAdaptive ? { thinking: { type: "adaptive" } } : {}),
+    }
   }
   if (reasoning.budgetTokens < 1_024) {
     throw new UnsupportedModelFeatureError(

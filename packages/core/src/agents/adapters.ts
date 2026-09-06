@@ -618,12 +618,13 @@ function toolResultModelPart<TMessage extends AgentMessage>(
   errorMode: "text" | "json",
   options: ToModelMessagesOptions<TMessage>
 ): AgentModelToolResultPart {
+  // Stored providerMetadata belongs to the call, not this synthesized result. Replaying it here
+  // can replace the result with the provider's original tool-call block.
   return {
     type: "tool-result",
     toolCallId: part.toolCallId,
     toolName: part.toolName,
     output: toolResultOutput(message, part, partIndex, errorMode, options),
-    ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
   }
 }
 
