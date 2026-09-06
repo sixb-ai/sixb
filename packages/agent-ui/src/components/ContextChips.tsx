@@ -1,6 +1,6 @@
 import { type AgentContextEntryInput, agentContextIdentity } from "@sixb/core/agents/context"
 import { cn } from "@sixb/ui/lib/utils"
-import { AtSign, Box, PanelsTopLeft, View, X } from "lucide-react"
+import { Box, PanelsTopLeft, X } from "lucide-react"
 import { agentContextLabel } from "../utils/contextDisplay"
 
 export function ContextChips({
@@ -20,7 +20,7 @@ export function ContextChips({
         return (
           <span
             key={`${identity}:${entry.origin}:${index}`}
-            className="inline-flex max-w-full items-center gap-1 rounded-full border border-border bg-muted/70 py-1 pr-1.5 pl-2 text-xs text-foreground"
+            className="inline-flex max-w-[min(100%,20rem)] items-center gap-1.5 rounded-full border border-border bg-muted/70 py-1 pr-1.5 pl-2 text-xs text-foreground"
           >
             {entry.context.kind === "object" ? (
               <Box className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
@@ -30,18 +30,7 @@ export function ContextChips({
                 aria-hidden="true"
               />
             )}
-            <span className="truncate">{agentContextLabel(entry.context)}</span>
-            <span
-              className="inline-flex shrink-0 text-muted-foreground"
-              title={entry.origin === "explicit" ? "Added with @" : "Provided by this page"}
-              aria-label={entry.origin === "explicit" ? "Added with @" : "Provided by this page"}
-            >
-              {entry.origin === "explicit" ? (
-                <AtSign className="size-3" />
-              ) : (
-                <View className="size-3" />
-              )}
-            </span>
+            <span className="min-w-0 flex-1 truncate">{agentContextLabel(entry.context)}</span>
             {onRemove ? (
               <button
                 type="button"

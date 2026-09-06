@@ -23,6 +23,7 @@ import { useQuery } from "@tanstack/react-query"
 import { ArrowUpRight, Bot, ChevronRight, GitBranch, Layers, Workflow, Zap } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { Link } from "react-router-dom"
+import { selectAtlasAgentThread } from "../lib/agentSurface"
 import { formatMoney } from "../lib/aiAccounting"
 
 type Group = ListAiModelCallGroupsResponse["items"][number]
@@ -156,7 +157,7 @@ function GroupRows({ group, filters }: { group: Group; filters: Filters }) {
           : Layers
   const href =
     group.attribution?.kind === "agent" && group.canOpenThread
-      ? `/agents/${encodeURIComponent(group.attribution.threadId)}`
+      ? "/agents"
       : group.attribution?.kind === "workflowAgent" || group.attribution?.kind === "workflow"
         ? `/workflows/${encodeURIComponent(group.attribution.workflowId)}?run=${encodeURIComponent(group.attribution.workflowRunId)}`
         : group.attribution?.kind === "action"
@@ -195,6 +196,11 @@ function GroupRows({ group, filters }: { group: Group; filters: Filters }) {
             {href ? (
               <Link
                 to={href}
+                onClick={() => {
+                  if (group.attribution?.kind === "agent" && group.canOpenThread) {
+                    selectAtlasAgentThread(group.attribution.threadId)
+                  }
+                }}
                 aria-label={`Open ${label}`}
                 title="Open source"
                 className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"

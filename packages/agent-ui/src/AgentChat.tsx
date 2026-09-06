@@ -1,16 +1,8 @@
-import {
-  EmptyState,
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@sixb/ui/components"
+import { EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
-import { type CSSProperties, type ReactNode, useState } from "react"
+import type { ReactNode } from "react"
 import { ConversationPanel } from "./components/ConversationPanel"
-import { ThreadSidebar } from "./components/ThreadSidebar"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 import { useAgentConversation } from "./hooks/useAgentConversation"
@@ -20,21 +12,24 @@ export interface AgentChatProps {
   readonly threadId?: string | null
   readonly onNavigateHome: () => void
   readonly onNavigateThread: (threadId: string) => void
-  readonly onExit?: () => void
-  readonly exitLabel?: string
   readonly className?: string
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
   /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
   readonly welcomeContent?: ReactNode
-  /** Host chrome rendered above the workspace thread navigation. */
-  readonly sidebarHeader?: ReactNode
-  /** Host chrome rendered below the workspace thread navigation. */
-  readonly sidebarFooter?: ReactNode
-  /** Desktop workspace sidebar width. Mobile keeps its responsive sheet width. */
-  readonly sidebarWidth?: CSSProperties["width"]
   /** Additional file viewers supplied by the host application. */
   readonly documentPreviewRenderers?: readonly AgentDocumentPreviewRenderer[]
+  /** Portal host for a modeless compact document canvas. */
+  readonly documentPreviewHost?: HTMLElement | null
+  /** Keep documents beside compact chat on desktop instead of opening a modal. */
+  readonly splitDocumentPreview?: boolean
+  readonly emptyStateHeader?: ReactNode
+  readonly emptyStateFooter?: ReactNode
+  readonly centerEmptyState?: boolean
+  readonly hideHeaderOnEmpty?: boolean
+  readonly emptyStateThreadHistoryLabel?: string
+  readonly conversationHeaderActions?: ReactNode
+  readonly composerPlaceholder?: string
 }
 
 /** Route-independent conversation view; routing and embedded panels only adapt its callbacks. */
@@ -42,16 +37,20 @@ export function AgentChat({
   threadId: threadIdInput = null,
   onNavigateHome,
   onNavigateThread,
-  onExit,
-  exitLabel = "Back to app",
   className,
   ambientContext = [],
   compact = false,
   welcomeContent,
-  sidebarHeader,
-  sidebarFooter,
-  sidebarWidth,
   documentPreviewRenderers,
+  documentPreviewHost,
+  splitDocumentPreview = false,
+  emptyStateHeader,
+  emptyStateFooter,
+  centerEmptyState,
+  hideHeaderOnEmpty,
+  emptyStateThreadHistoryLabel,
+  conversationHeaderActions,
+  composerPlaceholder,
 }: AgentChatProps) {
   const threadId = threadIdInput ?? null
   const conversation = useAgentConversation({
@@ -59,53 +58,21 @@ export function AgentChat({
     embedded: compact,
     onThreadCreated: onNavigateThread,
   })
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false)
-
   const selectThread = (nextThreadId: string) => {
-    setMobileSidebarOpen(false)
     onNavigateThread(nextThreadId)
   }
-  const startNewThread = () => {
-    setMobileSidebarOpen(false)
-    onNavigateHome()
-  }
-  const exitWorkspace = onExit
-    ? () => {
-        setMobileSidebarOpen(false)
-        onExit()
-      }
-    : undefined
   const pendingUser = conversation.pendingUser
   const presentation = conversation.presentation
-  const renderThreadSidebar = (sidebarClassName: string, width?: CSSProperties["width"]) => (
-    <ThreadSidebar
-      threads={conversation.threads}
-      currentThreadId={threadId}
-      loading={conversation.agentLoading}
-      threadsError={
-        conversation.agentError
-          ? "Agent unavailable."
-          : conversation.threadsError
-            ? "Could not load threads."
-            : null
-      }
-      totalThreads={conversation.threadTotal}
-      hasMoreThreads={conversation.threadsHasMore}
-      loadingMoreThreads={conversation.threadsLoadingMore}
-      loadMoreThreadsError={conversation.threadsLoadMoreError}
-      onStartNewThread={startNewThread}
-      onSelectThread={selectThread}
-      onLoadMoreThreads={() => void conversation.loadMoreThreads()}
-      onExit={exitWorkspace}
-      exitLabel={exitLabel}
-      header={sidebarHeader}
-      footer={sidebarFooter}
-      className={sidebarClassName}
-      width={width}
-    />
-  )
+  const runningThreadCount =
+    conversation.threads.filter((entry) => entry.activeRunId !== null).length +
+    (threadId &&
+    conversation.isRunning &&
+    !conversation.threads.some((entry) => entry.id === threadId && entry.activeRunId !== null)
+      ? 1
+      : 0)
 
   let content: ReactNode
+  let controlsInConversationHeader = false
   if (conversation.agentLoading) {
     content = <div className="h-full" aria-busy="true" />
   } else if (conversation.agentError) {
@@ -128,6 +95,7 @@ export function AgentChat({
       />
     )
   } else {
+    controlsInConversationHeader = true
     content = (
       <ConversationPanel
         agent={conversation.currentAgent}
@@ -169,10 +137,16 @@ export function AgentChat({
         continuing={conversation.composerPending}
         reconnecting={conversation.reconnecting}
         sendError={conversation.sendError}
+        currentThread={conversation.currentThread}
+        runningThreadCount={runningThreadCount}
+        threadsError={conversation.threadsError ? "Could not load threads." : null}
+        hasMoreThreads={conversation.threadsHasMore}
+        loadingMoreThreads={conversation.threadsLoadingMore}
+        loadMoreThreadsError={conversation.threadsLoadMoreError}
+        onLoadMoreThreads={() => void conversation.loadMoreThreads()}
         agentThreads={conversation.agentThreads}
         onSend={conversation.send}
-        onOpenWorkspaceNavigation={() => setMobileSidebarOpen(true)}
-        onNewChat={startNewThread}
+        onNewChat={onNavigateHome}
         onSelectThread={selectThread}
         composerDisabled={conversation.isRunning}
         composerPending={conversation.composerPending}
@@ -186,7 +160,7 @@ export function AgentChat({
         modelsError={conversation.modelsError}
         onSelectModel={conversation.selectModel}
         onSelectReasoning={conversation.selectReasoning}
-        composerPlaceholder="Ask anything"
+        composerPlaceholder={composerPlaceholder ?? "Ask anything"}
         composerDraft={conversation.draftReseed.text}
         composerDraftAttachments={conversation.draftReseed.attachments}
         composerDraftContext={conversation.draftReseed.context}
@@ -194,7 +168,12 @@ export function AgentChat({
         ambientContext={ambientContext}
         compact={compact}
         welcomeContent={welcomeContent}
-        workspace={!compact}
+        emptyStateHeader={emptyStateHeader}
+        emptyStateFooter={emptyStateFooter}
+        centerEmptyState={centerEmptyState}
+        hideHeaderOnEmpty={hideHeaderOnEmpty}
+        emptyStateThreadHistoryLabel={emptyStateThreadHistoryLabel}
+        headerActions={conversationHeaderActions}
       />
     )
   }
@@ -202,33 +181,21 @@ export function AgentChat({
   return (
     <DocumentPreviewRoot
       compact={compact}
+      split={splitDocumentPreview}
+      overlayHost={documentPreviewHost}
       scopeKey={threadId ?? "draft"}
       persistenceKey={threadId}
       documentPreviewRenderers={documentPreviewRenderers}
     >
       <div
         data-agent-panel={compact ? "" : undefined}
-        className={cn("relative flex h-full min-h-0 min-w-0", compact && "flex-col", className)}
+        className={cn("relative flex h-full min-h-0 flex-col", className)}
       >
-        {!compact ? (
-          <>
-            {renderThreadSidebar("hidden h-full w-64 shrink-0 md:flex xl:w-72", sidebarWidth)}
-            <Sheet open={mobileSidebarOpen} onOpenChange={setMobileSidebarOpen}>
-              <SheetContent
-                side="left"
-                showCloseButton={false}
-                className="w-72 max-w-[calc(100vw-3rem)] gap-0 p-0 md:hidden"
-              >
-                <SheetHeader className="sr-only">
-                  <SheetTitle>Agent navigation</SheetTitle>
-                  <SheetDescription>Switch threads or start a new one.</SheetDescription>
-                </SheetHeader>
-                {renderThreadSidebar("flex h-full w-full border-r-0")}
-              </SheetContent>
-            </Sheet>
-          </>
+        {!controlsInConversationHeader && conversationHeaderActions ? (
+          <div className="absolute top-1.5 right-2 z-20 flex items-center gap-1">
+            {conversationHeaderActions}
+          </div>
         ) : null}
-
         <main className="min-h-0 min-w-0 flex-1">{content}</main>
       </div>
     </DocumentPreviewRoot>

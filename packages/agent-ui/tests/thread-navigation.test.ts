@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { filterThreadNavigation } from "../src/threadNavigation"
+import { agentThreadTitle, filterThreadNavigation } from "../src/threadNavigation"
 import type { AgentThread } from "../src/types"
 
 function thread(overrides: Partial<AgentThread> & Pick<AgentThread, "id">): AgentThread {
@@ -39,5 +39,12 @@ describe("filterThreadNavigation", () => {
 
     expect(filterThreadNavigation(threads, "FORECAST").map((item) => item.id)).toEqual(["forecast"])
     expect(filterThreadNavigation(threads, "operations")).toEqual([])
+  })
+})
+
+describe("thread switcher presentation", () => {
+  test("uses readable fallback titles", () => {
+    expect(agentThreadTitle(null)).toBe("New thread")
+    expect(agentThreadTitle(thread({ id: "untitled", title: " " }))).toBe("Untitled chat")
   })
 })

@@ -1,8 +1,13 @@
-export type DocumentPreviewPresentation = "panel" | "dialog"
+export type DocumentPreviewPresentation = "panel" | "dialog" | "canvas"
 
 export function documentPreviewPresentation(
   compact: boolean,
-  isMobile: boolean
+  isMobile: boolean,
+  hasCanvas: boolean = false,
+  split: boolean = false
 ): DocumentPreviewPresentation {
-  return compact || isMobile ? "dialog" : "panel"
+  if (isMobile) return "dialog"
+  if (split) return "panel"
+  if (compact && !isMobile && hasCanvas) return "canvas"
+  return compact ? "dialog" : "panel"
 }

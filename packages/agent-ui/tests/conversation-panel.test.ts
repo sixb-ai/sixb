@@ -37,6 +37,8 @@ function renderPanel(props: Partial<ConversationPanelProps>): string {
           awaitingResponse: false,
           reconnecting: false,
           agentThreads: [],
+          currentThread: null,
+          runningThreadCount: 0,
           onSend: noop,
           onNewChat: noop,
           onSelectThread: noop,

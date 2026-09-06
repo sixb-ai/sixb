@@ -15,3 +15,7 @@ export function filterThreadNavigation(
     return title.toLowerCase().includes(query)
   })
 }
+
+export function agentThreadTitle(thread: AgentThread | null): string {
+  return thread?.title?.trim() || (thread ? "Untitled chat" : "New thread")
+}
