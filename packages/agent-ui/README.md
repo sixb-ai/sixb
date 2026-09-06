@@ -127,5 +127,4 @@ const workbookPreviewRenderer = {
 
 The first matching host renderer handles the document, including formats with a built-in viewer.
 Built-in viewers are the fallback. Keep `supports` synchronous and metadata-only. A renderer
-component may come from a private package; only the host application that registers it needs that
-dependency.
+implementation remains owned and explicitly registered by the host application.

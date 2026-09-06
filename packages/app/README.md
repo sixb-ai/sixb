@@ -89,9 +89,8 @@ export default function AgentsLayout({ children }: PropsWithChildren) {
 Explicit props passed to a project-owned `AgentsPage` override provider defaults. The custom width
 applies to the persistent desktop rail; the mobile sheet keeps its responsive width.
 
-The provider also accepts `documentPreviewRenderers`. This is the integration point for a private
-document package: the application imports and registers its renderer while `@sixb/app` and
-`@sixb/agent-ui` stay independent of that package.
+The provider also accepts `documentPreviewRenderers`. Applications can register document viewers
+without coupling `@sixb/app` or `@sixb/agent-ui` to their implementation.
 
 ```tsx
 <AgentWorkspaceProvider documentPreviewRenderers={[workbookPreviewRenderer]}>
