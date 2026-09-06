@@ -8,17 +8,18 @@ export {
   type AgentFileRef,
   AgentPanel,
   type AgentPanelProps,
+  AgentSurface,
+  type AgentSurfaceMode,
+  type AgentSurfaceProps,
+  handoffAgentSurfaceThread,
+  setAgentSurfaceMode,
   useAgentContext,
 } from "@sixb/agent-ui"
-
 export { agentContext } from "@sixb/core/agents/context"
 
 export type AgentsPageProps = Omit<AgentChatPageProps, "routeBase">
 
-type AgentWorkspaceConfiguration = Pick<
-  AgentsPageProps,
-  "sidebarHeader" | "sidebarFooter" | "sidebarWidth" | "documentPreviewRenderers"
->
+type AgentWorkspaceConfiguration = Pick<AgentsPageProps, "documentPreviewRenderers">
 
 export type AgentWorkspaceProviderProps = PropsWithChildren<AgentWorkspaceConfiguration>
 
@@ -26,15 +27,12 @@ const AgentWorkspaceContext = createContext<AgentWorkspaceConfiguration>({})
 
 /** Configure the framework-owned Agents routes, typically from `app/agents/layout.tsx`. */
 export function AgentWorkspaceProvider({
-  sidebarHeader,
-  sidebarFooter,
-  sidebarWidth,
   documentPreviewRenderers,
   children,
 }: AgentWorkspaceProviderProps) {
   return createElement(
     AgentWorkspaceContext.Provider,
-    { value: { sidebarHeader, sidebarFooter, sidebarWidth, documentPreviewRenderers } },
+    { value: { documentPreviewRenderers } },
     children
   )
 }

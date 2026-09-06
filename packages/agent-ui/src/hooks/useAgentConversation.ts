@@ -362,7 +362,7 @@ export function useAgentConversation({
     writeModelPreference(preference)
   }
 
-  const agentThreads = threads.filter((entry) => entry.id !== threadId).slice(0, 8)
+  const agentThreads = threads.filter((entry) => entry.id !== threadId)
   const pendingUserForThread =
     pendingUser &&
     pendingUser.threadId === threadId &&
@@ -389,6 +389,7 @@ export function useAgentConversation({
     loadMoreThreads: () => threadsQuery.fetchNextPage(),
     threadUnavailable,
     currentAgent,
+    currentThread: thread,
     agentThreads,
     messages,
     messagesLoading: threadId !== null && messagesQuery.isLoading,

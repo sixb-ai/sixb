@@ -12,6 +12,23 @@ export interface AgentPanelProps {
   readonly threadId?: string | null
   readonly defaultThreadId?: string | null
   readonly onThreadChange?: (threadId: string | null) => void
+  readonly onBackHome?: () => void
+  readonly onNewThread?: () => void
+  /** Optional modeless document canvas owned by an enclosing application shell. */
+  readonly documentPreviewHost?: HTMLElement | null
+  /** Keep documents beside the chat on desktop instead of opening a modal. */
+  readonly splitDocumentPreview?: boolean
+  /** Optional branded content above the centered composer in a new draft. */
+  readonly emptyStateHeader?: ReactNode
+  /** Optional shortcuts below the centered composer in a new draft. */
+  readonly emptyStateFooter?: ReactNode
+  readonly centerEmptyState?: boolean
+  readonly hideHeaderOnEmpty?: boolean
+  /** A labeled history action shown without restoring the full empty-state header. */
+  readonly emptyStateThreadHistoryLabel?: string
+  readonly conversationHeaderActions?: ReactNode
+  readonly composerPlaceholder?: string
+  readonly compact?: boolean
   readonly className?: string
   /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
   readonly welcomeContent?: ReactNode
@@ -25,6 +42,18 @@ export function AgentPanel({
   threadId: controlledThreadId,
   defaultThreadId = null,
   onThreadChange,
+  onBackHome,
+  onNewThread,
+  documentPreviewHost,
+  splitDocumentPreview,
+  emptyStateHeader,
+  emptyStateFooter,
+  centerEmptyState,
+  hideHeaderOnEmpty,
+  emptyStateThreadHistoryLabel,
+  conversationHeaderActions,
+  composerPlaceholder,
+  compact = true,
   className,
   welcomeContent,
   documentPreviewRenderers,
@@ -47,9 +76,22 @@ export function AgentPanel({
     <AgentChat
       threadId={threadId}
       ambientContext={ambientContext}
-      compact
+      compact={compact}
+      documentPreviewHost={documentPreviewHost}
+      splitDocumentPreview={splitDocumentPreview}
+      emptyStateHeader={emptyStateHeader}
+      emptyStateFooter={emptyStateFooter}
+      centerEmptyState={centerEmptyState}
+      hideHeaderOnEmpty={hideHeaderOnEmpty}
+      emptyStateThreadHistoryLabel={emptyStateThreadHistoryLabel}
+      conversationHeaderActions={conversationHeaderActions}
+      composerPlaceholder={composerPlaceholder}
       welcomeContent={welcomeContent}
-      onNavigateHome={() => changeThread(null)}
+      onNavigateHome={() => {
+        changeThread(null)
+        onNewThread?.()
+        onBackHome?.()
+      }}
       onNavigateThread={changeThread}
       documentPreviewRenderers={documentPreviewRenderers}
       className={cn("min-h-0 overflow-hidden bg-background", className)}

@@ -12,6 +12,12 @@ export {
   type AgentExecutionTraceVariant,
 } from "./AgentExecutionTrace"
 export { AgentPanel, type AgentPanelProps } from "./AgentPanel"
+export {
+  AgentSurface,
+  type AgentSurfaceMode,
+  type AgentSurfaceProps,
+} from "./AgentSurface"
+export { handoffAgentSurfaceThread, setAgentSurfaceMode } from "./agent-surface-state"
 export { ActivityStatusText } from "./components/ActivityStatus"
 export { Composer, type ComposerProps } from "./components/Composer"
 export { ContextChips } from "./components/ContextChips"
