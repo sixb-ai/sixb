@@ -22,7 +22,7 @@ export function AppShell({ sidebar, children, currentProjectName }: AppShellProp
             ) : null}
           </div>
         </header>
-        <main className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto">{children}</main>
+        <main className="min-h-0 flex-1 overflow-hidden">{children}</main>
       </SidebarInset>
     </SidebarProvider>
   )

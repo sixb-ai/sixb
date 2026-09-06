@@ -8,13 +8,13 @@ import {
   listAgentThreadMessagesQueryKey,
   listAgentThreadRunsOptions,
   listAgentThreadRunsQueryKey,
-  listAgentThreadsInfiniteOptions,
+  listAgentThreadsOptions,
   listAgentThreadsQueryKey,
   postAgentThreadMessageMutation,
   retryAgentRunMutation,
   useAgentActivityStream,
 } from "@sixb/client/hooks"
-import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import {
   EXTENDED_WAITING_STATUS_MS,
@@ -39,7 +39,7 @@ interface PendingUser {
   messageId: string | null
 }
 
-const THREAD_LIST_QUERY = {
+const DEFAULT_THREAD_LIST_QUERY = {
   limit: String(THREAD_PAGE_SIZE),
   order: "desc" as const,
 }
@@ -67,23 +67,18 @@ export function useAgentConversation({
     onActivity: refreshThreads,
     onSubscribed: refreshThreads,
   })
-  const threadsQuery = useInfiniteQuery({
-    ...listAgentThreadsInfiniteOptions({ query: THREAD_LIST_QUERY }),
-    initialPageParam: { query: THREAD_LIST_QUERY },
-    getNextPageParam: (lastPage, pages) => {
-      if (!lastPage.hasMore) return undefined
-
-      return {
-        query: {
-          ...THREAD_LIST_QUERY,
-          offset: String(pages.length * THREAD_PAGE_SIZE),
-        },
-      }
-    },
+  const threadListQuery = useMemo(
+    () => ({
+      ...DEFAULT_THREAD_LIST_QUERY,
+      ...(pinnedAgentId ? { agentId: pinnedAgentId } : {}),
+    }),
+    [pinnedAgentId]
+  )
+  const threadsQuery = useQuery({
+    ...listAgentThreadsOptions({ query: threadListQuery }),
     // The project activity feed is primary. Poll only as a focus-aware recovery path while the
     // socket is unavailable, rather than opening one connection per background thread.
-    refetchInterval:
-      !pinnedAgentId && (!activityStream.connected || activityStream.error) ? 10_000 : false,
+    refetchInterval: !activityStream.connected || activityStream.error ? 10_000 : false,
   })
   const agents = useMemo(
     () =>
@@ -92,11 +87,7 @@ export function useAgentConversation({
         : (agentsQuery.data ?? []),
     [agentsQuery.data, pinnedAgentId]
   )
-  const threads = useMemo(
-    () => threadsQuery.data?.pages.flatMap((page) => page.threads) ?? [],
-    [threadsQuery.data]
-  )
-  const threadTotal = threadsQuery.data?.pages[0]?.total ?? threads.length
+  const threads = useMemo(() => threadsQuery.data?.threads ?? [], [threadsQuery.data])
   const agentsById = useMemo(() => new Map(agents.map((agent) => [agent.id, agent])), [agents])
   const draftAgentId =
     threadId === null
@@ -253,7 +244,8 @@ export function useAgentConversation({
       const created = await createThread.mutateAsync({
         body: { agentId: draftAgentId, title: deriveTitle(text) },
       })
-      createdThreadId = created.thread.id
+      const newThreadId = created.thread.id
+      createdThreadId = newThreadId
       setPendingUser({ threadId: createdThreadId, text, attachments, context, messageId: null })
       const response = await postMessage.mutateAsync({
         path: { threadId: createdThreadId },
@@ -327,9 +319,7 @@ export function useAgentConversation({
     (threadId !== null ? agentsById.get(thread?.agentId ?? "") : undefined) ??
     (draftAgentId ? agentsById.get(draftAgentId) : undefined)
   const agentThreads = currentAgent
-    ? threads
-        .filter((entry) => entry.agentId === currentAgent.id && entry.id !== threadId)
-        .slice(0, 8)
+    ? threads.filter((entry) => entry.agentId === currentAgent.id && entry.id !== threadId)
     : []
   const pendingUserForThread =
     pendingUser &&
@@ -344,15 +334,11 @@ export function useAgentConversation({
     agentsLoading: agentsQuery.isLoading,
     agentsError: agentsQuery.isError,
     threads,
-    threadTotal,
     threadsError: threadsQuery.isError,
-    threadsHasMore: threadsQuery.hasNextPage,
-    threadsLoadingMore: threadsQuery.isFetchingNextPage,
-    threadsLoadMoreError: threadsQuery.isFetchNextPageError,
-    loadMoreThreads: () => threadsQuery.fetchNextPage(),
     draftAgentId,
     home: threadId === null && draftAgentId === null,
     currentAgent,
+    currentThread: thread,
     agentThreads,
     canGoHome: !pinnedAgentId && agents.length > 1,
     messages,

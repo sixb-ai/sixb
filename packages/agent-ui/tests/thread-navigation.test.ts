@@ -1,25 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { filterThreadNavigation } from "../src/threadNavigation"
-import type { Agent, AgentThread } from "../src/types"
-
-const agents = new Map<string, Agent>([
-  [
-    "analyst",
-    {
-      id: "analyst",
-      name: "Business Analyst",
-      groupIds: [],
-    },
-  ],
-  [
-    "operator",
-    {
-      id: "operator",
-      name: "Operations Agent",
-      groupIds: [],
-    },
-  ],
-])
+import { agentThreadTitle } from "../src/threadNavigation"
+import type { AgentThread } from "../src/types"
 
 function thread(overrides: Partial<AgentThread> & Pick<AgentThread, "id">): AgentThread {
   const { id, ...rest } = overrides
@@ -37,32 +18,9 @@ function thread(overrides: Partial<AgentThread> & Pick<AgentThread, "id">): Agen
   }
 }
 
-describe("filterThreadNavigation", () => {
-  test("preserves date order regardless of run activity", () => {
-    const visible = filterThreadNavigation(
-      [
-        thread({ id: "idle-new", title: "Newest idle" }),
-        thread({ id: "running", title: "Background work", activeRunId: "run-1" }),
-        thread({ id: "idle-old", title: "Older idle" }),
-      ],
-      agents,
-      ""
-    )
-
-    expect(visible.map((item) => item.id)).toEqual(["idle-new", "running", "idle-old"])
-  })
-
-  test("searches thread titles and agent names case-insensitively", () => {
-    const threads = [
-      thread({ id: "forecast", title: "Quarterly forecast" }),
-      thread({ id: "ops", agentId: "operator", title: "Deploy service" }),
-    ]
-
-    expect(filterThreadNavigation(threads, agents, "FORECAST").map((item) => item.id)).toEqual([
-      "forecast",
-    ])
-    expect(filterThreadNavigation(threads, agents, "operations").map((item) => item.id)).toEqual([
-      "ops",
-    ])
+describe("thread switcher presentation", () => {
+  test("uses readable fallback titles", () => {
+    expect(agentThreadTitle(null)).toBe("New thread")
+    expect(agentThreadTitle(thread({ id: "untitled", title: " " }))).toBe("Untitled chat")
   })
 })

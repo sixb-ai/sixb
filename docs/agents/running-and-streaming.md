@@ -149,10 +149,16 @@ original transcript.
 
 ## A ready-made chat UI
 
-You rarely need to wire this HTTP + WebSocket flow by hand. `@sixb/agent-ui` ships a turnkey React
-chat: `AgentChat` (a full thread with composer and live transcript), `AgentsHome` (an agent
-picker), and the `Composer`, `Transcript`, and streaming hooks as building blocks. For a
-React-Router app, `@sixb/agent-ui/react-router` exposes a drop-in `AgentChatPage`:
+You rarely need to wire this HTTP + WebSocket flow by hand. `@sixb/agent-ui` ships a turnkey
+`AgentPanel` and an adaptive `AgentSurface`. The latter keeps one conversation mounted while it
+moves between a collapsed launcher and an in-app dock. The resizable dock defaults open and keeps
+its open/closed state, width, and selected thread in per-tab session state, so refreshes restore it
+without changing the host URL. Documents open in a modeless tabbed canvas beside the interactive
+dock, whose header keeps collapse, thread history, and one-click compose controls available. Set
+`fullPage` from a host route to expand that same session without mounting a second chat. Connect
+`onRequestFullPage` and `onRequestDock` to navigation; leaving the route returns the conversation to
+its dock while preserving the selected thread.
+For a standalone routed conversation, `@sixb/agent-ui/react-router` exposes `AgentChatPage`:
 
 ```tsx
 import { AgentChatPage } from "@sixb/agent-ui/react-router"

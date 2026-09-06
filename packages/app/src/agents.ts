@@ -1,45 +1,23 @@
 import { AgentChatPage, type AgentChatPageProps } from "@sixb/agent-ui/react-router"
-import { createContext, createElement, type PropsWithChildren, useContext } from "react"
+import { createElement } from "react"
 
 export {
   AgentContextProvider,
   AgentPanel,
   type AgentPanelProps,
+  AgentSurface,
+  type AgentSurfaceMode,
+  type AgentSurfaceProps,
+  handoffAgentSurfaceThread,
+  setAgentSurfaceMode,
   useAgentContext,
 } from "@sixb/agent-ui"
-
 export { agentContext } from "@sixb/core/agents/context"
 
 export type AgentsPageProps = Omit<AgentChatPageProps, "routeBase">
 
-type AgentWorkspaceChrome = Pick<
-  AgentsPageProps,
-  "sidebarHeader" | "sidebarFooter" | "sidebarWidth"
->
-
-export type AgentWorkspaceProviderProps = PropsWithChildren<AgentWorkspaceChrome>
-
-const AgentWorkspaceContext = createContext<AgentWorkspaceChrome>({})
-
-/** Configure the framework-owned Agents routes, typically from `app/agents/layout.tsx`. */
-export function AgentWorkspaceProvider({
-  sidebarHeader,
-  sidebarFooter,
-  sidebarWidth,
-  children,
-}: AgentWorkspaceProviderProps) {
-  return createElement(
-    AgentWorkspaceContext.Provider,
-    { value: { sidebarHeader, sidebarFooter, sidebarWidth } },
-    children
-  )
-}
-
 export default function AgentsPage(props: AgentsPageProps) {
-  const workspaceChrome = useContext(AgentWorkspaceContext)
-
   return createElement(AgentChatPage, {
-    ...workspaceChrome,
     ...props,
     routeBase: "/agents",
   })

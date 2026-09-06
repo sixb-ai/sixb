@@ -224,6 +224,17 @@ describe("document preview presentation", () => {
     expect(documentPreviewPresentation(true, false)).toBe("dialog")
     expect(documentPreviewPresentation(true, true)).toBe("dialog")
   })
+
+  test("can keep a compact conversation and document side by side on desktop", () => {
+    expect(documentPreviewPresentation(true, false, false, true)).toBe("panel")
+    expect(documentPreviewPresentation(true, true, false, true)).toBe("dialog")
+  })
+
+  test("uses a modeless canvas for embedded desktop chat without changing mobile", () => {
+    expect(documentPreviewPresentation(true, false, true)).toBe("canvas")
+    expect(documentPreviewPresentation(true, true, true)).toBe("dialog")
+    expect(documentPreviewPresentation(false, false, true)).toBe("panel")
+  })
 })
 
 describe("document preview tabs", () => {

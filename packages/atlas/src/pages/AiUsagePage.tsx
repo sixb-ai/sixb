@@ -32,9 +32,10 @@ import {
   TriangleAlert,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { Link } from "react-router-dom"
+import { Link, useNavigate } from "react-router-dom"
 import { AiUsageBreakdown, AiUsageMetricCard, AiUsageTimeSeries } from "../components/AiUsageCharts"
 import { AiUsageDateRangeControl } from "../components/AiUsageDateRangeControl"
+import { selectAtlasAgentThread } from "../lib/agentSurface"
 import { utcAccountingRangeForCalendarDays } from "../lib/aiUsageDateRange"
 
 const PAGE_SIZE = 25
@@ -593,23 +594,29 @@ function ModelCallsTable({
 }
 
 function AccountingSource({ call }: { call: ModelCall }) {
-  if (call.attribution?.kind === "agent") {
+  const navigate = useNavigate()
+  const attribution = call.attribution
+  if (attribution?.kind === "agent") {
     return (
-      <Link
-        to={`/agents/${encodeURIComponent(call.attribution.threadId)}`}
-        className="block truncate font-medium text-foreground hover:underline"
+      <button
+        type="button"
+        onClick={() => {
+          selectAtlasAgentThread(attribution.threadId)
+          navigate("/agents")
+        }}
+        className="block max-w-full truncate font-medium text-foreground hover:underline"
       >
-        Agent · {call.attribution.agentId}
-      </Link>
+        Agent · {attribution.agentId}
+      </button>
     )
   }
-  if (call.attribution?.kind === "workflowAgent") {
+  if (attribution?.kind === "workflowAgent") {
     return (
       <Link
-        to={`/workflows/${encodeURIComponent(call.attribution.workflowId)}?run=${encodeURIComponent(call.attribution.workflowRunId)}`}
+        to={`/workflows/${encodeURIComponent(attribution.workflowId)}?run=${encodeURIComponent(attribution.workflowRunId)}`}
         className="block truncate font-medium text-foreground hover:underline"
       >
-        Workflow · {call.attribution.workflowId}
+        Workflow · {attribution.workflowId}
       </Link>
     )
   }

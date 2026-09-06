@@ -4,7 +4,6 @@ import { KNOWN_VIEWS } from "../components/layout/viewMode"
 
 const loadActionRunDetailPage = () => import("./ActionRunDetailPage")
 const loadActionsPage = () => import("./ActionsPage")
-const loadAgentsPage = () => import("./AgentsPage")
 const loadAiUsagePage = () => import("./AiUsagePage")
 const loadConnectorsPage = () => import("./ConnectorsPage")
 const loadDatasetsPage = () => import("./DatasetsPage")
@@ -28,9 +27,6 @@ export const ActionRunDetailPage = lazy(() =>
 )
 export const ActionsPage = lazy(() =>
   loadActionsPage().then((module) => ({ default: module.ActionsPage }))
-)
-export const AgentsPage = lazy(() =>
-  loadAgentsPage().then((module) => ({ default: module.AgentsPage }))
 )
 export const AiUsagePage = lazy(() =>
   loadAiUsagePage().then((module) => ({ default: module.AiUsagePage }))
@@ -106,7 +102,6 @@ type WorkspaceRouteLoader = () => Promise<unknown>
 
 const workspaceViewLoaders: Partial<Record<ViewMode, WorkspaceRouteLoader>> = {
   actions: loadActionsPage,
-  agents: loadAgentsPage,
   "ai-usage": loadAiUsagePage,
   connectors: loadConnectorsPage,
   datasets: loadDatasetsPage,

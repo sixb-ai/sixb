@@ -22,11 +22,20 @@ credentials.
 - Atlas: <http://localhost:3000>
 - API documentation: <http://localhost:3002/docs>
 
+The Northline home route is a branded assistant landing with a centered prompt and direct shortcuts
+to equipment, service cases, dispatch, and customers. Once it creates a durable thread, navigating
+into the operations app hands that thread to the persistent side dock in the same browser tab.
+
 ### Optional Operations Assistant
 
-The button at the bottom-right opens an embedded agent panel with the current route and detail
-object attached as context. The demo uses `deepseek/deepseek-v4-flash-vision-exp` through Vercel AI
-Gateway. Run it with your own AI Gateway key:
+The button at the bottom-right opens an agent dock with the current route and detail object attached
+as context. Files open in a closable tabbed canvas over Northline while the dock remains interactive.
+The dock header keeps collapse, thread history, and one-click compose immediately available. The
+history dialog shows the current thread, recent activity, and meaningful work status; it becomes a
+full-page search surface on small screens. The dock's
+open state, width, and current thread persist independently in each browser tab. The demo uses
+`deepseek/deepseek-v4-flash-vision-exp` through Vercel AI Gateway. Run it with your own AI Gateway
+key:
 
 ```bash
 AI_GATEWAY_API_KEY=your_key bun --filter @sixb/example-northline dev

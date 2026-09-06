@@ -26,7 +26,9 @@ import {
   useMemo,
   useReducer,
   useRef,
+  useState,
 } from "react"
+import { createPortal } from "react-dom"
 import { useDelimitedTextDocument, useHtmlDocument, useMarkdownDocument } from "./content"
 import { DelimitedTextParseError, type DelimitedTextPreview, parseDelimitedText } from "./delimited"
 import { buildSafeHtmlPreviewDocument, HTML_PREVIEW_SANDBOX } from "./html"
@@ -48,7 +50,9 @@ import {
 import type { AgentDocumentSource } from "./types"
 
 interface DocumentPreviewContextValue {
+  readonly activeDocumentId: string | null
   readonly openDocument: (document: AgentDocumentSource) => void
+  readonly closeDocument: (id: string) => void
 }
 
 interface DocumentViewerProps {
@@ -56,7 +60,7 @@ interface DocumentViewerProps {
   readonly state: DocumentPreviewState
   readonly onSelect: (id: string) => void
   readonly onClose: (id: string) => void
-  readonly onCloseAll: () => void
+  readonly onDismiss: () => void
 }
 
 interface PreviewPanelHandle {
@@ -72,11 +76,17 @@ const DocumentPreviewContext = createContext<DocumentPreviewContextValue | null>
 export function DocumentPreviewRoot({
   children,
   compact = false,
+  split = false,
+  overlayHost,
   scopeKey,
   persistenceKey,
 }: {
   readonly children: ReactNode
   readonly compact?: boolean
+  /** Use a resizable modeless document panel beside the conversation on desktop. */
+  readonly split?: boolean
+  /** Modeless portal host used by embedded app surfaces on desktop. */
+  readonly overlayHost?: HTMLElement | null
   /** Selects the isolated preview state for the current conversation or draft. */
   readonly scopeKey?: string | null
   /** Persist open tabs, the active document, and panel width for a durable thread. */
@@ -90,6 +100,9 @@ export function DocumentPreviewRoot({
     [persistenceKey]
   )
   const [state, dispatch] = useReducer(documentPreviewReducer, restoredState)
+  const [viewerVisible, setViewerVisible] = useState(
+    () => (!compact || split) && restoredState.activeId !== null
+  )
   const [revealVersion, revealDocument] = useReducer((version: number) => version + 1, 0)
   const openerRef = useRef<HTMLElement | null>(null)
   const revealScopeRef = useRef<string | null>(null)
@@ -97,13 +110,19 @@ export function DocumentPreviewRoot({
   const visibleState = stateScopeRef.current === previewScopeKey ? state : restoredState
   const activeDocument =
     visibleState.documents.find((document) => document.id === visibleState.activeId) ?? null
-  const presentation = documentPreviewPresentation(compact, useIsMobile())
+  const presentation = documentPreviewPresentation(
+    compact,
+    useIsMobile(),
+    Boolean(overlayHost),
+    split
+  )
 
   useLayoutEffect(() => {
     stateScopeRef.current = previewScopeKey
     dispatch({ type: "restore", state: restoredState })
+    setViewerVisible((!compact || split) && restoredState.activeId !== null)
     openerRef.current = null
-  }, [previewScopeKey, restoredState])
+  }, [compact, previewScopeKey, restoredState, split])
 
   useEffect(() => {
     if (!persistenceKey || stateScopeRef.current !== previewScopeKey || state !== visibleState)
@@ -135,27 +154,31 @@ export function DocumentPreviewRoot({
   }, [])
   const openDocument = useCallback(
     (source: AgentDocumentSource) => {
-      if (visibleState.documents.length === 0 && typeof window !== "undefined") {
+      if (typeof window !== "undefined") {
         const activeElement = window.document.activeElement
         openerRef.current = activeElement instanceof HTMLElement ? activeElement : null
       }
       dispatch({ type: "open", document: source })
+      setViewerVisible(true)
       revealScopeRef.current = previewScopeKey
       revealDocument()
     },
-    [previewScopeKey, visibleState.documents.length]
+    [previewScopeKey]
   )
   const closeDocument = useCallback(
     (id: string) => {
       const closesLastDocument =
         visibleState.documents.length === 1 && visibleState.documents[0]?.id === id
       dispatch({ type: "close", id })
-      if (closesLastDocument) restoreOpenerFocus()
+      if (closesLastDocument) {
+        setViewerVisible(false)
+        restoreOpenerFocus()
+      }
     },
     [restoreOpenerFocus, visibleState.documents]
   )
-  const closeAllDocuments = useCallback(() => {
-    dispatch({ type: "close-all" })
+  const dismissViewer = useCallback(() => {
+    setViewerVisible(false)
     restoreOpenerFocus()
   }, [restoreOpenerFocus])
   const selectDocument = useCallback((id: string) => dispatch({ type: "select", id }), [])
@@ -163,16 +186,23 @@ export function DocumentPreviewRoot({
     (width: number) => dispatch({ type: "set-panel-width", width }),
     []
   )
-  const context = useMemo<DocumentPreviewContextValue>(() => ({ openDocument }), [openDocument])
+  const context = useMemo<DocumentPreviewContextValue>(
+    () => ({
+      activeDocumentId: viewerVisible ? (activeDocument?.id ?? null) : null,
+      openDocument,
+      closeDocument,
+    }),
+    [activeDocument?.id, closeDocument, openDocument, viewerVisible]
+  )
   const viewerProps = useMemo<DocumentViewerProps>(
     () => ({
       idPrefix,
       state: visibleState,
       onSelect: selectDocument,
       onClose: closeDocument,
-      onCloseAll: closeAllDocuments,
+      onDismiss: dismissViewer,
     }),
-    [closeAllDocuments, closeDocument, idPrefix, selectDocument, visibleState]
+    [closeDocument, dismissViewer, idPrefix, selectDocument, visibleState]
   )
 
   return (
@@ -180,7 +210,9 @@ export function DocumentPreviewRoot({
       {presentation === "panel" ? (
         <DocumentPreviewWorkspace
           revealKey={
-            activeDocument ? `${previewScopeKey}:${activeDocument.id}:${revealVersion}` : null
+            viewerVisible && activeDocument
+              ? `${previewScopeKey}:${activeDocument.id}:${revealVersion}`
+              : null
           }
           scopeKey={previewScopeKey}
           panelWidth={visibleState.panelWidth}
@@ -194,7 +226,14 @@ export function DocumentPreviewRoot({
         children
       )}
       <DocumentPreviewDialog
-        open={presentation === "dialog" && activeDocument !== null}
+        open={presentation === "dialog" && viewerVisible && activeDocument !== null}
+        activeDocument={activeDocument}
+        viewerProps={viewerProps}
+        onDismiss={dismissViewer}
+      />
+      <DocumentPreviewCanvas
+        host={presentation === "canvas" ? overlayHost : null}
+        open={viewerVisible && activeDocument !== null}
         activeDocument={activeDocument}
         viewerProps={viewerProps}
       />
@@ -277,15 +316,6 @@ function DocumentPreviewWorkspace({
       onLayoutChanged={persistPanelWidth}
       className="min-h-0"
     >
-      <ResizablePanel id="agent-conversation" defaultSize="100%" minSize="30%">
-        <ConversationPane>{children}</ConversationPane>
-      </ResizablePanel>
-      <ResizableHandle
-        className={cn(
-          "bg-transparent transition-opacity before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border/70 before:transition-[width,background-color] before:duration-150 hover:before:w-0.5 hover:before:bg-foreground/25 focus-visible:before:w-0.5 focus-visible:before:bg-ring active:before:w-[3px] active:before:bg-foreground/35",
-          !open && "pointer-events-none invisible opacity-0"
-        )}
-      />
       <ResizablePanel
         id="agent-document-preview"
         defaultSize="0%"
@@ -308,6 +338,15 @@ function DocumentPreviewWorkspace({
           ) : null}
         </div>
       </ResizablePanel>
+      <ResizableHandle
+        className={cn(
+          "bg-transparent transition-opacity before:pointer-events-none before:absolute before:inset-y-0 before:left-1/2 before:w-px before:-translate-x-1/2 before:bg-border/70 before:transition-[width,background-color] before:duration-150 hover:before:w-0.5 hover:before:bg-foreground/25 focus-visible:before:w-0.5 focus-visible:before:bg-ring active:before:w-[3px] active:before:bg-foreground/35",
+          !open && "pointer-events-none invisible opacity-0"
+        )}
+      />
+      <ResizablePanel id="agent-conversation" defaultSize="100%" minSize="30%">
+        <ConversationPane>{children}</ConversationPane>
+      </ResizablePanel>
     </ResizablePanelGroup>
   )
 }
@@ -316,16 +355,18 @@ function DocumentPreviewDialog({
   open,
   activeDocument,
   viewerProps,
+  onDismiss,
 }: {
   open: boolean
   activeDocument: AgentDocumentSource | null
   viewerProps: DocumentViewerProps
+  onDismiss: () => void
 }) {
   return (
     <Dialog
       open={open}
       onOpenChange={(nextOpen) => {
-        if (!nextOpen) viewerProps.onCloseAll()
+        if (!nextOpen) onDismiss()
       }}
     >
       <DialogContent
@@ -346,12 +387,47 @@ function DocumentPreviewDialog({
   )
 }
 
+function DocumentPreviewCanvas({
+  host,
+  open,
+  activeDocument,
+  viewerProps,
+}: {
+  host: HTMLElement | null | undefined
+  open: boolean
+  activeDocument: AgentDocumentSource | null
+  viewerProps: DocumentViewerProps
+}) {
+  const titleId = `${viewerProps.idPrefix}-canvas-title`
+  const descriptionId = `${viewerProps.idPrefix}-canvas-description`
+  if (!host || !open || !activeDocument) return null
+
+  return createPortal(
+    <section
+      role="dialog"
+      aria-modal="false"
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
+      className="pointer-events-auto flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-2 motion-safe:duration-200"
+    >
+      <h2 id={titleId} className="sr-only">
+        Preview {documentName(activeDocument)}
+      </h2>
+      <p id={descriptionId} className="sr-only">
+        Preview and switch between documents while continuing to use the assistant.
+      </p>
+      <DocumentViewer {...viewerProps} showActionLabels focusActiveTab={false} />
+    </section>,
+    host
+  )
+}
+
 function DocumentViewer({
   idPrefix,
   state,
   onSelect,
   onClose,
-  onCloseAll,
+  onDismiss,
   showActionLabels,
   focusActiveTab,
 }: DocumentViewerProps & {
@@ -370,7 +446,7 @@ function DocumentViewer({
         activeId={state.activeId}
         onSelect={onSelect}
         onClose={onClose}
-        onCloseAll={onCloseAll}
+        onDismiss={onDismiss}
         showActionLabels={showActionLabels}
         focusActiveTab={focusActiveTab}
       />
@@ -395,7 +471,7 @@ function DocumentTabs({
   activeId,
   onSelect,
   onClose,
-  onCloseAll,
+  onDismiss,
   showActionLabels,
   focusActiveTab,
 }: {
@@ -405,7 +481,7 @@ function DocumentTabs({
   activeId: string | null
   onSelect: (id: string) => void
   onClose: (id: string) => void
-  onCloseAll: () => void
+  onDismiss: () => void
   showActionLabels: boolean
   focusActiveTab: boolean
 }) {
@@ -536,8 +612,9 @@ function DocumentTabs({
         <Button
           variant="ghost"
           size="icon-sm"
-          onClick={onCloseAll}
+          onClick={onDismiss}
           aria-label="Close document viewer"
+          title="Close document viewer"
         >
           <X />
         </Button>

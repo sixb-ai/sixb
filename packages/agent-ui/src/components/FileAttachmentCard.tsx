@@ -7,7 +7,7 @@ import {
   AttachmentTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { File as FileIcon, FileImage, FileText, Table2 } from "lucide-react"
+import { File as FileIcon, FileImage, FileText, Table2, X } from "lucide-react"
 import { useDocumentPreview } from "../document-preview/DocumentPreviewRoot"
 import { agentDocumentPreviewRenderer } from "../document-preview/rendering"
 import type { AgentDocumentSource } from "../document-preview/types"
@@ -25,6 +25,7 @@ export function FileAttachmentCard({
   const preview = useDocumentPreview()
   const fileName = fileRef.fileName?.trim() || "File"
   const previewable = agentDocumentPreviewRenderer(document?.kind ?? null) !== null
+  const selected = Boolean(document && previewable && preview?.activeDocumentId === document.id)
   const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
   const { Icon, className: iconClassName } = fileIconPresentation(fileRef.mediaType, fileName)
 
@@ -32,8 +33,11 @@ export function FileAttachmentCard({
     <Attachment
       size="sm"
       state="done"
+      data-selected={selected ? "" : undefined}
       className={cn(
         "w-[20rem] max-w-[80vw] rounded-2xl border-border/70 bg-background shadow-sm",
+        selected &&
+          "border-foreground/25 bg-muted/70 shadow-none ring-1 ring-foreground/10 ring-inset",
         className
       )}
     >
@@ -41,8 +45,11 @@ export function FileAttachmentCard({
         <AttachmentTrigger asChild>
           <button
             type="button"
-            onClick={() => preview.openDocument(document)}
-            aria-label={`Preview ${fileName}`}
+            onClick={() =>
+              selected ? preview.closeDocument(document.id) : preview.openDocument(document)
+            }
+            aria-label={selected ? `Close preview of ${fileName}` : `Preview ${fileName}`}
+            aria-pressed={selected}
           />
         </AttachmentTrigger>
       ) : document ? (
@@ -66,6 +73,14 @@ export function FileAttachmentCard({
           {mediaLabel} · {formatFileSize(fileRef.sizeBytes)}
         </AttachmentDescription>
       </AttachmentContent>
+      {selected ? (
+        <span
+          aria-hidden="true"
+          className="mr-2 flex size-6 shrink-0 items-center justify-center rounded-full bg-background/80 text-muted-foreground"
+        >
+          <X className="size-3.5" />
+        </span>
+      ) : null}
     </Attachment>
   )
 }

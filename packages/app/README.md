@@ -66,28 +66,10 @@ These routes are generated only when the project has at least one `app/` page, s
 
 The default agent UI is imported through `@sixb/app/agents`, so app projects do not need to import `@sixb/agent-ui` directly. A framework-owned `agent-ui.css` bundle is generated before the app stylesheet and imports normal `@sixb/ui` styles, which means app-level token overrides in `app/globals.css` still apply in the usual way.
 
-Add `app/agents/layout.tsx` with `AgentWorkspaceProvider` to make the built-in agent navigation
-match the custom app shell without making the provider global or replacing any routes:
-
-```tsx
-import { AgentWorkspaceProvider } from "@sixb/app/agents"
-import type { PropsWithChildren } from "react"
-
-export default function AgentsLayout({ children }: PropsWithChildren) {
-  return (
-    <AgentWorkspaceProvider
-      sidebarHeader={<AppSidebarHeader />}
-      sidebarFooter={<AppSidebarFooter />}
-      sidebarWidth="12.5rem"
-    >
-      {children}
-    </AgentWorkspaceProvider>
-  )
-}
-```
-
-Explicit props passed to a project-owned `AgentsPage` override provider defaults. The custom width
-applies to the persistent desktop rail; the mobile sheet keeps its responsive width.
+The routed page uses the same conversation header, history dialog, and new-thread flow as an
+embedded agent panel. Applications that want a conversation to move between a full page and an
+in-app dock should mount one `AgentSurface` in their shell and derive its `fullPage` presentation
+from the route instead of mounting a second chat.
 
 ### Embedded Agent Panel
 
@@ -134,6 +116,34 @@ const view = agentContext.appState("invoice-view", {
 Context is visible and removable before send, then stored on that user message. `@` adds authorized
 object references explicitly. V1 accepts 12 entries, 16 KB per app-state entry, and 64 KB of app
 state per message. Object references identify live data; they do not grant access.
+
+For an assistant that lives beside the app, keep one `AgentSurface` mounted next to the route
+outlet:
+
+```tsx
+import { AgentSurface } from "@sixb/app/agents"
+
+function AppAssistant() {
+  return (
+    <AgentSurface
+      agentId="invoice-assistant"
+      title="Invoice Assistant"
+      launcherLabel="Ask about invoices"
+    />
+  )
+}
+```
+
+`AgentSurface` opens as a resizable dock by default and owns its open/closed state, width, and
+selected thread. It persists those values in `sessionStorage`: refreshes restore them, while each
+browser tab can diverge without changing the app URL. Pass controlled `mode`, `threadId`, or
+`dockWidth` props when the host needs to own a value, or `persistenceKey={false}` to disable per-tab
+persistence. Documents open in a modeless tabbed canvas over the app area while the dock stays
+visible and interactive; hiding the canvas preserves its tabs. Mobile uses a full-screen dock and
+modal document overlay. Set `fullPage` from the host's conversation route when that same session
+should occupy the main application canvas. Connect `onRequestFullPage` and `onRequestDock` to host
+navigation; leaving that route returns the session to its dock without changing the selected
+thread.
 
 ### Styling and Tailwind
 

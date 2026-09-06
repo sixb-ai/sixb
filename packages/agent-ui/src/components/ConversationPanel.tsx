@@ -5,9 +5,6 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
   Spinner,
   Tooltip,
   TooltipContent,
@@ -15,9 +12,8 @@ import {
   TooltipTrigger,
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { Check, ChevronLeft, History, Info, PanelLeft, Pencil, Search } from "lucide-react"
-import { useMemo, useState } from "react"
-import { groupThreadsByDate } from "../format"
+import { Check, ChevronLeft, Info, Plus } from "lucide-react"
+import type { ReactNode } from "react"
 import type { LiveRunState } from "../liveRun"
 import type {
   Agent,
@@ -28,6 +24,7 @@ import type {
   AgentThread,
 } from "../types"
 import { AgentAvatar } from "./AgentAvatar"
+import { AgentThreadSwitcher } from "./AgentThreadSwitcher"
 import { Composer } from "./Composer"
 import { RunErrorMarker } from "./MessageView"
 import { Transcript } from "./Transcript"
@@ -60,8 +57,12 @@ export interface ConversationPanelProps {
   readonly sendError?: string | null
   /** All registered agents, for the header quick-switcher. */
   readonly agents: readonly Agent[]
+  /** The selected durable thread, or null while composing a new one. */
+  readonly currentThread: AgentThread | null
   /** Other chats with this agent, for the header history menu. */
   readonly agentThreads: readonly AgentThread[]
+  /** Runs active across the threads visible to this agent surface. */
+  readonly runningThreadCount: number
   /** Whether a home/landing exists to return to (i.e. more than one agent). */
   readonly canGoHome: boolean
   readonly onSend: (
@@ -70,7 +71,6 @@ export interface ConversationPanelProps {
     context: readonly AgentContextEntryInput[]
   ) => void
   readonly onBackHome: () => void
-  readonly onOpenWorkspaceNavigation?: () => void
   readonly onNewChat: () => void
   readonly onPickAgent: (agentId: string) => void
   readonly onSelectThread: (threadId: string) => void
@@ -89,8 +89,16 @@ export interface ConversationPanelProps {
   readonly composerDraftNonce?: number
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
-  /** Full-page mode uses the persistent thread rail for navigation and agent selection. */
-  readonly workspace?: boolean
+  /** Optional branded content above the composer while a draft has no messages. */
+  readonly emptyStateHeader?: ReactNode
+  /** Optional actions or shortcuts below the composer while a draft has no messages. */
+  readonly emptyStateFooter?: ReactNode
+  /** Center the empty draft as a landing experience instead of using the compact dock layout. */
+  readonly centerEmptyState?: boolean
+  /** Hide conversation controls until the first message is sent. */
+  readonly hideHeaderOnEmpty?: boolean
+  readonly emptyStateThreadHistoryLabel?: string
+  readonly headerActions?: ReactNode
 }
 
 export function ConversationPanel({
@@ -116,11 +124,12 @@ export function ConversationPanel({
   reconnecting,
   sendError,
   agents,
+  currentThread,
   agentThreads,
+  runningThreadCount,
   canGoHome,
   onSend,
   onBackHome,
-  onOpenWorkspaceNavigation,
   onNewChat,
   onPickAgent,
   onSelectThread,
@@ -136,7 +145,12 @@ export function ConversationPanel({
   composerDraftNonce,
   ambientContext = [],
   compact = false,
-  workspace = false,
+  emptyStateHeader,
+  emptyStateFooter,
+  centerEmptyState = false,
+  hideHeaderOnEmpty = false,
+  emptyStateThreadHistoryLabel,
+  headerActions,
 }: ConversationPanelProps) {
   const name = agent?.name ?? "Agent"
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
@@ -154,7 +168,7 @@ export function ConversationPanel({
         <RunErrorMarker message={sendError} />
       </div>
     ) : null
-  const renderComposer = (workspaceClassName?: string) => (
+  const renderComposer = (wideClassName?: string) => (
     <Composer
       onSend={onSend}
       disabled={composerDisabled}
@@ -163,7 +177,13 @@ export function ConversationPanel({
       stopping={composerStopping}
       onStop={onStop}
       placeholder={composerPlaceholder}
-      className={compact ? "px-4 pt-2 pb-4" : workspaceClassName}
+      className={
+        compact
+          ? centerEmptyState && showWelcome
+            ? "bg-transparent p-0"
+            : "px-4 pt-2 pb-4"
+          : wideClassName
+      }
       draft={composerDraft}
       draftAttachments={composerDraftAttachments}
       draftContext={composerDraftContext}
@@ -175,65 +195,84 @@ export function ConversationPanel({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <header
-        className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", workspace && "md:hidden")}
-      >
-        {workspace && onOpenWorkspaceNavigation ? (
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onOpenWorkspaceNavigation}
-            aria-label="Open agent navigation"
-            className="md:hidden"
-          >
-            <PanelLeft />
-          </Button>
-        ) : canGoHome ? (
-          <Button variant="ghost" size="icon-sm" onClick={onBackHome} aria-label="Back to chats">
-            <ChevronLeft />
-          </Button>
-        ) : null}
-
-        <AgentIdentity
-          agent={agent}
-          agents={agents}
-          onPickAgent={onPickAgent}
-          interactive={!workspace}
-        />
-
-        <div className="ml-auto flex items-center gap-1">
-          {!workspace && agentThreads.length > 0 ? (
-            <AgentThreadHistoryPopover
-              agentName={name}
-              threads={agentThreads}
-              onSelectThread={onSelectThread}
-            />
-          ) : null}
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={onNewChat}
-            aria-label="New chat with this agent"
-            className={cn(workspace && "md:hidden")}
-          >
-            <Pencil />
-          </Button>
+      {showWelcome && hideHeaderOnEmpty && emptyStateThreadHistoryLabel ? (
+        <div className="absolute top-3 right-3 z-10 flex items-center gap-1">
+          {headerActions}
+          <AgentThreadSwitcher
+            agentName={name}
+            currentThread={currentThread}
+            threads={agentThreads}
+            runningThreadCount={runningThreadCount}
+            onSelectThread={onSelectThread}
+            onNewThread={onNewChat}
+            triggerLabel={emptyStateThreadHistoryLabel}
+          />
         </div>
-      </header>
+      ) : null}
+      {showWelcome && hideHeaderOnEmpty ? null : (
+        <header
+          data-agent-conversation-header=""
+          className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", compact && "h-11 py-1.5")}
+        >
+          {canGoHome ? (
+            <Button variant="ghost" size="icon-sm" onClick={onBackHome} aria-label="Back to chats">
+              <ChevronLeft />
+            </Button>
+          ) : null}
+
+          {!compact ? (
+            <AgentIdentity agent={agent} agents={agents} onPickAgent={onPickAgent} interactive />
+          ) : null}
+
+          <div className="ml-auto flex items-center gap-1">
+            {headerActions}
+            <AgentThreadSwitcher
+              agentName={name}
+              currentThread={currentThread}
+              threads={agentThreads}
+              runningThreadCount={runningThreadCount}
+              onSelectThread={onSelectThread}
+              onNewThread={onNewChat}
+            />
+            <Button
+              variant="ghost"
+              size="icon-lg"
+              onClick={onNewChat}
+              aria-label="New thread"
+              className="[&_svg]:size-5"
+            >
+              <Plus />
+            </Button>
+          </div>
+        </header>
+      )}
 
       {showWelcome ? (
-        <div
-          className={cn(
-            "flex min-h-0 flex-1 flex-col",
-            !compact && "md:justify-center md:px-8 md:pb-[25vh] lg:pb-[27vh]"
-          )}
-        >
-          <Welcome agent={agent} compact={compact} />
-          <div className="shrink-0">
-            {renderSendError("md:px-0")}
-            {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
+        centerEmptyState ? (
+          <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-[8vh]">
+            <div className="w-full max-w-3xl">
+              {emptyStateHeader ? <div className="mb-7">{emptyStateHeader}</div> : null}
+              <div>
+                {renderSendError("px-0")}
+                {renderComposer()}
+              </div>
+              {emptyStateFooter ? <div className="mt-4">{emptyStateFooter}</div> : null}
+            </div>
           </div>
-        </div>
+        ) : (
+          <div
+            className={cn(
+              "flex min-h-0 flex-1 flex-col",
+              !compact && "md:justify-center md:px-8 md:pb-[25vh] lg:pb-[27vh]"
+            )}
+          >
+            <Welcome agent={agent} compact={compact} />
+            <div className="shrink-0">
+              {renderSendError("md:px-0")}
+              {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
+            </div>
+          </div>
+        )
       ) : (
         <>
           <div className="relative flex min-h-0 flex-1 flex-col">
@@ -276,95 +315,6 @@ export function ConversationPanel({
       )}
     </div>
   )
-}
-
-function AgentThreadHistoryPopover({
-  agentName,
-  threads,
-  onSelectThread,
-}: {
-  agentName: string
-  threads: readonly AgentThread[]
-  onSelectThread: (threadId: string) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [searchTerm, setSearchTerm] = useState("")
-  const normalizedSearchTerm = searchTerm.trim().toLowerCase()
-  const filteredThreads = useMemo(() => {
-    if (!normalizedSearchTerm) return threads
-    return threads.filter((thread) =>
-      (thread.title?.trim() || "Untitled chat").toLowerCase().includes(normalizedSearchTerm)
-    )
-  }, [threads, normalizedSearchTerm])
-  const groups = useMemo(() => groupThreadsByDate(filteredThreads), [filteredThreads])
-
-  function selectThread(threadId: string) {
-    setOpen(false)
-    setSearchTerm("")
-    onSelectThread(threadId)
-  }
-
-  return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon-sm" aria-label="Recent chats">
-          <History />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        className="w-[calc(100vw-1rem)] max-w-80 rounded-2xl p-2 shadow-xl"
-        sideOffset={8}
-      >
-        <div className="flex h-11 items-center gap-2 rounded-xl border border-input bg-background px-3 text-muted-foreground shadow-xs focus-within:ring-2 focus-within:ring-ring/40">
-          <Search className="size-4 shrink-0" aria-hidden="true" />
-          <input
-            value={searchTerm}
-            onChange={(event) => setSearchTerm(event.target.value)}
-            placeholder="Search threads..."
-            aria-label={`Search ${agentName} threads`}
-            className="h-full min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-          />
-        </div>
-
-        <div className="mt-2 border-t border-border/70 pt-2">
-          <div className="max-h-[min(24rem,calc(100vh-8rem))] overflow-y-auto pr-1">
-            {groups.length > 0 ? (
-              <div className="space-y-3">
-                {groups.map((group) => (
-                  <div key={group.label}>
-                    <p className="px-2 pb-1.5 text-xs font-semibold text-muted-foreground">
-                      {historyGroupLabel(group.label)}
-                    </p>
-                    <div className="space-y-0.5">
-                      {group.threads.map((thread) => (
-                        <button
-                          key={thread.id}
-                          type="button"
-                          onClick={() => selectThread(thread.id)}
-                          className="block w-full truncate rounded-lg px-2 py-2 text-left text-sm font-medium text-foreground transition-colors hover:bg-muted focus-visible:bg-muted focus-visible:outline-none"
-                        >
-                          {thread.title?.trim() || "Untitled chat"}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="px-2 py-8 text-center text-sm text-muted-foreground">
-                No matching threads.
-              </p>
-            )}
-          </div>
-        </div>
-      </PopoverContent>
-    </Popover>
-  )
-}
-
-function historyGroupLabel(label: string): string {
-  return label === "Previous 7 days" ? "This week" : label
 }
 
 function AgentIdentity({
