@@ -1,7 +1,6 @@
 import type { GetAiAccountingOverviewResponse, ListAiModelCallsResponse } from "@sixb/client"
 import { getAiAccountingOverviewOptions, listAiModelCallsOptions } from "@sixb/client/hooks"
 import {
-  Badge,
   Button,
   Card,
   CardContent,
@@ -495,39 +494,38 @@ function ModelCallsTable({
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle>Model calls</CardTitle>
-          <CardDescription>Immutable usage and valuation drilldown</CardDescription>
+          <CardDescription>Token usage and cost per call</CardDescription>
         </div>
         <AccountingSelect
-          label="All valuations"
+          label="All costs"
           value={valuationStatus}
           options={["rated", "unpriceable", "unvalued"]}
           formatOption={(value) => valuationStatusLabel(value as ValuationStatus)}
           onChange={(value) => onValuationStatusChange(value as ValuationStatus | undefined)}
         />
       </CardHeader>
-      <CardContent className="px-0">
+      <CardContent className="px-0 pb-0">
         <div className="[&_[data-slot=table-container]]:max-h-[70vh] [&_[data-slot=table-container]]:overflow-auto">
           <Table>
             <TableHeader className="sticky top-0 z-10">
               <TableRow>
                 <TableHead className="pl-6">Time</TableHead>
-                <TableHead>Provider / model</TableHead>
+                <TableHead>Model</TableHead>
                 <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">Catalog-estimated cost</TableHead>
-                <TableHead>Valuation</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
                 <TableHead className="pr-6">Source</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                     Loading model calls…
                   </TableCell>
                 </TableRow>
               ) : error ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-28 text-center">
+                  <TableCell colSpan={5} className="h-28 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <p className="text-sm text-muted-foreground">
                         Atlas could not load model-call accounting records.
@@ -540,7 +538,7 @@ function ModelCallsTable({
                 </TableRow>
               ) : calls.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                     No model calls match these filters.
                   </TableCell>
                 </TableRow>
@@ -558,30 +556,15 @@ function ModelCallsTable({
                           ? ""
                           : ` · ${formatReasoning(call.usage.requestedReasoning)}`}
                       </p>
-                      {call.usage.providerIds ? (
-                        <div className="break-all text-xs text-muted-foreground">
-                          {Object.entries(call.usage.providerIds)
-                            .map(([key, value]) => `${key}: ${value}`)
-                            .join(" · ")}
-                        </div>
-                      ) : null}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs tabular-nums">
                       {formatOptionalTokens(call.usage.usage.totalTokens)}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums">
+                    <TableCell
+                      className="whitespace-nowrap text-right font-mono text-xs tabular-nums"
+                      title={callCostDescription(call)}
+                    >
                       {call.cost?.status === "rated" ? formatMoney(call.cost.money) : "—"}
-                      {call.cost?.estimate && (
-                        <p className="mt-1 font-sans text-muted-foreground">
-                          Estimate:{" "}
-                          {call.cost.estimate.status === "rated"
-                            ? formatMoney(call.cost.estimate.money)
-                            : unpriceableReasonLabel(call.cost.estimate.reason)}
-                        </p>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <ValuationBadge call={call} />
                     </TableCell>
                     <TableCell className="max-w-48 pr-6 text-xs">
                       <AccountingSource call={call} />
@@ -592,22 +575,24 @@ function ModelCallsTable({
             </TableBody>
           </Table>
         </div>
-        <div className="flex items-center justify-between border-t px-6 py-3">
-          (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-3">
           <p className="text-xs text-muted-foreground">
             {total === 0
               ? "0 calls"
-              : `${(offset + 1).toLocaleString()}–${Math.min(offset + calls.length, total).toLocaleString()} of ${total.toLocaleString()}`}
+              : loading || error
+                ? `${total.toLocaleString()} calls`
+                : `${(offset + 1).toLocaleString()}–${Math.min(offset + calls.length, total).toLocaleString()} of ${total.toLocaleString()}`}
           </p>
-          ){" "}
           <div className="flex gap-2">
-            (
-            <Button variant="outline" size="sm" disabled={offset === 0} onClick={onPrevious}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading || offset === 0}
+              onClick={onPrevious}
+            >
               Previous
             </Button>
-            ){" "}
-            <Button variant="outline" size="sm" disabled={!hasMore} onClick={onNext}>
-              {" "}
+            <Button variant="outline" size="sm" disabled={loading || !hasMore} onClick={onNext}>
               Next
             </Button>
           </div>
@@ -643,26 +628,12 @@ function AccountingSource({ call }: { call: ModelCall }) {
   )
 }
 
-function ValuationBadge({ call }: { call: ModelCall }) {
-  const title =
-    call.cost?.status === "unpriceable"
-      ? unpriceableReasonLabel(call.cost.reason)
-      : call.cost?.status === "rated"
-        ? costSourceLabel(call.cost.source)
-        : valuationStatusLabel(call.valuationStatus)
-  return (
-    <Badge
-      variant="outline"
-      title={title}
-      className={
-        call.valuationStatus === "rated"
-          ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-      }
-    >
-      {title}
-    </Badge>
-  )
+function callCostDescription(call: ModelCall): string {
+  return call.cost?.status === "unpriceable"
+    ? unpriceableReasonLabel(call.cost.reason)
+    : call.cost?.status === "rated"
+      ? costSourceLabel(call.cost.source)
+      : valuationStatusLabel(call.valuationStatus)
 }
 
 function costSourceLabel(source: "estimate" | "provider" | "unknown"): string {
@@ -1043,11 +1014,11 @@ function formatCallTime(value: string): string {
 function valuationStatusLabel(status: ValuationStatus): string {
   switch (status) {
     case "rated":
-      return "Valued"
+      return "Cost available"
     case "unpriceable":
-      return "Unpriceable"
+      return "Cost unavailable"
     case "unvalued":
-      return "Unvalued"
+      return "Not yet valued"
   }
 }
 
