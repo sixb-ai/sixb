@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
-import { ModelProviderError } from "@sixb/core/models"
+import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
 import { anthropic, createAnthropic } from "../src"
 import { decodeServerSentEvents } from "../src/sse"
 import { anthropicOutputSchema } from "../src/structured-output"
@@ -1106,3 +1106,34 @@ function answerOutput(): ModelOutput<{ answer: string }> {
     },
   }
 }
+// Regression proof: remove classification around fetch or body reads; offline recovery is bypassed.
+test("distinguishes unavailable Anthropic catalogs from malformed metadata", async () => {
+  for (const fetch of [
+    async () => {
+      throw new TypeError("network unavailable")
+    },
+    async () => new Response("unavailable", { status: 503 }),
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError("catalog body disconnected"))
+          },
+        })
+      ),
+  ]) {
+    await expect(createAnthropic({ fetch }).catalog.list()).rejects.toBeInstanceOf(
+      ModelCatalogUnavailableError
+    )
+  }
+  try {
+    await createAnthropic({ fetch: async () => Response.json({ wrong: [] }) }).catalog.list()
+    throw new Error("Expected malformed catalog to fail")
+  } catch (error) {
+    expect(error).toBeInstanceOf(ModelProviderError)
+    expect(error).not.toBeInstanceOf(ModelCatalogUnavailableError)
+  }
+  await expect(
+    createAnthropic({ fetch: async () => new Response("not JSON") }).catalog.list()
+  ).rejects.toBeInstanceOf(SyntaxError)
+})

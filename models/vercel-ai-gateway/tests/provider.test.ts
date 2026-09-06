@@ -1,7 +1,10 @@
 import { describe, expect, test } from "bun:test"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
-import { ModelProviderError } from "@sixb/core/models"
+import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
+import { BASH_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/bash"
+import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
+import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
 import { createVercelGateway, vercelGateway } from "../src"
 import { decodeServerSentEvents } from "../src/sse"
 import { gatewayOutputSchema } from "../src/structured-output"
@@ -15,6 +18,60 @@ function request(overrides: Partial<LanguageModelRequest> = {}): LanguageModelRe
     ...overrides,
   }
 }
+
+// Regression proof: remove classification around fetch or body reads; offline recovery is bypassed.
+test("distinguishes unavailable Gateway catalogs from malformed metadata", async () => {
+  for (const fetch of [
+    async () => {
+      throw new TypeError("network unavailable")
+    },
+    async () => new Response("unavailable", { status: 503 }),
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            controller.error(new TypeError("catalog body disconnected"))
+          },
+        })
+      ),
+  ]) {
+    await expect(createVercelGateway({ fetch }).catalog.list()).rejects.toBeInstanceOf(
+      ModelCatalogUnavailableError
+    )
+  }
+  try {
+    await createVercelGateway({ fetch: async () => Response.json({ wrong: [] }) }).catalog.list()
+    throw new Error("Expected malformed catalog to fail")
+  } catch (error) {
+    expect(error).toBeInstanceOf(ModelProviderError)
+    expect(error).not.toBeInstanceOf(ModelCatalogUnavailableError)
+  }
+  await expect(
+    createVercelGateway({ fetch: async () => new Response("not JSON") }).catalog.list()
+  ).rejects.toBeInstanceOf(SyntaxError)
+})
+
+// Regression proof: force strict:true for every tool; read/bash have optional non-nullable inputs.
+test("preserves built-in tool schemas and only enables compatible strict decoding", async () => {
+  let body: unknown
+  const provider = createVercelGateway({
+    fetch: async (_url, init) => {
+      body = JSON.parse(String(init?.body))
+      return sseResponse([{ type: "response.completed", response: { status: "completed" } }])
+    },
+  })
+  const tools = [READ_TOOL_SPEC, BASH_TOOL_SPEC, VIEW_FILE_TOOL_SPEC]
+  const response = await provider("openai/test").stream(request({ tools }))
+  await collect(response.events)
+  expect(body).toMatchObject({
+    tools: tools.map((tool, index) => ({
+      type: "function",
+      name: tool.name,
+      parameters: tool.inputSchema,
+      strict: index === 2,
+    })),
+  })
+})
 
 function sseResponse(events: readonly unknown[], chunkSize = 17): Response {
   const encoded = new TextEncoder().encode(
@@ -392,7 +449,7 @@ describe("Vercel AI Gateway provider", () => {
       stream: true,
       reasoning: { effort: "medium" },
       providerOptions: { gateway: { order: ["one", "two"] } },
-      tools: [{ type: "web_search_preview" }, { type: "function", name: "echo", strict: true }],
+      tools: [{ type: "web_search_preview" }, { type: "function", name: "echo", strict: false }],
       text: { format: { type: "json_schema", name: "answer", strict: true } },
       input: [{ role: "user", content: [{ type: "input_text", text: "Hello" }] }],
     })

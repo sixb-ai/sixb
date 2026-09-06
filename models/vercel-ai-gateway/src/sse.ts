@@ -13,6 +13,7 @@ export async function* decodeServerSentEvents(
   const reader = body.getReader()
   const decoder = new TextDecoder()
   let buffer = ""
+  let ended = false
   const cancel = () => {
     void reader.cancel(signal.reason).catch(() => {})
   }
@@ -21,6 +22,7 @@ export async function* decodeServerSentEvents(
     for (;;) {
       if (signal.aborted) throw abortError(signal.reason)
       const { done, value } = await reader.read()
+      ended = done
       if (signal.aborted) throw abortError(signal.reason)
       buffer += decoder.decode(value, { stream: !done })
       if (buffer.length > MAX_SSE_EVENT_BYTES * 2) {
@@ -48,6 +50,8 @@ export async function* decodeServerSentEvents(
     }
   } finally {
     signal.removeEventListener("abort", cancel)
+    // Returning or throwing from the consumer must also close the unfinished HTTP body.
+    if (!ended) await reader.cancel().catch(() => {})
     reader.releaseLock()
   }
 }

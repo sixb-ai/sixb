@@ -73,6 +73,83 @@ const echo: ModelTool<{ value: string }> = {
 }
 
 describe("runModelLoop", () => {
+  // Regression proof: put output publication back inside the tool-error catch.
+  test("propagates output publication failure before another model call", async () => {
+    const failure = new Error("stream sink unavailable")
+    let calls = 0
+    const chunks: ModelUiChunk[] = []
+    const model = new MockLanguageModel({
+      stream: async () => {
+        calls += 1
+        return streamFromArray([
+          { type: "stream-start" },
+          { type: "tool-call", toolCallId: "echo-1", toolName: "echo", input: '{"value":"ok"}' },
+          finish("tool-calls"),
+        ])
+      },
+    })
+    await expect(
+      runModelLoop({
+        model,
+        messages: [],
+        tools: [echo],
+        maxSteps: 2,
+        signal: new AbortController().signal,
+        onEvent(chunk) {
+          chunks.push(chunk)
+          if (chunk.type === "tool-output-available") throw failure
+        },
+      })
+    ).rejects.toBe(failure)
+    expect(calls).toBe(1)
+    expect(chunks.some((chunk) => chunk.type === "tool-output-error")).toBe(false)
+  })
+
+  // Regression proof: publish success before toModelOutput; projection failure emits both outcomes.
+  test("keeps tool and projection failures recoverable with exactly one outcome", async () => {
+    for (const stage of ["execute", "projection"] as const) {
+      const chunks: ModelUiChunk[] = []
+      const failure = new Error(`${stage} failed`)
+      const result = await runModelLoop({
+        model: modelFromCalls([
+          [
+            { type: "stream-start" },
+            { type: "tool-call", toolCallId: "echo-1", toolName: "echo", input: '{"value":"ok"}' },
+            finish("tool-calls"),
+          ],
+          [{ type: "stream-start" }, finish()],
+        ]),
+        messages: [],
+        tools: [
+          {
+            ...echo,
+            async execute(input: { value: string }, context) {
+              if (stage === "execute") throw failure
+              return echo.execute(input, context)
+            },
+            toModelOutput() {
+              throw failure
+            },
+          },
+        ],
+        maxSteps: 2,
+        signal: new AbortController().signal,
+        onEvent(chunk) {
+          chunks.push(chunk)
+        },
+      })
+      expect(result.status).toBe("completed")
+      expect(chunks.filter((chunk) => chunk.type.startsWith("tool-output-"))).toEqual([
+        {
+          type: "tool-output-error",
+          toolCallId: "echo-1",
+          toolName: "echo",
+          errorText: failure.message,
+        },
+      ])
+    }
+  })
+
   test("retains native IDs independently of the internal fallback response identity", async () => {
     // Removal proof: omit providerIds from CompletedResponse or onModelCallEnd.
     const calls: ModelCallEndEvent[] = []

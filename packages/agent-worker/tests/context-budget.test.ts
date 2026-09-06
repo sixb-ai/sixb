@@ -1,6 +1,10 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import type { AgentContextConfig } from "@sixb/core"
-import { defineLanguageModel, type LanguageModelDefinition } from "@sixb/core/models"
+import {
+  defineLanguageModel,
+  type LanguageModelDefinition,
+  ModelCatalogUnavailableError,
+} from "@sixb/core/models"
 import { prepareAgentModels, resolveAgentContextBudget } from "../src/context-budget"
 import { WorkerTestModel } from "./worker-model-fixture"
 
@@ -96,7 +100,7 @@ describe("agent context budget resolution", () => {
     expect(outputs).toEqual([400, 100, 400])
     expect(model.definition.contextWindow).toBeUndefined()
   })
-  // Regression proof: remove maxInputTokens from the budget calculation or restore the fixed fallback.
+  // Regression proof: remove maxInputTokens from the budget calculation.
   test("respects separate context and input limits", () => {
     expect(
       resolveAgentContextBudget(agent({ contextWindow: 1_050_000, maxInputTokens: 922_000 }))
@@ -142,8 +146,15 @@ describe("agent context budget resolution", () => {
     ).toMatchObject({ inputBudgetTokens: 850_000, keepRecentTokens: 10_000, source: "model" })
   })
 
-  test("rejects unknown limits rather than assuming a window", () => {
-    expect(() => resolveAgentContextBudget(agent())).toThrow("loop.context.windowTokens")
+  // Regression proof: remove the fallback in resolveAgentContextBudget.
+  test("uses the 128k fallback only when no model limit or override is available", () => {
+    expect(resolveAgentContextBudget(agent())).toEqual({
+      windowTokens: 128_000,
+      inputBudgetTokens: 111_616,
+      reserveTokens: 16_384,
+      keepRecentTokens: 20_000,
+      source: "fallback",
+    })
   })
 
   test("rejects overrides that cannot produce a safe input budget", () => {
@@ -216,13 +227,42 @@ describe("agent context budget resolution", () => {
     expect(calls).toBe(0)
   })
 
-  test("fails clearly on unknown models, catalog failures, and mismatched identities", async () => {
+  // Regression proof: let remote resolution errors bypass offline recovery, or remove the warning.
+  test.each([
+    false,
+    true,
+  ])("starts and warns once per model (catalog unavailable: %s)", async (unavailable) => {
+    const warning = spyOn(console, "warn").mockImplementation(() => {})
     const base = agent()
-    await expect(prepareAgentModels([base])).rejects.toThrow("mock/model")
+    try {
+      const modes: (boolean | undefined)[] = []
+      const model = Object.assign(base.model, {
+        resolve: async (options?: { offline?: boolean }) => {
+          modes.push(options?.offline)
+          if (unavailable && !options?.offline) throw new ModelCatalogUnavailableError("offline")
+          return base.model
+        },
+      })
+      const prepared = await prepareAgentModels([
+        { ...base, model },
+        { ...base, id: "other", model },
+      ])
+      expect(prepared.budgets.get(base.id)?.source).toBe("fallback")
+      expect(prepared.models.get(base.id)?.definition.maxOutputTokens).toBe(16_384)
+      expect(modes).toEqual(unavailable ? [false, true] : [false])
+      expect(warning).toHaveBeenCalledTimes(1)
+      expect(warning.mock.calls[0]?.[0]).toContain("128,000")
+      expect(warning.mock.calls[0]?.[0]).toContain("mock/model")
+    } finally {
+      warning.mockRestore()
+    }
+  })
+
+  test("rejects invalid definitions, arbitrary resolver failures, and mismatched identities", async () => {
+    const base = agent()
     for (const resolve of [
-      async () => base.model,
       async () => {
-        throw new Error("catalog unavailable")
+        throw new Error("resolver bug")
       },
       async () =>
         new WorkerTestModel({
@@ -234,9 +274,10 @@ describe("agent context budget resolution", () => {
         }),
     ]) {
       const model = Object.assign(base.model, { resolve })
-      await expect(prepareAgentModels([{ ...base, model }])).rejects.toThrow(
-        "loop.context.windowTokens"
-      )
+      await expect(prepareAgentModels([{ ...base, model }])).rejects.toThrow()
     }
+    const invalid = agent()
+    Object.assign(invalid.model, { definition: { ...invalid.model.definition, contextWindow: -1 } })
+    await expect(prepareAgentModels([invalid])).rejects.toThrow()
   })
 })

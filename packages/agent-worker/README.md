@@ -31,7 +31,9 @@ await worker.start()
   complete turns when it crosses the model's input budget. Context limits come from the model
   definition, or its provider-backed `resolve()` at startup. Explicit
   `loop.context.windowTokens` overrides avoid remote lookup. If neither model metadata nor an
-  override supplies a limit, startup fails with an actionable error rather than guessing a window.
+  override supplies a limit, the worker uses a 128,000-token fallback and warns once per model.
+  Catalog transport/access failures use an offline snapshot; invalid definitions and model identity
+  mismatches still fail startup.
   Separate input limits are respected; input-only metadata is treated as a conservative window
   with the same output reserve, which also bounds generation. Omitting `loop.context` keeps compaction enabled.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
@@ -119,5 +121,5 @@ The terminal run state is stored on the run record:
 - `leaseMs`: queue visibility duration; defaults to 60 seconds. The worker renews it while the turn
   runs.
 - `turnTimeoutMs`: wall-clock turn budget; defaults to 10 minutes.
-- `defaultMaxSteps`: model step cap when an agent does not specify one; defaults to `25`.
+- `defaultMaxSteps`: model step cap when an agent does not specify one; defaults to `100`.
 - `idlePollMs`: queue polling interval while idle.

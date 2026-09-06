@@ -130,7 +130,7 @@ export interface AgentWorkerOptions {
   readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
-  /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 25. */
+  /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 100. */
   readonly defaultMaxSteps?: number
   /**
    * Wall-clock budget for a single turn, in ms. A turn that exceeds it is aborted and recorded

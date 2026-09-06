@@ -26,7 +26,7 @@ import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from 
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type { AgentTurnContext } from "./types"
 
-export const DEFAULT_MAX_STEPS = 25
+export const DEFAULT_MAX_STEPS = 100
 
 export interface RunAgentTurnInput {
   /** The worker's stable execution context (storage, tools, stream sink, and turn limits). */

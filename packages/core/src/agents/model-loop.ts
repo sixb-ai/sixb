@@ -34,11 +34,10 @@ import type { ModelOutput, ModelTool } from "../models/tools"
 
 const MAX_PROVIDER_DATA_BYTES = 256 * 1024
 
-export interface RunModelLoopInput<TOutput = string> {
+interface ModelLoopOptions {
   readonly model: LanguageModel
   readonly messages: readonly ModelMessage[]
   readonly tools?: readonly ModelTool[]
-  readonly output?: ModelOutput<TOutput>
   readonly reasoning?: ModelReasoning
   readonly maxOutputTokens?: number
   readonly caching?: "auto" | "off"
@@ -54,6 +53,13 @@ export interface RunModelLoopInput<TOutput = string> {
   readonly onStepEnd?: (step: ModelStep) => void | Promise<void>
   readonly generateCallId?: () => string
 }
+
+/** Non-text output requires a validator; unvalidated text can only inhabit types accepting string. */
+export type RunModelLoopInput<TOutput = string> = ModelLoopOptions &
+  (
+    | { readonly output: ModelOutput<TOutput> }
+    | (string extends TOutput ? { readonly output?: undefined } : never)
+  )
 
 export interface PrepareModelStepInput {
   readonly stepIndex: number
@@ -98,19 +104,18 @@ interface ParsedToolCall {
   readonly inputError?: Error
 }
 
-interface ToolExecution {
-  readonly result: ModelToolResultPart
-}
-
 /**
  * Run a provider-neutral, streaming model/tool loop.
  *
  * One step is exactly one provider call. Lifecycle and stream callbacks are awaited so the caller
  * controls backpressure and can fail closed before another billable call starts.
  */
-export async function runModelLoop<TOutput = string>(
+export function runModelLoop<TOutput = string>(
   input: RunModelLoopInput<TOutput>
-): Promise<ModelLoopResult<TOutput>> {
+): Promise<ModelLoopResult<TOutput>>
+export async function runModelLoop(
+  input: RunModelLoopInput<unknown>
+): Promise<ModelLoopResult<unknown>> {
   assertLoopInput(input)
   const tools = indexTools(input.tools ?? [])
   const toolSpecifications = [...tools.values()].map<ModelToolSpecification>((tool) => ({
@@ -247,10 +252,7 @@ export async function runModelLoop<TOutput = string>(
       steps.push(step)
       await input.onStepEnd?.(step)
       if (input.output) {
-        const text = response.content
-          .filter((part): part is ModelTextPart => part.type === "text")
-          .map((part) => part.text)
-          .join("")
+        const text = responseText(response)
         let raw: unknown
         try {
           raw = JSON.parse(text)
@@ -274,17 +276,13 @@ export async function runModelLoop<TOutput = string>(
           })
         }
       }
-      const output = response.content
-        .filter((part): part is ModelTextPart => part.type === "text")
-        .map((part) => part.text)
-        .join("") as TOutput
+      const output = responseText(response)
       return { status: "completed", output, steps, finishReason: response.finishReason }
     }
 
-    const executions = await Promise.all(
+    const toolResults = await Promise.all(
       localCalls.map((call) => executeToolCall(call, tools, callId, input.signal, input.onEvent))
     )
-    const toolResults = executions.map((execution) => execution.result)
     const step = modelStep(response, responseId, [...response.content, ...toolResults], cost)
     steps.push(step)
     await input.onStepEnd?.(step)
@@ -293,7 +291,7 @@ export async function runModelLoop<TOutput = string>(
       return {
         status: "aborted",
         steps,
-        partialContent: response.content,
+        partialContent: [],
       }
     }
 
@@ -310,10 +308,7 @@ export async function runModelLoop<TOutput = string>(
           structuredOutputErrorContext(input, response, responseId, cost, responseText(response))
         )
       }
-      const output = response.content
-        .filter((part): part is ModelTextPart => part.type === "text")
-        .map((part) => part.text)
-        .join("") as TOutput
+      const output = responseText(response)
       return { status: "completed", output, steps, finishReason: response.finishReason }
     }
   }
@@ -419,7 +414,7 @@ async function executeToolCall(
   callId: string,
   signal: AbortSignal,
   onEvent: RunModelLoopInput["onEvent"]
-): Promise<ToolExecution> {
+): Promise<ModelToolResultPart> {
   const { part } = call
   if (call.inputError) {
     const errorText = `Tool input is not valid JSON: ${call.inputError.message}`
@@ -430,7 +425,7 @@ async function executeToolCall(
       input: part.input,
       errorText,
     })
-    return { result: toolErrorResult(part, errorText) }
+    return toolErrorResult(part, errorText)
   }
 
   const tool = tools.get(part.toolName)
@@ -442,7 +437,7 @@ async function executeToolCall(
       toolName: part.toolName,
       errorText,
     })
-    return { result: toolErrorResult(part, errorText) }
+    return toolErrorResult(part, errorText)
   }
 
   let parsed: unknown
@@ -457,7 +452,7 @@ async function executeToolCall(
       input: part.input,
       errorText,
     })
-    return { result: toolErrorResult(part, errorText) }
+    return toolErrorResult(part, errorText)
   }
 
   await onEvent?.({
@@ -466,29 +461,16 @@ async function executeToolCall(
     toolName: part.toolName,
     input: part.input,
   })
+  let output: JsonValue
+  let modelOutput: ModelToolOutput
   try {
     const context = { signal, callId, toolCallId: part.toolCallId }
-    const output = await tool.execute(parsed, context)
+    output = await tool.execute(parsed, context)
     assertJsonValue(output, `tool '${part.toolName}' output`)
-    await onEvent?.({
-      type: "tool-output-available",
-      toolCallId: part.toolCallId,
-      toolName: part.toolName,
-      output,
-    })
-    const modelOutput = tool.toModelOutput
+    modelOutput = tool.toModelOutput
       ? await tool.toModelOutput(output, context)
       : modelToolOutput(output)
     validateModelToolOutput(modelOutput, part.toolName)
-    return {
-      result: {
-        type: "tool-result",
-        toolCallId: part.toolCallId,
-        toolName: part.toolName,
-        output: modelOutput,
-        ...(modelOutputMatchesOriginal(modelOutput, output) ? {} : { originalOutput: output }),
-      },
-    }
   } catch (error) {
     const errorText = tool.errorText(error)
     await onEvent?.({
@@ -497,7 +479,21 @@ async function executeToolCall(
       toolName: part.toolName,
       errorText,
     })
-    return { result: toolErrorResult(part, errorText) }
+    return toolErrorResult(part, errorText)
+  }
+  // Publication failures belong to the caller, not the tool's recoverable error channel.
+  await onEvent?.({
+    type: "tool-output-available",
+    toolCallId: part.toolCallId,
+    toolName: part.toolName,
+    output,
+  })
+  return {
+    type: "tool-result",
+    toolCallId: part.toolCallId,
+    toolName: part.toolName,
+    output: modelOutput,
+    ...(modelOutputMatchesOriginal(modelOutput, output) ? {} : { originalOutput: output }),
   }
 }
 

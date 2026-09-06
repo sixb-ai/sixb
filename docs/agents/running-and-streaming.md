@@ -3,6 +3,16 @@
 A defined agent does nothing until a conversation drives it. You drive it over HTTP — create a
 thread, post a message, follow the run — and stream the run live over a websocket.
 
+```text
+Create thread --> Post user message --> Run queued --> Run starts
+                                                       |
+                              Subscribe to run <-------+
+                                    |
+                              Stream live output
+                                    |
+                              Read saved reply
+```
+
 ## Threads, runs, and messages
 
 - A **thread** is one conversation with one agent, owned by a principal. It has a status (`active`
@@ -83,11 +93,17 @@ Attachments — and any files the agent produces — appear as `file` parts on t
 | `failed` | A model/tool error or the turn timeout ended it (`error` has details). |
 | `cancelled` | The run was aborted. |
 
-A finished run also carries `finishReason` (`stop`, `length`, `tool-calls`, `content-filter`,
-`timeout`, `error`, `other`, `unknown`), provider-neutral `usage`, and `modelId`. Usage is read from
-the durable model-call ledger and includes input/output totals plus any reported cache, text, and
-reasoning breakdowns. It summarizes every completed provider call, including calls completed before
-a later failure or cancellation.
+A finished run also carries:
+
+| Field | Contents |
+| --- | --- |
+| `finishReason` | `stop`, `length`, `tool-calls`, `content-filter`, `timeout`, `error`, `other`, or `unknown`. |
+| `modelId` | The run's model. |
+| `usage` | Input/output totals and reported cache, text, and reasoning breakdowns from the durable call ledger. |
+
+Usage includes calls completed before a later failure or cancellation. Costs are recorded per call;
+see [Usage and costs](./defining-agents.md#usage-and-costs) for provider charges, local estimates,
+and unknown costs.
 
 When the wall-clock budget is reached, the run ends as `failed` with `finishReason: "timeout"` and
 the configured duration in `error.details.timeoutMs`. Any coherent text and completed tool work that

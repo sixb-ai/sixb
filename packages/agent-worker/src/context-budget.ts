@@ -3,14 +3,17 @@ import {
   defineLanguageModel,
   type LanguageModel,
   type LanguageModelDefinition,
+  ModelCatalogUnavailableError,
 } from "@sixb/core/models"
+
+const DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS = 128_000
 
 export interface AgentContextBudget {
   readonly windowTokens: number
   readonly inputBudgetTokens: number
   readonly reserveTokens: number
   readonly keepRecentTokens: number
-  readonly source: "config" | "model"
+  readonly source: "config" | "model" | "fallback"
 }
 
 type ContextAgent = Pick<AgentDefinition, "id" | "model" | "loop" | "reasoning">
@@ -23,35 +26,43 @@ export async function prepareAgentModels(agents: readonly ContextAgent[]): Promi
   const models = new Map<string, LanguageModel>()
   const definitions = new Map<LanguageModel, Promise<LanguageModel>>()
   const localDefinitions = new Map<LanguageModel, Promise<LanguageModel>>()
+  const warnedModels = new Set<string>()
+  const snapshot = (model: LanguageModel, offline: boolean): Promise<LanguageModel> => {
+    const snapshots = offline ? localDefinitions : definitions
+    let pending = snapshots.get(model)
+    if (!pending) {
+      pending = Promise.resolve()
+        .then(() => model.resolve?.({ offline }) ?? model)
+        .catch((cause: unknown) => {
+          if (offline || !(cause instanceof ModelCatalogUnavailableError)) throw cause
+          return snapshot(model, true)
+        })
+      snapshots.set(model, pending)
+    }
+    return pending
+  }
   const entries = await Promise.all(
     agents.map(async (agent) => {
       const offline =
         agent.loop?.context?.windowTokens !== undefined || hasContextLimit(agent.model.definition)
-      const snapshots = offline ? localDefinitions : definitions
-      let model: LanguageModel
-      try {
-        let pending = snapshots.get(agent.model)
-        if (!pending) {
-          pending = agent.model.resolve?.({ offline }) ?? Promise.resolve(agent.model)
-          snapshots.set(agent.model, pending)
-        }
-        model = await pending
-        const definition = defineLanguageModel(model.definition)
-        if (
-          definition.providerId !== agent.model.providerId ||
-          definition.modelId !== agent.model.modelId
-        ) {
-          throw new TypeError("Provider metadata does not match the selected model.")
-        }
-        if (model.providerId !== agent.model.providerId || model.modelId !== agent.model.modelId) {
-          throw new TypeError("Resolved model does not match the requested model.")
-        }
-      } catch (cause) {
-        const error = missingContextLimit(agent)
-        error.cause = cause
-        throw error
+      const model = await snapshot(agent.model, offline)
+      const definition = defineLanguageModel(model.definition)
+      if (
+        definition.providerId !== agent.model.providerId ||
+        definition.modelId !== agent.model.modelId ||
+        model.providerId !== agent.model.providerId ||
+        model.modelId !== agent.model.modelId
+      ) {
+        throw invalidBudget(agent.id, "resolved model identity does not match the selected model.")
       }
-      const budget = resolveAgentContextBudget(agent, model.definition)
+      const budget = resolveAgentContextBudget(agent, definition)
+      const modelRef = `${model.providerId}/${model.modelId}`
+      if (budget.source === "fallback" && !warnedModels.has(modelRef)) {
+        warnedModels.add(modelRef)
+        console.warn(
+          `[SixbAgentWorker] No context limit is available for '${modelRef}'; using the ${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token fallback. Configure loop.context.windowTokens to override it.`
+        )
+      }
       const maxOutputTokens = Math.min(
         budget.reserveTokens,
         model.definition.maxOutputTokens ?? budget.reserveTokens
@@ -86,13 +97,6 @@ function hasContextLimit(definition: LanguageModelDefinition): boolean {
   return definition.contextWindow !== undefined || definition.maxInputTokens !== undefined
 }
 
-function missingContextLimit(agent: ContextAgent): AgentDefinitionError {
-  return invalidBudget(
-    agent.id,
-    `limit could not be resolved for '${agent.model.providerId}/${agent.model.modelId}'. Configure loop.context.windowTokens or supply a model definition with contextWindow or maxInputTokens.`
-  )
-}
-
 /** Input-only limits are a conservative window: leave the same reserve without inventing a total. */
 export function resolveAgentContextBudget(
   agent: ContextAgent,
@@ -100,8 +104,8 @@ export function resolveAgentContextBudget(
 ): AgentContextBudget {
   const config = agent.loop?.context
   const configuredWindow = config?.windowTokens
-  const windowTokens = configuredWindow ?? definition.contextWindow ?? definition.maxInputTokens
-  if (windowTokens === undefined) throw missingContextLimit(agent)
+  const modelWindow = definition.contextWindow ?? definition.maxInputTokens
+  const windowTokens = configuredWindow ?? modelWindow ?? DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS
   const reserveTokens =
     config?.reserveTokens ??
     Math.max(
@@ -135,7 +139,8 @@ export function resolveAgentContextBudget(
     inputBudgetTokens,
     reserveTokens,
     keepRecentTokens,
-    source: configuredWindow !== undefined ? "config" : "model",
+    source:
+      configuredWindow !== undefined ? "config" : modelWindow === undefined ? "fallback" : "model",
   })
 }
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -1699,8 +1699,8 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("rejects startup before accepting work when the selected model has no context limit", async () => {
-    // Regression proof: restore a fixed context fallback or skip budget resolution in start().
+  test("starts with a warning when the selected model has no context limit", async () => {
+    // Regression proof: reject an undefined model window in resolveAgentContextBudget.
     const base = toolThenAnswerModel()
     const { contextWindow: _contextWindow, ...definition } = base.definition
     let resolutions = 0
@@ -1717,10 +1717,14 @@ describe("AgentWorker", () => {
       },
     })
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const warning = spyOn(console, "warn").mockImplementation(() => {})
     try {
-      await expect(worker.start()).rejects.toThrow("loop.context.windowTokens")
+      await worker.start()
       expect(resolutions).toBe(1)
+      expect(warning).toHaveBeenCalledTimes(1)
+      expect(warning.mock.calls[0]?.[0]).toContain("128,000-token fallback")
     } finally {
+      warning.mockRestore()
       await worker.stop()
     }
   })

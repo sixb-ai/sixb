@@ -7,6 +7,7 @@ import {
   noopLogger,
   stringEnum,
 } from "@sixb/core"
+import { runModelLoop } from "@sixb/core/internal/agents"
 import type { ModelStep, ModelUsage } from "@sixb/core/models"
 import {
   agentToolErrorText,
@@ -15,6 +16,7 @@ import {
   aiModelCallUsageFromModel,
   modelToolsFromAgentDefinitions,
 } from "../src/model-adapters"
+import { WorkerTestModel } from "./worker-model-fixture"
 
 const connector = (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"]
 const toolRuntime = {
@@ -31,6 +33,51 @@ const toolRuntime = {
 }
 
 describe("owned model adapters", () => {
+  // Regression proof: return response.content as partialContent after pushing the completed step.
+  test("retains a tool outcome exactly once when execution races with cancellation", async () => {
+    const abort = new AbortController()
+    const model = new WorkerTestModel()
+    model.stream = async () => ({
+      events: (async function* () {
+        yield { type: "stream-start" } as const
+        yield { type: "tool-call", toolCallId: "tool-1", toolName: "save", input: "{}" } as const
+        yield { type: "finish", finishReason: "tool-calls", usage: {} } as const
+      })(),
+    })
+    const result = await runModelLoop({
+      model,
+      messages: [],
+      tools: [
+        {
+          name: "save",
+          description: "Save",
+          inputSchema: { type: "object" },
+          parseInput: (value) => value,
+          async execute() {
+            abort.abort()
+            return "saved"
+          },
+          errorText: () => "failed",
+        },
+      ],
+      maxSteps: 2,
+      signal: abort.signal,
+    })
+    expect(result.status).toBe("aborted")
+    if (result.status !== "aborted") throw new Error("Expected cancellation")
+    expect(agentTraceFromPartialModelLoop(result.steps, result.partialContent)).toEqual([
+      { type: "step-start" },
+      {
+        type: "tool-call",
+        toolCallId: "tool-1",
+        toolName: "save",
+        input: {},
+        state: "output-available",
+        output: "saved",
+      },
+    ])
+  })
+
   test("converts Sixb tool definitions and supplies normalized run-scoped input", async () => {
     const connectorDefinition = defineConnector("knowledge", {
       type: "knowledge",

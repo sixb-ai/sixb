@@ -11,6 +11,7 @@ import {
   type LanguageModelStreamEvent,
   MODEL_REASONING_EFFORTS,
   type ModelCapabilities,
+  ModelCatalogUnavailableError,
   type ModelCostEstimator,
   type ModelFinishReason,
   type ModelMessage,
@@ -189,9 +190,24 @@ class RemoteAnthropicCatalog implements AnthropicCatalog {
       const response = await (this.transport.fetch ?? fetch)(url, {
         headers: anthropicHeaders(this.transport, "application/json"),
         signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
+      }).catch((cause: unknown) => {
+        throw new ModelCatalogUnavailableError("[SixbAnthropic] Model catalog unavailable.", {
+          cause,
+        })
       })
-      if (!response.ok) throw await providerHttpError(response, PROVIDER_ID, "catalog")
-      const body: unknown = await response.json()
+      if (!response.ok) {
+        throw new ModelCatalogUnavailableError("[SixbAnthropic] Model catalog unavailable.", {
+          cause: await providerHttpError(response, PROVIDER_ID, "catalog").catch(
+            (cause: unknown) => cause
+          ),
+        })
+      }
+      const raw = await response.text().catch((cause: unknown) => {
+        throw new ModelCatalogUnavailableError("[SixbAnthropic] Model catalog unavailable.", {
+          cause,
+        })
+      })
+      const body: unknown = JSON.parse(raw)
       assertJsonObject(body, "Anthropic model catalog")
       if (!Array.isArray(body.data)) {
         throw new ModelProviderError(

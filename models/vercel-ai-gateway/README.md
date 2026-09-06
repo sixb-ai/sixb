@@ -39,6 +39,9 @@ output limits, generation, and compaction. Explicit `loop.context.windowTokens` 
 limits use `resolve({ offline: true })` to avoid network lookup. A prepared binding never reloads
 capabilities; restarting the worker resolves again. Gateway `context_window` maps to `contextWindow`;
 configured definitions can additionally supply a separate `maxInputTokens` limit.
+Catalog transport/access failures throw `ModelCatalogUnavailableError` from `@sixb/core/models`,
+with the original error retained as `cause`. Workers recover using an offline snapshot and, if no
+context limit is available, a 128,000-token fallback with a warning. Malformed metadata still fails.
 A structured-output call consults it when support is otherwise unknown, then uses the native strict
 response format or transparently falls back to one required, nonparallel JSON function. A catalog
 failure safely selects the fallback. Inline Gateway cost is stored as the call's cost, with
@@ -68,3 +71,7 @@ Retryable `429` and `5xx` responses are retried only before a stream begins. `ma
 `maxRetryDelayMs`, and `catalogTtlMs` are configurable. Provider request IDs and retry hints are
 retained on `ModelProviderError`; the routed provider/model and gateway-reported total are retained
 as distinct accounting facts.
+
+Local tool schemas are sent unchanged. Strict decoding is enabled only when they satisfy the
+adapter's strict-schema check; tools with optional fields use explicit `strict: false` so their
+omission/default semantics are preserved. Sixb validates tool inputs before executing them.

@@ -1,8 +1,7 @@
 # Defining agents
 
-`defineAgent(id, config)` creates an agent. The `id` is its stable identifier (used in routes and
-threads) and must be unique across all agents. The call validates the config and returns an
-`AgentDefinition` you export from `agents/`.
+Define an agent and export it from `agents/`. Sixb discovers it automatically.
+The `id` is its stable identifier in routes and threads; it must be unique.
 
 ```ts
 // agents/invoice-assistant.ts
@@ -63,9 +62,14 @@ model: vercelGateway("openai/gpt-5.5", {
 })
 ```
 
-`maxOutputTokens` is optional for known models. Providers supply the default output ceiling;
-set it when you want a lower cap. It limits output rather than targeting a response length.
-Per-call limits, including compaction summary limits, can lower that ceiling.
+To lower a model's output ceiling:
+
+```ts
+model: anthropic("claude-sonnet-4-5", { maxOutputTokens: 8_192 })
+```
+
+`maxOutputTokens` is optional for known models. It caps output; it does not target a response
+length. The [context reserve](#loop-and-context-budget) and per-call limits can lower it further.
 
 ## Shared provider configuration
 
@@ -115,16 +119,18 @@ export const sixb = createSixb({
 })
 ```
 
-The first entry is the project default. Entries are `LanguageModel`s, identified by
-`providerId/modelId`. Duplicate entries fail startup. You can reuse an imported model:
+You can also reuse an imported model:
 
 ```ts
 models: { language: [supportModel] }
 ```
 
-An entry is the binding, not only the vendor model: the same vendor model reached through Vercel AI
-Gateway and through a direct provider are distinct entries because they route and bill differently.
-An agent's `model` has to match one of the configured entries.
+- The **first entry** is the project default.
+- Entries are identified by **`providerId/modelId`**; duplicates fail startup.
+- Direct and Gateway access to the same vendor model are separate entries: they route and bill
+  differently.
+
+## Reasoning
 
 Reasoning is one normalized preference, not a boolean. Named efforts are the portable default:
 
@@ -139,17 +145,20 @@ model: anthropic("claude-sonnet-4", { maxOutputTokens: 16_384 })
 reasoning: { budgetTokens: 8_192 }
 ```
 
-`model.definition.capabilities.reasoning` describes the controls known for that concrete provider
-offering: whether reasoning can be disabled, its supported named efforts, and any exact token-budget
-bounds. `undefined` means the synchronous model definition does not know; `false` means the catalog
-knows reasoning is unsupported. Providers reject a known unsupported preference before making the
-network request rather than silently approximating it.
+Providers reject known unsupported preferences before making a network request.
+
+| `model.definition.capabilities.reasoning` | Meaning |
+| --- | --- |
+| An object | Supported efforts, disable support, and exact token-budget bounds. |
+| `undefined` | The current definition does not know. |
+| `false` | Reasoning is known to be unsupported. |
 
 ## Instructions vs Agent Skills
 
-Keep `instructions` short and always relevant: the agent role, hard behavioral rules, and domain
-boundaries. Put larger company standards, examples, templates, and repeatable procedures in Agent
-Skills instead:
+| Put in `instructions` | Put in Agent Skills |
+| --- | --- |
+| Role, behavioral rules, domain boundaries | Company standards, examples, templates, procedures |
+| Included in every request | Full content read when relevant |
 
 ```txt
 skills/acme-writing-style/SKILL.md
@@ -178,16 +187,22 @@ Omitting it gives the agent no selected worker tools. Sixb still supplies sandbo
 
 ## Loop and context budget
 
-An agent runs a tool-calling loop: the model produces output, may call tools, sees the results, and
-continues until it stops or hits `loop.stopWhen.maxSteps` (default 25).
+Each loop step makes one model call. The default limit is **100 steps**.
+
+```text
+Call model --> Final answer --> Done
+    |
+    +--> Tool calls --> Execute tools --> Results --> Next step
+```
 
 ```ts
 loop: { stopWhen: { maxSteps: 12 } }
 ```
 
-For Gateway models, Sixb enables the Gateway's automatic prompt caching by default and records
-cache reads and writes in AI usage. Provider details stay out of project prompts and
-`providerOptions`. Opt out only when the workload requires it:
+### Prompt caching
+
+Gateway automatic prompt caching is enabled by default. Cache reads and writes appear in AI usage.
+To opt out:
 
 ```ts
 loop: { caching: "off" }
@@ -195,26 +210,37 @@ loop: { caching: "off" }
 
 Direct-provider models retain their provider-specific caching behavior.
 
-Sixb automatically checkpoints long conversations before their next model request exceeds the
-selected model's context window. At startup, the worker uses locally available model limits or
-calls the model's `resolve()` to fetch metadata through its provider's cached catalog and retain
-an executable snapshot. Execution, media/reasoning capabilities, per-call output limits, and
-compaction then use that same snapshot. An explicit `loop.context.windowTokens` avoids that lookup
-and allows offline startup. Known local limits also use an offline snapshot. Refreshing a provider
-catalog does not change a running worker's prepared models; restart the worker to resolve again.
-Custom models may implement `resolve({ offline })`; it must preserve provider and model identity,
-pin operational metadata, and avoid network lookup when `offline` is true.
-If no limit is available, startup fails with instructions to configure a window or supply a model
-definition; Sixb does not assume a default context size.
+### Context preparation
 
-Model definitions distinguish `contextWindow` (shared input/output capacity) from `maxInputTokens`.
-When both are known, the input budget respects both limits. When only an input limit is known,
-Sixb uses it as a conservative window and still leaves the configured output reserve.
+Before a conversational run's model loop, Sixb checks whether the context fits:
 
-The full transcript remains unchanged. Only the model-facing view becomes a continuation summary
-plus recent complete turns.
+```text
+System prompt + tools + summary + recent history + current message
+                              |
+                       Estimate input size
+                              |
+                      Fits input budget?
+                       /             \
+                     yes              no
+                      |                |
+                      |       Summarize older complete turns
+                      |       Keep recent turns + current message
+                      |       Check fit; save checkpoint
+                      |                |
+                      +-------+--------+
+                              v
+                       Start model loop
+```
 
-Use `loop.context` only when a model deployment or workload needs an explicit override:
+The estimate includes the request shape and, when suitable, prior provider token usage.
+Compaction changes only the model-facing view; the full transcript stays intact. If the summary
+and recent turns still cannot fit, the run fails. This check happens at run preflight, not at every
+loop step.
+
+### Context overrides
+
+Omit `loop.context` to use automatic compaction with default budgets. Override it for a specific
+deployment or workload:
 
 ```ts
 loop: {
@@ -222,40 +248,101 @@ loop: {
   caching: "auto",
   context: {
     windowTokens: 200_000,
+    reserveTokens: 16_384,
+    keepRecentTokens: 20_000,
   },
 }
 ```
 
-`windowTokens` overrides the catalog and is authoritative when set. `reserveTokens` defaults to the
-smaller of 16,384 or 25% of the resolved window, increased when needed to exceed an exact reasoning
-budget. Normal generation is capped by this reserve and the model's output ceiling. An explicit
-reserve must also accommodate reasoning. `keepRecentTokens` defaults to the smaller of
-20,000 or half the resolved input budget. All three fields are optional; omitting `context` keeps
-automatic compaction enabled with model-derived defaults.
+```text
+Context window
++-----------------------------------+------------------+
+| Input: prompt + tools + history   | Output reserve   |
++-----------------------------------+------------------+
+```
+
+| Optional field | Default |
+| --- | --- |
+| `windowTokens` | Model `contextWindow`, then `maxInputTokens`, then 128,000. An explicit value overrides model input limits. |
+| `reserveTokens` | Smaller of 16,384 or 25% of the window; increased to exceed an exact reasoning budget. |
+| `keepRecentTokens` | Smaller of 20,000 or half the input budget. |
+
+The input budget is **window minus reserve**, also capped by the model's `maxInputTokens` unless
+`windowTokens` is explicitly set. An input-only model limit is treated as a conservative window.
+Generation is capped by both the reserve and the model's output ceiling; an explicit reserve must
+accommodate reasoning.
+
+### How model limits are resolved
+
+| At worker startup | Behavior |
+| --- | --- |
+| Explicit window or known local limits | Prepare an offline model snapshot. |
+| Limits need discovery | Resolve through the provider's cached catalog. |
+| Catalog transport/access failure | Use an offline snapshot. |
+| No context limit available | Use 128,000 tokens and warn once per model. |
+| Invalid definition, identity mismatch, or other resolver error | Fail startup. |
+
+Execution, capabilities, output limits, and compaction use the same prepared snapshot. Restart the
+worker to pick up catalog changes. Set `loop.context.windowTokens` if the fallback does not match
+your deployment.
+
+Custom models can implement `resolve({ offline })`. It must preserve provider/model identity, pin
+operational metadata, and avoid network lookup when `offline` is true. Signal catalog access
+failures with `ModelCatalogUnavailableError` from `@sixb/core/models`.
 
 ## Usage and costs
 
-Sixb records completed model calls, including compaction summaries, before another billable step
-starts. Token estimates come from the model integration's optional `costEstimator`, independently
-of operational metadata such as context limits. Inline provider costs are retained separately.
+**Accounting happens after each model call, before the next billable step** — including calls that
+generate compaction summaries.
 
-Atlas displays a **selected cost** for each call: an inline provider cost when available, otherwise
-a local estimate, otherwise unknown. When both are available, the local estimate appears alongside
-the provider cost. Totals count each call once. Gateway charges describe Gateway billing.
+```text
+Model call finishes
+        |
+Normalize usage + compute local estimate
+        |
+Provider reported a charge?
+        |
+        +-- yes --> Select reported cost; keep estimate too
+        |
+        +-- no ---> Select estimate or "unpriceable"
+        |
+        v
+Store usage + selected cost
+```
 
-Usage and cost are recorded atomically and recovered idempotently after a storage failure.
-Invalid local estimates become unavailable without discarding valid usage or inline costs.
-Accepted streams that end through cancellation, disconnection, or a missing finish event are also
-recorded, retaining native IDs received so far. Without final usage, their meters and cost remain
-unknown, never zero. Requests that fail before returning a stream and process crashes before
-recording are outside this call-level guarantee; this ledger is not an account-wide billing report.
-`storage.aiCosts.listModelCalls()` returns the immutable call-time cost and its optional estimate.
-Native request, response, and generation IDs are retained when supplied by the provider and exposed
-through the model-call API and Atlas. Internal fallback response IDs are stored separately.
+The model integration's optional `costEstimator` prices **returned token usage**, independently of
+context limits and preflight token estimates. It runs for completed calls even when a provider
+charge is available. Local rates require no administrative credentials or financial API requests.
 
-Storage migration `029-model-accounting` adds requested reasoning and native provider IDs, and
-updates the historical missing-price reason while preserving existing valuations. Estimates use
-local provider rates and require no administrative credentials or financial API requests.
+### What gets stored
+
+| Selected cost | Stored status | `priceSource.sourceId` | Detail |
+| --- | --- | --- | --- |
+| Provider-reported charge | `rated` | `provider-reported` | Local estimate retained alongside it. |
+| Local estimate | `rated` | `model-rate-card` | Token quantities, rates, and charge components. |
+| Cannot price | `unpriceable` | — | Reason and available missing-meter diagnostics. |
+
+Both priced paths use the same money format: USD, with billionths of a dollar stored as an integer
+string.
+
+```jsonc
+{ "currency": "USD", "amountNanos": "1250000" } // $0.00125
+```
+
+- **Atlas totals count each call once.** A retained estimate appears alongside the reported charge
+  and is not added to it.
+- **Provider-reported means a charge was supplied**, not just a response. Gateway charges describe
+  Gateway billing; they are not independently verified invoice totals.
+- **Usage and cost are saved atomically.** Storage recovery deduplicates replays.
+- **Unknown is never zero.** Invalid estimates preserve valid usage and reported charges. Accepted
+  streams interrupted before final usage retain unknown meters/cost and any native IDs received.
+
+Use `storage.aiCosts.listModelCalls()` to read immutable call-time costs and optional estimates.
+Provider request, response, and generation IDs appear in the model-call API and Atlas when supplied;
+internal fallback response IDs are separate.
+
+This is a call-level ledger: requests that fail before returning a stream and process crashes before
+recording are outside its guarantee.
 
 ## Discovery
 

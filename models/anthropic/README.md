@@ -47,6 +47,10 @@ metadata without fetching; workers use it with explicit context overrides or kno
 Resolved bindings never consult the catalog again for capabilities. Unresolved direct bindings
 retain the structured-output discovery behavior below.
 
+Catalog transport/access failures throw `ModelCatalogUnavailableError` from `@sixb/core/models`,
+with the original error retained as `cause`. Workers recover using an offline snapshot and, if no
+context limit is available, a 128,000-token fallback with a warning. Malformed metadata still fails.
+
 `maxOutputTokens` is optional. Anthropic requires `max_tokens` on every Messages request, so the
 adapter resolves an omitted value to the selected Claude model's provider-owned output limit (128K,
 64K, or the appropriate legacy limit). An explicit value lowers that ceiling. Unknown non-Claude

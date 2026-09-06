@@ -86,6 +86,8 @@ export interface LanguageModel {
    * Return an executable model pinned to operational metadata, preserving model identity.
    * `offline` requires a local snapshot without catalog I/O. Workers retain this model
    * for generation and compaction; later catalog refreshes must not change its capabilities/limits.
+   * Throw ModelCatalogUnavailableError for catalog transport/access failures to allow workers to
+   * retry with an offline snapshot. Invalid definitions and other resolver errors remain fatal.
    */
   resolve?(options?: { readonly offline?: boolean }): Promise<LanguageModel>
   stream(request: LanguageModelRequest): Promise<LanguageModelStream>

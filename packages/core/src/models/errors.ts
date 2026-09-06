@@ -1,6 +1,11 @@
 import type { ModelFinishReason, ModelUsage } from "./events"
 import type { ModelCallCost } from "./pricing"
 
+/** Catalog transport/access failed; callers may use local metadata without masking invalid definitions. */
+export class ModelCatalogUnavailableError extends Error {
+  readonly name = "ModelCatalogUnavailableError"
+}
+
 /** A provider or provider protocol rejected a model request. */
 export class ModelProviderError extends Error {
   readonly name = "ModelProviderError"

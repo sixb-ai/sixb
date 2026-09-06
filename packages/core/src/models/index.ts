@@ -16,6 +16,7 @@ export type {
 } from "./definitions"
 export { defineLanguageModel } from "./definitions"
 export {
+  ModelCatalogUnavailableError,
   ModelProviderError,
   ModelStreamError,
   StructuredOutputError,

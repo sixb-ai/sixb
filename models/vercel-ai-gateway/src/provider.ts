@@ -14,6 +14,7 @@ import {
   type LanguageModelStreamEvent,
   MODEL_REASONING_EFFORTS,
   type ModelCapabilities,
+  ModelCatalogUnavailableError,
   type ModelCostEstimator,
   type ModelFinishReason,
   type ModelMessage,
@@ -187,9 +188,24 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     const response = await (this.transport.fetch ?? fetch)(`${this.transport.baseUrl}/models`, {
       headers: gatewayHeaders(this.transport, "application/json"),
       signal: AbortSignal.timeout(CATALOG_TIMEOUT_MS),
+    }).catch((cause: unknown) => {
+      throw new ModelCatalogUnavailableError("[SixbVercelGateway] Model catalog unavailable.", {
+        cause,
+      })
     })
-    if (!response.ok) throw await providerHttpError(response, PROVIDER_ID, "catalog")
-    const body: unknown = await response.json()
+    if (!response.ok) {
+      throw new ModelCatalogUnavailableError("[SixbVercelGateway] Model catalog unavailable.", {
+        cause: await providerHttpError(response, PROVIDER_ID, "catalog").catch(
+          (cause: unknown) => cause
+        ),
+      })
+    }
+    const raw = await response.text().catch((cause: unknown) => {
+      throw new ModelCatalogUnavailableError("[SixbVercelGateway] Model catalog unavailable.", {
+        cause,
+      })
+    })
+    const body: unknown = JSON.parse(raw)
     assertJsonObject(body, "Vercel AI Gateway model catalog")
     if (!Array.isArray(body.data)) {
       throw new ModelProviderError(
@@ -541,7 +557,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
         name: tool.name,
         description: tool.description,
         parameters: tool.inputSchema,
-        strict: true,
+        strict: gatewayOutputSchema(tool.inputSchema) !== undefined,
       })),
       ...(useOutputTool
         ? [
@@ -551,6 +567,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
               description:
                 request.responseFormat?.description ?? "Return the final structured result.",
               parameters: request.responseFormat?.schema ?? {},
+              strict: false,
             },
           ]
         : []),
