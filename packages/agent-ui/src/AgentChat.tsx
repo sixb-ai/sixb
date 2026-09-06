@@ -15,6 +15,7 @@ import { AgentsHome } from "./components/AgentsHome"
 import { ConversationPanel } from "./components/ConversationPanel"
 import { ThreadSidebar } from "./components/ThreadSidebar"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
+import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 import { useAgentConversation } from "./hooks/useAgentConversation"
 import type { Agent, AgentContextInput } from "./types"
 
@@ -39,6 +40,8 @@ export interface AgentChatProps {
   readonly sidebarFooter?: ReactNode
   /** Desktop workspace sidebar width. Mobile keeps its responsive sheet width. */
   readonly sidebarWidth?: CSSProperties["width"]
+  /** Additional file viewers supplied by the host application. */
+  readonly documentPreviewRenderers?: readonly AgentDocumentPreviewRenderer[]
 }
 
 /** Route-independent conversation view; routing and embedded panels only adapt its callbacks. */
@@ -57,6 +60,7 @@ export function AgentChat({
   sidebarHeader,
   sidebarFooter,
   sidebarWidth,
+  documentPreviewRenderers,
 }: AgentChatProps) {
   const threadId = threadIdInput ?? null
   const conversation = useAgentConversation({
@@ -260,6 +264,7 @@ export function AgentChat({
       compact={compact}
       scopeKey={threadId ?? (draftAgentIdInput ? `draft:${draftAgentIdInput}` : "home")}
       persistenceKey={threadId}
+      documentPreviewRenderers={documentPreviewRenderers}
     >
       <div
         data-agent-panel={compact ? "" : undefined}

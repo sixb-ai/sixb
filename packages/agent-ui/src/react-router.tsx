@@ -3,6 +3,12 @@ import { useCallback } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { AgentChat, type AgentChatProps } from "./AgentChat"
 
+export type {
+  AgentDocumentPreviewRenderer,
+  AgentDocumentPreviewRendererProps,
+} from "./document-preview/types"
+export type { AgentFileRef } from "./types"
+
 export interface AgentChatPageProps
   extends Omit<
     AgentChatProps,

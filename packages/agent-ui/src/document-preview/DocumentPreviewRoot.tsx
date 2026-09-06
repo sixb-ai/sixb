@@ -14,10 +14,12 @@ import { useIsMobile } from "@sixb/ui/hooks"
 import { cn } from "@sixb/ui/lib/utils"
 import { Download, ExternalLink, FileWarning, X } from "lucide-react"
 import {
+  Component,
   createContext,
   memo,
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  Suspense,
   useCallback,
   useContext,
   useEffect,
@@ -27,8 +29,14 @@ import {
   useReducer,
   useRef,
 } from "react"
-import { useDelimitedTextDocument, useHtmlDocument, useMarkdownDocument } from "./content"
+import {
+  useCustomDocument,
+  useDelimitedTextDocument,
+  useHtmlDocument,
+  useMarkdownDocument,
+} from "./content"
 import { DelimitedTextParseError, type DelimitedTextPreview, parseDelimitedText } from "./delimited"
+import { formatFileSize } from "./file-size"
 import { buildSafeHtmlPreviewDocument, HTML_PREVIEW_SANDBOX } from "./html"
 import {
   documentPreviewStorageKey,
@@ -37,7 +45,7 @@ import {
   writeDocumentPreviewState,
 } from "./persistence"
 import { documentPreviewPresentation } from "./presentation"
-import { agentDocumentPreviewRenderer } from "./rendering"
+import { resolveAgentDocumentPreview } from "./rendering"
 import {
   type DocumentPreviewState,
   type DocumentTabNavigationKey,
@@ -45,9 +53,10 @@ import {
   documentTabIdAfterKey,
   EMPTY_DOCUMENT_PREVIEW_STATE,
 } from "./state"
-import type { AgentDocumentSource } from "./types"
+import type { AgentDocumentPreviewRenderer, AgentDocumentSource } from "./types"
 
 interface DocumentPreviewContextValue {
+  readonly canPreview: (document: AgentDocumentSource) => boolean
   readonly openDocument: (document: AgentDocumentSource) => void
 }
 
@@ -57,6 +66,7 @@ interface DocumentViewerProps {
   readonly onSelect: (id: string) => void
   readonly onClose: (id: string) => void
   readonly onCloseAll: () => void
+  readonly renderers: readonly AgentDocumentPreviewRenderer[]
 }
 
 interface PreviewPanelHandle {
@@ -68,12 +78,14 @@ interface PreviewPanelHandle {
 }
 
 const DocumentPreviewContext = createContext<DocumentPreviewContextValue | null>(null)
+const NO_CUSTOM_RENDERERS: readonly AgentDocumentPreviewRenderer[] = []
 
 export function DocumentPreviewRoot({
   children,
   compact = false,
   scopeKey,
   persistenceKey,
+  documentPreviewRenderers = NO_CUSTOM_RENDERERS,
 }: {
   readonly children: ReactNode
   readonly compact?: boolean
@@ -81,6 +93,8 @@ export function DocumentPreviewRoot({
   readonly scopeKey?: string | null
   /** Persist open tabs, the active document, and panel width for a durable thread. */
   readonly persistenceKey?: string | null
+  /** Viewers supplied by the host. The first match overrides the built-in viewer. */
+  readonly documentPreviewRenderers?: readonly AgentDocumentPreviewRenderer[]
 }) {
   const idPrefix = useId()
   const previewScopeKey = persistenceKey ? `thread:${persistenceKey}` : `scope:${scopeKey ?? ""}`
@@ -163,7 +177,15 @@ export function DocumentPreviewRoot({
     (width: number) => dispatch({ type: "set-panel-width", width }),
     []
   )
-  const context = useMemo<DocumentPreviewContextValue>(() => ({ openDocument }), [openDocument])
+  const canPreview = useCallback(
+    (document: AgentDocumentSource) =>
+      resolveAgentDocumentPreview(document, documentPreviewRenderers) !== null,
+    [documentPreviewRenderers]
+  )
+  const context = useMemo<DocumentPreviewContextValue>(
+    () => ({ canPreview, openDocument }),
+    [canPreview, openDocument]
+  )
   const viewerProps = useMemo<DocumentViewerProps>(
     () => ({
       idPrefix,
@@ -171,8 +193,16 @@ export function DocumentPreviewRoot({
       onSelect: selectDocument,
       onClose: closeDocument,
       onCloseAll: closeAllDocuments,
+      renderers: documentPreviewRenderers,
     }),
-    [closeAllDocuments, closeDocument, idPrefix, selectDocument, visibleState]
+    [
+      closeAllDocuments,
+      closeDocument,
+      documentPreviewRenderers,
+      idPrefix,
+      selectDocument,
+      visibleState,
+    ]
   )
 
   return (
@@ -352,6 +382,7 @@ function DocumentViewer({
   onSelect,
   onClose,
   onCloseAll,
+  renderers,
   showActionLabels,
   focusActiveTab,
 }: DocumentViewerProps & {
@@ -381,7 +412,7 @@ function DocumentViewer({
           aria-labelledby={documentTabDomId(idPrefix, activeDocument.id)}
           className="flex min-h-0 flex-1 flex-col"
         >
-          <DocumentContent document={activeDocument} />
+          <DocumentContent document={activeDocument} renderers={renderers} />
         </div>
       ) : null}
     </>
@@ -546,13 +577,24 @@ function DocumentTabs({
   )
 }
 
-function DocumentContent({ document }: { document: AgentDocumentSource }) {
-  const renderer = agentDocumentPreviewRenderer(document.kind)
-  if (renderer === "markdown") return <MarkdownDocument document={document} />
-  if (renderer === "html-static") return <HtmlDocument document={document} />
-  if (renderer === "delimited-text") return <DelimitedTextDocument document={document} />
-  if (renderer === "pdf-native") return <PdfDocument document={document} />
-  if (renderer === "image-native") return <ImageDocument document={document} />
+function DocumentContent({
+  document,
+  renderers,
+}: {
+  readonly document: AgentDocumentSource
+  readonly renderers: readonly AgentDocumentPreviewRenderer[]
+}) {
+  const resolution = resolveAgentDocumentPreview(document, renderers)
+  if (resolution?.type === "custom") {
+    return <CustomDocument document={document} renderer={resolution.renderer} />
+  }
+  if (resolution?.renderer === "markdown") return <MarkdownDocument document={document} />
+  if (resolution?.renderer === "html-static") return <HtmlDocument document={document} />
+  if (resolution?.renderer === "delimited-text") {
+    return <DelimitedTextDocument document={document} />
+  }
+  if (resolution?.renderer === "pdf-native") return <PdfDocument document={document} />
+  if (resolution?.renderer === "image-native") return <ImageDocument document={document} />
 
   return (
     <DocumentNotice
@@ -560,6 +602,73 @@ function DocumentContent({ document }: { document: AgentDocumentSource }) {
       description="This file type is not available in the document viewer yet."
     />
   )
+}
+
+function CustomDocument({
+  document,
+  renderer,
+}: {
+  readonly document: AgentDocumentSource
+  readonly renderer: AgentDocumentPreviewRenderer
+}) {
+  const preview = useCustomDocument(document, renderer.maxFileSizeBytes)
+
+  if (preview.tooLarge) {
+    return (
+      <DocumentNotice
+        title="Document is too large to preview"
+        description={`This viewer accepts files up to ${formatFileSize(renderer.maxFileSizeBytes)}. Download the file to view it elsewhere.`}
+      />
+    )
+  }
+  if (preview.loading) return <DocumentLoading />
+  if (preview.error || !preview.source) {
+    return (
+      <DocumentNotice
+        title="Could not preview document"
+        description={preview.error ?? "The document content was unavailable."}
+      />
+    )
+  }
+
+  const Renderer = renderer.component
+  return (
+    <DocumentRendererBoundary key={`${renderer.id}:${document.id}`} rendererId={renderer.id}>
+      <Suspense fallback={<DocumentLoading />}>
+        <Renderer file={document.fileRef} source={preview.source} />
+      </Suspense>
+    </DocumentRendererBoundary>
+  )
+}
+
+class DocumentRendererBoundary extends Component<
+  { readonly children: ReactNode; readonly rendererId: string },
+  { readonly failed: boolean }
+> {
+  state = { failed: false }
+
+  static getDerivedStateFromError() {
+    return { failed: true }
+  }
+
+  componentDidCatch(error: unknown) {
+    console.error(
+      `[SixbAgentUI] Document preview renderer '${this.props.rendererId}' failed.`,
+      error
+    )
+  }
+
+  render() {
+    if (this.state.failed) {
+      return (
+        <DocumentNotice
+          title="Could not preview document"
+          description="The configured document viewer could not render this file."
+        />
+      )
+    }
+    return this.props.children
+  }
 }
 
 function ImageDocument({ document }: { document: AgentDocumentSource }) {

@@ -3,6 +3,9 @@ import { createContext, createElement, type PropsWithChildren, useContext } from
 
 export {
   AgentContextProvider,
+  type AgentDocumentPreviewRenderer,
+  type AgentDocumentPreviewRendererProps,
+  type AgentFileRef,
   AgentPanel,
   type AgentPanelProps,
   useAgentContext,
@@ -12,34 +15,35 @@ export { agentContext } from "@sixb/core/agents/context"
 
 export type AgentsPageProps = Omit<AgentChatPageProps, "routeBase">
 
-type AgentWorkspaceChrome = Pick<
+type AgentWorkspaceConfiguration = Pick<
   AgentsPageProps,
-  "sidebarHeader" | "sidebarFooter" | "sidebarWidth"
+  "sidebarHeader" | "sidebarFooter" | "sidebarWidth" | "documentPreviewRenderers"
 >
 
-export type AgentWorkspaceProviderProps = PropsWithChildren<AgentWorkspaceChrome>
+export type AgentWorkspaceProviderProps = PropsWithChildren<AgentWorkspaceConfiguration>
 
-const AgentWorkspaceContext = createContext<AgentWorkspaceChrome>({})
+const AgentWorkspaceContext = createContext<AgentWorkspaceConfiguration>({})
 
 /** Configure the framework-owned Agents routes, typically from `app/agents/layout.tsx`. */
 export function AgentWorkspaceProvider({
   sidebarHeader,
   sidebarFooter,
   sidebarWidth,
+  documentPreviewRenderers,
   children,
 }: AgentWorkspaceProviderProps) {
   return createElement(
     AgentWorkspaceContext.Provider,
-    { value: { sidebarHeader, sidebarFooter, sidebarWidth } },
+    { value: { sidebarHeader, sidebarFooter, sidebarWidth, documentPreviewRenderers } },
     children
   )
 }
 
 export default function AgentsPage(props: AgentsPageProps) {
-  const workspaceChrome = useContext(AgentWorkspaceContext)
+  const workspaceConfiguration = useContext(AgentWorkspaceContext)
 
   return createElement(AgentChatPage, {
-    ...workspaceChrome,
+    ...workspaceConfiguration,
     ...props,
     routeBase: "/agents",
   })
