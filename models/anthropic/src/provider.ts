@@ -478,6 +478,12 @@ class AnthropicLanguageModel implements LanguageModel {
       maxOutputTokens,
       this.modelId
     )
+    if (useOutputTool && reasoning.thinking?.type === "enabled") {
+      throw new UnsupportedModelFeatureError(
+        "[SixbAnthropic] Manual thinking cannot be combined with the required JSON output tool. " +
+          "Use native structured output with a supported schema, or omit the exact reasoning budget."
+      )
+    }
     const outputConfig: JsonObject = {
       ...(existingOutputConfig ?? {}),
       ...(reasoning.effort === undefined ? {} : { effort: reasoning.effort }),

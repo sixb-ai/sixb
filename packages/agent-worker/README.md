@@ -87,7 +87,8 @@ The default `StreamSink` writes:
 
 Live model UI chunks are broker records only. They are not inserted into `agent_messages`.
 `agent_messages` stores the finalized assistant message after the model turn completes or is
-interrupted with coherent partial progress.
+interrupted with coherent partial progress, including completed tool steps when cancellation happens
+while preparing the next model request.
 
 The default sink is created with `createBrokerStreamSink(...)`. Tests can pass `NOOP_STREAM_SINK` or
 a custom `streamSink`.
@@ -97,6 +98,8 @@ a custom `streamSink`.
 The terminal run state is stored on the run record:
 
 - Model or tool failure: `failed`
+- Sandbox provisioning failure during a conversation or workflow agent node: `failed`, even if the
+  model never invokes a sandbox tool; in-flight inference is aborted with the original failure reported
 - Turn timeout: `failed` with `finishReason: "timeout"`; coherent partial work is finalized as the
   assistant message before the thread is released. This controlled limit is not emitted as an
   unhandled runtime failure

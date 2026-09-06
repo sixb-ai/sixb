@@ -49,6 +49,7 @@ import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   LanguageModel,
   LanguageModelRequest,
+  LanguageModelStreamEvent,
   ModelFinishReason,
   ModelTool,
   ModelUsage,
@@ -1106,6 +1107,7 @@ async function queueWorkflowAgentNode(input: {
   readonly model: LanguageModel
   readonly tools?: readonly AgentToolDefinition[]
   readonly storage?: Storage
+  readonly sandboxes?: SandboxFactory
   readonly runId: string
   readonly requestedByPrincipal?: typeof REQUESTER
   readonly requesterGroupIds?: readonly string[]
@@ -1133,7 +1135,7 @@ async function queueWorkflowAgentNode(input: {
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
-    sandboxes: new RecordingSandboxFactory(),
+    sandboxes: input.sandboxes ?? new RecordingSandboxFactory(),
   })
   const runs = sixb.storage.workflowRuns
   if (!runs) throw new Error("expected workflow run storage")
@@ -2434,6 +2436,80 @@ describe("AgentWorker", () => {
         payload: { runId, nodeRunId },
       })
     } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: remove monitorSandboxReadiness from runWorkflowAgentNode.
+  test.each([
+    1, 2,
+  ])("fails a workflow when its sandbox rejects during model call %s", async (failedCall) => {
+    const failure = new Error("sandbox provisioning unavailable")
+    const sandbox = Promise.withResolvers<Sandbox>()
+    const signals: AbortSignal[] = []
+    const model = new WorkerTestModel({
+      stream: async (request) => {
+        signals.push(request.signal)
+        const call = signals.length
+        return {
+          events: (async function* (): AsyncIterable<LanguageModelStreamEvent> {
+            yield { type: "stream-start" }
+            if (call === failedCall) {
+              sandbox.reject(failure)
+              await Bun.sleep(0)
+              request.signal.throwIfAborted()
+            }
+            yield { type: "text-start", id: "answer" }
+            yield {
+              type: "text-delta",
+              id: "answer",
+              delta: '{"answer":"Project Alpha","confidence":0.96}',
+            }
+            yield { type: "text-end", id: "answer" }
+            yield { type: "finish", finishReason: "stop", usage: USAGE }
+          })(),
+        }
+      },
+    })
+    const runId = `workflow-sandbox-failure-${failedCall}`
+    const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
+      model,
+      runId,
+      sandboxes: { create: () => sandbox.promise },
+    })
+    const errors: unknown[] = []
+    const reporter = attachSixbErrorReporter(sixb, (error) => {
+      errors.push(error)
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const execution = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow sandbox failure" }
+      )
+      expect(execution.status).toBe("failed")
+      expect(signals).toHaveLength(failedCall)
+      expect(signals.at(-1)?.aborted).toBe(true)
+      await expect(
+        runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
+      ).resolves.toMatchObject({ status: "failed" })
+      await expect(runs.getById({ projectId: PROJECT_ID, id: runId })).resolves.toMatchObject({
+        status: "failed",
+      })
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: agentExecutionId,
+        })
+      ).resolves.toMatchObject({ modelCallCount: failedCall })
+      await reporter.flush()
+      expect(errors).toEqual([failure])
+    } finally {
+      sandbox.reject(failure)
       await worker.stop()
     }
   })
@@ -5299,6 +5375,54 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
     }
+  })
+
+  test("persists completed tool progress when preparation is cancelled", async () => {
+    // Regression proof: let prepareStep abort errors escape runModelLoop without its completed steps.
+    const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
+    const storage = agentStorageOf(sixb)
+    const request = await requestAgent(sixb, { agentId: "assistant", text: "go" })
+    const run = await storage.runs.start({
+      projectId: PROJECT_ID,
+      id: request.run.id,
+      execution: freshTestExecution(),
+    })
+    const abort = new AbortController()
+    const result = await runAgentTurn({
+      context: {
+        id: PROJECT_ID,
+        agentPrincipal: AGENT_PRINCIPAL,
+        storage: workerStorageOf(sixb.storage),
+        blobStorage: sixb.blobStorage,
+        tools: echoTool,
+        systemPrompt: "Test system prompt.",
+        streamSink: NOOP_STREAM_SINK,
+        recoverAiModelCall: recoverAiModelCall(sixb),
+        defaultMaxSteps: 4,
+        turnTimeoutMs: 60_000,
+        prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
+          if (stepIndex !== 1) return
+          abort.abort()
+          signal.throwIfAborted()
+        },
+      },
+      agent: sixb.definitions.agents.getById("assistant")!,
+      run,
+      signal: abort.signal,
+    })
+    expect(result.status).toBe("cancelled")
+    const messages = await listMessages(storage, request.run.threadId)
+    expect(messages.find((message) => message.role === "assistant")?.parts).toContainEqual({
+      type: "tool-call",
+      toolCallId: "c1",
+      toolName: "echo",
+      input: { value: "hi" },
+      state: "output-available",
+      output: { echoed: "hi" },
+    })
+    await expect(
+      storage.threads.getById({ projectId: PROJECT_ID, id: request.run.threadId })
+    ).resolves.toMatchObject({ activeRunId: null })
   })
 
   test("persists the partial assistant message when a mid-response run is cancelled", async () => {

@@ -69,6 +69,7 @@ export interface PrepareModelStepInput {
 }
 
 export interface PrepareModelStepResult {
+  /** Replacement history retained for this request and subsequent steps. */
   readonly messages?: readonly ModelMessage[]
 }
 
@@ -123,7 +124,7 @@ export async function runModelLoop(
     description: tool.description,
     inputSchema: tool.inputSchema,
   }))
-  const messages: ModelMessage[] = [...input.messages]
+  let messages: readonly ModelMessage[] = [...input.messages]
   const steps: ModelStep[] = []
   const generateCallId = input.generateCallId ?? (() => `model_call_${randomUUID()}`)
   const callIds = new Set<string>()
@@ -134,13 +135,22 @@ export async function runModelLoop(
     }
     await input.onEvent?.({ type: "start-step" })
 
-    const prepared = await input.prepareStep?.({
-      stepIndex,
-      messages,
-      model: input.model,
-      signal: input.signal,
-    })
-    let requestMessages = prepared?.messages ?? messages
+    let requestMessages: readonly ModelMessage[]
+    try {
+      const prepared = await input.prepareStep?.({
+        stepIndex,
+        messages,
+        model: input.model,
+        signal: input.signal,
+      })
+      requestMessages = prepared?.messages ?? messages
+    } catch (error) {
+      if (!input.signal.aborted && !isAbortError(error)) throw error
+      return { status: "aborted", steps, partialContent: [] }
+    }
+    if (input.signal.aborted) {
+      return { status: "aborted", steps, partialContent: [] }
+    }
     let requestTools: readonly ModelToolSpecification[] = toolSpecifications
     if (input.finalStepInstruction !== undefined && stepIndex === input.maxSteps - 1) {
       requestMessages = [
@@ -239,7 +249,7 @@ export async function runModelLoop(
       const step = modelStep(response, responseId, response.content, cost)
       steps.push(step)
       await input.onStepEnd?.(step)
-      messages.push({ role: "assistant", content: response.content })
+      messages = [...requestMessages, { role: "assistant", content: response.content }]
       if (stepIndex + 1 === input.maxSteps) {
         throw new ModelStreamError(
           "[SixbModels] Model reached the step limit while a provider continuation was pending."
@@ -298,8 +308,11 @@ export async function runModelLoop(
     const assistantContent = response.content.filter(
       (part) => part.type !== "tool-result" || part.providerExecuted === true
     )
-    messages.push({ role: "assistant", content: assistantContent })
-    messages.push({ role: "tool", content: toolResults })
+    messages = [
+      ...requestMessages,
+      { role: "assistant", content: assistantContent },
+      { role: "tool", content: toolResults },
+    ]
 
     if (stepIndex + 1 === input.maxSteps) {
       if (input.output) {

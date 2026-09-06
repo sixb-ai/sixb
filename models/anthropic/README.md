@@ -61,6 +61,11 @@ support and the schema fits the native decoder. Otherwise the adapter transparen
 required, nonparallel JSON tool. In both cases Sixb validates the completed value against the
 original application contract.
 
+The JSON-tool fallback cannot be combined with manual thinking (`reasoning: { budgetTokens }`),
+because Anthropic rejects forced tool use in that mode. The adapter throws
+`UnsupportedModelFeatureError` before inference. Use native structured output with a supported
+schema, or omit the exact reasoning budget. Adaptive thinking supports the JSON-tool fallback.
+
 Local tools use the same schema transformation as native structured output: unsupported decoder
 constraints move into descriptions, while Sixb validates inputs against the original tool contract.
 Schemas with open objects are sent unchanged with `strict: false` to preserve their allowed keys.

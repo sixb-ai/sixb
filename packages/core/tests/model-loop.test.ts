@@ -3,6 +3,7 @@ import { runModelLoop } from "../src/agents/model-loop"
 import type {
   LanguageModelStreamEvent,
   ModelCallEndEvent,
+  ModelMessage,
   ModelTool,
   ModelUiChunk,
 } from "../src/models"
@@ -410,6 +411,123 @@ describe("runModelLoop", () => {
         { role: "tool", content: [{ type: "tool-result", toolCallId: "tool-1" }] },
       ],
     })
+  })
+
+  // Regression proof: append continuations to the original messages instead of requestMessages.
+  test.each([
+    "tool-calls",
+    "pause",
+  ] as const)("retains prepared images across %s continuations", async (continuation) => {
+    const requests: ModelMessage[][] = []
+    const image: ModelMessage = {
+      role: "user",
+      content: [
+        { type: "file", data: new URL("data:image/png;base64,aW1hZ2U="), mediaType: "image/png" },
+      ],
+    }
+    const model = new MockLanguageModel({
+      stream: async (request) => {
+        const stepIndex = requests.length
+        requests.push([...request.messages])
+        return streamFromArray([
+          { type: "stream-start" },
+          ...(stepIndex === 0 || (stepIndex === 1 && continuation === "tool-calls")
+            ? [
+                {
+                  type: "tool-call" as const,
+                  toolCallId: `echo-${stepIndex}`,
+                  toolName: "echo",
+                  input: '{"value":"ok"}',
+                },
+              ]
+            : []),
+          finish(stepIndex === 0 ? "tool-calls" : stepIndex === 1 ? continuation : "stop"),
+        ])
+      },
+    })
+    const result = await runModelLoop({
+      model,
+      messages: [{ role: "user", content: [{ type: "text", text: "Inspect this file." }] }],
+      tools: [echo],
+      maxSteps: 3,
+      signal: new AbortController().signal,
+      prepareStep: ({ stepIndex, messages }) =>
+        stepIndex === 1 ? { messages: [...messages, image] } : undefined,
+    })
+
+    expect(result.status).toBe("completed")
+    expect(requests).toHaveLength(3)
+    expect(requests[1]?.at(-1)).toEqual(image)
+    expect(requests[2]?.slice(0, requests[1]?.length)).toEqual(requests[1])
+    expect(requests[2]?.filter((message) => message === image)).toHaveLength(1)
+  })
+
+  // Regression proof: move prepareStep outside the abort boundary, or omit its post-await check.
+  test.each([
+    "throw",
+    "return",
+  ] as const)("retains completed steps when aborted during preparation (%s)", async (outcome) => {
+    const abort = new AbortController()
+    const calls: ModelCallEndEvent[] = []
+    let requests = 0
+    const model = new MockLanguageModel({
+      stream: async () => {
+        requests += 1
+        return streamFromArray([
+          { type: "stream-start" },
+          { type: "tool-call", toolCallId: "echo-1", toolName: "echo", input: '{"value":"ok"}' },
+          finish("tool-calls"),
+        ])
+      },
+    })
+    const result = await runModelLoop({
+      model,
+      messages: [],
+      tools: [echo],
+      maxSteps: 3,
+      signal: abort.signal,
+      prepareStep: async ({ stepIndex, signal }): Promise<undefined> => {
+        if (stepIndex !== 1) return
+        abort.abort(new Error("cancelled during projection"))
+        if (outcome === "throw") signal.throwIfAborted()
+      },
+      onModelCallEnd: (event) => {
+        calls.push(event)
+      },
+    })
+
+    expect(result).toMatchObject({ status: "aborted", partialContent: [] })
+    expect(result.steps).toHaveLength(1)
+    expect(result.steps[0]?.content).toContainEqual({
+      type: "tool-result",
+      toolCallId: "echo-1",
+      toolName: "echo",
+      output: { type: "json", value: { echoed: "ok" } },
+    })
+    expect(requests).toBe(1)
+    expect(calls).toHaveLength(1)
+  })
+
+  test("propagates preparation errors without starting a model call", async () => {
+    const failure = new Error("projection unavailable")
+    let calls = 0
+    await expect(
+      runModelLoop({
+        model: new MockLanguageModel({
+          stream: async () => {
+            calls += 1
+            return streamFromArray([{ type: "stream-start" }, finish()])
+          },
+        }),
+        messages: [],
+        maxSteps: 1,
+        signal: new AbortController().signal,
+        prepareStep: () => {
+          throw failure
+        },
+      })
+    ).rejects.toBe(failure)
+    expect(calls).toBe(0)
   })
 
   test("continues a provider pause without inventing a local tool result", async () => {

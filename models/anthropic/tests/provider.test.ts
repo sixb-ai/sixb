@@ -1,7 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
-import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
+import {
+  ModelCatalogUnavailableError,
+  ModelProviderError,
+  UnsupportedModelFeatureError,
+} from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
 import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
 import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
@@ -729,6 +733,65 @@ describe("Anthropic provider", () => {
     })
     expect(messageBody?.output_config).toBeUndefined()
     expect(messageBody).not.toHaveProperty("disable_parallel_tool_use")
+  })
+
+  // Regression proof: remove the manual-thinking/output-tool compatibility check in prepareRequest.
+  test.each([
+    false,
+    true,
+  ])("rejects manual thinking with JSON-tool fallback before inference (native: %s)", async (nativeStructuredOutput) => {
+    let requests = 0
+    const provider = createAnthropic({
+      fetch: async () => {
+        requests += 1
+        return sseResponse([])
+      },
+    })
+    const model = provider("claude-sonnet-4-6", {
+      capabilities: {
+        nativeStructuredOutput,
+        reasoning: { budgetTokens: { min: 1024 } },
+      },
+    })
+    await expect(
+      model.stream(
+        request({
+          reasoning: { budgetTokens: 4096 },
+          responseFormat: {
+            type: "json",
+            name: "answer",
+            schema: { ...answerOutput().schema, additionalProperties: true },
+          },
+        })
+      )
+    ).rejects.toBeInstanceOf(UnsupportedModelFeatureError)
+    expect(requests).toBe(0)
+  })
+
+  test("preserves manual thinking with native structured output", async () => {
+    let body: unknown
+    const provider = createAnthropic({
+      fetch: async (_url, init) => {
+        body = JSON.parse(String(init?.body))
+        return sseResponse([])
+      },
+    })
+    await provider("claude-sonnet-4-6", {
+      capabilities: {
+        nativeStructuredOutput: true,
+        reasoning: { budgetTokens: { min: 1024 } },
+      },
+    }).stream(
+      request({
+        reasoning: { budgetTokens: 4096 },
+        responseFormat: { type: "json", name: "answer", schema: answerOutput().schema },
+      })
+    )
+    expect(body).toMatchObject({
+      thinking: { type: "enabled", budget_tokens: 4096 },
+      output_config: { format: { type: "json_schema" } },
+    })
+    expect(body).not.toHaveProperty("tool_choice")
   })
 
   test("uses provider-owned model output limits when no request ceiling is configured", async () => {

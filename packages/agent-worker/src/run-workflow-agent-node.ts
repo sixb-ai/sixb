@@ -17,6 +17,7 @@ import {
 } from "./agent-prompt"
 import { agentTraceFromModelSteps } from "./model-adapters"
 import type { AiModelCallRecorder } from "./model-call-recorder"
+import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { AgentTurnContext } from "./types"
 
 const WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS = 2
@@ -82,7 +83,8 @@ export async function runWorkflowAgentNode(
 
   const timeout = new AbortController()
   const timer = setTimeout(() => timeout.abort(), input.context.turnTimeoutMs)
-  const abortSignal = AbortSignal.any([input.signal, timeout.signal])
+  const sandboxReadiness = monitorSandboxReadiness(input.context.sandboxReady)
+  const abortSignal = AbortSignal.any([input.signal, timeout.signal, sandboxReadiness.signal])
   const completedSteps: ModelStep[] = []
   const traceDetails = {
     agentId: input.agent.id,
@@ -117,6 +119,7 @@ export async function runWorkflowAgentNode(
       },
     })
     input.usageRecorder.assertHealthy()
+    sandboxReadiness.throwIfFailed()
     if (research.status === "aborted") {
       throw abortSignal.reason ?? new DOMException("The workflow agent was aborted.", "AbortError")
     }
@@ -177,6 +180,7 @@ export async function runWorkflowAgentNode(
         break
       } catch (error) {
         input.usageRecorder.assertHealthy()
+        sandboxReadiness.throwIfFailed()
         if (
           attempt >= WORKFLOW_OUTPUT_FINALIZATION_ATTEMPTS ||
           !(error instanceof StructuredOutputError)
@@ -209,6 +213,7 @@ export async function runWorkflowAgentNode(
       )
     }
 
+    sandboxReadiness.throwIfFailed()
     return {
       output: snapshotWorkflowAgentStepOutput({
         workflowId: input.workflowId,
@@ -221,6 +226,8 @@ export async function runWorkflowAgentNode(
       trace: agentTraceFromModelSteps(completedSteps, traceDetails),
     }
   } catch (cause) {
+    // Prefer the concrete provisioning failure over the abort it causes in either model phase.
+    sandboxReadiness.throwIfFailed()
     throw new WorkflowAgentNodeExecutionError({
       phase,
       finishReason,
