@@ -1,7 +1,8 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { SixbApiError } from "@sixb/client"
 import { agentDocumentKind } from "../src/document-preview/classify"
 import {
+  customPreviewTooLarge,
   documentLoadError,
   MAX_MARKDOWN_PREVIEW_BYTES,
   markdownPreviewTooLarge,
@@ -15,14 +16,20 @@ import {
 import { buildSafeHtmlPreviewDocument, HTML_PREVIEW_SANDBOX } from "../src/document-preview/html"
 import { parseDocumentPreviewState } from "../src/document-preview/persistence"
 import { documentPreviewPresentation } from "../src/document-preview/presentation"
-import { agentDocumentPreviewRenderer } from "../src/document-preview/rendering"
+import {
+  agentDocumentPreviewRenderer,
+  resolveAgentDocumentPreview,
+} from "../src/document-preview/rendering"
 import { createAgentDocumentSource } from "../src/document-preview/source"
 import {
   documentPreviewReducer,
   documentTabIdAfterKey,
   EMPTY_DOCUMENT_PREVIEW_STATE,
 } from "../src/document-preview/state"
-import type { AgentDocumentSource } from "../src/document-preview/types"
+import type {
+  AgentDocumentPreviewRenderer,
+  AgentDocumentSource,
+} from "../src/document-preview/types"
 import type { AgentFileRef } from "../src/types"
 
 const MARKDOWN_FILE: AgentFileRef = {
@@ -94,6 +101,75 @@ describe("document preview rendering", () => {
     expect(agentDocumentPreviewRenderer("tsv")).toBe("delimited-text")
     expect(agentDocumentPreviewRenderer("image")).toBe("image-native")
     expect(agentDocumentPreviewRenderer(null)).toBeNull()
+  })
+
+  test("resolves the first matching host renderer before built-in viewers", () => {
+    const spreadsheet = {
+      ...document("workbook", "forecast.xlsx"),
+      kind: null,
+    } satisfies AgentDocumentSource
+    const renderer: AgentDocumentPreviewRenderer = {
+      id: "test-spreadsheet",
+      maxFileSizeBytes: 10 * 1024 * 1024,
+      supports: (file) => file.fileName?.endsWith(".xlsx") === true,
+      component: () => null,
+    }
+
+    expect(resolveAgentDocumentPreview(spreadsheet, [renderer])).toEqual({
+      type: "custom",
+      renderer,
+    })
+    expect(resolveAgentDocumentPreview(document("markdown", "report.md"), [renderer])).toEqual({
+      type: "built-in",
+      renderer: "markdown",
+    })
+    expect(
+      resolveAgentDocumentPreview(document("markdown", "report.md"), [
+        { ...renderer, supports: () => true },
+      ])
+    ).toMatchObject({ type: "custom" })
+    expect(
+      resolveAgentDocumentPreview(
+        { ...spreadsheet, fileRef: { ...spreadsheet.fileRef, fileName: "archive.zip" } },
+        [renderer]
+      )
+    ).toBeNull()
+  })
+
+  test("isolates a failed capability check and tries the next renderer", () => {
+    const spreadsheet = {
+      ...document("workbook", "forecast.xlsx"),
+      kind: null,
+    } satisfies AgentDocumentSource
+    const failure = new Error("broken capability check")
+    const consoleError = spyOn(console, "error").mockImplementation(() => undefined)
+    const fallback: AgentDocumentPreviewRenderer = {
+      id: "fallback",
+      maxFileSizeBytes: 1024,
+      supports: () => true,
+      component: () => null,
+    }
+
+    try {
+      expect(
+        resolveAgentDocumentPreview(spreadsheet, [
+          {
+            ...fallback,
+            id: "broken",
+            supports: () => {
+              throw failure
+            },
+          },
+          fallback,
+        ])
+      ).toEqual({ type: "custom", renderer: fallback })
+      expect(consoleError).toHaveBeenCalledWith(
+        "[SixbAgentUI] Document preview renderer 'broken' failed its capability check.",
+        failure
+      )
+    } finally {
+      consoleError.mockRestore()
+    }
   })
 })
 
@@ -321,6 +397,19 @@ describe("Markdown document loading policy", () => {
         ...document("large", "large.md"),
         fileRef: { ...MARKDOWN_FILE, sizeBytes: MAX_MARKDOWN_PREVIEW_BYTES + 1 },
       })
+    ).toBe(true)
+  })
+
+  test("applies a host renderer's limit before loading binary content", () => {
+    const source = document("binary", "workbook.xlsx")
+    expect(customPreviewTooLarge(source, source.fileRef.sizeBytes)).toBe(false)
+    expect(customPreviewTooLarge(source, source.fileRef.sizeBytes - 1)).toBe(true)
+    expect(customPreviewTooLarge(source, Number.NaN)).toBe(true)
+    expect(
+      customPreviewTooLarge(
+        { ...source, fileRef: { ...source.fileRef, sizeBytes: Number.POSITIVE_INFINITY } },
+        1024
+      )
     ).toBe(true)
   })
 

@@ -101,3 +101,31 @@ existing open/download behavior.
 
 Preview tabs support Left/Right Arrow, Home, End, Delete, and Backspace. Closing the final document
 returns focus to the attachment that opened the viewer.
+
+### Host-provided document viewers
+
+An application can add viewers for other formats without adding those implementations to this public
+package. `agent-ui` keeps responsibility for the authenticated download, cache, loading and error
+states, size limit, preview shell, and renderer isolation. The supplied component receives the
+durable file metadata and its `Blob`:
+
+```tsx
+import { lazy } from "react"
+import { AgentPanel, type AgentDocumentPreviewRenderer } from "@sixb/agent-ui"
+
+const workbookPreviewRenderer = {
+  id: "workbook-preview",
+  maxFileSizeBytes: 25 * 1024 * 1024,
+  supports: (file) =>
+    file.mediaType === "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+    file.fileName?.toLowerCase().endsWith(".xlsx") === true,
+  component: lazy(() => import("./WorkbookPreview")),
+} satisfies AgentDocumentPreviewRenderer
+
+<AgentPanel agentId="analyst" documentPreviewRenderers={[workbookPreviewRenderer]} />
+```
+
+The first matching host renderer handles the document, including formats with a built-in viewer.
+Built-in viewers are the fallback. Keep `supports` synchronous and metadata-only. A renderer
+component may come from a private package; only the host application that registers it needs that
+dependency.

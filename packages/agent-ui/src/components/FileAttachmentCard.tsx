@@ -9,7 +9,7 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { File as FileIcon, FileImage, FileText, Table2 } from "lucide-react"
 import { useDocumentPreview } from "../document-preview/DocumentPreviewRoot"
-import { agentDocumentPreviewRenderer } from "../document-preview/rendering"
+import { formatFileSize } from "../document-preview/file-size"
 import type { AgentDocumentSource } from "../document-preview/types"
 import type { AgentFileRef } from "../types"
 
@@ -24,7 +24,7 @@ export function FileAttachmentCard({
 }) {
   const preview = useDocumentPreview()
   const fileName = fileRef.fileName?.trim() || "File"
-  const previewable = agentDocumentPreviewRenderer(document?.kind ?? null) !== null
+  const previewable = document !== undefined && preview?.canPreview(document) === true
   const mediaLabel = fileMediaLabel(fileRef.mediaType, fileName)
   const { Icon, className: iconClassName } = fileIconPresentation(fileRef.mediaType, fileName)
 
@@ -87,21 +87,6 @@ function fileMediaLabel(mediaType: string | undefined, fileName: string): string
   if (normalized?.startsWith("text/")) return "Document"
   if (normalized) return normalized
   return "File"
-}
-
-function formatFileSize(sizeBytes: number): string {
-  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) return "Unknown size"
-
-  const units = ["B", "KB", "MB", "GB", "TB"] as const
-  let value = sizeBytes
-  let unitIndex = 0
-  while (value >= 1024 && unitIndex < units.length - 1) {
-    value /= 1024
-    unitIndex += 1
-  }
-
-  const maximumFractionDigits = unitIndex === 0 || value >= 10 ? 0 : 1
-  return `${value.toLocaleString(undefined, { maximumFractionDigits })} ${units[unitIndex]}`
 }
 
 function fileIconPresentation(mediaType: string | undefined, fileName: string) {
