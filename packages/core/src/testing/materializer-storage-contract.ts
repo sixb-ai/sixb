@@ -15,6 +15,7 @@ import { restoreTrustedPrimitiveExecutionScope } from "../execution/durable"
 import { createTestingScope } from "../execution/scopes"
 import type { OntologyMaterializer } from "../materializer"
 import {
+  createLinkScopeFingerprint,
   createOntologyMaterializer,
   type OntologyEditOperation,
   ProjectionRegistry,
@@ -42,7 +43,7 @@ const Device = defineObjectType({
     prop("name", "string", { required: true }),
     prop("temperature", "double", { mode: "telemetry" }),
   ],
-  links: [link.self("parent", { cardinality: "one" })],
+  links: [link.self("parent", { cardinality: "one" }), link.self("peers", { cardinality: "many" })],
 })
 
 const devices = defineDataset("storage_contract_devices", {
@@ -54,6 +55,9 @@ const devices = defineDataset("storage_contract_devices", {
 })
 const readings = defineDataset("storage_contract_readings", {
   schema: [col("device_id", "string"), col("at", "timestamp"), col("value", "float64")],
+})
+const devicePeers = defineDataset("storage_contract_device_peers", {
+  schema: [col("source_id", "string"), col("target_id", "string")],
 })
 const ConflictDevice = defineObjectType({
   id: "StorageContractConflictDevice",
@@ -88,6 +92,10 @@ const temperatureProjection = defineProjection(
 )
   .fromDataset(readings)
   .points({ objectId: "device_id", at: "at", value: "value" })
+const devicePeersProjection = defineProjection("storage_contract_device_peers", Device.l.peers)
+  .fromDataset(devicePeers)
+  .sourceField("source_id")
+  .targetField("target_id")
 const conflictDeviceProjection = defineProjection(
   "storage_contract_conflict_devices",
   ConflictDevice
@@ -98,11 +106,17 @@ const conflictDeviceProjection = defineProjection(
 
 const ontology = new OntologyRegistry({ sources: [Device, ConflictDevice] })
 const projections = new ProjectionRegistry({
-  projections: [deviceProjection, temperatureProjection, conflictDeviceProjection],
+  projections: [
+    deviceProjection,
+    temperatureProjection,
+    devicePeersProjection,
+    conflictDeviceProjection,
+  ],
   ontology,
   datasetsById: new Map<string, DatasetDefinition>([
     [devices.id, devices],
     [readings.id, readings],
+    [devicePeers.id, devicePeers],
     [conflictDevices.id, conflictDevices],
   ]),
 })
@@ -557,6 +571,160 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         ref: linkRef("haverstraw"),
       })
       expect(await targets()).toEqual(["rockland"])
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  test(`${name} fences projected cardinality-many link scopes by fingerprint`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let materializationOrdinal = 0
+    const materializer = createOntologyMaterializer({
+      projectId: "materializer-storage-contract",
+      ontology,
+      projections,
+      storage,
+      dependencies: {
+        batching: { sourceStageRows: 1, statePageRows: 1, planChunkRows: 1 },
+        clock: () => new Date("2026-02-01T12:00:00.000Z"),
+        materializationId: () => `many-scope-contract-candidate-${++materializationOrdinal}`,
+      },
+    })
+    const runtimeMaterializer = materializer.withScope(runtimeScope())
+    const source = { objectTypeId: Device.id, primaryId: "source" }
+    const peer = (primaryId: string) => ({ objectTypeId: Device.id, primaryId })
+    const linkRef = (targetId: string) => ({
+      source,
+      linkId: "peers",
+      target: peer(targetId),
+    })
+
+    try {
+      await runtimeMaterializer.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "many-scope-endpoints" },
+        operations: ["source", "peer-a", "peer-b", "peer-c"].map((primaryId) => ({
+          id: `create-${primaryId}`,
+          kind: "object.create" as const,
+          ref: peer(primaryId),
+          properties: { name: primaryId },
+        })),
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+
+      const datasetVersion = {
+        datasetId: devicePeers.id,
+        versionId: "many-links-v1",
+        createdAt: "2026-02-01T00:00:00.000Z",
+      }
+      const execution = await claim(storage, {
+        runId: "many-links-v1",
+        projectionId: devicePeersProjection.id,
+        protocol: "replacement",
+        datasetVersion,
+      })
+      const projectedLinks = [linkRef("peer-a"), linkRef("peer-b")]
+      await (
+        await projectionMaterializer(
+          materializer,
+          storage,
+          devicePeersProjection.id,
+          "many-links-v1"
+        )
+      ).projections.replace({
+        source: { projectionId: devicePeersProjection.id },
+        datasetVersion,
+        execution,
+        entries: entries(
+          projectedLinks.map((ref) => ({
+            root: { kind: "link", ref },
+            assertions: [{ kind: "link", ref }],
+          }))
+        ),
+      })
+
+      const observedLinks = await storage.objects.listLinks({
+        projectId: "materializer-storage-contract",
+        objectTypeId: Device.id,
+        objectId: source.primaryId,
+        linkId: "peers",
+      })
+      const fingerprint = createLinkScopeFingerprint(
+        observedLinks.map((row) => {
+          if (row.lastCommitId === undefined) {
+            throw new Error("Projected contract link is missing materializer provenance.")
+          }
+          return {
+            ref: linkRef(row.targetId),
+            createdAt: row.createdAt.toISOString(),
+            updatedAt: row.updatedAt.toISOString(),
+            lastCommitId: row.lastCommitId,
+          }
+        })
+      )
+      const commitObservation = async (runId: string, name: string) => {
+        await queueTestActionRun(storage, {
+          id: runId,
+          projectId: "materializer-storage-contract",
+          actionId: "observePeers",
+          subject: { kind: "object", objectTypeId: Device.id, primaryId: source.primaryId },
+          params: {},
+          idempotencyKey: runId,
+        })
+        await storage.actionRuns.start({ id: runId, projectId: "materializer-storage-contract" })
+        const actionMaterializer = await primitiveMaterializer(materializer, storage, {
+          kind: "action",
+          id: "observePeers",
+          runId,
+        })
+        return actionMaterializer.edits.commit({
+          mode: "atomic",
+          source: { kind: "action", actionId: "observePeers", runId },
+          operations: [
+            {
+              id: `record-${runId}`,
+              kind: "object.patch",
+              ref: source,
+              set: { name },
+              unset: [],
+              reset: [],
+            },
+          ],
+          expectedObjects: [],
+          expectedLinks: [],
+          expectedLinkScopes: [{ source, linkId: "peers", fingerprint }],
+        })
+      }
+
+      // Regression guard for G-021: make begin() hydrate the expected scope through the
+      // cardinality-one slot reader again and this otherwise unrelated Action commit fails before
+      // its already-stable fingerprint can be compared.
+      await expect(commitObservation("many-scope-action", "observed peers")).resolves.toMatchObject(
+        { kind: "edit", created: true }
+      )
+
+      await runtimeMaterializer.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "many-scope-change" },
+        operations: [{ id: "add-peer", kind: "link.upsert", ref: linkRef("peer-c") }],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+
+      await expect(commitObservation("stale-many-scope-action", "must not commit")).rejects.toThrow(
+        "Expected link scope changed"
+      )
+      expect(
+        await storage.objects.getByPrimaryId({
+          projectId: "materializer-storage-contract",
+          objectTypeId: Device.id,
+          primaryId: source.primaryId,
+        })
+      ).toMatchObject({ properties: { name: "observed peers" } })
     } finally {
       await provider.cleanup?.(createdStorage)
     }
