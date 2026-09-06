@@ -68,7 +68,7 @@ const compactionDemoContext =
 export const operationsAssistant = defineAgent("operations-assistant", {
   name: "Operations Assistant",
   description: "A demo agent showing how to add an AI assistant to a Sixb app.",
-  model: gateway("deepseek/deepseek-v4-flash-vision-exp"),
+  model: gateway("poolside/laguna-s-2.1-free"),
   reasoning: "medium",
   instructions: [
     "This is a demo agent for the Northline example.",
