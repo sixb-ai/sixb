@@ -5,6 +5,7 @@
     "paths": {
       "@sixb/action-worker": ["./packages/action-worker/src/index.ts"],
       "@sixb/agent-ui": ["./packages/agent-ui/src/index.ts"],
+      "@sixb/agent-ui/internal/context": ["./packages/agent-ui/src/internal/context.ts"],
       "@sixb/agent-ui/react-router": ["./packages/agent-ui/src/react-router.tsx"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],

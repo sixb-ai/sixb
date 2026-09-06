@@ -3,6 +3,12 @@ import { cloneJsonValue, getInvalidJsonValueReason, stableJsonStringify } from "
 import type { ObjectRef } from "../ontology/refs"
 import { AgentRequestError } from "./errors"
 
+export {
+  type AgentContextCommandInput,
+  compileAgentContextCommandInput,
+} from "./context-command-input"
+export type { AgentToolInputSchema, InferAgentToolInputSchema } from "./types"
+
 export type AgentContextInput =
   | { readonly kind: "object"; readonly ref: ObjectRef }
   | {

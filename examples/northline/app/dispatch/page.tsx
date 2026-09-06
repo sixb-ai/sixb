@@ -1,3 +1,4 @@
+import { agentContext, useAgentContext } from "@sixb/app/agents"
 import type {
   ListWorkflowInterventionsResponse,
   SubmitWorkflowInterventionData,
@@ -9,6 +10,7 @@ import {
   useObjectsQuery,
 } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
+import { stringEnum } from "@sixb/core/ontology"
 import { Button } from "@sixb/ui/components"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowRight, Check, ChevronLeft, ChevronRight, Filter, LoaderCircle } from "lucide-react"
@@ -69,6 +71,34 @@ export default function DispatchPage() {
   const [selectedDate, setSelectedDate] = useState(() => startOfDay(new Date()))
   const [scheduleView, setScheduleView] = useState<"timeline" | "list">("timeline")
   const [showAvailableOnly, setShowAvailableOnly] = useState(false)
+  const updateSchedule = (input: {
+    readonly view: "timeline" | "list"
+    readonly availableOnly: boolean
+  }) => {
+    setScheduleView(input.view)
+    setShowAvailableOnly(input.availableOnly)
+  }
+  useAgentContext(
+    agentContext.appState("northline-dispatch", {
+      label: "Dispatch",
+      description: "The selected schedule date, presentation, and technician availability filter.",
+      value: {
+        selectedDate: selectedDate.toISOString(),
+        scheduleView,
+        showAvailableOnly,
+      },
+    }),
+    {
+      commands: {
+        setSchedule: {
+          description:
+            "Switch between the timeline and list and optionally show only available technicians.",
+          input: { view: stringEnum(["timeline", "list"]), availableOnly: "boolean" },
+          run: updateSchedule,
+        },
+      },
+    }
+  )
   const [reviewingId, setReviewingId] = useState<string>()
   const [submittingId, setSubmittingId] = useState<string>()
   const didChooseInitialDate = useRef(false)
@@ -243,7 +273,9 @@ export default function DispatchPage() {
                     ? "h-9 bg-primary px-4 text-xs font-semibold text-primary-foreground"
                     : "h-9 px-4 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 }
-                onClick={() => setScheduleView("timeline")}
+                onClick={() =>
+                  updateSchedule({ view: "timeline", availableOnly: showAvailableOnly })
+                }
               >
                 Timeline
               </button>
@@ -255,7 +287,7 @@ export default function DispatchPage() {
                     ? "h-9 border-l border-border bg-primary px-4 text-xs font-semibold text-primary-foreground"
                     : "h-9 border-l border-border px-4 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 }
-                onClick={() => setScheduleView("list")}
+                onClick={() => updateSchedule({ view: "list", availableOnly: showAvailableOnly })}
               >
                 List
               </button>
@@ -270,7 +302,9 @@ export default function DispatchPage() {
                   ? "grid size-9 place-items-center rounded-md border border-primary bg-primary text-primary-foreground"
                   : "grid size-9 place-items-center rounded-md border border-border bg-background text-muted-foreground transition-colors hover:border-primary/45 hover:text-primary"
               }
-              onClick={() => setShowAvailableOnly((current) => !current)}
+              onClick={() =>
+                updateSchedule({ view: scheduleView, availableOnly: !showAvailableOnly })
+              }
             >
               <Filter className="size-4" strokeWidth={1.8} />
             </button>

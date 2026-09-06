@@ -152,14 +152,34 @@ generated shell automatically adds a `sixb-custom-app-route` context entry conta
 location, matching route pattern, complete generated route catalog, and a short-lived capability
 for that tab. An embedded `AgentPanel` receives it without app-authored route plumbing.
 
-The co-hosted development runtime automatically provides `inspect_app` and `navigate_app` only for
+The co-hosted development runtime automatically provides `inspect_app`, `navigate_app`, and
+`invoke_app_command` only for
 a conversational turn triggered by a currently connected custom-app tab. Agents do not declare
 these host capabilities in their `tools` list, workflows and direct API requests do not receive
 them, and the tab session id is excluded from model context and model-facing tool input. Navigation is restricted
-to the generated same-origin route catalog. Provisioning either tool also activates the worker's
+to the generated same-origin route catalog. Provisioning the tools also activates the worker's
 application-surface rules, so project prompts can stay focused on the agent's role and business
 judgment instead of explaining route context, browser mechanics, navigation responses, or file
 preview behavior.
+
+`useAgentContext(context, { commands })` associates typed view operations with the same component
+registration that contributes ambient context. Import it from `@sixb/app/agents`; existing
+single-argument registrations continue to work. See the
+[context command example](../agent-ui/README.md#commands-on-live-context) for the full API.
+
+Inspection and navigation results include the current context values and available command
+descriptors. The agent invokes a command using its live registration id, local command name, and
+JSON-encoded input. The browser validates that input against the declared Sixb schema, invokes the
+latest React handler, and returns the resulting context after the UI update. This lets an agent
+navigate to Dispatch and change its view in the same turn, without a separate agent tool definition
+for every component.
+
+The route context stores offered context identities as host-only metadata. At send time, omitted
+context chips are excluded from subsequent live inspection and invocation for that turn. New
+contexts mounted by navigation become discoverable, while departed or replaced component instances
+cannot be invoked through their old registration ids. Commands remain scoped to the originating
+browser tab and expire after 30 seconds; cancellation also removes commands still waiting in its
+queue. Async view handlers receive an abort signal when their view disappears or execution expires.
 
 This first slice intentionally runs only in the co-hosted `sixb dev` process. It proves the tab and
 tool protocol without turning the public app server into a remote-control plane. A production

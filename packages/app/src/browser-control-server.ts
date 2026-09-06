@@ -1,6 +1,7 @@
 import {
   type AppBrowserCommand,
   type AppBrowserCommandResult,
+  type AppBrowserOperation,
   appBrowserControlPath,
   appBrowserControlSecretHeader,
 } from "./browser-control-protocol"
@@ -32,9 +33,7 @@ interface PendingBrowserCommand {
   readonly dispose: () => void
 }
 
-export type AppBrowserCommandInput =
-  | { readonly kind: "inspect" }
-  | { readonly kind: "navigate"; readonly path: string }
+export type AppBrowserCommandInput = AppBrowserOperation
 
 export class AppBrowserControlError extends Error {
   readonly name = "AppBrowserControlError"
@@ -149,7 +148,11 @@ export class AppBrowserControlHub {
   ): Promise<unknown> {
     this.#pruneStaleSessions()
     const session = this.#activeSession(sessionId)
-    const command = { id: crypto.randomUUID(), ...input } as AppBrowserCommand
+    const command: AppBrowserCommand = {
+      id: crypto.randomUUID(),
+      expiresAt: this.now() + browserCommandTimeoutMs,
+      ...input,
+    }
 
     return await new Promise<unknown>((resolve, reject) => {
       let settled = false
@@ -157,6 +160,8 @@ export class AppBrowserControlHub {
         if (settled) return
         settled = true
         this.#pending.delete(command.id)
+        const queuedIndex = session.commands.findIndex((entry) => entry.id === command.id)
+        if (queuedIndex !== -1) session.commands.splice(queuedIndex, 1)
         dispose()
         reject(error)
       }
