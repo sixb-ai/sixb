@@ -34,6 +34,7 @@ import {
 import { useRuleLiveUpdates } from "../features/rules/hooks/useRuleLiveUpdates"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
+import { objectDetailPath } from "../lib/objectRoutes"
 import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
 
@@ -732,7 +733,7 @@ export function RuleDetailPage() {
   const states = statesQuery.data?.states ?? []
 
   const handleSelectObject = (state: RuleState) => {
-    navigate(`/${encodeObjectId(state.subject.objectTypeId, state.subject.primaryId)}`)
+    navigate(objectDetailPath(encodeObjectId(state.subject.objectTypeId, state.subject.primaryId)))
   }
 
   if (ruleQuery.isLoading) {
