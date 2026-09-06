@@ -340,6 +340,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: turnSignal,
         messages: prepared.threadContext.retainedMessages,
         skills: prepared.skills,
+        runtimeProvision: prepared.runtimeProvision,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       runtime.assertCanContinue()
@@ -788,6 +789,7 @@ function buildAgentContext(
       )
     ),
     recoverAiModelCall: (input) => enqueueAiModelCallRecovery(host.queues.agents, input),
+    conversationToolProvider: options.conversationToolProvider,
     agentSkills,
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
     turnTimeoutMs,

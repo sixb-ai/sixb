@@ -1,5 +1,6 @@
 import { dirname, resolve } from "node:path"
 import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
+import { createAppBrowserControlRuntime } from "@sixb/app/agent-tools"
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
 import { createSixbServer, type SixbServer } from "@sixb/server"
 import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
@@ -59,11 +60,13 @@ export async function runDev(options: DevOptions = {}) {
       appPublicOrigin: options.appPublicOrigin,
       hasCustomApp,
     })
+    const browserControl = hasCustomApp ? createAppBrowserControlRuntime() : undefined
     const customApp = await createCustomApp({
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
       authEnabled: host.auth.isEnabled(),
+      browserControl,
     })
     const authExperience = hasCustomApp
       ? ((await customApp.prepareAuthExperience()) ?? {
@@ -76,6 +79,7 @@ export async function runDev(options: DevOptions = {}) {
       agentApiBaseUrl: topology.apiPublicOrigin,
       agentTurnTimeoutMs,
       workerConcurrency,
+      conversationToolProvider: browserControl?.conversationToolProvider,
     })
     const authEnabled = host.auth.isEnabled()
 

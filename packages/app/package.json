@@ -34,6 +34,12 @@
       "import": "./dist/agents.js",
       "default": "./dist/agents.js"
     },
+    "./agent-tools": {
+      "types": "./dist/agent-tools.d.ts",
+      "bun": "./src/agent-tools.ts",
+      "import": "./dist/agent-tools.js",
+      "default": "./dist/agent-tools.js"
+    },
     "./auth": {
       "types": "./dist/auth.d.ts",
       "bun": "./src/auth.ts",

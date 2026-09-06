@@ -432,6 +432,10 @@ export async function generateAppEntry(
     stylesheetPath?: string | null
     /** Framework-owned stylesheets imported before the app stylesheet. */
     frameworkStylesheetPaths?: readonly string[]
+    /** Add automatic route context for the custom app's agent surfaces. */
+    agentContext?: boolean
+    /** Enable the co-hosted custom-app browser-control POC in the generated shell. */
+    browserControl?: boolean
   } = {}
 ): Promise<{ htmlPath: string; mainPath: string; manifestPath: string }> {
   await mkdir(generatedDir, { recursive: true })
@@ -469,6 +473,15 @@ export async function generateAppEntry(
         auth: { audience: options.audience ?? "app", enabled: options.authEnabled ?? true },
       })
     : ""
+  const browserControlEnabled = options.browserControl === true
+  const agentContextEnabled = options.agentContext === true || browserControlEnabled
+  const agentContextImport = agentContextEnabled
+    ? 'import { AppAgentContextProvider } from "@sixb/app/agents"'
+    : ""
+  const agentContextWrapperStart = agentContextEnabled
+    ? `<AppAgentContextProvider routePaths={routePaths} browserControl={${browserControlEnabled}}>`
+    : "<>"
+  const agentContextWrapperEnd = agentContextEnabled ? "</AppAgentContextProvider>" : "</>"
 
   // Generate main.tsx
   const mainContent = `import React from "react"
@@ -488,6 +501,7 @@ import {
   readSixbBrowserRuntimeConfig,
   requireSixbBrowserAuthSession,
 } from "@sixb/client/browser"
+${agentContextImport}
 import { routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
@@ -802,12 +816,14 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <BrowserRouter>
-        <InternalLinkInterceptor />
-        <RoutedErrorBoundary>
-          ${layoutWrapperStart}
-            <AppRoutes />
-          ${layoutWrapperEnd}
-        </RoutedErrorBoundary>
+        ${agentContextWrapperStart}
+          <InternalLinkInterceptor />
+          <RoutedErrorBoundary>
+            ${layoutWrapperStart}
+              <AppRoutes />
+            ${layoutWrapperEnd}
+          </RoutedErrorBoundary>
+        ${agentContextWrapperEnd}
       </BrowserRouter>
     </QueryClientProvider>
   )

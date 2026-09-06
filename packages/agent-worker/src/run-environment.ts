@@ -16,6 +16,7 @@ import {
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
+import { combineAgentTools, EMPTY_CONVERSATION_TOOL_PROVISION } from "./conversation-tools"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
@@ -24,7 +25,12 @@ import { BASH_TOOL_SPEC, createBashTool } from "./tools/bash"
 import { createReadTool, READ_TOOL_SPEC } from "./tools/read"
 import { AgentToolResultMediaBridge } from "./tools/result-media"
 import { createViewFileTool, VIEW_FILE_TOOL_SPEC } from "./tools/view-file"
-import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
+import type {
+  AgentConversationToolProvision,
+  AgentExecutionContext,
+  AgentTurnContext,
+  AgentWorkerContext,
+} from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
 
 export interface AgentExecutionEnvironment {
@@ -50,6 +56,8 @@ export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvi
   readonly messages?: readonly AgentMessageRecord[]
   /** Skills already loaded while estimating the request. */
   readonly skills?: readonly AgentSkill[]
+  /** Host-owned tools and prompt capabilities already resolved during preflight. */
+  readonly runtimeProvision: AgentConversationToolProvision
 }
 
 export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvironmentInput {
@@ -100,6 +108,7 @@ export async function createConversationAgentEnvironment(
     apiBaseUrl,
     attachmentContext,
     skills,
+    runtimeProvision: input.runtimeProvision,
     onDetachedTeardown: input.onDetachedTeardown,
   })
 }
@@ -148,6 +157,7 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: Awaited<AgentWorkerContext["agentSkills"]>
+  readonly runtimeProvision?: AgentConversationToolProvision
 }
 
 /**
@@ -156,6 +166,8 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
  */
 function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvironment {
   const { mode, context, agent, runId, threadId, apiBaseUrl, attachmentContext, skills } = input
+  const runtimeProvision = input.runtimeProvision ?? EMPTY_CONVERSATION_TOOL_PROVISION
+  const definitions = combineAgentTools(agent.tools, runtimeProvision.tools)
 
   const logSession = resolveLoggingService(context.id, context.logging).startExecution({
     kind: "agent",
@@ -185,7 +197,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       onPublished: (artifact) => fileRegistry.register(artifact.sandboxPath, artifact.fileRef),
     })
   const tools = aiSdkToolsFromAgentDefinitions({
-    definitions: agent.tools,
+    definitions,
     valueTypesById: context.valueTypesById,
     run: { id: runId, agentId: agent.id, ...(threadId ? { threadId } : {}) },
     connector: context.connector,
@@ -243,7 +255,12 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       attachmentContext,
       tools,
       prepareStep: mediaBridge.prepareStep,
-      systemPrompt: renderAgentSystemPrompt({ mode, instructions: agent.instructions, skills }),
+      systemPrompt: renderAgentSystemPrompt({
+        mode,
+        instructions: agent.instructions,
+        skills,
+        capabilities: runtimeProvision.capabilities,
+      }),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,

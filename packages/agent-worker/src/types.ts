@@ -1,4 +1,5 @@
 import type {
+  AgentToolDefinition,
   AgentToolRunContext,
   AuthorizablePrincipal,
   BlobStorage,
@@ -13,6 +14,7 @@ import type {
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type {
+  AgentMessageRecord,
   AgentStorage,
   AiCostStorage,
   AiPricingContext,
@@ -41,6 +43,32 @@ export interface RecoverAiModelCallInput {
 }
 
 export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<void>
+
+export type AgentConversationCapability = "application-surface"
+
+export interface AgentConversationToolProvision {
+  readonly tools: readonly AgentToolDefinition[]
+  readonly capabilities?: readonly AgentConversationCapability[]
+}
+
+/** Exact conversational request available to a host-owned, per-turn tool provider. */
+export interface AgentConversationToolProviderInput {
+  readonly projectId: string
+  readonly agentId: string
+  readonly runId: string
+  readonly threadId: string
+  readonly triggerMessageId: string
+  readonly triggerMessage: AgentMessageRecord
+  readonly signal: AbortSignal
+}
+
+/**
+ * Supplies ephemeral tools that exist only for one conversational turn. This is the runtime seam
+ * for host capabilities such as a live custom-app tab; agents do not declare those tools.
+ */
+export type AgentConversationToolProvider = (
+  input: AgentConversationToolProviderInput
+) => AgentConversationToolProvision | Promise<AgentConversationToolProvision>
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
@@ -74,6 +102,7 @@ export interface AgentWorkerContext {
   readonly streamSink: StreamSink
   /** Durable fallback used only when the direct model-call ledger append remains unavailable. */
   readonly recoverAiModelCall: RecoverAiModelCall
+  readonly conversationToolProvider?: AgentConversationToolProvider
   readonly agentSkills: Promise<readonly AgentSkill[]>
   readonly defaultMaxSteps: number
   readonly turnTimeoutMs: number
@@ -128,6 +157,8 @@ export interface AgentWorkerOptions {
   readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
+  /** Host-owned tools resolved from the exact triggering message for conversational turns only. */
+  readonly conversationToolProvider?: AgentConversationToolProvider
   /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 25. */
   readonly defaultMaxSteps?: number
   /**

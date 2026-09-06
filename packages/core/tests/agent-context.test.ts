@@ -74,6 +74,26 @@ describe("agent context normalization", () => {
     ])
   })
 
+  test("snapshots an optional model-safe app-state projection", () => {
+    const modelValue = { pathname: "/customers" }
+    const [entry] = normalizeAgentContextEntries([
+      {
+        context: {
+          kind: "app-state",
+          id: "app-route",
+          label: "App route",
+          description: "Current route",
+          value: { pathname: "/customers", runtimeToken: "secret" },
+          modelValue,
+        },
+        origin: "ambient",
+      },
+    ])
+    modelValue.pathname = "/equipment"
+
+    expect(entry?.context).toMatchObject({ modelValue: { pathname: "/customers" } })
+  })
+
   test("rejects conflicting entries with the same identity", () => {
     expect(() =>
       normalizeAgentContextEntries([
@@ -177,5 +197,26 @@ describe("agent context model projection", () => {
         "</sixb_user_context>",
       ].join("\n")
     )
+  })
+
+  test("uses the model-safe projection instead of host metadata", () => {
+    const serialized = serializeAgentContextForModel([
+      {
+        type: "context",
+        context: {
+          kind: "app-state",
+          id: "app-route",
+          label: "App route",
+          description: "Current route",
+          value: { pathname: "/customers", runtimeToken: "secret" },
+          modelValue: { pathname: "/customers" },
+        },
+        origin: "ambient",
+      },
+    ])
+
+    expect(serialized).toContain("pathname")
+    expect(serialized).not.toContain("runtimeToken")
+    expect(serialized).not.toContain("secret")
   })
 })

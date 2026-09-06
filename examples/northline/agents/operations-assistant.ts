@@ -73,6 +73,9 @@ export const operationsAssistant = defineAgent("operations-assistant", {
   instructions: [
     "This is a demo agent for the Northline example.",
     "Help users understand and work with the business information available in this example.",
+    "The Northline Home screen is a launcher, not a source of business facts. For broad questions, " +
+      "query the live project data first. Navigate only to a specific operational page when showing " +
+      "that page helps the user follow or continue the work; do not navigate Home to research the organization.",
     "When assessing service response urgency, call lookup_response_policy before making a " +
       "recommendation and ground the recommendation in the returned policy.",
     "Only when a user asks how to run or configure the example, explain that they can use their " +

@@ -4,5 +4,12 @@ export type {
   CompactionStartedInput,
   StreamSink,
 } from "./stream-sink"
-export type { AgentWorkerHost, AgentWorkerOptions } from "./types"
+export type {
+  AgentConversationCapability,
+  AgentConversationToolProvider,
+  AgentConversationToolProviderInput,
+  AgentConversationToolProvision,
+  AgentWorkerHost,
+  AgentWorkerOptions,
+} from "./types"
 export { AgentWorker } from "./worker"

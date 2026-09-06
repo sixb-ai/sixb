@@ -11,6 +11,8 @@ export type AgentContextInput =
       readonly label: string
       readonly description: string
       readonly value: JsonValue
+      /** Optional safe projection used in model input when `value` also carries host metadata. */
+      readonly modelValue?: JsonValue
     }
 
 export type AgentContextOrigin = "ambient" | "explicit"
@@ -47,6 +49,7 @@ export const agentContext = {
       readonly label: string
       readonly description: string
       readonly value: TValue
+      readonly modelValue?: JsonValue
     }
   ) {
     return { kind: "app-state" as const, id, ...input }
@@ -150,6 +153,15 @@ function normalizeEntry(rawEntry: unknown, index: number): AgentContextEntryInpu
     if (reason) {
       invalidContext(`context[${index}].context.value must be a JSON value; ${reason}`)
     }
+    const modelValueReason = getInvalidJsonValueReason(
+      context.modelValue,
+      `context[${index}].context.modelValue`
+    )
+    if (context.modelValue !== undefined && modelValueReason) {
+      invalidContext(
+        `context[${index}].context.modelValue must be a JSON value; ${modelValueReason}`
+      )
+    }
     return {
       context: {
         kind: "app-state",
@@ -157,6 +169,9 @@ function normalizeEntry(rawEntry: unknown, index: number): AgentContextEntryInpu
         label,
         description,
         value: cloneJsonValue(context.value as JsonValue),
+        ...(context.modelValue === undefined
+          ? {}
+          : { modelValue: cloneJsonValue(context.modelValue as JsonValue) }),
       },
       origin: rawEntry.origin,
     }

@@ -92,6 +92,10 @@ skill is relevant.
 Sixb composes these project instructions with framework-owned conversation rules for grounding,
 confirmation before domain changes, safe context handling, useful milestone updates during longer
 work, and concise outcome-focused responses.
+Selected application-control tools also add shared-workspace rules automatically: the agent uses
+current application state for interface orientation, navigates directly when asked, keeps browser
+mechanics out of its response, and treats generated files as working artifacts. Application authors
+do not need to repeat those mechanics in each agent's `instructions`.
 
 ## Tools
 

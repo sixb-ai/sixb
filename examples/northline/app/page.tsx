@@ -1,8 +1,8 @@
-import { AgentPanel, setAgentSurfaceMode } from "@sixb/app/agents"
+import { AgentPanel, isAppAgentNavigation, setAgentSurfaceMode } from "@sixb/app/agents"
 import { CalendarClock, ClipboardList, Gauge, Network } from "lucide-react"
 import type { ComponentType, SVGProps } from "react"
 import { useEffect } from "react"
-import { Link, useNavigate } from "react-router-dom"
+import { Link, useLocation, useNavigate } from "react-router-dom"
 
 const ASSISTANT_ID = "operations-assistant"
 
@@ -35,9 +35,12 @@ const shortcuts = [
 
 export default function NorthlineHomePage() {
   const navigate = useNavigate()
+  const location = useLocation()
+  const agentContinuation = isAppAgentNavigation(location.state)
+
   useEffect(() => {
-    setAgentSurfaceMode(ASSISTANT_ID, "collapsed")
-  }, [])
+    setAgentSurfaceMode(ASSISTANT_ID, agentContinuation ? "dock" : "collapsed")
+  }, [agentContinuation])
 
   const changeThread = (nextThreadId: string | null) => {
     if (!nextThreadId) return
@@ -46,19 +49,36 @@ export default function NorthlineHomePage() {
 
   return (
     <section className="h-full min-h-[34rem]">
-      <AgentPanel
-        agentId={ASSISTANT_ID}
-        threadId={null}
-        onThreadChange={changeThread}
-        centerEmptyState
-        hideHeaderOnEmpty
-        emptyStateThreadHistoryLabel="Recent conversations"
-        emptyStateHeader={<NorthlineHomeBrand />}
-        emptyStateFooter={<HomeShortcuts />}
-        composerPlaceholder="Ask Northline about today’s work"
-        className="h-full bg-transparent"
-      />
+      {agentContinuation ? (
+        <HomeContinuationCanvas />
+      ) : (
+        <AgentPanel
+          agentId={ASSISTANT_ID}
+          threadId={null}
+          onThreadChange={changeThread}
+          centerEmptyState
+          hideHeaderOnEmpty
+          emptyStateThreadHistoryLabel="Recent conversations"
+          emptyStateHeader={<NorthlineHomeBrand />}
+          emptyStateFooter={<HomeShortcuts />}
+          composerPlaceholder="Ask Northline about today’s work"
+          className="h-full bg-transparent"
+        />
+      )}
     </section>
+  )
+}
+
+function HomeContinuationCanvas() {
+  return (
+    <div className="flex h-full items-center justify-center px-4 pb-[8vh]">
+      <div className="w-full max-w-3xl">
+        <NorthlineHomeBrand />
+        <div className="mt-7">
+          <HomeShortcuts />
+        </div>
+      </div>
+    </div>
   )
 }
 

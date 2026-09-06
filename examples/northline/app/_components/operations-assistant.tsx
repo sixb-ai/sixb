@@ -1,35 +1,18 @@
-import { AgentSurface, agentContext } from "@sixb/app/agents"
+import { AgentSurface, agentContext, isAppAgentNavigation, useAgentContext } from "@sixb/app/agents"
 import { useLocation, useNavigate } from "react-router-dom"
 import { CustomerAccount } from "../../ontology/customer-account"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
 
-const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
-  ["/service-cases", "Service cases"],
-  ["/dispatch", "Dispatch"],
-  ["/quotes", "Quotes"],
-  ["/contracts", "Contracts"],
-  ["/customers", "Customers"],
-  ["/equipment", "Equipment"],
-  ["/technicians", "Technicians"],
-  ["/review", "Operational review"],
-]
-
 export function OperationsAssistant() {
   const location = useLocation()
   const navigate = useNavigate()
   const objectContext = currentObjectContext(location.pathname)
-  const pageLabel =
-    pageLabels.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ?? "Home"
-  const pageContext = agentContext.appState("northline-current-page", {
-    label: pageLabel,
-    description: "The current Northline Operations route and query state.",
-    value: { path: location.pathname, query: location.search },
-  })
-  const context = objectContext ? [pageContext, objectContext] : [pageContext]
+  const agentContinuation = isAppAgentNavigation(location.state)
+  useAgentContext(objectContext)
   if (
-    location.pathname === "/" ||
+    (location.pathname === "/" && !agentContinuation) ||
     location.pathname.startsWith("/agents") ||
     location.pathname.startsWith("/chat/")
   ) {
@@ -41,7 +24,14 @@ export function OperationsAssistant() {
       agentId="operations-assistant"
       title="Northline Operations Assistant"
       launcherLabel="Ask Northline"
-      context={context}
+      onModeChange={(mode) => {
+        if (mode === "collapsed" && location.pathname === "/" && agentContinuation) {
+          navigate(`${location.pathname}${location.search}${location.hash}`, {
+            replace: true,
+            state: null,
+          })
+        }
+      }}
       onExpandThread={(threadId) => {
         navigate(`/chat/${encodeURIComponent(threadId)}`)
       }}

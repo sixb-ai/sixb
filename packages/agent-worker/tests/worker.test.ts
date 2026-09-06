@@ -71,12 +71,16 @@ import {
 } from "@sixb/core/testing"
 import { jsonSchema, type ToolSet, tool } from "ai"
 import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
-import { AgentWorker, type AgentWorkerOptions } from "../src"
+import { type AgentConversationToolProvider, AgentWorker, type AgentWorkerOptions } from "../src"
 import { renderAgentSystemPrompt } from "../src/agent-prompt"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments, toolResultAttachmentKey } from "../src/attachments"
+import {
+  EMPTY_CONVERSATION_TOOL_PROVISION,
+  resolveConversationToolProvision,
+} from "../src/conversation-tools"
 import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
 import { finishRunOrThrow } from "../src/finalize"
 import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
@@ -1563,7 +1567,10 @@ function workerStorageOf(storage: Storage): AgentWorkerStorage {
 
 async function buildAgentWorkerContext(
   sixb: TestSixb,
-  input: { readonly apiBaseUrl?: string } = {}
+  input: {
+    readonly apiBaseUrl?: string
+    readonly conversationToolProvider?: AgentConversationToolProvider
+  } = {}
 ): Promise<AgentExecutionContext> {
   if (!sixb.sandboxes) {
     throw new Error("expected sandbox factory")
@@ -1578,6 +1585,7 @@ async function buildAgentWorkerContext(
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
     recoverAiModelCall: recoverAiModelCall(sixb),
+    conversationToolProvider: input.conversationToolProvider,
     agentSkills: loadAgentSkills({ projectSkillsDir: false }),
     defaultMaxSteps: 4,
     turnTimeoutMs: 60_000,
@@ -2558,7 +2566,17 @@ describe("AgentWorker", () => {
       return next(usage)
     })
 
-    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    let conversationToolProviderCalls = 0
+    const worker = new AgentWorker(
+      sixb,
+      workerOptions({
+        skillsDir: false,
+        conversationToolProvider: () => {
+          conversationToolProviderCalls += 1
+          return { tools: [] }
+        },
+      })
+    )
     await worker.start()
     try {
       const execution = await waitFor(
@@ -2581,6 +2599,7 @@ describe("AgentWorker", () => {
       expect(execution.execution).toBeUndefined()
       expect(execution.trace).toBeArray()
       expect(lookupCalls).toBe(1)
+      expect(conversationToolProviderCalls).toBe(0)
       expect(recordedUsage).toHaveLength(3)
       expect(recordedUsage.map((usage) => usage.executionId)).toEqual([
         agentExecutionId,
@@ -3432,6 +3451,62 @@ describe("AgentWorker", () => {
     })
   })
 
+  test("adds application-surface rules when the host provides an app control tool", async () => {
+    const navigateApp = defineAgentTool("navigate_app")
+      .description("Navigate the connected application.")
+      .input({ path: "string" })
+      .run(({ input }) => ({ path: input.path }))
+    const sixb = buildSixb(toolThenAnswerModel())
+    const agent = sixb.definitions.agents.getById("assistant")
+    if (!agent) {
+      throw new Error("Expected test agent.")
+    }
+    const request = await requestAgent(sixb, { agentId: "assistant", text: "open customers" })
+    const run = await reserveRequestedRun(sixb, request)
+    let providerCalls = 0
+    const conversationToolProvider: AgentConversationToolProvider = ({ triggerMessage }) => {
+      providerCalls += 1
+      expect(triggerMessage.id).toBe(run.triggerMessageId)
+      return { tools: [navigateApp], capabilities: ["application-surface"] }
+    }
+    const context = await buildAgentWorkerContext(sixb, {
+      apiBaseUrl: "http://sixb-api.local/api/",
+      conversationToolProvider,
+    })
+    const triggerMessage = (
+      await context.storage.agents.messages.list({
+        projectId: context.id,
+        threadId: run.threadId,
+      })
+    ).messages.find((message) => message.id === run.triggerMessageId)
+    if (!triggerMessage) throw new Error("Expected triggering message.")
+    const runtimeProvision = await resolveConversationToolProvision({
+      context,
+      agent,
+      run,
+      messages: [triggerMessage],
+      signal: new AbortController().signal,
+    })
+    const environment = await createConversationAgentEnvironment({
+      context,
+      agent,
+      run,
+      runtimeProvision,
+    })
+
+    try {
+      expect(agent.tools.some((tool) => tool.name === "navigate_app")).toBe(false)
+      expect(providerCalls).toBe(1)
+      expect(environment.turnContext.tools.navigate_app).toBeDefined()
+      expect(environment.turnContext.systemPrompt).toContain("<sixb_application_surface_rules>")
+      expect(environment.turnContext.systemPrompt).toContain(
+        "live application as a shared workspace with the user"
+      )
+    } finally {
+      await environment.dispose()
+    }
+  })
+
   test("creates isolated gateway URLs and sandbox env per concurrent run environment", async () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(toolThenAnswerModel(), new InMemoryBroker(), sandboxes)
@@ -3452,8 +3527,18 @@ describe("AgentWorker", () => {
       apiBaseUrl: "http://sixb-api.local/api/",
     })
     const [firstEnvironment, secondEnvironment] = await Promise.all([
-      createConversationAgentEnvironment({ context, agent, run: firstRun }),
-      createConversationAgentEnvironment({ context, agent, run: secondRun }),
+      createConversationAgentEnvironment({
+        context,
+        agent,
+        run: firstRun,
+        runtimeProvision: EMPTY_CONVERSATION_TOOL_PROVISION,
+      }),
+      createConversationAgentEnvironment({
+        context,
+        agent,
+        run: secondRun,
+        runtimeProvision: EMPTY_CONVERSATION_TOOL_PROVISION,
+      }),
     ])
     let firstDisposed = false
     let secondDisposed = false
@@ -3540,7 +3625,12 @@ describe("AgentWorker", () => {
       apiBaseUrl: "http://sixb-api.local/api/",
     })
 
-    const environment = await createConversationAgentEnvironment({ context, agent, run })
+    const environment = await createConversationAgentEnvironment({
+      context,
+      agent,
+      run,
+      runtimeProvision: EMPTY_CONVERSATION_TOOL_PROVISION,
+    })
     try {
       await environment.turnContext.sandboxReady
       const sandbox = sandboxes.sandboxes[0]
@@ -3603,6 +3693,7 @@ describe("AgentWorker", () => {
       context,
       agent: sixb.definitions.agents.getById("assistant")!,
       run,
+      runtimeProvision: EMPTY_CONVERSATION_TOOL_PROVISION,
     })
     try {
       await runAgentTurn({
@@ -3661,6 +3752,7 @@ describe("AgentWorker", () => {
       context,
       agent: sixb.definitions.agents.getById("assistant")!,
       run,
+      runtimeProvision: EMPTY_CONVERSATION_TOOL_PROVISION,
     })
     try {
       await runAgentTurn({
@@ -3723,6 +3815,7 @@ describe("AgentWorker", () => {
       context,
       agent: sixb.definitions.agents.getById("assistant")!,
       run,
+      runtimeProvision: EMPTY_CONVERSATION_TOOL_PROVISION,
     })
     try {
       await runAgentTurn({
@@ -3915,7 +4008,12 @@ describe("AgentWorker", () => {
 
     // Resolves while create() is still gated: the system prompt is ready and the
     // sandbox has not been built yet.
-    const environment = await createConversationAgentEnvironment({ context, agent, run })
+    const environment = await createConversationAgentEnvironment({
+      context,
+      agent,
+      run,
+      runtimeProvision: EMPTY_CONVERSATION_TOOL_PROVISION,
+    })
     expect(environment.turnContext.systemPrompt).toContain(
       "inside a live Sixb project modeled as an ontology"
     )
@@ -3963,6 +4061,7 @@ describe("AgentWorker", () => {
       context,
       agent,
       run,
+      runtimeProvision: EMPTY_CONVERSATION_TOOL_PROVISION,
       onDetachedTeardown: (teardown) => {
         detached = teardown
       },

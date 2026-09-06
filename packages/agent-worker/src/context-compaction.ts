@@ -20,11 +20,12 @@ import { generateText } from "ai"
 import { renderAgentSystemPrompt } from "./agent-prompt"
 import type { AgentSkill } from "./agent-skills"
 import type { AgentContextBudget } from "./context-budget"
+import { combineAgentTools, resolveConversationToolProvision } from "./conversation-tools"
 import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
 import { type LoadedAgentThreadModelContext, loadAgentThreadModelContext } from "./thread-context"
 import { type AgentModelToolSpec, agentModelToolSpecs } from "./tools/model-spec"
 import type { AgentTurnRuntime } from "./turn-runtime"
-import type { AgentExecutionContext } from "./types"
+import type { AgentConversationToolProvision, AgentExecutionContext } from "./types"
 
 const SUMMARY_FORMAT_VERSION = 1 as const
 const SUMMARY_MAX_OUTPUT_TOKENS = 8_192
@@ -48,6 +49,7 @@ const SUMMARY_SYSTEM_PROMPT = [
 export interface PreparedAgentConversationContext {
   readonly threadContext: LoadedAgentThreadModelContext
   readonly skills: readonly AgentSkill[]
+  readonly runtimeProvision: AgentConversationToolProvision
 }
 
 /** Load, estimate, and—when required—compact one admitted conversational run before setup. */
@@ -69,15 +71,26 @@ export async function prepareAgentConversationContext(input: {
   ])
   runtime.assertCanContinue()
 
+  const runtimeProvision = await resolveConversationToolProvision({
+    context,
+    agent,
+    run,
+    messages: initialContext.retainedMessages,
+    signal: runtime.signal,
+  })
+  runtime.assertCanContinue()
+  const definitions = combineAgentTools(agent.tools, runtimeProvision.tools)
+
   const estimateShape = {
     systemPrompt: renderAgentSystemPrompt({
       mode: "conversation",
       instructions: agent.instructions,
       skills,
+      capabilities: runtimeProvision.capabilities,
     }),
     tools: contextEstimateTools(
       agentModelToolSpecs({
-        definitions: agent.tools,
+        definitions,
         valueTypesById: context.valueTypesById,
       })
     ),
@@ -96,7 +109,7 @@ export async function prepareAgentConversationContext(input: {
       inputBudgetTokens: budget.inputBudgetTokens,
     })
   ) {
-    return { threadContext: initialContext, skills }
+    return { threadContext: initialContext, skills, runtimeProvision }
   }
 
   const reason = "threshold" satisfies AgentContextCheckpointReason
@@ -199,7 +212,7 @@ export async function prepareAgentConversationContext(input: {
       estimatedInputTokensBefore,
       estimatedInputTokensAfter,
     })
-    return { threadContext, skills }
+    return { threadContext, skills, runtimeProvision }
   } catch (error) {
     // Preserve queue ownership, accounting, deadline, and cancellation failures as their original
     // run-level outcome instead of relabeling them as a compaction implementation failure.
