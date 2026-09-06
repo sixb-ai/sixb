@@ -40,6 +40,55 @@ function modelCall(): RecordAiModelCallInput {
 }
 
 describe("AI usage recovery", () => {
+  test.each([
+    {},
+    { routedProviderId: "openai", routedModelId: "gpt-5" },
+  ])("preserves usage from legacy pricing-context recovery jobs (%j)", async (pricingContext) => {
+    // Regression proof: remove the legacy pricingContext branch in accountingFromQueuePayload.
+    const queues = new InMemoryQueues()
+    const storage = new InMemoryStorage()
+    await createTestAgentExecution(storage, {
+      projectId,
+      agentId: "assistant",
+      runId: "run_1",
+      executionId,
+    })
+    const record = modelCall()
+    await enqueueAiModelCallRecovery(queues.agents, record)
+    const [claim] = await queues.agents.claim({ projectId, workerId: "test", limit: 1 })
+    if (claim?.job.type !== "agent.ai-usage.record.requested")
+      throw new Error("Expected recovery job")
+    // Model the JSON boundary of a job persisted before completed-call costs were captured.
+    const legacyJob: AgentAiUsageRecordRequestedQueueJob = JSON.parse(
+      JSON.stringify({
+        ...claim.job,
+        payload: {
+          ...claim.job.payload,
+          accounting: { pricingContext, ratedAt: record.recordedAt?.toISOString() },
+        },
+      })
+    )
+    await expect(recordRecoveredAiModelCall(storage, legacyJob)).resolves.toMatchObject({
+      created: true,
+    })
+    await expect(recordRecoveredAiModelCall(storage, legacyJob)).resolves.toMatchObject({
+      created: false,
+    })
+    await expect(
+      storage.aiUsage.summarizeExecution({ projectId, executionId })
+    ).resolves.toMatchObject({
+      modelCallCount: 1,
+      usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
+    })
+    const page = await storage.aiCosts.listModelCalls({
+      projectId,
+      from: new Date("2026-07-01"),
+      to: new Date("2026-07-02"),
+    })
+    expect(page.total).toBe(1)
+    expect(page.items[0]?.cost).toBeUndefined()
+  })
+
   test("retains the estimate and inline cost through queue serialization and replay", async () => {
     // Regression proof: drop estimate from either recovery codec; only the report will survive.
     const queues = new InMemoryQueues()

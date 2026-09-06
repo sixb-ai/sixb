@@ -36,8 +36,6 @@ export function anthropicOutputSchema(schema: JsonObject): JsonObject | undefine
 }
 
 function sanitizeSchema(schema: JsonObject): JsonObject | undefined {
-  if (typeof schema.$ref === "string") return { $ref: schema.$ref }
-
   const objectSchema = schema.type === "object" || isObject(schema.properties)
   // Anthropic requires closed objects. Narrowing an open object would change the contract, so let
   // the JSON tool enforce that schema instead of silently rewriting it.
@@ -46,7 +44,7 @@ function sanitizeSchema(schema: JsonObject): JsonObject | undefined {
   }
 
   const result: JsonObject = {}
-  for (const key of ["$schema", "$id", "title", "description"] as const) {
+  for (const key of ["$schema", "$id", "$ref", "title", "description"] as const) {
     if (typeof schema[key] === "string") result[key] = schema[key]
   }
   for (const key of ["default", "const", "enum", "type"] as const) {

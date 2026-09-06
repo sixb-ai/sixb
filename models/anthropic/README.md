@@ -69,6 +69,8 @@ schema, or omit the exact reasoning budget. Adaptive thinking supports the JSON-
 Local tools use the same schema transformation as native structured output: unsupported decoder
 constraints move into descriptions, while Sixb validates inputs against the original tool contract.
 Schemas with open objects are sent unchanged with `strict: false` to preserve their allowed keys.
+References retain their sibling `$defs` and `definitions`, with those definitions sanitized by the
+same rules. An open object behind a reference also selects the non-strict fallback.
 
 Native server tools can be supplied beside Sixb's local tools:
 
@@ -92,6 +94,9 @@ Exact budgets must be at least 1,024 tokens and below the model call's `maxOutpu
 named efforts (including `none`) emit a `[SixbAnthropic]` warning and omit the reasoning override,
 allowing the request to continue with provider-default reasoning. The live catalog normalizes
 Anthropic's effort and thinking-mode flags into `definition.capabilities.reasoning`.
+Claude Fable 5, Mythos 5 (including their 5.1 variants), and Mythos Preview always keep thinking on;
+`reasoning: "none"` uses the same warning and provider-default fallback for direct, offline, and
+catalog-resolved bindings, including compaction summaries.
 
 The model definition is built synchronously from provider defaults and configured definitions.
 Pricing lives separately in `model.costEstimator.estimate({ usage })`. Its exact token calculation

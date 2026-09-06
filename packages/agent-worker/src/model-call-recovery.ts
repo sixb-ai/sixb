@@ -1,4 +1,5 @@
 import { createSixbError } from "@sixb/core/internal/errors"
+import { isJsonObject } from "@sixb/core/models"
 import type {
   AgentAiUsageAccountingPayload,
   AgentAiUsageRecordPayload,
@@ -153,6 +154,15 @@ function accountingFromQueuePayload(
 ): Omit<RecoverAiModelCallInput, "usage"> | undefined {
   const accounting = job.payload.accounting
   if (!accounting) return undefined
+  // Older workers captured a pricing context, not a completed-call valuation. Preserve their
+  // usage without inventing a historical price from today's catalog.
+  if (
+    !Object.hasOwn(accounting, "cost") &&
+    "pricingContext" in accounting &&
+    isJsonObject(accounting.pricingContext)
+  ) {
+    return undefined
+  }
   return {
     cost: structuredClone(accounting.cost),
     ...(accounting.estimate === undefined

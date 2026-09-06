@@ -77,6 +77,8 @@ retained on `ModelProviderError`; the routed provider/model and gateway-reported
 as distinct accounting facts.
 
 Provider refusals are streamed and retained as visible text with a `content-filter` finish reason.
+Assistant message phases (`commentary` and `final_answer`) are retained through tool loops and
+durable history replay, with each provider message kept distinct.
 File inputs accept remote URLs or inline data URLs: documents use `file_url` or `file_data`
 respectively, while images use `image_url` for either form.
 

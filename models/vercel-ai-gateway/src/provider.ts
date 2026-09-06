@@ -749,7 +749,7 @@ class ResponseState {
       if (part?.type === "output_text") {
         const id = textSpanId(value)
         this.textStarted.add(id)
-        events.push({ type: "text-start", id })
+        events.push({ type: "text-start", id, providerData: this.textProviderData(value) })
       }
       return events
     }
@@ -766,7 +766,7 @@ class ResponseState {
       const id = textSpanId(value)
       if (!this.textStarted.has(id)) {
         this.textStarted.add(id)
-        events.push({ type: "text-start", id })
+        events.push({ type: "text-start", id, providerData: this.textProviderData(value) })
       }
       events.push({ type: "text-delta", id, delta: string(value.delta) })
       return events
@@ -776,7 +776,7 @@ class ResponseState {
       const id = textSpanId(value)
       if (!this.textStarted.has(id)) {
         this.textStarted.add(id)
-        events.push({ type: "text-start", id })
+        events.push({ type: "text-start", id, providerData: this.textProviderData(value) })
         const text = string(value.text)
         if (text) events.push({ type: "text-delta", id, delta: text })
       }
@@ -851,6 +851,15 @@ class ResponseState {
       if (!item) return events
       const key = itemKey(value, item)
       this.items.set(key, item)
+      if (item.type === "message" && typeof item.phase === "string") {
+        // Phase can arrive after the text spans have closed. Keep message-level replay metadata
+        // separately, without duplicating the full visible text in provider state.
+        events.push({
+          type: "provider-state",
+          providerId: this.providerId,
+          data: { messageId: key, phase: item.phase },
+        })
+      }
       if (item.type === "message" && Array.isArray(item.content)) {
         for (const [contentIndex, content] of item.content.entries()) {
           const part = object(content)
@@ -968,7 +977,7 @@ class ResponseState {
     if (!span) {
       span = { text: "", complete: false }
       this.refusalSpans.set(id, span)
-      events.push({ type: "text-start", id })
+      events.push({ type: "text-start", id, providerData: this.textProviderData(value) })
     }
     if (span.complete) return events
     const delta = complete && span.text ? "" : text
@@ -981,6 +990,14 @@ class ResponseState {
       events.push({ type: "text-end", id })
     }
     return events
+  }
+
+  private textProviderData(value: JsonObject): ProviderData {
+    return {
+      [this.providerId]: {
+        messageId: string(value.item_id) || `output:${integer(value.output_index) ?? 0}`,
+      },
+    }
   }
 
   private markOutputCall(
@@ -1024,10 +1041,24 @@ function messagesToInput(messages: readonly ModelMessage[], providerId: string):
       continue
     }
 
+    const phases = new Map<string, string>()
+    for (const part of message.content) {
+      if (part.type !== "provider-state" || part.providerId !== providerId) continue
+      const data = object(part.data)
+      if (typeof data?.messageId === "string" && typeof data.phase === "string") {
+        phases.set(data.messageId, data.phase)
+      }
+    }
     const assistantText: JsonValue[] = []
+    let assistantMessageId: string | undefined
     const flushAssistantText = () => {
       if (assistantText.length === 0) return
-      input.push({ role: "assistant", content: assistantText.splice(0) })
+      const phase = assistantMessageId === undefined ? undefined : phases.get(assistantMessageId)
+      input.push({
+        role: "assistant",
+        content: assistantText.splice(0),
+        ...(phase === undefined ? {} : { phase }),
+      })
     }
     for (const part of message.content) {
       if (part.type === "provider-state") {
@@ -1048,6 +1079,9 @@ function messagesToInput(messages: readonly ModelMessage[], providerId: string):
         continue
       }
       if (part.type === "text") {
+        const messageId = string(object(part.providerData?.[providerId])?.messageId) || undefined
+        if (messageId !== assistantMessageId) flushAssistantText()
+        assistantMessageId = messageId
         assistantText.push({ type: "output_text", text: part.text })
       } else if (part.type === "tool-call") {
         flushAssistantText()

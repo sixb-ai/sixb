@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test"
-import { runModelLoop } from "@sixb/core/internal/agents"
+import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type {
   LanguageModelRequest,
   LanguageModelStreamEvent,
@@ -7,6 +7,7 @@ import type {
   ModelOutput,
 } from "@sixb/core/models"
 import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
+import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
 import { BASH_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/bash"
 import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
 import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
@@ -106,6 +107,136 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Vercel AI Gateway provider", () => {
+  test("preserves assistant phases across tool steps and durable history replay", async () => {
+    // Regression proof: remove phase capture or replay in the Gateway adapter.
+    const bodies: Record<string, unknown>[] = []
+    const messageEvents = (id: string, phase: string, texts: string[], outputIndex: number) => [
+      {
+        type: "response.output_item.added",
+        output_index: outputIndex,
+        item: { type: "message", id, role: "assistant", content: [] },
+      },
+      ...texts.flatMap((text, contentIndex) => {
+        const location = { item_id: id, output_index: outputIndex, content_index: contentIndex }
+        return [
+          {
+            type: "response.content_part.added",
+            ...location,
+            part: { type: "output_text", text: "" },
+          },
+          { type: "response.output_text.delta", ...location, delta: text },
+          { type: "response.output_text.done", ...location, text },
+        ]
+      }),
+      {
+        type: "response.output_item.done",
+        output_index: outputIndex,
+        item: {
+          type: "message",
+          id,
+          role: "assistant",
+          phase,
+          status: "completed",
+          content: texts.map((text) => ({ type: "output_text", text })),
+        },
+      },
+    ]
+    const call = {
+      type: "function_call",
+      id: "fc",
+      call_id: "call",
+      name: "check",
+      arguments: "{}",
+    }
+    const provider = createVercelGateway({
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        const first = bodies.length === 1
+        return sseResponse([
+          { type: "response.created", response: { id: `resp-${bodies.length}` } },
+          ...(first
+            ? [
+                ...messageEvents("msg-1", "commentary", ["I will ", "check."], 0),
+                ...messageEvents("msg-2", "commentary", ["Checking now."], 1),
+                {
+                  type: "response.output_item.added",
+                  output_index: 2,
+                  item: { ...call, arguments: "" },
+                },
+                { type: "response.output_item.done", output_index: 2, item: call },
+              ]
+            : messageEvents("msg-final", "final_answer", ["Done."], 0)),
+          { type: "response.completed", response: { status: "completed", usage: {} } },
+        ])
+      },
+    })
+    const model = provider("openai/gpt-5.5")
+    const chunks: string[] = []
+    const first = await runModelLoop({
+      model,
+      messages: request().messages,
+      maxSteps: 2,
+      signal: request().signal,
+      tools: [
+        {
+          name: "check",
+          description: "Check",
+          inputSchema: { type: "object", properties: {}, additionalProperties: false },
+          parseInput: (value) => value,
+          execute: async () => "ok",
+          errorText: () => "failed",
+        },
+      ],
+      onEvent: (event) => {
+        if (event.type === "text-delta") chunks.push(event.delta)
+      },
+    })
+    expect(first.status).toBe("completed")
+    expect(chunks.join("")).toBe("I will check.Checking now.Done.")
+    const history = [
+      { role: "user", content: [{ type: "input_text", text: "Hello" }] },
+      {
+        role: "assistant",
+        phase: "commentary",
+        content: [
+          { type: "output_text", text: "I will " },
+          { type: "output_text", text: "check." },
+        ],
+      },
+      {
+        role: "assistant",
+        phase: "commentary",
+        content: [{ type: "output_text", text: "Checking now." }],
+      },
+      call,
+      { type: "function_call_output", call_id: "call", output: "ok" },
+    ]
+    expect(bodies[1]?.input).toEqual(history)
+    const parts = agentTraceFromModelSteps(first.steps)
+    const replay = toModelMessages([
+      { role: "assistant", parts: JSON.parse(JSON.stringify(parts)) },
+    ])
+    await runModelLoop({
+      model,
+      messages: [
+        ...request().messages,
+        ...replay,
+        { role: "user", content: [{ type: "text", text: "Continue." }] },
+      ],
+      maxSteps: 1,
+      signal: request().signal,
+    })
+    expect(bodies[2]?.input).toEqual([
+      ...history,
+      {
+        role: "assistant",
+        phase: "final_answer",
+        content: [{ type: "output_text", text: "Done." }],
+      },
+      { role: "user", content: [{ type: "input_text", text: "Continue." }] },
+    ])
+  })
+
   // Regression proof: restore unconditional file_data in userPartToInput.
   test("maps remote documents to file URLs and preserves inline data and images", async () => {
     let body: Record<string, unknown> | undefined
@@ -604,7 +735,11 @@ describe("Vercel AI Gateway provider", () => {
         modelId: "resolved-model",
         providerIds: { responseId: "resp-1" },
       },
-      { type: "text-start", id: "message-1:text:0" },
+      {
+        type: "text-start",
+        id: "message-1:text:0",
+        providerData: { "vercel-ai-gateway": { messageId: "message-1" } },
+      },
       { type: "text-delta", id: "message-1:text:0", delta: "Hel" },
       { type: "text-delta", id: "message-1:text:0", delta: "lo" },
       { type: "text-end", id: "message-1:text:0" },

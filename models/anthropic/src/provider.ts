@@ -255,7 +255,7 @@ function catalogDefinition(value: unknown): LanguageModelDefinition | undefined 
   const providerTools = ["code_execution", "web_search", "web_fetch"].some((name) =>
     supported(capabilities, name)
   )
-  const reasoning = anthropicReasoningCapabilities(capabilities)
+  const reasoning = anthropicReasoningCapabilities(capabilities, modelId)
   return defineLanguageModel({
     kind: "language",
     providerId: PROVIDER_ID,
@@ -969,7 +969,10 @@ function anthropicReasoningRequest(
   maxOutputTokens: number,
   modelId: string
 ): { readonly effort?: ModelReasoningEffort; readonly thinking?: JsonObject } {
-  const issue = modelReasoningSupportIssue(capabilities, reasoning)
+  const issue =
+    reasoning === "none" && anthropicThinkingAlwaysOn(modelId)
+      ? "reasoning cannot be disabled"
+      : modelReasoningSupportIssue(capabilities, reasoning)
   if (issue) {
     if (typeof reasoning === "string" && isModelReasoning(reasoning)) {
       console.warn(
@@ -1172,8 +1175,15 @@ function supported(capabilities: JsonObject | undefined, name: string): boolean 
   return object(capabilities?.[name])?.supported === true
 }
 
+// The catalog exposes adaptive/manual support, but not whether thinking can be disabled.
+// Keep the same restriction for direct and offline bindings that have no catalog metadata.
+function anthropicThinkingAlwaysOn(modelId: string): boolean {
+  return /^claude-(?:fable-5|mythos-(?:5|preview))(?:-|$)/.test(modelId)
+}
+
 function anthropicReasoningCapabilities(
-  capabilities: JsonObject | undefined
+  capabilities: JsonObject | undefined,
+  modelId: string
 ): false | ModelReasoningCapabilities | undefined {
   if (capabilities === undefined) return undefined
   if (!supported(capabilities, "thinking")) return false
@@ -1183,7 +1193,7 @@ function anthropicReasoningCapabilities(
   const thinkingTypes = object(object(capabilities.thinking)?.types)
   const supportsManualBudget = supported(thinkingTypes, "enabled")
   return {
-    canDisable: true,
+    canDisable: !anthropicThinkingAlwaysOn(modelId),
     ...(efforts.length === 0 ? {} : { efforts }),
     ...(supportsManualBudget ? { budgetTokens: { min: 1_024 } } : {}),
   }

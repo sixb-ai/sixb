@@ -65,6 +65,9 @@ call. If the durable handoff also fails, the owning agent run or workflow fails 
 silently losing usage. This local path cannot close a process-crash window before a completed stream
 is observed; provider-side reconciliation is the appropriate later layer for that guarantee.
 
+Recovery also accepts queued jobs from older workers that captured only a pricing context. Their
+usage is recorded idempotently without assigning a historical cost from current model prices.
+
 Valuation is captured at call completion. Provider-reported totals are authoritative when present;
 otherwise the core model runtime rates exact token meters against the model's immutable rate card.
 Missing rate cards or incomplete cache/token meters remain explicitly unpriceable. Routed provider

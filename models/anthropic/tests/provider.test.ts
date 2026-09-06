@@ -51,6 +51,128 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Anthropic provider", () => {
+  test.each([
+    "$defs",
+    "definitions",
+  ])("preserves referenced %s in native output and strict tool schemas", async (definitionsKey) => {
+    // Regression proof: restore sanitizeSchema's early return for $ref.
+    const definition = {
+      type: "object",
+      properties: { answer: { type: "string", minLength: 1 } },
+      required: ["answer"],
+      additionalProperties: false,
+    }
+    const schema = {
+      $ref: `#/${definitionsKey}/Answer`,
+      [definitionsKey]: { Answer: definition },
+    }
+    const expectedSchema = {
+      $ref: schema.$ref,
+      [definitionsKey]: {
+        Answer: {
+          ...definition,
+          properties: { answer: { type: "string", description: "min length: 1." } },
+        },
+      },
+    }
+    let body: Record<string, unknown> | undefined
+    const provider = createAnthropic({
+      fetch: async (_url, init) => {
+        body = JSON.parse(String(init?.body))
+        return sseResponse([])
+      },
+    })
+    await provider("claude-sonnet-5", { capabilities: { nativeStructuredOutput: true } }).stream(
+      request({
+        tools: [{ name: "answer", description: "Answer", inputSchema: schema }],
+        responseFormat: { type: "json", name: "answer", schema },
+      })
+    )
+    expect(body).toMatchObject({
+      output_config: { format: { type: "json_schema", schema: expectedSchema } },
+      tools: [{ name: "answer", strict: true, input_schema: expectedSchema }],
+    })
+    expect(definition.properties.answer.minLength).toBe(1)
+    expect(
+      anthropicOutputSchema({
+        $ref: `#/${definitionsKey}/Open`,
+        [definitionsKey]: { Open: { type: "object", additionalProperties: true } },
+      })
+    ).toBeUndefined()
+  })
+
+  test.each([
+    "claude-fable-5",
+    "claude-fable-5-1",
+    "claude-mythos-5",
+    "claude-mythos-preview",
+    "claude-mythos-preview-20260407",
+  ])("keeps always-on thinking enabled on %s, including summary requests", async (modelId) => {
+    // Regression proof: restore unconditional canDisable:true and remove the always-on request guard.
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      const bodies: Record<string, unknown>[] = []
+      const provider = createAnthropic({
+        fetch: async (url, init) => {
+          if (String(url).includes("/models")) {
+            return Response.json({
+              data: [
+                {
+                  id: modelId,
+                  type: "model",
+                  max_tokens: 128_000,
+                  capabilities: {
+                    thinking: {
+                      supported: true,
+                      types: { adaptive: { supported: true }, enabled: { supported: false } },
+                    },
+                    effort: { high: { supported: true } },
+                  },
+                },
+              ],
+              has_more: false,
+            })
+          }
+          bodies.push(JSON.parse(String(init?.body)))
+          return sseResponse([
+            { type: "message_start", message: { id: "msg-summary", usage: {} } },
+            {
+              type: "content_block_start",
+              index: 0,
+              content_block: { type: "text", text: "Summary." },
+            },
+            { type: "content_block_stop", index: 0 },
+            { type: "message_delta", delta: { stop_reason: "end_turn" } },
+            { type: "message_stop" },
+          ])
+        },
+      })
+      const direct = provider(modelId)
+      const offline = await direct.resolve!({ offline: true })
+      const resolved = await direct.resolve!()
+      expect(resolved.definition.capabilities.reasoning).toMatchObject({ canDisable: false })
+      for (const model of [direct, offline, resolved]) {
+        const result = await runModelLoop({
+          model,
+          messages: request().messages,
+          reasoning: "none",
+          maxOutputTokens: 8_192,
+          maxSteps: 1,
+          signal: request().signal,
+        })
+        expect(result.status).toBe("completed")
+        expect(bodies.at(-1)).toMatchObject({ max_tokens: 8_192 })
+        expect(bodies.at(-1)?.thinking).toBeUndefined()
+      }
+      expect(warn).toHaveBeenCalledTimes(3)
+      await resolved.stream(request({ reasoning: "high" }))
+      expect(bodies.at(-1)?.output_config).toEqual({ effort: "high" })
+      expect(warn).toHaveBeenCalledTimes(3)
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
   test("sanitizes strict tool schemas while preserving local validation constraints", async () => {
     // Regression proof: restore input_schema: tool.inputSchema with unconditional strict: true.
     let body: unknown
