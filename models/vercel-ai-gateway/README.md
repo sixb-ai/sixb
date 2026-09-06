@@ -67,6 +67,10 @@ the routed provider's token budget. The Responses API does not expose a portable
 so `{ budgetTokens }` is rejected by this adapter; use a named effort or an explicit native
 `providerOptions` override when routing is constrained to a compatible provider.
 
+When known model capabilities do not support a requested named effort (including `none`), the
+adapter emits a `[SixbVercelGateway]` warning and omits the reasoning override. The request continues
+with provider-default reasoning. Omit `reasoning` or use `"provider-default"` to avoid the warning.
+
 Retryable `429` and `5xx` responses are retried only before a stream begins. `maxRetries`,
 `maxRetryDelayMs`, and `catalogTtlMs` are configurable. Provider request IDs and retry hints are
 retained on `ModelProviderError`; the routed provider/model and gateway-reported total are retained

@@ -78,7 +78,8 @@ reasoning: { budgetTokens: 8_192 }
 ```
 
 Exact budgets must be at least 1,024 tokens and below the model call's `maxOutputTokens`. Unsupported
-efforts fail locally and are never silently rounded to another level. The live catalog normalizes
+named efforts (including `none`) emit a `[SixbAnthropic]` warning and omit the reasoning override,
+allowing the request to continue with provider-default reasoning. The live catalog normalizes
 Anthropic's effort and thinking-mode flags into `definition.capabilities.reasoning`.
 
 The model definition is built synchronously from provider defaults and configured definitions.

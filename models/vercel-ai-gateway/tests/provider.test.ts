@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
 import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
@@ -666,6 +666,38 @@ describe("Vercel AI Gateway provider", () => {
       ],
     })
     expect(responseBody?.text).toBeUndefined()
+  })
+
+  // Regression proof: restore the unsupported-effort throw in gatewayReasoningRequest.
+  test("warns and delivers the response with default reasoning for unsupported efforts", async () => {
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      for (const reasoning of [false, {}, { efforts: ["high"] }] as const) {
+        let body: Record<string, unknown> | undefined
+        const model = createVercelGateway({
+          fetch: async (_input, init) => {
+            body = JSON.parse(String(init?.body))
+            return sseResponse([
+              { type: "response.output_text.delta", delta: "Hello back" },
+              { type: "response.completed", response: { status: "completed" } },
+            ])
+          },
+        })("zai/glm-5.3-flash", { capabilities: { reasoning } })
+        const response = await model.stream(request({ reasoning: "medium" }))
+        const events = await collect(response.events)
+        expect(body?.reasoning).toBeUndefined()
+        expect(body?.input).toBeDefined()
+        expect(events).toContainEqual(
+          expect.objectContaining({ type: "text-delta", delta: "Hello back" })
+        )
+      }
+      expect(warn).toHaveBeenCalledTimes(3)
+      expect(warn).toHaveBeenLastCalledWith(
+        "[SixbVercelGateway] Model 'zai/glm-5.3-flash' reasoning effort 'medium' is not supported. Using provider-default reasoning instead."
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   test("rejects exact budgets that the Gateway Responses API cannot represent", async () => {

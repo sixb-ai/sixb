@@ -3,6 +3,7 @@ import {
   defineLanguageModel,
   defineModelRateCard,
   isJsonObject,
+  isModelReasoning,
   type JsonObject,
   type JsonValue,
   type LanguageModel,
@@ -1054,6 +1055,12 @@ function gatewayReasoningRequest(
 ): { readonly reasoning: JsonObject } | undefined {
   const issue = modelReasoningSupportIssue(capabilities, reasoning)
   if (issue) {
+    if (typeof reasoning === "string" && isModelReasoning(reasoning)) {
+      console.warn(
+        `[SixbVercelGateway] Model '${modelId}' ${issue}. Using provider-default reasoning instead.`
+      )
+      return undefined
+    }
     throw new UnsupportedModelFeatureError(`[SixbVercelGateway] Model '${modelId}' ${issue}.`)
   }
   if (reasoning === undefined || reasoning === "provider-default") return undefined

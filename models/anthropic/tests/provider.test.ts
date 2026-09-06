@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
 import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
@@ -594,7 +594,8 @@ describe("Anthropic provider", () => {
     expect(bodies.at(-1)?.max_tokens).toBe(24_000)
   })
 
-  test("maps exact reasoning budgets and rejects unsupported effort without approximation", async () => {
+  // Regression proof: restore the minimal-effort throw in anthropicReasoningRequest.
+  test("maps exact reasoning budgets and warns before falling back for unsupported effort", async () => {
     let capturedBody: Record<string, unknown> | undefined
     let requests = 0
     const provider = createAnthropic({
@@ -612,10 +613,18 @@ describe("Anthropic provider", () => {
     expect(capturedBody).toMatchObject({
       thinking: { type: "enabled", budget_tokens: 4_096 },
     })
-    await expect(
-      provider("claude-sonnet-4").stream(request({ reasoning: "minimal" }))
-    ).rejects.toThrow("does not support reasoning effort 'minimal'")
-    expect(requests).toBe(1)
+    const warn = spyOn(console, "warn").mockImplementation(() => {})
+    try {
+      await provider("claude-sonnet-4").stream(request({ reasoning: "minimal" }))
+      expect(requests).toBe(2)
+      expect(capturedBody?.thinking).toBeUndefined()
+      expect(capturedBody?.output_config).toBeUndefined()
+      expect(warn).toHaveBeenCalledWith(
+        "[SixbAnthropic] Model 'claude-sonnet-4' does not support reasoning effort 'minimal'. Using provider-default reasoning instead."
+      )
+    } finally {
+      warn.mockRestore()
+    }
   })
 
   test("streams tool JSON and replays signed provider blocks exactly", async () => {

@@ -2,6 +2,7 @@ import {
   assertJsonObject,
   defineLanguageModel,
   isJsonObject,
+  isModelReasoning,
   type JsonObject,
   type LanguageModel,
   type LanguageModelDefinition,
@@ -959,15 +960,22 @@ function anthropicReasoningRequest(
 ): { readonly effort?: ModelReasoningEffort; readonly thinking?: JsonObject } {
   const issue = modelReasoningSupportIssue(capabilities, reasoning)
   if (issue) {
+    if (typeof reasoning === "string" && isModelReasoning(reasoning)) {
+      console.warn(
+        `[SixbAnthropic] Model '${modelId}' ${issue}. Using provider-default reasoning instead.`
+      )
+      return {}
+    }
     throw new UnsupportedModelFeatureError(`[SixbAnthropic] Model '${modelId}' ${issue}.`)
   }
   if (reasoning === undefined || reasoning === "provider-default") return {}
   if (reasoning === "none") return { thinking: { type: "disabled" } }
   if (typeof reasoning === "string") {
     if (reasoning === "minimal") {
-      throw new UnsupportedModelFeatureError(
-        `[SixbAnthropic] Model '${modelId}' does not support reasoning effort 'minimal'.`
+      console.warn(
+        `[SixbAnthropic] Model '${modelId}' does not support reasoning effort 'minimal'. Using provider-default reasoning instead.`
       )
+      return {}
     }
     return { effort: reasoning }
   }
