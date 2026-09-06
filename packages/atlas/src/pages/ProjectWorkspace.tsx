@@ -40,6 +40,7 @@ import {
 import { SidebarDataContext } from "../components/layout/sidebarData"
 import { KNOWN_VIEWS } from "../components/layout/viewMode"
 import { SettingsAccessGate } from "../components/SettingsAccessGate"
+import { objectDetailPath, objectIdFromPathSegment } from "../lib/objectRoutes"
 import {
   getObjectSortPreference,
   type ObjectSortPreference,
@@ -82,7 +83,8 @@ export function ProjectWorkspace() {
   const location = useLocation()
   const pathSegments = location.pathname.split("/").filter(Boolean)
   const firstSegment = pathSegments[0]
-  const objectIdFromUrl = firstSegment && !KNOWN_VIEWS.has(firstSegment) ? firstSegment : null
+  const objectIdFromUrl =
+    firstSegment && !KNOWN_VIEWS.has(firstSegment) ? objectIdFromPathSegment(firstSegment) : null
   const { setSidebarData } = useContext(SidebarDataContext)
 
   const [objectSortBy, setObjectSortBy] = useState<ObjectSortPreference>(getObjectSortPreference)
@@ -347,8 +349,6 @@ export function ProjectWorkspace() {
     [objectTypePreviewSections]
   )
 
-  const toProjectPath = (suffix: string) => `/${suffix}`
-
   const handleObjectSortByChange = (sortBy: ObjectSortPreference) => {
     setObjectSortBy(sortBy)
     setObjectSortPreference(sortBy)
@@ -435,7 +435,7 @@ export function ProjectWorkspace() {
                     selectedObjectId={selectedObjectIdForSidebar}
                     onSortByChange={handleObjectSortByChange}
                     onClassFilterChange={setClassFilter}
-                    onSelectObject={(objectId) => navigate(toProjectPath(objectId))}
+                    onSelectObject={(objectId) => navigate(objectDetailPath(objectId))}
                   />
                 }
               />
@@ -495,7 +495,7 @@ export function ProjectWorkspace() {
                     onSelectedTypeChange={setSelectedOntologyTypeId}
                     onOpenType={openOntologyTypeDetails}
                     onViewObjects={(typeId) => {
-                      navigate(toProjectPath(`?class=${encodeURIComponent(typeId)}`))
+                      navigate(`/?class=${encodeURIComponent(typeId)}`)
                     }}
                   />
                 }

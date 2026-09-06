@@ -42,6 +42,7 @@ import { useObjectTelemetryUpdates } from "../features/objects/hooks/useObjectTe
 import { classifyFileValue, type FileValueContext } from "../lib/files"
 import { formatValue } from "../lib/formatValue"
 import { humanizeIdentifier } from "../lib/labels"
+import { objectDetailPath } from "../lib/objectRoutes"
 import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
 import { formatRelativeTime } from "../lib/time"
 
@@ -798,7 +799,7 @@ export function ObjectDetailPage({ projectName, objectLookup }: ObjectDetailPage
             outgoing={outgoing}
             incoming={incoming}
             objectLookup={objectLookup}
-            onSelectObject={(id) => navigate(`/${id}`)}
+            onSelectObject={(id) => navigate(objectDetailPath(id))}
           />
         </Section>
       ) : null}
@@ -1031,7 +1032,7 @@ function RelatedObjectLink({
 }) {
   return (
     <Link
-      to={`/${objectId}`}
+      to={objectDetailPath(objectId)}
       onClick={(event) => {
         event.preventDefault()
         onSelect(objectId)
