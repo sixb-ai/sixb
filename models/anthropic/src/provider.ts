@@ -502,8 +502,10 @@ class AnthropicLanguageModel implements LanguageModel {
           ? {}
           : {
               tools,
-              tool_choice: { type: useOutputTool ? "any" : "auto" },
-              ...(useOutputTool ? { disable_parallel_tool_use: true } : {}),
+              tool_choice: {
+                type: useOutputTool ? "any" : "auto",
+                ...(useOutputTool ? { disable_parallel_tool_use: true } : {}),
+              },
             }),
         ...(Object.keys(outputConfig).length === 0 ? {} : { output_config: outputConfig }),
         ...(reasoning.thinking === undefined ? {} : { thinking: reasoning.thinking }),

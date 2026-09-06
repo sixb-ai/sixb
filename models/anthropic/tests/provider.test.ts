@@ -659,6 +659,7 @@ describe("Anthropic provider", () => {
   })
 
   test("hides a required nonparallel JSON tool when native output is unavailable", async () => {
+    // Regression proof: move disable_parallel_tool_use back out of tool_choice in prepareRequest.
     let messageBody: Record<string, unknown> | undefined
     const provider = createAnthropic({
       baseUrl: "https://anthropic.example/v1",
@@ -718,8 +719,7 @@ describe("Anthropic provider", () => {
       steps: [{ content: [{ type: "text", text: '{"answer":"yes"}' }] }],
     })
     expect(messageBody).toMatchObject({
-      tool_choice: { type: "any" },
-      disable_parallel_tool_use: true,
+      tool_choice: { type: "any", disable_parallel_tool_use: true },
       tools: [
         {
           name: "sixb_structured_output",
@@ -728,6 +728,7 @@ describe("Anthropic provider", () => {
       ],
     })
     expect(messageBody?.output_config).toBeUndefined()
+    expect(messageBody).not.toHaveProperty("disable_parallel_tool_use")
   })
 
   test("uses provider-owned model output limits when no request ceiling is configured", async () => {

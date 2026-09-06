@@ -680,6 +680,7 @@ class ResponseState {
   readonly toolArguments = new Map<string, string>()
   readonly toolEnded = new Set<string>()
   readonly textStarted = new Set<string>()
+  readonly refusalSpans = new Map<string, { text: string; complete: boolean }>()
   readonly reasoningStarted = new Set<string>()
   readonly outputCallIds = new Set<string>()
   started = false
@@ -742,11 +743,22 @@ class ResponseState {
 
     if (type === "response.content_part.added") {
       const part = object(value.part)
+      if (part?.type === "refusal") {
+        events.push(...this.refusalEvents(value, string(part.refusal), false))
+      }
       if (part?.type === "output_text") {
         const id = textSpanId(value)
         this.textStarted.add(id)
         events.push({ type: "text-start", id })
       }
+      return events
+    }
+
+    if (type === "response.refusal.delta" || type === "response.refusal.done") {
+      const complete = type === "response.refusal.done"
+      events.push(
+        ...this.refusalEvents(value, string(complete ? value.refusal : value.delta), complete)
+      )
       return events
     }
 
@@ -839,6 +851,19 @@ class ResponseState {
       if (!item) return events
       const key = itemKey(value, item)
       this.items.set(key, item)
+      if (item.type === "message" && Array.isArray(item.content)) {
+        for (const [contentIndex, content] of item.content.entries()) {
+          const part = object(content)
+          if (part?.type !== "refusal") continue
+          events.push(
+            ...this.refusalEvents(
+              { ...value, item_id: key, content_index: contentIndex },
+              string(part.refusal),
+              true
+            )
+          )
+        }
+      }
       if (item.type !== "message" && item.type !== "function_call") {
         events.push({ type: "provider-state", providerId: this.providerId, data: { item } })
       }
@@ -890,7 +915,8 @@ class ResponseState {
       this.finished = true
       events.push({
         type: "finish",
-        finishReason: finishReason(response, this.sawToolCall),
+        finishReason:
+          this.refusalSpans.size > 0 ? "content-filter" : finishReason(response, this.sawToolCall),
         rawFinishReason: rawReason,
         usage,
         ...(metadata === undefined ? {} : { providerData: { [this.providerId]: metadata } }),
@@ -928,6 +954,33 @@ class ResponseState {
     return new ModelProviderError(`[SixbVercelGateway] ${message}`, this.providerId, this.modelId, {
       ...(this.requestId === undefined ? {} : { requestId: this.requestId }),
     })
+  }
+
+  /** Completion events may repeat streamed refusals or provide their only visible text. */
+  private refusalEvents(
+    value: JsonObject,
+    text: string,
+    complete: boolean
+  ): LanguageModelStreamEvent[] {
+    const id = textSpanId(value)
+    const events: LanguageModelStreamEvent[] = []
+    let span = this.refusalSpans.get(id)
+    if (!span) {
+      span = { text: "", complete: false }
+      this.refusalSpans.set(id, span)
+      events.push({ type: "text-start", id })
+    }
+    if (span.complete) return events
+    const delta = complete && span.text ? "" : text
+    if (delta) {
+      span.text += delta
+      events.push({ type: "text-delta", id, delta })
+    }
+    if (complete) {
+      span.complete = true
+      events.push({ type: "text-end", id })
+    }
+    return events
   }
 
   private markOutputCall(
@@ -1027,7 +1080,9 @@ function userPartToInput(
   }
   return {
     type: "input_file",
-    file_data: part.data.toString(),
+    ...(part.data.protocol === "data:"
+      ? { file_data: part.data.toString() }
+      : { file_url: part.data.toString() }),
     ...(part.filename === undefined ? {} : { filename: part.filename }),
   }
 }

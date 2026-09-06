@@ -76,6 +76,10 @@ Retryable `429` and `5xx` responses are retried only before a stream begins. `ma
 retained on `ModelProviderError`; the routed provider/model and gateway-reported total are retained
 as distinct accounting facts.
 
+Provider refusals are streamed and retained as visible text with a `content-filter` finish reason.
+File inputs accept remote URLs or inline data URLs: documents use `file_url` or `file_data`
+respectively, while images use `image_url` for either form.
+
 Local tool schemas are sent unchanged. Strict decoding is enabled only when they satisfy the
 adapter's strict-schema check; tools with optional fields use explicit `strict: false` so their
 omission/default semantics are preserved. Sixb validates tool inputs before executing them.

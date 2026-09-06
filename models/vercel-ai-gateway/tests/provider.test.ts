@@ -1,6 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop } from "@sixb/core/internal/agents"
-import type { LanguageModelRequest, LanguageModelStreamEvent, ModelOutput } from "@sixb/core/models"
+import type {
+  LanguageModelRequest,
+  LanguageModelStreamEvent,
+  ModelCallEndEvent,
+  ModelOutput,
+} from "@sixb/core/models"
 import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
 import { BASH_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/bash"
 import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
@@ -101,6 +106,144 @@ async function collect(stream: AsyncIterable<LanguageModelStreamEvent>) {
 }
 
 describe("Vercel AI Gateway provider", () => {
+  // Regression proof: restore unconditional file_data in userPartToInput.
+  test("maps remote documents to file URLs and preserves inline data and images", async () => {
+    let body: Record<string, unknown> | undefined
+    const provider = createVercelGateway({
+      fetch: async (_input, init) => {
+        body = JSON.parse(String(init?.body))
+        return sseResponse([{ type: "response.completed", response: { status: "completed" } }])
+      },
+    })
+    const files = [
+      {
+        data: "https://example.com/report.pdf",
+        mediaType: "application/pdf",
+        filename: "report.pdf",
+      },
+      { data: "http://example.com/report.pdf", mediaType: "application/pdf" },
+      {
+        data: "data:application/pdf;base64,JVBERi0=",
+        mediaType: "application/pdf",
+        filename: "inline.pdf",
+      },
+      { data: "https://example.com/image.png", mediaType: "image/png" },
+      { data: "data:image/png;base64,aW1hZ2U=", mediaType: "image/png" },
+    ] as const
+    const response = await provider("openai/test").stream(
+      request({
+        messages: [
+          {
+            role: "user",
+            content: files.map((file) => ({ ...file, type: "file", data: new URL(file.data) })),
+          },
+        ],
+      })
+    )
+    await collect(response.events)
+    expect(body?.input).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "input_file", file_url: files[0].data, filename: "report.pdf" },
+          { type: "input_file", file_url: files[1].data },
+          { type: "input_file", file_data: files[2].data, filename: "inline.pdf" },
+          { type: "input_image", image_url: files[3].data, detail: "auto" },
+          { type: "input_image", image_url: files[4].data, detail: "auto" },
+        ],
+      },
+    ])
+  })
+
+  // Regression proof: remove refusal event normalization and its content-filter finish reason.
+  test.each([
+    "deltas",
+    "done",
+    "item",
+  ] as const)("preserves refusal text and usage from %s events", async (delivery) => {
+    const refusal = "I cannot help with that request."
+    const location = { item_id: "message-refusal", output_index: 0, content_index: 0 }
+    const provider = createVercelGateway({
+      fetch: async () =>
+        sseResponse([
+          {
+            type: "response.created",
+            response: { id: "resp-refusal", model: "openai/test", status: "in_progress" },
+          },
+          {
+            type: "response.output_item.added",
+            output_index: 0,
+            item: { type: "message", id: location.item_id, role: "assistant", content: [] },
+          },
+          ...(delivery === "item"
+            ? []
+            : [
+                {
+                  type: "response.content_part.added",
+                  ...location,
+                  part: { type: "refusal", refusal: "" },
+                },
+                ...(delivery === "deltas"
+                  ? [
+                      { type: "response.refusal.delta", ...location, delta: "I cannot " },
+                      {
+                        type: "response.refusal.delta",
+                        ...location,
+                        delta: "help with that request.",
+                      },
+                    ]
+                  : []),
+                { type: "response.refusal.done", ...location, refusal },
+              ]),
+          {
+            type: "response.output_item.done",
+            output_index: 0,
+            item: {
+              type: "message",
+              id: location.item_id,
+              role: "assistant",
+              status: "completed",
+              content: [{ type: "refusal", refusal }],
+            },
+          },
+          {
+            type: "response.completed",
+            response: {
+              id: "resp-refusal",
+              status: "completed",
+              usage: { input_tokens: 10, output_tokens: 8 },
+            },
+          },
+        ]),
+    })
+    const chunks: string[] = []
+    const calls: ModelCallEndEvent[] = []
+    const result = await runModelLoop({
+      model: provider("openai/test"),
+      messages: request().messages,
+      maxSteps: 1,
+      signal: new AbortController().signal,
+      onEvent: (event) => {
+        if (event.type === "text-delta") chunks.push(event.delta)
+      },
+      onModelCallEnd: (event) => {
+        calls.push(event)
+      },
+    })
+    expect(result).toMatchObject({
+      status: "completed",
+      output: refusal,
+      finishReason: "content-filter",
+      steps: [{ content: [{ type: "text", text: refusal }], finishReason: "content-filter" }],
+    })
+    expect(chunks.join("")).toBe(refusal)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({
+      responseId: "resp-refusal",
+      usage: { inputTokens: 10, outputTokens: 8 },
+    })
+  })
+
   test("captures native generation and request IDs from the streaming response", async () => {
     // Removal proof: omit gatewayProviderIds from response metadata.
     const provider = createVercelGateway({
