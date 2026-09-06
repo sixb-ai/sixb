@@ -5,7 +5,7 @@ the output ceiling configured on the model.
 
 Callable Anthropic provider for Sixb's core model contract. It uses the native Messages API and a
 small provider-owned rate card for Anthropic's published family prices. Current model metadata and
-limits are available through the catalog API and `await model.resolveDefinition?.()`.
+limits are available through the catalog API and the model returned by `await model.resolve?.()`.
 The resolver uses the shared, cached provider catalog, preserves configured definitions and binding
 options, and does not mutate `model.definition`. Anthropic's `max_input_tokens` is exposed as
 `maxInputTokens`, not as a shared input/output context window. Agent workers resolve missing limits
@@ -78,9 +78,8 @@ efforts fail locally and are never silently rounded to another level. The live c
 Anthropic's effort and thinking-mode flags into `definition.capabilities.reasoning`.
 
 The model definition is built synchronously from provider defaults and configured definitions.
-Pricing lives separately in `model.costTracking.estimate({ usage })`. Its exact token calculation
-produces an **estimate**, with the applied rates retained as evidence. Optional negotiated rates
-can be supplied as `anthropic(modelId, { rateCard })`; they are not model metadata.
+Pricing lives separately in `model.costEstimator.estimate({ usage })`. Its exact token calculation
+uses provider-owned rates and produces an **estimate**, with the applied rates retained as evidence.
 Constructing a model and ordinary inference never fetch the cached, paginated
 catalog. A structured-output call consults it only when native support is otherwise unknown; a
 catalog failure safely selects the JSON-tool fallback. Server tools disable token-only estimates when

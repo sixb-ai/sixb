@@ -151,6 +151,8 @@ export async function runModelLoop<TOutput = string>(
     }
     callIds.add(callId)
     const accumulator = new StreamAccumulator(input.onEvent)
+    let accepted = false
+    let cost: ModelCallCost = { status: "unpriceable", reason: "missing-usage" }
     let terminalStreamError: { readonly error: unknown } | undefined
     try {
       const stream = await input.model.stream({
@@ -174,6 +176,7 @@ export async function runModelLoop<TOutput = string>(
             }),
         signal: input.signal,
       })
+      accepted = true
       for await (const event of stream.events) {
         await accumulator.accept(event)
       }
@@ -190,6 +193,29 @@ export async function runModelLoop<TOutput = string>(
           partialContent: accumulator.partialContent(),
         }
       }
+    } finally {
+      // Once a stream is accepted, cancellation or protocol failure cannot erase the call.
+      // Only a finish event establishes final meters; interrupted calls remain explicitly unknown.
+      if (accepted) {
+        const facts = accumulator.accounting()
+        const estimate = accumulator.isFinished() ? estimateModelCall(input.model, facts) : cost
+        cost = facts.reportedCost
+          ? rateModelCall({ usage: facts.usage, reported: facts.reportedCost })
+          : estimate
+        await input.onModelCallEnd?.({
+          callId,
+          providerId: input.model.providerId,
+          modelId: input.model.modelId,
+          responseId: facts.responseId ?? `${callId}:response`,
+          providerIds: facts.providerIds,
+          responseModelId: facts.responseModelId,
+          usage: facts.usage,
+          cost,
+          ...(facts.reportedCost === undefined ? {} : { estimate }),
+          ...(input.reasoning === undefined ? {} : { requestedReasoning: input.reasoning }),
+          ...(facts.route === undefined ? {} : { route: facts.route }),
+        })
+      }
     }
 
     if (input.signal.aborted && !accumulator.isFinished()) {
@@ -197,29 +223,6 @@ export async function runModelLoop<TOutput = string>(
     }
     const response = accumulator.complete()
     const responseId = response.responseId ?? `${callId}:response`
-    const estimate = estimateModelCall(input.model, {
-      usage: response.usage,
-      route: response.route,
-      responseModelId: response.responseModelId,
-    })
-    const cost = response.reportedCost
-      ? rateModelCall({ usage: response.usage, reported: response.reportedCost })
-      : estimate
-    await input.onModelCallEnd?.({
-      callId,
-      providerId: input.model.providerId,
-      modelId: input.model.modelId,
-      responseId,
-      ...(response.providerIds === undefined ? {} : { providerIds: response.providerIds }),
-      ...(response.responseModelId === undefined
-        ? {}
-        : { responseModelId: response.responseModelId }),
-      usage: response.usage,
-      cost,
-      ...(response.reportedCost === undefined ? {} : { estimate }),
-      ...(input.reasoning === undefined ? {} : { requestedReasoning: input.reasoning }),
-      ...(response.route === undefined ? {} : { route: response.route }),
-    })
     if (terminalStreamError) throw terminalStreamError.error
     if (response.projectionError) throw response.projectionError
     if (input.signal.aborted) {
@@ -673,11 +676,17 @@ class StreamAccumulator {
       toolCalls: parsed.toolCalls,
       finishReason: this.finishReason,
       ...(this.rawFinishReason === undefined ? {} : { rawFinishReason: this.rawFinishReason }),
+      ...this.accounting(),
+      ...(this.projectionError === undefined ? {} : { projectionError: this.projectionError }),
+    }
+  }
+
+  accounting() {
+    return {
       usage: this.usage,
       ...(this.responseId === undefined ? {} : { responseId: this.responseId }),
       ...(this.providerIds === undefined ? {} : { providerIds: this.providerIds }),
       ...(this.responseModelId === undefined ? {} : { responseModelId: this.responseModelId }),
-      ...(this.projectionError === undefined ? {} : { projectionError: this.projectionError }),
       ...(this.reportedCost === undefined ? {} : { reportedCost: this.reportedCost }),
       ...(this.route === undefined ? {} : { route: this.route }),
     }

@@ -60,37 +60,10 @@ export function anthropicRateCard(
 ): LanguageModelRateCard | undefined {
   const rule = PRICES.find((candidate) => candidate.match.test(modelId))
   if (!rule) return undefined
-  return applyAnthropicRateCardModifiers(
-    {
-      currency: "USD",
-      unit: "million-tokens",
-      input: rule.input,
-      output: rule.output,
-      cacheReadInput: scale(rule.input, 1n, 10n),
-      cacheWriteInput5m: scale(rule.input, 5n, 4n),
-      cacheWriteInput1h: scale(rule.input, 2n, 1n),
-    },
-    modelId,
-    request
-  )
-}
-
-export function applyAnthropicRateCardModifiers(
-  rateCard: LanguageModelRateCard,
-  modelId: string,
-  request: JsonObject | undefined
-): LanguageModelRateCard {
-  const speed = request?.speed
-  const fast = speed === "fast" && /^claude-opus-(?:5|4-8)(?:-|$)/.test(modelId)
+  const fast = request?.speed === "fast" && /^claude-opus-(?:5|4-8)(?:-|$)/.test(modelId)
   const residency = request?.inference_geo === "us"
-  if (!fast && !residency) return rateCard
-  const baseInput = fast ? "10" : scalarPrice(rateCard.input)
-  const baseOutput = fast ? "50" : scalarPrice(rateCard.output)
-  // Custom tiered definitions remain authoritative; request modifiers cannot be represented
-  // honestly without transforming every tier.
-  if (!baseInput || !baseOutput) return rateCard
-  const input = scale(baseInput, residency ? 11n : 1n, residency ? 10n : 1n)
-  const output = scale(baseOutput, residency ? 11n : 1n, residency ? 10n : 1n)
+  const input = scale(fast ? "10" : rule.input, residency ? 11n : 1n, residency ? 10n : 1n)
+  const output = scale(fast ? "50" : rule.output, residency ? 11n : 1n, residency ? 10n : 1n)
   return {
     currency: "USD",
     unit: "million-tokens",
@@ -111,8 +84,4 @@ function scale(value: string, numerator: bigint, denominator: bigint): string {
   const scaledWhole = scaled / outputFactor
   const remainder = (scaled % outputFactor).toString().padStart(precision, "0").replace(/0+$/, "")
   return remainder ? `${scaledWhole}.${remainder}` : scaledWhole.toString()
-}
-
-function scalarPrice(price: LanguageModelRateCard["input"]): string | undefined {
-  return typeof price === "string" ? price : undefined
 }

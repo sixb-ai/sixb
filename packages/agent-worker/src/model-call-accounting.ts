@@ -1,13 +1,20 @@
 import { createHash } from "node:crypto"
+import {
+  aiModelCallCostMatchesUsage,
+  normalizeAiModelCallCostRecord,
+} from "@sixb/core/internal/ai-cost-storage-provider"
+import { assertJsonObject, type ModelCostEstimate } from "@sixb/core/models"
 import type {
   AiBillableMeter,
   AiCostStorage,
   AiModelCallCostRecord,
+  AiModelCallUsageRecord,
   AiPricingContext,
   AiUsageStorage,
   RecordAiModelCallResult,
   Storage,
 } from "@sixb/core/storage"
+import { normalizeAiModelCallRecord } from "@sixb/core/storage"
 import type { AgentWorkerStorage, RecoverAiModelCallInput } from "./types"
 
 interface RecordAiModelCallAccountingInput extends RecoverAiModelCallInput {
@@ -28,12 +35,16 @@ export async function recordAiModelCallAccounting(
     const usage = await aiUsage.recordModelCall(input.usage)
     // Usage deduplicates provider lifecycle replays by execution/call identity. Always attach the
     // valuation to the canonical row it returns, not the fresh candidate ID from a replay.
-    const canonical = { ...input, usage: usage.record, ratedAt: usage.record.recordedAt }
+    const canonical = normalizeModelCallAccounting({
+      ...input,
+      usage: usage.record,
+      ratedAt: usage.record.recordedAt,
+    })
     const record = modelCostRecord(canonical, usage.record.id)
     const estimate =
-      input.cost.status !== "reported" || input.estimate === undefined
+      canonical.cost.status !== "reported" || canonical.estimate === undefined
         ? undefined
-        : modelCostRecord({ ...canonical, cost: input.estimate }, usage.record.id)
+        : modelCostRecord({ ...canonical, cost: canonical.estimate }, usage.record.id)
     await aiCosts.recordModelCallCost({
       ...record,
       ...(estimate === undefined
@@ -53,6 +64,41 @@ export async function recordAiModelCallAccounting(
     })
     return usage
   })
+}
+
+/** Sanitize optional enrichment before either persistence or a JSON-safe recovery handoff. */
+export function normalizeModelCallAccounting(
+  input: RecoverAiModelCallInput
+): RecoverAiModelCallInput {
+  const usage = normalizeAiModelCallRecord(input.usage)
+  return {
+    ...input,
+    cost:
+      input.cost.status === "reported" ? input.cost : validatedEstimate(input.cost, input, usage),
+    ...(input.estimate === undefined
+      ? {}
+      : { estimate: validatedEstimate(input.estimate, input, usage) }),
+  }
+}
+
+function validatedEstimate(
+  cost: ModelCostEstimate,
+  input: RecoverAiModelCallInput,
+  usage: AiModelCallUsageRecord
+): ModelCostEstimate {
+  try {
+    assertJsonObject(cost, "model cost estimate")
+    const record = normalizeAiModelCallCostRecord(modelCostRecord({ ...input, cost }, usage.id))
+    if (!aiModelCallCostMatchesUsage(record, usage)) {
+      throw new TypeError("Estimate quantities do not match recorded usage.")
+    }
+    return structuredClone(cost)
+  } catch {
+    console.warn(
+      "[SixbAgentWorker] Invalid model cost estimate; preserving call usage and provider cost."
+    )
+    return { status: "unpriceable", reason: "inconsistent-usage" }
+  }
 }
 
 function modelCostRecord(

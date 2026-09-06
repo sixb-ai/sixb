@@ -1,19 +1,17 @@
 import {
   assertJsonObject,
   defineLanguageModel,
-  defineModelRateCard,
   isJsonObject,
   type JsonObject,
   type LanguageModel,
   type LanguageModelDefinition,
   type LanguageModelDefinitionCatalog,
   type LanguageModelProvider,
-  type LanguageModelRateCard,
   type LanguageModelRequest,
   type LanguageModelStreamEvent,
   MODEL_REASONING_EFFORTS,
   type ModelCapabilities,
-  type ModelCostTracking,
+  type ModelCostEstimator,
   type ModelFinishReason,
   type ModelMessage,
   ModelProviderError,
@@ -26,11 +24,7 @@ import {
   rateModelCall,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
-import {
-  anthropicMaxOutputTokens,
-  anthropicRateCard,
-  applyAnthropicRateCardModifiers,
-} from "./model-details"
+import { anthropicMaxOutputTokens, anthropicRateCard } from "./model-details"
 import { decodeServerSentEvents } from "./sse"
 import { anthropicOutputSchema } from "./structured-output"
 
@@ -61,8 +55,6 @@ export interface AnthropicOptions {
 }
 
 export interface AnthropicModelOptions {
-  /** Optional negotiated token pricing, independent of model metadata. */
-  readonly rateCard?: LanguageModelRateCard
   readonly maxOutputTokens?: number
   /** Additional native Messages API fields. Adapter-owned fields are rejected or merged safely. */
   readonly request?: JsonObject
@@ -287,7 +279,7 @@ class AnthropicLanguageModel implements LanguageModel {
   readonly providerId = PROVIDER_ID
   readonly modelId: string
   readonly definition: LanguageModelDefinition
-  readonly costTracking: ModelCostTracking
+  readonly costEstimator: ModelCostEstimator
   private readonly maxOutputTokens: number
 
   constructor(
@@ -320,25 +312,18 @@ class AnthropicLanguageModel implements LanguageModel {
     for (const [index, tool] of (options.providerTools ?? []).entries()) {
       assertJsonObject(tool, `providerTools[${index}]`)
     }
-    const baseRateCard = options.rateCard && defineModelRateCard(options.rateCard)
     // Server tools may add request- or duration-based charges that token rates cannot represent.
     const rateCard =
       (options.providerTools?.length ?? 0) > 0
         ? undefined
-        : baseRateCard
-          ? applyAnthropicRateCardModifiers(baseRateCard, modelId, options.request)
-          : anthropicRateCard(modelId, options.request)
+        : anthropicRateCard(modelId, options.request)
     this.definition = defineLanguageModel({
       ...base,
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
     })
-    this.costTracking = {
+    this.costEstimator = {
       estimate: ({ usage }) => rateModelCall({ usage, rateCard }),
     }
-  }
-
-  async resolveDefinition(): Promise<LanguageModelDefinition> {
-    return (await this.resolve()).definition
   }
 
   async resolve(options?: { readonly offline?: boolean }): Promise<LanguageModel> {

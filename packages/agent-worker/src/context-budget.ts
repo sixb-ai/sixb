@@ -13,14 +13,7 @@ export interface AgentContextBudget {
   readonly source: "config" | "model"
 }
 
-type ContextAgent = Pick<AgentDefinition, "id" | "model" | "loop">
-
-/** Resolve provider metadata once per model instance, before the worker accepts any jobs. */
-export async function resolveAgentContextBudgets(
-  agents: readonly ContextAgent[]
-): Promise<ReadonlyMap<string, AgentContextBudget>> {
-  return (await prepareAgentModels(agents)).budgets
-}
+type ContextAgent = Pick<AgentDefinition, "id" | "model" | "loop" | "reasoning">
 
 /** Keep the exact resolved binding beside the budget derived from it. */
 export async function prepareAgentModels(agents: readonly ContextAgent[]): Promise<{
@@ -39,7 +32,7 @@ export async function prepareAgentModels(agents: readonly ContextAgent[]): Promi
       try {
         let pending = snapshots.get(agent.model)
         if (!pending) {
-          pending = resolveModelSnapshot(agent.model, offline)
+          pending = agent.model.resolve?.({ offline }) ?? Promise.resolve(agent.model)
           snapshots.set(agent.model, pending)
         }
         model = await pending
@@ -58,42 +51,35 @@ export async function prepareAgentModels(agents: readonly ContextAgent[]): Promi
         error.cause = cause
         throw error
       }
-      models.set(agent.id, model)
-      return [agent.id, resolveAgentContextBudget(agent, model.definition)] as const
+      const budget = resolveAgentContextBudget(agent, model.definition)
+      const maxOutputTokens = Math.min(
+        budget.reserveTokens,
+        model.definition.maxOutputTokens ?? budget.reserveTokens
+      )
+      if (typeof agent.reasoning === "object" && agent.reasoning.budgetTokens >= maxOutputTokens) {
+        throw invalidBudget(agent.id, "output allowance must exceed the reasoning token budget.")
+      }
+      models.set(
+        agent.id,
+        Object.freeze({
+          providerId: model.providerId,
+          modelId: model.modelId,
+          definition: defineLanguageModel({ ...model.definition, maxOutputTokens }),
+          costEstimator: model.costEstimator,
+          stream: (request: Parameters<LanguageModel["stream"]>[0]) =>
+            model.stream({
+              ...request,
+              maxOutputTokens: Math.min(
+                request.maxOutputTokens ?? maxOutputTokens,
+                maxOutputTokens
+              ),
+            }),
+        })
+      )
+      return [agent.id, budget] as const
     })
   )
   return { models, budgets: new Map(entries) }
-}
-
-async function resolveModelSnapshot(
-  model: LanguageModel,
-  offline: boolean
-): Promise<LanguageModel> {
-  if (model.resolve) return model.resolve({ offline })
-  const definition = defineLanguageModel(
-    offline ? model.definition : ((await model.resolveDefinition?.()) ?? model.definition)
-  )
-  // Custom models can keep the older metadata hook. Bind their stream receiver and enforce the
-  // resolved output ceiling without mutating the original executable object.
-  return Object.freeze({
-    providerId: model.providerId,
-    modelId: model.modelId,
-    definition,
-    costTracking: model.costTracking,
-    stream: (request: Parameters<LanguageModel["stream"]>[0]) =>
-      model.stream({
-        ...request,
-        ...(definition.maxOutputTokens === undefined
-          ? {}
-          : {
-              maxOutputTokens: Math.min(
-                request.maxOutputTokens ?? definition.maxOutputTokens,
-                definition.maxOutputTokens
-              ),
-            }),
-      }),
-    resolveDefinition: async () => definition,
-  })
 }
 
 function hasContextLimit(definition: LanguageModelDefinition): boolean {
@@ -116,7 +102,12 @@ export function resolveAgentContextBudget(
   const configuredWindow = config?.windowTokens
   const windowTokens = configuredWindow ?? definition.contextWindow ?? definition.maxInputTokens
   if (windowTokens === undefined) throw missingContextLimit(agent)
-  const reserveTokens = config?.reserveTokens ?? Math.min(16_384, Math.floor(windowTokens * 0.25))
+  const reserveTokens =
+    config?.reserveTokens ??
+    Math.max(
+      Math.min(16_384, Math.floor(windowTokens * 0.25)),
+      typeof agent.reasoning === "object" ? agent.reasoning.budgetTokens + 1 : 0
+    )
 
   assertPositiveSafeInteger(agent.id, windowTokens, "windowTokens")
   assertPositiveSafeInteger(agent.id, reserveTokens, "reserveTokens")

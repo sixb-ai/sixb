@@ -125,7 +125,7 @@ describe("Vercel AI Gateway provider", () => {
     expect(await resolved.resolve!()).toBe(resolved)
   })
   test("resolves model context through the shared catalog without mutating the binding", async () => {
-    // Regression proof: remove resolveDefinition or expire the pending loadPromise before loadedAt is set.
+    // Regression proof: skip catalog resolution or expire loadPromise before loadedAt is set.
     let calls = 0
     const provider = createVercelGateway({
       apiKey: "test",
@@ -149,15 +149,18 @@ describe("Vercel AI Gateway provider", () => {
     const original = model.definition
     expect(calls).toBe(0)
     const [resolved, other] = await Promise.all([
-      model.resolveDefinition?.(),
-      provider("creator/model").resolveDefinition?.(),
+      model.resolve?.(),
+      provider("creator/model").resolve?.(),
     ])
     expect(calls).toBe(1)
-    expect(resolved).toMatchObject({ contextWindow: 200_000, capabilities: { localTools: false } })
-    expect(other?.contextWindow).toBe(200_000)
+    expect(resolved?.definition).toMatchObject({
+      contextWindow: 200_000,
+      capabilities: { localTools: false },
+    })
+    expect(other?.definition.contextWindow).toBe(200_000)
     expect(model.definition).toBe(original)
     expect(model.definition.contextWindow).toBeUndefined()
-    await model.resolveDefinition?.()
+    await model.resolve?.()
     expect(calls).toBe(1)
   })
 
@@ -177,7 +180,7 @@ describe("Vercel AI Gateway provider", () => {
         throw new Error("must not fetch")
       },
     })
-    expect(await provider("creator/model").resolveDefinition?.()).toMatchObject({
+    expect((await provider("creator/model").resolve?.())?.definition).toMatchObject({
       contextWindow: 123_000,
       maxInputTokens: 100_000,
     })
@@ -193,8 +196,8 @@ describe("Vercel AI Gateway provider", () => {
       },
     })
     const model = provider("creator/unknown")
-    await expect(model.resolveDefinition?.()).rejects.toThrow("catalog unavailable")
-    expect(await model.resolveDefinition?.()).toEqual(model.definition)
+    await expect(model.resolve?.()).rejects.toThrow("catalog unavailable")
+    expect((await model.resolve?.())?.definition).toEqual(model.definition)
     expect(model.definition.contextWindow).toBeUndefined()
     expect(calls).toBe(2)
   })
@@ -208,7 +211,7 @@ describe("Vercel AI Gateway provider", () => {
         return sseResponse([])
       },
     })
-    const model = provider("openai/gpt-5", { request: { max_output_tokens: 2_048 } })
+    const model = provider("openai/gpt-5", { maxOutputTokens: 2_048 })
     await model.stream(request({ maxOutputTokens: 512 }))
     await model.stream(request({ maxOutputTokens: 4_096, caching: "off" }))
     expect(bodies.map((body) => body.max_output_tokens)).toEqual([512, 2_048])
@@ -218,6 +221,47 @@ describe("Vercel AI Gateway provider", () => {
       "positive safe integer"
     )
     expect(bodies).toHaveLength(2)
+    expect(() => provider("openai/gpt-5", { maxOutputTokens: 0 })).toThrow("positive safe integer")
+  })
+  test("estimates safe Gateway settings but declines routing and extra pricing dimensions", async () => {
+    // Removal proof: reject every request/providerOptions object; safe settings become unpriceable.
+    const provider = createVercelGateway({
+      fetch: async () =>
+        Response.json({
+          data: [
+            {
+              id: "test/model",
+              type: "language",
+              pricing: { input: "0.000003", output: "0.000015" },
+            },
+          ],
+        }),
+    })
+    await provider.catalog.list()
+    const safeOptions: import("../src/provider").VercelGatewayModelOptions[] = [
+      {},
+      { request: {} },
+      { request: { temperature: 0.2 } },
+      { providerOptions: { gateway: { caching: "off" } } },
+    ]
+    for (const options of safeOptions) {
+      expect(
+        provider("test/model", options).costEstimator?.estimate({
+          usage: { inputTokens: 1000, outputTokens: 200 },
+        })
+      ).toMatchObject({ status: "rated", money: { amountNanos: "6000000" } })
+    }
+    for (const options of [
+      { request: { service_tier: "priority" } },
+      { providerOptions: { gateway: { models: ["other/model"] } } },
+      { providerTools: [{ type: "web_search" }] },
+    ]) {
+      expect(
+        provider("test/model", options).costEstimator?.estimate({
+          usage: { inputTokens: 1000, outputTokens: 200 },
+        })
+      ).toMatchObject({ status: "unpriceable" })
+    }
   })
   test("keeps schemas outside the strict Responses subset on the tool fallback", () => {
     expect(
@@ -876,13 +920,13 @@ describe("Vercel AI Gateway provider", () => {
     expect(await gateway.catalog.list()).toHaveLength(1)
     // Regression proof: omit the routed/response model check; a fallback gets the requested model's price.
     expect(
-      gateway("creator/reasoner").costTracking?.estimate({
+      gateway("creator/reasoner").costEstimator?.estimate({
         usage: { inputTokens: 1, uncachedInputTokens: 1, outputTokens: 1, cacheReadInputTokens: 0 },
         route: { modelId: "other/model" },
       })
     ).toEqual({ status: "unpriceable", reason: "missing-rate-card" })
     expect(
-      gateway("creator/reasoner").costTracking?.estimate({
+      gateway("creator/reasoner").costEstimator?.estimate({
         usage: {
           inputTokens: 200_000,
           uncachedInputTokens: 200_000,

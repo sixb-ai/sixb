@@ -76,7 +76,7 @@ describe("Anthropic provider", () => {
     expect(bodies[0]).toMatchObject({ max_tokens: 512, temperature: 0.2 })
   })
   test("resolves model input limits through the shared catalog without mutating the binding", async () => {
-    // Regression proof: remove resolveDefinition or expire the pending loadPromise before loadedAt is set.
+    // Regression proof: skip catalog resolution or expire loadPromise before loadedAt is set.
     let calls = 0
     const provider = createAnthropic({
       apiKey: "test",
@@ -101,16 +101,19 @@ describe("Anthropic provider", () => {
     const original = model.definition
     expect(calls).toBe(0)
     const [resolved, other] = await Promise.all([
-      model.resolveDefinition?.(),
-      provider("claude-sonnet-4-5").resolveDefinition?.(),
+      model.resolve?.(),
+      provider("claude-sonnet-4-5").resolve?.(),
     ])
     expect(calls).toBe(1)
-    expect(resolved).toMatchObject({ maxInputTokens: 200_000, capabilities: { localTools: false } })
-    expect(resolved?.contextWindow).toBeUndefined()
-    expect(other?.maxInputTokens).toBe(200_000)
+    expect(resolved?.definition).toMatchObject({
+      maxInputTokens: 200_000,
+      capabilities: { localTools: false },
+    })
+    expect(resolved?.definition.contextWindow).toBeUndefined()
+    expect(other?.definition.maxInputTokens).toBe(200_000)
     expect(model.definition).toBe(original)
     expect(model.definition.maxInputTokens).toBeUndefined()
-    await model.resolveDefinition?.()
+    await model.resolve?.()
     expect(calls).toBe(1)
   })
 
@@ -130,13 +133,12 @@ describe("Anthropic provider", () => {
       },
     })
     const model = provider("claude-sonnet-4-5", {
-      rateCard: { currency: "USD", unit: "million-tokens", input: "3", output: "15" },
       providerTools: [{ type: "web_search_20250305", name: "web_search" }],
     })
-    const definition = await model.resolveDefinition?.()
+    const definition = (await model.resolve?.())?.definition
     expect(definition?.maxInputTokens).toBe(123_000)
     expect(definition).not.toHaveProperty("rateCard")
-    expect(model.costTracking?.estimate({ usage: {} }).status).toBe("unpriceable")
+    expect(model.costEstimator?.estimate({ usage: {} }).status).toBe("unpriceable")
   })
 
   test("reports catalog failures, retries later, and does not invent unknown model limits", async () => {
@@ -149,8 +151,8 @@ describe("Anthropic provider", () => {
       },
     })
     const model = provider("custom-model", { maxOutputTokens: 512 })
-    await expect(model.resolveDefinition?.()).rejects.toThrow("catalog unavailable")
-    expect(await model.resolveDefinition?.()).toEqual(model.definition)
+    await expect(model.resolve?.()).rejects.toThrow("catalog unavailable")
+    expect((await model.resolve?.())?.definition).toEqual(model.definition)
     expect(model.definition.maxInputTokens).toBeUndefined()
     expect(calls).toBe(2)
   })
@@ -919,7 +921,7 @@ describe("Anthropic provider", () => {
     expect(definitions[1]?.capabilities.reasoning).toBe(false)
     expect(definitions[0]).not.toHaveProperty("rateCard")
     expect(
-      provider("claude-opus-5").costTracking?.estimate({
+      provider("claude-opus-5").costEstimator?.estimate({
         usage: {
           inputTokens: 100,
           uncachedInputTokens: 100,
@@ -952,7 +954,7 @@ describe("Anthropic provider", () => {
 
     expect(model.definition).not.toHaveProperty("rateCard")
     expect(
-      model.costTracking?.estimate({
+      model.costEstimator?.estimate({
         usage: {
           inputTokens: 100,
           uncachedInputTokens: 100,
@@ -967,27 +969,9 @@ describe("Anthropic provider", () => {
       providerTools: [{ type: "web_search_20260209", name: "web_search" }],
     })
     expect(
-      serverToolModel.costTracking?.estimate({ usage: { inputTokens: 100, outputTokens: 10 } })
+      serverToolModel.costEstimator?.estimate({ usage: { inputTokens: 100, outputTokens: 10 } })
     ).toEqual({ status: "unpriceable", reason: "missing-rate-card" })
     expect(requests).toBe(0)
-    expect(
-      provider("claude-sonnet-4-5", {
-        rateCard: {
-          currency: "USD",
-          unit: "million-tokens",
-          input: "3",
-          output: "15",
-          cacheReadInput: "0.2",
-        },
-      }).costTracking?.estimate({
-        usage: {
-          inputTokens: 100,
-          uncachedInputTokens: 0,
-          cacheReadInputTokens: 100,
-          outputTokens: 10,
-        },
-      })
-    ).toMatchObject({ status: "rated", money: { amountNanos: "170000" } })
   })
 
   test("retries retryable pre-stream responses and preserves pause_turn", async () => {

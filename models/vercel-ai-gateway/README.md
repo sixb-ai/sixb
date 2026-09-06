@@ -2,7 +2,7 @@
 
 Callable Vercel AI Gateway provider for Sixb's core model contract. It uses native `fetch`, exposes
 model metadata through the gateway catalog, and preserves routing and inline gateway-reported costs.
-Pricing is separate from `LanguageModelDefinition` and belongs to `model.costTracking`.
+Pricing is separate from `LanguageModelDefinition` and belongs to `model.costEstimator`.
 
 ```ts
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
@@ -29,13 +29,12 @@ Share the configured provider or model through normal imports. Agents accept the
 
 Gateway requests enable automatic prompt caching by default. Explicit
 `providerOptions.gateway.caching` values are preserved. Per-call `maxOutputTokens` limits
-(including compaction summaries) are capped by a stricter configured `request.max_output_tokens`
+(including compaction summaries) are capped by a stricter configured `maxOutputTokens`
 or model-definition maximum.
 
 The remote catalog is cached in memory. Constructing a model and ordinary inference never fetch it.
-`await model.resolveDefinition?.()` resolves metadata from that same catalog without mutating
-`model.definition`, preserving configured definitions and binding options. `await model.resolve?.()`
-also pins an executable binding to that metadata. Workers retain this snapshot for capabilities,
+`await model.resolve?.()` returns an executable snapshot without mutating `model.definition`,
+preserving configured definitions and model options. Workers retain this snapshot for capabilities,
 output limits, generation, and compaction. Explicit `loop.context.windowTokens` or locally supplied
 limits use `resolve({ offline: true })` to avoid network lookup. A prepared binding never reloads
 capabilities; restarting the worker resolves again. Gateway `context_window` maps to `contextWindow`;
@@ -43,10 +42,10 @@ configured definitions can additionally supply a separate `maxInputTokens` limit
 A structured-output call consults it when support is otherwise unknown, then uses the native strict
 response format or transparently falls back to one required, nonparallel JSON function. A catalog
 failure safely selects the fallback. Inline Gateway cost is stored as the call's cost, with
-any local estimate retained separately. `costTracking.estimate({ usage })` uses fixed prices from an
-already-loaded catalog, or an explicit `vercelGateway(modelId, { rateCard })` override, without a
-network request. Routing/request overrides, variable provider pricing, and provider tools disable
-token-only estimates. If neither a report nor a defensible estimate exists, cost is unpriceable.
+any local estimate retained separately. `costEstimator.estimate({ usage })` uses fixed prices from an
+already-loaded catalog without a network request. Temperature, output limits, and caching controls
+preserve estimation. Routing, unknown pricing dimensions, variable provider pricing, and provider
+tools disable token-only estimates. If neither a report nor a defensible estimate exists, cost is unpriceable.
 
 Sixb displays the inline provider cost when available and retains the local estimate alongside it;
 totals count each call once. A Gateway charge describes Gateway billing. Native generation,

@@ -11,14 +11,10 @@ export type {
 export { createModelCatalog, modelRef } from "./catalog"
 export type {
   LanguageModelDefinition,
-  LanguageModelRateCard,
   ModelDefinition,
   ModelKind,
-  ModelPricingTier,
-  ModelTokenPrice,
-  ModelUnitPrice,
 } from "./definitions"
-export { defineLanguageModel, defineModelRateCard } from "./definitions"
+export { defineLanguageModel } from "./definitions"
 export {
   ModelProviderError,
   ModelStreamError,
@@ -75,10 +71,17 @@ export type {
   ModelCallCost,
   ModelCostComponent,
   ModelCostEstimate,
+  ModelCostEstimator,
   ModelCostMeter,
-  ModelCostTracking,
   ModelMoney,
   ModelReportedCost,
 } from "./pricing"
 export { rateModelCall } from "./pricing"
+export type {
+  LanguageModelRateCard,
+  ModelPricingTier,
+  ModelTokenPrice,
+  ModelUnitPrice,
+} from "./rate-card"
+export { defineModelRateCard } from "./rate-card"
 export type { ModelOutput, ModelTool, ModelToolExecutionContext } from "./tools"

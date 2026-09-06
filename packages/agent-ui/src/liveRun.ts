@@ -17,7 +17,7 @@ export interface LiveRunState {
    * rendering — the view consumes `parts` directly.
    */
   readonly partKeys: readonly string[]
-  /** AI SDK model step currently being streamed. Used to keep reused part ids ordered. */
+  /** Model step currently being streamed. Used to keep reused part ids ordered. */
   readonly stepIndex: number
   /** Set once the worker persists the assistant message; the hook reloads durable state on change. */
   readonly finalizedMessageId: string | null
@@ -103,7 +103,7 @@ function reduceEvent(state: LiveRunState, event: AgentRunStreamEvent): LiveRunSt
   }
 }
 
-// Reduce an AI SDK `UIMessageChunk` (typed as opaque JSON on the wire). Unknown shapes are ignored
+// Reduce a Sixb model UI chunk (typed as opaque JSON on the wire). Unknown shapes are ignored
 // so the stream stays alive even if the SDK emits chunk variants this UI does not model yet.
 function applyChunk(state: LiveRunState, chunk: unknown): LiveRunState {
   if (!isRecord(chunk) || typeof chunk.type !== "string") return state

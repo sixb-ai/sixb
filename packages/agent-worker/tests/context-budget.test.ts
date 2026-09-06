@@ -1,11 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { AgentContextConfig } from "@sixb/core"
 import { defineLanguageModel, type LanguageModelDefinition } from "@sixb/core/models"
-import {
-  prepareAgentModels,
-  resolveAgentContextBudget,
-  resolveAgentContextBudgets,
-} from "../src/context-budget"
+import { prepareAgentModels, resolveAgentContextBudget } from "../src/context-budget"
 import { WorkerTestModel } from "./worker-model-fixture"
 
 function agent(limits: Partial<LanguageModelDefinition> = {}, context?: AgentContextConfig) {
@@ -25,8 +21,42 @@ function agent(limits: Partial<LanguageModelDefinition> = {}, context?: AgentCon
 }
 
 describe("agent context budget resolution", () => {
+  test("uses each agent's output reserve as its execution ceiling", async () => {
+    // Removal proof: store the unbounded model in prepareAgentModels; requests exceed the reserve.
+    const base = agent({ contextWindow: 32_768, maxOutputTokens: 16_384 })
+    const outputs: (number | undefined)[] = []
+    base.model.stream = async (request) => {
+      outputs.push(request.maxOutputTokens)
+      return { events: (async function* () {})() }
+    }
+    const prepared = await prepareAgentModels([
+      base,
+      { ...base, id: "reasoner", reasoning: { budgetTokens: 10_000 } },
+    ])
+    for (const id of [base.id, "reasoner"]) {
+      const model = prepared.models.get(id)!
+      const budget = prepared.budgets.get(id)!
+      await model.stream({
+        callId: id,
+        tools: [],
+        messages: [],
+        signal: new AbortController().signal,
+      })
+      expect(outputs.at(-1)! + budget.inputBudgetTokens).toBeLessThanOrEqual(32_768)
+    }
+    expect(outputs).toEqual([8_192, 10_001])
+    await expect(
+      prepareAgentModels([
+        {
+          ...base,
+          reasoning: { budgetTokens: 10_000 },
+          loop: { context: { reserveTokens: 8_192 } },
+        },
+      ])
+    ).rejects.toThrow("reasoning")
+  })
   test("pins custom metadata and clamps execution to its resolved output ceiling", async () => {
-    // Regression proof: return the original model from resolveModelSnapshot instead of the wrapper.
+    // Regression proof: store the original model instead of the bounded prepared model.
     const base = agent()
     const outputs: (number | undefined)[] = []
     const model = {
@@ -34,13 +64,16 @@ describe("agent context budget resolution", () => {
       providerId: base.model.providerId,
       modelId: base.model.modelId,
       definition: base.model.definition,
-      resolveDefinition: async () =>
-        defineLanguageModel({
+      resolve: async () => ({
+        ...model,
+        stream: model.stream.bind(model),
+        definition: defineLanguageModel({
           ...base.model.definition,
           contextWindow: 32_000,
           maxOutputTokens: 400,
           capabilities: { inputMediaTypes: ["image/png"] },
         }),
+      }),
       async stream(request: import("@sixb/core/models").LanguageModelRequest) {
         expect(this).toBe(model)
         outputs.push(request.maxOutputTokens)
@@ -122,17 +155,19 @@ describe("agent context budget resolution", () => {
     ).toThrow("keepRecentTokens must be less than the resolved input budget")
   })
 
-  // Regression proof: skip the resolver in resolveAgentContextBudgets or remove its per-instance cache.
+  // Regression proof: skip model resolution or remove its per-instance cache.
   test("resolves shared model instances once with separate budgets for each agent", async () => {
     const base = agent()
     let calls = 0
     const model = Object.assign(base.model, {
-      resolveDefinition: async () => {
+      resolve: async () => {
         calls += 1
-        return defineLanguageModel({ ...base.model.definition, contextWindow: 32_000 })
+        return new WorkerTestModel({
+          definition: defineLanguageModel({ ...base.model.definition, contextWindow: 32_000 }),
+        })
       },
     })
-    const budgets = await resolveAgentContextBudgets([
+    const { budgets } = await prepareAgentModels([
       { ...base, model },
       { ...base, id: "other", model, loop: { context: { reserveTokens: 4_000 } } },
     ])
@@ -149,12 +184,14 @@ describe("agent context budget resolution", () => {
         ...base,
         id: `agent-${index}`,
         model: Object.assign(base.model, {
-          resolveDefinition: async () =>
-            defineLanguageModel({ ...base.model.definition, contextWindow }),
+          resolve: async () =>
+            new WorkerTestModel({
+              definition: defineLanguageModel({ ...base.model.definition, contextWindow }),
+            }),
         }),
       }
     })
-    const budgets = await resolveAgentContextBudgets(bindings)
+    const { budgets } = await prepareAgentModels(bindings)
     expect([...budgets.values()].map((budget) => budget.windowTokens)).toEqual([32_000, 64_000])
   })
 
@@ -166,13 +203,14 @@ describe("agent context budget resolution", () => {
       agent({ maxInputTokens: 32_000 }),
     ]) {
       const model = Object.assign(base.model, {
-        resolveDefinition: async () => {
+        resolve: async (options?: { offline?: boolean }) => {
+          if (options?.offline) return base.model
           calls += 1
           throw new Error("offline")
         },
       })
       expect(
-        (await resolveAgentContextBudgets([{ ...base, model }])).get("assistant")?.windowTokens
+        (await prepareAgentModels([{ ...base, model }])).budgets.get("assistant")?.windowTokens
       ).toBe(32_000)
     }
     expect(calls).toBe(0)
@@ -180,17 +218,23 @@ describe("agent context budget resolution", () => {
 
   test("fails clearly on unknown models, catalog failures, and mismatched identities", async () => {
     const base = agent()
-    await expect(resolveAgentContextBudgets([base])).rejects.toThrow("mock/model")
-    for (const resolveDefinition of [
-      async () => base.model.definition,
+    await expect(prepareAgentModels([base])).rejects.toThrow("mock/model")
+    for (const resolve of [
+      async () => base.model,
       async () => {
         throw new Error("catalog unavailable")
       },
       async () =>
-        defineLanguageModel({ ...base.model.definition, modelId: "wrong", contextWindow: 32_000 }),
+        new WorkerTestModel({
+          definition: defineLanguageModel({
+            ...base.model.definition,
+            modelId: "wrong",
+            contextWindow: 32_000,
+          }),
+        }),
     ]) {
-      const model = Object.assign(base.model, { resolveDefinition })
-      await expect(resolveAgentContextBudgets([{ ...base, model }])).rejects.toThrow(
+      const model = Object.assign(base.model, { resolve })
+      await expect(prepareAgentModels([{ ...base, model }])).rejects.toThrow(
         "loop.context.windowTokens"
       )
     }

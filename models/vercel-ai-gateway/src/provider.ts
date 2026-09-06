@@ -14,7 +14,7 @@ import {
   type LanguageModelStreamEvent,
   MODEL_REASONING_EFFORTS,
   type ModelCapabilities,
-  type ModelCostTracking,
+  type ModelCostEstimator,
   type ModelFinishReason,
   type ModelMessage,
   ModelProviderError,
@@ -54,8 +54,8 @@ export interface VercelGatewayOptions {
 }
 
 export interface VercelGatewayModelOptions {
-  /** Optional token estimate, retained independently of inline Gateway charges. */
-  readonly rateCard?: LanguageModelRateCard
+  /** Default output ceiling; individual calls may request less. */
+  readonly maxOutputTokens?: number
   readonly request?: JsonObject
   /** AI Gateway routing, fallback, caching, and provider-specific options. */
   readonly providerOptions?: JsonObject
@@ -365,11 +365,28 @@ function fallbackDefinition(modelId: string): LanguageModelDefinition {
   })
 }
 
+/** Unknown native options may affect billing; only known token-neutral controls are safe. */
+function hasFixedTokenPricing(options: VercelGatewayModelOptions): boolean {
+  if (
+    Object.keys(options.request ?? {}).some(
+      (key) => !["temperature", "top_p", "max_output_tokens", "metadata", "store"].includes(key)
+    )
+  )
+    return false
+  const providerOptions = options.providerOptions ?? {}
+  if (Object.keys(providerOptions).some((key) => key !== "gateway")) return false
+  const gateway = providerOptions.gateway
+  return (
+    gateway === undefined ||
+    (isJsonObject(gateway) && Object.keys(gateway).every((key) => key === "caching"))
+  )
+}
+
 class VercelGatewayLanguageModel implements LanguageModel {
   readonly providerId = PROVIDER_ID
   readonly modelId: string
   readonly definition: LanguageModelDefinition
-  readonly costTracking: ModelCostTracking
+  readonly costEstimator: ModelCostEstimator
 
   constructor(
     private readonly transport: GatewayTransport,
@@ -380,19 +397,15 @@ class VercelGatewayLanguageModel implements LanguageModel {
     private readonly metadataResolved = false
   ) {
     this.modelId = modelId
-    const rateCard = options.rateCard && defineModelRateCard(options.rateCard)
-    this.costTracking = {
+    this.costEstimator = {
       // A model-only card cannot price routing overrides or provider-native tool charges.
       estimate: ({ usage, route, responseModelId }) =>
-        options.providerOptions ||
-        options.request ||
+        !hasFixedTokenPricing(options) ||
         options.providerTools?.length ||
         (route?.modelId !== undefined && route.modelId !== modelId) ||
         (responseModelId !== undefined && responseModelId !== modelId)
           ? { status: "unpriceable", reason: "missing-rate-card" }
-          : rateCard
-            ? rateModelCall({ usage, rateCard })
-            : catalog.estimate(modelId, usage),
+          : catalog.estimate(modelId, usage),
     }
     if (options.request !== undefined) {
       assertJsonObject(options.request, "model request options")
@@ -407,10 +420,19 @@ class VercelGatewayLanguageModel implements LanguageModel {
       ...(configuredDefinition ?? fallbackDefinition(modelId)),
       ...(options.capabilities === undefined ? {} : { capabilities: options.capabilities }),
     })
-  }
-
-  async resolveDefinition(): Promise<LanguageModelDefinition> {
-    return (await this.resolve()).definition
+    if (
+      options.maxOutputTokens !== undefined &&
+      (!Number.isSafeInteger(options.maxOutputTokens) || options.maxOutputTokens <= 0)
+    ) {
+      throw new TypeError("[SixbVercelGateway] maxOutputTokens must be a positive safe integer.")
+    }
+    if (
+      options.maxOutputTokens !== undefined &&
+      this.definition.maxOutputTokens !== undefined &&
+      options.maxOutputTokens > this.definition.maxOutputTokens
+    ) {
+      throw new TypeError("[SixbVercelGateway] maxOutputTokens must not exceed the model maximum.")
+    }
   }
 
   async resolve(options?: { readonly offline?: boolean }): Promise<LanguageModel> {
@@ -487,6 +509,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
     }
     const ceilings = [
       request.maxOutputTokens,
+      this.options.maxOutputTokens,
       positiveInteger(extra.max_output_tokens),
       this.definition.maxOutputTokens,
     ].filter((value): value is number => value !== undefined)

@@ -203,8 +203,7 @@ compaction then use that same snapshot. An explicit `loop.context.windowTokens` 
 and allows offline startup. Known local limits also use an offline snapshot. Refreshing a provider
 catalog does not change a running worker's prepared models; restart the worker to resolve again.
 Custom models may implement `resolve({ offline })`; it must preserve provider and model identity,
-pin operational metadata, and avoid network lookup when `offline` is true. The older
-`resolveDefinition()` hook remains supported with a bound stream and resolved output ceiling.
+pin operational metadata, and avoid network lookup when `offline` is true.
 If no limit is available, startup fails with instructions to configure a window or supply a model
 definition; Sixb does not assume a default context size.
 
@@ -228,14 +227,16 @@ loop: {
 ```
 
 `windowTokens` overrides the catalog and is authoritative when set. `reserveTokens` defaults to the
-smaller of 16,384 or 25% of the resolved window. `keepRecentTokens` defaults to the smaller of
+smaller of 16,384 or 25% of the resolved window, increased when needed to exceed an exact reasoning
+budget. Normal generation is capped by this reserve and the model's output ceiling. An explicit
+reserve must also accommodate reasoning. `keepRecentTokens` defaults to the smaller of
 20,000 or half the resolved input budget. All three fields are optional; omitting `context` keeps
 automatic compaction enabled with model-derived defaults.
 
 ## Usage and costs
 
 Sixb records completed model calls, including compaction summaries, before another billable step
-starts. Token estimates come from the model integration's optional `costTracking`, independently
+starts. Token estimates come from the model integration's optional `costEstimator`, independently
 of operational metadata such as context limits. Inline provider costs are retained separately.
 
 Atlas displays a **selected cost** for each call: an inline provider cost when available, otherwise
@@ -243,6 +244,11 @@ a local estimate, otherwise unknown. When both are available, the local estimate
 the provider cost. Totals count each call once. Gateway charges describe Gateway billing.
 
 Usage and cost are recorded atomically and recovered idempotently after a storage failure.
+Invalid local estimates become unavailable without discarding valid usage or inline costs.
+Accepted streams that end through cancellation, disconnection, or a missing finish event are also
+recorded, retaining native IDs received so far. Without final usage, their meters and cost remain
+unknown, never zero. Requests that fail before returning a stream and process crashes before
+recording are outside this call-level guarantee; this ledger is not an account-wide billing report.
 `storage.aiCosts.listModelCalls()` returns the immutable call-time cost and its optional estimate.
 Native request, response, and generation IDs are retained when supplied by the provider and exposed
 through the model-call API and Atlas. Internal fallback response IDs are stored separately.

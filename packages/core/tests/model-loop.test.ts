@@ -113,7 +113,7 @@ describe("runModelLoop", () => {
         ],
       ]),
       {
-        costTracking: {
+        costEstimator: {
           estimate: ({ usage }: { usage: typeof USAGE }) =>
             rateModelCall({
               usage,
@@ -144,7 +144,7 @@ describe("runModelLoop", () => {
   })
 
   test("estimation failure cannot discard completed usage or an inline report", async () => {
-    // Regression proof: call costTracking.estimate directly without the failure boundary.
+    // Regression proof: call costEstimator.estimate directly without the failure boundary.
     const calls: ModelCallEndEvent[] = []
     const model = Object.assign(
       modelFromCalls([
@@ -159,7 +159,7 @@ describe("runModelLoop", () => {
         ],
       ]),
       {
-        costTracking: {
+        costEstimator: {
           estimate: () => {
             throw new Error("unavailable estimator")
           },
@@ -492,6 +492,47 @@ describe("runModelLoop", () => {
       steps: [],
       partialContent: [{ type: "text", text: "partial" }],
     })
+  })
+
+  test("accounts accepted interrupted streams as unknown instead of free", async () => {
+    // Removal proof: record only after accumulator.complete(); none of these calls are preserved.
+    for (const end of ["abort", "error", "eof"] as const) {
+      const abort = new AbortController()
+      const calls: ModelCallEndEvent[] = []
+      const model = new MockLanguageModel({
+        stream: async () => ({
+          events: (async function* () {
+            yield { type: "stream-start" } as const
+            yield {
+              type: "response-metadata",
+              providerIds: { requestId: "req-partial" },
+              modelId: "served",
+            } as const
+            if (end === "abort") abort.abort()
+            if (end === "error") throw new Error("connection lost")
+          })(),
+        }),
+      })
+      const result = runModelLoop({
+        model,
+        messages: [],
+        maxSteps: 1,
+        signal: abort.signal,
+        onModelCallEnd: async (event) => {
+          calls.push(event)
+        },
+      })
+      if (end === "abort") expect((await result).status).toBe("aborted")
+      else
+        await expect(result).rejects.toThrow(end === "error" ? "connection lost" : "finish event")
+      expect(calls).toHaveLength(1)
+      expect(calls[0]).toMatchObject({
+        providerIds: { requestId: "req-partial" },
+        responseModelId: "served",
+        usage: {},
+        cost: { status: "unpriceable", reason: "missing-usage" },
+      })
+    }
   })
 
   test("accounts a finished response when cancellation races with stream teardown", async () => {

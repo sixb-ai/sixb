@@ -19,33 +19,6 @@ export interface ModelDefinition {
   readonly releaseDate?: string
 }
 
-/** A decimal USD price per one million units. Strings keep catalog data exact and serializable. */
-export type ModelUnitPrice = string
-
-export interface ModelPricingTier {
-  readonly minTokens: number
-  readonly maxTokens?: number
-  readonly price: ModelUnitPrice
-}
-
-export type ModelTokenPrice =
-  | ModelUnitPrice
-  | {
-      readonly default: ModelUnitPrice
-      readonly tiers: readonly ModelPricingTier[]
-    }
-
-export interface LanguageModelRateCard {
-  readonly currency: "USD"
-  readonly unit: "million-tokens"
-  readonly input: ModelTokenPrice
-  readonly output: ModelTokenPrice
-  readonly cacheReadInput?: ModelTokenPrice
-  readonly cacheWriteInput?: ModelTokenPrice
-  readonly cacheWriteInput5m?: ModelTokenPrice
-  readonly cacheWriteInput1h?: ModelTokenPrice
-}
-
 /** Serializable facts about one concrete model offering from one provider. */
 export interface LanguageModelDefinition extends ModelDefinition {
   readonly kind: "language"
@@ -185,104 +158,6 @@ function freezeReasoningBudgetCapabilities(
     ...(budget.min === undefined ? {} : { min: budget.min }),
     ...(budget.max === undefined ? {} : { max: budget.max }),
   })
-}
-
-/** Validate and snapshot provider-owned pricing independently of operational model metadata. */
-export function defineModelRateCard(rateCard: LanguageModelRateCard): LanguageModelRateCard {
-  assertLanguageModelRateCard(rateCard)
-  return Object.freeze({
-    currency: "USD",
-    unit: "million-tokens",
-    input: freezeTokenPrice(rateCard.input),
-    output: freezeTokenPrice(rateCard.output),
-    ...(rateCard.cacheReadInput === undefined
-      ? {}
-      : { cacheReadInput: freezeTokenPrice(rateCard.cacheReadInput) }),
-    ...(rateCard.cacheWriteInput === undefined
-      ? {}
-      : { cacheWriteInput: freezeTokenPrice(rateCard.cacheWriteInput) }),
-    ...(rateCard.cacheWriteInput5m === undefined
-      ? {}
-      : { cacheWriteInput5m: freezeTokenPrice(rateCard.cacheWriteInput5m) }),
-    ...(rateCard.cacheWriteInput1h === undefined
-      ? {}
-      : { cacheWriteInput1h: freezeTokenPrice(rateCard.cacheWriteInput1h) }),
-  })
-}
-
-function freezeTokenPrice(price: ModelTokenPrice): ModelTokenPrice {
-  return typeof price === "string"
-    ? price
-    : Object.freeze({
-        default: price.default,
-        tiers: Object.freeze(
-          price.tiers.map((tier) =>
-            Object.freeze({
-              minTokens: tier.minTokens,
-              ...(tier.maxTokens === undefined ? {} : { maxTokens: tier.maxTokens }),
-              price: tier.price,
-            })
-          )
-        ),
-      })
-}
-
-function assertLanguageModelRateCard(rateCard: unknown): asserts rateCard is LanguageModelRateCard {
-  assertRecord(rateCard, "rate card")
-  if (rateCard.currency !== "USD" || rateCard.unit !== "million-tokens") {
-    throw new TypeError("[Sixb] Model rate cards must use USD per million tokens.")
-  }
-  for (const meter of [
-    "input",
-    "output",
-    "cacheReadInput",
-    "cacheWriteInput",
-    "cacheWriteInput5m",
-    "cacheWriteInput1h",
-  ] as const) {
-    const value = rateCard[meter]
-    if (value === undefined && meter !== "input" && meter !== "output") continue
-    if (typeof value === "string") {
-      assertPrice(value, meter)
-      continue
-    }
-    assertRecord(value, `price '${meter}'`)
-    assertPrice(value.default, `${meter}.default`)
-    if (!Array.isArray(value.tiers))
-      throw new TypeError(`[Sixb] Model price '${meter}' tiers must be an array.`)
-    let previousMax = 0
-    for (const [index, tier] of value.tiers.entries()) {
-      assertRecord(tier, `price '${meter}' tier ${index}`)
-      if (
-        typeof tier.minTokens !== "number" ||
-        !Number.isSafeInteger(tier.minTokens) ||
-        tier.minTokens < 0
-      ) {
-        throw new TypeError(`[Sixb] Model price '${meter}' tier ${index} has an invalid minimum.`)
-      }
-      if (index > 0 && tier.minTokens < previousMax) {
-        throw new TypeError(
-          `[Sixb] Model price '${meter}' tiers must be ordered and nonoverlapping.`
-        )
-      }
-      if (
-        tier.maxTokens !== undefined &&
-        (typeof tier.maxTokens !== "number" ||
-          !Number.isSafeInteger(tier.maxTokens) ||
-          tier.maxTokens <= tier.minTokens)
-      ) {
-        throw new TypeError(`[Sixb] Model price '${meter}' tier ${index} has an invalid maximum.`)
-      }
-      previousMax = tier.maxTokens ?? Number.POSITIVE_INFINITY
-      assertPrice(tier.price, `${meter}.tiers[${index}].price`)
-    }
-  }
-}
-
-function assertPrice(value: unknown, meter: string): asserts value is string {
-  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) {
-    throw new TypeError(`[Sixb] Model price '${meter}' must be a nonnegative decimal string.`)
-  }
 }
 
 function assertModelId(value: string, field: string): void {

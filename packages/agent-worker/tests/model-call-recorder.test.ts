@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { ModelCallEndEvent } from "@sixb/core/models"
+import { type ModelCallEndEvent, rateModelCall } from "@sixb/core/models"
 import { AiUsageStorageError, InMemoryStorage } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { AgentUsageRecordingError } from "../src/errors"
@@ -82,6 +82,73 @@ async function seededWorkerStorage(): Promise<AgentWorkerStorage> {
 }
 
 describe("AiModelCallRecorder", () => {
+  test("invalid estimates cannot discard usage or inline provider costs", async () => {
+    // Removal proof: bypass validatedEstimate in model-call-accounting; the first append rejects.
+    const estimates = [
+      {
+        status: "rated" as const,
+        money: { currency: "USD" as const, amountNanos: "2" },
+        components: [],
+      },
+      rateModelCall({
+        usage: { inputTokens: 1, outputTokens: 1 },
+        rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "1" },
+      }),
+    ]
+    for (const { reported, estimate } of estimates.flatMap((estimate) =>
+      [true, false].map((reported) => ({ reported, estimate }))
+    )) {
+      const storage = await seededWorkerStorage()
+      const event = callEndEvent()
+      await recorder(storage, { now: () => occurredAt }).onModelCallEnd({
+        ...event,
+        cost: reported ? event.cost : estimate,
+        ...(reported ? { estimate } : {}),
+      })
+      const page = await storage.aiCosts.listModelCalls({
+        projectId: "project_1",
+        from: new Date("2026-07-01"),
+        to: new Date("2026-07-02"),
+      })
+      expect(page.total).toBe(1)
+      expect(page.items[0]?.usage.usage.totalTokens).toBe(20)
+      expect(page.items[0]?.cost).toMatchObject(
+        reported
+          ? {
+              status: "rated",
+              money: { amountNanos: "42000" },
+              estimate: { status: "unpriceable" },
+            }
+          : { status: "unpriceable" }
+      )
+    }
+  })
+  test("sanitizes optional estimates before a durable recovery handoff", async () => {
+    // Removal proof: construct recoveryInput without normalizeModelCallAccounting in the recorder.
+    let recovered: RecoverAiModelCallInput | undefined
+    const usage = recorder(
+      await seededWorkerStorage(),
+      {
+        retryDelaysMs: [],
+        recordAccounting: async () => {
+          throw new Error("storage unavailable")
+        },
+      },
+      async (input) => {
+        recovered = input
+      }
+    )
+    const event = callEndEvent()
+    await expect(
+      usage.onModelCallEnd({
+        ...event,
+        estimate: { status: "rated", money: { currency: "USD", amountNanos: "2" }, components: [] },
+      })
+    ).rejects.toMatchObject({ recoveryScheduled: true })
+    expect(recovered?.estimate).toMatchObject({ status: "unpriceable" })
+    expect(recovered?.cost).toEqual(event.cost)
+    expect(recovered?.usage.usage.inputTokens).toBe(12)
+  })
   test("retries and records one complete provider call with stable identity", async () => {
     // Removal proof: omit providerIds in the recorder's usage input.
     const inputs: RecoverAiModelCallInput[] = []

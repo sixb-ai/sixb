@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto"
 import type { ModelCallEndEvent, ModelUsage } from "@sixb/core/models"
 import type { ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
-import { normalizeAiModelCallRecord } from "@sixb/core/storage"
 import { AgentUsageRecordingError } from "./errors"
 import { aiModelCallUsageFromModel } from "./model-adapters"
-import { recordAiModelCallAccounting } from "./model-call-accounting"
+import { normalizeModelCallAccounting, recordAiModelCallAccounting } from "./model-call-accounting"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
 import type { AgentWorkerStorage, RecoverAiModelCall, RecoverAiModelCallInput } from "./types"
 
@@ -77,14 +76,13 @@ export class AiModelCallRecorder {
         ...(event.usage.raw === undefined ? {} : { rawUsage: rawUsage(event.usage) }),
         occurredAt,
       }
-      normalizeAiModelCallRecord(record)
-      const recoveryInput: RecoverAiModelCallInput = {
+      const recoveryInput = normalizeModelCallAccounting({
         usage: record,
         cost: event.cost,
         ...(event.estimate === undefined ? {} : { estimate: event.estimate }),
         ...(event.route === undefined ? {} : { route: event.route }),
         ratedAt: new Date(occurredAt),
-      }
+      })
 
       try {
         await retryOperation(

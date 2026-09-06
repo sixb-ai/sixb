@@ -29,16 +29,17 @@ await worker.start()
 - The worker transitions the durable run from `queued` to `running` when it claims the job.
 - Before each conversation turn, the worker estimates the next model request and checkpoints older
   complete turns when it crosses the model's input budget. Context limits come from the model
-  definition, or its provider-backed `resolveDefinition()` at startup. Explicit
+  definition, or its provider-backed `resolve()` at startup. Explicit
   `loop.context.windowTokens` overrides avoid remote lookup. If neither model metadata nor an
   override supplies a limit, startup fails with an actionable error rather than guessing a window.
   Separate input limits are respected; input-only metadata is treated as a conservative window
-  with the same output reserve. Omitting `loop.context` keeps compaction enabled.
+  with the same output reserve, which also bounds generation. Omitting `loop.context` keeps compaction enabled.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
 - Every completed provider call from Sixb's owned model loop is appended to `storage.aiUsage` with
   an immutable valuation in `storage.aiCosts`; API conversation and workflow-agent summaries are
-  derived from that ledger. Run rows do not store a second usage aggregate.
+  derived from that ledger. Accepted interrupted streams are recorded with unknown final usage and
+  cost, retaining received native IDs. Run rows do not store a second usage aggregate.
 - Every delivery rotates a durable execution token that fences stale finalization after redelivery.
   Usage remains unfenced because a completed provider call is billable even when execution ownership
   changes afterward. The run also persists the queue-returned lease expiration for gateway

@@ -261,7 +261,7 @@ function compactingAnswerModel(input: {
     ...(input.provider === undefined ? {} : { providerId: input.provider }),
     modelId: input.modelId ?? "mock-model",
     stream: async (options) => {
-      if (options.maxOutputTokens === undefined) {
+      if (options.tools.length > 0) {
         input.captureAnswerPrompt(options.messages)
         input.captureAnswerReasoning?.(options.reasoning)
         return stream([
@@ -1711,9 +1711,9 @@ describe("AgentWorker", () => {
       stream: () => {
         throw new Error("must not run inference")
       },
-      resolveDefinition: async () => {
+      resolve: async () => {
         resolutions += 1
-        return definition
+        return new WorkerTestModel({ definition })
       },
     })
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
