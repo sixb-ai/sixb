@@ -14,7 +14,7 @@ import type { OntologyCommitOriginSelector, OntologyCommitWrite } from "./commit
 import type {
   FinalizeMaterializationInput,
   MaterializationEventWorkRecord,
-  MaterializationLinkScopeState,
+  MaterializationLinkScopeRevision,
   MaterializationPlanChunk,
   MaterializationPlanHeader,
   MaterializationPlanWorkItem,
@@ -99,7 +99,7 @@ export function appendScopeSnapshot(
 
 export function finishScopeAccumulator(
   accumulator: LinkScopeAccumulator
-): Pick<MaterializationLinkScopeState, "source" | "linkId" | "effectiveCount" | "fingerprint"> {
+): MaterializationLinkScopeRevision {
   accumulator.hash.update("]")
   return {
     source: accumulator.source,

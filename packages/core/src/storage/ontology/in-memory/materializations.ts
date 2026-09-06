@@ -38,6 +38,7 @@ import type {
   FinalizeMaterializationInput,
   MaterializationCardinalityOccupantWorkRecord,
   MaterializationEventWorkRecord,
+  MaterializationLinkScopeRevision,
   MaterializationLinkScopeState,
   MaterializationLinkState,
   MaterializationObjectExistence,
@@ -134,7 +135,7 @@ export interface SessionState {
   readonly workStreams: Record<StreamMaterializationWorkInput["order"], WorkStreamState>
   workSealed: boolean
   incidentLinksByObject: Map<string, readonly OntologyLinkRef[]> | null
-  linkScopeStates: Map<string, MaterializationLinkScopeState> | null
+  linkSlotStates: Map<string, MaterializationLinkScopeState> | null
   readonly objectExistence: Map<string, MaterializationObjectExistenceWorkRecord>
   replacement: ReplacementSessionState | null
 }
@@ -209,13 +210,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       await this.assertObject(expected, input.commit.projectId)
     for (const expected of input.expected.links)
       await this.assertLink(expected, input.commit.projectId)
-    const expectedScopeStates = new Map<string, MaterializationLinkScopeState>()
+    const expectedScopeRevisions = new Map<string, MaterializationLinkScopeRevision>()
     for (const expected of input.expected.linkScopes) {
       const key = linkScopeSortKey(expected.source, expected.linkId)
       const current =
-        expectedScopeStates.get(key) ??
-        this.computeLinkScopeState(input.commit.projectId, expected.source, expected.linkId)
-      expectedScopeStates.set(key, current)
+        expectedScopeRevisions.get(key) ??
+        this.computeEffectiveLinkScope(input.commit.projectId, expected.source, expected.linkId)
+      expectedScopeRevisions.set(key, current)
       if (current.fingerprint !== expected.fingerprint) {
         throw new MaterializationConflictError(
           "effective-state",
@@ -247,7 +248,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       },
       workSealed: false,
       incidentLinksByObject: null,
-      linkScopeStates: expectedScopeStates,
+      linkSlotStates: new Map(),
       objectExistence: new Map<string, MaterializationObjectExistenceWorkRecord>(),
       replacement: null,
     }
@@ -275,7 +276,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     session.appliedPlanItems.length = 0
     session.outboxEnvelopes.clear()
     session.incidentLinksByObject = null
-    session.linkScopeStates = null
+    session.linkSlotStates = null
     session.objectExistence.clear()
     session.replacement = null
     this.liveSessions.delete(session)
@@ -329,7 +330,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         linkScopeSortKey(value.source, value.linkId)
       )) {
         this.requireSession(input.session)
-        const value = this.linkScopeState(session, scope.source, scope.linkId)
+        const value = this.linkSlotState(session, scope.source, scope.linkId)
         // Scope rows are currently only requested for cardinality-one links, so the complete member
         // set is bounded by the ontology invariant. Replacement scope enumeration is flattened in
         // its dedicated stream and never uses this shape.
@@ -1136,25 +1137,44 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     }
   }
 
-  private linkScopeState(
+  private linkSlotState(
     session: SessionState,
     source: OntologyObjectRef,
     linkId: string
   ): MaterializationLinkScopeState {
-    session.linkScopeStates ??= new Map()
+    session.linkSlotStates ??= new Map()
     const key = linkScopeSortKey(source, linkId)
-    const existing = session.linkScopeStates.get(key)
+    const existing = session.linkSlotStates.get(key)
     if (existing) return structuredClone(existing)
-    const computed = this.computeLinkScopeState(session.header.commit.projectId, source, linkId)
-    session.linkScopeStates.set(key, computed)
+    const computed = this.computeLinkSlotState(session.header.commit.projectId, source, linkId)
+    session.linkSlotStates.set(key, computed)
     return structuredClone(computed)
   }
 
-  private computeLinkScopeState(
+  private computeLinkSlotState(
     projectId: string,
     source: OntologyObjectRef,
     linkId: string
   ): MaterializationLinkScopeState {
+    const value = this.computeEffectiveLinkScope(projectId, source, linkId)
+    return {
+      ...value,
+      sourceAssertion: this.findActiveLinkScopeSource(projectId, source, linkId),
+      override: structuredClone(
+        publicLinkSlotOverride(
+          this.state.linkSlotOverrides.get(
+            projectEntityKey(projectId, linkScopeKey(source, linkId))
+          )
+        )
+      ),
+    }
+  }
+
+  private computeEffectiveLinkScope(
+    projectId: string,
+    source: OntologyObjectRef,
+    linkId: string
+  ): MaterializationLinkScopeRevision & Pick<MaterializationLinkScopeState, "effective"> {
     const rows: ObjectLinkRow[] = []
     getInMemoryObjectMaterializerAdapter(this.objects).visitExactScopeLinks(
       projectId,
@@ -1177,14 +1197,6 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     const effective = rows.length === 1 ? linkSnapshot(rows[0]!) : null
     return {
       ...finishScopeAccumulator(accumulator),
-      sourceAssertion: this.findActiveLinkScopeSource(projectId, source, linkId),
-      override: structuredClone(
-        publicLinkSlotOverride(
-          this.state.linkSlotOverrides.get(
-            projectEntityKey(projectId, linkScopeKey(source, linkId))
-          )
-        )
-      ),
       effective,
     }
   }

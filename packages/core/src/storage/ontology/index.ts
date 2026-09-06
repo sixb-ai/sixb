@@ -45,6 +45,7 @@ export type {
   MaterializationClassificationWorkRecord,
   MaterializationEventWorkRecord,
   MaterializationIncidentObjectWorkRecord,
+  MaterializationLinkScopeRevision,
   MaterializationLinkScopeState,
   MaterializationLinkState,
   MaterializationObjectExistence,

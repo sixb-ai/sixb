@@ -88,10 +88,9 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         this.assertSource(expected, input.commit.projectId)
       for (const expected of input.expected.objects) this.assertObject(reader, expected)
       for (const expected of input.expected.links) this.assertLink(reader, expected)
-      for (const expected of input.expected.linkScopes) {
-        if (
-          reader.linkScope(expected.source, expected.linkId).fingerprint !== expected.fingerprint
-        ) {
+      const linkScopeRevisions = reader.linkScopeRevisions(input.expected.linkScopes)
+      for (const [index, expected] of input.expected.linkScopes.entries()) {
+        if (linkScopeRevisions[index]?.fingerprint !== expected.fingerprint) {
           throw new MaterializationConflictError(
             "effective-state",
             `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
@@ -151,7 +150,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         yield {
           objects: [],
           links: [],
-          linkScopes: reader.linkScopes(scopes.slice(offset, offset + input.pageRows)),
+          linkScopes: reader.linkSlotStates(scopes.slice(offset, offset + input.pageRows)),
           points: [],
         }
       }

@@ -121,9 +121,9 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       for (const expected of input.expected.links) {
         this.assertLink(linkRevisions.get(linkRefKey(expected.ref)), expected)
       }
-      const linkScopes = await reader.linkScopes(input.expected.linkScopes)
+      const linkScopeRevisions = await reader.linkScopeRevisions(input.expected.linkScopes)
       for (const [index, expected] of input.expected.linkScopes.entries()) {
-        if (linkScopes[index]?.fingerprint !== expected.fingerprint) {
+        if (linkScopeRevisions[index]?.fingerprint !== expected.fingerprint) {
           throw new MaterializationConflictError(
             "effective-state",
             `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
@@ -191,7 +191,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         yield {
           objects: [],
           links: [],
-          linkScopes: await reader.linkScopes(scopes.slice(offset, offset + input.pageRows)),
+          linkScopes: await reader.linkSlotStates(scopes.slice(offset, offset + input.pageRows)),
           points: [],
         }
       }

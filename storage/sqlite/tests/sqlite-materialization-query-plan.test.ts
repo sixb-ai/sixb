@@ -105,7 +105,7 @@ describe("SQLite materialization query plans", () => {
     })
   })
 
-  test("point and link-scope batches use their complete lookup keys", () => {
+  test("point and link-scope revision batches use their complete lookup keys", () => {
     withRecordedReader(({ db, reader, recorded }) => {
       reader.exactPoints([
         {
@@ -113,7 +113,7 @@ describe("SQLite materialization query plans", () => {
           at: "2026-08-06T00:00:00.000Z",
         },
       ])
-      reader.linkScopes([{ source: objectRef, linkId: "timecards" }])
+      reader.linkScopeRevisions([{ source: objectRef, linkId: "timecards" }])
 
       expectRequestedFirstLookup(
         db,
