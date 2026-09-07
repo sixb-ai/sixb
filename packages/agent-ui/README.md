@@ -117,6 +117,77 @@ function ProjectPage({ project }: { project: ObjectRef }) {
 Registration follows mount and unmount, so context tracks what the user is actually looking at. Pass
 `null` to contribute nothing. Panels that receive their own `context` prop ignore the ambient list.
 
+### Commands on live context
+
+Pass an optional second argument to `useAgentContext` to expose operations on the mounted view:
+
+```tsx
+import { useAgentContext } from "@sixb/agent-ui"
+import { agentContext } from "@sixb/core/agents/context"
+import { stringEnum } from "@sixb/core/ontology"
+import { useState } from "react"
+
+function DispatchPage() {
+  const [view, setView] = useState<"timeline" | "list">("timeline")
+  const [availableOnly, setAvailableOnly] = useState(false)
+
+  const updateSchedule = (input: {
+    readonly view: "timeline" | "list"
+    readonly availableOnly: boolean
+  }) => {
+    setView(input.view)
+    setAvailableOnly(input.availableOnly)
+  }
+
+  useAgentContext(
+    agentContext.appState("dispatch", {
+      label: "Dispatch",
+      description: "Current schedule view and availability filter.",
+      value: { view, availableOnly },
+    }),
+    {
+      commands: {
+        setSchedule: {
+          description: "Change the schedule view and availability filter.",
+          input: {
+            view: stringEnum(["timeline", "list"]),
+            availableOnly: "boolean",
+          },
+          run: updateSchedule,
+        },
+      },
+    }
+  )
+
+  return <Schedule value={{ view, availableOnly }} onChange={updateSchedule} />
+}
+```
+
+Inputs use the same inline Sixb schema syntax as `defineAgentTool`; inline `run` callbacks infer
+their input types automatically. Named value-type references require a server ontology catalog
+and are not supported by browser view commands. Command names are local to their context
+registration, so different components can each declare `setView`.
+
+The context value remains plain serializable data. Commands are live browser bindings: handlers
+and command definitions are never added to the durable user-message context. The host advertises
+their descriptions and input schemas through live inspection. `modelValue`, when supplied, also
+controls what that inspection reveals.
+
+Handlers always read the latest committed React props/state. They may return `void` or a promise
+of `void`, and receive `{ signal }` as a second argument for asynchronous work. Unmounting, changing
+the context identity, or shadowing it with another registration cancels pending handlers; handlers
+must honor the signal before making delayed changes. A remounted view receives a new binding, so
+old command references cannot target its replacement. Ordinary context updates keep the binding.
+
+In a custom app, `sixb dev` automatically connects these registrations to `inspect_app`,
+`navigate_app`, and `invoke_app_command`. After a command, the host returns the updated view context.
+Removing a context chip excludes its live context and commands for that turn. Removing the app
+route context disables the tab's host tools entirely. Standalone panels retain context behavior;
+remote command execution requires the custom-app browser-control host.
+
+Use view commands for filters, selections, tabs, and opening existing review surfaces. Execute
+business changes through the existing Sixb actions and workflow interventions.
+
 ## Full page, with routing
 
 The `/react-router` subpath adds `AgentChatPage`, which wires the conversation to real URLs —

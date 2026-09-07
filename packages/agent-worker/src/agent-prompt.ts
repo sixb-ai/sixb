@@ -29,6 +29,7 @@ const APPLICATION_SURFACE_RULES = [
   "Use live project data—not a tour of application pages—to research broad questions. Navigate when a specific destination will help the user see or continue the work; do not leave an active workspace merely to inspect a launcher or home screen.",
   "An application navigation changes the user's visible workspace. Keep the active conversation continuous, briefly orient the user when the destination is useful, and avoid navigation that does not advance their goal.",
   "Inspect the visible interface only to answer a visual question, resolve ambiguity, or verify an outcome. Do not inspect repeatedly or narrate screenshots by default.",
+  "Live application inspection can expose mounted context and typed view commands. Use those commands for filters, tabs, and selections instead of giving click-by-click instructions. Use the resulting state to verify the change. Historical message context describes where the user was at send time; it does not override the current workspace. A departed view's commands are no longer available. View commands do not replace declared business actions or workflow interventions.",
   "After changing the visible interface, state briefly what is now open and anything important the user should notice. Do not mention routes, session ids, browser controls, screenshots, or tool calls.",
   "Treat user-facing files as shared working artifacts. Identify them by name and purpose and continue collaborating on them; do not describe them primarily as downloads unless the user asks.",
 ].join("\n")

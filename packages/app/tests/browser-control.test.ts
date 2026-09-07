@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { noopLogger } from "@sixb/core"
 import type { AgentMessageRecord } from "@sixb/core/storage"
 import { createAppBrowserAgentToolProvider } from "../src/agent-tools"
 import {
@@ -58,7 +59,11 @@ describe("AppBrowserControlHub", () => {
     const provision = provideTools({ triggerMessage: message })
     const tools = provision.tools
     expect(provision.capabilities).toEqual(["application-surface"])
-    expect(tools.map((tool) => tool.name)).toEqual(["inspect_app", "navigate_app"])
+    expect(tools.map((tool) => tool.name)).toEqual([
+      "inspect_app",
+      "navigate_app",
+      "invoke_app_command",
+    ])
     expect(tools[0]?.input).toEqual({})
     expect(tools[1]?.input).toEqual({ path: "string" })
   })
@@ -157,6 +162,95 @@ describe("AppBrowserControlHub", () => {
     await expect(hub.poll(sessionId, "different_secret_123456")).rejects.toMatchObject({
       status: 401,
     })
+  })
+
+  test("does not execute a queued command after its caller cancels", async () => {
+    const hub = new AppBrowserControlHub()
+    hub.register(sessionId, sessionSecret)
+    const controller = new AbortController()
+    const pending = hub.dispatch(
+      sessionId,
+      {
+        kind: "invoke",
+        registrationId: "old-view",
+        command: "setView",
+        input: { view: "list" },
+      },
+      controller.signal
+    )
+    controller.abort()
+    await expect(pending).rejects.toMatchObject({ status: 499 })
+    // Guard check: remove the queuedIndex splice in dispatch's finishWithError.
+    const pollAbort = new AbortController()
+    pollAbort.abort()
+    expect(await hub.poll(sessionId, sessionSecret, pollAbort.signal)).toBeNull()
+  })
+
+  test("forwards live commands and excludes omitted composer contexts from every app operation", async () => {
+    const hub = new AppBrowserControlHub()
+    hub.register(sessionId, sessionSecret)
+    const base = triggerMessage({ sessionId, navigate: true })
+    const message: AgentMessageRecord = {
+      ...base,
+      parts: [
+        {
+          type: "context",
+          origin: "ambient",
+          context: {
+            kind: "app-state",
+            id: "sixb-custom-app-route",
+            label: "App",
+            description: "Current app",
+            value: {
+              browser: { sessionId, navigate: true, offeredContext: ["app-state:dispatch"] },
+            },
+          },
+        },
+      ],
+    }
+    const provision = createAppBrowserAgentToolProvider(hub)({ triggerMessage: message })
+    const cases = [
+      { tool: "inspect_app", input: {}, kind: "inspect" },
+      { tool: "navigate_app", input: { path: "/dispatch" }, kind: "navigate" },
+      {
+        tool: "invoke_app_command",
+        input: {
+          registrationId: "view-instance",
+          command: "setView",
+          inputJson: '{"view":"list"}',
+        },
+        kind: "invoke",
+      },
+    ]
+    for (const entry of cases) {
+      const tool = provision.tools.find((tool) => tool.name === entry.tool)
+      if (!tool) throw new Error("Expected host tool")
+      const result = tool.handler({
+        input: entry.input,
+        signal: new AbortController().signal,
+        toolCallId: "call-1",
+        run: { id: "run-1", agentId: "assistant" },
+        connector: async () => {
+          throw new Error("Unexpected connector")
+        },
+        logger: noopLogger,
+        artifacts: {
+          put: async () => {
+            throw new Error("Unexpected artifact")
+          },
+        },
+      })
+      const command = await hub.poll(sessionId, sessionSecret)
+      expect(command).toMatchObject({ kind: entry.kind, excludedContext: ["app-state:dispatch"] })
+      if (!command) throw new Error("Expected command")
+      if (command.kind === "invoke") expect(command.input).toEqual({ view: "list" })
+      hub.submit(sessionId, sessionSecret, {
+        commandId: command.id,
+        ok: true,
+        value: { contexts: [] },
+      })
+      await expect(result).resolves.toEqual({ contexts: [] })
+    }
   })
 
   test("prunes stale browser tabs and rejects their pending commands", async () => {

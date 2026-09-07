@@ -1,5 +1,6 @@
 import type { AgentContextInput } from "@sixb/core"
-import { agentContext } from "../src/agents"
+import { stringEnum } from "@sixb/core"
+import { agentContext, useAgentContext } from "../src/agents"
 
 const Invoice = { id: "Invoice" } as const
 const invoiceContext = agentContext.object(Invoice, "inv-123")
@@ -19,3 +20,25 @@ type Equal<TLeft, TRight> =
 type Expect<TValue extends true> = TValue
 
 type _ObjectTypeAutocomplete = Expect<Equal<typeof invoiceContext.ref.objectTypeId, "Invoice">>
+
+export function ViewCommandsTypecheck() {
+  useAgentContext(viewContext, {
+    commands: {
+      setSchedule: {
+        description: "Change the schedule",
+        input: { view: stringEnum(["timeline", "list"]), availableOnly: "boolean" },
+        run(input) {
+          const view: "timeline" | "list" = input.view
+          const availableOnly: boolean = input.availableOnly
+          // @ts-expect-error Command input must retain its inferred enum.
+          const invalid: "grid" = input.view
+          // @ts-expect-error Command input is not an arbitrary record.
+          input.missing
+          void view
+          void availableOnly
+          void invalid
+        },
+      },
+    },
+  })
+}

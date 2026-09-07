@@ -7,8 +7,13 @@ import {
   type JsonValue,
   type ReadonlyJsonValue,
 } from "@sixb/core"
+import { agentContextIdentity } from "@sixb/core/agents/context"
 import type { AgentMessageRecord } from "@sixb/core/storage"
-import { AppBrowserControlError, AppBrowserControlHub } from "./browser-control-server"
+import {
+  type AppBrowserCommandInput,
+  AppBrowserControlError,
+  AppBrowserControlHub,
+} from "./browser-control-server"
 
 export interface AppBrowserControlRuntime {
   readonly hub: AppBrowserControlHub
@@ -17,15 +22,21 @@ export interface AppBrowserControlRuntime {
 
 function createBoundAppBrowserAgentTools(
   hub: AppBrowserControlHub,
-  sessionId: string
+  sessionId: string,
+  excludedContext: readonly string[]
 ): readonly AgentToolDefinition[] {
   const inspectApp = defineAgentTool("inspect_app")
     .description(
-      "Inspect the exact current page, matching route, complete route catalog, title, and viewport of the connected custom-app browser tab."
+      "Inspect the current page, route catalog, and live component context of the connected app tab. Context entries describe view state and available commands with their registrationId, name, and JSON input schema. Inspect before invoking a view command; historical context is not the current workspace."
     )
     .input({})
     .run(async ({ signal }) => {
-      return await dispatchBrowserCommand(hub, sessionId, { kind: "inspect" }, signal)
+      return await dispatchBrowserCommand(
+        hub,
+        sessionId,
+        { kind: "inspect", excludedContext },
+        signal
+      )
     })
 
   const navigateApp = defineAgentTool("navigate_app")
@@ -37,12 +48,38 @@ function createBoundAppBrowserAgentTools(
       return await dispatchBrowserCommand(
         hub,
         sessionId,
-        { kind: "navigate", path: input.path },
+        { kind: "navigate", path: input.path, excludedContext },
         signal
       )
     })
 
-  return Object.freeze([inspectApp, navigateApp])
+  const invokeAppCommand = defineAgentTool("invoke_app_command")
+    .description(
+      "Operate a mounted app view using a command returned by inspect_app or navigate_app. Pass its exact registrationId and command name, and a JSON-encoded input object matching its inputSchema. Use this for view changes such as filters, tabs, and selections. The result contains the updated app state. If the view is no longer available, inspect again. Business changes still use declared Sixb actions or workflow interventions."
+    )
+    .input({ registrationId: "string", command: "string", inputJson: "string" })
+    .run(async ({ input, signal }) => {
+      let value: unknown
+      try {
+        value = JSON.parse(input.inputJson)
+      } catch {
+        throw new AgentToolPublicError("[SixbApp] View command inputJson must contain valid JSON.")
+      }
+      return await dispatchBrowserCommand(
+        hub,
+        sessionId,
+        {
+          kind: "invoke",
+          registrationId: input.registrationId,
+          command: input.command,
+          input: value,
+          excludedContext,
+        },
+        signal
+      )
+    })
+
+  return Object.freeze([inspectApp, navigateApp, invokeAppCommand])
 }
 
 /**
@@ -61,7 +98,11 @@ export function createAppBrowserAgentToolProvider(hub: AppBrowserControlHub): (i
       return { tools: [], capabilities: [] }
     }
     return {
-      tools: createBoundAppBrowserAgentTools(hub, sessionId),
+      tools: createBoundAppBrowserAgentTools(
+        hub,
+        sessionId,
+        excludedAppContext(input.triggerMessage)
+      ),
       capabilities: ["application-surface"],
     }
   }
@@ -99,10 +140,35 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
+/** Omitted composer chips stay omitted from inspection and command execution for this turn. */
+function excludedAppContext(message: AgentMessageRecord): readonly string[] {
+  const included = new Set(
+    message.parts.flatMap((part) =>
+      part.type === "context" ? [agentContextIdentity(part.context)] : []
+    )
+  )
+  for (const part of message.parts) {
+    if (
+      part.type !== "context" ||
+      part.context.kind !== "app-state" ||
+      part.context.id !== "sixb-custom-app-route" ||
+      !isRecord(part.context.value) ||
+      !isRecord(part.context.value.browser)
+    )
+      continue
+    const offered = part.context.value.browser.offeredContext
+    if (!Array.isArray(offered)) return []
+    return offered.filter(
+      (identity): identity is string => typeof identity === "string" && !included.has(identity)
+    )
+  }
+  return []
+}
+
 async function dispatchBrowserCommand(
   hub: AppBrowserControlHub,
   sessionId: string,
-  input: { readonly kind: "inspect" } | { readonly kind: "navigate"; readonly path: string },
+  input: AppBrowserCommandInput,
   signal: AbortSignal
 ): Promise<JsonValue> {
   try {

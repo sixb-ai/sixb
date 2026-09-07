@@ -1,5 +1,6 @@
 import { AgentContextProvider, useAgentContext } from "@sixb/agent-ui"
-import { agentContext } from "@sixb/core/agents/context"
+import { useAgentContextRegistry, useRegisteredAgentContext } from "@sixb/agent-ui/internal/context"
+import { agentContext, agentContextIdentity } from "@sixb/core/agents/context"
 import { createElement, type ReactNode, useEffect, useMemo, useRef } from "react"
 import { matchPath, useLocation, useNavigate } from "react-router-dom"
 import {
@@ -27,6 +28,8 @@ function AppAgentContextRegistrar({
 }: AppAgentContextProviderProps) {
   const location = useLocation()
   const navigate = useNavigate()
+  const contextRegistry = useAgentContextRegistry()
+  const registeredContext = useRegisteredAgentContext()
   // Intentionally memory-only: duplicated tabs can inherit sessionStorage from their opener, but
   // every mounted tab must be a distinct control target and conversation surface.
   const identity = useMemo(createBrowserIdentity, [])
@@ -40,6 +43,7 @@ function AppAgentContextRegistrar({
 
     void runBrowserControlLoop({
       identity,
+      contextRegistry,
       routePaths: currentRoutePaths,
       navigate: (path) =>
         navigateRef.current(path, {
@@ -52,7 +56,7 @@ function AppAgentContextRegistrar({
     })
 
     return () => controller.abort()
-  }, [browserControl, identity, routePaths])
+  }, [browserControl, identity, routePaths, contextRegistry])
 
   const matchedRoute =
     routePaths.find((path) => matchPath({ path, end: true }, location.pathname)) ?? null
@@ -72,6 +76,12 @@ function AppAgentContextRegistrar({
         ? {
             sessionId: identity.sessionId,
             navigate: true,
+            offeredContext: registeredContext
+              .filter(
+                (context) => context.kind !== "app-state" || context.id !== "sixb-custom-app-route"
+              )
+              .map(agentContextIdentity)
+              .sort(),
           }
         : { navigate: false },
     },
@@ -111,6 +121,7 @@ async function runBrowserControlLoop(input: {
   readonly routePaths: readonly string[]
   readonly navigate: (path: string) => void
   readonly signal: AbortSignal
+  readonly contextRegistry: ReturnType<typeof useAgentContextRegistry>
 }): Promise<void> {
   const headers = {
     "content-type": "application/json",
@@ -135,6 +146,7 @@ async function runConnectedBrowserControlLoop(
     readonly routePaths: readonly string[]
     readonly navigate: (path: string) => void
     readonly signal: AbortSignal
+    readonly contextRegistry: ReturnType<typeof useAgentContextRegistry>
   },
   headers: Record<string, string>
 ): Promise<void> {
@@ -176,12 +188,17 @@ async function browserCommandResult(
   input: {
     readonly routePaths: readonly string[]
     readonly navigate: (path: string) => void
+    readonly contextRegistry: ReturnType<typeof useAgentContextRegistry>
+    readonly signal: AbortSignal
   }
 ): Promise<
   { readonly ok: true; readonly value: unknown } | { readonly ok: false; readonly error: string }
 > {
   try {
-    return { ok: true, value: await executeBrowserCommand(command, input) }
+    const remaining = command.expiresAt - Date.now()
+    if (remaining <= 0) throw new Error("The browser command has expired.")
+    const signal = AbortSignal.any([input.signal, AbortSignal.timeout(remaining)])
+    return { ok: true, value: await executeBrowserCommand(command, { ...input, signal }) }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
@@ -204,9 +221,28 @@ async function executeBrowserCommand(
   input: {
     readonly routePaths: readonly string[]
     readonly navigate: (path: string) => void
+    readonly contextRegistry: ReturnType<typeof useAgentContextRegistry>
+    readonly signal: AbortSignal
   }
 ): Promise<unknown> {
-  if (command.kind === "inspect") return browserInspection(input.routePaths)
+  input.signal.throwIfAborted()
+  const inspect = () => ({
+    ...browserInspection(input.routePaths),
+    contexts: input.contextRegistry.inspect(command.excludedContext),
+  })
+  if (command.kind === "inspect") return inspect()
+  if (command.kind === "invoke") {
+    await input.contextRegistry.invoke({
+      registrationId: command.registrationId,
+      command: command.command,
+      input: command.input,
+      excluded: command.excludedContext ?? [],
+      signal: input.signal,
+    })
+    await nextBrowserPaint(input.signal)
+    input.signal.throwIfAborted()
+    return inspect()
+  }
   if (command.kind === "navigate") {
     const url = new URL(command.path, window.location.href)
     if (url.origin !== window.location.origin) {
@@ -216,8 +252,9 @@ async function executeBrowserCommand(
       throw new Error(`No custom-app route matches '${url.pathname}'.`)
     }
     input.navigate(url.pathname + url.search + url.hash)
-    await nextBrowserPaint()
-    return browserInspection(input.routePaths)
+    await nextBrowserPaint(input.signal)
+    input.signal.throwIfAborted()
+    return inspect()
   }
 }
 
@@ -238,10 +275,28 @@ function browserInspection(routePaths: readonly string[]) {
   }
 }
 
-async function nextBrowserPaint(): Promise<void> {
-  await new Promise<void>((resolve) =>
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()))
-  )
+async function nextBrowserPaint(signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted()
+  await new Promise<void>((resolve, reject) => {
+    let frame = 0
+    const finish = () => {
+      cancelAnimationFrame(frame)
+      clearTimeout(timer)
+      signal.removeEventListener("abort", abort)
+      resolve()
+    }
+    const abort = () => {
+      finish()
+      reject(signal.reason)
+    }
+    // Hidden tabs may suspend animation frames. Give React a task boundary there as well.
+    const timer = setTimeout(finish, 100)
+    frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(finish)
+    })
+    signal.addEventListener("abort", abort, { once: true })
+  })
+  signal.throwIfAborted()
 }
 
 async function requireBrowserResponse(response: Response): Promise<void> {

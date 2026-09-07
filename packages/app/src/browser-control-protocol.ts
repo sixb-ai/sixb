@@ -1,16 +1,26 @@
 export const appBrowserControlPath = "/__sixb/browser-control"
 export const appBrowserControlSecretHeader = "x-sixb-browser-secret"
 
-export type AppBrowserCommand =
+export type AppBrowserOperation = (
   | {
-      readonly id: string
       readonly kind: "inspect"
     }
   | {
-      readonly id: string
       readonly kind: "navigate"
       readonly path: string
     }
+  | {
+      readonly kind: "invoke"
+      readonly registrationId: string
+      readonly command: string
+      readonly input: unknown
+    }
+) & { readonly excludedContext?: readonly string[] }
+
+export type AppBrowserCommand = AppBrowserOperation & {
+  readonly id: string
+  readonly expiresAt: number
+}
 
 export interface AppBrowserCommandResult {
   readonly commandId: string

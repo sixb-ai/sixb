@@ -35,6 +35,12 @@
       "import": "./dist/react-router.js",
       "default": "./dist/react-router.js"
     },
+    "./internal/context": {
+      "types": "./dist/internal/context.d.ts",
+      "bun": "./src/internal/context.ts",
+      "import": "./dist/internal/context.js",
+      "default": "./dist/internal/context.js"
+    },
     "./globals.css": "./src/globals.css"
   },
   "scripts": {

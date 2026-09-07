@@ -47,6 +47,12 @@ assistant turns are unavailable. To customize the assistant, edit
 `gateway()` and the `instructions` prompt. Agent commands run through the local sandbox provider by
 default.
 
+On Dispatch, try **“Show only available technicians in List view.”** The page registers its view
+state and `setSchedule` command through `useAgentContext(context, { commands })`. The assistant
+inspects that live registration and changes the same state as the List/Timeline and availability
+buttons. Manually changing either control is reflected in the next inspection. Removing the
+**Dispatch** context chip excludes those commands for that turn.
+
 To exercise an agent inside a workflow, open **Workflows → Agent service assessment** in Atlas and
 request a run with these values:
 

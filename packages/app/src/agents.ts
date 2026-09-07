@@ -2,13 +2,17 @@ import { AgentChatPage, type AgentChatPageProps } from "@sixb/agent-ui/react-rou
 import { createElement } from "react"
 
 export {
+  type AgentContextCommand,
+  type AgentContextOptions,
   AgentContextProvider,
   AgentPanel,
   type AgentPanelProps,
   AgentSurface,
   type AgentSurfaceMode,
   type AgentSurfaceProps,
+  type AgentToolInputSchema,
   handoffAgentSurfaceThread,
+  type InferAgentToolInputSchema,
   setAgentSurfaceMode,
   useAgentContext,
 } from "@sixb/agent-ui"

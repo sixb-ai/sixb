@@ -1,92 +1,82 @@
-import {
-  type AgentContextInput,
-  agentContextFingerprint,
-  agentContextIdentity,
-} from "@sixb/core/agents/context"
+import type { AgentToolInputSchema } from "@sixb/core"
+import { type AgentContextInput, agentContextFingerprint } from "@sixb/core/agents/context"
 import {
   createContext,
   type ReactNode,
-  useCallback,
   useContext,
-  useEffect,
-  useMemo,
+  useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react"
-
-type RegistrationToken = symbol
-
-interface AgentContextRegistry {
-  readonly context: readonly AgentContextInput[]
-  readonly register: (token: RegistrationToken, context: AgentContextInput) => void
-  readonly unregister: (token: RegistrationToken) => void
-}
+import {
+  type AgentContextOptions,
+  AgentContextRegistry,
+  registerContextCommands,
+} from "./context-commands"
 
 const RegistryContext = createContext<AgentContextRegistry | null>(null)
+const emptyContext: readonly AgentContextInput[] = []
+const emptySnapshot = () => emptyContext
+const emptySubscribe = () => () => {}
 
 export function AgentContextProvider({ children }: { readonly children: ReactNode }) {
-  const [registrations, setRegistrations] = useState(
-    () => new Map<RegistrationToken, AgentContextInput>()
-  )
-
-  const register = useCallback((token: RegistrationToken, context: AgentContextInput) => {
-    setRegistrations((current) => {
-      const next = new Map(current)
-      next.set(token, context)
-      return next
-    })
-  }, [])
-
-  const unregister = useCallback((token: RegistrationToken) => {
-    setRegistrations((current) => {
-      if (!current.has(token)) return current
-      const next = new Map(current)
-      next.delete(token)
-      return next
-    })
-  }, [])
-
-  const context = useMemo(() => {
-    // Later registrations win while mounted. If they unmount, the previous value for that identity
-    // naturally becomes active again; this makes nested page components compose without stale data.
-    const byIdentity = new Map<string, AgentContextInput>()
-    for (const value of registrations.values()) {
-      byIdentity.set(agentContextIdentity(value), value)
-    }
-    return [...byIdentity.values()]
-  }, [registrations])
-
-  const value = useMemo(() => ({ context, register, unregister }), [context, register, unregister])
-  return <RegistryContext.Provider value={value}>{children}</RegistryContext.Provider>
+  const [registry] = useState(() => new AgentContextRegistry())
+  return <RegistryContext.Provider value={registry}>{children}</RegistryContext.Provider>
 }
 
-/** Register ambient page context for every descendant AgentPanel that is not context-controlled. */
-export function useAgentContext(context: AgentContextInput | null | undefined): void {
+/** Register ambient context and optional live view commands for this component's lifetime. */
+export function useAgentContext<
+  const TCommands extends Readonly<Record<string, AgentToolInputSchema>>,
+>(context: AgentContextInput | null | undefined, options?: AgentContextOptions<TCommands>): void {
   const registry = useContext(RegistryContext)
-  const tokenRef = useRef<RegistrationToken>(Symbol("agent-context"))
+  const tokenRef = useRef(Symbol("agent-context"))
+  const optionsRef = useRef(options)
   const contextRef = useRef(context)
-  contextRef.current = context
-  const register = registry?.register
-  const unregister = registry?.unregister
-  const contextKey =
-    context === null || context === undefined ? null : agentContextFingerprint(context)
-
-  useEffect(() => {
-    if (contextKey === null) return
-    if (!register || !unregister) {
+  useLayoutEffect(() => {
+    optionsRef.current = options
+    contextRef.current = context
+  })
+  const contextKey = context == null ? null : agentContextFingerprint(context)
+  // Handler identity is deliberately excluded: inline callbacks read committed props through refs.
+  const commandsKey = JSON.stringify(
+    Object.entries(options?.commands ?? {}).map(([name, command]) => ({
+      name,
+      description: command.description,
+      input: command.input,
+    }))
+  )
+  useLayoutEffect(() => {
+    if (contextKey !== null && !registry) {
       throw new Error("[Sixb] useAgentContext() must be used inside AgentContextProvider.")
     }
+    if (!registry) return
+    const commands =
+      optionsRef.current && commandsKey !== "[]"
+        ? registerContextCommands(optionsRef.current, () => optionsRef.current)
+        : undefined
+    if (contextRef.current == null) registry.unregister(tokenRef.current)
+    else registry.register(tokenRef.current, contextRef.current, commands)
+  }, [registry, contextKey, commandsKey])
 
-    // Read through the ref so structurally identical inline helper values do not re-register after
-    // every provider-driven render; contextKey remains the semantic effect dependency.
-    const currentContext = contextRef.current
-    if (!currentContext) return
+  useLayoutEffect(() => {
     const token = tokenRef.current
-    register(token, currentContext)
-    return () => unregister(token)
-  }, [contextKey, register, unregister])
+    return () => registry?.unregister(token)
+  }, [registry])
 }
 
 export function useRegisteredAgentContext(): readonly AgentContextInput[] {
-  return useContext(RegistryContext)?.context ?? []
+  const registry = useContext(RegistryContext)
+  return useSyncExternalStore(
+    registry?.subscribe ?? emptySubscribe,
+    registry?.getContext ?? emptySnapshot,
+    emptySnapshot
+  )
+}
+
+/** Host integration for the tab-local browser command bridge. */
+export function useAgentContextRegistry(): AgentContextRegistry {
+  const registry = useContext(RegistryContext)
+  if (!registry) throw new Error("[Sixb] The app bridge requires AgentContextProvider.")
+  return registry
 }

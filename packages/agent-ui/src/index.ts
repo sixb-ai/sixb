@@ -1,3 +1,4 @@
+export type { AgentToolInputSchema, InferAgentToolInputSchema } from "@sixb/core"
 export {
   AgentContextProvider,
   useAgentContext,
@@ -17,3 +18,4 @@ export {
   type AgentSurfaceProps,
 } from "./AgentSurface"
 export { handoffAgentSurfaceThread, setAgentSurfaceMode } from "./agent-surface-state"
+export type { AgentContextCommand, AgentContextOptions } from "./context-commands"
