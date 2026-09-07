@@ -7591,7 +7591,10 @@ describe("AgentWorker", () => {
     expect(capturedSystem).toContain("<sixb_mode_rules>")
   })
 
-  test("passes agent reasoning into the owned model request", async () => {
+  test.each([
+    "high",
+    "max",
+  ] as const)("passes %s reasoning into the owned model request", async (reasoning) => {
     let capturedReasoning: unknown
     const model = new WorkerTestModel({
       modelId: "mock-model",
@@ -7624,13 +7627,13 @@ describe("AgentWorker", () => {
       },
       plan: {
         ...executionPlanFor(sixb),
-        reasoning: "high",
+        reasoning,
       },
       run,
       signal: new AbortController().signal,
     })
 
-    expect(capturedReasoning).toBe("high")
+    expect(capturedReasoning).toBe(reasoning)
   })
 
   test("executes the authoritative model instance from the project catalog", async () => {

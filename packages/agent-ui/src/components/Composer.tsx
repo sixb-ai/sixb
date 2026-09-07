@@ -635,6 +635,7 @@ export function Composer({
             >
               <Plus className="size-5" />
             </button>
+            <span className="min-w-0 flex-1" />
             {onSelectModel && onSelectReasoning ? (
               <ModelControls
                 models={models}
@@ -647,7 +648,6 @@ export function Composer({
                 onSelectReasoning={onSelectReasoning}
               />
             ) : null}
-            <span className="min-w-0 flex-1" />
             {running ? (
               <button
                 type="button"
