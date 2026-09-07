@@ -6,7 +6,11 @@ import type {
   ModelCallEndEvent,
   ModelOutput,
 } from "@sixb/core/models"
-import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
+import {
+  ModelCatalogUnavailableError,
+  ModelProviderError,
+  UnsupportedModelFeatureError,
+} from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
 import { BASH_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/bash"
 import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
@@ -434,23 +438,26 @@ describe("Vercel AI Gateway provider", () => {
     expect(resolved.definition.contextWindow).toBe(64_000)
     expect(resolved.definition.maxOutputTokens).toBe(512)
     await provider.catalog.refresh()
-    await resolved.stream(
-      request({
-        responseFormat: {
-          type: "json",
-          name: "answer",
-          schema: {
-            type: "object",
-            properties: { answer: { type: "string" } },
-            required: ["answer"],
-            additionalProperties: false,
+    await expect(
+      resolved.stream(
+        request({
+          responseFormat: {
+            type: "json",
+            name: "answer",
+            schema: {
+              type: "object",
+              properties: { answer: { type: "string" } },
+              required: ["answer"],
+              additionalProperties: false,
+            },
           },
-        },
-      })
-    )
+        })
+      )
+    ).rejects.toBeInstanceOf(UnsupportedModelFeatureError)
+    await resolved.stream(request())
     await resolved.stream(request({ maxOutputTokens: 100 }))
     expect(bodies.map((body) => body.max_output_tokens)).toEqual([512, 100])
-    expect(bodies[0]?.tools).toEqual([expect.objectContaining({ name: "sixb_structured_output" })])
+    expect(bodies[0]?.tools).toBeUndefined()
     expect(bodies[0]?.text).toBeUndefined()
     expect(model.definition.contextWindow).toBeUndefined()
     expect(await resolved.resolve!()).toBe(resolved)
@@ -594,7 +601,7 @@ describe("Vercel AI Gateway provider", () => {
       ).toMatchObject({ status: "unpriceable" })
     }
   })
-  test("keeps schemas outside the strict Responses subset on the tool fallback", () => {
+  test("declines native decoding for schemas outside the strict Responses subset", () => {
     expect(
       gatewayOutputSchema({
         type: "object",
@@ -863,87 +870,32 @@ describe("Vercel AI Gateway provider", () => {
     expect(responseBody?.tools).toBeUndefined()
   })
 
-  test("hides a required nonparallel JSON tool when native output is unavailable", async () => {
-    let responseBody: Record<string, unknown> | undefined
-    const gateway = createVercelGateway({
-      baseUrl: "https://models.example/v1",
-      apiKey: "secret-key",
-      fetch: async (_input, init) => {
-        responseBody = JSON.parse(String(init?.body))
-        return sseResponse([
-          {
-            type: "response.created",
-            response: { id: "resp-structured-tool", model: "creator/legacy" },
-          },
-          {
-            type: "response.output_item.added",
-            output_index: 0,
-            item: {
-              type: "function_call",
-              id: "item-output",
-              call_id: "call-output",
-              name: "sixb_structured_output",
-              arguments: "",
-            },
-          },
-          {
-            type: "response.function_call_arguments.delta",
-            item_id: "item-output",
-            output_index: 0,
-            delta: '{"answer":',
-          },
-          {
-            type: "response.function_call_arguments.delta",
-            item_id: "item-output",
-            output_index: 0,
-            delta: '"yes"}',
-          },
-          {
-            type: "response.function_call_arguments.done",
-            item_id: "item-output",
-            output_index: 0,
-            arguments: '{"answer":"yes"}',
-          },
-          {
-            type: "response.completed",
-            response: {
-              id: "resp-structured-tool",
-              status: "completed",
-              usage: { input_tokens: 8, output_tokens: 5 },
-            },
-          },
-        ])
+  // Regression proof: restore the JSON-tool fallback in prepareRequest.
+  test.each([
+    false,
+    true,
+  ])("rejects unsupported structured output before inference (native: %s)", async (nativeStructuredOutput) => {
+    let requests = 0
+    const model = createVercelGateway({
+      fetch: async () => {
+        requests += 1
+        return sseResponse([])
       },
-    })
-
-    const result = await runModelLoop({
-      model: gateway("creator/legacy", {
-        capabilities: { nativeStructuredOutput: false },
-      }),
-      messages: [{ role: "user", content: [{ type: "text", text: "Answer yes." }] }],
-      output: answerOutput(),
-      maxSteps: 1,
-      signal: new AbortController().signal,
-    })
-
-    expect(result).toMatchObject({
-      status: "completed",
-      output: { answer: "yes" },
-      finishReason: "stop",
-      steps: [{ content: [{ type: "text", text: '{"answer":"yes"}' }] }],
-    })
-    expect(responseBody).toMatchObject({
-      tool_choice: "required",
-      parallel_tool_calls: false,
-      tools: [
-        {
-          type: "function",
-          name: "sixb_structured_output",
-          parameters: answerOutput().schema,
-        },
-      ],
-    })
-    expect(responseBody?.text).toBeUndefined()
+    })("creator/model", { capabilities: { nativeStructuredOutput } })
+    await expect(
+      model.stream(
+        request({
+          responseFormat: {
+            type: "json",
+            name: "answer",
+            schema: nativeStructuredOutput
+              ? { ...answerOutput().schema, additionalProperties: true }
+              : answerOutput().schema,
+          },
+        })
+      )
+    ).rejects.toBeInstanceOf(UnsupportedModelFeatureError)
+    expect(requests).toBe(0)
   })
 
   // Regression proof: restore the unsupported-effort throw in gatewayReasoningRequest.

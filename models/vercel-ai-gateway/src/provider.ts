@@ -41,7 +41,6 @@ const CATALOG_TIMEOUT_MS = 5_000
 const DEFAULT_CATALOG_TTL_MS = 60 * 60 * 1_000
 const DEFAULT_MAX_RETRIES = 2
 const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
-const OUTPUT_TOOL_NAME = "sixb_structured_output"
 
 export interface VercelGatewayOptions {
   readonly baseUrl?: string
@@ -497,12 +496,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
     }
     const requestId = response.headers.get("x-request-id") ?? response.headers.get("request-id")
     return {
-      events: this.responseEvents(
-        response.body,
-        request.signal,
-        requestId ?? undefined,
-        prepared.outputToolName
-      ),
+      events: this.responseEvents(response.body, request.signal, requestId ?? undefined),
     }
   }
 
@@ -515,7 +509,6 @@ class VercelGatewayLanguageModel implements LanguageModel {
 
   private async prepareRequest(request: LanguageModelRequest): Promise<{
     readonly body: JsonObject
-    readonly outputToolName?: string
   }> {
     const extra = this.options.request ?? {}
     if (
@@ -550,7 +543,11 @@ class VercelGatewayLanguageModel implements LanguageModel {
       request.responseFormat !== undefined && (await this.supportsNativeStructuredOutput())
         ? gatewayOutputSchema(request.responseFormat.schema)
         : undefined
-    const useOutputTool = request.responseFormat !== undefined && nativeOutputSchema === undefined
+    if (request.responseFormat !== undefined && nativeOutputSchema === undefined) {
+      throw new UnsupportedModelFeatureError(
+        `[SixbVercelGateway] Structured output requires native support for model '${this.modelId}' and the supplied schema. Choose a supported model and schema; JSON-tool fallback is not supported.`
+      )
+    }
     const tools: JsonObject[] = [
       ...(this.options.providerTools ?? []),
       ...request.tools.map((tool) => ({
@@ -560,25 +557,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
         parameters: tool.inputSchema,
         strict: gatewayOutputSchema(tool.inputSchema) !== undefined,
       })),
-      ...(useOutputTool
-        ? [
-            {
-              type: "function",
-              name: OUTPUT_TOOL_NAME,
-              description:
-                request.responseFormat?.description ?? "Return the final structured result.",
-              parameters: request.responseFormat?.schema ?? {},
-              strict: false,
-            },
-          ]
-        : []),
     ]
-    if (
-      useOutputTool &&
-      tools.slice(0, -1).some((tool) => string(tool.name) === OUTPUT_TOOL_NAME)
-    ) {
-      throw new TypeError(`[SixbVercelGateway] Tool name '${OUTPUT_TOOL_NAME}' is reserved.`)
-    }
     const providerOptions = withAutomaticPromptCaching(
       this.options.providerOptions,
       request.caching
@@ -595,8 +574,8 @@ class VercelGatewayLanguageModel implements LanguageModel {
           ? {}
           : {
               tools,
-              tool_choice: useOutputTool ? "required" : "auto",
-              parallel_tool_calls: !useOutputTool,
+              tool_choice: "auto",
+              parallel_tool_calls: true,
             }),
         ...(gatewayReasoningRequest(
           request.reasoning,
@@ -619,7 +598,6 @@ class VercelGatewayLanguageModel implements LanguageModel {
               },
             }),
       },
-      ...(useOutputTool ? { outputToolName: OUTPUT_TOOL_NAME } : {}),
     }
   }
 
@@ -639,10 +617,9 @@ class VercelGatewayLanguageModel implements LanguageModel {
   private async *responseEvents(
     body: ReadableStream<Uint8Array>,
     signal: AbortSignal,
-    requestId?: string,
-    outputToolName?: string
+    requestId?: string
   ): AsyncIterable<LanguageModelStreamEvent> {
-    const state = new ResponseState(this.providerId, this.modelId, requestId, outputToolName)
+    const state = new ResponseState(this.providerId, this.modelId, requestId)
     for await (const event of decodeServerSentEvents(body, signal)) {
       if (event.data === "[DONE]") break
       let value: unknown
@@ -682,15 +659,13 @@ class ResponseState {
   readonly textStarted = new Set<string>()
   readonly refusalSpans = new Map<string, { text: string; complete: boolean }>()
   readonly reasoningStarted = new Set<string>()
-  readonly outputCallIds = new Set<string>()
   started = false
   finished = false
   sawToolCall = false
   constructor(
     private readonly providerId: string,
     private readonly modelId: string,
-    private readonly requestId?: string,
-    private readonly outputToolName?: string
+    private readonly requestId?: string
   ) {}
 
   accept(eventName: string, value: JsonObject): readonly LanguageModelStreamEvent[] {
@@ -730,13 +705,8 @@ class ResponseState {
         const name = string(item.name)
         if (!name) throw this.protocolError("Function call is missing a name.")
         this.toolArguments.set(callId, string(item.arguments))
-        if (this.markOutputCall(callId, name, events)) {
-          const initial = string(item.arguments)
-          if (initial) events.push({ type: "text-delta", id: callId, delta: initial })
-        } else {
-          this.sawToolCall = true
-          events.push({ type: "tool-input-start", id: callId, toolName: name })
-        }
+        this.sawToolCall = true
+        events.push({ type: "tool-input-start", id: callId, toolName: name })
       }
       return events
     }
@@ -807,11 +777,7 @@ class ResponseState {
       const callId = toolCallId(value, this.items)
       const delta = string(value.delta)
       this.toolArguments.set(callId, (this.toolArguments.get(callId) ?? "") + delta)
-      events.push(
-        this.outputCallIds.has(callId)
-          ? { type: "text-delta", id: callId, delta }
-          : { type: "tool-input-delta", id: callId, delta }
-      )
+      events.push({ type: "tool-input-delta", id: callId, delta })
       return events
     }
 
@@ -824,11 +790,6 @@ class ResponseState {
       const name = string(item?.name)
       if (!name) throw this.protocolError("Function call completion is missing a name.")
       this.toolEnded.add(callId)
-      if (this.markOutputCall(callId, name, events)) {
-        if (supplied && !previous) events.push({ type: "text-delta", id: callId, delta: supplied })
-        events.push({ type: "text-end", id: callId })
-        return events
-      }
       if (supplied && !previous) {
         events.push({ type: "tool-input-delta", id: callId, delta: supplied })
       }
@@ -880,30 +841,21 @@ class ResponseState {
         const callId = string(item.call_id) || string(item.id) || key
         const name = string(item.name)
         if (!name) throw this.protocolError("Function call completion is missing a name.")
-        const outputCall = this.markOutputCall(callId, name, events)
         if (!this.toolEnded.has(callId)) {
           const argumentsText = string(item.arguments)
           const previous = this.toolArguments.get(callId) ?? ""
           if (argumentsText && !previous) {
-            events.push(
-              outputCall
-                ? { type: "text-delta", id: callId, delta: argumentsText }
-                : { type: "tool-input-delta", id: callId, delta: argumentsText }
-            )
+            events.push({ type: "tool-input-delta", id: callId, delta: argumentsText })
           }
           this.toolEnded.add(callId)
-          events.push(
-            outputCall
-              ? { type: "text-end", id: callId }
-              : {
-                  type: "tool-input-end",
-                  id: callId,
-                  providerData: providerItemData(this.providerId, {
-                    ...item,
-                    arguments: argumentsText,
-                  }),
-                }
-          )
+          events.push({
+            type: "tool-input-end",
+            id: callId,
+            providerData: providerItemData(this.providerId, {
+              ...item,
+              arguments: argumentsText,
+            }),
+          })
         }
       }
       return events
@@ -998,21 +950,6 @@ class ResponseState {
         messageId: string(value.item_id) || `output:${integer(value.output_index) ?? 0}`,
       },
     }
-  }
-
-  private markOutputCall(
-    callId: string,
-    name: string,
-    events: LanguageModelStreamEvent[]
-  ): boolean {
-    if (this.outputCallIds.has(callId)) return true
-    if (name !== this.outputToolName) return false
-    if (this.outputCallIds.size > 0) {
-      throw this.protocolError("Model submitted structured output more than once.")
-    }
-    this.outputCallIds.add(callId)
-    events.push({ type: "text-start", id: callId })
-    return true
   }
 }
 

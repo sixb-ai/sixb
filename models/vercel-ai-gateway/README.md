@@ -43,8 +43,11 @@ Catalog transport/access failures throw `ModelCatalogUnavailableError` from `@si
 with the original error retained as `cause`. Workers recover using an offline snapshot and, if no
 context limit is available, a 128,000-token fallback with a warning. Malformed metadata still fails.
 A structured-output call consults it when support is otherwise unknown, then uses the native strict
-response format or transparently falls back to one required, nonparallel JSON function. A catalog
-failure safely selects the fallback. Inline Gateway cost is stored as the call's cost, with
+response format. Unsupported models or schemas (including unavailable capability metadata) throw
+`UnsupportedModelFeatureError` before inference; there is no JSON-tool fallback. Sixb validates the
+completed value locally and rejects truncated or refused structured output, even if it is valid JSON.
+
+Inline Gateway cost is stored as the call's cost, with
 any local estimate retained separately. `costEstimator.estimate({ usage })` uses fixed prices from an
 already-loaded catalog without a network request. Temperature, output limits, and caching controls
 preserve estimation. Routing, unknown pricing dimensions, variable provider pricing, and provider

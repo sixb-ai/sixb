@@ -74,6 +74,47 @@ const echo: ModelTool<{ value: string }> = {
 }
 
 describe("runModelLoop", () => {
+  // Regression proof: remove the finishReason guard before structured-output parsing.
+  test.each([
+    "length",
+    "content-filter",
+    "other",
+    "unknown",
+  ] as const)("rejects incomplete structured output even when JSON is valid (%s)", async (finishReason) => {
+    const calls: ModelCallEndEvent[] = []
+    let validations = 0
+    await expect(
+      runModelLoop({
+        model: modelFromCalls([
+          [
+            { type: "stream-start" },
+            { type: "text-start", id: "text-1" },
+            { type: "text-delta", id: "text-1", delta: '{"answer":"yes"}' },
+            { type: "text-end", id: "text-1" },
+            { type: "finish", finishReason, usage: USAGE },
+          ],
+        ]),
+        messages: [],
+        maxSteps: 1,
+        signal: new AbortController().signal,
+        output: {
+          name: "answer",
+          schema: { type: "object" },
+          validate(value) {
+            validations += 1
+            return value
+          },
+        },
+        onModelCallEnd(event) {
+          calls.push(event)
+        },
+      })
+    ).rejects.toBeInstanceOf(StructuredOutputError)
+    expect(validations).toBe(0)
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ usage: USAGE })
+  })
+
   // Regression proof: put output publication back inside the tool-error catch.
   test("propagates output publication failure before another model call", async () => {
     const failure = new Error("stream sink unavailable")

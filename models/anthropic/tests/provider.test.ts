@@ -784,84 +784,39 @@ describe("Anthropic provider", () => {
     expect(messageBody?.tools).toBeUndefined()
   })
 
-  test("hides a required nonparallel JSON tool when native output is unavailable", async () => {
-    // Regression proof: move disable_parallel_tool_use back out of tool_choice in prepareRequest.
-    let messageBody: Record<string, unknown> | undefined
-    const provider = createAnthropic({
-      baseUrl: "https://anthropic.example/v1",
-      apiKey: "secret-key",
-      fetch: async (_input, init) => {
-        messageBody = JSON.parse(String(init?.body))
-        return sseResponse([
-          {
-            type: "message_start",
-            message: {
-              id: "msg-structured-tool",
-              model: "claude-legacy",
-              usage: { input_tokens: 8, output_tokens: 1 },
-            },
-          },
-          {
-            type: "content_block_start",
-            index: 0,
-            content_block: {
-              type: "tool_use",
-              id: "toolu-output",
-              name: "sixb_structured_output",
-              input: {},
-            },
-          },
-          {
-            type: "content_block_delta",
-            index: 0,
-            delta: { type: "input_json_delta", partial_json: '{"answer":"yes"}' },
-          },
-          { type: "content_block_stop", index: 0 },
-          {
-            type: "message_delta",
-            delta: { stop_reason: "tool_use" },
-            usage: { output_tokens: 5 },
-          },
-          { type: "message_stop" },
-        ])
-      },
-    })
-
-    const result = await runModelLoop({
-      model: provider("claude-legacy", {
-        maxOutputTokens: 4_096,
-        capabilities: { nativeStructuredOutput: false },
-      }),
-      messages: [{ role: "user", content: [{ type: "text", text: "Answer yes." }] }],
-      output: answerOutput(),
-      maxSteps: 1,
-      signal: new AbortController().signal,
-    })
-
-    expect(result).toMatchObject({
-      status: "completed",
-      output: { answer: "yes" },
-      finishReason: "stop",
-      steps: [{ content: [{ type: "text", text: '{"answer":"yes"}' }] }],
-    })
-    expect(messageBody).toMatchObject({
-      tool_choice: { type: "any", disable_parallel_tool_use: true },
-      tools: [
-        {
-          name: "sixb_structured_output",
-          input_schema: answerOutput().schema,
-        },
-      ],
-    })
-    expect(messageBody?.output_config).toBeUndefined()
-    expect(messageBody).not.toHaveProperty("disable_parallel_tool_use")
-  })
-
-  // Regression proof: remove the manual-thinking/output-tool compatibility check in prepareRequest.
+  // Regression proof: restore the JSON-tool fallback in prepareRequest.
   test.each([
     false,
     true,
-  ])("rejects manual thinking with JSON-tool fallback before inference (native: %s)", async (nativeStructuredOutput) => {
+  ])("rejects unsupported structured output before inference (native: %s)", async (nativeStructuredOutput) => {
+    let requests = 0
+    const model = createAnthropic({
+      fetch: async () => {
+        requests += 1
+        return sseResponse([])
+      },
+    })("claude-sonnet-4-6", { capabilities: { nativeStructuredOutput } })
+    await expect(
+      model.stream(
+        request({
+          responseFormat: {
+            type: "json",
+            name: "answer",
+            schema: nativeStructuredOutput
+              ? { ...answerOutput().schema, additionalProperties: true }
+              : answerOutput().schema,
+          },
+        })
+      )
+    ).rejects.toBeInstanceOf(UnsupportedModelFeatureError)
+    expect(requests).toBe(0)
+  })
+
+  // Regression proof: remove the native structured-output eligibility check in prepareRequest.
+  test.each([
+    false,
+    true,
+  ])("rejects unsupported schemas with manual thinking before inference (native: %s)", async (nativeStructuredOutput) => {
     let requests = 0
     const provider = createAnthropic({
       fetch: async () => {
@@ -1218,7 +1173,7 @@ describe("Anthropic provider", () => {
     ])
   })
 
-  test("loads paged model metadata, capabilities, and family rate cards", async () => {
+  test("loads paged model metadata, capabilities, and explicit rate cards", async () => {
     const requested: string[] = []
     const provider = createAnthropic({
       apiKey: "catalog-key",
@@ -1316,8 +1271,7 @@ describe("Anthropic provider", () => {
   })
 
   test("builds request-specific rate cards without loading the catalog", () => {
-    // Regression proof for overrides: remove the no-modifier return in model-details.ts;
-    // the explicitly negotiated cache rate below is overwritten by the family multiplier.
+    // Regression proof: ignore speed or inference_geo in anthropicRateCard.
     let requests = 0
     const provider = createAnthropic({
       fetch: async () => {

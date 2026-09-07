@@ -4,7 +4,7 @@ Per-call `maxOutputTokens` limits (including compaction summaries) can lower, bu
 the output ceiling configured on the model.
 
 Callable Anthropic provider for Sixb's core model contract. It uses the native Messages API and a
-small provider-owned rate card for Anthropic's published family prices. Current model metadata and
+small provider-owned rate card for explicitly covered Anthropic model versions. Current model metadata and
 limits are available through the catalog API and the model returned by `await model.resolve?.()`.
 The resolver uses the shared, cached provider catalog, preserves configured definitions and binding
 options, and does not mutate `model.definition`. Anthropic's `max_input_tokens` is exposed as
@@ -57,14 +57,11 @@ adapter resolves an omitted value to the selected Claude model's provider-owned 
 models require an explicit value; inference never fetches the catalog to discover one.
 
 Structured output uses Anthropic's native `output_config.format` when the model catalog confirms
-support and the schema fits the native decoder. Otherwise the adapter transparently uses one
-required, nonparallel JSON tool. In both cases Sixb validates the completed value against the
-original application contract.
-
-The JSON-tool fallback cannot be combined with manual thinking (`reasoning: { budgetTokens }`),
-because Anthropic rejects forced tool use in that mode. The adapter throws
-`UnsupportedModelFeatureError` before inference. Use native structured output with a supported
-schema, or omit the exact reasoning budget. Adaptive thinking supports the JSON-tool fallback.
+support and the schema fits the native decoder. Otherwise the adapter throws
+`UnsupportedModelFeatureError` before inference. There is no JSON-tool fallback.
+Sixb validates the completed value against the original application contract and rejects
+truncated or refused output, even when its text is valid JSON. Native output preserves manual
+thinking when the model supports it.
 
 Local tools use the same schema transformation as native structured output: unsupported decoder
 constraints move into descriptions, while Sixb validates inputs against the original tool contract.
@@ -103,8 +100,14 @@ Pricing lives separately in `model.costEstimator.estimate({ usage })`. Its exact
 uses provider-owned rates and produces an **estimate**, with the applied rates retained as evidence.
 Constructing a model and ordinary inference never fetch the cached, paginated
 catalog. A structured-output call consults it only when native support is otherwise unknown; a
-catalog failure safely selects the JSON-tool fallback. Server tools disable token-only estimates when
+catalog failure rejects structured output before inference. Server tools disable token-only estimates when
 their additional charges would make a token-only total incomplete.
+
+Rates cover exact model IDs and supported request dimensions, with explicit cache prices:
+new versions, unlisted dated snapshots, and unknown pricing options are `unpriceable`, not guessed.
+Unknown pricing does not block inference. The table records its verification date and
+[public pricing source](https://platform.claude.com/docs/en/about-claude/pricing);
+these rates do not account for negotiated discounts or replace an invoice.
 
 Cost estimates use local rates and the completed call's usage. Native provider request and response
 IDs are retained with usage for troubleshooting.

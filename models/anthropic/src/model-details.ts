@@ -1,9 +1,17 @@
 import type { JsonObject, LanguageModelRateCard } from "@sixb/core/models"
 
-interface PriceRule {
-  readonly match: RegExp
+interface TokenRates {
   readonly input: string
   readonly output: string
+  readonly cacheReadInput: string
+  readonly cacheWriteInput5m: string
+  readonly cacheWriteInput1h: string
+}
+
+interface PriceRule {
+  readonly modelIds: readonly string[]
+  readonly rates: TokenRates
+  readonly usInference?: boolean
 }
 
 interface OutputLimitRule {
@@ -36,17 +44,138 @@ const OUTPUT_LIMITS: readonly OutputLimitRule[] = [
   },
 ]
 
-// Anthropic publishes prices by model family, while /v1/models is the source of truth for IDs.
-// Keep the small family table here so pricing stays reviewable TypeScript rather than generated data.
+// Public USD/MTok prices verified on 2026-09-07:
+// https://platform.claude.com/docs/en/about-claude/pricing
+// Exact IDs only: neither new versions nor dated snapshots inherit a guessed family price.
+// Applied rates are retained by the accounting ledger; these are estimates, not negotiated bills.
 const PRICES: readonly PriceRule[] = [
-  { match: /^claude-(?:fable|mythos)-5(?:-|$)/, input: "10", output: "50" },
-  { match: /^claude-opus-(?:5|4-(?:8|7|6|5))(?:-|$)/, input: "5", output: "25" },
-  { match: /^claude-opus-4(?:-1)?(?:-|$)/, input: "15", output: "75" },
-  { match: /^claude-sonnet-5(?:-|$)/, input: "2", output: "10" },
-  { match: /^claude-sonnet-4(?:-(?:6|5))?(?:-|$)/, input: "3", output: "15" },
-  { match: /^claude-haiku-4-5(?:-|$)/, input: "1", output: "5" },
-  { match: /^claude-(?:3-5-haiku|haiku-3-5)(?:-|$)/, input: "0.8", output: "4" },
+  {
+    modelIds: ["claude-fable-5-1", "claude-mythos-5-1"],
+    rates: {
+      input: "10",
+      output: "50",
+      cacheReadInput: "0.25",
+      cacheWriteInput5m: "12.5",
+      cacheWriteInput1h: "20",
+    },
+    usInference: true,
+  },
+  {
+    modelIds: ["claude-fable-5", "claude-mythos-5"],
+    rates: {
+      input: "10",
+      output: "50",
+      cacheReadInput: "1",
+      cacheWriteInput5m: "12.5",
+      cacheWriteInput1h: "20",
+    },
+    usInference: true,
+  },
+  {
+    modelIds: ["claude-opus-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6"],
+    rates: {
+      input: "5",
+      output: "25",
+      cacheReadInput: "0.5",
+      cacheWriteInput5m: "6.25",
+      cacheWriteInput1h: "10",
+    },
+    usInference: true,
+  },
+  {
+    modelIds: ["claude-opus-4-5"],
+    rates: {
+      input: "5",
+      output: "25",
+      cacheReadInput: "0.5",
+      cacheWriteInput5m: "6.25",
+      cacheWriteInput1h: "10",
+    },
+  },
+  {
+    modelIds: ["claude-opus-4", "claude-opus-4-1"],
+    rates: {
+      input: "15",
+      output: "75",
+      cacheReadInput: "1.5",
+      cacheWriteInput5m: "18.75",
+      cacheWriteInput1h: "30",
+    },
+  },
+  {
+    modelIds: ["claude-sonnet-5"],
+    rates: {
+      input: "2",
+      output: "10",
+      cacheReadInput: "0.2",
+      cacheWriteInput5m: "2.5",
+      cacheWriteInput1h: "4",
+    },
+    usInference: true,
+  },
+  {
+    modelIds: ["claude-sonnet-4-6"],
+    rates: {
+      input: "3",
+      output: "15",
+      cacheReadInput: "0.3",
+      cacheWriteInput5m: "3.75",
+      cacheWriteInput1h: "6",
+    },
+    usInference: true,
+  },
+  {
+    modelIds: ["claude-sonnet-4", "claude-sonnet-4-5"],
+    rates: {
+      input: "3",
+      output: "15",
+      cacheReadInput: "0.3",
+      cacheWriteInput5m: "3.75",
+      cacheWriteInput1h: "6",
+    },
+  },
+  {
+    modelIds: ["claude-haiku-4-5"],
+    rates: {
+      input: "1",
+      output: "5",
+      cacheReadInput: "0.1",
+      cacheWriteInput5m: "1.25",
+      cacheWriteInput1h: "2",
+    },
+  },
+  {
+    modelIds: ["claude-3-5-haiku"],
+    rates: {
+      input: "0.8",
+      output: "4",
+      cacheReadInput: "0.08",
+      cacheWriteInput5m: "1",
+      cacheWriteInput1h: "1.6",
+    },
+  },
 ]
+
+const FAST_RATES: TokenRates = {
+  input: "10",
+  output: "50",
+  cacheReadInput: "1",
+  cacheWriteInput5m: "12.5",
+  cacheWriteInput1h: "20",
+}
+
+// Unknown request dimensions may change billing. Keep inference usable but decline the estimate.
+const PRICED_REQUEST_KEYS = new Set([
+  "temperature",
+  "top_p",
+  "top_k",
+  "stop_sequences",
+  "metadata",
+  "output_config",
+  "cache_control",
+  "speed",
+  "inference_geo",
+])
 
 export function anthropicMaxOutputTokens(modelId: string): number | undefined {
   const known = OUTPUT_LIMITS.find((candidate) => candidate.match.test(modelId))
@@ -58,20 +187,31 @@ export function anthropicRateCard(
   modelId: string,
   request: JsonObject | undefined
 ): LanguageModelRateCard | undefined {
-  const rule = PRICES.find((candidate) => candidate.match.test(modelId))
+  const rule = PRICES.find((candidate) => candidate.modelIds.includes(modelId))
   if (!rule) return undefined
-  const fast = request?.speed === "fast" && /^claude-opus-(?:5|4-8)(?:-|$)/.test(modelId)
+  if (Object.keys(request ?? {}).some((key) => !PRICED_REQUEST_KEYS.has(key))) return undefined
+  if (request?.speed !== undefined && request.speed !== "standard" && request.speed !== "fast")
+    return undefined
+  if (
+    request?.inference_geo !== undefined &&
+    request.inference_geo !== "global" &&
+    request.inference_geo !== "us"
+  )
+    return undefined
+  if (request?.inference_geo !== undefined && !rule.usInference) return undefined
+  const fast = request?.speed === "fast"
+  if (fast && modelId !== "claude-opus-5" && modelId !== "claude-opus-4-8") return undefined
+  const rates = fast ? FAST_RATES : rule.rates
   const residency = request?.inference_geo === "us"
-  const input = scale(fast ? "10" : rule.input, residency ? 11n : 1n, residency ? 10n : 1n)
-  const output = scale(fast ? "50" : rule.output, residency ? 11n : 1n, residency ? 10n : 1n)
+  const adjusted = (value: string) => (residency ? scale(value, 11n, 10n) : value)
   return {
     currency: "USD",
     unit: "million-tokens",
-    input,
-    output,
-    cacheReadInput: scale(input, 1n, 10n),
-    cacheWriteInput5m: scale(input, 5n, 4n),
-    cacheWriteInput1h: scale(input, 2n, 1n),
+    input: adjusted(rates.input),
+    output: adjusted(rates.output),
+    cacheReadInput: adjusted(rates.cacheReadInput),
+    cacheWriteInput5m: adjusted(rates.cacheWriteInput5m),
+    cacheWriteInput1h: adjusted(rates.cacheWriteInput1h),
   }
 }
 

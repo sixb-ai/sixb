@@ -263,6 +263,12 @@ export async function runModelLoop(
       await input.onStepEnd?.(step)
       if (input.output) {
         const text = responseText(response)
+        if (response.finishReason !== "stop") {
+          throw new StructuredOutputError(
+            `[SixbModels] Structured output did not complete successfully (${response.finishReason}).`,
+            structuredOutputErrorContext(input, response, responseId, cost, text)
+          )
+        }
         let raw: unknown
         try {
           raw = JSON.parse(text)

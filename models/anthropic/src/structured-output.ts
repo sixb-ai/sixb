@@ -30,15 +30,15 @@ const DESCRIPTION_CONSTRAINTS = [
   "not",
 ] as const
 
-/** Return an Anthropic-compatible decoder schema, or undefined when tool fallback is safer. */
+/** Return an Anthropic-compatible decoder schema, or undefined when native decoding is unsafe. */
 export function anthropicOutputSchema(schema: JsonObject): JsonObject | undefined {
   return sanitizeSchema(schema)
 }
 
 function sanitizeSchema(schema: JsonObject): JsonObject | undefined {
   const objectSchema = schema.type === "object" || isObject(schema.properties)
-  // Anthropic requires closed objects. Narrowing an open object would change the contract, so let
-  // the JSON tool enforce that schema instead of silently rewriting it.
+  // Anthropic requires closed objects. Narrowing an open object would change the contract.
+  // Structured output rejects it; ordinary local tools can still use non-strict decoding.
   if (objectSchema && schema.additionalProperties !== false) {
     return undefined
   }
