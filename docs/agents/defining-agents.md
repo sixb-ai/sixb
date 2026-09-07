@@ -31,7 +31,7 @@ export const invoiceAssistant = defineAgent("invoice-assistant", {
 | --- | --- | --- | --- |
 | `name` | `string` | Yes | Display name shown in catalogs and pickers. |
 | `model` | `LanguageModelV4` | Yes | An AI SDK model instance (see below). |
-| `instructions` | `string` | Yes | The system prompt. |
+| `instructions` | `string` | Yes | Project-specific instructions composed into the framework system prompt. |
 | `description` | `string` | No | Short summary for catalogs. |
 | `reasoning` | reasoning level | No | `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, or `xhigh`. |
 | `providerOptions` | provider-keyed object | No | Per-provider passthrough, e.g. `{ openai: { ... } }`. |
@@ -88,6 +88,14 @@ skills/acme-writing-style/references/examples.md
 Project skills are installed into each run sandbox under `$SIXB_SKILLS_DIR`. The worker advertises
 only each skill's `name` and `description` up front, and the agent reads the full `SKILL.md` when the
 skill is relevant.
+
+Sixb composes these project instructions with framework-owned conversation rules for grounding,
+confirmation before domain changes, safe context handling, useful milestone updates during longer
+work, and concise outcome-focused responses.
+Selected application-control tools also add shared-workspace rules automatically: the agent uses
+current application state for interface orientation, navigates directly when asked, keeps browser
+mechanics out of its response, and treats generated files as working artifacts. Application authors
+do not need to repeat those mechanics in each agent's `instructions`.
 
 ## Tools
 

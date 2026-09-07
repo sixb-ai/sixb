@@ -4,6 +4,7 @@ import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { brotliCompressSync, gzipSync } from "node:zlib"
+import { createAppBrowserControlRuntime } from "../src/agent-tools"
 import {
   generateAppEntry,
   generateAuthExperienceEntry,
@@ -117,6 +118,29 @@ describe("createCustomApp.start", () => {
         method: "POST",
       })
       expect(mutationResponse.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("never exposes the development browser-control bridge from the built app server", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      browserControl: createAppBrowserControlRuntime(),
+    })
+    const server = await app.start({ host: "127.0.0.1", port })
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/__sixb/browser-control/register`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-sixb-browser-secret": "test_browser_secret_123456",
+        },
+        body: JSON.stringify({ sessionId: "test_browser_session_123456" }),
+      })
+      expect(response.status).toBe(404)
     } finally {
       await server.stop()
     }
@@ -351,13 +375,43 @@ describe("createCustomApp.dev", () => {
     try {
       const apiResponse = await fetch(`http://127.0.0.1:${port}/api/project`)
       const authResponse = await fetch(`http://127.0.0.1:${port}/auth/sign-in`)
+      const internalResponse = await fetch(`http://127.0.0.1:${port}/__sixb/browser-control/next`)
       const mutationResponse = await fetch(`http://127.0.0.1:${port}/devices`, {
         method: "POST",
       })
 
       expect(apiResponse.status).toBe(404)
       expect(authResponse.status).toBe(404)
+      expect(internalResponse.status).toBe(404)
       expect(mutationResponse.status).toBe(404)
+    } finally {
+      await server.stop()
+    }
+  })
+
+  test("connects a browser-control tab only when the POC is enabled", async () => {
+    const port = await getFreePort()
+    const app = await createCustomApp({
+      rootDir: tempRoot,
+      apiBaseUrl: "http://127.0.0.1:3000",
+      browserControl: createAppBrowserControlRuntime(),
+    })
+    const server = await app.dev({ host: "127.0.0.1", port })
+
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/__sixb/browser-control/register`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-sixb-browser-secret": "test_browser_secret_123456",
+        },
+        body: JSON.stringify({ sessionId: "test_browser_session_123456" }),
+      })
+      expect(response.status).toBe(200)
+
+      const main = await readFile(join(tempRoot, ".sixb", "generated", "main.tsx"), "utf-8")
+      expect(main).toContain("<AppAgentContextProvider")
+      expect(main).toContain("browserControl={true}")
     } finally {
       await server.stop()
     }
@@ -659,6 +713,8 @@ describe("createCustomApp.dev", () => {
 
       const main = await readFile(join(tempRoot, ".sixb", "generated", "main.tsx"), "utf-8")
       expect(main).toContain('import "./agent-ui.css"')
+      expect(main).toContain("<AppAgentContextProvider")
+      expect(main).toContain("browserControl={false}")
     } finally {
       await server.stop()
     }

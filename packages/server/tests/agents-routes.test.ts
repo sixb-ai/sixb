@@ -263,6 +263,7 @@ describe("agent routes", () => {
           label: "Invoice view",
           description: "Current invoice view state",
           value: { activeTab: "history" },
+          modelValue: { activeTab: "history" },
         },
         origin: "explicit",
       },

@@ -13,6 +13,11 @@ export {
   useAgentContext,
 } from "@sixb/agent-ui"
 export { agentContext } from "@sixb/core/agents/context"
+export {
+  AppAgentContextProvider,
+  type AppAgentContextProviderProps,
+} from "./browser-control-react"
+export { isAppAgentNavigation } from "./browser-navigation"
 
 export type AgentsPageProps = Omit<AgentChatPageProps, "routeBase">
 

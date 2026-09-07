@@ -5623,6 +5623,18 @@ export type GetWorkflowAgentNodeExecutionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                /**
+                 * Any JSON-compatible value.
+                 */
+                modelValue?:
+                  | string
+                  | number
+                  | boolean
+                  | Array<unknown>
+                  | {
+                      [key: string]: unknown
+                    }
+                  | null
               }
           origin: "ambient" | "explicit"
           type: "context"
@@ -8353,6 +8365,18 @@ export type ListAgentThreadMessagesResponses = {
                         [key: string]: unknown
                       }
                     | null
+                  /**
+                   * Any JSON-compatible value.
+                   */
+                  modelValue?:
+                    | string
+                    | number
+                    | boolean
+                    | Array<unknown>
+                    | {
+                        [key: string]: unknown
+                      }
+                    | null
                 }
             origin: "ambient" | "explicit"
             type: "context"
@@ -8506,6 +8530,18 @@ export type PostAgentThreadMessageData = {
              * Any JSON-compatible value.
              */
             value:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+            /**
+             * Any JSON-compatible value.
+             */
+            modelValue?:
               | string
               | number
               | boolean

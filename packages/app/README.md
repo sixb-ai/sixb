@@ -145,6 +145,27 @@ should occupy the main application canvas. Connect `onRequestFullPage` and `onRe
 navigation; leaving that route returns the session to its dock without changing the selected
 thread.
 
+### Browser-control POC
+
+`sixb dev` makes every custom-app browser tab a separate, short-lived browser-control session. The
+generated shell automatically adds a `sixb-custom-app-route` context entry containing the exact
+location, matching route pattern, complete generated route catalog, and a short-lived capability
+for that tab. An embedded `AgentPanel` receives it without app-authored route plumbing.
+
+The co-hosted development runtime automatically provides `inspect_app` and `navigate_app` only for
+a conversational turn triggered by a currently connected custom-app tab. Agents do not declare
+these host capabilities in their `tools` list, workflows and direct API requests do not receive
+them, and the tab session id is excluded from model context and model-facing tool input. Navigation is restricted
+to the generated same-origin route catalog. Provisioning either tool also activates the worker's
+application-surface rules, so project prompts can stay focused on the agent's role and business
+judgment instead of explaining route context, browser mechanics, navigation responses, or file
+preview behavior.
+
+This first slice intentionally runs only in the co-hosted `sixb dev` process. It proves the tab and
+tool protocol without turning the public app server into a remote-control plane. A production
+version should move the broker to the authenticated API, bind sessions to user and thread, keep an
+audit log, and apply per-command approval policy.
+
 ### Styling and Tailwind
 
 `app/globals.css` is treated as source:

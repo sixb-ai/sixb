@@ -45,6 +45,10 @@ A context entry is either an object reference or a piece of app state:
 { kind: "app-state", id: "filters", label: "Active filters", description: "…", value: { status: "open" } }
 ```
 
+When app state also contains host-only runtime metadata, provide a safe `modelValue` projection.
+The full `value` remains durable for host integrations, while only `modelValue` is included in
+model input.
+
 ## Adaptive app surface
 
 `AgentSurface` keeps one `AgentPanel` mounted while it moves between a launcher, compact dock, and

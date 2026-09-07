@@ -55,6 +55,7 @@ export const AgentAppStateContextSchema = z.object({
   label: z.string().min(1),
   description: z.string().min(1),
   value: JsonValueSchema,
+  modelValue: JsonValueSchema.optional(),
 })
 
 export const AgentContextInputSchema = z.discriminatedUnion("kind", [

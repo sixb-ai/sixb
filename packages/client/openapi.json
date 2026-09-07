@@ -16244,6 +16244,29 @@
                                             "additionalProperties": true
                                           }
                                         ]
+                                      },
+                                      "modelValue": {
+                                        "description": "Any JSON-compatible value.",
+                                        "nullable": true,
+                                        "anyOf": [
+                                          {
+                                            "type": "string"
+                                          },
+                                          {
+                                            "type": "number"
+                                          },
+                                          {
+                                            "type": "boolean"
+                                          },
+                                          {
+                                            "type": "array",
+                                            "items": {}
+                                          },
+                                          {
+                                            "type": "object",
+                                            "additionalProperties": true
+                                          }
+                                        ]
                                       }
                                     },
                                     "required": ["kind", "id", "label", "description", "value"],
@@ -23960,6 +23983,29 @@
                                                   "additionalProperties": true
                                                 }
                                               ]
+                                            },
+                                            "modelValue": {
+                                              "description": "Any JSON-compatible value.",
+                                              "nullable": true,
+                                              "anyOf": [
+                                                {
+                                                  "type": "string"
+                                                },
+                                                {
+                                                  "type": "number"
+                                                },
+                                                {
+                                                  "type": "boolean"
+                                                },
+                                                {
+                                                  "type": "array",
+                                                  "items": {}
+                                                },
+                                                {
+                                                  "type": "object",
+                                                  "additionalProperties": true
+                                                }
+                                              ]
                                             }
                                           },
                                           "required": [
@@ -24474,6 +24520,29 @@
                                       "additionalProperties": true
                                     }
                                   ]
+                                },
+                                "modelValue": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
                                 }
                               },
                               "required": ["kind", "id", "label", "description", "value"],
@@ -24612,6 +24681,29 @@
                                       "additionalProperties": true
                                     }
                                   ]
+                                },
+                                "modelValue": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
                                 }
                               },
                               "required": ["kind", "id", "label", "description", "value"],
@@ -24729,6 +24821,29 @@
                                   "minLength": 1
                                 },
                                 "value": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                },
+                                "modelValue": {
                                   "description": "Any JSON-compatible value.",
                                   "nullable": true,
                                   "anyOf": [

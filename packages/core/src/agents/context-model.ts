@@ -23,7 +23,11 @@ export function serializeAgentContextForModel(
       "  <app_state_context>",
       `    <id>${escapeXml(part.context.id)}</id>`,
       `    <description>${escapeXml(part.context.description)}</description>`,
-      `    <value format="json">${escapeXml(stableJsonStringify(part.context.value))}</value>`,
+      `    <value format="json">${escapeXml(
+        stableJsonStringify(
+          part.context.modelValue === undefined ? part.context.value : part.context.modelValue
+        )
+      )}</value>`,
       "  </app_state_context>"
     )
   }

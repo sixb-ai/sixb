@@ -3,6 +3,9 @@ import { access, cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { AuthSessionAudience } from "@sixb/core"
+import type { AppBrowserControlRuntime } from "./agent-tools"
+import { appBrowserControlPath } from "./browser-control-protocol"
+import { handleAppBrowserControlRequest } from "./browser-control-server"
 import {
   type BuildAppResult,
   buildApp,
@@ -30,6 +33,8 @@ export interface CreateCustomAppOptions {
   audience?: AuthSessionAudience
   authEnabled?: boolean
   agentRoutes?: boolean
+  /** Local co-hosted POC: explicitly owned bridge shared with the agent worker. */
+  browserControl?: AppBrowserControlRuntime
 }
 
 export interface CustomAppDevOptions {
@@ -96,6 +101,8 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
   const audience = options.audience ?? "app"
   const authEnabled = options.authEnabled ?? true
   const agentRoutesEnabled = options.agentRoutes ?? true
+  const browserControl = options.browserControl
+  const browserControlEnabled = browserControl !== undefined
 
   async function scanRoutes(): Promise<PageRoute[]> {
     return [...(await scanAppRoutes(appDir)).pages]
@@ -226,7 +233,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     return outputPath
   }
 
-  async function prepareGeneratedApp(): Promise<{
+  async function prepareGeneratedApp(
+    generatedOptions: { readonly browserControl?: boolean } = {}
+  ): Promise<{
     htmlPath: string
     mainPath: string
     manifestPath: string
@@ -252,6 +261,8 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       publicDir,
       frameworkStylesheetPaths: stylesheets.frameworkStylesheetPaths,
       stylesheetPath: stylesheets.stylesheetPath,
+      agentContext: agentRoutesEnabled,
+      browserControl: generatedOptions.browserControl === true,
     })
     return { htmlPath, mainPath, manifestPath, routes }
   }
@@ -325,7 +336,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     async dev(devOptions: CustomAppDevOptions = {}) {
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
-      const { htmlPath, manifestPath } = await prepareGeneratedApp()
+      const { htmlPath, manifestPath } = await prepareGeneratedApp({
+        browserControl: browserControlEnabled,
+      })
       await prepareAuthExperience()
       let htmlImportVersion = 0
       let htmlBundle = await importHtmlBundle(htmlPath, htmlImportVersion)
@@ -339,6 +352,13 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           routes: {
             ...publicRoutes,
             ...reservedSixbRoutes(),
+            ...(browserControlEnabled
+              ? {
+                  [`${appBrowserControlPath}/*`]: allMethodsRoute((request) =>
+                    handleAppBrowserControlRequest(request, browserControl.hub)
+                  ),
+                }
+              : {}),
             [customAppManifestRoute]: manifestRoute(manifestPath),
             [internalAppShellRoute]: htmlBundleRoute(bundle),
             "/": spaHtmlRoute(() => internalOrigin),
@@ -356,7 +376,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
       const enqueueRebuild = () => {
         rebuildChain = rebuildChain
           .then(async () => {
-            const { htmlPath: nextHtmlPath } = await prepareGeneratedApp()
+            const { htmlPath: nextHtmlPath } = await prepareGeneratedApp({
+              browserControl: browserControlEnabled,
+            })
             await prepareAuthExperience()
             htmlImportVersion++
             htmlBundle = await importHtmlBundle(nextHtmlPath, htmlImportVersion)
@@ -596,6 +618,8 @@ function reservedSixbRoutes(): BunServeRoutes {
     "/ws/*": allMethodsRoute(handler),
     "/docs": allMethodsRoute(handler),
     "/docs/*": allMethodsRoute(handler),
+    "/__sixb": allMethodsRoute(handler),
+    "/__sixb/*": allMethodsRoute(handler),
   }
 }
 
@@ -608,7 +632,9 @@ function isReservedSixbRoute(pathname: string): boolean {
     pathname === "/ws" ||
     pathname.startsWith("/ws/") ||
     pathname === "/docs" ||
-    pathname.startsWith("/docs/")
+    pathname.startsWith("/docs/") ||
+    pathname === "/__sixb" ||
+    pathname.startsWith("/__sixb/")
   )
 }
 
@@ -833,7 +859,9 @@ function getHeadRoute(handler: (request: Request) => Response | Promise<Response
   } as unknown as BunServeRoute
 }
 
-function allMethodsRoute(handler: (request: Request) => Response): BunServeRoute {
+function allMethodsRoute(
+  handler: (request: Request) => Response | Promise<Response>
+): BunServeRoute {
   return {
     GET: handler,
     HEAD: handler,

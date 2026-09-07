@@ -8,6 +8,7 @@
       "@sixb/agent-ui/react-router": ["./packages/agent-ui/src/react-router.tsx"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],
       "@sixb/app": ["./packages/app/src/index.ts"],
+      "@sixb/app/agent-tools": ["./packages/app/src/agent-tools.ts"],
       "@sixb/app/agents": ["./packages/app/src/agents.ts"],
       "@sixb/app/auth": ["./packages/app/src/auth.ts"],
       "@sixb/atlas": ["./packages/atlas/src/index.ts"],

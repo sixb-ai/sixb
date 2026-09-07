@@ -1,6 +1,6 @@
 import { appendFileSync } from "node:fs"
 import { ActionWorker } from "@sixb/action-worker"
-import { AgentWorker } from "@sixb/agent-worker"
+import { type AgentConversationToolProvider, AgentWorker } from "@sixb/agent-worker"
 import { migrateStorage } from "@sixb/core"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
@@ -59,6 +59,7 @@ export interface StartSixbRuntimeOptions {
   readonly agentApiBaseUrl?: string
   readonly agentTurnTimeoutMs?: number
   readonly workerConcurrency?: WorkerConcurrency
+  readonly conversationToolProvider?: AgentConversationToolProvider
 }
 
 export interface RunningRulesRuntime {
@@ -248,6 +249,7 @@ export async function startSixbRuntime(
           apiBaseUrl: requireAgentApiBaseUrl(options.agentApiBaseUrl),
           concurrency: options.workerConcurrency?.agent,
           turnTimeoutMs: options.agentTurnTimeoutMs,
+          conversationToolProvider: options.conversationToolProvider,
         })
         await agentWorker.start()
       }
