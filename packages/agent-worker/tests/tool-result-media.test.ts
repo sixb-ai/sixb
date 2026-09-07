@@ -1,26 +1,14 @@
 import { describe, expect, test } from "bun:test"
-import {
-  APICallError,
-  type LanguageModelV4StreamPart,
-  type LanguageModelV4Usage,
-} from "@ai-sdk/provider"
 import type { BlobStorage, FileRef, JsonValue } from "@sixb/core"
 import { InMemoryBlobStorage } from "@sixb/core"
-import {
-  jsonSchema,
-  type LanguageModel,
-  type ModelMessage,
-  stepCountIs,
-  streamText,
-  tool,
-} from "ai"
-import { convertArrayToReadableStream, MockLanguageModelV4 } from "ai/test"
+import type { LanguageModel, ModelMessage } from "@sixb/core/models"
 import { AgentToolResultMediaBridge } from "../src/tools/result-media"
+import { WorkerTestModel } from "./worker-model-fixture"
 
 const PNG_BYTES = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
 
 describe("agent tool-result media bridge", () => {
-  test("keeps tool results text-only and injects one retry-stable image for the next-step model", async () => {
+  test("keeps durable tool results text-only and injects one image into the next model call", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const fileRef = await storeImage(blobStorage)
     const bridge = new AgentToolResultMediaBridge({
@@ -65,13 +53,13 @@ describe("agent tool-result media bridge", () => {
       ],
     })
 
-    // The override carries into an AI SDK provider retry or later step; do not append it again.
+    // Provider retries reuse the already prepared request; a later loop step must not append it.
     await expect(
       prepareBridge(bridge, imageModel(), prepared?.messages ?? messages)
     ).resolves.toBeUndefined()
   })
 
-  test("uses metadata and the sandbox path when the next-step model cannot accept images", async () => {
+  test("uses metadata and the sandbox path when the selected model cannot accept images", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const fileRef = await storeImage(blobStorage)
     let projections = 0
@@ -95,81 +83,35 @@ describe("agent tool-result media bridge", () => {
     expect(JSON.stringify(projected)).not.toContain("data:image")
   })
 
-  test("reuses the same synthetic user image when the provider retries the next call", async () => {
+  test("deduplicates identical file content queued by parallel tool calls", async () => {
     const blobStorage = new InMemoryBlobStorage()
     const fileRef = await storeImage(blobStorage)
+    let projections = 0
     const bridge = new AgentToolResultMediaBridge({
       blobStorage,
-      projectFile: async () => ({
-        promptText: "projected",
-        modelFileData: {
-          data: new URL("data:image/png;base64,iVBORw0KGgo="),
-          mediaType: "image/png",
-          filename: "generated.png",
-        },
-      }),
-    })
-    let toolSignal = new AbortController().signal
-    const createImage = tool({
-      inputSchema: jsonSchema({ type: "object", properties: {}, additionalProperties: false }),
-      execute(_input, { abortSignal }) {
-        toolSignal = abortSignal ?? toolSignal
-        return richImageResult(fileRef)
-      },
-      toModelOutput: ({ output, toolCallId }) =>
-        bridge.toModelOutput({ output: output as JsonValue, signal: toolSignal, toolCallId }),
-    })
-    const retryPrompts: string[] = []
-    let calls = 0
-    const model = new MockLanguageModelV4({
-      supportedUrls: { "image/*": [/^data:/] },
-      doStream: async (options) => {
-        calls += 1
-        if (calls === 1) {
-          return modelStream([
-            { type: "stream-start", warnings: [] },
-            {
-              type: "tool-call",
-              toolCallId: "retry-image-call",
-              toolName: "create_image",
-              input: "{}",
-            },
-            modelFinish("tool-calls"),
-          ])
+      projectFile: async () => {
+        projections += 1
+        return {
+          promptText: "projected",
+          modelFileData: {
+            data: new URL("data:image/png;base64,iVBORw0KGgo="),
+            mediaType: "image/png",
+            filename: "generated.png",
+          },
         }
-        retryPrompts.push(JSON.stringify(options.prompt))
-        if (calls === 2) {
-          throw new APICallError({
-            message: "retry once",
-            url: "https://provider.invalid",
-            requestBodyValues: {},
-            statusCode: 503,
-            responseHeaders: { "retry-after-ms": "0" },
-          })
-        }
-        return modelStream([
-          { type: "stream-start", warnings: [] },
-          { type: "text-start", id: "answer" },
-          { type: "text-delta", id: "answer", delta: "done" },
-          { type: "text-end", id: "answer" },
-          modelFinish("stop"),
-        ])
       },
     })
-    const result = streamText({
-      model,
-      prompt: "Create an image.",
-      tools: { create_image: createImage },
-      prepareStep: bridge.prepareStep as never,
-      stopWhen: stepCountIs(3),
-      maxRetries: 1,
-    })
+    const signal = new AbortController().signal
+    await bridge.toModelOutput({ output: richImageResult(fileRef), signal, toolCallId: "call-1" })
+    await bridge.toModelOutput({ output: richImageResult(fileRef), signal, toolCallId: "call-2" })
 
-    await expect(result.text).resolves.toBe("done")
-    expect(calls).toBe(3)
-    expect(retryPrompts).toHaveLength(2)
-    expect(retryPrompts[0]).toBe(retryPrompts[1])
-    expect(retryPrompts[0]?.match(/<sixb_tool_files/g)).toHaveLength(1)
+    const prepared = await prepareBridge(bridge, imageModel(), [])
+    expect(projections).toBe(1)
+    expect(prepared?.messages?.at(-1)?.content).toHaveLength(2)
+    expect(prepared?.messages?.at(-1)?.content[0]).toMatchObject({
+      type: "text",
+      text: expect.stringContaining('toolCallIds="call-1"'),
+    })
   })
 
   test("cancels an in-flight blob projection", async () => {
@@ -223,19 +165,6 @@ describe("agent tool-result media bridge", () => {
   })
 })
 
-const MODEL_USAGE: LanguageModelV4Usage = {
-  inputTokens: { total: 1, noCache: 1, cacheRead: 0, cacheWrite: 0 },
-  outputTokens: { total: 1, text: 1, reasoning: 0 },
-}
-
-function modelStream(chunks: LanguageModelV4StreamPart[]) {
-  return { stream: convertArrayToReadableStream(chunks) }
-}
-
-function modelFinish(unified: "stop" | "tool-calls"): LanguageModelV4StreamPart {
-  return { type: "finish", finishReason: { unified, raw: unified }, usage: MODEL_USAGE }
-}
-
 function richImageResult(fileRef: FileRef): JsonValue {
   return {
     kind: "agentToolResult",
@@ -254,29 +183,23 @@ async function storeImage(blobStorage: InMemoryBlobStorage): Promise<FileRef> {
   })
 }
 
-function imageModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({ supportedUrls: { "image/*": [/^data:/] } })
+function imageModel(): WorkerTestModel {
+  return new WorkerTestModel({ capabilities: { inputMediaTypes: ["image/png"] } })
 }
 
-function textModel(): MockLanguageModelV4 {
-  return new MockLanguageModelV4({ supportedUrls: {} })
+function textModel(): WorkerTestModel {
+  return new WorkerTestModel({ capabilities: { inputMediaTypes: [] } })
 }
 
 async function prepareBridge(
   bridge: AgentToolResultMediaBridge,
   model: LanguageModel,
-  messages: ModelMessage[]
+  messages: readonly ModelMessage[]
 ) {
   return bridge.prepareStep({
-    steps: [],
-    stepNumber: 1,
+    stepIndex: 1,
     model,
-    instructions: undefined,
-    initialInstructions: undefined,
     messages,
-    initialMessages: messages,
-    responseMessages: [],
-    toolsContext: {},
-    runtimeContext: {},
+    signal: new AbortController().signal,
   })
 }

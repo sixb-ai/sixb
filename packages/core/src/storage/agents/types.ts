@@ -69,10 +69,9 @@ export const AGENT_RUN_FAILURE_CODES = [
 export type AgentRunFailureCode = (typeof AGENT_RUN_FAILURE_CODES)[number]
 
 /**
- * Why a run ended — our own SDK-independent vocabulary. It includes the AI SDK's unified finish
- * reasons plus platform-level endings such as `timeout`, so reads are typed and exhaustive without
- * core depending on `ai`. `other`/`unknown` are catch-alls: an unrecognised provider value still
- * records *that* the run ended.
+ * Why a run ended — Sixb's provider-independent vocabulary. It includes model-loop reasons plus
+ * platform-level endings such as `timeout`, so reads remain typed and exhaustive. `other` and
+ * `unknown` preserve terminal state when a provider adds a new reason.
  */
 export const AGENT_RUN_FINISH_REASONS = [
   "stop",

@@ -1,3 +1,12 @@
+export type {
+  ModelCallCost,
+  ModelCostComponent,
+  ModelCostEstimate,
+  ModelCostMeter,
+  ModelMoney,
+  ModelRoute,
+} from "../models"
+export type { ModelProviderIds } from "../models/events"
 export type { ProviderScope } from "../provider-scope"
 export { QueueError } from "./errors"
 export { InMemoryQueues } from "./in-memory"

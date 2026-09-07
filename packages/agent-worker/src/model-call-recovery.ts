@@ -1,4 +1,5 @@
 import { createSixbError } from "@sixb/core/internal/errors"
+import { isJsonObject } from "@sixb/core/models"
 import type {
   AgentAiUsageAccountingPayload,
   AgentAiUsageRecordPayload,
@@ -73,8 +74,10 @@ export async function recordRecoveredAiModelCall(
   job: AgentAiUsageRecordRequestedQueueJob
 ): Promise<RecordAiModelCallResult> {
   const usage = fromQueuePayload(job)
-  const accounting = accountingFromQueuePayload(job, usage)
-  return recordAiModelCallAccounting({ storage, usage, ...accounting })
+  const accounting = accountingFromQueuePayload(job)
+  return accounting
+    ? recordAiModelCallAccounting({ storage, usage, ...accounting })
+    : storage.aiUsage.recordModelCall(usage)
 }
 
 /** Validation and referential-integrity failures cannot become valid through queue redelivery. */
@@ -97,7 +100,13 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
     callId: record.callId,
     requesterGroupIds: [...record.requesterGroupIds],
     providerId: record.providerId,
+    ...(record.providerIds === undefined
+      ? {}
+      : { providerIds: structuredClone(record.providerIds) }),
     requestedModelId: record.requestedModelId,
+    ...(record.requestedReasoning === undefined
+      ? {}
+      : { requestedReasoning: structuredClone(record.requestedReasoning) }),
     ...(record.responseModelId === undefined ? {} : { responseModelId: record.responseModelId }),
     responseId: record.responseId,
     usage: toQueueUsage(record.usage),
@@ -108,7 +117,9 @@ function toQueuePayload(record: RecordAiModelCallInput): AgentAiUsageRecordPaylo
 
 function toAccountingPayload(input: RecoverAiModelCallInput): AgentAiUsageAccountingPayload {
   return {
-    pricingContext: { ...input.pricingContext },
+    cost: structuredClone(input.cost),
+    ...(input.estimate === undefined ? {} : { estimate: structuredClone(input.estimate) }),
+    ...(input.route === undefined ? {} : { route: structuredClone(input.route) }),
     ratedAt: input.ratedAt.toISOString(),
   }
 }
@@ -139,18 +150,25 @@ function fromQueuePayload(job: AgentAiUsageRecordRequestedQueueJob): RecordAiMod
 }
 
 function accountingFromQueuePayload(
-  job: AgentAiUsageRecordRequestedQueueJob,
-  usage: RecordAiModelCallInput
-): Omit<RecoverAiModelCallInput, "usage"> {
+  job: AgentAiUsageRecordRequestedQueueJob
+): Omit<RecoverAiModelCallInput, "usage"> | undefined {
   const accounting = job.payload.accounting
-  if (!accounting) {
-    return {
-      pricingContext: {},
-      ratedAt: new Date(usage.occurredAt),
-    }
+  if (!accounting) return undefined
+  // Older workers captured a pricing context, not a completed-call valuation. Preserve their
+  // usage without inventing a historical price from today's catalog.
+  if (
+    !Object.hasOwn(accounting, "cost") &&
+    "pricingContext" in accounting &&
+    isJsonObject(accounting.pricingContext)
+  ) {
+    return undefined
   }
   return {
-    pricingContext: { ...accounting.pricingContext },
+    cost: structuredClone(accounting.cost),
+    ...(accounting.estimate === undefined
+      ? {}
+      : { estimate: structuredClone(accounting.estimate) }),
+    ...(accounting.route === undefined ? {} : { route: structuredClone(accounting.route) }),
     ratedAt: parseDate(accounting.ratedAt, job.id, "ratedAt"),
   }
 }

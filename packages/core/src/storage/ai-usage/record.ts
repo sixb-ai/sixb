@@ -1,5 +1,7 @@
 import { normalizeRequesterGroupIds } from "../../auth/attribution"
 import { assertJsonValue, isPlainRecord } from "../../json"
+import { normalizeModelProviderIds } from "../../models/events"
+import { isModelReasoning } from "../../models/language-model"
 import type { AiModelCallUsageRecord, RecordAiModelCallInput } from "./types"
 import { normalizeAiModelCallUsage } from "./usage"
 
@@ -20,6 +22,7 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
   const occurredAt = cloneValidDate(input.occurredAt, "occurredAt")
   const recordedAt = cloneValidDate(input.recordedAt ?? new Date(), "recordedAt")
   const requesterGroupIds = normalizeRequesterGroupIds(input.requesterGroupIds)
+  const requestedReasoning = cloneRequestedReasoning(input.requestedReasoning)
   const rawUsage = cloneRawUsage(input.rawUsage)
 
   return {
@@ -30,7 +33,11 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
     callId: input.callId,
     requesterGroupIds,
     providerId: input.providerId,
+    ...(input.providerIds === undefined
+      ? {}
+      : { providerIds: normalizeModelProviderIds(input.providerIds) }),
     requestedModelId: input.requestedModelId,
+    ...(requestedReasoning === undefined ? {} : { requestedReasoning }),
     ...(input.responseModelId === undefined ? {} : { responseModelId: input.responseModelId }),
     responseId: input.responseId,
     usage: normalizeAiModelCallUsage(input.usage),
@@ -38,6 +45,16 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
     occurredAt,
     recordedAt,
   }
+}
+
+function cloneRequestedReasoning(
+  reasoning: RecordAiModelCallInput["requestedReasoning"]
+): RecordAiModelCallInput["requestedReasoning"] {
+  if (reasoning === undefined) return undefined
+  if (!isModelReasoning(reasoning)) {
+    throw new TypeError("[Sixb] AI usage requestedReasoning is invalid.")
+  }
+  return typeof reasoning === "string" ? reasoning : { budgetTokens: reasoning.budgetTokens }
 }
 
 /** Validate a durable execution reference at storage and query boundaries. */

@@ -11,17 +11,13 @@ import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError, isSixbError } from "@sixb/core/internal/errors"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
+import type { LanguageModel } from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import type { AgentRunExecution, AgentRunRecord } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "@sixb/core/storage"
 import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
-import {
-  type AgentContextBudget,
-  type AgentModelContextLimits,
-  DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS,
-  resolveAgentContextBudget,
-} from "./context-budget"
+import { type AgentContextBudget, prepareAgentModels } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
 import {
   AgentExecutionLostError,
@@ -89,6 +85,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   private readonly context: AgentWorkerContext | null
   private readonly idleWithoutAgents: boolean
   private contextBudgets: ReadonlyMap<string, AgentContextBudget> = new Map()
+  private models: ReadonlyMap<string, LanguageModel> = new Map()
   /**
    * Sandbox teardowns that outlived their run's dispose() (boot still in flight when the turn
    * ended). stop() drains these so a graceful shutdown does not leave machines mid-teardown.
@@ -116,14 +113,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
   override async start(): Promise<void> {
     if (this.context) {
-      const [modelsDev] = await Promise.all([
-        import("./models-dev/catalog"),
+      const [prepared] = await Promise.all([
+        prepareAgentModels(this.agents),
         this.context.agentSkills,
       ])
-      this.contextBudgets = resolveContextBudgets(
-        this.agents,
-        modelsDev.resolveModelsDevContextLimits
-      )
+      this.contextBudgets = prepared.budgets
+      this.models = prepared.models
     }
     await super.start()
   }
@@ -185,6 +180,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         delivery,
         watchForCancel: (runId) => this.watchForCancel(runId),
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
+        models: this.models,
       })
       return
     }
@@ -203,7 +199,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
-    const agent = this.host.definitions.agents.getById(queuedRun.agentId)
+    const registered = this.host.definitions.agents.getById(queuedRun.agentId)
+    const agent = registered && {
+      ...registered,
+      model: this.models.get(registered.id) ?? registered.model,
+    }
     if (!agent) {
       const error = createSixbError(
         "internal.unexpected",
@@ -324,7 +324,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: executionContext,
         run,
         signal: turnSignal,
-        providerOptions: agent.providerOptions,
       })
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
@@ -708,35 +707,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
   }
 }
-
-function resolveContextBudgets(
-  agents: readonly AgentDefinition[],
-  resolveModelContextLimits: (
-    model: AgentDefinition["model"]
-  ) => AgentModelContextLimits | undefined
-): ReadonlyMap<string, AgentContextBudget> {
-  const budgets = new Map<string, AgentContextBudget>()
-  const warnedModels = new Set<string>()
-  for (const agent of agents) {
-    const modelLimits =
-      agent.loop?.context?.windowTokens === undefined
-        ? resolveModelContextLimits(agent.model)
-        : undefined
-    const budget = resolveAgentContextBudget(agent, modelLimits)
-    budgets.set(agent.id, budget)
-    if (budget.source !== "fallback") continue
-
-    const model = `${agent.model.provider}/${agent.model.modelId}`
-    if (warnedModels.has(model)) continue
-    warnedModels.add(model)
-    console.warn(
-      `[SixbAgentWorker] Models.dev has no context limit for '${model}'; using the ${DEFAULT_CONTEXT_WINDOW_LABEL} fallback. Configure loop.context.windowTokens to override it.`
-    )
-  }
-  return budgets
-}
-
-const DEFAULT_CONTEXT_WINDOW_LABEL = `${DEFAULT_AGENT_CONTEXT_WINDOW_TOKENS.toLocaleString("en-US")}-token`
 
 function requiredContextBudget(
   budgets: ReadonlyMap<string, AgentContextBudget>,

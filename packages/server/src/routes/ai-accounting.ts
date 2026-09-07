@@ -3,6 +3,7 @@ import type {
   AiAccountingAggregate,
   AiAccountingOverview,
   AiModelCallAccountingItem,
+  AiModelCallCostRecord,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -52,6 +53,29 @@ function serializeOverview(overview: AiAccountingOverview) {
   })
 }
 
+function serializeCost(cost: AiModelCallCostRecord) {
+  return {
+    ...cost,
+    source:
+      cost.status !== "rated"
+        ? "unknown"
+        : cost.priceSource.sourceId === "provider-reported"
+          ? "provider"
+          : cost.priceSource.sourceId === "model-rate-card"
+            ? "estimate"
+            : "unknown",
+    ...(cost.priceSource === undefined
+      ? {}
+      : {
+          priceSource: {
+            ...cost.priceSource,
+            observedAt: cost.priceSource.observedAt.toISOString(),
+          },
+        }),
+    ratedAt: cost.ratedAt.toISOString(),
+  }
+}
+
 function serializeModelCall(item: AiModelCallAccountingItem) {
   return AiModelCallAccountingListResponseSchema.shape.items.element.parse({
     usage: {
@@ -61,6 +85,8 @@ function serializeModelCall(item: AiModelCallAccountingItem) {
       callId: item.usage.callId,
       providerId: item.usage.providerId,
       requestedModelId: item.usage.requestedModelId,
+      providerIds: item.usage.providerIds ?? null,
+      requestedReasoning: item.usage.requestedReasoning,
       responseModelId: item.usage.responseModelId,
       responseId: item.usage.responseId,
       usage: item.usage.usage,
@@ -68,17 +94,7 @@ function serializeModelCall(item: AiModelCallAccountingItem) {
       recordedAt: item.usage.recordedAt.toISOString(),
     },
     attribution: item.attribution,
-    cost:
-      item.cost === undefined
-        ? undefined
-        : {
-            ...item.cost,
-            priceSource: {
-              ...item.cost.priceSource,
-              observedAt: item.cost.priceSource.observedAt.toISOString(),
-            },
-            ratedAt: item.cost.ratedAt.toISOString(),
-          },
+    cost: item.cost === undefined ? undefined : serializeCost(item.cost),
     valuationStatus: item.valuationStatus,
   })
 }

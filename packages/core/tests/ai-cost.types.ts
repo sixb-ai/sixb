@@ -13,10 +13,10 @@ const cost = {
   billingIdentity: { providerId: "anthropic", modelId: "claude-opus-4-8" },
   pricingContext: context,
   priceSource: {
-    sourceId: "models.dev",
+    sourceId: "vendor-catalog",
     sourceEntryId: "anthropic/claude-opus-4-8",
     sourceVersion: "sha256:test",
-    sourceUrl: "https://models.dev/api.json",
+    sourceUrl: "https://catalog.example/models.json",
     observedAt: new Date(),
   },
   reason: "unsupportedPricingDimension",

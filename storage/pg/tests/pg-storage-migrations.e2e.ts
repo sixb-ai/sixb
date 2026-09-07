@@ -42,6 +42,93 @@ const Room = defineObjectType({
 const ontology = new OntologyRegistry({ sources: [Room] })
 
 describe("Postgres storage migrations", () => {
+  test("upgrades model accounting in one step without losing historical evidence or constraints", async () => {
+    // Regression proof: omit 029's reason conversion or native ID columns, or change shipped 026.
+    await withStorage(false, async (_storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
+        await sql.unsafe(`CREATE TABLE ai_model_call_usage (
+          project_id TEXT, id TEXT, provider_id TEXT, requested_model_id TEXT, occurred_at TEXT,
+          PRIMARY KEY (project_id, id)
+        )`)
+        await sql.unsafe(
+          "INSERT INTO ai_model_call_usage VALUES ('project', 'usage', 'mock', 'model', '2026-08-01')"
+        )
+        const context = {
+          exec: async (text: string) => {
+            await sql.unsafe(text)
+          },
+        }
+        await postgresStorageMigrations.steps
+          .find((step) => step.id === "026-ai-cost-accounting")
+          ?.up(context)
+        await sql.unsafe(`INSERT INTO ai_model_call_valuations (
+          project_id, usage_record_id, status, provider_id, model_id, reason, details, rated_at
+        ) VALUES ('project', 'usage', 'unpriceable', 'mock', 'model', 'missingCatalogEntry',
+          '{"pricingContext":{}}', '2026-08-01')`)
+        for (const sourceId of ["provider-reported", "model-rate-card", "unknown-old-source"]) {
+          await sql`INSERT INTO ai_model_call_usage VALUES ('project', ${sourceId}, 'mock', 'model', '2026-08-01')`
+          const details = JSON.stringify({
+            pricingContext: {},
+            priceSource: {
+              sourceId,
+              sourceEntryId: "model",
+              sourceVersion: "v1",
+              observedAt: "2026-08-01T00:00:00.000Z",
+            },
+            components: [
+              {
+                meter: "tokens.input.total",
+                quantity: "10",
+                rateAmountNanosPerMillion: "1000000000",
+                chargeAmountNanos: "10000",
+              },
+            ],
+          })
+          await sql`INSERT INTO ai_model_call_valuations (project_id, usage_record_id, status,
+            provider_id, model_id, currency, amount_nanos, details, rated_at)
+            VALUES ('project', ${sourceId}, 'rated', 'mock', 'model', 'USD', 10000, ${details}::text::jsonb, '2026-08-01')`
+        }
+        await sql.unsafe(
+          `UPDATE ai_model_call_valuations SET details = '{"pricingContext":{},"priceSource":{"sourceId":"provider-reported","sourceEntryId":"missing-report","sourceVersion":"v1","observedAt":"2026-08-01T00:00:00.000Z"}}' WHERE usage_record_id = 'usage'`
+        )
+        const before =
+          await sql`SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id`
+        await postgresStorageMigrations.steps
+          .find((step) => step.id === "029-model-accounting")!
+          .up(context)
+        const [converted] =
+          await sql`SELECT reason FROM ai_model_call_valuations WHERE usage_record_id = 'usage'`
+        expect(converted?.reason).toBe("missingRateCard")
+        const after =
+          await sql`SELECT usage_record_id, details FROM ai_model_call_valuations ORDER BY usage_record_id`
+        expect([...after]).toEqual([...before])
+        // Bun 1.3.14's rejects matcher hangs on postgres.js's lazy PendingQuery thenable.
+        // Regression proof: remove Promise.resolve here and this test times out instead of finishing.
+        await expect(
+          Promise.resolve(
+            sql.unsafe(
+              "UPDATE ai_model_call_valuations SET reason = 'missingCatalogEntry' WHERE usage_record_id = 'usage'"
+            )
+          )
+        ).rejects.toThrow()
+        await expect(
+          Promise.resolve(sql.unsafe("DELETE FROM ai_model_call_usage"))
+        ).rejects.toThrow()
+        const [reasoning] =
+          await sql`SELECT COUNT(*)::int AS count FROM ai_model_call_usage WHERE requested_reasoning IS NULL`
+        expect(reasoning?.count).toBe(4)
+        const [nativeIds] =
+          await sql`SELECT COUNT(*)::int AS count FROM ai_model_call_usage WHERE provider_ids IS NULL`
+        expect(nativeIds?.count).toBe(4)
+      } finally {
+        await sql.end()
+      }
+    })
+  })
   test("migrateStorage writes schema-level migration history", async () => {
     await withStorage(false, async (storage, schemaName) => {
       const result = await migrateStorage(storage)
@@ -80,6 +167,7 @@ describe("Postgres storage migrations", () => {
             "026-ai-cost-accounting",
             "027-agent-context-checkpoints",
             "028-object-override-edit-times",
+            "029-model-accounting",
           ],
         },
       ])
@@ -279,6 +367,13 @@ describe("Postgres storage migrations", () => {
           id: "028-object-override-edit-times",
           status: "applied",
           version: 28,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "029-model-accounting",
+          status: "applied",
+          version: 29,
         },
       ])
     })
@@ -1758,6 +1853,13 @@ describe("Postgres storage migrations", () => {
           id: "028-object-override-edit-times",
           status: "applied",
           version: 28,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "029-model-accounting",
+          status: "applied",
+          version: 29,
         },
       ])
     } finally {

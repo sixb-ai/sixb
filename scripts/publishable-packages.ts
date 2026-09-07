@@ -50,6 +50,7 @@ export interface PublishablePackage {
 const workspaceRoots = [
   "auth",
   "packages",
+  "models",
   "connectors",
   "broker",
   "loggers",

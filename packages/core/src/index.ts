@@ -858,6 +858,12 @@ export type {
   SixbReadiness,
 } from "./maintenance"
 export type {
+  LanguageModel,
+  LanguageModelDefinition,
+  LanguageModelRateCard,
+  ProviderData,
+} from "./models"
+export type {
   ExecutionObjectByIdHandle,
   ExecutionObjectSet,
   ObjectQueryLinksInput,
@@ -973,6 +979,8 @@ export type {
   AgentModelToolCallPart,
   AgentModelToolOutput,
   AgentModelToolResultPart,
+  AgentProviderStatePart,
+  AgentReasoning,
   AgentReasoningLevel,
   AgentReasoningPart,
   AgentRequestErrorCode,

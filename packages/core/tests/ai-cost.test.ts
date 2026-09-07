@@ -95,4 +95,90 @@ describe("AI cost record validation", () => {
       )
     ).toBe(false)
   })
+
+  test("retains distinct cache-write TTL charges while matching their durable total", () => {
+    const cacheUsage: AiModelCallUsageRecord = {
+      ...usage,
+      usage: {
+        inputTokens: 12,
+        outputTokens: 8,
+        uncachedInputTokens: 8,
+        cacheReadInputTokens: 2,
+        cacheWriteInputTokens: 2,
+        totalTokens: 20,
+        reportingStatus: "complete",
+      },
+    }
+    const record = normalizeAiModelCallCostRecord({
+      ...cost(),
+      priceSource: { ...cost().priceSource, sourceId: "model-rate-card" },
+      money: { currency: "USD", amountNanos: "20" },
+      components: [
+        {
+          meter: "tokens.input.uncached",
+          quantity: "8",
+          rateAmountNanosPerMillion: "1000000",
+          chargeAmountNanos: "8",
+        },
+        {
+          meter: "tokens.input.cacheRead",
+          quantity: "2",
+          rateAmountNanosPerMillion: "1000000",
+          chargeAmountNanos: "2",
+        },
+        {
+          meter: "tokens.input.cacheWrite5m",
+          quantity: "1",
+          rateAmountNanosPerMillion: "1000000",
+          chargeAmountNanos: "1",
+        },
+        {
+          meter: "tokens.input.cacheWrite1h",
+          quantity: "1",
+          rateAmountNanosPerMillion: "1000000",
+          chargeAmountNanos: "1",
+        },
+        {
+          meter: "tokens.output.total",
+          quantity: "8",
+          rateAmountNanosPerMillion: "1000000",
+          chargeAmountNanos: "8",
+        },
+      ],
+    })
+    if (record.status !== "rated") throw new Error("Expected a rated cost record.")
+
+    expect(record.components.map((component) => component.meter)).toEqual([
+      "tokens.input.uncached",
+      "tokens.input.cacheRead",
+      "tokens.input.cacheWrite5m",
+      "tokens.input.cacheWrite1h",
+      "tokens.output.total",
+    ])
+    expect(aiModelCallCostMatchesUsage(record, cacheUsage)).toBe(true)
+    expect(
+      aiModelCallCostMatchesUsage(
+        {
+          ...record,
+          components: record.components.map((component) =>
+            component.meter === "tokens.input.cacheWrite1h"
+              ? { ...component, quantity: "0", chargeAmountNanos: "0" }
+              : component
+          ),
+          money: { currency: "USD", amountNanos: "19" },
+        },
+        cacheUsage
+      )
+    ).toBe(false)
+  })
+
+  test("requires component evidence for model rate-card ratings", () => {
+    expect(() =>
+      normalizeAiModelCallCostRecord({
+        ...cost(),
+        priceSource: { ...cost().priceSource, sourceId: "model-rate-card" },
+        components: [],
+      })
+    ).toThrow("requires components")
+  })
 })

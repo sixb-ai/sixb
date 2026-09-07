@@ -1,7 +1,6 @@
 import type { GetAiAccountingOverviewResponse, ListAiModelCallsResponse } from "@sixb/client"
 import { getAiAccountingOverviewOptions, listAiModelCallsOptions } from "@sixb/client/hooks"
 import {
-  Badge,
   Button,
   Card,
   CardContent,
@@ -38,6 +37,7 @@ import { AiUsageDateRangeControl } from "../components/AiUsageDateRangeControl"
 import { utcAccountingRangeForCalendarDays } from "../lib/aiUsageDateRange"
 
 const PAGE_SIZE = 25
+
 const ALL = "__all__"
 
 type Overview = GetAiAccountingOverviewResponse
@@ -125,9 +125,8 @@ export function AiUsagePage() {
   }
 
   const totals = overview.totals
-  const catalogValuedCalls = totals.costs.ratedCallCount
-  const coverage =
-    totals.modelCallCount === 0 ? 0 : (catalogValuedCalls / totals.modelCallCount) * 100
+  const ratedCalls = totals.costs.ratedCallCount
+  const coverage = totals.modelCallCount === 0 ? 0 : (ratedCalls / totals.modelCallCount) * 100
   const selectedAmount = amountForCurrency(totals.costs.amounts, currency)
   const tokenSeries = overview.series.map((period) => ({
     at: period.start,
@@ -184,7 +183,7 @@ export function AiUsagePage() {
     .sort((left, right) => right.value - left.value)
     .slice(0, 8)
   const valuationBreakdown = [
-    { key: "rated", label: "Catalog-valued", value: totals.costs.ratedCallCount },
+    { key: "rated", label: "Valued", value: totals.costs.ratedCallCount },
     { key: "unpriceable", label: "Unpriceable", value: totals.costs.unpriceableCallCount },
     { key: "unvalued", label: "Unvalued", value: totals.costs.unvaluedCallCount },
   ].filter((item) => item.value > 0)
@@ -286,10 +285,12 @@ export function AiUsagePage() {
         <>
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <AiUsageMetricCard
-              label="Catalog-estimated cost"
+              label="Tracked cost"
               value={selectedAmount ? formatMoney(selectedAmount) : "—"}
               description={
-                currency ? `Catalog-valued calls in ${currency}` : "No catalog-valued calls"
+                currency
+                  ? `Selected costs in ${currency}: reports with estimate fallback`
+                  : "No valued calls"
               }
               icon={<CircleDollarSign className="size-4" />}
               sparkline={costSeries.map((point) => ({
@@ -316,7 +317,7 @@ export function AiUsagePage() {
             <AiUsageMetricCard
               label="Pricing coverage"
               value={`${coverage.toFixed(coverage >= 99.95 ? 0 : 1)}%`}
-              description={`${catalogValuedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls catalog-valued`}
+              description={`${ratedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls valued`}
               icon={<Coins className="size-4" />}
             />
           </div>
@@ -340,9 +341,7 @@ export function AiUsagePage() {
               className="xl:col-span-2"
               title="Estimated cost over time"
               description={
-                currency
-                  ? `Catalog-valued model calls in ${currency}`
-                  : "No catalog-valued calls in this range"
+                currency ? `Valued model calls in ${currency}` : "No valued calls in this range"
               }
             >
               <AiUsageTimeSeries
@@ -360,20 +359,20 @@ export function AiUsagePage() {
                 ]}
                 xFormatter={(value) => formatBucketLabel(value, bucket)}
                 valueFormatter={(value) => formatChartMoney(value, currency)}
-                emptyLabel="No catalog-estimated cost in this range"
+                emptyLabel="No selected cost in this range"
                 ariaLabel="Catalog-estimated AI cost over time"
               />
             </ChartCard>
             <ChartCard
               className="h-full"
               title="Estimated cost by requested model"
-              description="Highest catalog-estimated cost for the selected currency"
+              description="Highest selected cost for the selected currency"
             >
               <AiUsageBreakdown
                 data={modelCosts}
                 valueLabel="Estimated cost"
                 valueFormatter={(value) => formatChartMoney(value, currency)}
-                emptyLabel="No catalog-estimated model cost in this range"
+                emptyLabel="No selected model cost in this range"
                 ariaLabel="Catalog-estimated AI cost by requested model"
               />
             </ChartCard>
@@ -417,7 +416,7 @@ export function AiUsagePage() {
               {agentCosts.length > 1 ? (
                 <ChartCard
                   title="Estimated cost by agent"
-                  description="Highest catalog-estimated cost in this range"
+                  description="Highest selected cost in this range"
                 >
                   <AiUsageBreakdown
                     data={agentCosts}
@@ -430,7 +429,7 @@ export function AiUsagePage() {
               {workflowCosts.length > 1 ? (
                 <ChartCard
                   title="Estimated cost by workflow"
-                  description="Highest catalog-estimated workflow Agent nodes in this range"
+                  description="Highest selected cost for workflow Agent nodes in this range"
                 >
                   <AiUsageBreakdown
                     data={workflowCosts}
@@ -495,39 +494,38 @@ function ModelCallsTable({
       <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <CardTitle>Model calls</CardTitle>
-          <CardDescription>Immutable usage and valuation drilldown</CardDescription>
+          <CardDescription>Token usage and cost per call</CardDescription>
         </div>
         <AccountingSelect
-          label="All valuations"
+          label="All costs"
           value={valuationStatus}
           options={["rated", "unpriceable", "unvalued"]}
           formatOption={(value) => valuationStatusLabel(value as ValuationStatus)}
           onChange={(value) => onValuationStatusChange(value as ValuationStatus | undefined)}
         />
       </CardHeader>
-      <CardContent className="px-0">
+      <CardContent className="px-0 pb-0">
         <div className="[&_[data-slot=table-container]]:max-h-[70vh] [&_[data-slot=table-container]]:overflow-auto">
           <Table>
             <TableHeader className="sticky top-0 z-10">
               <TableRow>
                 <TableHead className="pl-6">Time</TableHead>
-                <TableHead>Provider / model</TableHead>
+                <TableHead>Model</TableHead>
                 <TableHead className="text-right">Tokens</TableHead>
-                <TableHead className="text-right">Catalog-estimated cost</TableHead>
-                <TableHead>Valuation</TableHead>
+                <TableHead className="text-right">Cost</TableHead>
                 <TableHead className="pr-6">Source</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                     Loading model calls…
                   </TableCell>
                 </TableRow>
               ) : error ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-28 text-center">
+                  <TableCell colSpan={5} className="h-28 text-center">
                     <div className="flex flex-col items-center gap-3">
                       <p className="text-sm text-muted-foreground">
                         Atlas could not load model-call accounting records.
@@ -540,7 +538,7 @@ function ModelCallsTable({
                 </TableRow>
               ) : calls.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="h-24 text-center text-muted-foreground">
+                  <TableCell colSpan={5} className="h-24 text-center text-muted-foreground">
                     No model calls match these filters.
                   </TableCell>
                 </TableRow>
@@ -552,16 +550,21 @@ function ModelCallsTable({
                     </TableCell>
                     <TableCell>
                       <p className="font-medium">{call.usage.requestedModelId}</p>
-                      <p className="text-xs text-muted-foreground">{call.usage.providerId}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {call.usage.providerId}
+                        {call.usage.requestedReasoning === undefined
+                          ? ""
+                          : ` · ${formatReasoning(call.usage.requestedReasoning)}`}
+                      </p>
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs tabular-nums">
                       {formatOptionalTokens(call.usage.usage.totalTokens)}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums">
+                    <TableCell
+                      className="whitespace-nowrap text-right font-mono text-xs tabular-nums"
+                      title={callCostDescription(call)}
+                    >
                       {call.cost?.status === "rated" ? formatMoney(call.cost.money) : "—"}
-                    </TableCell>
-                    <TableCell>
-                      <ValuationBadge call={call} />
                     </TableCell>
                     <TableCell className="max-w-48 pr-6 text-xs">
                       <AccountingSource call={call} />
@@ -572,17 +575,24 @@ function ModelCallsTable({
             </TableBody>
           </Table>
         </div>
-        <div className="flex items-center justify-between border-t px-6 py-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t px-6 py-3">
           <p className="text-xs text-muted-foreground">
             {total === 0
               ? "0 calls"
-              : `${(offset + 1).toLocaleString()}–${Math.min(offset + calls.length, total).toLocaleString()} of ${total.toLocaleString()}`}
+              : loading || error
+                ? `${total.toLocaleString()} calls`
+                : `${(offset + 1).toLocaleString()}–${Math.min(offset + calls.length, total).toLocaleString()} of ${total.toLocaleString()}`}
           </p>
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" disabled={offset === 0} onClick={onPrevious}>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={loading || offset === 0}
+              onClick={onPrevious}
+            >
               Previous
             </Button>
-            <Button variant="outline" size="sm" disabled={!hasMore} onClick={onNext}>
+            <Button variant="outline" size="sm" disabled={loading || !hasMore} onClick={onNext}>
               Next
             </Button>
           </div>
@@ -618,24 +628,20 @@ function AccountingSource({ call }: { call: ModelCall }) {
   )
 }
 
-function ValuationBadge({ call }: { call: ModelCall }) {
-  const title =
-    call.cost?.status === "unpriceable"
-      ? unpriceableReasonLabel(call.cost.reason)
+function callCostDescription(call: ModelCall): string {
+  return call.cost?.status === "unpriceable"
+    ? unpriceableReasonLabel(call.cost.reason)
+    : call.cost?.status === "rated"
+      ? costSourceLabel(call.cost.source)
       : valuationStatusLabel(call.valuationStatus)
-  return (
-    <Badge
-      variant="outline"
-      title={title}
-      className={
-        call.valuationStatus === "rated"
-          ? "border-blue-500/30 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-          : "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300"
-      }
-    >
-      {title}
-    </Badge>
-  )
+}
+
+function costSourceLabel(source: "estimate" | "provider" | "unknown"): string {
+  return source === "provider"
+    ? "Provider-reported"
+    : source === "estimate"
+      ? "Estimated"
+      : "Unclassified"
 }
 
 function AccountingQualityNotice({
@@ -653,7 +659,7 @@ function AccountingQualityNotice({
   }
   if (coverage < 100) {
     messages.push(
-      `${overview.totals.costs.unpriceableCallCount + overview.totals.costs.unvaluedCallCount} calls do not have a catalog-estimated cost`
+      `${overview.totals.costs.unpriceableCallCount + overview.totals.costs.unvaluedCallCount} calls do not have a reported or estimated cost`
     )
   }
   const reviewStatus = overview.totals.costs.unpriceableCallCount > 0 ? "unpriceable" : "unvalued"
@@ -702,9 +708,7 @@ function AccountingInsights({
     <Card className="h-full">
       <CardHeader>
         <CardTitle>Efficiency and coverage</CardTitle>
-        <CardDescription>
-          Token composition and confidence in catalog-estimated cost
-        </CardDescription>
+        <CardDescription>Token composition and coverage of selected costs</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="grid grid-cols-2 gap-x-6 gap-y-4">
@@ -730,7 +734,7 @@ function AccountingInsights({
           <div
             className="flex h-2.5 overflow-hidden rounded-full bg-muted"
             role="img"
-            aria-label={`${coverage.toFixed(1)}% of calls have a catalog-estimated cost`}
+            aria-label={`${coverage.toFixed(1)}% of calls have a selected cost`}
           >
             {valuationBreakdown.map((item) => (
               <div
@@ -948,6 +952,12 @@ function formatOptionalTokens(value: number | undefined): string {
   return value === undefined ? "—" : formatCompactNumber(value)
 }
 
+function formatReasoning(reasoning: string | { budgetTokens: number }): string {
+  return typeof reasoning === "string"
+    ? `${reasoning} reasoning`
+    : `${reasoning.budgetTokens.toLocaleString()}-token reasoning budget`
+}
+
 function formatCompactNumber(value: number): string {
   return new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 }).format(
     value
@@ -1004,11 +1014,11 @@ function formatCallTime(value: string): string {
 function valuationStatusLabel(status: ValuationStatus): string {
   switch (status) {
     case "rated":
-      return "Catalog-valued"
+      return "Cost available"
     case "unpriceable":
-      return "Unpriceable"
+      return "Cost unavailable"
     case "unvalued":
-      return "Unvalued"
+      return "Not yet valued"
   }
 }
 
@@ -1022,8 +1032,8 @@ function unpriceableReasonLabel(
   switch (reason) {
     case "missingBillingIdentity":
       return "Missing billing identity"
-    case "missingCatalogEntry":
-      return "Missing Models.dev entry"
+    case "missingRateCard":
+      return "Missing rate card"
     case "missingUsageMeter":
       return "Missing usage meter"
     case "unsupportedPricingDimension":

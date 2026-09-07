@@ -11,16 +11,16 @@ import type {
   ValueType,
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
+import type { RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
+import type { ModelCallCost, ModelCostEstimate, ModelRoute, ModelTool } from "@sixb/core/models"
 import type {
   AgentStorage,
   AiCostStorage,
-  AiPricingContext,
   AiUsageStorage,
   AuthStorage,
   RecordAiModelCallInput,
 } from "@sixb/core/storage"
-import type { PrepareStepFunction, ToolSet } from "ai"
 import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
 import type { AgentSandboxHandle } from "./sandbox-handle"
@@ -36,7 +36,9 @@ export type AgentWorkerStorage = Storage & {
 
 export interface RecoverAiModelCallInput {
   readonly usage: RecordAiModelCallInput
-  readonly pricingContext: AiPricingContext
+  readonly cost: ModelCallCost
+  readonly estimate?: ModelCostEstimate
+  readonly route?: ModelRoute
   readonly ratedAt: Date
 }
 
@@ -95,8 +97,8 @@ export interface AgentTurnContext {
   readonly blobStorage: BlobStorage
   /** Run-scoped agent API gateway base URL, when this turn was created through a run environment. */
   readonly apiBaseUrl?: string
-  readonly tools: ToolSet
-  readonly prepareStep?: PrepareStepFunction<ToolSet>
+  readonly tools: readonly ModelTool[]
+  readonly prepareStep?: RunModelLoopInput["prepareStep"]
   /** Complete worker-owned system prompt, derived from the mode and provisioned runtime. */
   readonly systemPrompt: string
   readonly attachmentContext?: PreparedAgentAttachmentContext
@@ -128,7 +130,7 @@ export interface AgentWorkerOptions {
   readonly concurrency?: number
   /** Stream routing seam. Defaults to broker backed. */
   readonly streamSink?: StreamSink
-  /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 25. */
+  /** Step cap for agents that do not declare `loop.stopWhen.maxSteps`. Defaults to 100. */
   readonly defaultMaxSteps?: number
   /**
    * Wall-clock budget for a single turn, in ms. A turn that exceeds it is aborted and recorded

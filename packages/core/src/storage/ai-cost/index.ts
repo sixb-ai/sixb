@@ -18,6 +18,7 @@ export type {
   AiBillableMeter,
   AiBillingIdentity,
   AiCostComponent,
+  AiCostEstimate,
   AiCostStorage,
   AiCostSummary,
   AiModelCallAccountingItem,

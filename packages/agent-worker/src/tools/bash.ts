@@ -1,5 +1,5 @@
 import type { CommandResult } from "@sixb/core"
-import { type JSONSchema7, jsonSchema, type Tool, tool } from "ai"
+import type { JsonObject, JsonValue, ModelTool } from "@sixb/core/models"
 import type { AgentSandboxHandle } from "../sandbox-handle"
 
 const DEFAULT_COMMAND_TIMEOUT_MS = 30_000
@@ -18,7 +18,7 @@ export const BASH_TOOL_SPEC = {
     },
     required: ["command"],
     additionalProperties: false,
-  } satisfies JSONSchema7,
+  } satisfies JsonObject,
 } as const
 
 interface BashToolInput {
@@ -40,21 +40,48 @@ export interface BashToolOutput extends CommandResult {
  */
 export function createBashTool(
   resolveSandbox: () => Promise<AgentSandboxHandle>
-): Tool<BashToolInput, BashToolOutput> {
-  return tool({
-    description: BASH_TOOL_SPEC.description,
-    inputSchema: jsonSchema<BashToolInput>(BASH_TOOL_SPEC.inputSchema),
-    async execute(input, { abortSignal }): Promise<BashToolOutput> {
+): ModelTool<BashToolInput> {
+  return {
+    ...BASH_TOOL_SPEC,
+    parseInput: parseBashToolInput,
+    async execute(input, { signal }): Promise<JsonValue> {
       const { sandbox, env } = await resolveSandbox()
       const result = await sandbox.runCommand("bash", ["-lc", input.command], {
         cwd: input.cwd,
         env,
         timeout: normalizeTimeout(input.timeoutMs),
-        signal: abortSignal,
+        signal,
       })
-      return truncateCommandResult(result)
+      return truncateCommandResult(result) as unknown as JsonValue
     },
-  })
+    errorText: () => "The command failed.",
+  }
+}
+
+function parseBashToolInput(value: unknown): BashToolInput {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    throw new TypeError("Bash tool input must be an object.")
+  }
+  const input = value as Record<string, unknown>
+  if (typeof input.command !== "string" || input.command.length === 0) {
+    throw new TypeError("Bash tool input.command must be a non-empty string.")
+  }
+  if (input.cwd !== undefined && typeof input.cwd !== "string") {
+    throw new TypeError("Bash tool input.cwd must be a string when provided.")
+  }
+  if (input.timeoutMs !== undefined && typeof input.timeoutMs !== "number") {
+    throw new TypeError("Bash tool input.timeoutMs must be a number when provided.")
+  }
+  for (const key of Object.keys(input)) {
+    if (key !== "command" && key !== "cwd" && key !== "timeoutMs") {
+      throw new TypeError(`Bash tool input contains unknown property '${key}'.`)
+    }
+  }
+  return {
+    command: input.command,
+    ...(input.cwd === undefined ? {} : { cwd: input.cwd }),
+    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
+  }
 }
 
 function normalizeTimeout(timeoutMs: number | undefined): number {

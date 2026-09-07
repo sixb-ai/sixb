@@ -16,6 +16,7 @@ export type {
   ProjectionExecution,
   ProjectionMaterializationIdentity,
 } from "../materialization/model"
+export type { ModelProviderIds } from "../models/events"
 export type {
   ActionRunEffectsRecord,
   ActionRunFailure,
@@ -111,6 +112,7 @@ export type {
   AiBillableMeter,
   AiBillingIdentity,
   AiCostComponent,
+  AiCostEstimate,
   AiCostStorage,
   AiCostStorageErrorCode,
   AiCostSummary,

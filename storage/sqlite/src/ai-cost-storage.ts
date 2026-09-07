@@ -10,6 +10,7 @@ import {
   parseAiModelCallCostDetails,
   toAccountingItem,
 } from "@sixb/core/internal/ai-cost-storage-provider"
+import { normalizeModelProviderIds } from "@sixb/core/models"
 import type { ReadonlyJsonObject } from "@sixb/core/storage"
 import {
   type AiAccountingOverview,
@@ -23,6 +24,7 @@ import {
   type QueryAiAccountingOverviewInput,
   type SummarizeAiCostExecutionsInput,
 } from "@sixb/core/storage"
+import { requestedReasoningFromRow } from "./ai-usage-storage"
 import { isUniqueConstraintError } from "./storage-errors"
 import { runImmediateTransaction, type SqliteStoreConnection } from "./transactions"
 
@@ -355,6 +357,7 @@ interface UsageRow {
   readonly call_id: string
   readonly provider_id: string
   readonly requested_model_id: string
+  readonly requested_reasoning: string | null
   readonly response_model_id: string | null
   readonly response_id: string
   readonly input_tokens: number | null
@@ -367,6 +370,7 @@ interface UsageRow {
   readonly reasoning_output_tokens: number | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: string | null
+  readonly provider_ids: string | null
   readonly occurred_at: string
   readonly recorded_at: string
 }
@@ -537,7 +541,13 @@ function usageFromRow(row: UsageRow, requesterGroupIds: readonly string[]): AiMo
     callId: row.call_id,
     requesterGroupIds,
     providerId: row.provider_id,
+    ...(row.provider_ids === null
+      ? {}
+      : { providerIds: normalizeModelProviderIds(JSON.parse(row.provider_ids)) }),
     requestedModelId: row.requested_model_id,
+    ...(row.requested_reasoning === null
+      ? {}
+      : { requestedReasoning: requestedReasoningFromRow(row.requested_reasoning) }),
     ...(row.response_model_id === null ? {} : { responseModelId: row.response_model_id }),
     responseId: row.response_id,
     usage: {
@@ -610,14 +620,15 @@ function costRecord(input: {
   ratedAt: string
 }): AiModelCallCostRecord {
   const details = parseAiModelCallCostDetails(input.details)
+  const priceSource =
+    details.priceSource === undefined
+      ? undefined
+      : { ...details.priceSource, observedAt: new Date(details.priceSource.observedAt) }
   const base = {
+    ...(details.estimate === undefined ? {} : { estimate: details.estimate }),
     projectId: input.projectId,
     usageRecordId: input.usageId,
     pricingContext: details.pricingContext,
-    priceSource: {
-      ...details.priceSource,
-      observedAt: new Date(details.priceSource.observedAt),
-    },
     ratedAt: new Date(input.ratedAt),
   }
   if (input.status === "rated") {
@@ -625,6 +636,7 @@ function costRecord(input: {
       ...base,
       status: "rated",
       billingIdentity: { providerId: required(input.providerId), modelId: required(input.modelId) },
+      priceSource: required(priceSource),
       money: { currency: required(input.currency), amountNanos: required(input.amountNanos) },
       components: required(details.components),
     })
@@ -635,6 +647,7 @@ function costRecord(input: {
     ...(input.providerId && input.modelId
       ? { billingIdentity: { providerId: input.providerId, modelId: input.modelId } }
       : {}),
+    ...(priceSource === undefined ? {} : { priceSource }),
     reason: required(input.reason) as Extract<
       AiModelCallCostRecord,
       { status: "unpriceable" }

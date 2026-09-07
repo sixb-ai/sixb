@@ -1854,8 +1854,25 @@ export type ListAiModelCallsResponses = {
         callId: string
         providerId: string
         requestedModelId: string
+        requestedReasoning?:
+          | "provider-default"
+          | "none"
+          | "minimal"
+          | "low"
+          | "medium"
+          | "high"
+          | "xhigh"
+          | "max"
+          | {
+              budgetTokens: number
+            }
         responseModelId?: string
         responseId: string
+        providerIds: {
+          requestId?: string
+          responseId?: string
+          generationId?: string
+        } | null
         usage: {
           inputTokens?: number
           outputTokens?: number
@@ -1887,6 +1904,50 @@ export type ListAiModelCallsResponses = {
       cost?:
         | {
             status: "rated"
+            source: "estimate" | "provider" | "unknown"
+            estimate?:
+              | {
+                  status: "rated"
+                  money: {
+                    currency: string
+                    amountNanos: string
+                  }
+                  components: Array<{
+                    meter:
+                      | "tokens.input.total"
+                      | "tokens.input.uncached"
+                      | "tokens.input.cacheRead"
+                      | "tokens.input.cacheWrite"
+                      | "tokens.input.cacheWrite5m"
+                      | "tokens.input.cacheWrite1h"
+                      | "tokens.output.total"
+                      | "tokens.output.text"
+                      | "tokens.output.reasoning"
+                    quantity: string
+                    rateAmountNanosPerMillion: string
+                    chargeAmountNanos: string
+                  }>
+                }
+              | {
+                  status: "unpriceable"
+                  reason:
+                    | "missingBillingIdentity"
+                    | "missingRateCard"
+                    | "missingUsageMeter"
+                    | "unsupportedPricingDimension"
+                    | "invalidUsageForFormula"
+                  missingMeters?: Array<
+                    | "tokens.input.total"
+                    | "tokens.input.uncached"
+                    | "tokens.input.cacheRead"
+                    | "tokens.input.cacheWrite"
+                    | "tokens.input.cacheWrite5m"
+                    | "tokens.input.cacheWrite1h"
+                    | "tokens.output.total"
+                    | "tokens.output.text"
+                    | "tokens.output.reasoning"
+                  >
+                }
             billingIdentity: {
               providerId: string
               modelId: string
@@ -1897,6 +1958,7 @@ export type ListAiModelCallsResponses = {
               region?: string
               inferenceGeo?: string
               routedProviderId?: string
+              routedModelId?: string
               deploymentId?: string
               inferenceProfileId?: string
               cacheWriteTtlSeconds?: number
@@ -1906,7 +1968,7 @@ export type ListAiModelCallsResponses = {
               sourceId: string
               sourceEntryId: string
               sourceVersion: string
-              sourceUrl: string
+              sourceUrl?: string
               observedAt: string
             }
             money: {
@@ -1919,6 +1981,8 @@ export type ListAiModelCallsResponses = {
                 | "tokens.input.uncached"
                 | "tokens.input.cacheRead"
                 | "tokens.input.cacheWrite"
+                | "tokens.input.cacheWrite5m"
+                | "tokens.input.cacheWrite1h"
                 | "tokens.output.total"
                 | "tokens.output.text"
                 | "tokens.output.reasoning"
@@ -1930,6 +1994,50 @@ export type ListAiModelCallsResponses = {
           }
         | {
             status: "unpriceable"
+            source: "estimate" | "provider" | "unknown"
+            estimate?:
+              | {
+                  status: "rated"
+                  money: {
+                    currency: string
+                    amountNanos: string
+                  }
+                  components: Array<{
+                    meter:
+                      | "tokens.input.total"
+                      | "tokens.input.uncached"
+                      | "tokens.input.cacheRead"
+                      | "tokens.input.cacheWrite"
+                      | "tokens.input.cacheWrite5m"
+                      | "tokens.input.cacheWrite1h"
+                      | "tokens.output.total"
+                      | "tokens.output.text"
+                      | "tokens.output.reasoning"
+                    quantity: string
+                    rateAmountNanosPerMillion: string
+                    chargeAmountNanos: string
+                  }>
+                }
+              | {
+                  status: "unpriceable"
+                  reason:
+                    | "missingBillingIdentity"
+                    | "missingRateCard"
+                    | "missingUsageMeter"
+                    | "unsupportedPricingDimension"
+                    | "invalidUsageForFormula"
+                  missingMeters?: Array<
+                    | "tokens.input.total"
+                    | "tokens.input.uncached"
+                    | "tokens.input.cacheRead"
+                    | "tokens.input.cacheWrite"
+                    | "tokens.input.cacheWrite5m"
+                    | "tokens.input.cacheWrite1h"
+                    | "tokens.output.total"
+                    | "tokens.output.text"
+                    | "tokens.output.reasoning"
+                  >
+                }
             billingIdentity?: {
               providerId: string
               modelId: string
@@ -1940,21 +2048,22 @@ export type ListAiModelCallsResponses = {
               region?: string
               inferenceGeo?: string
               routedProviderId?: string
+              routedModelId?: string
               deploymentId?: string
               inferenceProfileId?: string
               cacheWriteTtlSeconds?: number
               mode?: string
             }
-            priceSource: {
+            priceSource?: {
               sourceId: string
               sourceEntryId: string
               sourceVersion: string
-              sourceUrl: string
+              sourceUrl?: string
               observedAt: string
             }
             reason:
               | "missingBillingIdentity"
-              | "missingCatalogEntry"
+              | "missingRateCard"
               | "missingUsageMeter"
               | "unsupportedPricingDimension"
               | "invalidUsageForFormula"
@@ -1963,6 +2072,8 @@ export type ListAiModelCallsResponses = {
               | "tokens.input.uncached"
               | "tokens.input.cacheRead"
               | "tokens.input.cacheWrite"
+              | "tokens.input.cacheWrite5m"
+              | "tokens.input.cacheWrite1h"
               | "tokens.output.total"
               | "tokens.output.text"
               | "tokens.output.reasoning"
@@ -5598,6 +5709,22 @@ export type GetWorkflowAgentNodeExecutionResponses = {
             | null
         }
       | {
+          type: "provider-state"
+          providerId: string
+          /**
+           * Any JSON-compatible value.
+           */
+          data:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      | {
           context:
             | {
                 kind: "object"
@@ -7971,7 +8098,18 @@ export type ListAgentsResponses = {
     name: string
     description?: string
     modelId?: string
-    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
     groupIds: Array<string>
     loop?: {
       stopWhen?: {
@@ -8017,7 +8155,18 @@ export type GetAgentResponses = {
     name: string
     description?: string
     modelId?: string
-    reasoning?: "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    reasoning?:
+      | "provider-default"
+      | "none"
+      | "minimal"
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max"
+      | {
+          budgetTokens: number
+        }
     groupIds: Array<string>
     loop?: {
       stopWhen?: {
@@ -8318,6 +8467,22 @@ export type ListAgentThreadMessagesResponses = {
              * Any JSON-compatible value.
              */
             providerMetadata?:
+              | string
+              | number
+              | boolean
+              | Array<unknown>
+              | {
+                  [key: string]: unknown
+                }
+              | null
+          }
+        | {
+            type: "provider-state"
+            providerId: string
+            /**
+             * Any JSON-compatible value.
+             */
+            data:
               | string
               | number
               | boolean

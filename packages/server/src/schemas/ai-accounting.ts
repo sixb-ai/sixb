@@ -1,8 +1,15 @@
 import { z } from "zod"
 import { AiUsageSummarySchema } from "./ai-usage"
+import { ModelReasoningSchema } from "./models"
 
 const IntegerStringSchema = z.string().regex(/^\d+$/)
 const IsoDateSchema = z.string().datetime({ offset: true })
+const CurrencySchema = z.string().regex(/^[A-Z]{3}$/)
+
+export const AiMoneySchema = z.object({
+  currency: CurrencySchema,
+  amountNanos: IntegerStringSchema,
+})
 
 export const AiAccountingBucketSchema = z.enum(["hour", "day", "week"])
 export const AiValuationStatusSchema = z.enum(["rated", "unpriceable", "unvalued"])
@@ -23,11 +30,6 @@ export const AiModelCallAccountingListQuerySchema = AiAccountingRangeQuerySchema
   valuationStatus: AiValuationStatusSchema.optional(),
   limit: IntegerStringSchema.optional(),
   offset: IntegerStringSchema.optional(),
-})
-
-export const AiMoneySchema = z.object({
-  currency: z.string().regex(/^[A-Z]{3}$/),
-  amountNanos: IntegerStringSchema,
 })
 
 export const AiCostSummarySchema = z.object({
@@ -77,6 +79,7 @@ export const AiPricingContextSchema = z.object({
   region: z.string().optional(),
   inferenceGeo: z.string().optional(),
   routedProviderId: z.string().optional(),
+  routedModelId: z.string().optional(),
   deploymentId: z.string().optional(),
   inferenceProfileId: z.string().optional(),
   cacheWriteTtlSeconds: z.number().int().positive().optional(),
@@ -89,6 +92,8 @@ const AiCostComponentSchema = z.object({
     "tokens.input.uncached",
     "tokens.input.cacheRead",
     "tokens.input.cacheWrite",
+    "tokens.input.cacheWrite5m",
+    "tokens.input.cacheWrite1h",
     "tokens.output.total",
     "tokens.output.text",
     "tokens.output.reasoning",
@@ -107,13 +112,36 @@ const AiPriceSourceSchema = z.object({
   sourceId: z.string(),
   sourceEntryId: z.string(),
   sourceVersion: z.string(),
-  sourceUrl: z.string().url(),
+  sourceUrl: z.string().url().optional(),
   observedAt: IsoDateSchema,
 })
+
+const AiCostSourceSchema = z.enum(["estimate", "provider", "unknown"])
+const AiUnpriceableReasonSchema = z.enum([
+  "missingBillingIdentity",
+  "missingRateCard",
+  "missingUsageMeter",
+  "unsupportedPricingDimension",
+  "invalidUsageForFormula",
+])
+const AiCostEstimateSchema = z.discriminatedUnion("status", [
+  z.object({
+    status: z.literal("rated"),
+    money: AiMoneySchema,
+    components: z.array(AiCostComponentSchema),
+  }),
+  z.object({
+    status: z.literal("unpriceable"),
+    reason: AiUnpriceableReasonSchema,
+    missingMeters: z.array(AiCostComponentSchema.shape.meter).optional(),
+  }),
+])
 
 const AiModelCallCostSchema = z.discriminatedUnion("status", [
   z.object({
     status: z.literal("rated"),
+    source: AiCostSourceSchema,
+    estimate: AiCostEstimateSchema.optional(),
     billingIdentity: AiBillingIdentitySchema,
     pricingContext: AiPricingContextSchema,
     priceSource: AiPriceSourceSchema,
@@ -123,16 +151,12 @@ const AiModelCallCostSchema = z.discriminatedUnion("status", [
   }),
   z.object({
     status: z.literal("unpriceable"),
+    source: AiCostSourceSchema,
+    estimate: AiCostEstimateSchema.optional(),
     billingIdentity: AiBillingIdentitySchema.optional(),
     pricingContext: AiPricingContextSchema,
-    priceSource: AiPriceSourceSchema,
-    reason: z.enum([
-      "missingBillingIdentity",
-      "missingCatalogEntry",
-      "missingUsageMeter",
-      "unsupportedPricingDimension",
-      "invalidUsageForFormula",
-    ]),
+    priceSource: AiPriceSourceSchema.optional(),
+    reason: AiUnpriceableReasonSchema,
     missingMeters: z.array(AiCostComponentSchema.shape.meter).optional(),
     ratedAt: IsoDateSchema,
   }),
@@ -145,8 +169,16 @@ const AiModelCallUsageRecordSchema = z.object({
   callId: z.string(),
   providerId: z.string(),
   requestedModelId: z.string(),
+  requestedReasoning: ModelReasoningSchema.optional(),
   responseModelId: z.string().optional(),
   responseId: z.string(),
+  providerIds: z
+    .object({
+      requestId: z.string().optional(),
+      responseId: z.string().optional(),
+      generationId: z.string().optional(),
+    })
+    .nullable(),
   usage: AiUsageSummarySchema,
   occurredAt: IsoDateSchema,
   recordedAt: IsoDateSchema,

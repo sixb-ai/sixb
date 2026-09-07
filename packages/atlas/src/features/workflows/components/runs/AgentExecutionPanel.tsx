@@ -66,7 +66,9 @@ export function AgentExecutionPanel({
           )}
           {data.cost ? (
             <>
-              <span>{formatAiCostAmounts(data.cost.amounts)} catalog-estimated cost</span>
+              <span title="Provider reports with estimate fallback; legacy costs retain their original provenance.">
+                {formatAiCostAmounts(data.cost.amounts)} selected cost
+              </span>
               <span>{formatAiCostCoverage(data.cost)}</span>
             </>
           ) : null}

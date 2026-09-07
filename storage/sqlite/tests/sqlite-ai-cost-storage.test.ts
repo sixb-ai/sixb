@@ -39,7 +39,7 @@ describe("SqliteStorage AI accounting", () => {
           currency, amount_nanos, reason, details, rated_at
         ) VALUES (
           'cost-contract-project', 'usage_2', 'unpriceable', 'vercel', 'unpriced/model',
-          NULL, NULL, 'missingCatalogEntry', '{}', '2026-08-01T12:00:00.200Z'
+          NULL, NULL, 'missingRateCard', '{}', '2026-08-01T12:00:00.200Z'
         )`
       ).run()
 
@@ -175,7 +175,7 @@ describe("SqliteStorage AI accounting", () => {
     }
   })
 
-  test("attributes catalog valuations to durable agent executions", async () => {
+  test("attributes model-call valuations to durable agent executions", async () => {
     const storage = new SqliteStorage()
     try {
       await storage.agents.threads.create({

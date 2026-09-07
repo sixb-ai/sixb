@@ -77,7 +77,7 @@ export class AgentTurnTimeoutError extends Error {
   }
 }
 
-/** Keep an untrusted tool failure as the cause while exposing only a generic message to AI SDK. */
+/** Keep an untrusted tool failure as the cause while exposing only a generic message to the model. */
 export class AgentToolExecutionError extends Error {
   readonly name = "AgentToolExecutionError"
 

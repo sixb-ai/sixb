@@ -6,7 +6,12 @@ import type {
   AgentMessageRole,
   FileRef,
 } from "../src"
-import { AgentMessageAdapterError, fromAiSdk, toModelMessages, toUiMessage } from "../src/agents"
+import {
+  AgentMessageAdapterError,
+  fromUiMessage,
+  toModelMessages,
+  toUiMessage,
+} from "../src/agents"
 
 function sixbMessage(role: AgentMessageRole, parts: AgentMessagePart[]): AgentMessage {
   return { role, parts }
@@ -20,7 +25,7 @@ const fileRef: FileRef = {
   mediaType: "application/pdf",
 }
 
-describe("fromAiSdk", () => {
+describe("fromUiMessage", () => {
   test("maps text, reasoning, and step-start parts", () => {
     const message: AgentInboundUiMessage = {
       role: "assistant",
@@ -35,7 +40,7 @@ describe("fromAiSdk", () => {
         { type: "text", text: "hello", state: "done" },
       ],
     }
-    expect(fromAiSdk(message)).toEqual({
+    expect(fromUiMessage(message)).toEqual({
       role: "assistant",
       metadata: { traceId: "t1" },
       parts: [
@@ -72,7 +77,7 @@ describe("fromAiSdk", () => {
         },
       ],
     }
-    expect(fromAiSdk(message).parts).toEqual([
+    expect(fromUiMessage(message).parts).toEqual([
       {
         type: "tool-call",
         toolCallId: "call_1",
@@ -112,7 +117,7 @@ describe("fromAiSdk", () => {
       ],
     } as unknown as AgentInboundUiMessage
 
-    expect(fromAiSdk(message)).toEqual({
+    expect(fromUiMessage(message)).toEqual({
       role: "assistant",
       metadata: { traceId: "t1" },
       parts: [
@@ -136,7 +141,7 @@ describe("fromAiSdk", () => {
       role: "user",
       parts: [{ type: "file", fileRef, providerMetadata: { openai: { purpose: "assistants" } } }],
     }
-    expect(fromAiSdk(message)).toEqual({
+    expect(fromUiMessage(message)).toEqual({
       role: "user",
       parts: [{ type: "file", fileRef, providerMetadata: { openai: { purpose: "assistants" } } }],
     })
@@ -147,7 +152,7 @@ describe("fromAiSdk", () => {
       role: "assistant",
       parts: [{ type: "source", url: "https://x" }],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
+    expect(() => fromUiMessage(message)).toThrow(AgentMessageAdapterError)
   })
 
   test("throws on transient/streaming states that must never be persisted", () => {
@@ -155,24 +160,24 @@ describe("fromAiSdk", () => {
       role: "assistant",
       parts: [{ type: "text", text: "partial", state: "streaming" }],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(streamingText)).toThrow(AgentMessageAdapterError)
+    expect(() => fromUiMessage(streamingText)).toThrow(AgentMessageAdapterError)
 
     const transientTool = {
       role: "assistant",
       parts: [{ type: "tool-bash", toolCallId: "c", state: "input-available", input: {} }],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(transientTool)).toThrow(AgentMessageAdapterError)
+    expect(() => fromUiMessage(transientTool)).toThrow(AgentMessageAdapterError)
 
     const approval = {
       role: "assistant",
       parts: [{ type: "tool-bash", toolCallId: "c", state: "approval-requested", input: {} }],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(approval)).toThrow(AgentMessageAdapterError)
+    expect(() => fromUiMessage(approval)).toThrow(AgentMessageAdapterError)
   })
 
   test("throws on an unsupported role", () => {
     const message = { role: "tool", parts: [] } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
+    expect(() => fromUiMessage(message)).toThrow(AgentMessageAdapterError)
   })
 
   test("throws on out-of-contract (non-JSON) payloads", () => {
@@ -188,11 +193,11 @@ describe("fromAiSdk", () => {
         },
       ],
     } as unknown as AgentInboundUiMessage
-    expect(() => fromAiSdk(message)).toThrow(AgentMessageAdapterError)
+    expect(() => fromUiMessage(message)).toThrow(AgentMessageAdapterError)
   })
 })
 
-describe("envelope round-trip (fromAiSdk ∘ toUiMessage)", () => {
+describe("envelope round-trip (fromUiMessage ∘ toUiMessage)", () => {
   const cases: Record<string, AgentMessage> = {
     text: sixbMessage("user", [{ type: "text", text: "hi" }]),
     "with message metadata": {
@@ -253,7 +258,7 @@ describe("envelope round-trip (fromAiSdk ∘ toUiMessage)", () => {
 
   for (const [name, original] of Object.entries(cases)) {
     test(`round-trips: ${name}`, () => {
-      expect(fromAiSdk(toUiMessage(original))).toEqual(original)
+      expect(fromUiMessage(toUiMessage(original))).toEqual(original)
     })
   }
 })
@@ -410,7 +415,7 @@ describe("toModelMessages", () => {
     ).toEqual([{ role: "system", content: "You are helpful." }])
   })
 
-  test("merges system text providerMetadata into providerOptions", () => {
+  test("merges system text providerMetadata into providerData", () => {
     expect(
       toModelMessages([
         sixbMessage("system", [
@@ -425,7 +430,7 @@ describe("toModelMessages", () => {
       {
         role: "system",
         content: "Cached prompt",
-        providerOptions: { anthropic: { cacheControl: "ephemeral" } },
+        providerData: { anthropic: { cacheControl: "ephemeral" } },
       },
     ])
   })

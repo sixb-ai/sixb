@@ -7,7 +7,7 @@ import type {
   SandboxFileRecord,
 } from "@sixb/core"
 import { InMemoryBlobStorage } from "@sixb/core"
-import type { Tool } from "ai"
+import type { ModelTool } from "@sixb/core/models"
 import type { PreparedAgentAttachmentContext } from "../src/attachments"
 import { AgentSandboxFileRegistry } from "../src/sandbox-file-registry"
 import { createAgentToolArtifacts } from "../src/tools/artifacts"
@@ -221,19 +221,15 @@ function unusedToolResultProjection(): { readonly type: "text"; readonly value: 
   return { type: "text", value: "unused" }
 }
 
-function executableViewFileTool(definition: Tool<{ readonly path: string }, JsonValue>): {
+function executableViewFileTool(definition: ModelTool<{ readonly path: string }>): {
   execute(input: { readonly path: string }): Promise<JsonValue>
 } {
-  if (typeof definition.execute !== "function") throw new Error("Expected executable view_file.")
-  const execute = definition.execute as unknown as (
-    input: { readonly path: string },
-    options: { readonly toolCallId: string; readonly abortSignal: AbortSignal }
-  ) => Promise<JsonValue>
   return {
     execute: (input) =>
-      execute(input, {
+      definition.execute(definition.parseInput(input), {
         toolCallId: "view-call-1",
-        abortSignal: new AbortController().signal,
+        callId: "view-model-call-1",
+        signal: new AbortController().signal,
       }),
   }
 }

@@ -7,7 +7,7 @@ import { registerAiAccountingRoutes } from "../src/routes/ai-accounting"
 
 const projectId = "ai-accounting-routes"
 
-async function createApp() {
+async function createApp(inlineCost = false) {
   const storage = new InMemoryStorage()
   await storage.agents.threads.create({
     id: "thread_1",
@@ -40,27 +40,54 @@ async function createApp() {
       requesterGroupIds: [],
       providerId: "openai",
       requestedModelId: "gpt-5",
+      requestedReasoning: "high",
       responseId: "response_1",
+      providerIds: { requestId: "req-native", responseId: "response_1" },
       usage: { inputTokens: 10, outputTokens: 5, reasoningOutputTokens: 2 },
       occurredAt: new Date("2026-09-10T12:30:00.000Z"),
       recordedAt: new Date("2026-09-10T12:30:00.100Z"),
     })
-    await tx.aiCosts!.recordModelCallCost({
+    const base = {
       projectId,
       usageRecordId: usage.record.id,
-      status: "unpriceable",
       billingIdentity: { providerId: "openai", modelId: "gpt-5" },
       pricingContext: { serviceTier: "priority" },
-      priceSource: {
-        sourceId: "test-catalog",
-        sourceEntryId: "openai/gpt-5",
-        sourceVersion: "test-catalog-v1",
-        sourceUrl: "https://example.test/ai-pricing.json",
-        observedAt: new Date("2026-09-10T12:00:00.000Z"),
-      },
-      reason: "unsupportedPricingDimension",
       ratedAt: new Date("2026-09-10T12:30:00.200Z"),
-    })
+    }
+    await tx.aiCosts!.recordModelCallCost(
+      inlineCost
+        ? {
+            ...base,
+            status: "rated",
+            money: { currency: "USD", amountNanos: "12" },
+            components: [],
+            priceSource: {
+              sourceId: "provider-reported",
+              sourceEntryId: "response_1",
+              sourceVersion: "v1",
+              observedAt: base.ratedAt,
+            },
+            estimate: {
+              status: "rated",
+              money: { currency: "USD", amountNanos: "15" },
+              components: [
+                {
+                  meter: "tokens.input.total",
+                  quantity: "10",
+                  rateAmountNanosPerMillion: "1000000",
+                  chargeAmountNanos: "10",
+                },
+                {
+                  meter: "tokens.output.total",
+                  quantity: "5",
+                  rateAmountNanosPerMillion: "1000000",
+                  chargeAmountNanos: "5",
+                },
+              ],
+            },
+          }
+        : { ...base, status: "unpriceable", reason: "unsupportedPricingDimension" }
+    )
   })
   const host = {
     id: projectId,
@@ -70,6 +97,27 @@ async function createApp() {
 }
 
 describe("AI accounting routes", () => {
+  test("returns the selected inline cost and its independent local estimate", async () => {
+    // Removal proof: remove estimate from AiModelCallCostSchema; response parsing strips it.
+    const app = await createApp(true)
+    const response = await app.handle(
+      new Request(
+        "http://localhost/api/ai/model-calls?from=2026-09-10T00:00:00.000Z&to=2026-09-11T00:00:00.000Z"
+      )
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      items: [
+        {
+          cost: {
+            source: "provider",
+            money: { amountNanos: "12" },
+            estimate: { status: "rated", money: { amountNanos: "15" } },
+          },
+        },
+      ],
+    })
+  })
   test("returns chart-ready project usage with honest pricing coverage", async () => {
     const app = await createApp()
     const response = await app.handle(
@@ -135,6 +183,8 @@ describe("AI accounting routes", () => {
             executionId: "execution_1",
             providerId: "openai",
             requestedModelId: "gpt-5",
+            requestedReasoning: "high",
+            providerIds: { requestId: "req-native", responseId: "response_1" },
           },
           attribution: {
             kind: "agent",

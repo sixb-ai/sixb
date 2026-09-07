@@ -347,6 +347,12 @@
       "import": "./dist/lake-storage/index.js",
       "default": "./dist/lake-storage/index.js"
     },
+    "./models": {
+      "types": "./dist/models/index.d.ts",
+      "bun": "./src/models/index.ts",
+      "import": "./dist/models/index.js",
+      "default": "./dist/models/index.js"
+    },
     "./logging": {
       "types": "./dist/logging/types.d.ts",
       "bun": "./src/logging/types.ts",
@@ -396,9 +402,6 @@
     "test": "bun test",
     "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 600 bun test ./tests/published-artifacts.e2e.ts",
     "prepack": "bun run build"
-  },
-  "dependencies": {
-    "@ai-sdk/provider": "^4.0.0"
   },
   "devDependencies": {
     "@types/bun": "latest",

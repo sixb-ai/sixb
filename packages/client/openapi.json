@@ -5486,11 +5486,55 @@
                               "requestedModelId": {
                                 "type": "string"
                               },
+                              "requestedReasoning": {
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "enum": [
+                                      "provider-default",
+                                      "none",
+                                      "minimal",
+                                      "low",
+                                      "medium",
+                                      "high",
+                                      "xhigh",
+                                      "max"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "budgetTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      }
+                                    },
+                                    "required": ["budgetTokens"],
+                                    "additionalProperties": false
+                                  }
+                                ]
+                              },
                               "responseModelId": {
                                 "type": "string"
                               },
                               "responseId": {
                                 "type": "string"
+                              },
+                              "providerIds": {
+                                "type": "object",
+                                "properties": {
+                                  "requestId": {
+                                    "type": "string"
+                                  },
+                                  "responseId": {
+                                    "type": "string"
+                                  },
+                                  "generationId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "additionalProperties": false,
+                                "nullable": true
                               },
                               "usage": {
                                 "type": "object",
@@ -5552,6 +5596,7 @@
                               "providerId",
                               "requestedModelId",
                               "responseId",
+                              "providerIds",
                               "usage",
                               "occurredAt",
                               "recordedAt"
@@ -5620,6 +5665,119 @@
                                     "type": "string",
                                     "enum": ["rated"]
                                   },
+                                  "source": {
+                                    "type": "string",
+                                    "enum": ["estimate", "provider", "unknown"]
+                                  },
+                                  "estimate": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "status": {
+                                            "type": "string",
+                                            "enum": ["rated"]
+                                          },
+                                          "money": {
+                                            "type": "object",
+                                            "properties": {
+                                              "currency": {
+                                                "type": "string",
+                                                "pattern": "^[A-Z]{3}$"
+                                              },
+                                              "amountNanos": {
+                                                "type": "string",
+                                                "pattern": "^\\d+$"
+                                              }
+                                            },
+                                            "required": ["currency", "amountNanos"],
+                                            "additionalProperties": false
+                                          },
+                                          "components": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "meter": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "tokens.input.total",
+                                                    "tokens.input.uncached",
+                                                    "tokens.input.cacheRead",
+                                                    "tokens.input.cacheWrite",
+                                                    "tokens.input.cacheWrite5m",
+                                                    "tokens.input.cacheWrite1h",
+                                                    "tokens.output.total",
+                                                    "tokens.output.text",
+                                                    "tokens.output.reasoning"
+                                                  ]
+                                                },
+                                                "quantity": {
+                                                  "type": "string",
+                                                  "pattern": "^\\d+$"
+                                                },
+                                                "rateAmountNanosPerMillion": {
+                                                  "type": "string",
+                                                  "pattern": "^\\d+$"
+                                                },
+                                                "chargeAmountNanos": {
+                                                  "type": "string",
+                                                  "pattern": "^\\d+$"
+                                                }
+                                              },
+                                              "required": [
+                                                "meter",
+                                                "quantity",
+                                                "rateAmountNanosPerMillion",
+                                                "chargeAmountNanos"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["status", "money", "components"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "status": {
+                                            "type": "string",
+                                            "enum": ["unpriceable"]
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                              "missingBillingIdentity",
+                                              "missingRateCard",
+                                              "missingUsageMeter",
+                                              "unsupportedPricingDimension",
+                                              "invalidUsageForFormula"
+                                            ]
+                                          },
+                                          "missingMeters": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "enum": [
+                                                "tokens.input.total",
+                                                "tokens.input.uncached",
+                                                "tokens.input.cacheRead",
+                                                "tokens.input.cacheWrite",
+                                                "tokens.input.cacheWrite5m",
+                                                "tokens.input.cacheWrite1h",
+                                                "tokens.output.total",
+                                                "tokens.output.text",
+                                                "tokens.output.reasoning"
+                                              ]
+                                            }
+                                          }
+                                        },
+                                        "required": ["status", "reason"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
                                   "billingIdentity": {
                                     "type": "object",
                                     "properties": {
@@ -5649,6 +5807,9 @@
                                         "type": "string"
                                       },
                                       "routedProviderId": {
+                                        "type": "string"
+                                      },
+                                      "routedModelId": {
                                         "type": "string"
                                       },
                                       "deploymentId": {
@@ -5693,7 +5854,6 @@
                                       "sourceId",
                                       "sourceEntryId",
                                       "sourceVersion",
-                                      "sourceUrl",
                                       "observedAt"
                                     ],
                                     "additionalProperties": false
@@ -5725,6 +5885,8 @@
                                             "tokens.input.uncached",
                                             "tokens.input.cacheRead",
                                             "tokens.input.cacheWrite",
+                                            "tokens.input.cacheWrite5m",
+                                            "tokens.input.cacheWrite1h",
                                             "tokens.output.total",
                                             "tokens.output.text",
                                             "tokens.output.reasoning"
@@ -5759,6 +5921,7 @@
                                 },
                                 "required": [
                                   "status",
+                                  "source",
                                   "billingIdentity",
                                   "pricingContext",
                                   "priceSource",
@@ -5774,6 +5937,119 @@
                                   "status": {
                                     "type": "string",
                                     "enum": ["unpriceable"]
+                                  },
+                                  "source": {
+                                    "type": "string",
+                                    "enum": ["estimate", "provider", "unknown"]
+                                  },
+                                  "estimate": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "status": {
+                                            "type": "string",
+                                            "enum": ["rated"]
+                                          },
+                                          "money": {
+                                            "type": "object",
+                                            "properties": {
+                                              "currency": {
+                                                "type": "string",
+                                                "pattern": "^[A-Z]{3}$"
+                                              },
+                                              "amountNanos": {
+                                                "type": "string",
+                                                "pattern": "^\\d+$"
+                                              }
+                                            },
+                                            "required": ["currency", "amountNanos"],
+                                            "additionalProperties": false
+                                          },
+                                          "components": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "object",
+                                              "properties": {
+                                                "meter": {
+                                                  "type": "string",
+                                                  "enum": [
+                                                    "tokens.input.total",
+                                                    "tokens.input.uncached",
+                                                    "tokens.input.cacheRead",
+                                                    "tokens.input.cacheWrite",
+                                                    "tokens.input.cacheWrite5m",
+                                                    "tokens.input.cacheWrite1h",
+                                                    "tokens.output.total",
+                                                    "tokens.output.text",
+                                                    "tokens.output.reasoning"
+                                                  ]
+                                                },
+                                                "quantity": {
+                                                  "type": "string",
+                                                  "pattern": "^\\d+$"
+                                                },
+                                                "rateAmountNanosPerMillion": {
+                                                  "type": "string",
+                                                  "pattern": "^\\d+$"
+                                                },
+                                                "chargeAmountNanos": {
+                                                  "type": "string",
+                                                  "pattern": "^\\d+$"
+                                                }
+                                              },
+                                              "required": [
+                                                "meter",
+                                                "quantity",
+                                                "rateAmountNanosPerMillion",
+                                                "chargeAmountNanos"
+                                              ],
+                                              "additionalProperties": false
+                                            }
+                                          }
+                                        },
+                                        "required": ["status", "money", "components"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "status": {
+                                            "type": "string",
+                                            "enum": ["unpriceable"]
+                                          },
+                                          "reason": {
+                                            "type": "string",
+                                            "enum": [
+                                              "missingBillingIdentity",
+                                              "missingRateCard",
+                                              "missingUsageMeter",
+                                              "unsupportedPricingDimension",
+                                              "invalidUsageForFormula"
+                                            ]
+                                          },
+                                          "missingMeters": {
+                                            "type": "array",
+                                            "items": {
+                                              "type": "string",
+                                              "enum": [
+                                                "tokens.input.total",
+                                                "tokens.input.uncached",
+                                                "tokens.input.cacheRead",
+                                                "tokens.input.cacheWrite",
+                                                "tokens.input.cacheWrite5m",
+                                                "tokens.input.cacheWrite1h",
+                                                "tokens.output.total",
+                                                "tokens.output.text",
+                                                "tokens.output.reasoning"
+                                              ]
+                                            }
+                                          }
+                                        },
+                                        "required": ["status", "reason"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
                                   },
                                   "billingIdentity": {
                                     "type": "object",
@@ -5804,6 +6080,9 @@
                                         "type": "string"
                                       },
                                       "routedProviderId": {
+                                        "type": "string"
+                                      },
+                                      "routedModelId": {
                                         "type": "string"
                                       },
                                       "deploymentId": {
@@ -5848,7 +6127,6 @@
                                       "sourceId",
                                       "sourceEntryId",
                                       "sourceVersion",
-                                      "sourceUrl",
                                       "observedAt"
                                     ],
                                     "additionalProperties": false
@@ -5857,7 +6135,7 @@
                                     "type": "string",
                                     "enum": [
                                       "missingBillingIdentity",
-                                      "missingCatalogEntry",
+                                      "missingRateCard",
                                       "missingUsageMeter",
                                       "unsupportedPricingDimension",
                                       "invalidUsageForFormula"
@@ -5872,6 +6150,8 @@
                                         "tokens.input.uncached",
                                         "tokens.input.cacheRead",
                                         "tokens.input.cacheWrite",
+                                        "tokens.input.cacheWrite5m",
+                                        "tokens.input.cacheWrite1h",
                                         "tokens.output.total",
                                         "tokens.output.text",
                                         "tokens.output.reasoning"
@@ -5885,8 +6165,8 @@
                                 },
                                 "required": [
                                   "status",
+                                  "source",
                                   "pricingContext",
-                                  "priceSource",
                                   "reason",
                                   "ratedAt"
                                 ],
@@ -16175,6 +16455,43 @@
                           {
                             "type": "object",
                             "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["provider-state"]
+                              },
+                              "providerId": {
+                                "type": "string"
+                              },
+                              "data": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              }
+                            },
+                            "required": ["type", "providerId", "data"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
                               "context": {
                                 "anyOf": [
                                   {
@@ -22913,15 +23230,31 @@
                         "type": "string"
                       },
                       "reasoning": {
-                        "type": "string",
-                        "enum": [
-                          "provider-default",
-                          "none",
-                          "minimal",
-                          "low",
-                          "medium",
-                          "high",
-                          "xhigh"
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "enum": [
+                              "provider-default",
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "budgetTokens": {
+                                "type": "integer",
+                                "minimum": 0
+                              }
+                            },
+                            "required": ["budgetTokens"],
+                            "additionalProperties": false
+                          }
                         ]
                       },
                       "groupIds": {
@@ -23016,15 +23349,31 @@
                       "type": "string"
                     },
                     "reasoning": {
-                      "type": "string",
-                      "enum": [
-                        "provider-default",
-                        "none",
-                        "minimal",
-                        "low",
-                        "medium",
-                        "high",
-                        "xhigh"
+                      "anyOf": [
+                        {
+                          "type": "string",
+                          "enum": [
+                            "provider-default",
+                            "none",
+                            "minimal",
+                            "low",
+                            "medium",
+                            "high",
+                            "xhigh",
+                            "max"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "budgetTokens": {
+                              "type": "integer",
+                              "minimum": 0
+                            }
+                          },
+                          "required": ["budgetTokens"],
+                          "additionalProperties": false
+                        }
                       ]
                     },
                     "groupIds": {
@@ -23886,6 +24235,43 @@
                                     }
                                   },
                                   "required": ["type", "fileRef"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "enum": ["provider-state"]
+                                    },
+                                    "providerId": {
+                                      "type": "string"
+                                    },
+                                    "data": {
+                                      "description": "Any JSON-compatible value.",
+                                      "nullable": true,
+                                      "anyOf": [
+                                        {
+                                          "type": "string"
+                                        },
+                                        {
+                                          "type": "number"
+                                        },
+                                        {
+                                          "type": "boolean"
+                                        },
+                                        {
+                                          "type": "array",
+                                          "items": {}
+                                        },
+                                        {
+                                          "type": "object",
+                                          "additionalProperties": true
+                                        }
+                                      ]
+                                    }
+                                  },
+                                  "required": ["type", "providerId", "data"],
                                   "additionalProperties": false
                                 },
                                 {

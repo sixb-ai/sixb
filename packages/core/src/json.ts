@@ -21,6 +21,15 @@ export function assertJsonValue(value: unknown, label = "value"): asserts value 
   }
 }
 
+export function isJsonObject(value: unknown): value is JsonObject {
+  return isPlainRecord(value) && isJsonValue(value)
+}
+
+export function assertJsonObject(value: unknown, label = "value"): asserts value is JsonObject {
+  assertJsonValue(value, label)
+  if (!isPlainRecord(value)) throw new Error(`[Sixb] ${label} must be a JSON object.`)
+}
+
 export function cloneJsonValue(value: ReadonlyJsonValue, label = "value"): JsonValue {
   assertJsonValue(value, label)
   return JSON.parse(JSON.stringify(value)) as JsonValue

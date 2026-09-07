@@ -83,6 +83,9 @@
       "path": "packages/agent-ui/tsconfig.build.json"
     },
     {
+      "path": "models/anthropic/tsconfig.build.json"
+    },
+    {
       "path": "packages/app/tsconfig.build.json"
     },
     {
@@ -99,6 +102,9 @@
     },
     {
       "path": "packages/core/tsconfig.build.json"
+    },
+    {
+      "path": "models/vercel-ai-gateway/tsconfig.build.json"
     },
     {
       "path": "packages/orchestrator/tsconfig.build.json"
