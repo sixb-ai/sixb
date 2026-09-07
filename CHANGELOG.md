@@ -2,6 +2,38 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-07 — Framework 0.1.6
+
+### Highlights
+
+- Add copyable invitation links to Atlas and the auth API, with opt-in support for magic-link and
+  OIDC authentication.
+- Let custom apps register document viewers through `documentPreviewRenderers`.
+- Catch non-JSON Action writeback results at compile time while preserving result inference.
+- Fix Action commits that read projected cardinality-many links.
+- Fix Atlas navigation for object identifiers containing reserved or Unicode characters.
+- Correct the stale core dependency pins published in 0.1.5 and prevent stale lockfile versions from
+  reaching future releases.
+
+### Upgrade notes
+
+- No database migration is required.
+- Writeback handlers must return JSON-shaped data or no result. Serialize dates and other non-JSON
+  values explicitly; existing invalid handlers may now fail typechecking.
+- Invitation links are returned only with `revealLink: true`. Treat revealed magic links as sign-in
+  credentials.
+- Upgrade core, its exact worker and storage consumers, and the CLI to `0.1.6` together.
+
+### Package versions
+
+- `0.1.6`: `@sixb/core`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/cli`, `@sixb/client`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/server`, `@sixb/sqlite`, `@sixb/sync-worker`, and
+  `@sixb/workflow-worker`.
+- `0.1.5`: `@sixb/agent-ui`, `@sixb/app`, and `@sixb/atlas`.
+- `0.1.3`: `@sixb/auth-magic-link`.
+- `0.1.2`: `@sixb/auth-oidc`.
+
 ## 2026-09-03 — Framework 0.1.5
 
 This selective release is anchored by `@sixb/core` `0.1.5`.

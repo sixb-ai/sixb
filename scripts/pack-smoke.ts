@@ -21,10 +21,12 @@ import {
   coreInternalConsumerErrors,
   workspaceDependencyPolicyErrors,
 } from "./workspace-dependency-policy"
+import { assertWorkspaceLockfileVersions } from "./workspace-lockfile-policy"
 
 const root = process.cwd()
 const packages = await discoverPublishablePackages(root)
 
+await assertWorkspaceLockfileVersions(root, packages)
 await assertSourceAliasesMirrorExports(packages)
 assertWorkspaceDependencyPolicy(packages)
 await assertCoreInternalConsumerPolicy(packages)

@@ -33,10 +33,12 @@ import {
   packageReleaseId,
 } from "./release-plan"
 import { assertReleaseTagAllowed, isPreviewRelease } from "./release-policy"
+import { assertWorkspaceLockfileVersions } from "./workspace-lockfile-policy"
 
 const root = process.cwd()
 const options = parsePublishOptions(process.argv.slice(2))
 const ordered = topologicalPublishOrder(await discoverPublishablePackages(root))
+await assertWorkspaceLockfileVersions(root, ordered)
 const registryByName = new Map(
   await Promise.all(
     ordered.map(async (packageInfo) => {

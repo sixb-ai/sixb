@@ -240,6 +240,12 @@ export const sendReminder = defineAction("sendReminder", {
 
 The runtime commits every staged edit in a single atomic batch once the handler returns.
 
+Writeback results must be JSON-shaped data or no result (`void` / `undefined`), including for async
+handlers. The builder validates this at compile time while preserving the inferred result type in
+`edits` and `effects`. Serialize dates with `.toISOString()`, convert `Map` and `bigint` values to JSON
+representations, and validate `unknown` external responses before returning them. A JSON-shaped
+interface does not need an index signature.
+
 ### Reading telemetry in Actions
 
 `read.telemetry.historyBatch(...)` reads several telemetry series through one authorized provider
