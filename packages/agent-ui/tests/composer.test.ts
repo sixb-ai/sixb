@@ -53,7 +53,7 @@ describe("Composer", () => {
     expect(html).toContain('viewBox="0 0 24 24"')
     expect(html).not.toContain("models.dev")
     expect(html).toContain("Medium")
-    expect(html).toContain('aria-label="Choose model"')
+    expect(html).toContain('aria-label="Choose model and reasoning effort"')
   })
 
   test.each([false, true])("keeps send errors within the input width (compact: %s)", (compact) => {

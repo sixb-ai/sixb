@@ -50,9 +50,12 @@ await worker.start()
 - The assistant message append and successful run finish happen in one storage transaction.
 - `spawn_agent` advertises exact `{ provider, modelId }` pairs from the project catalog, with
   available pricing and context metadata. For example, Gateway uses
-  `{ provider: "gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. The tool schema
+  `{ provider: "vercel-ai-gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. The tool schema
   restricts selection to configured pairs; the worker rechecks them before creating a child.
   Omitting `model` uses the first configured language model.
+- Reasoning supports `provider-default`, `none`, `minimal`, `low`, `medium`, `high`, `xhigh`,
+  and `max`. The chat picker uses the configured model's catalog-supported levels. Sixb's native
+  providers validate and translate the requested effort without silently lowering it.
 
 ## Usage accounting
 

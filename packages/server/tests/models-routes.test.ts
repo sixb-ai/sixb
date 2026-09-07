@@ -171,11 +171,36 @@ describe("GET /api/models", () => {
     expect(response.status).toBe(500)
   })
 
-  test("accepts a configured model and reasoning level for an Agent turn", async () => {
+  // Regression proof: drop "max" from the native reasoning-level serialization.
+  test("exposes Max for a configured model that supports it", async () => {
+    const model = testModel("vercel-ai-gateway", "openai/gpt-5.6-luna")
+    const app = createApp({
+      language: [
+        {
+          ...model,
+          definition: defineLanguageModel({
+            ...model.definition,
+            capabilities: {
+              reasoning: { canDisable: true, efforts: ["low", "medium", "high", "xhigh", "max"] },
+            },
+          }),
+        },
+      ],
+    })
+    const response = await app.fetch(new Request("http://localhost/api/models"))
+    expect(await response.json()).toMatchObject({
+      language: [
+        { reasoningLevels: ["provider-default", "none", "low", "medium", "high", "xhigh", "max"] },
+      ],
+    })
+  })
+
+  // Regression proof: remove "max" from the native reasoning schema; admission returns 422.
+  test.each(["high", "max"])("accepts %s reasoning for an Agent turn", async (reasoning) => {
     const app = createApp({
       language: [
         testModel("gateway", "openai/gpt-5.4"),
-        testModel("gateway", "anthropic/claude-sonnet-4.6"),
+        testModel("gateway", "openai/gpt-5.6-luna"),
       ],
     })
     const threadResponse = await app.fetch(
@@ -193,8 +218,8 @@ describe("GET /api/models", () => {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           text: "Review this request.",
-          model: { provider: "gateway", modelId: "anthropic/claude-sonnet-4.6" },
-          reasoning: "high",
+          model: { provider: "gateway", modelId: "openai/gpt-5.6-luna" },
+          reasoning,
         }),
       })
     )
@@ -202,8 +227,8 @@ describe("GET /api/models", () => {
     expect(response.status).toBe(202)
     expect(await response.json()).toMatchObject({
       run: {
-        model: { provider: "gateway", modelId: "anthropic/claude-sonnet-4.6" },
-        reasoning: "high",
+        model: { provider: "gateway", modelId: "openai/gpt-5.6-luna" },
+        reasoning,
       },
     })
   })
