@@ -153,6 +153,13 @@ export function assertAuthorized(runtime: AuthorizedRuntime, request: AuthzReque
   )
 }
 
+/** Runtime catalogs never infer unrestricted access from an absent principal context. */
+export function isRuntimeAllowed(runtime: AuthorizedRuntime, request: AuthzRequest): boolean {
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
+  if (authority.type === "denied" || authority.type === "delegated") return false
+  return authority.type === "unrestricted" || isAllowed(authority.context, request)
+}
+
 /** Resolve registered process-local authority before a protected leaf makes a decision. */
 export function assertRuntimeAuthorizationBound(
   runtime: AuthorizedRuntime

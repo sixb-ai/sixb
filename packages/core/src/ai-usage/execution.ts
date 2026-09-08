@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { assertAuthorized, assertRuntimeAuthorizationBound, isAllowed } from "../authorization"
+import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { SecurityDefinitionCatalog } from "../security"
 import type {
@@ -87,11 +87,9 @@ export function createAiUsageRuntime(
   const assertObservable = () => assertAuthorized(runtime, { kind: "aiUsage.observe" })
   const assertManageable = () => assertAuthorized(runtime, { kind: "aiUsage.manage" })
   const assertPolicyReadable = () => {
-    const resolved = assertRuntimeAuthorizationBound(runtime)
     if (
-      resolved.type === "principal" &&
-      !isAllowed(resolved.context, { kind: "aiUsage.observe" }) &&
-      !isAllowed(resolved.context, { kind: "aiUsage.manage" })
+      !isRuntimeAllowed(runtime, { kind: "aiUsage.observe" }) &&
+      !isRuntimeAllowed(runtime, { kind: "aiUsage.manage" })
     ) {
       assertObservable()
     }
@@ -114,12 +112,7 @@ export function createAiUsageRuntime(
     limitsConfigured: runtime.storage.aiLimits !== undefined,
     assertObservable,
     assertManageable,
-    canManageLimits: () => {
-      const resolved = assertRuntimeAuthorizationBound(runtime)
-      return (
-        resolved.type !== "principal" || isAllowed(resolved.context, { kind: "aiUsage.manage" })
-      )
-    },
+    canManageLimits: () => isRuntimeAllowed(runtime, { kind: "aiUsage.manage" }),
     queryOverview: (input) => {
       assertObservable()
       return requireCosts().queryProjectOverview({ ...input, projectId: runtime.projectId })

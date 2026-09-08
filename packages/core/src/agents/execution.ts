@@ -1,6 +1,7 @@
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
-import { assertAuthorized, isAllowed } from "../authorization"
+import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
+import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { ModelCatalog } from "../models"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
@@ -82,22 +83,25 @@ export function createAgentRuntime(
   execution: ExecutionContext,
   models?: ModelCatalog
 ): AgentRuntime {
-  const principal = runtime.authorization?.principal ?? SYSTEM_PRINCIPAL
-  const allowed = () => isAllowed(runtime.authorization, { kind: "agent.run" })
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
+  const principal = authority.type === "principal" ? authority.context.principal : SYSTEM_PRINCIPAL
+  const allowed = () => isRuntimeAllowed(runtime, { kind: "agent.run" })
 
   const getVisibleThreadRecord = async (threadId: string): Promise<AgentThreadRecord | null> => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
     const thread =
       (await runtime.storage.agents?.threads.getById({
         projectId: runtime.projectId,
         id: threadId,
       })) ?? null
     if (!thread || !allowed()) return null
-    return runtime.authorization && !principalsEqual(principal, thread.ownerPrincipal)
+    return authority.type === "principal" && !principalsEqual(principal, thread.ownerPrincipal)
       ? null
       : thread
   }
 
   const getAgent = (): AgentDescriptor | null => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
     const model = models?.language.default
     if (!model || !allowed()) return null
     return {
@@ -107,6 +111,7 @@ export function createAgentRuntime(
   }
 
   const getVisibleRunRecord = async (runId: string): Promise<ConversationAgentRunRecord | null> => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
     const run =
       (await runtime.storage.agents?.runs.getById({
         projectId: runtime.projectId,
@@ -148,12 +153,15 @@ export function createAgentRuntime(
       getById: getVisibleThreadRecord,
       list: async (input = {}) => {
         assertNoAgentSelector(input)
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return { threads: [], hasMore: false, total: 0 }
+        }
         const storage = runtime.storage.agents
         if (!storage || !allowed()) return { threads: [], hasMore: false, total: 0 }
         return storage.threads.list({
           ...input,
           projectId: runtime.projectId,
-          ownerPrincipal: runtime.authorization ? principal : undefined,
+          ownerPrincipal: authority.type === "principal" ? principal : undefined,
         })
       },
     },

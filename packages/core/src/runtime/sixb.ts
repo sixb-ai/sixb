@@ -119,7 +119,7 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),
     events: createEventsRuntime(runtime),
     logs: createLogsRuntime(runtime, dependencies.logging),
-    schedules: createSchedulesRuntime(dependencies.definitions.schedules),
+    schedules: createSchedulesRuntime(runtime, dependencies.definitions.schedules),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),
     blobs: createBlobsRuntime(runtime, execution, dependencies.blobStorage),
   }
