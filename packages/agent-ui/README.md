@@ -33,6 +33,16 @@ export function InvoiceSidebar({ invoice }: { invoice: ObjectRef }) {
 | `context` | Ambient context the agent sees. Omit it to inherit from `AgentContextProvider` instead; passing it makes the list fully controlled. |
 | `threadId` | Controlled thread. Omit to let the panel own its current thread. |
 | `defaultThreadId`, `onThreadChange` | For remembering where a user left off. |
+| `welcomeContent` | Custom React content centered above the composer in an empty conversation. Omit for the default agent name and description tooltip; pass `null` to leave it empty. |
+
+Use a logo, text, or your own component for the welcome area:
+
+```tsx
+<AgentPanel welcomeContent={<img src="/logo.svg" alt="Northline" className="h-10" />} />
+```
+
+The panel handles centering; your content controls its own styling. It disappears when the
+conversation starts. `AgentChat` also accepts `welcomeContent`.
 
 A context entry is either an object reference or a piece of app state:
 

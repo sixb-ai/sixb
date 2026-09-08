@@ -25,6 +25,8 @@ export interface AgentChatProps {
   readonly className?: string
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
+  /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
+  readonly welcomeContent?: ReactNode
   /** Host chrome rendered above the workspace thread navigation. */
   readonly sidebarHeader?: ReactNode
   /** Host chrome rendered below the workspace thread navigation. */
@@ -45,6 +47,7 @@ export function AgentChat({
   className,
   ambientContext = [],
   compact = false,
+  welcomeContent,
   sidebarHeader,
   sidebarFooter,
   sidebarWidth,
@@ -190,6 +193,7 @@ export function AgentChat({
         composerDraftNonce={conversation.draftReseed.nonce}
         ambientContext={ambientContext}
         compact={compact}
+        welcomeContent={welcomeContent}
         workspace={!compact}
       />
     )

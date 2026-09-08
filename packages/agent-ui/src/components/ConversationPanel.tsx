@@ -12,7 +12,7 @@ import {
 } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { History, Info, PanelLeft, Pencil, Search } from "lucide-react"
-import { useMemo, useState } from "react"
+import { type ReactNode, useMemo, useState } from "react"
 import { groupThreadsByDate } from "../format"
 import type { LiveRunState } from "../liveRun"
 import type {
@@ -85,6 +85,7 @@ export interface ConversationPanelProps {
   readonly composerDraftNonce?: number
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
+  readonly welcomeContent?: ReactNode
   /** Full-page mode uses the persistent thread rail for navigation. */
   readonly workspace?: boolean
 }
@@ -135,6 +136,7 @@ export function ConversationPanel({
   composerDraftNonce,
   ambientContext = [],
   compact = false,
+  welcomeContent,
   workspace = false,
 }: ConversationPanelProps) {
   const name = agent?.name ?? "Agent"
@@ -191,8 +193,6 @@ export function ConversationPanel({
           </Button>
         ) : null}
 
-        <AgentIdentity agent={agent} />
-
         <div className="ml-auto flex items-center gap-1">
           {!workspace && agentThreads.length > 0 ? (
             <AgentThreadHistoryPopover
@@ -220,7 +220,7 @@ export function ConversationPanel({
             !compact && "md:justify-center md:px-8 md:pb-[25vh] lg:pb-[27vh]"
           )}
         >
-          <Welcome agent={agent} compact={compact} />
+          <Welcome agent={agent} compact={compact} content={welcomeContent} />
           <div className="shrink-0">
             {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
           </div>
@@ -355,19 +355,30 @@ function historyGroupLabel(label: string): string {
   return label === "Previous 7 days" ? "This week" : label
 }
 
-function AgentIdentity({ agent }: { agent: Agent | undefined }) {
-  const name = agent?.name ?? "Agent"
-
-  return (
-    <div className="flex min-w-0 items-center px-1.5 py-1">
-      <span className="truncate text-sm font-medium text-foreground">{name}</span>
-    </div>
-  )
-}
-
-function Welcome({ agent, compact }: { agent: Agent | undefined; compact: boolean }) {
+function Welcome({
+  agent,
+  compact,
+  content,
+}: {
+  agent: Agent | undefined
+  compact: boolean
+  content?: ReactNode
+}) {
   const name = agent?.name ?? "Agent"
   const description = agent?.description?.trim()
+
+  if (content !== undefined) {
+    return (
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 items-center justify-center px-4 text-center",
+          compact ? "-translate-y-3" : "md:flex-none md:px-0 md:pb-8"
+        )}
+      >
+        {content}
+      </div>
+    )
+  }
 
   if (!compact) {
     return (
