@@ -138,6 +138,8 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ["objects", "--help"],
         ["objects", "inspect", "--help"],
         ["objects", "query", "--help"],
+        // Regression: before the shared parser fix, trailing --help executed a query.
+        ["objects", "get", "Customer", "alice", "--help"],
         ["telemetry", "--help"],
         ["actions", "--help"],
         ["actions", "get", "opaque/action", "--help"],
@@ -297,7 +299,12 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           },
           {
             args: ["workflows", "start", "review-customer", "--input-file", "input.json"],
-            message: "workflows start requires --file <path|->.",
+            message: "Unknown workflows start option '--input-file'.",
+          },
+          // Regression: without the shared parser fix, this requests the action with runId b.
+          {
+            args: ["actions", "request", "example", "--run-id", "a", "--run-id", "b"],
+            message: "--run-id may only be provided once.",
           },
         ] as const
         for (const { args, message } of invalidOptions) {

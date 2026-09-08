@@ -1,5 +1,12 @@
 import type { ApiClient } from "../api-client"
-import { enumValue, isHelp, requireExact, requireOrderedRange, rfc3339Value } from "../arguments"
+import {
+  enumValue,
+  isHelp,
+  parseCommandArgs,
+  requestsHelp,
+  requireOrderedRange,
+  rfc3339Value,
+} from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS, DEFAULT_LIST_ORDER } from "../policies"
 import { GROUP_HELP } from "./metadata"
@@ -22,10 +29,10 @@ export async function runs(
 ): Promise<void> {
   const [sub, ...rest] = args
   const group = `${kind}-runs` as "action-runs" | "workflow-runs"
-  if (!sub || isHelp(sub) || isHelp(rest[0])) return writeText(GROUP_HELP[group])
+  if (!sub || isHelp(sub) || requestsHelp(rest)) return writeText(GROUP_HELP[group])
   if (sub === "get") {
-    requireExact(rest, 1, `${group} get requires exactly one run id.`)
-    return writeJson(await api.get(`/api/${group}/${encodeURIComponent(rest[0] ?? "")}`))
+    const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1)
+    return writeJson(await api.get(`/api/${group}/${encodeURIComponent(positionals[0] ?? "")}`))
   }
   if (sub === "list") {
     const common = {

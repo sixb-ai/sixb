@@ -1,16 +1,69 @@
 import { fail } from "./output"
 
+type OptionKinds = Readonly<Record<string, "string" | "boolean">>
+
+/** Parse a command's options once, before reading files or calling the API. */
+export function parseCommandArgs<const T extends OptionKinds>(
+  args: readonly string[],
+  kinds: T,
+  command: string,
+  positionalCount: number | readonly [number, number] = 0
+): {
+  positionals: string[]
+  options: { [K in keyof T]?: T[K] extends "boolean" ? boolean : string }
+} {
+  const positionals: string[] = []
+  const options: Record<string, string | boolean> = {}
+  let positionalOnly = false
+  for (let index = 0; index < args.length; index++) {
+    const argument = args[index] ?? ""
+    if (!positionalOnly && argument === "--") {
+      positionalOnly = true
+      continue
+    }
+    if (positionalOnly || !argument.startsWith("-") || argument === "-") {
+      positionals.push(argument)
+      continue
+    }
+    const equals = argument.indexOf("=")
+    const flag = equals < 0 ? argument : argument.slice(0, equals)
+    if (!Object.hasOwn(kinds, flag)) fail(`Unknown ${command} option '${flag}'.`)
+    if (Object.hasOwn(options, flag)) fail(`${flag} may only be provided once.`)
+    if (kinds[flag] === "boolean") {
+      if (equals >= 0) fail(`${flag} does not accept a value.`)
+      options[flag] = true
+    } else {
+      const value = equals < 0 ? args[++index] : argument.slice(equals + 1)
+      if (!value || (equals < 0 && value.startsWith("--"))) {
+        fail(`${flag} requires a value.`)
+      }
+      options[flag] = value
+    }
+  }
+  const [minimum, maximum] =
+    typeof positionalCount === "number" ? [positionalCount, positionalCount] : positionalCount
+  if (positionals.length < minimum || positionals.length > maximum) {
+    fail(`Invalid arguments for '${command}'.`)
+  }
+  return {
+    positionals,
+    // Every assigned option was checked against its declared kind above.
+    options: options as { [K in keyof T]?: T[K] extends "boolean" ? boolean : string },
+  }
+}
+
+export function requestsHelp(args: readonly string[]): boolean {
+  const separator = args.indexOf("--")
+  const beforeSeparator = separator < 0 ? args : args.slice(0, separator)
+  return isHelp(args[0]) || beforeSeparator.includes("--help") || beforeSeparator.includes("-h")
+}
+
 /** Argument validation shared by every instance command mode. */
 
 const RFC3339_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/
 
 export function isHelp(value: string | undefined): boolean {
   return value === "-h" || value === "--help" || value === "help"
-}
-
-export function requireValue(label: string, value: string | undefined): string {
-  if (!value) fail(`${label} requires a value.`)
-  return value
 }
 
 export function requireExact(args: readonly string[], count: number, message: string): void {

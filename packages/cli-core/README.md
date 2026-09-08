@@ -109,6 +109,11 @@ downloads        atomic file write plus JSON receipt
 The HTTP client accepts only relative `/api` paths, parses structured API errors, and never prints
 credentials.
 
+Both modes reject unknown options, missing values, duplicate scalar options, and invalid positional
+counts before command I/O. Options accept `--name value` or `--name=value`. Use `--` before literal
+identifiers that start with a dash. `--help` and `-h` before that separator show help even after
+positionals, without reading files or contacting the API.
+
 ## Core API
 
 ```ts
@@ -130,6 +135,7 @@ import {
 | `INSTANCE_COMMANDS` | Frozen top-level command names |
 | `isInstanceCommand` | Narrow a string to an instance command |
 | `renderInstanceHelp` | Render local or sandbox help text |
+| `requestsHelp` | Detect help before resolving a local connection |
 | `CliError` | Structured CLI failure with an exit code |
 | `reportError` | Write the stable error envelope and return its exit code |
 
