@@ -271,6 +271,17 @@ bun add tailwindcss @tailwindcss/cli
 
 Bringing your own UI? Keep `globals.css` plain CSS and skip the install.
 
+## UI packages
+
+Sixb provides two optional packages for building app interfaces:
+
+- `@sixb/ui` provides shared React components and theme tokens for application screens. The
+  [styles and theming](#styles-and-theming) section shows how to include its stylesheet.
+- `@sixb/agent-ui` provides agent chat UI components for custom apps.
+
+The [project organization guide](../fundamentals/organizing-your-project.md) shows one way to group
+components and data access by feature.
+
 ## Custom login experience
 
 Add `app/auth.tsx` to give the app audience an organization-specific magic-link experience. The

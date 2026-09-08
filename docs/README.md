@@ -143,6 +143,8 @@ type, the materialized object, and the runs that produced it.
 ## Next steps
 
 - [Project structure](fundamentals/project-structure.md) — discovery and every convention folder
+- [Organizing your project](fundamentals/organizing-your-project.md) — examples of how to group code
+  as your project grows
 - [Ontology](ontology/overview.md) — model your own domain
 - [Syncs](data/syncs.md), [datasets](data/datasets.md), and
   [projections](data/projections.md) — follow the complete data path

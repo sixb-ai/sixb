@@ -79,7 +79,8 @@ agent sandboxes.
 Discovery matches exported *values*, not filenames. One file can export several definitions,
 a definition can be split across files, and an array export is flattened — so
 `export const all = [Customer, Invoice]` registers both. A `helpers.ts` next to your
-definitions is harmless: its exports just fail the kind's type guard and are ignored.
+definitions can export helpers: exports that fail the kind's type guard are ignored. The module
+is still imported, so its code at module scope executes during discovery.
 
 ```ts
 // ontology/customer.ts — both exports are discovered
@@ -139,6 +140,8 @@ under [Apps](../apps/overview.md).
 
 ## Related
 
+- [Organizing your project](organizing-your-project.md) — adaptable examples for grouping definitions
+  and growing a project's structure.
 - [Get started](../README.md) — scaffold and run a project end to end.
 - [Manual install](manual-install.md) — set up the folders by hand.
 - [Runtime](../runtime/overview.md) — what `createSixb()` accepts and returns.
