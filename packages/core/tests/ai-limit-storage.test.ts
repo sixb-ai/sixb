@@ -62,3 +62,31 @@ test("initialized period counters avoid repeated immutable-ledger scans", async 
 
   expect(scans).toBe(1)
 })
+
+// Regression check: remove InMemoryAiLimitStorage's operation lock; both calls are admitted.
+test("standalone in-memory limits serialize competing reservations", async () => {
+  const limits = new InMemoryAiLimitStorage({
+    executionExists: () => true,
+    listUsageRecords: () => [],
+  })
+  await limits.createPolicy({
+    id: "tokens",
+    projectId: "project",
+    subject: { type: "project" },
+    limit: { meter: "tokens.total", amount: 10 },
+  })
+  const results = await Promise.all(
+    ["a", "b"].map((callId) =>
+      limits.reserveModelCall({
+        projectId: "project",
+        executionId: "execution",
+        attempt: 1,
+        callId,
+        subjects: [],
+        estimates: [{ meter: "tokens.total", amount: 6 }],
+        reservedAt: new Date("2026-08-15Z"),
+      })
+    )
+  )
+  expect(results.map((result) => result.status).sort()).toEqual(["denied", "reserved"])
+})

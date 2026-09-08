@@ -5,6 +5,7 @@ import { AiLimitStorageError } from "./errors"
 import { aiLimitCalendarMonth } from "./period"
 import type { AiLimitAccountingEntry } from "./provider"
 import {
+  AiLimitOperationLock,
   aiLimitAccountingEntryAppliesToSubject,
   aiLimitAmountKey,
   aiLimitPolicyDimensionKey,
@@ -96,54 +97,66 @@ export class InMemoryAiLimitStorage implements AiLimitStorage {
   private readonly policyIdsByDimension = new Map<string, string>()
   private readonly periodStates = new Map<string, AiLimitPeriodState>()
   private readonly reservations = new Map<string, AiModelCallReservation>()
+  private readonly operations = new AiLimitOperationLock()
 
   constructor(private readonly options: InMemoryAiLimitStorageOptions = {}) {}
 
+  /** @internal The root transaction must settle queued work before restoring its snapshot. */
+  settleOperations(): Promise<void> {
+    return this.operations.settle()
+  }
+
   async createPolicy(input: CreateAiLimitPolicyInput): Promise<AiLimitPolicy> {
-    const policy = normalizeCreateAiLimitPolicy(input)
-    const key = policyKey(policy.projectId, policy.id)
-    const dimensionKey = aiLimitPolicyDimensionKey(policy)
-    if (this.policies.has(key) || this.policyIdsByDimension.has(dimensionKey)) {
-      throw new AiLimitStorageError(
-        "duplicate_policy",
-        `[Sixb] An AI limit policy already exists for '${aiLimitSubjectKey(policy.subject)}' and '${aiLimitAmountKey(normalizeAiLimitAmount(policy.limit))}'.`
-      )
-    }
-    this.policies.set(key, structuredClone(policy))
-    this.policyIdsByDimension.set(dimensionKey, key)
-    return cloneAiLimitPolicy(policy)
+    return this.operations.run(async () => {
+      const policy = normalizeCreateAiLimitPolicy(input)
+      const key = policyKey(policy.projectId, policy.id)
+      const dimensionKey = aiLimitPolicyDimensionKey(policy)
+      if (this.policies.has(key) || this.policyIdsByDimension.has(dimensionKey)) {
+        throw new AiLimitStorageError(
+          "duplicate_policy",
+          `[Sixb] An AI limit policy already exists for '${aiLimitSubjectKey(policy.subject)}' and '${aiLimitAmountKey(normalizeAiLimitAmount(policy.limit))}'.`
+        )
+      }
+      this.policies.set(key, structuredClone(policy))
+      this.policyIdsByDimension.set(dimensionKey, key)
+      return cloneAiLimitPolicy(policy)
+    })
   }
 
   async updatePolicy(input: UpdateAiLimitPolicyInput): Promise<AiLimitPolicy> {
-    const update = normalizeUpdateAiLimitPolicy(input)
-    const key = policyKey(update.projectId, update.id)
-    const existing = this.policies.get(key)
-    if (!existing) throw missingPolicy(update.projectId, update.id)
-    if (update.limit !== undefined) {
-      const previous = normalizeAiLimitAmount(existing.limit)
-      const next = normalizeAiLimitAmount(update.limit)
-      if (aiLimitAmountKey(previous) !== aiLimitAmountKey(next)) {
-        throw new TypeError("[Sixb] AI limit policy meter and cost currency are immutable.")
+    return this.operations.run(async () => {
+      const update = normalizeUpdateAiLimitPolicy(input)
+      const key = policyKey(update.projectId, update.id)
+      const existing = this.policies.get(key)
+      if (!existing) throw missingPolicy(update.projectId, update.id)
+      if (update.limit !== undefined) {
+        const previous = normalizeAiLimitAmount(existing.limit)
+        const next = normalizeAiLimitAmount(update.limit)
+        if (aiLimitAmountKey(previous) !== aiLimitAmountKey(next)) {
+          throw new TypeError("[Sixb] AI limit policy meter and cost currency are immutable.")
+        }
       }
-    }
-    const policy: AiLimitPolicy = {
-      ...existing,
-      ...(update.limit === undefined ? {} : { limit: update.limit }),
-      ...(update.enabled === undefined ? {} : { enabled: update.enabled }),
-      updatedAt: update.updatedAt,
-    }
-    this.policies.set(key, structuredClone(policy))
-    return cloneAiLimitPolicy(policy)
+      const policy: AiLimitPolicy = {
+        ...existing,
+        ...(update.limit === undefined ? {} : { limit: update.limit }),
+        ...(update.enabled === undefined ? {} : { enabled: update.enabled }),
+        updatedAt: update.updatedAt,
+      }
+      this.policies.set(key, structuredClone(policy))
+      return cloneAiLimitPolicy(policy)
+    })
   }
 
   async deletePolicy(input: DeleteAiLimitPolicyInput): Promise<boolean> {
-    validatePolicyIdentity(input)
-    const key = policyKey(input.projectId, input.id)
-    const existing = this.policies.get(key)
-    if (!existing) return false
-    this.policies.delete(key)
-    this.policyIdsByDimension.delete(aiLimitPolicyDimensionKey(existing))
-    return true
+    return this.operations.run(async () => {
+      validatePolicyIdentity(input)
+      const key = policyKey(input.projectId, input.id)
+      const existing = this.policies.get(key)
+      if (!existing) return false
+      this.policies.delete(key)
+      this.policyIdsByDimension.delete(aiLimitPolicyDimensionKey(existing))
+      return true
+    })
   }
 
   async getPolicy(input: GetAiLimitPolicyInput): Promise<AiLimitPolicy | null> {
@@ -166,183 +179,199 @@ export class InMemoryAiLimitStorage implements AiLimitStorage {
   async listPolicyStatuses(
     input: ListAiLimitPolicyStatusesInput
   ): Promise<readonly AiLimitPolicyStatus[]> {
-    assertNonBlank(input.projectId, "projectId")
-    const period = aiLimitCalendarMonth(input.at ?? new Date())
-    const existingGroups =
-      input.existingGroupIds === undefined ? undefined : new Set(input.existingGroupIds)
-    const policies = await this.listPolicies({
-      projectId: input.projectId,
-      includeDisabled: input.includeDisabled,
+    return this.operations.run(async () => {
+      assertNonBlank(input.projectId, "projectId")
+      const period = aiLimitCalendarMonth(input.at ?? new Date())
+      const existingGroups =
+        input.existingGroupIds === undefined ? undefined : new Set(input.existingGroupIds)
+      const policies = await this.listPolicies({
+        projectId: input.projectId,
+        includeDisabled: input.includeDisabled,
+      })
+      return Promise.all(
+        policies.map((policy) => this.policyStatus(policy, period, existingGroups))
+      )
     })
-    return Promise.all(policies.map((policy) => this.policyStatus(policy, period, existingGroups)))
   }
 
   async reserveModelCall(input: ReserveAiModelCallInput): Promise<ReserveAiModelCallResult> {
-    const request = normalizeReserveAiModelCall(input)
-    const reservationKey = aiModelCallReservationKey(request.identity)
-    const existing = this.reservations.get(reservationKey)
-    if (existing) {
-      if (!aiLimitReservationRequestMatches(existing, request)) {
-        throw new AiLimitStorageError(
-          "reservation_conflict",
-          `[Sixb] AI model-call reservation '${input.callId}' was replayed with different subjects, estimates, or period.`
-        )
-      }
-      if (existing.state !== "active") {
-        return { status: "terminal", reservation: structuredClone(existing), created: false }
-      }
-      return { status: "reserved", reservation: structuredClone(existing), created: false }
-    }
-    await this.assertExecutionExists(request.identity.projectId, request.identity.executionId)
-
-    const enabledPolicies = [...this.policies.values()].filter(
-      (policy) => policy.projectId === request.identity.projectId && policy.enabled
-    )
-    const subjectKeys = new Set(request.subjects.map(aiLimitSubjectKey))
-    const estimates = new Map(
-      request.estimates.map((quantity) => {
-        const amount = normalizeAiLimitAmount(quantity)
-        return [aiLimitAmountKey(amount), amount] as const
-      })
-    )
-    const exhaustedPolicies: AiLimitPolicyStatus[] = []
-    const unavailablePolicies: AiLimitPolicyStatus[] = []
-    const unavailableReasons = new Set<"missingEstimate" | "incompleteAccounting">()
-    for (const policy of enabledPolicies) {
-      if (!subjectKeys.has(aiLimitSubjectKey(policy.subject))) continue
-      const limit = normalizeAiLimitAmount(policy.limit)
-      const estimate = estimates.get(aiLimitAmountKey(limit))
-      const status = await this.policyStatus(policy, request.period)
-      if (!estimate || status.accountingStatus === "unavailable") {
-        unavailablePolicies.push(status)
-        if (!estimate) unavailableReasons.add("missingEstimate")
-        if (status.accountingStatus === "unavailable") {
-          unavailableReasons.add("incompleteAccounting")
+    return this.operations.run(async () => {
+      const request = normalizeReserveAiModelCall(input)
+      const reservationKey = aiModelCallReservationKey(request.identity)
+      const existing = this.reservations.get(reservationKey)
+      if (existing) {
+        if (!aiLimitReservationRequestMatches(existing, request)) {
+          throw new AiLimitStorageError(
+            "reservation_conflict",
+            `[Sixb] AI model-call reservation '${input.callId}' was replayed with different subjects, estimates, or period.`
+          )
         }
-        continue
+        if (existing.state !== "active") {
+          return { status: "terminal", reservation: structuredClone(existing), created: false }
+        }
+        return { status: "reserved", reservation: structuredClone(existing), created: false }
       }
-      const actual = normalizeAiLimitAmount(status.consumption.actual).amount
-      const reserved = normalizeAiLimitAmount(status.consumption.reserved).amount
-      const unknown = normalizeAiLimitAmount(status.consumption.unknown).amount
-      if (actual + reserved + unknown + estimate.amount > limit.amount) {
-        exhaustedPolicies.push(status)
-      }
-    }
-    if (unavailablePolicies.length > 0) {
-      unavailablePolicies.sort((left, right) => left.policy.id.localeCompare(right.policy.id))
-      return {
-        status: "unavailable",
-        unavailablePolicies,
-        reasons: [...unavailableReasons].sort(),
-      }
-    }
-    if (exhaustedPolicies.length > 0) {
-      exhaustedPolicies.sort((left, right) => left.policy.id.localeCompare(right.policy.id))
-      return {
-        status: "denied",
-        exhaustedPolicies,
-        resetAt: new Date(
-          Math.min(...exhaustedPolicies.map((status) => status.period.resetAt.getTime()))
-        ),
-      }
-    }
+      await this.assertExecutionExists(request.identity.projectId, request.identity.executionId)
 
-    const buckets = aiLimitReservationBuckets(enabledPolicies, request.subjects, request.estimates)
-    if (buckets.length === 0) return { status: "notRequired" }
-    for (const bucket of buckets) {
-      const amount = normalizeAiLimitAmount(bucket.estimate)
-      const state = this.requirePeriodState(
-        request.identity.projectId,
-        bucket.subject,
-        amount,
-        request.period
+      const enabledPolicies = [...this.policies.values()].filter(
+        (policy) => policy.projectId === request.identity.projectId && policy.enabled
       )
-      state.reserved += amount.amount
-      state.updatedAt = new Date(request.reservedAt)
-    }
-    const reservation: AiModelCallReservation = {
-      ...request.identity,
-      buckets,
-      requestKey: aiLimitReservationRequestKey(request),
-      period: request.period,
-      state: "active",
-      reservedAt: request.reservedAt,
-      updatedAt: new Date(request.reservedAt),
-    }
-    this.reservations.set(reservationKey, structuredClone(reservation))
-    return { status: "reserved", reservation: structuredClone(reservation), created: true }
+      const subjectKeys = new Set(request.subjects.map(aiLimitSubjectKey))
+      const estimates = new Map(
+        request.estimates.map((quantity) => {
+          const amount = normalizeAiLimitAmount(quantity)
+          return [aiLimitAmountKey(amount), amount] as const
+        })
+      )
+      const exhaustedPolicies: AiLimitPolicyStatus[] = []
+      const unavailablePolicies: AiLimitPolicyStatus[] = []
+      const unavailableReasons = new Set<"missingEstimate" | "incompleteAccounting">()
+      for (const policy of enabledPolicies) {
+        if (!subjectKeys.has(aiLimitSubjectKey(policy.subject))) continue
+        const limit = normalizeAiLimitAmount(policy.limit)
+        const estimate = estimates.get(aiLimitAmountKey(limit))
+        const status = await this.policyStatus(policy, request.period)
+        if (!estimate || status.accountingStatus === "unavailable") {
+          unavailablePolicies.push(status)
+          if (!estimate) unavailableReasons.add("missingEstimate")
+          if (status.accountingStatus === "unavailable") {
+            unavailableReasons.add("incompleteAccounting")
+          }
+          continue
+        }
+        const actual = normalizeAiLimitAmount(status.consumption.actual).amount
+        const reserved = normalizeAiLimitAmount(status.consumption.reserved).amount
+        const unknown = normalizeAiLimitAmount(status.consumption.unknown).amount
+        if (actual + reserved + unknown + estimate.amount > limit.amount) {
+          exhaustedPolicies.push(status)
+        }
+      }
+      if (unavailablePolicies.length > 0) {
+        unavailablePolicies.sort((left, right) => left.policy.id.localeCompare(right.policy.id))
+        return {
+          status: "unavailable",
+          unavailablePolicies,
+          reasons: [...unavailableReasons].sort(),
+        }
+      }
+      if (exhaustedPolicies.length > 0) {
+        exhaustedPolicies.sort((left, right) => left.policy.id.localeCompare(right.policy.id))
+        return {
+          status: "denied",
+          exhaustedPolicies,
+          resetAt: new Date(
+            Math.min(...exhaustedPolicies.map((status) => status.period.resetAt.getTime()))
+          ),
+        }
+      }
+
+      const buckets = aiLimitReservationBuckets(
+        enabledPolicies,
+        request.subjects,
+        request.estimates
+      )
+      if (buckets.length === 0) return { status: "notRequired" }
+      for (const bucket of buckets) {
+        const amount = normalizeAiLimitAmount(bucket.estimate)
+        const state = this.requirePeriodState(
+          request.identity.projectId,
+          bucket.subject,
+          amount,
+          request.period
+        )
+        state.reserved += amount.amount
+        state.updatedAt = new Date(request.reservedAt)
+      }
+      const reservation: AiModelCallReservation = {
+        ...request.identity,
+        buckets,
+        requestKey: aiLimitReservationRequestKey(request),
+        period: request.period,
+        state: "active",
+        reservedAt: request.reservedAt,
+        updatedAt: new Date(request.reservedAt),
+      }
+      this.reservations.set(reservationKey, structuredClone(reservation))
+      return { status: "reserved", reservation: structuredClone(reservation), created: true }
+    })
   }
 
   async recordModelCallActuals(input: RecordAiModelCallLimitActualsInput): Promise<void> {
-    assertNonBlank(input.projectId, "projectId")
-    assertNonBlank(input.usageRecordId, "usageRecordId")
-    const recordedAt = cloneValidDate(input.recordedAt ?? new Date(), "recordedAt")
-    const entry = await this.requireAccountingEntry(input.projectId, input.usageRecordId)
-    const period = aiLimitCalendarMonth(entry.occurredAt)
-    const subjectKeys = new Set(aiLimitSubjectsFromAccountingEntry(entry).map(aiLimitSubjectKey))
-    for (const state of this.periodStates.values()) {
-      if (
-        state.projectId !== input.projectId ||
-        state.period.start.getTime() !== period.start.getTime() ||
-        !subjectKeys.has(aiLimitSubjectKey(state.subject))
-      ) {
-        continue
+    return this.operations.run(async () => {
+      assertNonBlank(input.projectId, "projectId")
+      assertNonBlank(input.usageRecordId, "usageRecordId")
+      const recordedAt = cloneValidDate(input.recordedAt ?? new Date(), "recordedAt")
+      const entry = await this.requireAccountingEntry(input.projectId, input.usageRecordId)
+      const period = aiLimitCalendarMonth(entry.occurredAt)
+      const subjectKeys = new Set(aiLimitSubjectsFromAccountingEntry(entry).map(aiLimitSubjectKey))
+      for (const state of this.periodStates.values()) {
+        if (
+          state.projectId !== input.projectId ||
+          state.period.start.getTime() !== period.start.getTime() ||
+          !subjectKeys.has(aiLimitSubjectKey(state.subject))
+        ) {
+          continue
+        }
+        const actual = resolveAiLimitActual([entry], state)
+        state.actual += actual.amount
+        if (actual.accountingStatus === "unavailable") state.accountingStatus = "unavailable"
+        state.updatedAt = new Date(recordedAt)
       }
-      const actual = resolveAiLimitActual([entry], state)
-      state.actual += actual.amount
-      if (actual.accountingStatus === "unavailable") state.accountingStatus = "unavailable"
-      state.updatedAt = new Date(recordedAt)
-    }
+    })
   }
 
   async reconcileModelCall(input: ReconcileAiModelCallInput): Promise<AiModelCallReservation> {
-    const identity = normalizeAiModelCallReservationIdentity(input)
-    assertNonBlank(input.usageRecordId, "usageRecordId")
-    const reconciledAt = cloneValidDate(input.reconciledAt ?? new Date(), "reconciledAt")
-    const key = aiModelCallReservationKey(identity)
-    const reservation = this.reservations.get(key)
-    if (!reservation) throw missingReservation(identity)
-    if (reservation.state === "reconciled") {
-      if (reservation.usageRecordId === input.usageRecordId) {
-        return structuredClone(reservation)
+    return this.operations.run(async () => {
+      const identity = normalizeAiModelCallReservationIdentity(input)
+      assertNonBlank(input.usageRecordId, "usageRecordId")
+      const reconciledAt = cloneValidDate(input.reconciledAt ?? new Date(), "reconciledAt")
+      const key = aiModelCallReservationKey(identity)
+      const reservation = this.reservations.get(key)
+      if (!reservation) throw missingReservation(identity)
+      if (reservation.state === "reconciled") {
+        if (reservation.usageRecordId === input.usageRecordId) {
+          return structuredClone(reservation)
+        }
+        throw new AiLimitStorageError(
+          "reconciliation_conflict",
+          `[Sixb] AI model-call reservation '${identity.callId}' was reconciled with a different usage record.`
+        )
       }
-      throw new AiLimitStorageError(
-        "reconciliation_conflict",
-        `[Sixb] AI model-call reservation '${identity.callId}' was reconciled with a different usage record.`
-      )
-    }
-    const accounting = await this.requireAccountingEntry(identity.projectId, input.usageRecordId)
-    assertAiLimitAccountingMatchesReservation(reservation, accounting)
-    this.reconcileEstimateCounters(reservation, accounting, reconciledAt)
-    const reconciled: AiModelCallReservation = {
-      ...reservation,
-      state: "reconciled",
-      usageRecordId: input.usageRecordId,
-      updatedAt: reconciledAt,
-    }
-    this.reservations.set(key, structuredClone(reconciled))
-    return structuredClone(reconciled)
+      const accounting = await this.requireAccountingEntry(identity.projectId, input.usageRecordId)
+      assertAiLimitAccountingMatchesReservation(reservation, accounting)
+      this.reconcileEstimateCounters(reservation, accounting, reconciledAt)
+      const reconciled: AiModelCallReservation = {
+        ...reservation,
+        state: "reconciled",
+        usageRecordId: input.usageRecordId,
+        updatedAt: reconciledAt,
+      }
+      this.reservations.set(key, structuredClone(reconciled))
+      return structuredClone(reconciled)
+    })
   }
 
   async markReservationUnknown(
     input: MarkAiModelCallReservationUnknownInput
   ): Promise<AiModelCallReservation> {
-    const identity = normalizeAiModelCallReservationIdentity(input)
-    const markedAt = cloneValidDate(input.markedAt ?? new Date(), "markedAt")
-    const key = aiModelCallReservationKey(identity)
-    const reservation = this.reservations.get(key)
-    if (!reservation) throw missingReservation(identity)
-    if (reservation.state === "unknown") return structuredClone(reservation)
-    if (reservation.state !== "active") throw invalidState(reservation, "mark unknown")
-    this.moveEstimateCounter(reservation, "reserved", -1n, markedAt)
-    this.moveEstimateCounter(reservation, "unknown", 1n, markedAt)
-    const unknown: AiModelCallReservation = {
-      ...reservation,
-      state: "unknown",
-      updatedAt: markedAt,
-    }
-    this.reservations.set(key, structuredClone(unknown))
-    return structuredClone(unknown)
+    return this.operations.run(async () => {
+      const identity = normalizeAiModelCallReservationIdentity(input)
+      const markedAt = cloneValidDate(input.markedAt ?? new Date(), "markedAt")
+      const key = aiModelCallReservationKey(identity)
+      const reservation = this.reservations.get(key)
+      if (!reservation) throw missingReservation(identity)
+      if (reservation.state === "unknown") return structuredClone(reservation)
+      if (reservation.state !== "active") throw invalidState(reservation, "mark unknown")
+      this.moveEstimateCounter(reservation, "reserved", -1n, markedAt)
+      this.moveEstimateCounter(reservation, "unknown", 1n, markedAt)
+      const unknown: AiModelCallReservation = {
+        ...reservation,
+        state: "unknown",
+        updatedAt: markedAt,
+      }
+      this.reservations.set(key, structuredClone(unknown))
+      return structuredClone(unknown)
+    })
   }
 
   snapshot(): InMemoryAiLimitStorageSnapshot {
