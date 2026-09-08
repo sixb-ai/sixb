@@ -186,6 +186,9 @@ original transcript.
 
 ### Child runs
 
+Delegation tools are temporarily unavailable to the conversational Agent. The retained child-run
+protocol is described below for existing runs and future re-enablement.
+
 Child events are recorded in the broker, but V1 does not expose their streams through the client
 API. The parent receives their durable results through `wait_agent`.
 

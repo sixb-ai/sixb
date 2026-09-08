@@ -85,6 +85,7 @@ import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { finishRunOrThrow } from "../src/finalize"
 import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
 import { runAgentTurn } from "../src/run-agent-turn"
+import * as agentEnvironment from "../src/run-environment"
 import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import { SubagentCoordinator } from "../src/subagent-tools"
@@ -305,6 +306,27 @@ function answerModel(captureTools?: (names: readonly string[]) => void): WorkerT
       ])
     },
   })
+}
+
+/** Exercise the retained delegation engine without re-enabling the production tool surface. */
+function injectDelegationForTest(host: AgentWorkerHost) {
+  const createEnvironment = agentEnvironment.createConversationAgentEnvironment
+  return spyOn(agentEnvironment, "createConversationAgentEnvironment").mockImplementation(
+    async (input) => {
+      const execution = await host.storage.executions.getById({
+        projectId: host.id,
+        id: input.run.executionId,
+      })
+      if (!execution) throw new Error("Expected parent execution")
+      const frameworkTools = await new SubagentCoordinator(
+        host,
+        input.context,
+        input.run,
+        execution
+      ).createTools()
+      return createEnvironment({ ...input, frameworkTools })
+    }
+  )
 }
 
 function delegatingParentModel(input: {
@@ -1933,6 +1955,38 @@ function hangingCompactionModel(): WorkerTestModel {
 }
 
 describe("AgentWorker", () => {
+  test("keeps delegation tools unavailable to the conversational Agent", async () => {
+    // Regression proof: restore SubagentCoordinator injection in the worker; this fails.
+    let toolNames: readonly string[] = []
+    const sixb = buildSixb(
+      answerModel((names) => {
+        toolNames = names
+      }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [echoAgentTool] }
+    )
+    const requested = await requestAgent(sixb, { text: "Hello" })
+    const completion = observeQueueSettlement(sixb.queues.agents)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(toolNames).toEqual(expect.arrayContaining(["echo", "read", "view_file", "bash"]))
+      expect(toolNames).not.toContain("spawn_agent")
+      expect(toolNames).not.toContain("wait_agent")
+      expect(
+        await agentStorageOf(sixb).runs.getById({
+          projectId: PROJECT_ID,
+          id: requested.run.id,
+        })
+      ).toMatchObject({ status: "succeeded" })
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+  })
+
   test("rechecks AI limits after a queued conversation is claimed", async () => {
     let providerCalls = 0
     const model = new WorkerTestModel({
@@ -2136,8 +2190,8 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
-      // Startup validation, execution preparation, and delegation guidance resolve independently.
-      expect(resolutions).toBe(3)
+      // Only startup validation and execution preparation resolve the model while delegation is off.
+      expect(resolutions).toBe(2)
       await expect(
         storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
       ).resolves.toMatchObject({
@@ -5242,6 +5296,7 @@ describe("AgentWorker", () => {
     childRunId = createSubagentRunId(requested.run.id, "research")
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
 
+    const delegation = injectDelegationForTest(sixb)
     await worker.start()
     try {
       const parent = await waitFor(
@@ -5375,6 +5430,7 @@ describe("AgentWorker", () => {
       })
     } finally {
       await worker.stop()
+      delegation.mockRestore()
     }
   })
 
@@ -5655,6 +5711,7 @@ describe("AgentWorker", () => {
     const requested = await requestAgent(sixb, { text: "Delegate this task." })
     const worker = new AgentWorker(sixb, workerOptions())
 
+    const delegation = injectDelegationForTest(sixb)
     await worker.start()
     try {
       await waitFor(
@@ -5686,6 +5743,7 @@ describe("AgentWorker", () => {
       expect(sandboxes.sandboxes).toHaveLength(1)
     } finally {
       await worker.stop()
+      delegation.mockRestore()
     }
   })
 
@@ -5751,6 +5809,7 @@ describe("AgentWorker", () => {
     const childRunId = createSubagentRunId(requested.run.id, "background-work")
     const worker = new AgentWorker(sixb, workerOptions({ concurrency: 1 }))
 
+    const delegation = injectDelegationForTest(sixb)
     await worker.start()
     try {
       const [parent, child] = await Promise.all([
@@ -5792,6 +5851,7 @@ describe("AgentWorker", () => {
       ).toHaveLength(0)
     } finally {
       await worker.stop()
+      delegation.mockRestore()
     }
   })
 

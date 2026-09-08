@@ -48,8 +48,10 @@ await worker.start()
   authorization. That value is a projection of the queue lease—not a separate run lease, timer, or
   heartbeat—and is extended only from successful queue renewals.
 - The assistant message append and successful run finish happen in one storage transaction.
-- `spawn_agent` advertises exact `{ provider, modelId }` pairs from the project catalog, with
-  available pricing and context metadata. For example, Gateway uses
+- Delegation tools (`spawn_agent`, `wait_agent`) are temporarily not injected into conversations.
+  The coordinator and child execution lane remain implemented and tested.
+- The retained `spawn_agent` tool advertises exact `{ provider, modelId }` pairs from the project
+  catalog, with available pricing and context metadata. For example, Gateway uses
   `{ provider: "vercel-ai-gateway", modelId: "deepseek/deepseek-v4-flash-vision-exp" }`. The tool schema
   restricts selection to configured pairs; the worker rechecks them before creating a child.
   Omitting `model` uses the first configured language model.
