@@ -238,6 +238,11 @@ Compaction changes only the model-facing view; the full transcript stays intact.
 and recent turns still cannot fit, the run fails. This check happens at run preflight, not at every
 loop step.
 
+Switching models does not bypass these limits: the worker estimates both the summary request and
+the continuation, including tools, before making the summary call, then checks the generated
+continuation again. If the selected model is too small, the run fails without replacing the stored
+history. Select a larger model or start a new conversation; Sixb never switches models for you.
+
 ### Context overrides
 
 Omit `loop.context` to use automatic compaction with default budgets. Override it for a specific
