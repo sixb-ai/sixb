@@ -486,65 +486,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") return
 
-    const parent = await context.storage.agents.runs.getById({
-      projectId: context.id,
-      id: queuedRun.parentRunId,
-    })
-    if (!parent || parent.kind !== "conversation" || isTerminalRun(parent)) {
-      await this.cancelInactiveParentChild(
-        queuedRun,
-        delivery,
-        "The parent Agent run is no longer active."
-      )
-      return
-    }
-
-    const configuredPlan = resolveSubagentExecutionPlan({
-      run: queuedRun,
-      models: this.host.definitions.models?.language,
-      tools: this.host.definitions.tools,
-    })
-    const durableExecution = await context.storage.executions.getById({
-      projectId: context.id,
-      id: queuedRun.executionId,
-    })
-    if (
-      !durableExecution ||
-      durableExecution.source.type !== "execution" ||
-      durableExecution.source.executionId !== parent.executionId
-    ) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Subagent run '${runId}' has invalid execution lineage.`,
-        {
-          details: {
-            parentRunId: queuedRun.parentRunId,
-            runId,
-            executionId: queuedRun.executionId,
-          },
-        }
-      )
-    }
-    const authorization = await resolveInheritedAgentExecutionAuthorization({
-      auth: context.storage.auth,
-      projectId: context.id,
-      authorizationRef: durableExecution.authorizationRef,
-      security: this.host.definitions.security,
-    })
-    const executionContext = createAgentExecutionContext({
-      context,
-      host: this.host,
-      execution: durableExecution,
-      runId: queuedRun.id,
-      authorization,
-    })
-    const prepared = await prepareAgentModels([{ id: queuedRun.id, ...configuredPlan }])
-    const model = prepared.models.get(queuedRun.id)
-    if (!model) throw new Error("[SixbAgentWorker] Subagent model preparation returned no model.")
-    const plan = Object.freeze({ ...configuredPlan, model })
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,
-      modelId: plan.model.modelId,
+      modelId: queuedRun.spec.model.modelId,
       execution: freshExecution(delivery.leaseExpiresAt),
     })
     if (reservation.kind === "skip" || reservation.run.kind !== "subagent") return
@@ -561,6 +505,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     const cancel = await this.watchForCancel(run.id)
     const parentCancel = await this.watchForCancel(run.parentRunId)
     const turnSignal = AbortSignal.any([signal, cancel.signal, parentCancel.signal])
+    let preparationComplete = false
     let environment: AgentExecutionEnvironment | null = null
     let stopOwnershipProjection: (() => void) | undefined
 
@@ -589,6 +534,50 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         })
       })
       await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
+      const configuredPlan = resolveSubagentExecutionPlan({
+        run: queuedRun,
+        models: this.host.definitions.models?.language,
+        tools: this.host.definitions.tools,
+      })
+      const durableExecution = await context.storage.executions.getById({
+        projectId: context.id,
+        id: queuedRun.executionId,
+      })
+      if (
+        !durableExecution ||
+        durableExecution.source.type !== "execution" ||
+        durableExecution.source.executionId !== currentParent.executionId
+      ) {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbAgentWorker] Subagent run '${runId}' has invalid execution lineage.`,
+          {
+            details: {
+              parentRunId: queuedRun.parentRunId,
+              runId,
+              executionId: queuedRun.executionId,
+            },
+          }
+        )
+      }
+      const authorization = await resolveInheritedAgentExecutionAuthorization({
+        auth: context.storage.auth,
+        projectId: context.id,
+        authorizationRef: durableExecution.authorizationRef,
+        security: this.host.definitions.security,
+      })
+      const executionContext = createAgentExecutionContext({
+        context,
+        host: this.host,
+        execution: durableExecution,
+        runId: queuedRun.id,
+        authorization,
+      })
+      const prepared = await prepareAgentModels([{ id: queuedRun.id, ...configuredPlan }])
+      const model = prepared.models.get(queuedRun.id)
+      if (!model) throw new Error("[SixbAgentWorker] Subagent model preparation returned no model.")
+      const plan = Object.freeze({ ...configuredPlan, model })
+      preparationComplete = true
       await context.streamSink.publishStarted(run)
       environment = await createSubagentEnvironment({
         context: executionContext,
@@ -607,6 +596,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         return
       }
       if (error instanceof AgentFinalizationError) throw error
+      if (
+        !preparationComplete &&
+        !turnSignal.aborted &&
+        !isAbortError(error) &&
+        shouldRetryAgentPreparation(error, claimed.job.attempt)
+      ) {
+        throw error
+      }
 
       const aborted =
         !(error instanceof AgentUsageRecordingError) &&
@@ -729,7 +726,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
     }
 
-    const retryable = !(isSixbError(error) && !error.retryable)
+    const retryable = !isPermanentAgentPreparationError(error)
     if (retryable && claimed.job.attempt < MAX_AGENT_DELIVERY_ATTEMPTS) {
       return { kind: "retry", availableAt: backoff(PRESTART_RETRY_BACKOFF_MS) }
     }
@@ -838,50 +835,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       dispatched += 1
     }
     return dispatched
-  }
-
-  private async cancelInactiveParentChild(
-    run: SubagentRunRecord,
-    delivery: QueueDelivery<SubagentQueueJob, (typeof AGENT_RUN_FAILURE_CODES)[number]>,
-    message: string
-  ): Promise<void> {
-    const context = this.requireContext()
-    const completedAt = new Date()
-    const error = toAgentRunFailure(
-      createSixbError("runtime.cancelled", message, {
-        details: agentRunFailureDetails(run),
-      }),
-      { status: "cancelled", at: completedAt, details: agentRunFailureDetails(run) }
-    )
-    if (run.status === "queued") {
-      const cancelled = await context.storage.agents.runs.finishQueued({
-        projectId: context.id,
-        id: run.id,
-        status: "cancelled",
-        error,
-        completedAt,
-      })
-      await context.streamSink.publishRunFinished(cancelled)
-      return
-    }
-
-    const reservation = await this.startOrReclaim(context, {
-      run,
-      modelId: run.modelId ?? run.spec.model.modelId,
-      execution: freshExecution(delivery.leaseExpiresAt),
-    })
-    if (reservation.kind === "skip" || reservation.run.kind !== "subagent") return
-    const executionToken = reservation.run.execution?.token
-    if (!executionToken) return
-    const cancelled = await finishRunOrThrow(context.storage.agents, {
-      projectId: context.id,
-      id: run.id,
-      executionToken,
-      status: "cancelled",
-      error,
-      completedAt,
-    })
-    await context.streamSink.publishRunFinished(cancelled)
   }
 
   private async cancelActiveSubagents(parentRunId: string, message: string): Promise<void> {
@@ -1031,25 +984,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       return failure
     }
 
-    const reservation = await this.startOrReclaim(context, {
-      run: loaded,
-      modelId: loaded.modelId ?? loaded.spec.model.modelId,
-      execution: freshExecution(claimed.leaseExpiresAt),
-    })
-    if (reservation.kind === "skip") return undefined
-    const token = reservation.run.execution?.token
-    if (!token) return undefined
-    const failed = await finishRunOrThrow(context.storage.agents, {
-      projectId: context.id,
-      id: loaded.id,
-      executionToken: token,
-      status: "failed",
-      error: failure,
-      completedAt,
-    })
-    this.reportFailure(error, failed, claimed.job.attempt, failure)
-    await context.streamSink.publishRunFinished(failed)
-    return failure
+    // A preparation failure must only finish the token acquired by that delivery in executeSubagent.
+    // Never reclaim a running child from an error handler: another delivery may already own it.
+    return undefined
   }
 
   private requireContext(): AgentWorkerContext {

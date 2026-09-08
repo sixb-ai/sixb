@@ -163,6 +163,15 @@ live; the durable copy of the turn is the persisted assistant message, read back
 Compaction events never include summary text. Normal message reads continue to return the complete
 original transcript.
 
+### Child runs
+
+Child events are recorded in the broker, but V1 does not expose their streams through the client
+API. The parent receives their durable results through `wait_agent`.
+
+Child file references remain part of that result's JSON: they are not automatically mounted in
+the parent's sandbox or published as conversation attachments. Accessing child files and choosing
+which deliverables to show the user are separate concerns.
+
 ## A ready-made chat UI
 
 You rarely need to wire this HTTP + WebSocket flow by hand. `@sixb/agent-ui` ships a turnkey React
