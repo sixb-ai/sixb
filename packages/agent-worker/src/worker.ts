@@ -123,15 +123,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
   }
 
   override async start(): Promise<void> {
-    const context = this.context
-    if (context) {
-      await Promise.all([
-        ...(this.host.definitions.models?.language.list() ?? []).map((entry) =>
-          prepareAgentModel({ model: entry.model })
-        ),
-        context.agentSkills,
-      ])
-    }
+    await this.context?.agentSkills
     await Promise.all([
       super.start(),
       ...(this.context === null ? [] : [this.subagentWorker.start()]),

@@ -29,13 +29,14 @@ await worker.start()
 - The worker transitions the durable run from `queued` to `running` when it claims the job.
 - Before each conversation turn, the worker estimates the next model request and checkpoints older
   complete turns when it crosses the model's input budget. Context limits come from the model
-  definition, or its provider-backed `resolve()` at startup. Explicit
-  `loop.context.windowTokens` overrides avoid remote lookup. If neither model metadata nor an
-  override supplies a limit, the worker uses a 128,000-token fallback and warns once per model.
+  definition, or its provider-backed `resolve()` when the selected execution is prepared. Worker
+  startup does not resolve catalog models. The prepared snapshot is shared by compaction and
+  generation. If no context limit is available, the worker uses a 128,000-token fallback and warns
+  during preparation.
   Catalog transport/access failures use an offline snapshot; invalid definitions and model identity
-  mismatches still fail startup.
+  mismatches fail preparation of the selected execution.
   Separate input limits are respected; input-only metadata is treated as a conservative window
-  with the same output reserve, which also bounds generation. Omitting `loop.context` keeps compaction enabled.
+  with the same output reserve, which also bounds generation.
 - The queue lease is the sole authority for liveness and redelivery; the worker renews it during
   turns.
 - Every completed provider call from Sixb's owned model loop is appended to `storage.aiUsage` with

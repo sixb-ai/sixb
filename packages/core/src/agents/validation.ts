@@ -6,7 +6,6 @@ import {
   type ValueType,
   validateSchemaValue,
 } from "../ontology"
-import type { GroupDefinition } from "../security"
 import { AgentDefinitionError } from "./errors"
 import type { AgentToolDefinition, AgentToolInputSchema } from "./types"
 
@@ -30,12 +29,6 @@ export const AGENT_RESERVED_TOOL_NAMES = [
   "spawn_agent",
   "wait_agent",
 ] as const
-
-export function assertNonEmpty(value: string, field: string): void {
-  if (!value.trim()) {
-    throw new AgentDefinitionError(`[Sixb] Agent ${field} must not be empty.`)
-  }
-}
 
 export function isAgentToolDefinition(value: unknown): value is AgentToolDefinition {
   return (
@@ -126,38 +119,6 @@ export function validateAndNormalizeAgentToolInput(
   )
 }
 
-export function groupIdsFromDefinitions(
-  agentId: string,
-  groups: readonly GroupDefinition[] | undefined
-): readonly string[] {
-  const groupIds = (groups ?? []).map((group) => {
-    if (!isRecord(group) || group.kind !== "group") {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent '${agentId}' groups must contain only group definitions.`
-      )
-    }
-
-    assertNonEmpty(group.id, `Agent '${agentId}' group id`)
-    return group.id
-  })
-
-  assertNoDuplicateGroupIds(agentId, groupIds)
-  return Object.freeze(groupIds)
-}
-
-function assertNoDuplicateGroupIds(agentId: string, groupIds: readonly string[]): void {
-  const seen = new Set<string>()
-  for (const groupId of groupIds) {
-    assertNonEmpty(groupId, `Agent '${agentId}' group id`)
-    if (seen.has(groupId)) {
-      throw new AgentDefinitionError(
-        `[Sixb] Agent '${agentId}' groups contains duplicate group id '${groupId}'.`
-      )
-    }
-    seen.add(groupId)
-  }
-}
-
 function assertValidAgentToolSchema(
   toolName: string,
   schema: unknown,
@@ -238,45 +199,25 @@ function invalidAgentToolSchema(toolName: string, path: string): AgentDefinition
   )
 }
 
-export function assertValidAgentToolDefinitions(
-  agentId: string,
-  tools: readonly AgentToolDefinition[]
-): void {
-  assertValidAgentToolDefinitionList(tools, {
-    invalidDefinitions: `[Sixb] Agent '${agentId}' tools must contain only agent tool definitions.`,
-    duplicateName: (name) =>
-      `[Sixb] Agent '${agentId}' tools contains duplicate tool name '${name}'.`,
-  })
-}
-
 export function assertValidProjectAgentToolDefinitions(
   tools: readonly AgentToolDefinition[]
-): void {
-  assertValidAgentToolDefinitionList(tools, {
-    invalidDefinitions: "[Sixb] Project tools must contain only agent tool definitions.",
-    duplicateName: (name) => `[Sixb] Project tools contain duplicate tool name '${name}'.`,
-  })
-}
-
-function assertValidAgentToolDefinitionList(
-  tools: readonly AgentToolDefinition[],
-  messages: {
-    readonly invalidDefinitions: string
-    readonly duplicateName: (name: string) => string
-  }
 ): void {
   const seen = new Set<string>()
   for (let index = 0; index < tools.length; index += 1) {
     const tool = tools[index]
     if (!Object.hasOwn(tools, index) || !isAgentToolDefinition(tool)) {
-      throw new AgentDefinitionError(messages.invalidDefinitions)
+      throw new AgentDefinitionError(
+        "[Sixb] Project tools must contain only agent tool definitions."
+      )
     }
 
     assertValidAgentToolName(tool.name)
     assertValidAgentToolDescription(tool.name, tool.description)
     assertValidAgentToolInput(tool.name, tool.input)
     if (seen.has(tool.name)) {
-      throw new AgentDefinitionError(messages.duplicateName(tool.name))
+      throw new AgentDefinitionError(
+        `[Sixb] Project tools contain duplicate tool name '${tool.name}'.`
+      )
     }
     seen.add(tool.name)
   }
