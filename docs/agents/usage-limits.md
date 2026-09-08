@@ -84,6 +84,9 @@ After the provider returns, immutable usage and valuation records are written an
 reconciled in the same storage transaction. Durable accounting recovery replays that reconciliation
 idempotently after queue redelivery. Period totals are initialized from the immutable ledger once,
 then maintained transactionally; routine admission does not rescan month-to-date records.
+An incomplete period is refreshed from the ledger on the next status read or admission attempt.
+When a missing valuation arrives, actual consumption and accounting availability recover without
+resetting active or unknown reservations. Partial repairs continue to block admission.
 
 Sixb fails closed when an enabled meter cannot be evaluated safely:
 
