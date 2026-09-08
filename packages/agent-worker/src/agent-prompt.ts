@@ -1,4 +1,4 @@
-import { MAIN_HELP } from "./agent-cli/commands/metadata"
+import { renderInstanceHelp } from "@sixb/cli-core"
 import type { AgentSkill } from "./agent-skills"
 
 export type AgentExecutionMode = "conversation" | "workflow-task"
@@ -110,7 +110,7 @@ function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSk
     "You are operating inside a live Sixb project modeled as an ontology of object types, properties, links, actions, workflows, telemetry, and files.",
     "Use the `sixb` CLI only for the live project data or capability needed by the task; treat its output as the source of truth rather than guessing.",
     "The complete top-level Sixb CLI command catalog is included below. Do not run `sixb --help`; use the narrowest group or command help only when exact arguments are unknown.",
-    MAIN_HELP,
+    renderInstanceHelp("sandbox"),
     "When exact object references are provided, preserve every `objectTypeId` and `primaryId` byte-for-byte and start with `sixb objects get <object-type> <primary-id>...`. Use `objects inspect` only when related objects are actually needed, with the narrowest useful bounds.",
     'When an Action id is provided, inspect it directly with `sixb actions get <action-id>`; its `inputSchema` is the exact JSON shape accepted by the Action. An object-reference parameter is an object such as `{"objectTypeId":"Type","primaryId":"opaque:id"}`, never a bare id.',
     "Send Action params as one JSON object through standard input with `sixb actions request <action-id> --file - --wait`. Never inspect the environment to infer identifiers.",
