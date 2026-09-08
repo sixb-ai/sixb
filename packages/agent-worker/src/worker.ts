@@ -47,7 +47,6 @@ import {
 } from "./run-environment"
 import { runSubagent } from "./run-subagent"
 import { createBrokerStreamSink, isolateStreamSink, withAgentActivityStream } from "./stream-sink"
-import { SubagentCoordinator } from "./subagent-tools"
 import { type AgentTurnRuntime, createAgentTurnRuntime } from "./turn-runtime"
 import type {
   AgentWorkerContext,
@@ -313,19 +312,13 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: turnSignal,
         requestedBy: durableExecution.requestedBy,
       })
-      const frameworkTools = await new SubagentCoordinator(
-        this.host,
-        context,
-        run,
-        durableExecution
-      ).createTools()
+      // Delegation is temporarily disabled; retain the child runtime for later re-enablement.
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
         plan,
         budget: preparedModel.budget,
         run,
         runtime,
-        frameworkTools,
       })
       environment = await createConversationAgentEnvironment({
         context: executionContext,
@@ -334,7 +327,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: turnSignal,
         messages: prepared.threadContext.retainedMessages,
         skills: prepared.skills,
-        frameworkTools,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       runtime.assertCanContinue()

@@ -32,7 +32,10 @@ Provider logos are local presentation assets.
 
 ## Child agents
 
-The Agent can delegate focused tasks to headless child agents. It can choose any language
+Delegation is temporarily disabled: the Agent does not receive `spawn_agent` or `wait_agent`.
+The child runtime is retained for later re-enablement.
+
+When enabled, the Agent can delegate focused tasks to headless child agents and choose any language
 model configured in `models.language`, continue working after a child starts, and wait only when it
 needs the result. Children are created at runtime; no extra
 project configuration is required.
@@ -65,7 +68,7 @@ schema, and execution groups belong to the step. See [Workflows](../workflows/ov
 | **Thread** | One conversation with the Agent, owned by a principal. |
 | **Run** | One turn. Posting a user message triggers a run. |
 | **Message** | A `system`, `user`, or `assistant` message made of `text`, `reasoning`, `step-start`, and `tool-call` parts. |
-| **Tools** | Project tools plus `read`, `view_file`, and `bash`; the Agent also gets `spawn_agent` and `wait_agent`. |
+| **Tools** | Project tools plus `read`, `view_file`, and `bash`. |
 
 ## Run an agent
 
