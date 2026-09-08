@@ -1,6 +1,6 @@
 import type { AgentContextInput } from "@sixb/core/agents/context"
 import { cn } from "@sixb/ui/lib/utils"
-import { useCallback, useState } from "react"
+import { type ReactNode, useCallback, useState } from "react"
 import { AgentChat } from "./AgentChat"
 import { useRegisteredAgentContext } from "./AgentContextProvider"
 import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
@@ -13,6 +13,8 @@ export interface AgentPanelProps {
   readonly defaultThreadId?: string | null
   readonly onThreadChange?: (threadId: string | null) => void
   readonly className?: string
+  /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
+  readonly welcomeContent?: ReactNode
   /** Additional file viewers supplied by the host application. */
   readonly documentPreviewRenderers?: readonly AgentDocumentPreviewRenderer[]
 }
@@ -24,6 +26,7 @@ export function AgentPanel({
   defaultThreadId = null,
   onThreadChange,
   className,
+  welcomeContent,
   documentPreviewRenderers,
 }: AgentPanelProps) {
   const registeredContext = useRegisteredAgentContext()
@@ -45,6 +48,7 @@ export function AgentPanel({
       threadId={threadId}
       ambientContext={ambientContext}
       compact
+      welcomeContent={welcomeContent}
       onNavigateHome={() => changeThread(null)}
       onNavigateThread={changeThread}
       documentPreviewRenderers={documentPreviewRenderers}

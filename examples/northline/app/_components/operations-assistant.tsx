@@ -64,7 +64,18 @@ export function OperationsAssistant() {
           >
             <ChevronRight className="size-4" />
           </Button>
-          <AgentPanel context={context} className="h-full" />
+          <AgentPanel
+            context={context}
+            className="h-full"
+            welcomeContent={
+              <div className="space-y-2">
+                <h2 className="text-xl font-semibold tracking-tight">Northline</h2>
+                <p className="text-sm text-muted-foreground">
+                  How can I help with operations today?
+                </p>
+              </div>
+            }
+          />
         </div>
       </aside>
     </>
