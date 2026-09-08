@@ -236,7 +236,13 @@ export class InMemoryStorage implements Storage {
       this.materializationLifecycles.set(transactionToken, materializationLifecycle)
 
       try {
-        const result = await this.transactionScope.run(transactionToken, async () => run(tx))
+        const result = await this.transactionScope.run(transactionToken, async () => {
+          try {
+            return await run(tx)
+          } finally {
+            await this.aiLimitStorage.settleOperations()
+          }
+        })
         materializationLifecycle.assertCommittable()
         return result
       } catch (error) {

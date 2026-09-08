@@ -16,6 +16,30 @@ import type {
 
 const SIGNED_INT64_MAX = 9_223_372_036_854_775_807n
 
+/** @internal Serialize compound limit operations, including within an existing transaction. */
+export class AiLimitOperationLock {
+  private tail: Promise<void> = Promise.resolve()
+
+  /** Wait for already queued operations before the owning transaction commits or rolls back. */
+  settle(): Promise<void> {
+    return this.tail
+  }
+
+  async run<T>(operation: () => Promise<T> | T): Promise<T> {
+    const previous = this.tail
+    let release!: () => void
+    this.tail = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    await previous
+    try {
+      return await operation()
+    } finally {
+      release()
+    }
+  }
+}
+
 /** @internal Canonical integer quantity used by storage providers. */
 export interface NormalizedAiLimitAmount {
   readonly meter: AiLimitQuantity["meter"]

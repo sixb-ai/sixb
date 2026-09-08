@@ -197,6 +197,101 @@ export function runAiLimitStorageContractSuite<TStorage extends AiLimitStorageCo
       })
     })
 
+    // Regression check: remove the provider's local operation lock and run this suite. Database
+    // locks do not serialize concurrent operations using the same transaction client.
+    for (const initialized of [false, true]) {
+      test(`serializes reservations within one transaction (initialized=${initialized})`, async () => {
+        await withStorage(async (storage) => {
+          await storage.aiLimits.createPolicy({
+            id: "project",
+            projectId,
+            subject: project,
+            limit: { meter: "tokens.total", amount: 10 },
+          })
+          if (initialized) {
+            await storage.aiLimits.listPolicyStatuses({ projectId, at: at("2026-08-20Z") })
+          }
+          await storage.transaction(async (tx) => {
+            const limits = tx.aiLimits!
+            const results = await Promise.all([
+              limits.reserveModelCall(reservation("call-a", 6)),
+              limits.reserveModelCall(reservation("call-b", 6)),
+            ])
+            expect(results.map((result) => result.status).sort()).toEqual(["denied", "reserved"])
+            const [status] = await limits.listPolicyStatuses({ projectId, at: at("2026-08-20Z") })
+            expect(status?.consumption.reserved.amount).toBe(6)
+            expect(status?.consumption.remaining.amount).toBe(4)
+          })
+        })
+      })
+    }
+
+    test("serializes reservation replays and unknown transitions within one transaction", async () => {
+      await withStorage(async (storage) => {
+        await storage.aiLimits.createPolicy({
+          id: "project",
+          projectId,
+          subject: project,
+          limit: { meter: "tokens.total", amount: 10 },
+        })
+        await storage.transaction(async (tx) => {
+          const limits = tx.aiLimits!
+          const identity = reservation("replay", 6)
+          const results = await Promise.all([
+            limits.reserveModelCall(identity),
+            limits.reserveModelCall(identity),
+          ])
+          expect(results).toMatchObject([
+            { status: "reserved", created: true },
+            { status: "reserved", created: false },
+          ])
+          await expect(limits.reserveModelCall(reservation("replay", 7))).rejects.toMatchObject({
+            code: "reservation_conflict",
+          })
+          await Promise.all([
+            limits.markReservationUnknown(identity),
+            limits.markReservationUnknown(identity),
+          ])
+          const [status] = await limits.listPolicyStatuses({ projectId, at: at("2026-08-20Z") })
+          expect(status?.consumption).toMatchObject({
+            reserved: { amount: 0 },
+            unknown: { amount: 6 },
+            remaining: { amount: 4 },
+          })
+        })
+      })
+    })
+
+    test("rolls back queued limit operations when a parallel operation rejects", async () => {
+      await withStorage(async (storage) => {
+        await storage.aiLimits.createPolicy({
+          id: "project",
+          projectId,
+          subject: project,
+          limit: { meter: "tokens.total", amount: 10 },
+        })
+        await expect(
+          storage.transaction(async (tx) => {
+            await Promise.all([
+              tx.aiLimits!.reserveModelCall(reservation("invalid", 1, { attempt: 0 })),
+              tx.aiLimits!.reserveModelCall(reservation("queued", 6)),
+            ])
+          })
+        ).rejects.toBeInstanceOf(TypeError)
+        const [status] = await storage.aiLimits.listPolicyStatuses({
+          projectId,
+          at: at("2026-08-20Z"),
+        })
+        expect(status?.consumption.reserved.amount).toBe(0)
+        await expect(
+          storage.aiLimits.reserveModelCall(reservation("queued", 6))
+        ).resolves.toMatchObject({
+          status: "reserved",
+          created: true,
+        })
+      })
+    })
+
     test("reserves only exact subject-meter policy buckets", async () => {
       await withStorage(async ({ aiLimits }) => {
         await aiLimits.createPolicy({
