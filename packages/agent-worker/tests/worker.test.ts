@@ -115,6 +115,36 @@ const COMPACTION_USAGE: ModelUsage = {
   raw: { input_tokens: 3_500, output_tokens: 100 },
 }
 
+/** Wait for the delivery to finish its error path before stopping the test worker. */
+function observeQueueSettlement<TFailure>(queue: {
+  complete(input: { projectId: string; jobId: string; leaseId: string }): Promise<void>
+  fail(input: {
+    projectId: string
+    jobId: string
+    leaseId: string
+    failure: TFailure
+  }): Promise<void>
+}) {
+  const complete = queue.complete.bind(queue)
+  const fail = queue.fail.bind(queue)
+  let completed = false
+  const observer = spyOn(queue, "complete").mockImplementation(async (input) => {
+    await complete(input)
+    completed = true
+  })
+  const failed = spyOn(queue, "fail").mockImplementation(async (input) => {
+    await fail(input)
+    completed = true
+  })
+  return {
+    wait: () => waitFor(() => Promise.resolve(completed), { label: "queue delivery completed" }),
+    restore: () => {
+      observer.mockRestore()
+      failed.mockRestore()
+    },
+  }
+}
+
 function stream(chunks: WorkerTestStreamEvent[]) {
   return testStream(chunks)
 }
@@ -4640,13 +4670,18 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("revalidates a user's session before running the main agent", async () => {
+  // Regression proof: resolve authority before reserving the run; revoked redeliveries stay running.
+  test.each([
+    "active",
+    "revoked-after-crash",
+    "revoked-after-takeover",
+  ] as const)("revalidates a user's session before running the project Agent: %s", async (scenario) => {
     const model = answerModel()
     const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
       models: { language: [model] },
     })
     const auth = authStorageOf(sixb)
-    const sessionId = "session-main-agent"
+    const sessionId = "session-agent"
     await auth.users.create({
       id: REQUESTER.id,
       projectId: PROJECT_ID,
@@ -4664,7 +4699,7 @@ describe("AgentWorker", () => {
     })
     const grants = { ...emptyGrantIndex(), "run:agent": new Set(["main"]) }
     const scoped = bindRequestExecution(sixb, {
-      request: new Request("https://sixb.test/api/agents/main/runs"),
+      request: new Request("https://sixb.test/api/agent-threads/thread-1/messages"),
       authorization: {
         type: "principal",
         context: {
@@ -4678,7 +4713,38 @@ describe("AgentWorker", () => {
       },
     })
     const requested = await scoped.agents.runs.request({ agentId: "main", text: "hello" })
-    const worker = new AgentWorker(sixb, workerOptions())
+    const storage = agentStorageOf(sixb)
+    const modelCalls = spyOn(model, "stream")
+    const currentSession = auth.sessions.getById.bind(auth.sessions)
+    let takeoverToken: string | undefined
+    if (scenario !== "active") {
+      await storage.runs.start({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+        execution: freshTestExecution(),
+      })
+      await auth.sessions.revoke({ projectId: PROJECT_ID, id: sessionId, revokedAt: new Date() })
+    }
+    const sessionLookup: typeof currentSession = async (params) => {
+      if (scenario === "revoked-after-takeover" && !takeoverToken) {
+        // Another delivery takes over while this worker is still resolving the revoked session.
+        const execution = freshTestExecution()
+        takeoverToken = execution.token
+        await storage.runs.reclaim({ projectId: PROJECT_ID, id: requested.run.id, execution })
+      }
+      return currentSession(params)
+    }
+    const workerHost = withStorage(
+      sixb,
+      new Proxy(sixb.storage, {
+        get: (target, property, receiver) =>
+          property === "auth"
+            ? { ...auth, sessions: { ...auth.sessions, getById: sessionLookup } }
+            : Reflect.get(target, property, receiver),
+      })
+    )
+    const worker = new AgentWorker(workerHost, workerOptions())
+    const completion = observeQueueSettlement(sixb.queues.agents)
 
     await worker.start()
     try {
@@ -4688,13 +4754,35 @@ describe("AgentWorker", () => {
             projectId: PROJECT_ID,
             id: requested.run.id,
           })
-          return current && current.status !== "queued" && current.status !== "running"
+          return current &&
+            (scenario === "revoked-after-takeover"
+              ? current.execution?.token === takeoverToken && takeoverToken !== undefined
+              : current.status !== "queued" && current.status !== "running")
             ? current
             : null
         },
-        { label: "authenticated main agent run terminal" }
+        { label: "authenticated conversation Agent run terminal" }
       )
-      expect(run.status).toBe("succeeded")
+      await completion.wait()
+      if (scenario === "active") {
+        expect(run.status).toBe("succeeded")
+      } else if (scenario === "revoked-after-crash") {
+        expect(run).toMatchObject({ status: "failed", attempt: 2 })
+        expect(run.execution).toBeUndefined()
+        expect(modelCalls).not.toHaveBeenCalled()
+        expect(
+          await storage.threads.getById({ projectId: PROJECT_ID, id: requested.run.threadId })
+        ).toMatchObject({ activeRunId: null })
+      } else {
+        await worker.stop()
+        expect(
+          await storage.runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+        ).toMatchObject({ status: "running", execution: { token: takeoverToken } })
+        expect(
+          await storage.threads.getById({ projectId: PROJECT_ID, id: requested.run.threadId })
+        ).toMatchObject({ activeRunId: requested.run.id })
+        expect(modelCalls).not.toHaveBeenCalled()
+      }
       const execution = await sixb.storage.executions.getById({
         projectId: PROJECT_ID,
         id: run.executionId,
@@ -4706,6 +4794,8 @@ describe("AgentWorker", () => {
       })
     } finally {
       await worker.stop()
+      modelCalls.mockRestore()
+      completion.restore()
     }
   })
 
@@ -6959,7 +7049,7 @@ describe("AgentWorker", () => {
       )
       expect(failed).toMatchObject({
         status: "failed",
-        attempt: 0,
+        attempt: 1,
         error: {
           code: "internal.unexpected",
           retryable: false,

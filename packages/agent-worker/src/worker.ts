@@ -10,7 +10,7 @@ import {
   workflowAgentNodeQueueJobId,
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { createSixbError, isSixbError } from "@sixb/core/internal/errors"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { LanguageModel } from "@sixb/core/models"
@@ -21,6 +21,11 @@ import { loadAgentSkills } from "./agent-skills"
 import { normalizeApiBaseUrl } from "./api-url"
 import { type AgentContextBudget, prepareAgentModels } from "./context-budget"
 import { prepareAgentConversationContext } from "./context-compaction"
+import {
+  isPermanentAgentPreparationError,
+  MAX_AGENT_DELIVERY_ATTEMPTS,
+  shouldRetryAgentPreparation,
+} from "./delivery-policy"
 import {
   AgentExecutionLostError,
   AgentFinalizationError,
@@ -64,8 +69,6 @@ const FINALIZE_RETRY_BACKOFF_MS = 5_000
 const PRESTART_RETRY_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_INITIAL_BACKOFF_MS = 5_000
 const AI_USAGE_RECOVERY_MAX_BACKOFF_MS = 5 * 60_000
-/** Cap retries for persistent setup or finalization failures so jobs cannot churn forever. */
-const MAX_AGENT_DELIVERY_ATTEMPTS = 10
 
 /** Outcome of trying to own a run for a claimed job. */
 type Reservation =
@@ -213,105 +216,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     if (queuedRun.status !== "queued" && queuedRun.status !== "running") {
       return
     }
-    const registered = this.host.definitions.agents.getById(queuedRun.agentId)
-    const agent = registered && {
-      ...registered,
-      model: this.models.get(registered.id) ?? registered.model,
-    }
-    if (!agent) {
-      const error = createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Unknown agent '${queuedRun.agentId}'.`,
-        { details: agentRunFailureDetails(queuedRun) }
-      )
-      if (queuedRun.status === "queued") {
-        const completedAt = new Date()
-        const failure = toAgentRunFailure(
-          createSixbError(
-            "internal.unexpected",
-            `[SixbAgentWorker] Agent '${queuedRun.agentId}' is not registered.`,
-            { details: agentRunFailureDetails(queuedRun) }
-          ),
-          {
-            status: "failed",
-            at: completedAt,
-            details: agentRunFailureDetails(queuedRun),
-          }
-        )
-        const failed = await context.storage.agents.runs.finishQueued({
-          projectId: context.id,
-          id: queuedRun.id,
-          status: "failed",
-          error: failure,
-          completedAt,
-        })
-        this.reportFailure(error, failed, job.attempt, failure)
-        await context.streamSink.publishRunFinished(failed)
-        return
-      }
-      throw error
-    }
-    const plan = resolveAgentExecutionPlan({
-      agent,
-      defaultMaxSteps: context.defaultMaxSteps,
-    })
-
-    const durableExecution = await context.storage.executions.getById({
-      projectId: context.id,
-      id: queuedRun.executionId,
-    })
-    if (!durableExecution) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbAgentWorker] Agent run '${runId}' references missing execution '${queuedRun.executionId}'.`,
-        {
-          details: {
-            agentId: queuedRun.agentId,
-            runId,
-            executionId: queuedRun.executionId,
-          },
-        }
-      )
-    }
-    const executionContext = await (async () => {
-      // Transitional: run kind will replace the reserved id as the authority discriminator.
-      if (agent.id === MAIN_AGENT_ID) {
-        return createAgentExecutionContext({
-          context,
-          host: this.host,
-          execution: durableExecution,
-          agentId: agent.id,
-          runId: queuedRun.id,
-          authorization: await resolveInheritedMainAgentExecutionAuthorization({
-            auth: context.storage.auth,
-            projectId: context.id,
-            authorizationRef: durableExecution.authorizationRef,
-            security: this.host.definitions.security,
-          }),
-        })
-      }
-
-      const resolved = await resolveAgentExecutionAuthorization({
-        auth: context.storage.auth,
-        projectId: context.id,
-        agentId: agent.id,
-        authorizationRef: durableExecution.authorizationRef,
-        security: this.host.definitions.security,
-      })
-      return createAgentExecutionContext({
-        context,
-        host: this.host,
-        execution: durableExecution,
-        agentId: agent.id,
-        runId: queuedRun.id,
-        authorization: { type: "principal", context: resolved.context },
-        authorPrincipal: resolved.identity.principal,
-      })
-    })()
-
+    // Reserve before preparation so revoked authority on redelivery has a fenced terminal outcome.
     const reservation = await this.startOrReclaim(context, {
       run: queuedRun,
-      modelId: plan.model.modelId,
+      modelId: queuedRun.modelId,
       execution: freshExecution(delivery.leaseExpiresAt),
     })
     if (reservation.kind === "skip") {
@@ -355,6 +263,76 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // Catch a renewal that completed between starting/reclaiming the run and attaching the
       // observer. Storage keeps this projection monotonic, so racing confirmations are safe.
       await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
+
+      const registered = this.host.definitions.agents.getById(queuedRun.agentId)
+      const agent = registered && {
+        ...registered,
+        model: this.models.get(registered.id) ?? registered.model,
+      }
+      if (!agent) {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbAgentWorker] Unknown agent '${queuedRun.agentId}'.`,
+          { details: agentRunFailureDetails(queuedRun) }
+        )
+      }
+      const plan = resolveAgentExecutionPlan({
+        agent,
+        defaultMaxSteps: context.defaultMaxSteps,
+      })
+
+      const durableExecution = await context.storage.executions.getById({
+        projectId: context.id,
+        id: queuedRun.executionId,
+      })
+      if (!durableExecution) {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbAgentWorker] Agent run '${runId}' references missing execution '${queuedRun.executionId}'.`,
+          {
+            details: {
+              agentId: queuedRun.agentId,
+              runId,
+              executionId: queuedRun.executionId,
+            },
+          }
+        )
+      }
+      const executionContext = await (async () => {
+        // Transitional: run kind will replace the reserved id as the authority discriminator.
+        if (agent.id === MAIN_AGENT_ID) {
+          return createAgentExecutionContext({
+            context,
+            host: this.host,
+            execution: durableExecution,
+            agentId: agent.id,
+            runId: queuedRun.id,
+            authorization: await resolveInheritedMainAgentExecutionAuthorization({
+              auth: context.storage.auth,
+              projectId: context.id,
+              authorizationRef: durableExecution.authorizationRef,
+              security: this.host.definitions.security,
+            }),
+          })
+        }
+
+        const resolved = await resolveAgentExecutionAuthorization({
+          auth: context.storage.auth,
+          projectId: context.id,
+          agentId: agent.id,
+          authorizationRef: durableExecution.authorizationRef,
+          security: this.host.definitions.security,
+        })
+        return createAgentExecutionContext({
+          context,
+          host: this.host,
+          execution: durableExecution,
+          agentId: agent.id,
+          runId: queuedRun.id,
+          authorization: { type: "principal", context: resolved.context },
+          authorPrincipal: resolved.identity.principal,
+        })
+      })()
 
       await context.streamSink.publishStarted(run)
       runtime = createAgentTurnRuntime({
@@ -401,6 +379,14 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // The turn succeeded but its finalize could not be recorded (storage down). Don't ack: let the
       // job redeliver so a later delivery finalizes the run — onExecutionError turns this into retry.
       if (error instanceof AgentFinalizationError) {
+        throw error
+      }
+      // No model/tool effects yet: preserve bounded retries for temporary preparation failures.
+      if (
+        runtime === null &&
+        !turnSignal.aborted &&
+        shouldRetryAgentPreparation(error, job.attempt)
+      ) {
         throw error
       }
       // Otherwise record the run's terminal fate. `recordFate` retries transient blips; if it cannot
@@ -458,7 +444,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     }
     // Known deterministic failures honor the catalog policy; uncoded dependency failures retain
     // the worker's bounded pre-start retry path below.
-    if (isSixbError(error) && !error.retryable) {
+    if (isPermanentAgentPreparationError(error)) {
       return { kind: "fail" }
     }
 
@@ -619,7 +605,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     context: AgentWorkerContext,
     input: {
       readonly run: AgentRunRecord
-      readonly modelId: string
+      readonly modelId?: string
       readonly execution: AgentRunExecution
     }
   ): Promise<Reservation> {
