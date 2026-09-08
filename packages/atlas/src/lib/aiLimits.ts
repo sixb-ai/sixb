@@ -27,7 +27,13 @@ export function parseAiLimitFormQuantity(
   amountInput: string,
   currencyInput = "USD"
 ): AiLimitFormParseResult {
-  const amount = amountInput.trim().replaceAll(",", "")
+  const amount = amountInput.trim()
+  if (/[,\s]/.test(amount)) {
+    return {
+      ok: false,
+      error: "Use a dot for decimals and no thousands separators (for example, 1234.50).",
+    }
+  }
   if (meter === "tokens.total") {
     if (!/^\d+$/.test(amount)) {
       return { ok: false, error: "Enter a whole, non-negative token amount." }

@@ -11,7 +11,7 @@ import {
 
 describe("AI limit presentation", () => {
   test("parses token limits without accepting fractional or unsafe values", () => {
-    expect(parseAiLimitFormQuantity("tokens.total", "12,500")).toEqual({
+    expect(parseAiLimitFormQuantity("tokens.total", "12500")).toEqual({
       ok: true,
       quantity: { meter: "tokens.total", amount: 12_500 },
     })
@@ -20,7 +20,7 @@ describe("AI limit presentation", () => {
   })
 
   test("converts decimal cost input to exact nanounits", () => {
-    const parsed = parseAiLimitFormQuantity("cost.catalogEstimated", "1,234.000000009", "usd")
+    const parsed = parseAiLimitFormQuantity("cost.catalogEstimated", "1234.000000009", "usd")
     expect(parsed).toEqual({
       ok: true,
       quantity: {
@@ -38,6 +38,19 @@ describe("AI limit presentation", () => {
     })
     expect(parseAiLimitFormQuantity("cost.catalogEstimated", "1.0000000001").ok).toBe(false)
     expect(parseAiLimitFormQuantity("cost.catalogEstimated", "9223372036.854775808").ok).toBe(false)
+  })
+
+  // Regression check: restoring replaceAll(",", "") in the parser turns 1,50 into 150.
+  test("rejects ambiguous decimal and grouping separators without changing the budget", () => {
+    for (const amount of ["1,50", "1,234", "1,234.56", "1.234,56", "1 234", "1\u202f234"]) {
+      for (const meter of ["tokens.total", "cost.catalogEstimated"] as const) {
+        expect(parseAiLimitFormQuantity(meter, amount).ok).toBe(false)
+      }
+    }
+    expect(parseAiLimitFormQuantity("cost.catalogEstimated", " 1.50 ")).toMatchObject({
+      ok: true,
+      quantity: { amount: { amountNanos: "1500000000" } },
+    })
   })
 
   test("includes actual, reserved, and unknown capacity in the usage bar", () => {
