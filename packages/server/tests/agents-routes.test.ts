@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { ModelCatalogInput } from "@sixb/core"
 import {
   can,
   defineAgent,
@@ -28,13 +29,20 @@ import { createTestAgentExecution, createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-// Minimal stand-in: these route tests never invoke the model (the worker does), so a partial shape
-// cast through unknown is enough to satisfy defineAgent's type.
+// Route tests register the binding but never invoke the provider.
 const model = {
-  specificationVersion: "v3",
-  provider: "test",
+  providerId: "test",
   modelId: "test-model",
-} as unknown as Parameters<typeof defineAgent>[1]["model"]
+  definition: {
+    kind: "language",
+    providerId: "test",
+    modelId: "test-model",
+    capabilities: {},
+  },
+  stream: async () => {
+    throw new Error("Must not invoke the route test model")
+  },
+} satisfies ModelCatalogInput["language"][number]
 
 const FAILURE: SixbFailure<AgentRunFailureCode> = {
   code: "internal.unexpected",
