@@ -1,5 +1,4 @@
 import type {
-  AgentInboundUiMessagePart,
   AgentMessagePart,
   AgentToolArtifacts,
   AgentToolDefinition,
@@ -12,16 +11,13 @@ import type {
 import { AgentToolPublicError } from "@sixb/core"
 import {
   AgentToolResultValidationError,
-  fromUiMessage,
   validateAndNormalizeAgentToolInput,
 } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type {
-  JsonObject,
   ModelAssistantPart,
   ModelStep,
   ModelTool,
-  ModelToolOutput,
   ModelToolResultPart,
   ModelUsage,
 } from "@sixb/core/models"
@@ -88,7 +84,6 @@ function modelToolFromAgentDefinition(
 
   return {
     ...spec,
-    inputSchema: spec.inputSchema as JsonObject,
     parseInput(value) {
       return validateAndNormalizeAgentToolInput(
         definition.name,
@@ -142,13 +137,12 @@ type ToolOutcome =
   | { readonly state: "output-available"; readonly output: JsonValue }
   | { readonly state: "output-error"; readonly errorText: string }
 
-/** Convert complete model-loop steps into Sixb's durable, JSON-validated trace contract. */
+/** Project validated model-loop steps into Sixb's durable trace contract. */
 export function agentTraceFromModelSteps(
   steps: readonly ModelStep[],
   errorDetails?: AgentErrorDetails
 ): readonly AgentMessagePart[] {
-  const parts = steps.flatMap((step) => tracePartsFromModelContent(step.content, errorDetails))
-  return fromUiMessage({ role: "assistant", parts }).parts
+  return steps.flatMap((step) => tracePartsFromModelContent(step.content, errorDetails))
 }
 
 /** Convert an aborted model loop, retaining only coherent content from its in-flight step. */
@@ -157,27 +151,28 @@ export function agentTraceFromPartialModelLoop(
   partialContent: readonly ModelAssistantPart[],
   errorDetails?: AgentErrorDetails
 ): readonly AgentMessagePart[] {
-  const parts = [
-    ...steps.flatMap((step) => tracePartsFromModelContent(step.content, errorDetails)),
+  return [
+    ...agentTraceFromModelSteps(steps, errorDetails),
     ...(partialContent.length === 0
       ? []
       : tracePartsFromModelContent(partialContent, errorDetails, "Tool execution was cancelled.")),
   ]
-  return fromUiMessage({ role: "assistant", parts }).parts
 }
 
 function tracePartsFromModelContent(
-  content: readonly (ModelAssistantPart | ModelToolResultPart)[],
+  content: readonly ModelAssistantPart[],
   errorDetails?: AgentErrorDetails,
   missingToolResultText = "Tool call did not produce a result."
-): AgentInboundUiMessagePart[] {
-  const outcomes = indexToolOutcomes(content)
+): AgentMessagePart[] {
+  const results = new Map(
+    content.filter((part) => part.type === "tool-result").map((part) => [part.toolCallId, part])
+  )
   return [
     { type: "step-start" },
-    ...content.flatMap((part): AgentInboundUiMessagePart[] => {
+    ...content.flatMap((part): AgentMessagePart[] => {
       switch (part.type) {
         case "text":
-        case "reasoning":
+        case "reasoning": {
           return [
             {
               type: part.type,
@@ -185,26 +180,28 @@ function tracePartsFromModelContent(
               ...(part.providerData === undefined ? {} : { providerMetadata: part.providerData }),
             },
           ]
+        }
         case "provider-state":
-          return [{ type: "provider-state", providerId: part.providerId, data: part.data }]
-        case "tool-call": {
-          const outcome = outcomes.get(part.toolCallId) ?? {
-            state: "output-error" as const,
-            errorText: missingToolResultText,
-          }
           return [
             {
-              type: part.dynamic === true ? "dynamic-tool" : `tool-${part.toolName}`,
+              type: "provider-state",
+              providerId: part.providerId,
+              data: part.data,
+            },
+          ]
+        case "tool-call": {
+          return [
+            {
+              type: "tool-call",
+              ...(part.dynamic === true ? { dynamic: true } : {}),
               toolCallId: part.toolCallId,
               toolName: part.toolName,
               input: part.input,
               ...(part.providerExecuted === undefined
                 ? {}
                 : { providerExecuted: part.providerExecuted }),
-              ...(part.providerData === undefined
-                ? {}
-                : { callProviderMetadata: part.providerData }),
-              ...outcome,
+              ...(part.providerData === undefined ? {} : { providerMetadata: part.providerData }),
+              ...toolOutcome(results.get(part.toolCallId), missingToolResultText),
             },
           ]
         }
@@ -217,26 +214,17 @@ function tracePartsFromModelContent(
   ]
 }
 
-function indexToolOutcomes(
-  content: readonly (ModelAssistantPart | ModelToolResultPart)[]
-): ReadonlyMap<string, ToolOutcome> {
-  const outcomes = new Map<string, ToolOutcome>()
-  for (const part of content) {
-    if (part.type !== "tool-result") continue
-    outcomes.set(
-      part.toolCallId,
-      part.originalOutput === undefined
-        ? modelToolOutcome(part.output)
-        : { state: "output-available", output: part.originalOutput }
-    )
+function toolOutcome(
+  result: ModelToolResultPart | undefined,
+  missingResultText: string
+): ToolOutcome {
+  if (!result) return { state: "output-error", errorText: missingResultText }
+  if (result.originalOutput !== undefined) {
+    return { state: "output-available", output: result.originalOutput }
   }
-  return outcomes
-}
-
-function modelToolOutcome(output: ModelToolOutput): ToolOutcome {
+  const { output } = result
   switch (output.type) {
     case "text":
-      return { state: "output-available", output: output.value }
     case "json":
       return { state: "output-available", output: output.value }
     case "error-text":
@@ -246,10 +234,7 @@ function modelToolOutcome(output: ModelToolOutput): ToolOutcome {
   }
 }
 
-function assertUnreachableModelPart(
-  part: never,
-  errorDetails?: AgentErrorDetails
-): AgentInboundUiMessagePart[] {
+function assertUnreachableModelPart(part: never, errorDetails?: AgentErrorDetails): never {
   throw createSixbError(
     "internal.unexpected",
     `[SixbAgentWorker] Model trace content '${(part as { type?: unknown }).type}' is not supported.`,

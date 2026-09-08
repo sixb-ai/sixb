@@ -1,5 +1,6 @@
 import type { AgentToolDefinition, ValueType } from "@sixb/core"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
+import type { JsonObject } from "@sixb/core/models"
 import { BASH_TOOL_SPEC } from "./bash"
 import { READ_TOOL_SPEC } from "./read"
 import { VIEW_FILE_TOOL_SPEC } from "./view-file"
@@ -8,7 +9,7 @@ import { VIEW_FILE_TOOL_SPEC } from "./view-file"
 export interface AgentModelToolSpec {
   readonly name: string
   readonly description: string
-  readonly inputSchema: Readonly<Record<string, unknown>>
+  readonly inputSchema: JsonObject
 }
 
 /** Build the model-facing specification shared by execution and context estimation. */

@@ -1,5 +1,11 @@
 import { randomUUID } from "node:crypto"
-import { assertJsonObject, assertJsonValue, isJsonValue, type JsonValue } from "../json"
+import {
+  assertJsonObject,
+  assertJsonValue,
+  isJsonValue,
+  isPlainRecord,
+  type JsonValue,
+} from "../json"
 import { ModelProviderError, ModelStreamError, StructuredOutputError } from "../models/errors"
 import type {
   LanguageModelStreamEvent,
@@ -110,6 +116,8 @@ interface ParsedToolCall {
  *
  * One step is exactly one provider call. Lifecycle and stream callbacks are awaited so the caller
  * controls backpressure and can fail closed before another billable call starts.
+ * Completed steps and partial content contain validated JSON payloads and normalized provider
+ * metadata. Trace adapters may project these results directly; storage owns write validation.
  */
 export function runModelLoop<TOutput = string>(
   input: RunModelLoopInput<TOutput>
@@ -523,6 +531,11 @@ function validateModelToolOutput(output: ModelToolOutput, toolName: string): voi
     }
     return
   }
+  if (output.type !== "json" && output.type !== "error-json") {
+    throw new TypeError(
+      `[SixbModels] Tool '${toolName}' returned an unsupported model output type.`
+    )
+  }
   assertJsonValue(output.value, `tool '${toolName}' model output`)
 }
 
@@ -537,6 +550,9 @@ function modelToolOutput(value: JsonValue): ModelToolOutput {
 }
 
 function toolErrorResult(part: ModelToolCallPart, errorText: string): ModelToolResultPart {
+  if (typeof errorText !== "string") {
+    throw new TypeError(`[SixbModels] Tool '${part.toolName}' error text must be a string.`)
+  }
   return {
     type: "tool-result",
     toolCallId: part.toolCallId,
@@ -645,6 +661,12 @@ class StreamAccumulator {
         this.addProviderToolResult(event)
         return
       case "provider-state":
+        if (typeof event.providerId !== "string" || event.providerId.length === 0) {
+          this.captureProjectionError(
+            new ModelStreamError("[SixbModels] Provider state requires a nonempty provider ID.")
+          )
+          return
+        }
         if (this.captureProviderState(event.data)) {
           this.parts.push({
             type: "provider-state",
@@ -836,7 +858,12 @@ class StreamAccumulator {
     event: Extract<LanguageModelStreamEvent, { type: "tool-input-start" }>
   ): Promise<void> {
     this.requireStarted(event.type)
-    if (!event.id || !event.toolName) {
+    if (
+      typeof event.id !== "string" ||
+      !event.id ||
+      typeof event.toolName !== "string" ||
+      !event.toolName
+    ) {
       throw new ModelStreamError("[SixbModels] Tool calls require nonempty IDs and names.")
     }
     if (this.toolCalls.has(event.id)) {
@@ -932,8 +959,7 @@ class StreamAccumulator {
   private captureProviderData(data: ProviderData | undefined): ProviderData | undefined {
     if (data === undefined) return undefined
     try {
-      validateProviderData(data)
-      return data
+      return normalizeProviderData(data)
     } catch (error) {
       this.captureProjectionError(error)
       return undefined
@@ -993,8 +1019,8 @@ function validateUsage(usage: ModelUsage): void {
   }
 }
 
-function validateProviderData(data: ProviderData | undefined): void {
-  if (data === undefined) return
+function normalizeProviderData(value: ProviderData): ProviderData {
+  const data = omitUndefinedObjectProperties(value)
   assertJsonValue(data, "provider data")
   if (typeof data !== "object" || data === null || Array.isArray(data)) {
     throw new TypeError("[SixbModels] provider data must be a JSON object.")
@@ -1003,6 +1029,28 @@ function validateProviderData(data: ProviderData | undefined): void {
     throw new ModelStreamError(
       `[SixbModels] Provider data exceeds the ${MAX_PROVIDER_DATA_BYTES}-byte response limit.`
     )
+  }
+  return data
+}
+
+/** Normalize absent metadata fields at ingestion, leaving non-JSON values for validation. */
+function omitUndefinedObjectProperties(value: unknown, seen = new Set<object>()): unknown {
+  if (typeof value !== "object" || value === null || seen.has(value)) return value
+  seen.add(value)
+  try {
+    if (Array.isArray(value)) {
+      return value.map((entry) => omitUndefinedObjectProperties(entry, seen))
+    }
+    if (!isPlainRecord(value)) return value
+    return Object.fromEntries(
+      Reflect.ownKeys(value)
+        .filter((key) => Object.prototype.propertyIsEnumerable.call(value, key))
+        .map((key) => [key, Reflect.get(value, key)] as const)
+        .filter(([, entry]) => entry !== undefined)
+        .map(([key, entry]) => [key, omitUndefinedObjectProperties(entry, seen)])
+    )
+  } finally {
+    seen.delete(value)
   }
 }
 

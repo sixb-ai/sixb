@@ -7,16 +7,6 @@ export class AgentDefinitionError extends Error {
 }
 
 /**
- * Raised by the message adapters. `fromUiMessage` is **total**: rather than silently dropping a part it
- * cannot model, it throws this — which both prevents data loss and pinpoints exactly when the
- * {@link AgentMessage} part union must be extended. It also fires on transient/streaming parts that
- * must never be persisted, and on out-of-contract (non-JSON) payloads.
- */
-export class AgentMessageAdapterError extends Error {
-  readonly name = "AgentMessageAdapterError"
-}
-
-/**
  * An agent-tool failure whose message is intentionally safe to expose to the model and persist in
  * the durable trace. Tool authors must keep the message free of credentials and internal details;
  * unknown errors remain masked by the worker.

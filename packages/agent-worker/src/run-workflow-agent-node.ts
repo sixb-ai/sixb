@@ -8,7 +8,7 @@ import {
   validateWorkflowAgentStepOutput,
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
-import type { JsonObject, ModelMessage, ModelStep } from "@sixb/core/models"
+import type { ModelMessage, ModelStep } from "@sixb/core/models"
 import { StructuredOutputError } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
 import {
@@ -73,7 +73,7 @@ export async function runWorkflowAgentNode(
   const outputSchema = schemaRecordToJsonSchema({
     shape: input.agentStep.output as Readonly<Record<string, SchemaOrRef>>,
     valueTypesById: input.valueTypesById,
-  }) as JsonObject
+  })
   const validateOutput = (value: unknown): Record<string, unknown> => ({
     ...validateWorkflowAgentStepOutput({
       workflowId: input.workflowId,
