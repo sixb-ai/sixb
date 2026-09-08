@@ -102,23 +102,7 @@ export async function executeWorkflowAgentNode(
       { details: workflowAgentErrorDetails(nodeRun) }
     )
   }
-  const modelCallLimits = createAiModelCallLimitController({
-    storage: context.storage,
-    projectId: context.id,
-    requestedBy: durableExecution.requestedBy,
-    requesterGroupIds: workflowRun.requesterGroupIds,
-  })
-  const usageRecorder = new AiModelCallRecorder({
-    storage: context.storage,
-    projectId: context.id,
-    executionId: executionRecord.executionId,
-    attempt: reserved.attempt,
-    requesterGroupIds: workflowRun.requesterGroupIds,
-    beforeModelCall: modelCallLimits.beforeModelCall,
-    markModelCallUnknown: modelCallLimits.markModelCallUnknown,
-    recoverAiModelCall: context.recoverAiModelCall,
-    errorRunId: nodeRun.id,
-  })
+  let usageRecorder: AiModelCallRecorder | undefined
 
   let environment: AgentExecutionEnvironment | null = null
   let modelId = reserved.modelId
@@ -144,6 +128,23 @@ export async function executeWorkflowAgentNode(
     })
     const { workflow, node, actorId, durableExecution, valueTypesById } =
       await resolveWorkflowAgentNodeExecution(input, loaded)
+    const modelCallLimits = createAiModelCallLimitController({
+      storage: context.storage,
+      projectId: context.id,
+      requestedBy: durableExecution.requestedBy,
+      requesterGroupIds: workflowRun.requesterGroupIds,
+    })
+    usageRecorder = new AiModelCallRecorder({
+      storage: context.storage,
+      projectId: context.id,
+      executionId: executionRecord.executionId,
+      attempt: reserved.attempt,
+      requesterGroupIds: workflowRun.requesterGroupIds,
+      beforeModelCall: modelCallLimits.beforeModelCall,
+      markModelCallUnknown: modelCallLimits.markModelCallUnknown,
+      recoverAiModelCall: context.recoverAiModelCall,
+      errorRunId: nodeRun.id,
+    })
     totalNodes = workflow.nodes.length
     const configuredPlan = resolveWorkflowAgentStepExecutionPlan({
       workflowId: workflow.id,
@@ -228,7 +229,7 @@ export async function executeWorkflowAgentNode(
     let executionError = debug?.cause ?? error
     let failurePhase = debug?.phase
     try {
-      usageRecorder.assertHealthy()
+      usageRecorder?.assertHealthy()
     } catch (recordingError) {
       const sameAdmissionFailure =
         isAiUsageLimitFailure(executionError) && isAiUsageLimitFailure(recordingError)

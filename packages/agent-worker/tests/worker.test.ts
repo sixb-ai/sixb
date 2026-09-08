@@ -3391,13 +3391,11 @@ describe("AgentWorker", () => {
         throw new Error("A denied workflow Agent call must not reach the provider")
       },
     })
-    const agent = defineAgent("workflow-limit-agent", {
-      name: "Workflow limit agent",
+    const agentStep = defineAgentStep("limited-agent-step", {
       model,
       instructions: "This call is denied before the provider.",
       groups: [AGENT_RUNTIME_GROUP],
     })
-    const agentStep = defineAgentStep("limited-agent-step", agent)
       .input({ query: "string" })
       .output({ answer: "string" })
       .prompt(({ input }) => `Resolve '${input.query}'.`)
@@ -3407,7 +3405,6 @@ describe("AgentWorker", () => {
     const sixb = new SixbHost({
       id: PROJECT_ID,
       ontology: [],
-      agents: [agent],
       workflows: [workflow],
       groups: [AGENT_RUNTIME_GROUP],
       broker: new InMemoryBroker(),
@@ -3427,6 +3424,7 @@ describe("AgentWorker", () => {
     const runs = sixb.storage.workflowRuns!
     const runId = "workflow-agent-limit-run"
     const nodeRunId = `${runId}:node:0`
+    const actorId = workflowAgentStepActorId(workflow.id, agentStep.id)
     const executionId = await createTestWorkflowExecution(sixb.storage.executions, {
       projectId: PROJECT_ID,
       workflowId: workflow.id,
@@ -3454,7 +3452,7 @@ describe("AgentWorker", () => {
     })
     const agentExecutionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      agentId: agent.id,
+      agentId: actorId,
       runId: nodeRunId,
       sourceExecutionId: executionId,
     })
@@ -3462,7 +3460,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       nodeRunId,
       executionId: agentExecutionId,
-      agentId: agent.id,
+      agentId: actorId,
       prompt: "Resolve 'alpha'.",
     })
     await runs.nodes.wait({ projectId: PROJECT_ID, id: nodeRunId })
@@ -3500,7 +3498,7 @@ describe("AgentWorker", () => {
       expect(execution.error).toMatchObject({
         code: "ai.usage_limit_exceeded",
         details: {
-          agentId: agent.id,
+          agentStepId: agentStep.id,
           workflowId: workflow.id,
           workflowRunId: runId,
           nodeRunId,

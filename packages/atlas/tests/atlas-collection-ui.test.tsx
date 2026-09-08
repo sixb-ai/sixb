@@ -13,7 +13,7 @@ const workflow = {
     { type: "step", id: "one", key: "loadContext", input: {}, output: {} },
     { type: "intervention", id: "two", key: "reviewDispatch", input: {}, response: {} },
     { type: "action", id: "three", key: "dispatchWorkOrder", params: {} },
-    { type: "agent", id: "four", key: "summarizeVisit", agentId: "ops", input: {}, output: {} },
+    { type: "agent", id: "four", key: "summarizeVisit", input: {}, output: {} },
     { type: "step", id: "five", key: "recordOutcome", input: {}, output: {} },
     { type: "step", id: "six", key: "notifyCustomer", input: {}, output: {} },
   ],
