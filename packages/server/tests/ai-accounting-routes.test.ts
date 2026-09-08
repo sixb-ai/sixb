@@ -202,11 +202,7 @@ async function createSubagentApp() {
     usage: { inputTokens: 10, outputTokens: 5 },
     occurredAt: new Date("2026-09-10T12:30:00.000Z"),
   })
-  const host = {
-    id: projectId,
-    storage: { aiCosts: storage.aiCosts },
-  } as unknown as SixbHostView
-  return registerAiAccountingRoutes(new Elysia(), host)
+  return aiRoutes(createHost(storage))
 }
 
 describe("AI accounting routes", () => {

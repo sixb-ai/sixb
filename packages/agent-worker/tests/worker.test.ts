@@ -5146,6 +5146,119 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Regression proof: omit wrapModel (project) or requestedBy (user); the child reaches the provider.
+  test.each([
+    "project",
+    "user",
+  ] as const)("enforces %s quotas for child model calls", async (subjectType) => {
+    const model = answerModel()
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [model] },
+    })
+    const auth = authStorageOf(sixb)
+    const sessionId = "session-agent"
+    await auth.users.create({
+      id: REQUESTER.id,
+      projectId: PROJECT_ID,
+      email: "requester@example.com",
+    })
+    await auth.sessions.create({
+      id: sessionId,
+      projectId: PROJECT_ID,
+      userId: REQUESTER.id,
+      strategyId: "test",
+      audience: "app",
+      tokenHash: "not-used-after-admission",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    const grants = { ...emptyGrantIndex(), "run:agent": new Set(["main"]) }
+    const scoped = bindRequestExecution(sixb, {
+      request: new Request("https://sixb.test/api/agent-threads/thread-1/messages"),
+      authorization: {
+        type: "principal",
+        context: {
+          principal: REQUESTER,
+          sessionId,
+          groupIds: [],
+          roleIds: [],
+          grants,
+        },
+        credential: { type: "session", id: sessionId },
+      },
+    })
+    const requested = await scoped.agents.runs.request({
+      agentId: "main",
+      text: "Delegate a task.",
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    // The parent is already running elsewhere; only the child's queue delivery runs in this test.
+    const [parentJob] = await sixb.queues.agents.claim({
+      projectId: PROJECT_ID,
+      workerId: "parent",
+    })
+    if (!parentJob) throw new Error("Expected the parent job")
+    await sixb.queues.agents.complete({
+      projectId: PROJECT_ID,
+      jobId: parentJob.job.id,
+      leaseId: parentJob.leaseId,
+    })
+    const parent = requireConversationRun(
+      await storage.runs.start({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+        execution: freshTestExecution(),
+      })
+    )
+    const execution = await sixb.storage.executions.getById({
+      projectId: PROJECT_ID,
+      id: parent.executionId,
+    })
+    if (
+      !execution ||
+      execution.authorizationRef.type !== "principal" ||
+      execution.authorizationRef.credential?.type !== "session"
+    )
+      throw new Error("Expected inherited session")
+    const coordinator = new SubagentCoordinator(
+      sixb,
+      await buildAgentWorkerContext(sixb),
+      parent,
+      execution
+    )
+    const child = await coordinator.spawn(
+      { key: "review", task: "Review the result." },
+      new AbortController().signal
+    )
+    await sixb.storage.aiLimits!.createPolicy({
+      id: "child-exhausted-quota",
+      projectId: PROJECT_ID,
+      subject: subjectType === "project" ? { type: "project" } : { type: "user", id: REQUESTER.id },
+      limit: { meter: "tokens.total", amount: 0 },
+    })
+    const modelCalls = spyOn(model, "stream")
+    const completion = observeQueueSettlement(sixb.queues.agentChildren)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await completion.wait()
+      const result = await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })
+      expect(result).toMatchObject({
+        status: "failed",
+        error: { code: "ai.usage_limit_exceeded" },
+      })
+      expect(modelCalls).not.toHaveBeenCalled()
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: parent.id })).toMatchObject({
+        status: "running",
+      })
+    } finally {
+      await worker.stop()
+      modelCalls.mockRestore()
+      completion.restore()
+    }
+  })
+
   test("cancels a running child when its parent finishes", async () => {
     let markChildStarted!: () => void
     const childStarted = new Promise<void>((resolve) => {
