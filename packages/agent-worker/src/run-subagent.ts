@@ -32,18 +32,29 @@ export async function runSubagent(input: {
 
   const sandboxReadiness = monitorSandboxReadiness(context.sandboxReady)
   const ownsRuntime = input.runtime === undefined
-  const runtime =
-    input.runtime ??
-    createAgentTurnRuntime({
+  let runtime = input.runtime
+  if (!runtime) {
+    const execution = await context.storage.executions.getById({
+      projectId: context.id,
+      id: run.executionId,
+    })
+    if (!execution) {
+      throw createSixbError("internal.unexpected", "Subagent execution is not available.", {
+        details: { runId: run.id, executionId: run.executionId },
+      })
+    }
+    runtime = createAgentTurnRuntime({
       context,
       run,
       signal,
+      requestedBy: execution.requestedBy,
     })
+  }
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
   try {
     let chunkIndex = 0
     const generation = await runModelLoop({
-      model: plan.model,
+      model: runtime.usageRecorder.wrapModel(plan.model),
       messages: [
         { role: "system", content: context.systemPrompt },
         { role: "user", content: [{ type: "text", text: run.spec.task }] },
