@@ -10,6 +10,7 @@ import {
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "@sixb/core/internal/agents"
+import type { ModelTool } from "@sixb/core/models"
 import type {
   AgentContextCheckpointReason,
   AgentContextCheckpointRecord,
@@ -57,6 +58,7 @@ export async function prepareAgentConversationContext(input: {
   readonly budget: AgentContextBudget
   readonly run: ConversationAgentRunRecord
   readonly runtime: AgentTurnRuntime
+  readonly frameworkTools?: readonly ModelTool[]
 }): Promise<PreparedAgentConversationContext> {
   const { context, agent, budget, run, runtime } = input
   const [skills, initialContext] = await Promise.all([
@@ -75,12 +77,13 @@ export async function prepareAgentConversationContext(input: {
       instructions: agent.instructions,
       skills,
     }),
-    tools: contextEstimateTools(
-      agentModelToolSpecs({
+    tools: contextEstimateTools([
+      ...agentModelToolSpecs({
         definitions: agent.tools,
         valueTypesById: context.valueTypesById,
-      })
-    ),
+      }),
+      ...(input.frameworkTools ?? []),
+    ]),
   }
   const estimatedInputTokensBefore = await estimateAgentConversationInputTokens({
     context,
@@ -126,26 +129,17 @@ export async function prepareAgentConversationContext(input: {
       )
     }
 
-    const summary = await generateCheckpointSummary({
-      agent,
-      budget,
-      run,
-      runtime,
-      previousCheckpoint: initialContext.checkpoint,
-      messages: boundary.messagesToSummarize,
-    })
-    runtime.assertCanContinue()
-
     const checkpointId = agentContextCheckpointId(run.id)
     const observedHeadSeq = requiredHeadSeq(initialContext.retainedMessages, run)
-    const candidate: AgentContextCheckpointRecord = {
+    const candidateBase: AgentContextCheckpointRecord = {
       id: checkpointId,
       projectId: context.id,
       threadId: run.threadId,
       createdByRunId: run.id,
       ...(initialContext.checkpoint ? { previousCheckpointId: initialContext.checkpoint.id } : {}),
       reason,
-      summary,
+      // Project a minimal summary to reject an oversized retained tail before a billable call.
+      summary: ".",
       summaryFormatVersion: SUMMARY_FORMAT_VERSION,
       summarizedThroughSeq: boundary.summarizedThroughSeq,
       observedHeadSeq,
@@ -154,6 +148,31 @@ export async function prepareAgentConversationContext(input: {
       summaryModelId: agent.model.modelId,
       createdAt: new Date(),
     }
+    const minimumContinuationTokens = estimateAgentContextRequestTokens({
+      ...estimateShape,
+      messages: projectAgentThreadModelContext({
+        checkpoint: candidateBase,
+        messages: boundary.retainedMessages,
+      }),
+    }).tokens
+    if (minimumContinuationTokens >= budget.inputBudgetTokens) {
+      throw new AgentContextCompactionError(
+        "context_limit_exceeded",
+        run.id,
+        "The retained turn and tools leave no room for a context summary. Start a new conversation or select a model with a larger context window."
+      )
+    }
+    const summary = await generateCheckpointSummary({
+      agent,
+      budget,
+      run,
+      runtime,
+      previousCheckpoint: initialContext.checkpoint,
+      messages: boundary.messagesToSummarize,
+      continuationAllowanceTokens: budget.inputBudgetTokens - minimumContinuationTokens,
+    })
+    runtime.assertCanContinue()
+    const candidate = { ...candidateBase, summary }
     const estimatedInputTokensAfter = estimateAgentContextRequestTokens({
       ...estimateShape,
       messages: projectAgentThreadModelContext({
@@ -165,7 +184,7 @@ export async function prepareAgentConversationContext(input: {
       throw new AgentContextCompactionError(
         "context_limit_exceeded",
         run.id,
-        "The summary and selected recent tail still exceed the model input budget. Reduce loop.context.keepRecentTokens or override loop.context.windowTokens."
+        "The summary and selected recent tail still exceed the model input budget. Start a new conversation or select a model with a larger context window."
       )
     }
 
@@ -289,7 +308,33 @@ async function generateCheckpointSummary(input: {
   readonly runtime: AgentTurnRuntime
   readonly previousCheckpoint: AgentContextCheckpointRecord | null
   readonly messages: readonly AgentMessageRecord[]
+  readonly continuationAllowanceTokens: number
 }): Promise<string> {
+  const prompt = summaryPrompt(input.previousCheckpoint, input.messages)
+  const maxOutputTokens = Math.min(
+    SUMMARY_MAX_OUTPUT_TOKENS,
+    Math.max(1, Math.floor(input.budget.reserveTokens / 2)),
+    input.agent.model.definition.maxOutputTokens ?? Number.POSITIVE_INFINITY,
+    input.continuationAllowanceTokens
+  )
+  // Estimate the actual serialized summary request, not the original conversation projection.
+  // Its output reserve differs from the continuation's, and provider input-only limits still apply.
+  const estimatedInputTokens = estimateAgentContextRequestTokens({
+    systemPrompt: SUMMARY_SYSTEM_PROMPT,
+    tools: [],
+    messages: [{ role: "user", parts: [{ type: "text", text: prompt }] }],
+  }).tokens
+  const inputBudgetTokens = Math.min(
+    input.agent.model.definition.maxInputTokens ?? Number.POSITIVE_INFINITY,
+    input.budget.windowTokens - maxOutputTokens
+  )
+  if (estimatedInputTokens > inputBudgetTokens) {
+    throw new AgentContextCompactionError(
+      "context_limit_exceeded",
+      input.run.id,
+      "The earlier history exceeds the selected model's summary input budget. Select a model with a larger context window or start a new conversation."
+    )
+  }
   let result: Awaited<ReturnType<typeof runModelLoop<string>>>
   try {
     result = await runModelLoop({
@@ -301,16 +346,11 @@ async function generateCheckpointSummary(input: {
         { role: "system", content: SUMMARY_SYSTEM_PROMPT },
         {
           role: "user",
-          content: [
-            { type: "text", text: summaryPrompt(input.previousCheckpoint, input.messages) },
-          ],
+          content: [{ type: "text", text: prompt }],
         },
       ],
       maxSteps: 1,
-      maxOutputTokens: Math.min(
-        SUMMARY_MAX_OUTPUT_TOKENS,
-        Math.max(1, Math.floor(input.budget.reserveTokens / 2))
-      ),
+      maxOutputTokens,
       onModelCallEnd: input.runtime.usageRecorder.onModelCallEnd,
       signal: input.runtime.signal,
     })

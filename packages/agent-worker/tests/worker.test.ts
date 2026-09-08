@@ -116,9 +116,9 @@ const USAGE: ModelUsage = {
 }
 
 const COMPACTION_USAGE: ModelUsage = {
-  inputTokens: 3_500,
+  inputTokens: 111_000,
   outputTokens: 100,
-  raw: { input_tokens: 3_500, output_tokens: 100 },
+  raw: { input_tokens: 111_000, output_tokens: 100 },
 }
 
 /** Wait for the delivery to finish its error path before stopping the test worker. */
@@ -2039,17 +2039,14 @@ describe("AgentWorker", () => {
       }),
       new InMemoryBroker(),
       new RecordingSandboxFactory(),
-      {
-        reasoning: "high",
-        context: { windowTokens: 5_000, reserveTokens: 1_000, keepRecentTokens: 700 },
-      }
+      {}
     )
     const storage = agentStorageOf(sixb)
     const threadId = "compaction_thread"
     await storage.threads.create({
+      agentId: "assistant",
       id: threadId,
       projectId: PROJECT_ID,
-      agentId: "assistant",
       ownerPrincipal: REQUESTER,
     })
     for (let index = 0; index < 6; index += 1) {
@@ -2057,7 +2054,8 @@ describe("AgentWorker", () => {
         sixb,
         threadId,
         index,
-        text: `${`turn-${index}-`}${"x".repeat(1_800)}`,
+        // Over the continuation budget, but the serialized removable turns fit the summary call.
+        text: `${`turn-${index}-`}${"x".repeat(index === 5 ? 2_000 : 44_000)}`,
         includeAttachment: index === 0,
       })
     }
@@ -2084,6 +2082,7 @@ describe("AgentWorker", () => {
         agentId: "assistant",
         threadId,
         text: "Continue from the latest completed turn.",
+        reasoning: "high",
       })
       const run = await waitFor(
         async () => {
@@ -2158,7 +2157,7 @@ describe("AgentWorker", () => {
           responseId: "compaction-summary-response",
           responseModelId: "served-summary-model",
           requestedReasoning: "none",
-          rawUsage: { input_tokens: 3_500, output_tokens: 100 },
+          rawUsage: COMPACTION_USAGE.raw,
         },
         cost: { status: "unpriceable", reason: "missingRateCard" },
       })
@@ -2212,7 +2211,7 @@ describe("AgentWorker", () => {
       expect(JSON.stringify(summaryPrompts[1])).toContain("Continue the durable test conversation")
       expect(summaryReasoning).toEqual(["none", "none"])
       expect(answerPrompts).toHaveLength(2)
-      expect(answerReasoning).toEqual(["high", "high"])
+      expect(answerReasoning).toEqual(["high", undefined])
       expect(await listMessages(storage, threadId)).toHaveLength(16)
     } finally {
       await worker.stop()
@@ -2229,7 +2228,7 @@ describe("AgentWorker", () => {
       }),
       new InMemoryBroker(),
       new RecordingSandboxFactory(),
-      { context: { windowTokens: 5000, reserveTokens: 1000, keepRecentTokens: 700 } }
+      {}
     )
     const storage = agentStorageOf(sixb)
     const threadId = "limited_compaction"
@@ -2244,7 +2243,7 @@ describe("AgentWorker", () => {
       threadId,
       index: 0,
       text: "Research this organization.",
-      assistantText: "x".repeat(20000),
+      assistantText: "x".repeat(460_000),
     })
     const request = await requestAgentAs(sixb, REQUESTER, {
       agentId: "assistant",
@@ -2279,6 +2278,98 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Regression proof: remove the summary-request budget check; the smaller model gets called.
+  test.each([
+    ["summary input budget", { contextWindow: 32_768 }, "Continue."],
+    ["summary input budget", { contextWindow: 128_000, maxInputTokens: 20_000 }, "Continue."],
+    ["retained turn and tools", { contextWindow: 32_768 }, "x".repeat(160_000)],
+  ] as const)("rejects an unsafe model switch exceeding %s", async (reason, limits, continuation) => {
+    const large = answerModel()
+    let smallCalls = 0
+    const small: LanguageModel = {
+      providerId: "mock",
+      modelId: "small",
+      definition: {
+        kind: "language",
+        providerId: "mock",
+        modelId: "small",
+        capabilities: {},
+        ...limits,
+      },
+      stream: async () => {
+        smallCalls += 1
+        throw new Error("An over-budget summary must not reach the provider")
+      },
+    }
+    const sixb = buildSixb(large, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [large, small] },
+    })
+    const reportedErrors: Error[] = []
+    const reporter = attachSixbErrorReporter(sixb, (error) => {
+      reportedErrors.push(error)
+    })
+    const storage = agentStorageOf(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const first = await requestAgent(sixb, {
+        agentId: "main",
+        text: `Long historical input. ${"x".repeat(160_000)}`,
+      })
+      await waitFor(
+        async () =>
+          (
+            await storage.runs.getById({
+              projectId: PROJECT_ID,
+              id: first.run.id,
+            })
+          )?.status === "succeeded",
+        { label: "large-model turn" }
+      )
+      const before = await listMessages(storage, first.run.threadId)
+      const next = await requestAgent(sixb, {
+        agentId: "main",
+        threadId: first.run.threadId,
+        text: continuation,
+        model: { provider: small.providerId, modelId: small.modelId },
+      })
+      const failed = await waitFor(
+        async () => {
+          const current = await storage.runs.getById({ projectId: PROJECT_ID, id: next.run.id })
+          return current?.status === "failed" ? current : null
+        },
+        { label: "incompatible model switch" }
+      )
+      expect(failed.spec?.model).toEqual({ provider: small.providerId, modelId: small.modelId })
+      expect(smallCalls).toBe(0)
+      await reporter.flush()
+      expect(reportedErrors).toHaveLength(1)
+      expect(reportedErrors[0]?.message).toContain(reason)
+      expect(
+        await storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId: first.run.threadId })
+      ).toBeNull()
+      expect((await listMessages(storage, first.run.threadId)).slice(0, before.length)).toEqual([
+        ...before,
+      ])
+      expect(
+        await storage.threads.getById({ projectId: PROJECT_ID, id: first.run.threadId })
+      ).toMatchObject({ activeRunId: null })
+      expect(
+        (await listRunStreamRecords(sixb.broker, failed.id)).find(
+          (record) => record.name === "agent.compaction.failed"
+        )?.payload
+      ).toMatchObject({ errorCode: "context_limit_exceeded" })
+      expect(
+        await aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: failed.executionId,
+        })
+      ).toMatchObject({ modelCallCount: 0 })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("checkpoints one oversized completed turn before a short follow-up", async () => {
     const summaryPrompts: LanguageModelRequest["messages"][] = []
     const answerPrompts: LanguageModelRequest["messages"][] = []
@@ -2293,16 +2384,14 @@ describe("AgentWorker", () => {
       }),
       new InMemoryBroker(),
       new RecordingSandboxFactory(),
-      {
-        context: { windowTokens: 5_000, reserveTokens: 1_000, keepRecentTokens: 700 },
-      }
+      {}
     )
     const storage = agentStorageOf(sixb)
     const threadId = "oversized_turn_compaction_thread"
     await storage.threads.create({
+      agentId: "assistant",
       id: threadId,
       projectId: PROJECT_ID,
-      agentId: "assistant",
       ownerPrincipal: REQUESTER,
     })
     await seedCompletedConversationTurn({
@@ -2310,7 +2399,7 @@ describe("AgentWorker", () => {
       threadId,
       index: 0,
       text: "Research this organization.",
-      assistantText: `oversized-result-marker ${"x".repeat(20_000)}`,
+      assistantText: `oversized-result-marker ${"x".repeat(460_000)}`,
     })
 
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
@@ -2357,16 +2446,14 @@ describe("AgentWorker", () => {
       }),
       new InMemoryBroker(),
       new RecordingSandboxFactory(),
-      {
-        context: { windowTokens: 2_500, reserveTokens: 1_000, keepRecentTokens: 500 },
-      }
+      {}
     )
     const storage = agentStorageOf(sixb)
     const threadId = "failed_compaction_thread"
     await storage.threads.create({
+      agentId: "assistant",
       id: threadId,
       projectId: PROJECT_ID,
-      agentId: "assistant",
       ownerPrincipal: REQUESTER,
     })
     for (let index = 0; index < 2; index += 1) {
@@ -2374,7 +2461,7 @@ describe("AgentWorker", () => {
         sixb,
         threadId,
         index,
-        text: `${`failed-turn-${index}-`}${"x".repeat(1_800)}`,
+        text: `${`failed-turn-${index}-`}${"x".repeat(112_000)}`,
       })
     }
 
@@ -7743,9 +7830,7 @@ describe("AgentWorker", () => {
       hangingCompactionModel(),
       new InMemoryBroker(),
       new RecordingSandboxFactory(),
-      {
-        context: { windowTokens: 5_000, reserveTokens: 1_000, keepRecentTokens: 700 },
-      }
+      {}
     )
     const storage = agentStorageOf(sixb)
     let reportCount = 0
@@ -7754,9 +7839,9 @@ describe("AgentWorker", () => {
     })
     const threadId = "preflight_compaction_timeout_thread"
     await storage.threads.create({
+      agentId: "assistant",
       id: threadId,
       projectId: PROJECT_ID,
-      agentId: "assistant",
       ownerPrincipal: REQUESTER,
     })
     await seedCompletedConversationTurn({
@@ -7764,7 +7849,7 @@ describe("AgentWorker", () => {
       threadId,
       index: 0,
       text: "Summarize the historical investigation.",
-      assistantText: `historical-result ${"x".repeat(20_000)}`,
+      assistantText: `historical-result ${"x".repeat(460_000)}`,
     })
 
     const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false, turnTimeoutMs: 50 }))

@@ -382,12 +382,17 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: turnSignal,
         requestedBy: durableExecution.requestedBy,
       })
+      const frameworkTools =
+        agent.id === MAIN_AGENT_ID
+          ? await new SubagentCoordinator(this.host, context, run, durableExecution).createTools()
+          : []
       const prepared = await prepareAgentConversationContext({
         context: executionContext,
         agent: executionAgent,
         budget: requiredContextBudget(preparedModel.budgets, agent.id),
         run,
         runtime,
+        frameworkTools,
       })
       environment = await createConversationAgentEnvironment({
         context: executionContext,
@@ -396,18 +401,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         signal: turnSignal,
         messages: prepared.threadContext.retainedMessages,
         skills: prepared.skills,
-        ...(agent.id === MAIN_AGENT_ID
-          ? {
-              // Temporary: delegation belongs only to the framework main Agent while legacy
-              // definition-backed conversational agents remain supported.
-              frameworkTools: await new SubagentCoordinator(
-                this.host,
-                context,
-                run,
-                durableExecution
-              ).createTools(),
-            }
-          : {}),
+        frameworkTools,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
       })
       runtime.assertCanContinue()
