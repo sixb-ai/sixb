@@ -13,7 +13,6 @@ import type {
   InferAgentToolInputSchema,
 } from "./types"
 import {
-  assertValidAgentToolDefinitions,
   assertValidAgentToolDescription,
   assertValidAgentToolName,
   assertValidProjectAgentToolDefinitions,
@@ -71,24 +70,6 @@ export function createAgentToolDefinition<
 
   normalizedAgentTools.add(tool)
   return Object.freeze(tool)
-}
-
-export function toolsFromDefinitions(
-  agentId: string,
-  tools: readonly AgentToolDefinition[] | undefined
-): readonly AgentToolDefinition[] {
-  if (tools === undefined) {
-    return EMPTY_AGENT_TOOLS
-  }
-  if (!Array.isArray(tools)) {
-    throw new AgentDefinitionError(
-      `[Sixb] Agent '${agentId}' tools must be an array of agent tool definitions.`
-    )
-  }
-
-  assertValidAgentToolDefinitions(agentId, tools)
-
-  return normalizeAgentToolDefinitions(tools)
 }
 
 export function toolsFromProjectConfig(

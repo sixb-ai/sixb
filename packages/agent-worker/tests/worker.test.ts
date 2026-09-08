@@ -2089,7 +2089,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("starts with a warning when the selected model has no context limit", async () => {
+  test("warns at execution time when the selected model has no context limit", async () => {
     // Regression proof: reject an undefined model window in resolveAgentContextBudget.
     const base = toolThenAnswerModel()
     const { contextWindow: _contextWindow, ...definition } = base.definition
@@ -2110,11 +2110,69 @@ describe("AgentWorker", () => {
     const warning = spyOn(console, "warn").mockImplementation(() => {})
     try {
       await worker.start()
+      expect(resolutions).toBe(0)
+      expect(warning).not.toHaveBeenCalled()
+      const request = await requestAgent(sixb, { text: "Hello" })
+      const run = await waitFor(
+        async () => {
+          const record = await agentStorageOf(sixb).runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "fallback model execution" }
+      )
+      expect(run.status).toBe("succeeded")
       expect(resolutions).toBe(1)
       expect(warning).toHaveBeenCalledTimes(1)
       expect(warning.mock.calls[0]?.[0]).toContain("128,000-token fallback")
     } finally {
       warning.mockRestore()
+      await worker.stop()
+    }
+  })
+
+  test("an unused model resolver cannot block worker startup or a selected model run", async () => {
+    // Regression proof: restore catalog-wide prepareAgentModel calls in AgentWorker.start;
+    // startup throws the unused resolver error before the valid model can run.
+    const selected = new WorkerTestModel()
+    const unused = new WorkerTestModel({ modelId: "unused-model" })
+    let resolutions = 0
+    const sixb = buildSixb(selected, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: {
+        language: [
+          selected,
+          {
+            providerId: unused.providerId,
+            modelId: unused.modelId,
+            definition: unused.definition,
+            stream: (request) => unused.stream(request),
+            resolve: async () => {
+              resolutions += 1
+              throw new Error("unused resolver unavailable")
+            },
+          },
+        ],
+      },
+    })
+    const worker = new AgentWorker(sixb, workerOptions())
+    try {
+      await worker.start()
+      const request = await requestAgent(sixb, { text: "Hello" })
+      const run = await waitFor(
+        async () => {
+          const record = await agentStorageOf(sixb).runs.getById({
+            projectId: PROJECT_ID,
+            id: request.run.id,
+          })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "selected model execution" }
+      )
+      expect(run.status).toBe("succeeded")
+      expect(resolutions).toBe(0)
+    } finally {
       await worker.stop()
     }
   })
@@ -2190,8 +2248,8 @@ describe("AgentWorker", () => {
       )
 
       expect(run.status).toBe("succeeded")
-      // Only startup validation and execution preparation resolve the model while delegation is off.
-      expect(resolutions).toBe(2)
+      // The selected metadata snapshot is prepared once and shared by compaction and generation.
+      expect(resolutions).toBe(1)
       await expect(
         storage.checkpoints.getLatest({ projectId: PROJECT_ID, threadId })
       ).resolves.toMatchObject({

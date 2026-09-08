@@ -11,7 +11,7 @@ import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
 import { JsonValueSchema, sixbFailureSchema } from "./common"
 import { FileRefSchema } from "./files"
-import { LanguageModelRefSchema, ModelReasoningLevelSchema, ModelReasoningSchema } from "./models"
+import { LanguageModelRefSchema, ModelReasoningSchema } from "./models"
 
 export const AgentRunFailureSchema: z.ZodType<SixbFailure<AgentRunFailureCode>> =
   sixbFailureSchema(AGENT_RUN_FAILURE_CODES)
@@ -69,9 +69,6 @@ export const AgentContextEntryInputSchema = z.object({
 export const AgentContextPartSchema = AgentContextEntryInputSchema.extend({
   type: z.literal("context"),
 })
-
-export const AgentReasoningLevelSchema = ModelReasoningLevelSchema
-export const AgentReasoningSchema = ModelReasoningSchema
 
 export const AgentDescriptorSchema = z.object({
   name: z.string(),
