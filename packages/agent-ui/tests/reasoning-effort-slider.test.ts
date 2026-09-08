@@ -23,10 +23,10 @@ function render(levels: LanguageModel["reasoningLevels"]): string {
   )
 }
 
-test("keeps an explicit None stop when the native model supports disabling reasoning", () => {
-  // Regression proof: filter out 'none'; the slider becomes hidden for this capability set.
+test("hides the slider when the model has no effort levels at Low or above", () => {
+  // Regression proof: restore the none stop in the slider filter; it becomes visible again.
   const html = render(["provider-default", "none"])
-  expect(html).not.toContain('hidden=""')
+  expect(html).toContain('hidden=""')
   expect(html).toContain('aria-label="Reasoning effort"')
 })
 

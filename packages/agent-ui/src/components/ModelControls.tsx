@@ -72,7 +72,9 @@ export function ModelControls({
             <span className="truncate text-foreground" title={selectedModel?.name}>
               {selectedModel ? selectedModel.name : error ? "Models unavailable" : "Default model"}
             </span>
-            {hasReasoning ? (
+            {hasReasoning &&
+            selectedReasoning !== "none" &&
+            selectedReasoning !== "provider-default" ? (
               <span className="shrink-0 text-muted-foreground">
                 {reasoningLabel(selectedReasoning)}
               </span>
