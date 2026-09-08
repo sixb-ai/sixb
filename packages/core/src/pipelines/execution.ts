@@ -1,5 +1,6 @@
-import { canViewPipelineRun, isAllowed } from "../authorization"
+import { assertAuthorized, canViewPipelineRun, isRuntimeAllowed } from "../authorization"
 import type { ExecutionContext } from "../execution"
+import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
   ListLatestPipelineRunsResult,
@@ -41,30 +42,46 @@ export function createPipelinesRuntime(
   execution: ExecutionContext,
   source: Pick<PipelinesRuntime, "list" | "getById">
 ): PipelinesRuntime {
+  const authority = resolveRuntimeAuthorizationForProject(runtime)
   const allowed = (pipelineId: string) =>
-    isAllowed(runtime.authorization, { kind: "pipeline.run", pipelineId })
+    isRuntimeAllowed(runtime, { kind: "pipeline.run", pipelineId })
   const visibleIds = () =>
     source
       .list()
       .filter((pipeline) => allowed(pipeline.id))
       .map((pipeline) => pipeline.id)
+  const historyFilterIds = () =>
+    authority.type === "unrestricted"
+      ? undefined
+      : authority.type === "principal"
+        ? visibleIds()
+        : []
 
   const getRun = async (runId: string) => {
+    if (authority.type === "denied" || authority.type === "delegated") return null
     const run =
       (await runtime.storage.pipelineRuns?.getById({
         projectId: runtime.projectId,
         id: runId,
       })) ?? null
-    return run && canViewPipelineRun(runtime.authorization, run) ? run : null
+    if (!run) return null
+    return authority.type === "unrestricted" || canViewPipelineRun(authority.context, run)
+      ? run
+      : null
   }
 
   return {
-    list: () => source.list().filter((pipeline) => allowed(pipeline.id)),
+    list: () =>
+      authority.type === "denied" || authority.type === "delegated"
+        ? []
+        : source.list().filter((pipeline) => allowed(pipeline.id)),
     getById: (pipelineId) => {
+      if (authority.type === "denied" || authority.type === "delegated") return null
       const pipeline = source.getById(pipelineId)
       return pipeline && allowed(pipelineId) ? pipeline : null
     },
     request: async (input) => {
+      assertAuthorized(runtime, { kind: "pipeline.run", pipelineId: input.pipelineId })
       const pipeline = source.getById(input.pipelineId)
       if (!pipeline) throw new PipelineError(`[Sixb] Unknown pipeline '${input.pipelineId}'`)
       return requestPipelineRun(runtime, execution, pipeline, input)
@@ -72,15 +89,21 @@ export function createPipelinesRuntime(
     runs: {
       getById: getRun,
       list: (input = {}) => {
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return Promise.resolve({ runs: [], hasMore: false, total: 0 })
+        }
         const storage = runtime.storage.pipelineRuns
         if (!storage) return Promise.resolve({ runs: [], hasMore: false, total: 0 })
         return storage.list({
-          projectId: runtime.projectId,
           ...input,
-          pipelineIds: runtime.authorization ? visibleIds() : undefined,
+          pipelineIds: historyFilterIds(),
+          projectId: runtime.projectId,
         })
       },
       listLatest: (pipelineIds) => {
+        if (authority.type === "denied" || authority.type === "delegated") {
+          return Promise.resolve({ runs: [] })
+        }
         const storage = runtime.storage.pipelineRuns
         if (!storage || pipelineIds.length === 0) return Promise.resolve({ runs: [] })
         const allowedIds = pipelineIds.filter(allowed)
@@ -95,9 +118,9 @@ export function createPipelinesRuntime(
         const storage = runtime.storage.pipelineRuns
         if (!storage || !(await getRun(runId))) return null
         return storage.listSteps({
-          projectId: runtime.projectId,
           ...input,
           pipelineRunId: runId,
+          projectId: runtime.projectId,
         })
       },
     },

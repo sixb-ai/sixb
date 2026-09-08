@@ -10,6 +10,7 @@ export {
   assertRuntimeAuthorizationBound,
   evaluate,
   isAllowed,
+  isRuntimeAllowed,
 } from "./decision"
 export { AuthorizationError } from "./errors"
 export { canViewEvent } from "./event-visibility"
