@@ -6,6 +6,7 @@ import {
   mkdtemp,
   open,
   readdir,
+  readFile,
   rename,
   rm,
   rmdir,
@@ -58,7 +59,10 @@ export type TestSftpReadMetrics = {
 }
 
 export async function startTestSftpServer(): Promise<TestSftpServer> {
-  const hostKey = utils.generateKeyPairSync("ed25519").private
+  // Test-only identity. ssh2 1.17.0 keygen strips leading zero bytes from Ed25519
+  // public keys, occasionally producing an invalid key. Keep the fixture stable
+  // so transport tests do not depend on random key generation.
+  const hostKey = await readFile(new URL("./fixtures/host-key", import.meta.url))
   const rootDir = await mkdtemp(join(tmpdir(), "sixb-sftp-"))
   mkdirSync(join(rootDir, "files"), { recursive: true })
   let activeConnections = 0
