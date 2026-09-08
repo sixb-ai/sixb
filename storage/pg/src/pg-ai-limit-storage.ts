@@ -1,5 +1,6 @@
 import {
   type AiLimitAccountingEntry,
+  AiLimitOperationLock,
   aiLimitAmountKey,
   aiLimitQuantityFromAmount,
   aiLimitReservationBuckets,
@@ -48,7 +49,14 @@ import { lockAdvisoryKeys, type PgStoreClient, runPgTransaction } from "./transa
 
 /** PostgreSQL-backed editable AI limits and atomic model-call reservations. */
 export class PgAiLimitStorage implements AiLimitStorage {
+  private readonly operations = new AiLimitOperationLock()
+
   constructor(private readonly sql: PgStoreClient) {}
+
+  /** @internal Keep queued work inside the lifetime of the owning SQL transaction. */
+  settleOperations(): Promise<void> {
+    return this.operations.settle()
+  }
 
   async createPolicy(input: CreateAiLimitPolicyInput): Promise<AiLimitPolicy> {
     const policy = normalizeCreateAiLimitPolicy(input)
@@ -328,8 +336,13 @@ export class PgAiLimitStorage implements AiLimitStorage {
     run: (tx: SQLClient) => Promise<T>
   ): Promise<T> {
     return runPgTransaction(this.sql, async (tx) => {
-      await lockAdvisoryKeys(tx, [`ai-limit:${projectId}`])
-      return run(tx)
+      const operation = async () => {
+        await lockAdvisoryKeys(tx, [`ai-limit:${projectId}`])
+        return run(tx)
+      }
+      // Advisory locks are reentrant within one transaction. Serialize calls sharing this
+      // transaction's store locally; independent root transactions retain their concurrency.
+      return tx === this.sql ? this.operations.run(operation) : operation()
     })
   }
 

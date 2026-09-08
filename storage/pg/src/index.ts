@@ -262,6 +262,7 @@ export class PostgresStorage implements MigrationCapableStorage {
             transactionContext.materializations.assertCommittable()
             return result
           } finally {
+            await txStorage.aiLimits.settleOperations()
             transactionContext.active = false
             txStorage.ontology.deactivateSessions()
             transactionContext.materializations.deactivate()
@@ -309,7 +310,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   private createTransactionStorage(
     client: PgStoreClient,
     transactionContext: PgOntologyTransactionContext
-  ): Storage & { readonly ontology: PgOntologyStorage } {
+  ): Storage & { readonly ontology: PgOntologyStorage; readonly aiLimits: PgAiLimitStorage } {
     return {
       ...createPostgresStores(client, {
         runOntologyOperation: async (run) => run(client),
