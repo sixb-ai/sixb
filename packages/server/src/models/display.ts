@@ -81,6 +81,11 @@ function publisherName(id: string): string {
     deepseek: "DeepSeek",
     google: "Google",
     xai: "xAI",
+    spacexai: "xAI",
+    zai: "Z.ai",
+    meta: "Meta",
+    moonshotai: "Moonshot AI",
+    nvidia: "NVIDIA",
   }
   return Object.hasOwn(names, id) ? names[id]! : id
 }

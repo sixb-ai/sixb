@@ -5,7 +5,7 @@ import { ChevronDown, Search, Shapes } from "lucide-react"
 import { useMemo, useState } from "react"
 import type { LanguageModel } from "../types"
 import { ModelPickerRow } from "./ModelPickerRow"
-import { modelDisplayName, reasoningLabel } from "./model-picker-labels"
+import { reasoningLabel } from "./model-picker-labels"
 import { ProviderLogo } from "./ProviderLogo"
 import { ReasoningEffortSlider } from "./ReasoningEffortSlider"
 
@@ -38,7 +38,7 @@ export function ModelControls({
   const visibleModels = useMemo(() => {
     if (!normalizedQuery) return models
     return models.filter((model) =>
-      [modelDisplayName(model), model.name, model.publisher.name, model.modelId, model.via]
+      [model.name, model.publisher.name, model.modelId, model.via]
         .filter(Boolean)
         .some((value) => value?.toLowerCase().includes(normalizedQuery))
     )
@@ -70,11 +70,7 @@ export function ModelControls({
               <Shapes className="size-4" aria-hidden="true" />
             )}
             <span className="truncate text-foreground" title={selectedModel?.name}>
-              {selectedModel
-                ? modelDisplayName(selectedModel)
-                : error
-                  ? "Models unavailable"
-                  : "Default model"}
+              {selectedModel ? selectedModel.name : error ? "Models unavailable" : "Default model"}
             </span>
             {hasReasoning ? (
               <span className="shrink-0 text-muted-foreground">

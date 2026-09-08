@@ -10,7 +10,6 @@ import { cn } from "@sixb/ui/lib/utils"
 import { Check, Info } from "lucide-react"
 import { useId, useState } from "react"
 import type { LanguageModel } from "../types"
-import { modelDisplayName } from "./model-picker-labels"
 import { ProviderLogo } from "./ProviderLogo"
 
 export function ModelPickerRow({
@@ -47,7 +46,7 @@ export function ModelPickerRow({
           >
             <ProviderLogo model={model} className="size-5" />
             <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">
-              {modelDisplayName(model)}
+              {model.name}
             </span>
             <span className="flex size-5 shrink-0 items-center justify-center">
               {selected ? <Check className="size-4 text-foreground" aria-hidden="true" /> : null}
