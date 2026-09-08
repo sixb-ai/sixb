@@ -93,6 +93,10 @@ Sixb fails closed when an enabled meter cannot be evaluated safely:
 - a provider attempt that may have been billed without usable actuals becomes `unknown` and retains
   capacity.
 
+Anthropic calls use native cache settings from the prepared messages, tools, and provider options.
+Uncached requests and standard five-minute caching need no extra accounting option. Explicit
+one-hour caching remains unsupported by the pinned pricing snapshot and blocks cost-limited calls.
+
 Denied calls use `ai.usage_limit_exceeded`; unsafe evaluation uses
 `ai.usage_limit_unavailable`. Direct HTTP requests return 429, and exhausted responses include
 `Retry-After` based on the earliest applicable reset.
