@@ -32,6 +32,7 @@ import type {
 } from "@sixb/core/storage"
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { prepareAgentModels } from "./context-budget"
+import { shouldRetryAgentPreparation } from "./delivery-policy"
 import { AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { resolveWorkflowAgentStepExecutionPlan } from "./execution-plan"
@@ -62,11 +63,14 @@ export interface ExecuteWorkflowAgentNodeInput {
   readonly onDetachedTeardown: (teardown: Promise<void>) => void
 }
 
-interface WorkflowAgentNodeExecutionContext {
+interface WorkflowAgentNodeRecords {
   readonly runs: WorkflowRunStorage
   readonly executionRecord: WorkflowAgentNodeRunRecord
   readonly nodeRun: WorkflowNodeRunRecord
   readonly workflowRun: WorkflowRunRecord
+}
+
+interface WorkflowAgentNodeExecutionContext extends WorkflowAgentNodeRecords {
   readonly workflow: WorkflowDefinition
   readonly node: WorkflowAgentNodeDefinition
   readonly actorId: string
@@ -81,51 +85,13 @@ export async function executeWorkflowAgentNode(
   if (!loaded) return
 
   const { context, job, signal, delivery } = input
-  const {
-    runs,
-    executionRecord,
-    nodeRun,
-    workflowRun,
-    workflow,
-    node,
-    actorId,
-    durableExecution,
-    valueTypesById,
-  } = loaded
-  const configuredPlan = resolveWorkflowAgentStepExecutionPlan({
-    workflowId: workflow.id,
-    step: node.agentStep,
-    models: input.host.definitions.models?.language,
-    tools: input.host.definitions.tools,
-    defaultMaxSteps: context.defaultMaxSteps,
-  })
-  const resolved = await resolveAgentExecutionAuthorization({
-    auth: context.storage.auth,
-    projectId: context.id,
-    agentId: actorId,
-    authorizationRef: durableExecution.authorizationRef,
-    security: input.host.definitions.security,
-  })
-  const executionContext = createAgentExecutionContext({
-    context,
-    host: input.host,
-    execution: durableExecution,
-    agentId: actorId,
-    runId: nodeRun.id,
-    authorization: { type: "principal", context: resolved.context },
-    authorPrincipal: resolved.identity.principal,
-  })
-  // Tasks pin their selected binding too: research and finalization share its metadata and budget.
-  const prepared = await prepareAgentModels([{ id: actorId, ...configuredPlan }])
-  const model = prepared.models.get(actorId)
-  if (!model)
-    throw new Error("[SixbAgentWorker] Workflow task model preparation returned no model.")
-  const plan = Object.freeze({ ...configuredPlan, model })
+  const { runs, executionRecord, nodeRun, workflowRun } = loaded
+  // Preparation belongs to the owned attempt too, so failures can durably finish the task and
+  // its workflow without claiming a second token in the failure handler.
   const reserved = await reserveWorkflowAgentNode({
     runs,
     executionRecord,
     nodeRun,
-    modelId: plan.model.modelId,
     execution: freshWorkflowExecution(delivery.leaseExpiresAt),
   })
   const executionToken = reserved.execution?.token
@@ -155,6 +121,9 @@ export async function executeWorkflowAgentNode(
   })
 
   let environment: AgentExecutionEnvironment | null = null
+  let modelId = reserved.modelId
+  let totalNodes: number | undefined
+  let preparationComplete = false
   const cancel = await input.watchForCancel(nodeRun.id)
   const turnSignal = AbortSignal.any([signal, cancel.signal])
   const stopOwnershipProjection = projectQueueOwnership({
@@ -173,6 +142,39 @@ export async function executeWorkflowAgentNode(
       executionToken,
       queueLeaseExpiresAt: delivery.leaseExpiresAt,
     })
+    const { workflow, node, actorId, durableExecution, valueTypesById } =
+      await resolveWorkflowAgentNodeExecution(input, loaded)
+    totalNodes = workflow.nodes.length
+    const configuredPlan = resolveWorkflowAgentStepExecutionPlan({
+      workflowId: workflow.id,
+      step: node.agentStep,
+      models: input.host.definitions.models?.language,
+      tools: input.host.definitions.tools,
+      defaultMaxSteps: context.defaultMaxSteps,
+    })
+    modelId = configuredPlan.model.modelId
+    const resolved = await resolveAgentExecutionAuthorization({
+      auth: context.storage.auth,
+      projectId: context.id,
+      agentId: actorId,
+      authorizationRef: durableExecution.authorizationRef,
+      security: input.host.definitions.security,
+    })
+    const executionContext = createAgentExecutionContext({
+      context,
+      host: input.host,
+      execution: durableExecution,
+      agentId: actorId,
+      runId: nodeRun.id,
+      authorization: { type: "principal", context: resolved.context },
+      authorPrincipal: resolved.identity.principal,
+    })
+    const prepared = await prepareAgentModels([{ id: actorId, ...configuredPlan }])
+    const model = prepared.models.get(actorId)
+    if (!model)
+      throw new Error("[SixbAgentWorker] Workflow task model preparation returned no model.")
+    const plan = Object.freeze({ ...configuredPlan, model })
+    preparationComplete = true
     environment = await createWorkflowAgentNodeEnvironment({
       context: executionContext,
       plan,
@@ -235,6 +237,13 @@ export async function executeWorkflowAgentNode(
     }
 
     if (signal.aborted) throw executionError
+    if (
+      !preparationComplete &&
+      !cancel.signal.aborted &&
+      shouldRetryAgentPreparation(executionError, job.attempt)
+    ) {
+      throw executionError
+    }
     if (cancel.signal.aborted && (await isAlreadyCancelled(runs, context.id, nodeRun.id))) {
       // The cancellation endpoint has already made the execution terminal, so it cannot be fenced
       // again. Still surface an accounting failure instead of silently acknowledging it.
@@ -249,8 +258,8 @@ export async function executeWorkflowAgentNode(
     const failed = await finishWorkflowAgentNodeFailed({
       context,
       nodeRun,
-      agentStepId: node.agentStep.id,
-      modelId: plan.model.modelId,
+      agentStepId: nodeRun.nodeId,
+      modelId,
       executionToken,
       status,
       error: executionError,
@@ -270,7 +279,7 @@ export async function executeWorkflowAgentNode(
         failure: failed.failure,
       })
     }
-    await emitNodeAndRunFailed(input.host, failed, workflow.nodes.length, status)
+    await emitNodeAndRunFailed(input.host, failed, totalNodes, status)
   } finally {
     stopOwnershipProjection()
     cancel.stop()
@@ -280,8 +289,8 @@ export async function executeWorkflowAgentNode(
 
 async function loadWorkflowAgentNodeExecution(
   input: ExecuteWorkflowAgentNodeInput
-): Promise<WorkflowAgentNodeExecutionContext | null> {
-  const { context, host, job } = input
+): Promise<WorkflowAgentNodeRecords | null> {
+  const { context, job } = input
   const runs = context.storage.workflowRuns
   if (!runs) {
     throw createSixbError(
@@ -335,6 +344,15 @@ async function loadWorkflowAgentNodeExecution(
     return null
   }
 
+  return { runs, executionRecord, nodeRun, workflowRun }
+}
+
+async function resolveWorkflowAgentNodeExecution(
+  input: ExecuteWorkflowAgentNodeInput,
+  loaded: WorkflowAgentNodeRecords
+): Promise<WorkflowAgentNodeExecutionContext> {
+  const { context, host, job } = input
+  const { runs, executionRecord, nodeRun, workflowRun } = loaded
   const durableExecution = await context.storage.executions.getById({
     projectId: context.id,
     id: executionRecord.executionId,
@@ -402,14 +420,12 @@ async function reserveWorkflowAgentNode(input: {
   readonly runs: WorkflowRunStorage
   readonly executionRecord: WorkflowAgentNodeRunRecord
   readonly nodeRun: WorkflowNodeRunRecord
-  readonly modelId: string
   readonly execution: WorkflowAgentNodeRunExecution
 }): Promise<WorkflowAgentNodeRunRecord> {
   if (input.executionRecord.status === "queued") {
     return input.runs.agentNodes.start({
       projectId: input.executionRecord.projectId,
       nodeRunId: input.nodeRun.id,
-      modelId: input.modelId,
       execution: input.execution,
     })
   }
@@ -487,7 +503,7 @@ async function finishWorkflowAgentNodeFailed(input: {
   readonly context: AgentWorkerContext
   readonly nodeRun: WorkflowNodeRunRecord
   readonly agentStepId: string
-  readonly modelId: string
+  readonly modelId?: string
   readonly executionToken: string
   readonly status: "failed" | "cancelled"
   readonly error: unknown
@@ -616,8 +632,8 @@ async function emitNodeSucceeded(
   node: WorkflowNodeRunRecord,
   totalNodes: number
 ): Promise<void> {
-  await host.events
-    .append({
+  await host.events.emit(
+    {
       events: [
         {
           type: "workflow.run.node.finished",
@@ -635,40 +651,42 @@ async function emitNodeSucceeded(
           },
         },
       ],
-    })
-    .catch((error) => {
-      console.error(
-        `[SixbAgentWorker] Could not emit completion for workflow agent node '${node.id}'.`,
-        error
-      )
-    })
+    },
+    { source: "SixbAgentWorker" }
+  )
 }
 
 async function emitNodeAndRunFailed(
   host: AgentWorkerHost,
   failed: { readonly node: WorkflowNodeRunRecord; readonly run: WorkflowRunRecord },
-  totalNodes: number,
+  totalNodes: number | undefined,
   status: "failed" | "cancelled"
 ): Promise<void> {
-  await host.events
-    .append({
+  await host.events.emit(
+    {
       events: [
-        {
-          type: "workflow.run.node.finished",
-          payload: {
-            workflowId: failed.node.workflowId,
-            runId: failed.node.workflowRunId,
-            nodeRunId: failed.node.id,
-            nodeIndex: failed.node.nodeIndex,
-            totalNodes,
-            nodeType: "agent",
-            nodeId: failed.node.nodeId,
-            nodeKey: failed.node.nodeKey,
-            status,
-            finishedAt: requireFinishedAt(failed.node).toISOString(),
-            ...(failed.node.error ? { error: failed.node.error } : {}),
-          },
-        },
+        // A removed definition has no trustworthy node count; the durable failure and run event
+        // still describe the outcome without inventing workflow metadata.
+        ...(totalNodes === undefined
+          ? []
+          : [
+              {
+                type: "workflow.run.node.finished" as const,
+                payload: {
+                  workflowId: failed.node.workflowId,
+                  runId: failed.node.workflowRunId,
+                  nodeRunId: failed.node.id,
+                  nodeIndex: failed.node.nodeIndex,
+                  totalNodes,
+                  nodeType: "agent" as const,
+                  nodeId: failed.node.nodeId,
+                  nodeKey: failed.node.nodeKey,
+                  status,
+                  finishedAt: requireFinishedAt(failed.node).toISOString(),
+                  ...(failed.node.error ? { error: failed.node.error } : {}),
+                },
+              },
+            ]),
         {
           type: "workflow.run.finished",
           payload: {
@@ -680,13 +698,9 @@ async function emitNodeAndRunFailed(
           },
         },
       ],
-    })
-    .catch((error) => {
-      console.error(
-        `[SixbAgentWorker] Could not emit failure for workflow agent node '${failed.node.id}'.`,
-        error
-      )
-    })
+    },
+    { source: "SixbAgentWorker" }
+  )
 }
 
 export async function enqueueWorkflowAgentNodeResume(
