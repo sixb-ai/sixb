@@ -34,6 +34,7 @@
     "build": "tsc -b tsconfig.build.json --force && bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:e2e": "bun ../../scripts/ci-guard.ts --stall 120 --max 300 bun test ./tests/create-sixb.e2e.ts",
     "prepack": "bun run build"
   },
   "devDependencies": {

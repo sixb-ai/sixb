@@ -9,6 +9,15 @@ const createPackageDir = join(repoRoot, "packages", "create-sixb")
 const cliPackageDir = join(repoRoot, "packages", "cli")
 const cliCorePackageDir = join(repoRoot, "packages", "cli-core")
 
+// Packing invokes prepack builds. On Bun 1.3.14, letting the default 5s hook timeout
+// interrupt those builds can leave a parallel test worker spinning at 100% CPU.
+// Reproduce the old failure by removing the hook budget below and running from the root:
+// bun test --parallel=2 --timeout=1000 ./packages/create-sixb/tests/create-sixb.e2e.ts
+//   ./packages/orchestrator/tests/compile-routes.test.ts (as one command, behind ci-guard).
+// Bound each build in a separate process group so cleanup finishes before the hook expires.
+const PACK_BUDGET_SECONDS = 30
+const SETUP_BUDGET_MS = (3 * PACK_BUDGET_SECONDS + 10) * 1000
+
 let layoutRoot: string
 let runRoot: string
 let createEntry: string
@@ -39,7 +48,7 @@ beforeAll(async () => {
 
   createEntry = join(nodeModulesDir, "create-sixb", "dist", "index.js")
   cliEntry = join(nodeModulesDir, "@sixb", "cli", "src", "index.tsx")
-})
+}, SETUP_BUDGET_MS)
 
 afterAll(async () => {
   if (layoutRoot) await rm(layoutRoot, { recursive: true, force: true })
@@ -143,11 +152,23 @@ async function readPackageManifest(packageDir: string): Promise<{
 }
 
 function packPackage(packageDir: string, destination: string): string {
-  const result = Bun.spawnSync(["bun", "pm", "pack", "--destination", destination, "--quiet"], {
-    cwd: packageDir,
-    stdout: "pipe",
-    stderr: "pipe",
-  })
+  const result = Bun.spawnSync(
+    [
+      process.execPath,
+      join(repoRoot, "scripts", "ci-guard.ts"),
+      "--stall",
+      String(PACK_BUDGET_SECONDS),
+      "--max",
+      String(PACK_BUDGET_SECONDS),
+      process.execPath,
+      "pm",
+      "pack",
+      "--destination",
+      destination,
+      "--quiet",
+    ],
+    { cwd: packageDir, stdout: "pipe", stderr: "pipe" }
+  )
   const stdout = result.stdout.toString()
   const stderr = result.stderr.toString()
   if (result.exitCode !== 0) {

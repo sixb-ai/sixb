@@ -214,6 +214,8 @@ jobs:
           # test process.
           - name: publish
             package: "@sixb/core"
+          - name: create-sixb
+            package: "create-sixb"
           - name: blob-s3
             package: "@sixb/blob-s3"
           - name: ducklake
