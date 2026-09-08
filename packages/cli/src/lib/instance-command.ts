@@ -1,4 +1,4 @@
-import { fail, isInstanceCommand, reportError, runInstanceCli } from "@sixb/cli-core"
+import { fail, isInstanceCommand, reportError, requestsHelp, runInstanceCli } from "@sixb/cli-core"
 import { resolveProfile } from "./profiles"
 
 const CONNECTION_FLAGS = new Set(["api-url", "profile", "token"])
@@ -10,6 +10,10 @@ export function isLocalInstanceCommand(command: string): boolean {
 export async function runLocalInstanceCommand(args: readonly string[]): Promise<void> {
   try {
     const { commandArgs, apiUrl, profile, token } = extractConnectionOptions(args)
+    if (requestsHelp(commandArgs)) {
+      await runInstanceCli({ args: commandArgs, mode: { kind: "local", baseUrl: "" } })
+      return
+    }
     const resolved = await resolveProfile({ apiUrl, profile, token })
     await runInstanceCli({
       args: commandArgs,
@@ -36,6 +40,10 @@ function extractConnectionOptions(args: readonly string[]): {
 
   for (let index = 0; index < args.length; index++) {
     const argument = args[index]
+    if (argument === "--") {
+      commandArgs.push(...args.slice(index))
+      break
+    }
     if (!argument?.startsWith("--")) {
       if (argument !== undefined) commandArgs.push(argument)
       continue

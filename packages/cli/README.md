@@ -100,6 +100,16 @@ positionals fail before the command runs. Repeatable options such as `--group` a
 `--concurrency` forms are declared explicitly. `--api-url` and `--profile` are mutually exclusive;
 either may be paired with an explicit `--token`.
 
+Instance commands share this validation with the sandbox CLI. Help does not require a saved profile
+or API connection. Use `--` to pass identifiers that look like options:
+
+```bash
+sixb objects get Customer alice --help
+sixb objects get Customer -- --help
+```
+
+The first command prints help; the second looks up the literal primary id `--help`.
+
 Use either help form for contextual command documentation:
 
 ```bash
