@@ -17,7 +17,7 @@ export function ReasoningEffortSlider({
   onChange: (level: ModelReasoningLevel) => void
 }) {
   const levels: readonly ModelReasoningLevel[] = model.reasoningLevels.filter(
-    (level) => level !== "provider-default"
+    (level) => level !== "provider-default" && level !== "none" && level !== "minimal"
   )
   const selectedIndex = levels.indexOf(value)
   const index = Math.max(0, selectedIndex)
@@ -93,7 +93,7 @@ export function ReasoningEffortSlider({
             if (level) onChange(level)
           }}
           onPointerUp={(event) => {
-            // The first stop selects its explicit effort when Default is showing there.
+            // The first stop selects its explicit effort when the current value has no stop.
             const level = levels[Number(event.currentTarget.value)]
             if (selectedIndex < 0 && level) onChange(level)
           }}
