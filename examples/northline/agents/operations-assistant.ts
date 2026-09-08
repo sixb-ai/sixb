@@ -61,6 +61,13 @@ export const lookupResponsePolicy = defineAgentTool("lookup_response_policy")
     }
   })
 
+function imageFileExtension(mediaType: string): string {
+  if (mediaType === "image/jpeg") return "jpg"
+  if (mediaType === "image/webp") return "webp"
+  if (mediaType === "image/gif") return "gif"
+  return "png"
+}
+
 const compactionDemoContext =
   process.env.NORTHLINE_AGENT_COMPACTION_DEMO === "1"
     ? {
