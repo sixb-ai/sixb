@@ -758,6 +758,105 @@ export function runAiLimitStorageContractSuite<TStorage extends AiLimitStorageCo
       })
     })
 
+    // Regression check: remove the unavailable-period refresh in the provider's status
+    // path and run this suite with --test-name-pattern "refreshes repaired cost accounting".
+    for (const initialized of [false, true]) {
+      for (const via of ["status", "admission"] as const) {
+        test(`refreshes repaired cost accounting via ${via} (initialized=${initialized})`, async () => {
+          await withStorage(async (storage) => {
+            const cost = (amountNanos: string): AiLimitQuantity => ({
+              meter: "cost.catalogEstimated",
+              amount: { currency: "USD", amountNanos },
+            })
+            const request = (callId: string, amount: string) =>
+              reservation(callId, 0, { estimates: [cost(amount)] })
+            const statuses = () =>
+              storage.aiLimits.listPolicyStatuses({
+                projectId,
+                at: at("2026-08-15T12:00:00.000Z"),
+              })
+            await storage.aiLimits.createPolicy({
+              id: "cost",
+              projectId,
+              subject: support,
+              limit: cost("1000"),
+            })
+            if (initialized) {
+              expect(
+                (await storage.aiLimits.reserveModelCall(request("active", "100"))).status
+              ).toBe("reserved")
+              expect(
+                (await storage.aiLimits.reserveModelCall(request("unknown", "200"))).status
+              ).toBe("reserved")
+              await storage.aiLimits.markReservationUnknown(request("unknown", "200"))
+            }
+            for (const id of ["missing-a", "missing-b"]) {
+              await recordUsage(storage.aiUsage, id, id, 1)
+              if (initialized) {
+                await storage.aiLimits.recordModelCallActuals({ projectId, usageRecordId: id })
+              }
+            }
+            expect((await statuses())[0]?.accountingStatus).toBe("unavailable")
+            await storage.aiCosts.recordModelCallCost(ratedCost("missing-a", "150"))
+            expect((await statuses())[0]).toMatchObject({
+              accountingStatus: "unavailable",
+              consumption: { actual: cost("150") },
+            })
+            await expect(
+              storage.aiLimits.reserveModelCall(request("still-incomplete", "1"))
+            ).resolves.toMatchObject({ status: "unavailable", reasons: ["incompleteAccounting"] })
+
+            await expect(
+              storage.transaction(async (tx) => {
+                if (!tx.aiCosts || !tx.aiLimits) throw new Error("Expected accounting storage")
+                await tx.aiCosts.recordModelCallCost(ratedCost("missing-b", "50"))
+                const [status] = await tx.aiLimits.listPolicyStatuses({
+                  projectId,
+                  at: at("2026-08-15T12:00:00.000Z"),
+                })
+                expect(status?.accountingStatus).toBe("complete")
+                throw new Error("roll back accounting repair")
+              })
+            ).rejects.toThrow("roll back accounting repair")
+            expect((await statuses())[0]?.accountingStatus).toBe("unavailable")
+
+            // Recovery appends the missing valuation, but replays an existing usage record:
+            // recordModelCallActuals must not be called again or tokens would be double-counted.
+            await storage.aiCosts.recordModelCallCost(ratedCost("missing-b", "50"))
+            if (via === "admission") {
+              await expect(
+                storage.aiLimits.reserveModelCall(request("too-large", "1001"))
+              ).resolves.toMatchObject({ status: "denied" })
+            }
+            for (let read = 0; read < 2; read++) {
+              expect((await statuses())[0]).toMatchObject({
+                accountingStatus: "complete",
+                consumption: {
+                  actual: cost("200"),
+                  reserved: cost(initialized ? "100" : "0"),
+                  unknown: cost(initialized ? "200" : "0"),
+                  remaining: cost(initialized ? "500" : "800"),
+                },
+              })
+            }
+            await recordUsage(storage.aiUsage, "next-actual", "next-actual", 1)
+            await storage.aiCosts.recordModelCallCost(ratedCost("next-actual", "50"))
+            await storage.aiLimits.recordModelCallActuals({
+              projectId,
+              usageRecordId: "next-actual",
+            })
+            const remaining = initialized ? 450 : 750
+            await expect(
+              storage.aiLimits.reserveModelCall(request("over-budget", String(remaining + 1)))
+            ).resolves.toMatchObject({ status: "denied" })
+            await expect(
+              storage.aiLimits.reserveModelCall(request("fits", String(remaining)))
+            ).resolves.toMatchObject({ status: "reserved" })
+          })
+        })
+      }
+    }
+
     test("fails cost admission closed until every applicable call is valued", async () => {
       await withStorage(async (storage) => {
         await recordUsage(storage.aiUsage, "usage-unvalued", "unvalued", 1)
@@ -1001,7 +1100,7 @@ function ratedCost(usageRecordId: string, amountNanos: string): AiModelCallCostR
       {
         meter: "tokens.input.total",
         quantity: "1",
-        rateAmountNanosPerMillion: "250000000000000",
+        rateAmountNanosPerMillion: (BigInt(amountNanos) * 1_000_000n).toString(),
         chargeAmountNanos: amountNanos,
       },
       {

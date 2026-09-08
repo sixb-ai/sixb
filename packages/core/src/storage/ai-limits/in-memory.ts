@@ -428,8 +428,15 @@ export class InMemoryAiLimitStorage implements AiLimitStorage {
     const amount = normalizeAiLimitAmount(policy.limit)
     const key = periodStateKey(policy.projectId, policy.subject, amount, period)
     const existing = this.periodStates.get(key)
-    if (existing) return existing
+    if (existing?.accountingStatus === "complete") return existing
+    // A late valuation can repair the ledger after this period was cached as unavailable.
     const actual = await this.resolvePolicyActual(policy, period, amount)
+    if (existing) {
+      existing.actual = actual.amount
+      existing.accountingStatus = actual.accountingStatus
+      existing.updatedAt = new Date()
+      return existing
+    }
     const state: AiLimitPeriodState = {
       projectId: policy.projectId,
       subject: structuredClone(policy.subject),
