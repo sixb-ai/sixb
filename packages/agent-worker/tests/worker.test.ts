@@ -119,6 +119,12 @@ const COMPACTION_USAGE: ModelUsage = {
 /** Wait for the delivery to finish its error path before stopping the test worker. */
 function observeQueueSettlement<TFailure>(queue: {
   complete(input: { projectId: string; jobId: string; leaseId: string }): Promise<void>
+  retry(input: {
+    projectId: string
+    jobId: string
+    leaseId: string
+    availableAt?: string
+  }): Promise<void>
   fail(input: {
     projectId: string
     jobId: string
@@ -128,6 +134,7 @@ function observeQueueSettlement<TFailure>(queue: {
 }) {
   const complete = queue.complete.bind(queue)
   const fail = queue.fail.bind(queue)
+  const retry = queue.retry.bind(queue)
   let completed = false
   const observer = spyOn(queue, "complete").mockImplementation(async (input) => {
     await complete(input)
@@ -137,11 +144,16 @@ function observeQueueSettlement<TFailure>(queue: {
     await fail(input)
     completed = true
   })
+  const retried = spyOn(queue, "retry").mockImplementation(async (input) => {
+    await retry(input)
+    completed = true
+  })
   return {
     wait: () => waitFor(() => Promise.resolve(completed), { label: "queue delivery completed" }),
     restore: () => {
       observer.mockRestore()
       failed.mockRestore()
+      retried.mockRestore()
     },
   }
 }
@@ -2638,6 +2650,101 @@ describe("AgentWorker", () => {
       expect(catalogCalls).toEqual(["research", "finalize"])
     } finally {
       await worker.stop()
+    }
+  })
+
+  // Regression proof: prepare the model before reserveWorkflowAgentNode; the task stays queued.
+  test.each([
+    "queued",
+    "running",
+    "taken-over",
+    "invalid-budget",
+    "removed-definition",
+  ] as const)("durably handles workflow model preparation failure from %s", async (state) => {
+    const model = trackedStructuredAnswerModel(() => {})
+    let takeoverToken: string | undefined
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      runId: `workflow-preparation-${state}`,
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    if (state === "running" || state === "taken-over") {
+      await runs.agentNodes.start({
+        projectId: PROJECT_ID,
+        nodeRunId,
+        execution: freshTestExecution(),
+      })
+    }
+    const failingModel: LanguageModel = {
+      ...model,
+      providerId: model.providerId,
+      modelId: model.modelId,
+      definition: model.definition,
+      stream: () => {
+        throw new Error("The model must not be called")
+      },
+      resolve: async () => {
+        if (state === "invalid-budget") {
+          return { ...failingModel, definition: { ...model.definition, contextWindow: 1 } }
+        }
+        if (state === "taken-over") {
+          const execution = freshTestExecution()
+          takeoverToken = execution.token
+          await runs.agentNodes.reclaim({ projectId: PROJECT_ID, nodeRunId, execution })
+        }
+        throw createSixbError("internal.unexpected", "Invalid model preparation.")
+      },
+    }
+    // Workflow-only models are prepared per task, not by the project language-catalog preflight.
+    const definition = sixb.definitions.workflows.list()[0]!
+    const definitionNode = definition.nodes[0]!
+    if (definitionNode.type !== "agent") throw new Error("Expected an agent step")
+    const lookup = spyOn(sixb.definitions.workflows, "getById").mockReturnValue(
+      state === "removed-definition"
+        ? null
+        : {
+            ...definition,
+            nodes: [
+              {
+                ...definitionNode,
+                agentStep: { ...definitionNode.agentStep, model: failingModel },
+              },
+            ],
+          }
+    )
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const completion = observeQueueSettlement(sixb.queues.agents)
+    await worker.start()
+    try {
+      await waitFor(
+        async () => {
+          const current = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return state === "taken-over" ? takeoverToken : current?.status === "failed"
+        },
+        { label: "workflow preparation failure" }
+      )
+      await completion.wait()
+      await worker.stop()
+      const task = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+      const node = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
+      const workflow = await runs.getById({
+        projectId: PROJECT_ID,
+        id: `workflow-preparation-${state}`,
+      })
+      if (state === "taken-over") {
+        expect(task).toMatchObject({ status: "running", execution: { token: takeoverToken } })
+        expect(node?.status).toBe("waiting")
+        expect(workflow?.status).toBe("waiting")
+      } else {
+        expect(task).toMatchObject({ status: "failed", attempt: state === "running" ? 2 : 1 })
+        expect(task?.execution).toBeUndefined()
+        expect(node).toMatchObject({ status: "failed", error: { code: "workflow.node_failed" } })
+        expect(workflow).toMatchObject({ status: "failed", error: node?.error })
+      }
+    } finally {
+      await worker.stop()
+      lookup.mockRestore()
+      completion.restore()
     }
   })
 
