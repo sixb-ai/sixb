@@ -9,17 +9,19 @@ and workflow Agent nodes use the same rules.
 The first release supports two aggregate meters:
 
 - `tokens.total` uses provider-reported total input and output tokens.
-- `cost.catalogEstimated` uses Sixb's pinned Models.dev pricing catalog in USD. It is an estimate,
-  not a provider invoice. Policies are fixed to USD because the built-in
-  accounting path does not perform foreign-exchange conversion.
+- `cost.catalogEstimated` reserves USD using the model integration's local rate-card estimate.
+  Recorded consumption follows the runtime's selected valuation: a provider-reported charge when
+  available, otherwise a local estimate. This is not provider-invoice reconciliation. Policies are
+  fixed to USD; accounting does not perform foreign-exchange conversion.
 
 Periods are fixed UTC calendar months. Every matching enabled policy applies independently: a call
 must fit the project policy, every snapshotted group policy, and its original user or service-account
 policy. Editing, disabling, deleting, or recreating a policy does not reset the immutable usage and
 cost ledgers.
 
-There is no user-configurable maximum-output-token setting. Sixb reserves a conservative internal
-output allowance before each call, then reconciles the reservation against actual provider usage.
+Usage-limit policies do not configure per-call output ceilings. Sixb reserves the request's
+`maxOutputTokens` when present, otherwise an internal allowance of 4,096 output tokens, then
+reconciles against observed provider usage. The allowance does not impose a generation ceiling.
 A response can exceed its reservation; Sixb records the full amount and denies later calls after the
 aggregate limit is exhausted.
 
@@ -96,9 +98,11 @@ Sixb fails closed when an enabled meter cannot be evaluated safely:
 - a provider attempt that may have been billed without usable actuals becomes `unknown` and retains
   capacity.
 
-Anthropic calls use native cache settings from the prepared messages, tools, and provider options.
-Uncached requests and standard five-minute caching need no extra accounting option. Explicit
-one-hour caching remains unsupported by the pinned pricing snapshot and blocks cost-limited calls.
+Cost admission uses `model.costEstimator.estimateReservation`. The Anthropic and Vercel Gateway
+integrations reserve using their existing rate cards, including cache-write rates and pricing tiers.
+Ordinary Anthropic calls need no separate cache-TTL accounting option; both five-minute and one-hour
+cache rates are supported. Custom models without a reservation estimator can use token limits,
+but cost-limited calls fail closed until a safe estimate is available.
 
 Denied calls use `ai.usage_limit_exceeded`; unsafe evaluation uses
 `ai.usage_limit_unavailable`. Direct HTTP requests return 429, and exhausted responses include
