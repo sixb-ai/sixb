@@ -1054,6 +1054,12 @@ export { CronValidationError } from "./schedules"
 // ── Projections ─────────────────────────────────────────────
 
 export type {
+  ActionDescriptor,
+  ActionDescriptorBinding,
+  ActionParamDescriptor,
+  ActionPhaseDescriptor,
+} from "./actions/descriptor"
+export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
   LinkProjectionTarget,
@@ -1070,7 +1076,6 @@ export type {
   TelemetryProjectionDefinition,
   TelemetryProjectionPropertyMapping,
 } from "./projections"
-
 export {
   defineProjection,
   fromForeignKey,

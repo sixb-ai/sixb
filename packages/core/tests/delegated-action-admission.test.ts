@@ -373,7 +373,7 @@ describe("delegated Action admission", () => {
     }
   })
 
-  test("keeps delegated Action metadata, runs, and polling closed before activation", async () => {
+  test("exposes inert delegated Action metadata while keeping runs and polling closed", async () => {
     const { runtimeHost, runtimeDeps } = await createFixture()
     const { runtime, scope } = createDelegatedRuntime(runtimeHost, {
       requestId: "closed-action-surfaces",
@@ -399,10 +399,16 @@ describe("delegated Action admission", () => {
 
     try {
       const actions = createActionsRuntime(runtime, scope.execution)
-      expect(actions.list()).toEqual([])
-      expect(actions.getById(approve.id)).toBeNull()
+      expect(actions.list().map((action) => action.id)).toEqual([approve.id])
+      expect(actions.getById(approve.id)?.phases.writeback).toBe(true)
+      expect(actions.getById(approve.id)?.binding).toEqual({
+        kind: "object",
+        objectTypeId: Proposal.id,
+      })
+      expect(actions.getById(reject.id)).toBeNull()
       expect(actions.listGlobal()).toEqual([])
-      expect(actions.listForType(Proposal)).toEqual([])
+      expect(actions.listForType(Proposal).map((action) => action.id)).toEqual([approve.id])
+      expect(actions.listForType(ArchivedProposal)).toEqual([])
       await expect(actions.runs.getById("guessed-run")).resolves.toBeNull()
       await expect(actions.runs.list()).resolves.toEqual({ runs: [], hasMore: false, total: 0 })
       await expect(waitForActionRun(runtime, { runId: "guessed-run" })).rejects.toThrow(
