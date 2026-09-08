@@ -4,5 +4,11 @@
   "buildCommand": "bun run build",
   "installCommand": "bun install",
   "ignoreCommand": "bun ../../scripts/docs-vercel-ignore.ts",
+  "git": {
+    "deploymentEnabled": {
+      "**": false,
+      "main": true
+    }
+  },
   "github": { "silent": true }
 }

@@ -1,5 +1,7 @@
 /**
  * Vercel's Ignored Build Step for the docs site: exit 0 to skip the build, non-zero to run it.
+ * Automatic Git deployments are limited to `main` by apps/docs/vercel.json; PR previews are
+ * disabled there before a build is created. This step filters production builds by changed paths.
  *
  * The rule this replaces diffed `HEAD^ HEAD` against `apps/docs` and `packages/ui`, but the site
  * renders `/docs` at the repo root (`apps/docs/src/docs/config.ts`). Every documentation-only
