@@ -88,6 +88,7 @@ import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
+import { SubagentCoordinator } from "../src/subagent-tools"
 import type {
   AgentExecutionContext,
   AgentWorkerContext,
@@ -4987,6 +4988,161 @@ describe("AgentWorker", () => {
       })
     } finally {
       await worker.stop()
+    }
+  })
+
+  // Regression proof: restore the reclaim in terminalizeSubagentDeliveryFailure; it steals the
+  // newer child's token when the former delivery learns that its inherited session was revoked.
+  test.each([
+    false,
+    true,
+  ])("fences a revoked child redelivery (concurrent takeover: %s)", async (takeover) => {
+    const model = answerModel()
+    const sixb = buildSixb(model, new InMemoryBroker(), new RecordingSandboxFactory(), {
+      models: { language: [model] },
+    })
+    const auth = authStorageOf(sixb)
+    const sessionId = "session-agent"
+    await auth.users.create({
+      id: REQUESTER.id,
+      projectId: PROJECT_ID,
+      email: "requester@example.com",
+    })
+    await auth.sessions.create({
+      id: sessionId,
+      projectId: PROJECT_ID,
+      userId: REQUESTER.id,
+      strategyId: "test",
+      audience: "app",
+      tokenHash: "not-used-after-admission",
+      createdAt: new Date(),
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    const grants = { ...emptyGrantIndex(), "run:agent": new Set(["main"]) }
+    const scoped = bindRequestExecution(sixb, {
+      request: new Request("https://sixb.test/api/agent-threads/thread-1/messages"),
+      authorization: {
+        type: "principal",
+        context: {
+          principal: REQUESTER,
+          sessionId,
+          groupIds: [],
+          roleIds: [],
+          grants,
+        },
+        credential: { type: "session", id: sessionId },
+      },
+    })
+    const requested = await scoped.agents.runs.request({
+      agentId: "main",
+      text: "Delegate a task.",
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    // The parent is already running elsewhere; only the child's queue delivery runs in this test.
+    const [parentJob] = await sixb.queues.agents.claim({
+      projectId: PROJECT_ID,
+      workerId: "parent",
+    })
+    if (!parentJob) throw new Error("Expected the parent job")
+    await sixb.queues.agents.complete({
+      projectId: PROJECT_ID,
+      jobId: parentJob.job.id,
+      leaseId: parentJob.leaseId,
+    })
+    const parent = requireConversationRun(
+      await storage.runs.start({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+        execution: freshTestExecution(),
+      })
+    )
+    const execution = await sixb.storage.executions.getById({
+      projectId: PROJECT_ID,
+      id: parent.executionId,
+    })
+    if (
+      !execution ||
+      execution.authorizationRef.type !== "principal" ||
+      execution.authorizationRef.credential?.type !== "session"
+    )
+      throw new Error("Expected inherited session")
+    const coordinator = new SubagentCoordinator(
+      sixb,
+      await buildAgentWorkerContext(sixb),
+      parent,
+      execution
+    )
+    const child = await coordinator.spawn(
+      { key: "review", task: "Review the result." },
+      new AbortController().signal
+    )
+    await storage.runs.start({
+      projectId: PROJECT_ID,
+      id: child.runId,
+      execution: freshTestExecution(),
+    })
+    await auth.sessions.revoke({
+      projectId: PROJECT_ID,
+      id: execution.authorizationRef.credential.id,
+      revokedAt: new Date(),
+    })
+    let takeoverToken: string | undefined
+    const getSession = auth.sessions.getById.bind(auth.sessions)
+    const workerHost = withStorage(
+      sixb,
+      new Proxy(sixb.storage, {
+        get: (target, property, receiver) =>
+          property === "auth"
+            ? {
+                ...auth,
+                sessions: {
+                  ...auth.sessions,
+                  getById: async (params: Parameters<typeof getSession>[0]) => {
+                    if (takeover && !takeoverToken) {
+                      const nextExecution = freshTestExecution()
+                      takeoverToken = nextExecution.token
+                      await storage.runs.reclaim({
+                        projectId: PROJECT_ID,
+                        id: child.runId,
+                        execution: nextExecution,
+                      })
+                    }
+                    return getSession(params)
+                  },
+                },
+              }
+            : Reflect.get(target, property, receiver),
+      })
+    )
+    const modelCalls = spyOn(model, "stream")
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    const completion = observeQueueSettlement(sixb.queues.agentChildren)
+    await worker.start()
+    try {
+      await waitFor(
+        async () => {
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })
+          return takeover ? takeoverToken : run?.status === "failed"
+        },
+        { label: "revoked child delivery" }
+      )
+      await completion.wait()
+      await worker.stop()
+      const run = await storage.runs.getById({ projectId: PROJECT_ID, id: child.runId })
+      expect(run).toMatchObject(
+        takeover
+          ? { status: "running", execution: { token: takeoverToken } }
+          : { status: "failed", attempt: 2 }
+      )
+      expect(modelCalls).not.toHaveBeenCalled()
+      expect(await storage.runs.getById({ projectId: PROJECT_ID, id: parent.id })).toMatchObject({
+        status: "running",
+      })
+    } finally {
+      await worker.stop()
+      modelCalls.mockRestore()
+      completion.restore()
     }
   })
 
