@@ -1,6 +1,6 @@
 export type { ApiClientOptions } from "./api-client"
 export { ApiClient } from "./api-client"
-export { isHelp } from "./arguments"
+export { isHelp, requestsHelp } from "./arguments"
 export type { InstanceCommand } from "./commands"
 export { INSTANCE_COMMANDS, isInstanceCommand } from "./commands"
 export { renderInstanceHelp } from "./commands/metadata"

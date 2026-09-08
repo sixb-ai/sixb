@@ -173,14 +173,55 @@ function stringField(record, key) {
   return typeof value === "string" ? value : undefined;
 }
 // ../cli-core/src/arguments.ts
+function parseCommandArgs(args, kinds, command, positionalCount = 0) {
+  const positionals = [];
+  const options = {};
+  let positionalOnly = false;
+  for (let index = 0;index < args.length; index++) {
+    const argument = args[index] ?? "";
+    if (!positionalOnly && argument === "--") {
+      positionalOnly = true;
+      continue;
+    }
+    if (positionalOnly || !argument.startsWith("-") || argument === "-") {
+      positionals.push(argument);
+      continue;
+    }
+    const equals = argument.indexOf("=");
+    const flag = equals < 0 ? argument : argument.slice(0, equals);
+    if (!Object.hasOwn(kinds, flag))
+      fail(`Unknown ${command} option '${flag}'.`);
+    if (Object.hasOwn(options, flag))
+      fail(`${flag} may only be provided once.`);
+    if (kinds[flag] === "boolean") {
+      if (equals >= 0)
+        fail(`${flag} does not accept a value.`);
+      options[flag] = true;
+    } else {
+      const value = equals < 0 ? args[++index] : argument.slice(equals + 1);
+      if (!value || equals < 0 && value.startsWith("--")) {
+        fail(`${flag} requires a value.`);
+      }
+      options[flag] = value;
+    }
+  }
+  const [minimum, maximum] = typeof positionalCount === "number" ? [positionalCount, positionalCount] : positionalCount;
+  if (positionals.length < minimum || positionals.length > maximum) {
+    fail(`Invalid arguments for '${command}'.`);
+  }
+  return {
+    positionals,
+    options
+  };
+}
+function requestsHelp(args) {
+  const separator = args.indexOf("--");
+  const beforeSeparator = separator < 0 ? args : args.slice(0, separator);
+  return isHelp(args[0]) || beforeSeparator.includes("--help") || beforeSeparator.includes("-h");
+}
 var RFC3339_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/;
 function isHelp(value) {
   return value === "-h" || value === "--help" || value === "help";
-}
-function requireValue(label, value) {
-  if (!value)
-    fail(`${label} requires a value.`);
-  return value;
 }
 function requireExact(args, count, message) {
   if (args.length !== count)
@@ -438,13 +479,13 @@ var FACETS_EXAMPLE = '{"query":{"kind":"start","objectTypeId":"WorkOrder"},"face
 // ../cli-core/src/commands/shared.ts
 import { readFile as readFile2 } from "node:fs/promises";
 function parseQueryOptions(args, names, command) {
+  const kinds = Object.fromEntries(Object.keys(names).map((flag) => [flag, "string"]));
+  const { options } = parseCommandArgs(args, kinds, command);
   const query = {};
-  for (let index = 0;index < args.length; index += 2) {
-    const flag = args[index] ?? "";
+  for (const [flag, value] of Object.entries(options)) {
     const name = names[flag];
-    if (!name)
-      fail(`Unknown ${command} option '${flag}'.`);
-    query[name] = requireOptionValue(flag, args[index + 1]);
+    if (name)
+      query[name] = value;
   }
   return query;
 }
@@ -460,12 +501,10 @@ function normalizeWindowOptions(options, policy) {
   return normalized;
 }
 function singleFileOption(args, command) {
-  if (args[0] !== "--file")
+  const { options } = parseCommandArgs(args, { "--file": "string" }, command);
+  if (!options["--file"])
     fail(`${command} requires --file <path|->.`);
-  const source = requireOptionValue("--file", args[1]);
-  if (args.length !== 2)
-    fail(`${command} accepts only --file <path|->.`);
-  return source;
+  return options["--file"];
 }
 async function readJson(source) {
   let text;
@@ -491,11 +530,6 @@ function asRecords(value) {
 function isFileError(error, code) {
   return error instanceof Error && "code" in error && error.code === code;
 }
-function requireOptionValue(label, value) {
-  if (!value)
-    fail(`${label} requires a value.`);
-  return value;
-}
 async function readStdin() {
   const chunks = [];
   for await (const chunk of process.stdin) {
@@ -507,11 +541,11 @@ async function readStdin() {
 // ../cli-core/src/commands/actions.ts
 async function actions(api, args) {
   const [sub, ...rest] = args;
-  if (!sub || isHelp(sub) || isHelp(rest[0]))
+  if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP.actions);
   if (sub === "get") {
-    requireExact(rest, 1, "actions get requires exactly one action id.");
-    return writeJson(await api.get(`/api/actions/${encodeURIComponent(rest[0] ?? "")}`));
+    const { positionals } = parseCommandArgs(rest, {}, "actions get", 1);
+    return writeJson(await api.get(`/api/actions/${encodeURIComponent(positionals[0] ?? "")}`));
   }
   if (sub === "list") {
     const options = parseQueryOptions(rest, { "--type": "objectTypeId" }, "actions list");
@@ -523,29 +557,19 @@ async function actions(api, args) {
     return writeJson(response.filter((value) => asRecord2(value).objectTypeId === options.objectTypeId));
   }
   if (sub === "request") {
-    const actionId = requireValue("actions request", rest[0]);
-    let subjectType;
-    let subjectId;
-    let paramsSource;
-    let runId;
-    let wait = false;
-    for (let index = 1;index < rest.length; index += 1) {
-      const flag = rest[index];
-      if (flag === "--subject-type")
-        subjectType = requireValue(flag, rest[++index]);
-      else if (flag === "--subject-id")
-        subjectId = requireValue(flag, rest[++index]);
-      else if (flag === "--file")
-        paramsSource = requireValue(flag, rest[++index]);
-      else if (flag === "--run-id")
-        runId = requireValue(flag, rest[++index]);
-      else if (flag === "--wait") {
-        if (wait)
-          fail("--wait may be provided only once.");
-        wait = true;
-      } else
-        fail(`Unknown actions request option '${flag}'.`);
-    }
+    const { positionals, options } = parseCommandArgs(rest, {
+      "--subject-type": "string",
+      "--subject-id": "string",
+      "--file": "string",
+      "--run-id": "string",
+      "--wait": "boolean"
+    }, "actions request", 1);
+    const actionId = positionals[0] ?? "";
+    const subjectType = options["--subject-type"];
+    const subjectId = options["--subject-id"];
+    const paramsSource = options["--file"];
+    const runId = options["--run-id"];
+    const wait = options["--wait"];
     if (Boolean(subjectType) !== Boolean(subjectId)) {
       fail("--subject-type and --subject-id must be provided together.");
     }
@@ -594,46 +618,41 @@ async function waitForActionRun(api, runId) {
 import { access } from "node:fs/promises";
 async function files(api, args) {
   const [sub, ...rest] = args;
-  if (!sub || isHelp(sub) || isHelp(rest[0]))
+  if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP.files);
   if (sub === "upload") {
-    const source = requireValue("files upload", rest[0]);
+    const { positionals, options } = parseCommandArgs(rest, { "--logical-path": "string" }, "files upload", 1);
+    const source = positionals[0] ?? "";
     try {
       await access(source);
     } catch {
       fail(`Upload file '${source}' does not exist.`);
     }
-    let logicalPath;
-    if (rest.length > 1) {
-      if (rest[1] !== "--logical-path")
-        fail(`Unknown files upload option '${rest[1]}'.`);
-      logicalPath = requireValue("--logical-path", rest[2]);
-      requireExact(rest, 3, "files upload accepts only --logical-path <path>.");
-    }
-    return writeJson(await api.upload("/api/files", source, logicalPath));
+    return writeJson(await api.upload("/api/files", source, options["--logical-path"]));
   }
   if (sub === "download") {
-    const context = requireValue("files download", rest[0]);
+    const { positionals, options } = parseCommandArgs(rest, { "--path": "string", "--output": "string" }, "files download", [2, 3]);
+    const context = positionals[0];
     let route;
-    let optionsStart;
     if (context === "object") {
-      const type = requireValue("files download object", rest[1]);
-      const id = requireValue("files download object", rest[2]);
+      requireExact(positionals, 3, "files download object requires object type and primary id.");
+      const type = positionals[1] ?? "";
+      const id = positionals[2] ?? "";
       route = `/api/objects/${encodeURIComponent(type)}/${encodeURIComponent(id)}/files/content`;
-      optionsStart = 3;
     } else if (context === "action-run" || context === "workflow-run") {
-      const id = requireValue(`files download ${context}`, rest[1]);
+      requireExact(positionals, 2, `files download ${context} requires exactly one run id.`);
+      const id = positionals[1] ?? "";
       route = `/api/${context}s/${encodeURIComponent(id)}/files/content`;
-      optionsStart = 2;
     } else
       fail(`Unknown file download context '${context}'.`);
-    const parsed = parseQueryOptions(rest.slice(optionsStart), { "--path": "path", "--output": "output" }, "files download");
-    if (!parsed.path)
+    const path = options["--path"];
+    const output = options["--output"];
+    if (!path)
       fail("files download requires --path <json-pointer>.");
-    if (!parsed.output)
+    if (!output)
       fail("files download requires --output <local-path>.");
-    await api.download(route, parsed.output, { path: parsed.path });
-    return writeJson({ downloaded: true, output: parsed.output });
+    await api.download(route, output, { path });
+    return writeJson({ downloaded: true, output });
   }
   fail(`Unknown files command '${sub}'.`);
 }
@@ -919,27 +938,20 @@ async function objects(api, args) {
   }
 }
 async function objectsInspect(api, args) {
-  if (isHelp(args[0]))
+  if (requestsHelp(args))
     return writeText(OBJECTS_HELP);
-  const objectTypeId = requireValue("objects inspect object type", args[0]);
-  const primaryId = requireValue("objects inspect primary id", args[1]);
-  let depth = CLI_LIMITS.inspect.depth.default;
-  let maxObjects = CLI_LIMITS.inspect.objects.default;
-  let maxLinks = CLI_LIMITS.inspect.links.default;
-  let full = false;
-  for (let index = 2;index < args.length; index += 1) {
-    const flag = args[index];
-    if (flag === "--full")
-      full = true;
-    else if (flag === "--depth") {
-      depth = integerInRange(flag, requireValue(flag, args[++index]), 0, CLI_LIMITS.inspect.depth.maximum);
-    } else if (flag === "--max-objects") {
-      maxObjects = integerInRange(flag, requireValue(flag, args[++index]), 1, CLI_LIMITS.inspect.objects.maximum);
-    } else if (flag === "--max-links") {
-      maxLinks = integerInRange(flag, requireValue(flag, args[++index]), 1, CLI_LIMITS.inspect.links.maximum);
-    } else
-      fail(`Unknown objects inspect option '${flag}'.`);
-  }
+  const { positionals, options } = parseCommandArgs(args, {
+    "--full": "boolean",
+    "--depth": "string",
+    "--max-objects": "string",
+    "--max-links": "string"
+  }, "objects inspect", 2);
+  const objectTypeId = positionals[0] ?? "";
+  const primaryId = positionals[1] ?? "";
+  const depth = integerInRange("--depth", options["--depth"] ?? String(CLI_LIMITS.inspect.depth.default), 0, CLI_LIMITS.inspect.depth.maximum);
+  const maxObjects = integerInRange("--max-objects", options["--max-objects"] ?? String(CLI_LIMITS.inspect.objects.default), 1, CLI_LIMITS.inspect.objects.maximum);
+  const maxLinks = integerInRange("--max-links", options["--max-links"] ?? String(CLI_LIMITS.inspect.links.default), 1, CLI_LIMITS.inspect.links.maximum);
+  const full = options["--full"] ?? false;
   writeJson(await inspectGraph(api, objectTypeId, primaryId, {
     depth,
     maxObjects,
@@ -948,7 +960,7 @@ async function objectsInspect(api, args) {
   }));
 }
 async function objectsList(api, args) {
-  if (isHelp(args[0]))
+  if (requestsHelp(args))
     return writeText(OBJECTS_HELP);
   const optionNames = {
     "--type": "objectTypeId",
@@ -988,35 +1000,41 @@ async function objectsList(api, args) {
   writeJson(await api.get("/api/objects", options));
 }
 async function objectsGet(api, args) {
-  if (isHelp(args[0]))
+  if (requestsHelp(args))
     return writeText("Usage: sixb objects get <object-type> <primary-id>...");
-  const objectTypeId = requireValue("objects get", args[0]);
-  if (args.length < 2)
-    fail("objects get requires at least one primary id.");
+  const { positionals } = parseCommandArgs(args, {}, "objects get", [2, Number.POSITIVE_INFINITY]);
+  const objectTypeId = positionals[0] ?? "";
   writeJson(await api.post("/api/objects/query", {
     query: {
       kind: "refs",
-      refs: args.slice(1).map((primaryId) => ({ objectTypeId, primaryId }))
+      refs: positionals.slice(1).map((primaryId) => ({ objectTypeId, primaryId }))
     },
     includeTotal: false
   }));
 }
 async function objectsSearch(api, args) {
-  if (isHelp(args[0])) {
+  if (requestsHelp(args)) {
     return writeText(`Usage: sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]`);
   }
-  const query = requireValue("objects search", args[0]);
-  const options = parseQueryOptions(args.slice(1), { "--limit": "limit" }, "objects search");
-  options.limit = String(integerInRange("--limit", options.limit ?? String(CLI_LIMITS.search.default), 1, CLI_LIMITS.search.maximum));
-  writeJson(await api.get("/api/objects/search", { q: query, ...options }));
+  const { positionals, options } = parseCommandArgs(args, { "--limit": "string" }, "objects search", 1);
+  const limit = String(integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.search.default), 1, CLI_LIMITS.search.maximum));
+  writeJson(await api.get("/api/objects/search", { q: positionals[0], limit }));
 }
 async function objectsQuery(api, args) {
-  if (isHelp(args[0]))
+  if (requestsHelp(args))
     return writeText(QUERY_HELP);
-  if (args[0] === "--example") {
-    if (args.length !== 2)
-      fail("objects query --example requires exactly one example name.");
-    const name = requireValue("--example", args[1]);
+  const { options } = parseCommandArgs(args, {
+    "--example": "string",
+    "--file": "string",
+    "--include-total": "boolean",
+    "--no-total": "boolean"
+  }, "objects query");
+  if (options["--include-total"] && options["--no-total"])
+    fail("--include-total and --no-total cannot be used together.");
+  if (options["--example"]) {
+    if (Object.keys(options).length !== 1)
+      fail("--example cannot be combined with query options.");
+    const name = options["--example"];
     if (name === "list")
       return writeText(Object.keys(QUERY_EXAMPLES).join(" "));
     const example = QUERY_EXAMPLES[name];
@@ -1024,19 +1042,8 @@ async function objectsQuery(api, args) {
       fail(`Unknown query example '${name}'. Run 'sixb objects query --example list'.`);
     return writeText(example);
   }
-  let source;
-  let includeTotal = false;
-  for (let index = 0;index < args.length; index += 1) {
-    const flag = args[index];
-    if (flag === "--file")
-      source = requireValue(flag, args[++index]);
-    else if (flag === "--include-total")
-      includeTotal = true;
-    else if (flag === "--no-total")
-      includeTotal = false;
-    else
-      fail(`Unknown objects query option '${flag}'.`);
-  }
+  const source = options["--file"];
+  const includeTotal = options["--include-total"] ?? false;
   if (!source)
     fail("objects query requires --file <path|->.");
   const input = await readJson(source);
@@ -1045,7 +1052,7 @@ async function objectsQuery(api, args) {
   writeJson(await api.post("/api/objects/query", body));
 }
 async function objectsScalar(api, operation, args) {
-  if (isHelp(args[0]))
+  if (requestsHelp(args))
     return writeText(`Usage: sixb objects ${operation} --file <path|->`);
   const source = singleFileOption(args, `objects ${operation}`);
   const input = await readJson(source);
@@ -1055,13 +1062,19 @@ async function objectsScalar(api, operation, args) {
   }));
 }
 async function objectsFacets(api, args) {
-  if (isHelp(args[0])) {
+  if (requestsHelp(args)) {
     return writeText(`Usage: sixb objects facets --file <path|->
        sixb objects facets --example`);
   }
-  if (args.length === 1 && args[0] === "--example")
+  const { options } = parseCommandArgs(args, { "--file": "string", "--example": "boolean" }, "objects facets");
+  if (options["--example"]) {
+    if (options["--file"])
+      fail("--example cannot be combined with --file.");
     return writeText(FACETS_EXAMPLE);
-  const body = await readJson(singleFileOption(args, "objects facets"));
+  }
+  if (!options["--file"])
+    fail("objects facets requires --file <path|->.");
+  const body = await readJson(options["--file"]);
   const record = asRecord2(body);
   if (!Object.hasOwn(record, "query") || !Object.hasOwn(record, "facets")) {
     fail("objects facets input must contain query and facets.");
@@ -1069,34 +1082,26 @@ async function objectsFacets(api, args) {
   writeJson(await api.post("/api/objects/query/facets", body));
 }
 async function objectsLinks(api, args) {
-  if (isHelp(args[0]))
+  if (requestsHelp(args))
     return writeText(OBJECTS_HELP);
-  const objectTypeId = requireValue("objects links object type", args[0]);
-  const primaryId = requireValue("objects links primary id", args[1]);
-  let linkId;
-  let direction = "both";
-  let pageSize = CLI_LIMITS.linkPage.default;
-  let pageToken;
-  let includeObjects = false;
-  for (let index = 2;index < args.length; index += 1) {
-    const flag = args[index];
-    if (flag === "--link")
-      linkId = requireValue(flag, args[++index]);
-    else if (flag === "--direction") {
-      direction = enumValue(flag, requireValue(flag, args[++index]), [
-        "outgoing",
-        "incoming",
-        "both"
-      ]);
-    } else if (flag === "--page-size") {
-      pageSize = integerInRange(flag, requireValue(flag, args[++index]), 1, CLI_LIMITS.linkPage.maximum);
-    } else if (flag === "--page-token")
-      pageToken = requireValue(flag, args[++index]);
-    else if (flag === "--include-objects")
-      includeObjects = true;
-    else
-      fail(`Unknown objects links option '${flag}'.`);
-  }
+  const { positionals, options } = parseCommandArgs(args, {
+    "--link": "string",
+    "--direction": "string",
+    "--page-size": "string",
+    "--page-token": "string",
+    "--include-objects": "boolean"
+  }, "objects links", 2);
+  const objectTypeId = positionals[0] ?? "";
+  const primaryId = positionals[1] ?? "";
+  const linkId = options["--link"];
+  const direction = enumValue("--direction", options["--direction"] ?? "both", [
+    "outgoing",
+    "incoming",
+    "both"
+  ]);
+  const pageSize = integerInRange("--page-size", options["--page-size"] ?? String(CLI_LIMITS.linkPage.default), 1, CLI_LIMITS.linkPage.maximum);
+  const pageToken = options["--page-token"];
+  const includeObjects = options["--include-objects"] ?? false;
   writeJson(await api.post("/api/objects/query/links", {
     query: { kind: "refs", refs: [{ objectTypeId, primaryId }] },
     direction,
@@ -1113,11 +1118,10 @@ async function ontology(api, args) {
   if (!sub || isHelp(sub))
     return writeText(GROUP_HELP.ontology);
   if (sub === "list") {
-    if (isHelp(rest[0]))
+    if (requestsHelp(rest))
       return writeText("Usage: sixb ontology list [--full]");
-    const full = rest.length === 1 && rest[0] === "--full";
-    if (!full && rest.length > 0)
-      fail(`Unknown ontology list option '${rest[0]}'.`);
+    const { options } = parseCommandArgs(rest, { "--full": "boolean" }, "ontology list");
+    const full = options["--full"] ?? false;
     const value = await api.get("/api/object-types");
     if (full)
       return writeJson(value);
@@ -1147,22 +1151,22 @@ async function ontology(api, args) {
     }));
   }
   if (sub === "get") {
-    if (isHelp(rest[0]))
+    if (requestsHelp(rest))
       return writeText("Usage: sixb ontology get <object-type>");
-    requireExact(rest, 1, "ontology get requires exactly one object type.");
-    return writeJson(await api.get(`/api/object-types/${encodeURIComponent(rest[0] ?? "")}`));
+    const { positionals } = parseCommandArgs(rest, {}, "ontology get", 1);
+    return writeJson(await api.get(`/api/object-types/${encodeURIComponent(positionals[0] ?? "")}`));
   }
   fail(`Unknown ontology command '${sub}'.`);
 }
 
 // ../cli-core/src/commands/project.ts
 async function project(api, args) {
-  if (!args[0] || isHelp(args[0]) || args[0] === "show" && isHelp(args[1])) {
+  if (!args[0] || isHelp(args[0]) || args[0] === "show" && requestsHelp(args.slice(1))) {
     return writeText(GROUP_HELP.project);
   }
   if (args[0] !== "show")
     fail(`Unknown project command '${args[0]}'.`);
-  requireExact(args, 1, "project show accepts no arguments.");
+  parseCommandArgs(args.slice(1), {}, "project show");
   writeJson(await api.get("/api/project"));
 }
 
@@ -1179,11 +1183,11 @@ var WORKFLOW_RUN_STATUSES = [
 async function runs(api, kind, args) {
   const [sub, ...rest] = args;
   const group = `${kind}-runs`;
-  if (!sub || isHelp(sub) || isHelp(rest[0]))
+  if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP[group]);
   if (sub === "get") {
-    requireExact(rest, 1, `${group} get requires exactly one run id.`);
-    return writeJson(await api.get(`/api/${group}/${encodeURIComponent(rest[0] ?? "")}`));
+    const { positionals } = parseCommandArgs(rest, {}, `${group} get`, 1);
+    return writeJson(await api.get(`/api/${group}/${encodeURIComponent(positionals[0] ?? "")}`));
   }
   if (sub === "list") {
     const common = {
@@ -1226,16 +1230,25 @@ async function runs(api, kind, args) {
 // ../cli-core/src/commands/telemetry.ts
 async function telemetry(api, args) {
   const [sub, ...rest] = args;
-  if (!sub || isHelp(sub) || isHelp(rest[0]))
+  if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP.telemetry);
   if (sub === "latest") {
-    requireExact(rest, 3, "telemetry latest requires object type, primary id, and property id.");
-    return writeJson(await api.get(telemetryPath(rest, "latest")));
+    const { positionals } = parseCommandArgs(rest, {}, "telemetry latest", 3);
+    return writeJson(await api.get(telemetryPath(positionals, "latest")));
   }
   if (sub === "history") {
-    if (rest.length < 3)
-      fail("telemetry history requires object type, primary id, and property id.");
-    const query = normalizeWindowOptions(parseQueryOptions(rest.slice(3), { "--from": "from", "--to": "to", "--limit": "limit", "--order": "order" }, "telemetry history"), {
+    const { positionals, options } = parseCommandArgs(rest, {
+      "--from": "string",
+      "--to": "string",
+      "--limit": "string",
+      "--order": "string"
+    }, "telemetry history", 3);
+    const query = normalizeWindowOptions({
+      from: options["--from"],
+      to: options["--to"],
+      limit: options["--limit"],
+      order: options["--order"]
+    }, {
       defaultLimit: CLI_LIMITS.telemetryHistory.default,
       maximumLimit: CLI_LIMITS.telemetryHistory.maximum,
       defaultOrder: DEFAULT_TELEMETRY_ORDER
@@ -1245,7 +1258,7 @@ async function telemetry(api, args) {
     if (query.to !== undefined)
       query.to = rfc3339Value("--to", query.to);
     requireOrderedRange("--from", query.from, "--to", query.to);
-    return writeJson(await api.get(telemetryPath(rest, "history"), query));
+    return writeJson(await api.get(telemetryPath(positionals, "history"), query));
   }
   if (sub === "query") {
     return writeJson(await api.post("/api/telemetry/history", normalizeTelemetryQueryInput(await readJson(singleFileOption(rest, "telemetry query")))));
@@ -1285,23 +1298,24 @@ function normalizeTelemetryQueryInput(input) {
 // ../cli-core/src/commands/workflows.ts
 async function workflows(api, args) {
   const [sub, ...rest] = args;
-  if (!sub || isHelp(sub) || isHelp(rest[0]))
+  if (!sub || isHelp(sub) || requestsHelp(rest))
     return writeText(GROUP_HELP.workflows);
   if (sub === "list") {
-    requireExact(rest, 0, "workflows list accepts no arguments.");
+    parseCommandArgs(rest, {}, "workflows list");
     return writeJson(await api.get("/api/workflows"));
   }
-  const workflowId = rest[0];
   if (sub === "get") {
-    requireExact(rest, 1, "workflows get requires exactly one workflow id.");
+    const {
+      positionals: [workflowId]
+    } = parseCommandArgs(rest, {}, "workflows get", 1);
     return writeJson(await api.get(`/api/workflows/${encodeURIComponent(workflowId ?? "")}`));
   }
   if (sub === "start") {
-    requireValue("workflows start", workflowId);
-    let input = {};
-    if (rest.length > 1) {
-      input = await readJson(singleFileOption(rest.slice(1), "workflows start"));
-    }
+    const {
+      positionals: [workflowId],
+      options
+    } = parseCommandArgs(rest, { "--file": "string" }, "workflows start", 1);
+    const input = options["--file"] ? await readJson(options["--file"]) : {};
     if (Array.isArray(input) || typeof input !== "object" || input === null) {
       fail("Workflow input must be a JSON object.");
     }

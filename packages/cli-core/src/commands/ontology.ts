@@ -1,5 +1,5 @@
 import type { ApiClient } from "../api-client"
-import { isHelp, requireExact } from "../arguments"
+import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { asRecord, asRecords } from "./shared"
@@ -8,9 +8,9 @@ export async function ontology(api: ApiClient, args: readonly string[]): Promise
   const [sub, ...rest] = args
   if (!sub || isHelp(sub)) return writeText(GROUP_HELP.ontology)
   if (sub === "list") {
-    if (isHelp(rest[0])) return writeText("Usage: sixb ontology list [--full]")
-    const full = rest.length === 1 && rest[0] === "--full"
-    if (!full && rest.length > 0) fail(`Unknown ontology list option '${rest[0]}'.`)
+    if (requestsHelp(rest)) return writeText("Usage: sixb ontology list [--full]")
+    const { options } = parseCommandArgs(rest, { "--full": "boolean" }, "ontology list")
+    const full = options["--full"] ?? false
     const value = await api.get("/api/object-types")
     if (full) return writeJson(value)
     if (!Array.isArray(value)) fail("The ontology API returned an invalid response.")
@@ -42,9 +42,9 @@ export async function ontology(api: ApiClient, args: readonly string[]): Promise
     )
   }
   if (sub === "get") {
-    if (isHelp(rest[0])) return writeText("Usage: sixb ontology get <object-type>")
-    requireExact(rest, 1, "ontology get requires exactly one object type.")
-    return writeJson(await api.get(`/api/object-types/${encodeURIComponent(rest[0] ?? "")}`))
+    if (requestsHelp(rest)) return writeText("Usage: sixb ontology get <object-type>")
+    const { positionals } = parseCommandArgs(rest, {}, "ontology get", 1)
+    return writeJson(await api.get(`/api/object-types/${encodeURIComponent(positionals[0] ?? "")}`))
   }
   fail(`Unknown ontology command '${sub}'.`)
 }

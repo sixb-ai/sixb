@@ -1,15 +1,15 @@
 import type { ApiClient } from "../api-client"
-import { isHelp, requireExact, requireValue } from "../arguments"
+import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { asRecord, parseQueryOptions, readJson } from "./shared"
 
 export async function actions(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
-  if (!sub || isHelp(sub) || isHelp(rest[0])) return writeText(GROUP_HELP.actions)
+  if (!sub || isHelp(sub) || requestsHelp(rest)) return writeText(GROUP_HELP.actions)
   if (sub === "get") {
-    requireExact(rest, 1, "actions get requires exactly one action id.")
-    return writeJson(await api.get(`/api/actions/${encodeURIComponent(rest[0] ?? "")}`))
+    const { positionals } = parseCommandArgs(rest, {}, "actions get", 1)
+    return writeJson(await api.get(`/api/actions/${encodeURIComponent(positionals[0] ?? "")}`))
   }
   if (sub === "list") {
     const options = parseQueryOptions(rest, { "--type": "objectTypeId" }, "actions list")
@@ -21,23 +21,24 @@ export async function actions(api: ApiClient, args: readonly string[]): Promise<
     )
   }
   if (sub === "request") {
-    const actionId = requireValue("actions request", rest[0])
-    let subjectType: string | undefined
-    let subjectId: string | undefined
-    let paramsSource: string | undefined
-    let runId: string | undefined
-    let wait = false
-    for (let index = 1; index < rest.length; index += 1) {
-      const flag = rest[index]
-      if (flag === "--subject-type") subjectType = requireValue(flag, rest[++index])
-      else if (flag === "--subject-id") subjectId = requireValue(flag, rest[++index])
-      else if (flag === "--file") paramsSource = requireValue(flag, rest[++index])
-      else if (flag === "--run-id") runId = requireValue(flag, rest[++index])
-      else if (flag === "--wait") {
-        if (wait) fail("--wait may be provided only once.")
-        wait = true
-      } else fail(`Unknown actions request option '${flag}'.`)
-    }
+    const { positionals, options } = parseCommandArgs(
+      rest,
+      {
+        "--subject-type": "string",
+        "--subject-id": "string",
+        "--file": "string",
+        "--run-id": "string",
+        "--wait": "boolean",
+      },
+      "actions request",
+      1
+    )
+    const actionId = positionals[0] ?? ""
+    const subjectType = options["--subject-type"]
+    const subjectId = options["--subject-id"]
+    const paramsSource = options["--file"]
+    const runId = options["--run-id"]
+    const wait = options["--wait"]
     if (Boolean(subjectType) !== Boolean(subjectId)) {
       fail("--subject-type and --subject-id must be provided together.")
     }

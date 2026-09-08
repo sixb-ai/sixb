@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises"
-import { enumValue, integerInRange, nonNegativeInteger } from "../arguments"
+import { enumValue, integerInRange, nonNegativeInteger, parseCommandArgs } from "../arguments"
 import { fail } from "../output"
 
 export type QueryOptions = Record<string, string | undefined>
@@ -11,12 +11,12 @@ export function parseQueryOptions(
   names: Readonly<Record<string, string>>,
   command: string
 ): QueryOptions {
+  const kinds = Object.fromEntries(Object.keys(names).map((flag) => [flag, "string" as const]))
+  const { options } = parseCommandArgs(args, kinds, command)
   const query: QueryOptions = {}
-  for (let index = 0; index < args.length; index += 2) {
-    const flag = args[index] ?? ""
+  for (const [flag, value] of Object.entries(options)) {
     const name = names[flag]
-    if (!name) fail(`Unknown ${command} option '${flag}'.`)
-    query[name] = requireOptionValue(flag, args[index + 1])
+    if (name) query[name] = value
   }
   return query
 }
@@ -49,10 +49,9 @@ export function normalizeWindowOptions(
 }
 
 export function singleFileOption(args: readonly string[], command: string): string {
-  if (args[0] !== "--file") fail(`${command} requires --file <path|->.`)
-  const source = requireOptionValue("--file", args[1])
-  if (args.length !== 2) fail(`${command} accepts only --file <path|->.`)
-  return source
+  const { options } = parseCommandArgs(args, { "--file": "string" }, command)
+  if (!options["--file"]) fail(`${command} requires --file <path|->.`)
+  return options["--file"]
 }
 
 export async function readJson(source: string): Promise<unknown> {
@@ -87,11 +86,6 @@ export function asRecords(value: unknown): Record<string, unknown>[] {
 
 export function isFileError(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === code
-}
-
-function requireOptionValue(label: string, value: string | undefined): string {
-  if (!value) fail(`${label} requires a value.`)
-  return value
 }
 
 async function readStdin(): Promise<string> {

@@ -3,8 +3,9 @@ import {
   enumValue,
   integerInRange,
   isHelp,
+  parseCommandArgs,
+  requestsHelp,
   requireOrderedRange,
-  requireValue,
   rfc3339Value,
 } from "../arguments"
 import { inspectGraph } from "../graph"
@@ -46,39 +47,39 @@ export async function objects(api: ApiClient, args: readonly string[]): Promise<
 }
 
 async function objectsInspect(api: ApiClient, args: readonly string[]): Promise<void> {
-  if (isHelp(args[0])) return writeText(OBJECTS_HELP)
-  const objectTypeId = requireValue("objects inspect object type", args[0])
-  const primaryId = requireValue("objects inspect primary id", args[1])
-  let depth: number = CLI_LIMITS.inspect.depth.default
-  let maxObjects: number = CLI_LIMITS.inspect.objects.default
-  let maxLinks: number = CLI_LIMITS.inspect.links.default
-  let full = false
-  for (let index = 2; index < args.length; index += 1) {
-    const flag = args[index]
-    if (flag === "--full") full = true
-    else if (flag === "--depth") {
-      depth = integerInRange(
-        flag,
-        requireValue(flag, args[++index]),
-        0,
-        CLI_LIMITS.inspect.depth.maximum
-      )
-    } else if (flag === "--max-objects") {
-      maxObjects = integerInRange(
-        flag,
-        requireValue(flag, args[++index]),
-        1,
-        CLI_LIMITS.inspect.objects.maximum
-      )
-    } else if (flag === "--max-links") {
-      maxLinks = integerInRange(
-        flag,
-        requireValue(flag, args[++index]),
-        1,
-        CLI_LIMITS.inspect.links.maximum
-      )
-    } else fail(`Unknown objects inspect option '${flag}'.`)
-  }
+  if (requestsHelp(args)) return writeText(OBJECTS_HELP)
+  const { positionals, options } = parseCommandArgs(
+    args,
+    {
+      "--full": "boolean",
+      "--depth": "string",
+      "--max-objects": "string",
+      "--max-links": "string",
+    },
+    "objects inspect",
+    2
+  )
+  const objectTypeId = positionals[0] ?? ""
+  const primaryId = positionals[1] ?? ""
+  const depth = integerInRange(
+    "--depth",
+    options["--depth"] ?? String(CLI_LIMITS.inspect.depth.default),
+    0,
+    CLI_LIMITS.inspect.depth.maximum
+  )
+  const maxObjects = integerInRange(
+    "--max-objects",
+    options["--max-objects"] ?? String(CLI_LIMITS.inspect.objects.default),
+    1,
+    CLI_LIMITS.inspect.objects.maximum
+  )
+  const maxLinks = integerInRange(
+    "--max-links",
+    options["--max-links"] ?? String(CLI_LIMITS.inspect.links.default),
+    1,
+    CLI_LIMITS.inspect.links.maximum
+  )
+  const full = options["--full"] ?? false
   writeJson(
     await inspectGraph(api, objectTypeId, primaryId, {
       depth,
@@ -90,7 +91,7 @@ async function objectsInspect(api: ApiClient, args: readonly string[]): Promise<
 }
 
 async function objectsList(api: ApiClient, args: readonly string[]): Promise<void> {
-  if (isHelp(args[0])) return writeText(OBJECTS_HELP)
+  if (requestsHelp(args)) return writeText(OBJECTS_HELP)
   const optionNames: Record<string, string> = {
     "--type": "objectTypeId",
     "--limit": "limit",
@@ -139,14 +140,14 @@ async function objectsList(api: ApiClient, args: readonly string[]): Promise<voi
 }
 
 async function objectsGet(api: ApiClient, args: readonly string[]): Promise<void> {
-  if (isHelp(args[0])) return writeText("Usage: sixb objects get <object-type> <primary-id>...")
-  const objectTypeId = requireValue("objects get", args[0])
-  if (args.length < 2) fail("objects get requires at least one primary id.")
+  if (requestsHelp(args)) return writeText("Usage: sixb objects get <object-type> <primary-id>...")
+  const { positionals } = parseCommandArgs(args, {}, "objects get", [2, Number.POSITIVE_INFINITY])
+  const objectTypeId = positionals[0] ?? ""
   writeJson(
     await api.post("/api/objects/query", {
       query: {
         kind: "refs",
-        refs: args.slice(1).map((primaryId) => ({ objectTypeId, primaryId })),
+        refs: positionals.slice(1).map((primaryId) => ({ objectTypeId, primaryId })),
       },
       includeTotal: false,
     })
@@ -154,41 +155,50 @@ async function objectsGet(api: ApiClient, args: readonly string[]): Promise<void
 }
 
 async function objectsSearch(api: ApiClient, args: readonly string[]): Promise<void> {
-  if (isHelp(args[0])) {
+  if (requestsHelp(args)) {
     return writeText(`Usage: sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]`)
   }
-  const query = requireValue("objects search", args[0])
-  const options = parseQueryOptions(args.slice(1), { "--limit": "limit" }, "objects search")
-  options.limit = String(
+  const { positionals, options } = parseCommandArgs(
+    args,
+    { "--limit": "string" },
+    "objects search",
+    1
+  )
+  const limit = String(
     integerInRange(
       "--limit",
-      options.limit ?? String(CLI_LIMITS.search.default),
+      options["--limit"] ?? String(CLI_LIMITS.search.default),
       1,
       CLI_LIMITS.search.maximum
     )
   )
-  writeJson(await api.get("/api/objects/search", { q: query, ...options }))
+  writeJson(await api.get("/api/objects/search", { q: positionals[0], limit }))
 }
 
 async function objectsQuery(api: ApiClient, args: readonly string[]): Promise<void> {
-  if (isHelp(args[0])) return writeText(QUERY_HELP)
-  if (args[0] === "--example") {
-    if (args.length !== 2) fail("objects query --example requires exactly one example name.")
-    const name = requireValue("--example", args[1])
+  if (requestsHelp(args)) return writeText(QUERY_HELP)
+  const { options } = parseCommandArgs(
+    args,
+    {
+      "--example": "string",
+      "--file": "string",
+      "--include-total": "boolean",
+      "--no-total": "boolean",
+    },
+    "objects query"
+  )
+  if (options["--include-total"] && options["--no-total"])
+    fail("--include-total and --no-total cannot be used together.")
+  if (options["--example"]) {
+    if (Object.keys(options).length !== 1) fail("--example cannot be combined with query options.")
+    const name = options["--example"]
     if (name === "list") return writeText(Object.keys(QUERY_EXAMPLES).join(" "))
     const example = QUERY_EXAMPLES[name]
     if (!example) fail(`Unknown query example '${name}'. Run 'sixb objects query --example list'.`)
     return writeText(example)
   }
-  let source: string | undefined
-  let includeTotal = false
-  for (let index = 0; index < args.length; index += 1) {
-    const flag = args[index]
-    if (flag === "--file") source = requireValue(flag, args[++index])
-    else if (flag === "--include-total") includeTotal = true
-    else if (flag === "--no-total") includeTotal = false
-    else fail(`Unknown objects query option '${flag}'.`)
-  }
+  const source = options["--file"]
+  const includeTotal = options["--include-total"] ?? false
   if (!source) fail("objects query requires --file <path|->.")
   const input = await readJson(source)
   const record = asRecord(input)
@@ -203,7 +213,7 @@ async function objectsScalar(
   operation: "count" | "exists",
   args: readonly string[]
 ): Promise<void> {
-  if (isHelp(args[0])) return writeText(`Usage: sixb objects ${operation} --file <path|->`)
+  if (requestsHelp(args)) return writeText(`Usage: sixb objects ${operation} --file <path|->`)
   const source = singleFileOption(args, `objects ${operation}`)
   const input = await readJson(source)
   const record = asRecord(input)
@@ -215,13 +225,22 @@ async function objectsScalar(
 }
 
 async function objectsFacets(api: ApiClient, args: readonly string[]): Promise<void> {
-  if (isHelp(args[0])) {
+  if (requestsHelp(args)) {
     return writeText(
       "Usage: sixb objects facets --file <path|->\n       sixb objects facets --example"
     )
   }
-  if (args.length === 1 && args[0] === "--example") return writeText(FACETS_EXAMPLE)
-  const body = await readJson(singleFileOption(args, "objects facets"))
+  const { options } = parseCommandArgs(
+    args,
+    { "--file": "string", "--example": "boolean" },
+    "objects facets"
+  )
+  if (options["--example"]) {
+    if (options["--file"]) fail("--example cannot be combined with --file.")
+    return writeText(FACETS_EXAMPLE)
+  }
+  if (!options["--file"]) fail("objects facets requires --file <path|->.")
+  const body = await readJson(options["--file"])
   const record = asRecord(body)
   if (!Object.hasOwn(record, "query") || !Object.hasOwn(record, "facets")) {
     fail("objects facets input must contain query and facets.")
@@ -230,34 +249,35 @@ async function objectsFacets(api: ApiClient, args: readonly string[]): Promise<v
 }
 
 async function objectsLinks(api: ApiClient, args: readonly string[]): Promise<void> {
-  if (isHelp(args[0])) return writeText(OBJECTS_HELP)
-  const objectTypeId = requireValue("objects links object type", args[0])
-  const primaryId = requireValue("objects links primary id", args[1])
-  let linkId: string | undefined
-  let direction: "outgoing" | "incoming" | "both" = "both"
-  let pageSize: number = CLI_LIMITS.linkPage.default
-  let pageToken: string | undefined
-  let includeObjects = false
-  for (let index = 2; index < args.length; index += 1) {
-    const flag = args[index]
-    if (flag === "--link") linkId = requireValue(flag, args[++index])
-    else if (flag === "--direction") {
-      direction = enumValue(flag, requireValue(flag, args[++index]), [
-        "outgoing",
-        "incoming",
-        "both",
-      ])
-    } else if (flag === "--page-size") {
-      pageSize = integerInRange(
-        flag,
-        requireValue(flag, args[++index]),
-        1,
-        CLI_LIMITS.linkPage.maximum
-      )
-    } else if (flag === "--page-token") pageToken = requireValue(flag, args[++index])
-    else if (flag === "--include-objects") includeObjects = true
-    else fail(`Unknown objects links option '${flag}'.`)
-  }
+  if (requestsHelp(args)) return writeText(OBJECTS_HELP)
+  const { positionals, options } = parseCommandArgs(
+    args,
+    {
+      "--link": "string",
+      "--direction": "string",
+      "--page-size": "string",
+      "--page-token": "string",
+      "--include-objects": "boolean",
+    },
+    "objects links",
+    2
+  )
+  const objectTypeId = positionals[0] ?? ""
+  const primaryId = positionals[1] ?? ""
+  const linkId = options["--link"]
+  const direction = enumValue("--direction", options["--direction"] ?? "both", [
+    "outgoing",
+    "incoming",
+    "both",
+  ])
+  const pageSize = integerInRange(
+    "--page-size",
+    options["--page-size"] ?? String(CLI_LIMITS.linkPage.default),
+    1,
+    CLI_LIMITS.linkPage.maximum
+  )
+  const pageToken = options["--page-token"]
+  const includeObjects = options["--include-objects"] ?? false
   writeJson(
     await api.post("/api/objects/query/links", {
       query: { kind: "refs", refs: [{ objectTypeId, primaryId }] },
