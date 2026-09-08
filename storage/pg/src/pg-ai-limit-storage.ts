@@ -391,7 +391,8 @@ export class PgAiLimitStorage implements AiLimitStorage {
         AND currency = ${limit.currency}
         AND period_start = ${period.start}
     `
-    if (!row) {
+    // Re-read incomplete accounting under the project lock; retain in-flight estimates.
+    if (!row || row.accounting_status === "unavailable") {
       const actual = resolveAiLimitActual(await this.accountingEntries(sql, policy, period), limit)
       const [inserted] = await sql<AiLimitPeriodStateRow[]>`
         INSERT INTO ai_usage_limit_periods (
@@ -402,6 +403,11 @@ export class PgAiLimitStorage implements AiLimitStorage {
           ${period.start}, ${period.end}, ${actual.amount.toString()}, 0, 0,
           ${actual.accountingStatus}, ${new Date()}
         )
+        ON CONFLICT (project_id, subject_type, subject_id, meter, currency, period_start)
+        DO UPDATE SET
+          actual_amount = excluded.actual_amount,
+          accounting_status = excluded.accounting_status,
+          updated_at = excluded.updated_at
         RETURNING actual_amount, reserved_amount, unknown_amount, accounting_status
       `
       row = inserted

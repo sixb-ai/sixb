@@ -411,12 +411,13 @@ export class SqliteAiLimitStorage implements AiLimitStorage {
         limit.currency,
         period.start.toISOString()
       ) as AiLimitPeriodStateRow | null
-    if (!row) {
+    // Re-read incomplete accounting inside the transaction; retain in-flight estimates.
+    if (!row || row.accounting_status === "unavailable") {
       const actual = resolveAiLimitActual(this.accountingEntries(policy, period), limit)
       row = {
         actual_amount: actual.amount.toString(),
-        reserved_amount: "0",
-        unknown_amount: "0",
+        reserved_amount: row?.reserved_amount ?? "0",
+        unknown_amount: row?.unknown_amount ?? "0",
         accounting_status: actual.accountingStatus,
       }
       this.connection.db
@@ -426,6 +427,11 @@ export class SqliteAiLimitStorage implements AiLimitStorage {
               project_id, subject_type, subject_id, meter, currency, period_start, period_end,
               actual_amount, reserved_amount, unknown_amount, accounting_status, updated_at
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '0', '0', ?, ?)
+            ON CONFLICT (project_id, subject_type, subject_id, meter, currency, period_start)
+            DO UPDATE SET
+              actual_amount = excluded.actual_amount,
+              accounting_status = excluded.accounting_status,
+              updated_at = excluded.updated_at
           `
         )
         .run(
