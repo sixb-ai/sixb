@@ -52,6 +52,51 @@ function startProjectServer(
 }
 
 describe("sixb profile commands", () => {
+  // Regression proof: this test sends an action with the stack's original parser.
+  test("validates instance options before dispatch and serves help without a profile", async () => {
+    const env = await tempConfigEnvironment()
+    const { server, authorizationHeaders } = startProjectServer()
+    const apiUrl = `http://127.0.0.1:${server.port}`
+    const invalid = await runCliToCompletion({
+      cmd: [
+        "bun",
+        cliEntry,
+        "actions",
+        "request",
+        "example",
+        "--api-url",
+        apiUrl,
+        "--run-id",
+        "a",
+        "--run-id",
+        "b",
+      ],
+      cwd: repoRoot,
+      env,
+    })
+    expect(invalid.exitCode).toBe(2)
+    expect(JSON.parse(invalid.stderr).error.code).toBe("invalid_arguments")
+    expect(authorizationHeaders).toEqual([])
+    const help = await runCliToCompletion({
+      cmd: [
+        "bun",
+        cliEntry,
+        "objects",
+        "get",
+        "Customer",
+        "alice",
+        "--profile",
+        "missing",
+        "--help",
+      ],
+      cwd: repoRoot,
+      env,
+    })
+    assertCliSucceeded(help)
+    expect(help.stdout).toContain("Usage:")
+    expect(help.stderr).toBe("")
+  })
+
   test("imports a token, stores a profile, and dispatches instance commands", async () => {
     const env = await tempConfigEnvironment()
     const { server, authorizationHeaders } = startProjectServer({ token: "secret-token" })
