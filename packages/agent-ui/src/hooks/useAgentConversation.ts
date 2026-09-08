@@ -15,7 +15,7 @@ import {
   retryAgentRunMutation,
   useAgentActivityStream,
 } from "@sixb/client/hooks"
-import type { ModelReasoningLevel } from "@sixb/core/models"
+import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import {
@@ -56,15 +56,7 @@ const THREAD_LIST_QUERY = {
 }
 
 const MODEL_PREFERENCE_KEY = "sixb.agent-ui.model-preference"
-const REASONING_LEVELS = new Set<string>([
-  "provider-default",
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-])
+const REASONING_LEVELS = new Set<string>(MODEL_REASONING_LEVELS)
 
 export interface UseAgentConversationInput {
   readonly threadId: string | null
