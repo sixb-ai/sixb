@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test"
 import { runModelLoop } from "../src/agents/model-loop"
 import type {
   LanguageModelStreamEvent,
+  ModelAssistantPart,
   ModelCallEndEvent,
   ModelMessage,
   ModelTool,
   ModelUiChunk,
+  ProviderData,
 } from "../src/models"
 import { ModelStreamError, rateModelCall, StructuredOutputError } from "../src/models"
 import { MockLanguageModel, streamFromArray } from "./helpers/models"
@@ -74,6 +76,206 @@ const echo: ModelTool<{ value: string }> = {
 }
 
 describe("runModelLoop", () => {
+  test("normalizes metadata before completed steps, partial traces, and continuation requests", async () => {
+    // Regression proof: return data unchanged in captureProviderData; undefined metadata then
+    // either fails ingestion or survives the strict equality checks below.
+    const metadata = {
+      test: { signature: "signed", absent: undefined, nested: [{ absent: undefined }] },
+    }
+    const providerData = metadata as unknown as ProviderData
+    const normalized = { test: { signature: "signed", nested: [{}] } }
+    const events: LanguageModelStreamEvent[] = [
+      { type: "stream-start" },
+      { type: "reasoning-start", id: "reasoning", providerData },
+      { type: "reasoning-delta", id: "reasoning", delta: "thinking" },
+      {
+        type: "reasoning-end",
+        id: "reasoning",
+        providerData: { end: { absent: undefined } } as unknown as ProviderData,
+      },
+      { type: "text-start", id: "text", providerData },
+      { type: "text-delta", id: "text", delta: "answer" },
+      { type: "text-end", id: "text" },
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "search",
+        input: "{}",
+        providerExecuted: true,
+        providerData,
+      },
+      {
+        type: "tool-result",
+        toolCallId: "call-1",
+        toolName: "search",
+        output: "found",
+        providerExecuted: true,
+        providerData,
+      },
+    ]
+    const expected: ModelAssistantPart[] = [
+      { type: "reasoning", text: "thinking", providerData: { ...normalized, end: {} } },
+      { type: "text", text: "answer", providerData: normalized },
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "search",
+        input: {},
+        providerExecuted: true,
+        providerData: normalized,
+      },
+      {
+        type: "tool-result",
+        toolCallId: "call-1",
+        toolName: "search",
+        output: { type: "text", value: "found" },
+        providerExecuted: true,
+        providerData: normalized,
+      },
+    ]
+    for (const interrupted of [false, true]) {
+      const requests: ModelMessage[][] = []
+      const abort = new AbortController()
+      const model = new MockLanguageModel({
+        stream: async (request) => {
+          requests.push([...request.messages])
+          return {
+            events: (async function* () {
+              if (requests.length > 1) {
+                yield { type: "stream-start" } as const
+                yield finish()
+                return
+              }
+              yield* events
+              if (interrupted) {
+                abort.abort()
+                throw new DOMException("Cancelled", "AbortError")
+              }
+              yield finish("pause")
+            })(),
+          }
+        },
+      })
+      const result = await runModelLoop({ model, messages: [], maxSteps: 2, signal: abort.signal })
+      if (interrupted) {
+        expect(result.status).toBe("aborted")
+        if (result.status !== "aborted") throw new Error("Expected interruption")
+        expect(result.partialContent).toStrictEqual(expected)
+      } else {
+        expect(result.status).toBe("completed")
+        expect(result.steps[0]?.content).toStrictEqual(expected)
+        expect(requests[1]).toStrictEqual([{ role: "assistant", content: expected }])
+      }
+    }
+    expect(Object.hasOwn(metadata.test, "absent")).toBe(true)
+    expect(Object.hasOwn(metadata.test.nested[0]!, "absent")).toBe(true)
+  })
+
+  test("rejects malformed provider payloads after accounting and excludes them from partial traces", async () => {
+    // Regression proof: remove assertJsonValue from captureJsonValue/normalizeProviderData;
+    // malformed results or replay state then reach completed and partial model content.
+    const cycle: Record<string, unknown> = {}
+    cycle.self = cycle
+    const invalid = [new Date("2026-09-08T00:00:00Z"), 1n, NaN, [undefined], cycle]
+    const malformed: LanguageModelStreamEvent[] = [
+      ...invalid.flatMap((value) => [
+        { type: "provider-state", providerId: "test", data: value },
+        { type: "tool-result", toolCallId: "call-1", toolName: "search", output: value },
+        { type: "text-start", id: "text", providerData: { test: value } },
+      ]),
+      { type: "provider-state", providerId: "", data: {} },
+      ...[null, [], "invalid", { [Symbol("invalid")]: true }].map((providerData) => ({
+        type: "text-start",
+        id: "text",
+        providerData,
+      })),
+      { type: "provider-state", providerId: "test", data: { absent: undefined } },
+      {
+        type: "tool-result",
+        toolCallId: "call-1",
+        toolName: "search",
+        output: { absent: undefined },
+      },
+    ] as unknown as LanguageModelStreamEvent[]
+    for (const event of malformed) {
+      for (const interrupted of [false, true]) {
+        const calls: ModelCallEndEvent[] = []
+        const abort = new AbortController()
+        const model = new MockLanguageModel({
+          stream: async () => ({
+            events: (async function* () {
+              yield { type: "stream-start" } as const
+              yield event
+              if (event.type === "text-start") yield { type: "text-end", id: "text" } as const
+              if (interrupted) {
+                abort.abort()
+                throw new DOMException("Cancelled", "AbortError")
+              }
+              yield finish()
+            })(),
+          }),
+        })
+        const result = runModelLoop({
+          model,
+          messages: [],
+          maxSteps: 1,
+          signal: abort.signal,
+          onModelCallEnd: (call) => {
+            calls.push(call)
+          },
+        })
+        if (interrupted) {
+          const partial = await result
+          expect(partial.status).toBe("aborted")
+          if (partial.status !== "aborted") throw new Error("Expected interruption")
+          expect(partial.partialContent).toEqual([])
+        } else {
+          await expect(result).rejects.toThrow()
+          expect(calls[0]?.usage).toEqual(USAGE)
+        }
+        expect(calls).toHaveLength(1)
+      }
+    }
+  })
+
+  test("keeps non-JSON local tool outputs and projections out of model steps", async () => {
+    // Regression proof: remove the tool-output or model-output JSON assertion in executeToolCall;
+    // the invalid value then appears as a successful result instead of a recoverable tool error.
+    for (const stage of ["execute", "projection"] as const) {
+      const result = await runModelLoop({
+        model: modelFromCalls([
+          [
+            { type: "stream-start" },
+            { type: "tool-call", toolCallId: "call-1", toolName: "echo", input: '{"value":"ok"}' },
+            finish("tool-calls"),
+          ],
+          [{ type: "stream-start" }, finish()],
+        ]),
+        tools: [
+          {
+            ...echo,
+            execute: async () => (stage === "execute" ? { absent: undefined } : "valid") as never,
+            toModelOutput: () =>
+              (stage === "projection"
+                ? { type: "json", value: { absent: undefined } }
+                : { type: "text", value: "valid" }) as never,
+            errorText: () => "Invalid tool output",
+          },
+        ],
+        messages: [],
+        maxSteps: 2,
+        signal: new AbortController().signal,
+      })
+      expect(result.status).toBe("completed")
+      expect(result.steps[0]?.content[1]).toStrictEqual({
+        type: "tool-result",
+        toolCallId: "call-1",
+        toolName: "echo",
+        output: { type: "error-text", value: "Invalid tool output" },
+      })
+    }
+  })
+
   // Regression proof: remove the finishReason guard before structured-output parsing.
   test.each([
     "length",

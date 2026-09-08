@@ -7,8 +7,8 @@ import {
   noopLogger,
   stringEnum,
 } from "@sixb/core"
-import { runModelLoop } from "@sixb/core/internal/agents"
-import type { ModelStep, ModelUsage } from "@sixb/core/models"
+import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
+import type { ModelAssistantPart, ModelStep, ModelUsage, ProviderData } from "@sixb/core/models"
 import {
   agentToolErrorText,
   agentTraceFromModelSteps,
@@ -30,6 +30,16 @@ const toolRuntime = {
   toolResultToModelOutput() {
     return { type: "text" as const, value: "unused" }
   },
+}
+
+function modelStep(content: readonly ModelAssistantPart[]): ModelStep {
+  return {
+    responseId: "response-1",
+    finishReason: "stop",
+    usage: {},
+    cost: { status: "unpriceable", reason: "missing-rate-card" },
+    content,
+  }
 }
 
 describe("owned model adapters", () => {
@@ -266,6 +276,119 @@ describe("owned model adapters", () => {
         errorText: "Tool execution was cancelled.",
       },
     ])
+  })
+
+  test("preserves normalized metadata, signed replay state, and original tool output", () => {
+    // Regression proof: drop originalOutput or providerData from trace projection.
+    const normalized = { anthropic: { signature: "signed", caller: { toolName: "search" } } }
+    const providerData: ProviderData = normalized
+    const content: ModelAssistantPart[] = [
+      { type: "reasoning", text: "think", providerData },
+      { type: "text", text: "searching", providerData },
+      { type: "provider-state", providerId: "anthropic", data: { id: "opaque" } },
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "tool-search",
+        input: {},
+        dynamic: true,
+        providerExecuted: true,
+        providerData,
+      },
+      {
+        type: "tool-result",
+        toolCallId: "call-1",
+        toolName: "tool-search",
+        output: { type: "text", value: "projected for model" },
+        originalOutput: { hits: 2 },
+      },
+    ]
+    const trace = agentTraceFromModelSteps([modelStep(content)])
+    expect(trace).toStrictEqual([
+      { type: "step-start" },
+      { type: "reasoning", text: "think", providerMetadata: normalized },
+      { type: "text", text: "searching", providerMetadata: normalized },
+      { type: "provider-state", providerId: "anthropic", data: { id: "opaque" } },
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "tool-search",
+        input: {},
+        dynamic: true,
+        providerExecuted: true,
+        providerMetadata: normalized,
+        state: "output-available",
+        output: { hits: 2 },
+      },
+    ])
+    expect(toModelMessages([{ role: "assistant", parts: trace }])).toEqual([
+      {
+        role: "assistant",
+        content: [
+          { type: "reasoning", text: "think", providerData: normalized },
+          { type: "text", text: "searching", providerData: normalized },
+          content[2],
+          {
+            type: "tool-call",
+            toolCallId: "call-1",
+            toolName: "tool-search",
+            input: {},
+            providerExecuted: true,
+            providerData: normalized,
+          },
+          {
+            type: "tool-result",
+            toolCallId: "call-1",
+            toolName: "tool-search",
+            output: { type: "json", value: { hits: 2 } },
+          },
+        ],
+      },
+    ])
+  })
+
+  test("preserves terminal tool errors and distinguishes missing results from cancellation", () => {
+    // Regression proof: use the completed-step fallback for partial content; cancellation changes.
+    const call = {
+      type: "tool-call",
+      toolCallId: "call-1",
+      toolName: "search",
+      input: null,
+    } as const
+    const step = modelStep([
+      call,
+      {
+        type: "tool-result",
+        toolCallId: "call-1",
+        toolName: "search",
+        output: { type: "error-json", value: { error: "unavailable" } },
+      },
+    ])
+    expect(agentTraceFromPartialModelLoop([step], [call])).toEqual([
+      { type: "step-start" },
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "search",
+        input: null,
+        state: "output-error",
+        errorText: '{"error":"unavailable"}',
+      },
+      { type: "step-start" },
+      {
+        type: "tool-call",
+        toolCallId: "call-1",
+        toolName: "search",
+        input: null,
+        state: "output-error",
+        errorText: "Tool execution was cancelled.",
+      },
+    ])
+    expect(agentTraceFromModelSteps([modelStep([call])])[1]).toMatchObject({
+      state: "output-error",
+      errorText: "Tool call did not produce a result.",
+    })
+    expect(agentTraceFromPartialModelLoop([step], [])).toEqual(agentTraceFromModelSteps([step]))
   })
 
   test("preserves every available provider-neutral usage count", () => {

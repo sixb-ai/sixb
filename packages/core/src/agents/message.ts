@@ -10,9 +10,8 @@ import type { AgentContextPart } from "./context"
  * column) versions the parts shape so it can be migrated.
  *
  * The part union is intentionally focused on what agent runs actually produce (text, reasoning, step
- * boundaries, tool calls). It is extensible: adding a part kind later is non-breaking. The adapter
- * `fromUiMessage` is total — it throws on any part it cannot model rather than dropping it silently,
- * which both prevents data loss and signals exactly when the union must grow.
+ * boundaries, tool calls). The model loop validates and normalizes output before its steps are
+ * projected into this union; storage validates the durable write contract independently.
  */
 export const AGENT_MESSAGE_CONTENT_VERSION = 2 as const
 
@@ -53,7 +52,7 @@ interface AgentToolCallBase {
   readonly type: "tool-call"
   readonly toolCallId: string
   readonly toolName: string
-  /** `true` when reconstructed from a dynamic tool part (vs a static `tool-${name}` part). */
+  /** `true` when the model identifies the call as a dynamic tool. */
   readonly dynamic?: boolean
   /** `true` when the provider executed the tool inline (steers model projection). */
   readonly providerExecuted?: boolean
@@ -95,6 +94,6 @@ export type AgentToolCallState = AgentToolCallPart["state"]
 export interface AgentMessage {
   readonly role: AgentMessageRole
   readonly parts: readonly AgentMessagePart[]
-  /** Message-level metadata (mirrors `UIMessage.metadata`). */
+  /** Optional JSON metadata associated with the message. */
   readonly metadata?: JsonValue
 }

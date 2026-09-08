@@ -1,8 +1,7 @@
+import type { JsonObject } from "../json"
 import { OntologyValidationError } from "./errors"
 import { isObjectRefSchema, type SchemaOrRef } from "./refs"
 import type { Schema, ValueType } from "./types"
-
-export type SchemaJsonSchema = Readonly<Record<string, unknown>>
 
 export interface SchemaJsonField {
   readonly schema: SchemaOrRef
@@ -14,7 +13,7 @@ export interface SchemaJsonField {
 export function schemaRecordToJsonSchema(input: {
   readonly shape: Readonly<Record<string, SchemaOrRef>>
   readonly valueTypesById: ReadonlyMap<string, ValueType>
-}): SchemaJsonSchema {
+}): JsonObject {
   return schemaFieldsToJsonSchema({
     fields: Object.fromEntries(
       Object.entries(input.shape).map(([field, schema]) => [field, { schema, required: true }])
@@ -27,7 +26,7 @@ export function schemaRecordToJsonSchema(input: {
 export function schemaFieldsToJsonSchema(input: {
   readonly fields: Readonly<Record<string, SchemaJsonField>>
   readonly valueTypesById: ReadonlyMap<string, ValueType>
-}): SchemaJsonSchema {
+}): JsonObject {
   const required = Object.entries(input.fields)
     .filter(([, field]) => field.required === true)
     .map(([field]) => field)
@@ -48,7 +47,7 @@ function schemaOrRefJsonSchema(
   schema: SchemaOrRef,
   valueTypesById: ReadonlyMap<string, ValueType>,
   resolving: ReadonlySet<string>
-): SchemaJsonSchema {
+): JsonObject {
   if (isObjectRefSchema(schema)) {
     return {
       type: "object",
@@ -67,7 +66,7 @@ function schemaJsonSchema(
   schema: Schema,
   valueTypesById: ReadonlyMap<string, ValueType>,
   resolving: ReadonlySet<string>
-): SchemaJsonSchema {
+): JsonObject {
   if (typeof schema === "string") {
     switch (schema) {
       case "string":
@@ -103,7 +102,7 @@ function schemaJsonSchema(
     }
   }
 
-  if (schema.type === "enum") return { enum: schema.values }
+  if (schema.type === "enum") return { enum: [...schema.values] }
   if (schema.type === "array") {
     return { type: "array", items: schemaJsonSchema(schema.items, valueTypesById, resolving) }
   }

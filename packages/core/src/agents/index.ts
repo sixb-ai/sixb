@@ -1,28 +1,10 @@
 export type {
   AgentFileDataProjection,
   AgentFileDataResolverInput,
-  AgentInboundUiMessage,
-  AgentInboundUiMessagePart,
-  AgentModelAssistantPart,
-  AgentModelFilePart,
-  AgentModelMessage,
-  AgentModelReasoningPart,
-  AgentModelTextPart,
-  AgentModelToolCallPart,
-  AgentModelToolOutput,
-  AgentModelToolResultPart,
   AgentToolResultFileResolverInput,
-  AgentUiMessage,
-  AgentUiMessagePart,
-  AgentUiToolPart,
   ToModelMessagesOptions,
 } from "./adapters"
-export {
-  fromUiMessage,
-  omitUndefinedObjectProperties,
-  toModelMessages,
-  toUiMessage,
-} from "./adapters"
+export { toModelMessages } from "./adapters"
 export type { AgentApiGatewayCapabilityInput, AgentApiRoute } from "./api-gateway"
 export {
   AGENT_API_GATEWAY_PREFIX,
@@ -85,7 +67,6 @@ export {
 } from "./dispatch"
 export {
   AgentDefinitionError,
-  AgentMessageAdapterError,
   AgentRequestError,
   type AgentRequestErrorCode,
   AgentToolPublicError,
