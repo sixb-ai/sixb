@@ -1,4 +1,7 @@
-import { findObjectQueryStructureIssue } from "@sixb/core/internal/query"
+import {
+  findObjectQueryStructureIssue,
+  type ObjectQueryStructureIssue,
+} from "@sixb/core/internal/query"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "./request-body"
 
 /** Hard transport ceiling for object-query control payloads. */
@@ -6,6 +9,13 @@ export const OBJECT_QUERY_REQUEST_BODY_LIMIT_BYTES = 1024 * 1024
 
 class InvalidObjectQueryRequestBodyError extends Error {
   readonly name = "InvalidObjectQueryRequestBodyError"
+
+  constructor(
+    message: string,
+    readonly issues?: readonly ObjectQueryStructureIssue[]
+  ) {
+    super(message)
+  }
 }
 
 /** Parse and structurally bound an object-query request before Elysia reaches recursive Zod. */
@@ -23,14 +33,16 @@ export async function parseBoundedObjectQueryBody(context: {
   if (!isRecord(body)) return body
 
   const found = findObjectQueryStructureIssue(body.query)
-  if (found) throw invalid(`${found.message}.`)
+  if (found) {
+    throw new InvalidObjectQueryRequestBodyError(`[SixbServer] ${found.message}.`, [found])
+  }
   return body
 }
 
 export function mapObjectQueryRequestParseError(context: {
   readonly error: unknown
   readonly set: { status?: number | string }
-}): { error: string } | undefined {
+}): { error: string; issues?: readonly ObjectQueryStructureIssue[] } | undefined {
   const tooLarge = findCause(context.error, RequestBodyTooLargeError)
   if (tooLarge) {
     context.set.status = 413
@@ -40,7 +52,10 @@ export function mapObjectQueryRequestParseError(context: {
   const invalidBody = findCause(context.error, InvalidObjectQueryRequestBodyError)
   if (invalidBody) {
     context.set.status = 400
-    return { error: invalidBody.message }
+    return {
+      error: invalidBody.message,
+      ...(invalidBody.issues === undefined ? {} : { issues: invalidBody.issues }),
+    }
   }
 
   return undefined

@@ -17,6 +17,8 @@ const queryPaths = [
 ] as const
 
 describe("object query request admission", () => {
+  // Regression check: omit issues in mapObjectQueryRequestParseError's response.
+  // The structural rejection tests below must fail while their HTTP status stays 400.
   test("rejects recursive query structure on all five query routes before Zod", async () => {
     const app = createObjectRoutesApp()
     let query: unknown = { kind: "start", objectTypeId: "Thing" }
@@ -29,6 +31,13 @@ describe("object query request admission", () => {
       expect(response.status, path).toBe(400)
       expect(await response.json(), path).toEqual({
         error: `[SixbServer] Object query exceeds the maximum structural depth of ${OBJECT_QUERY_STRUCTURE_LIMITS.maxDepth}.`,
+        issues: [
+          {
+            path: `$${".input".repeat(OBJECT_QUERY_STRUCTURE_LIMITS.maxDepth + 1)}`,
+            code: "query_depth_exceeded",
+            message: `Object query exceeds the maximum structural depth of ${OBJECT_QUERY_STRUCTURE_LIMITS.maxDepth}`,
+          },
+        ],
       })
     }
   })
@@ -49,6 +58,13 @@ describe("object query request admission", () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
       error: `[SixbServer] Object query exceeds the maximum of ${OBJECT_QUERY_STRUCTURE_LIMITS.maxArrayEntries} array entries.`,
+      issues: [
+        {
+          path: "$.refs",
+          code: "query_array_entries_exceeded",
+          message: `Object query exceeds the maximum of ${OBJECT_QUERY_STRUCTURE_LIMITS.maxArrayEntries} array entries`,
+        },
+      ],
     })
   })
 
@@ -70,6 +86,13 @@ describe("object query request admission", () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
       error: `[SixbServer] Object query JSON values exceed the maximum depth of ${OBJECT_QUERY_STRUCTURE_LIMITS.maxJsonValueDepth}.`,
+      issues: [
+        {
+          path: `$.predicate.value${"[0]".repeat(OBJECT_QUERY_STRUCTURE_LIMITS.maxJsonValueDepth + 1)}`,
+          code: "query_json_value_depth_exceeded",
+          message: `Object query JSON values exceed the maximum depth of ${OBJECT_QUERY_STRUCTURE_LIMITS.maxJsonValueDepth}`,
+        },
+      ],
     })
   })
 
@@ -91,6 +114,13 @@ describe("object query request admission", () => {
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({
       error: `[SixbServer] Object query exceeds the maximum structural depth of ${OBJECT_QUERY_STRUCTURE_LIMITS.maxDepth}.`,
+      issues: [
+        {
+          path: `$.predicate${".item".repeat(OBJECT_QUERY_STRUCTURE_LIMITS.maxDepth)}`,
+          code: "query_depth_exceeded",
+          message: `Object query exceeds the maximum structural depth of ${OBJECT_QUERY_STRUCTURE_LIMITS.maxDepth}`,
+        },
+      ],
     })
   })
 
