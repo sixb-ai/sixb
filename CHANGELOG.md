@@ -2,6 +2,51 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-09 — Framework 0.1.7
+
+### Highlights
+
+- Move language-model inference into the Sixb runtime, add a project model catalog, and introduce
+  the first-party `@sixb/anthropic` and `@sixb/vercel-ai-gateway` providers.
+- Replace static agent definitions with one project Agent, add first-class conversations and
+  workflow Agent steps, and persist the execution state needed for durable child tasks.
+- Add aggregate monthly AI usage limits for projects, groups, users, and service accounts, with
+  reservation, reconciliation, authorization, server APIs, and Atlas management views.
+- Add per-turn model and reasoning controls to Agent UI, with provider branding and preserved user
+  preferences.
+- Add shared remote-instance commands through `@sixb/cli-core`, CLI profiles, and browser-approved
+  device authorization for authenticated instances.
+- Keep object file URLs fresh after replacement, refine Atlas workspace navigation and collections,
+  and fix LinkedIn UGC analytics list serialization.
+
+### Upgrade notes
+
+- Apply bundled SQLite or PostgreSQL migrations 029–034 before or during deployment. They extend
+  model-call accounting, add AI usage-limit state and durable child runs, retire stored static Agent
+  identities, and add CLI device authorizations. Validate them on a backup first; this pre-1.0
+  release has no database downgrade path.
+- Replace `defineAgent` and `createSixb({ agents })` with project `models` and `tools`, move reusable
+  instructions from `agents/` into `skills/`, and use `sixb.agent` or `GET /api/agent`. Existing
+  conversation history is preserved without its former Agent identity.
+- Configure at least one language-model binding for Agent conversations. The new Anthropic and
+  Vercel AI Gateway packages read their normal provider credentials lazily; custom integrations
+  must provide safe cost-reservation estimates before cost-based usage limits can admit calls.
+- Conversational delegation tools remain temporarily disabled. Workflow Agent steps continue to use
+  the durable Agent-task execution path.
+- Deploy `@sixb/core`, its exact worker and storage consumers, and `@sixb/cli` as one coordinated
+  release on `0.1.7`.
+
+### Package versions
+
+- `0.1.7`: `@sixb/core`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/cli`, `@sixb/client`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/server`, `@sixb/sqlite`, `@sixb/sync-worker`, and
+  `@sixb/workflow-worker`.
+- `0.1.6`: `@sixb/agent-ui` and `@sixb/atlas`.
+- `0.1.4`: `@sixb/cli-core` and `@sixb/connector-linkedin`.
+- `0.1.3`: `@sixb/queues-bullmq`.
+- `0.1.1`: `@sixb/anthropic` and `@sixb/vercel-ai-gateway`.
+
 ## 2026-09-07 — Framework 0.1.6
 
 ### Highlights
