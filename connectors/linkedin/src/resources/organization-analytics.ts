@@ -77,15 +77,13 @@ export function createOrganizationAnalyticsResource(
       query?.posts?.forEach((post) => {
         urnPath(post, "post URN")
       })
-      const params: Record<string, QueryParams[string]> = {
+      const params: QueryParams = {
         q: "organizationalEntity",
         organizationalEntity: organization,
         timeIntervals: query?.timeIntervals ? restliTimeIntervals(query.timeIntervals) : undefined,
         shares: shares?.length ? restliList(shares) : undefined,
+        ugcPosts: ugcPosts?.length ? restliList(ugcPosts) : undefined,
       }
-      ugcPosts?.forEach((post, index) => {
-        params[`ugcPosts[${index}]`] = post
-      })
       return rows<LinkedinOrganizationShareStatistic>(
         http,
         withQuery("organizationalEntityShareStatistics", params)

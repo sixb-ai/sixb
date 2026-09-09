@@ -14,9 +14,8 @@ afterEach(() => {
 })
 
 describe("linkedin community analytics", () => {
-  test("serializes organization follower, page, share, and video analytics", async () => {
+  test("serializes organization follower, page, and video analytics", async () => {
     const organization = organizationUrn(123)
-    const share = shareUrn(456)
     const ugcPost = ugcPostUrn(789)
     // Regression guard: these 202608-shaped fixtures must satisfy the public wire types.
     const followerStatistic = {
@@ -47,7 +46,6 @@ describe("linkedin community analytics", () => {
     const calls = recorder([
       json({ elements: [followerStatistic] }),
       json({ elements: [pageStatistic] }),
-      json({ elements: [{ organizationalEntity: organization, totalShareStatistics: {} }] }),
       json({ elements: [{ entity: ugcPost, value: 100 }] }),
     ])
     const client = await createTestClient()
@@ -57,7 +55,6 @@ describe("linkedin community analytics", () => {
       timeGranularityType: "DAY",
     })
     const pages = await client.organizationAnalytics.pages(organization)
-    await client.organizationAnalytics.shares(organization, { posts: [share, ugcPost] })
     await client.organizationAnalytics.video({
       entity: ugcPost,
       type: "TIME_WATCHED_FOR_VIDEO_VIEWS",
@@ -69,12 +66,10 @@ describe("linkedin community analytics", () => {
       "(timeRange:(start:1700000000000,end:1700086400000),timeGranularityType:DAY)"
     )
     expect(new URL(calls[1]?.url ?? "").searchParams.get("q")).toBe("organization")
-    expect(new URL(calls[2]?.url ?? "").searchParams.get("shares")).toBe(`List(${share})`)
-    expect(new URL(calls[2]?.url ?? "").searchParams.get("ugcPosts[0]")).toBe(ugcPost)
-    expect(new URL(calls[3]?.url ?? "").searchParams.get("type")).toBe(
+    expect(new URL(calls[2]?.url ?? "").searchParams.get("type")).toBe(
       "TIME_WATCHED_FOR_VIDEO_VIEWS"
     )
-    expect(new URL(calls[3]?.url ?? "").searchParams.get("timeRange")).toBe(
+    expect(new URL(calls[2]?.url ?? "").searchParams.get("timeRange")).toBe(
       "(start:1700000000000,end:1700086400000)"
     )
     expect(followers[0]?.followerGains?.organicFollowerGain).toBe(223)
@@ -85,6 +80,87 @@ describe("linkedin community analytics", () => {
     expect(pages[0]?.pageStatisticsByIndustryV2?.[0]?.pageStatistics.views?.allPageViews).toEqual({
       pageViews: 6,
     })
+  })
+
+  // Regression guard: restore indexed ugcPosts parameters to reproduce the rejected wire shape.
+  test("serializes UGC posts as a Rest.li list", async () => {
+    const organization = organizationUrn(123)
+    const firstPost = ugcPostUrn(789)
+    const secondPost = ugcPostUrn(790)
+    const calls = recorder([json({ elements: [] })])
+    const client = await createTestClient()
+
+    await client.organizationAnalytics.shares(organization, {
+      posts: [firstPost, secondPost],
+    })
+
+    const url = calls[0]?.url ?? ""
+    expect(url).toContain("ugcPosts=List(urn%3Ali%3AugcPost%3A789,urn%3Ali%3AugcPost%3A790)")
+    expect(url).not.toContain("ugcPosts%5B0%5D")
+    expect(new URL(url).searchParams.get("ugcPosts")).toBe(`List(${firstPost},${secondPost})`)
+  })
+
+  test("serializes shares as a Rest.li list", async () => {
+    const organization = organizationUrn(123)
+    const firstShare = shareUrn(456)
+    const secondShare = shareUrn(457)
+    const calls = recorder([json({ elements: [] })])
+    const client = await createTestClient()
+
+    await client.organizationAnalytics.shares(organization, {
+      posts: [firstShare, secondShare],
+    })
+
+    const url = calls[0]?.url ?? ""
+    expect(url).toContain("shares=List(urn%3Ali%3Ashare%3A456,urn%3Ali%3Ashare%3A457)")
+    expect(url).not.toContain("shares=List%28")
+  })
+
+  test("serializes mixed share and UGC post batches independently", async () => {
+    const organization = organizationUrn(123)
+    const share = shareUrn(456)
+    const ugcPost = ugcPostUrn(789)
+    const calls = recorder([json({ elements: [] })])
+    const client = await createTestClient()
+
+    await client.organizationAnalytics.shares(organization, { posts: [share, ugcPost] })
+
+    const url = calls[0]?.url ?? ""
+    expect(url).toContain("shares=List(urn%3Ali%3Ashare%3A456)")
+    expect(url).toContain("ugcPosts=List(urn%3Ali%3AugcPost%3A789)")
+  })
+
+  test("omits Rest.li post lists when no posts are requested", async () => {
+    const calls = recorder([json({ elements: [] })])
+    const client = await createTestClient()
+
+    await client.organizationAnalytics.shares(organizationUrn(123), { posts: [] })
+
+    const params = new URL(calls[0]?.url ?? "").searchParams
+    expect(params.has("shares")).toBe(false)
+    expect(params.has("ugcPosts")).toBe(false)
+  })
+
+  test("preserves Rest.li post lists through query tunneling", async () => {
+    const share = shareUrn(456)
+    const ugcPosts = Array.from({ length: 100 }, (_, index) =>
+      ugcPostUrn(`700000000000000${String(index).padStart(4, "0")}`)
+    )
+    const calls = recorder([json({ elements: [] })])
+    const client = await createTestClient()
+
+    await client.organizationAnalytics.shares(organizationUrn(123), {
+      posts: [share, ...ugcPosts],
+    })
+
+    const body = calls[0]?.body ?? ""
+    const serializedUgcPosts = ugcPosts.map((post) => encodeURIComponent(post)).join(",")
+    expect(calls[0]?.method).toBe("POST")
+    expect(calls[0]?.headers.get("x-http-method-override")).toBe("GET")
+    expect(body).toContain("shares=List(urn%3Ali%3Ashare%3A456)")
+    expect(body).toContain(`ugcPosts=List(${serializedUgcPosts})`)
+    expect(body).not.toContain("List%28")
+    expect(body).not.toContain("ugcPosts%5B0%5D")
   })
 
   test("serializes authenticated-member follower, post, and video analytics", async () => {
