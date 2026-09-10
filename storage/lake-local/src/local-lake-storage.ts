@@ -5,6 +5,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  realpath,
   rename,
   rm,
   stat,
@@ -33,6 +34,7 @@ import {
   encodeDatasetPrimaryKey,
   getDatasetMergeChangeValidationError,
   getDatasetPrimaryKeyColumns,
+  LakeConcurrencyError,
   type LakeMergeSession,
   type LakeStorage,
   LakeStorageError,
@@ -40,6 +42,7 @@ import {
   mergeStrictDatasetDefinition,
   type ReadDatasetRowsInput,
   reconcileDatasetSequences,
+  retryDatasetMergeCommit,
 } from "@sixb/core/lake-storage"
 import type {
   CommitMergeInput,
@@ -181,13 +184,17 @@ class LocalLakeMergeSession implements LakeMergeSession {
     this.closed = true
 
     try {
-      return await this.storage.commitMerge({
-        merge: this.input,
-        commit: input,
-        baseVersionId: this.baseVersionId,
-        sessionDir: this.sessionDir,
-        tempRowsPath: this.tempRowsPath,
-      })
+      return await retryDatasetMergeCommit(this.input, input, async (rebase) =>
+        this.storage.commitMerge({
+          merge: this.input,
+          commit: input,
+          baseVersionId: rebase
+            ? ((await this.storage.getLatestVersion(this.input.dataset.id))?.versionId ?? null)
+            : this.baseVersionId,
+          sessionDir: this.sessionDir,
+          tempRowsPath: this.tempRowsPath,
+        })
+      )
     } catch (error) {
       await this.cleanup()
       throw error
@@ -377,7 +384,7 @@ export class LocalLakeStorage implements LakeStorage {
       input.expectedLatestVersionId !== undefined &&
       latestVersion?.versionId !== input.expectedLatestVersionId
     ) {
-      throw new LakeStorageError(
+      throw new LakeConcurrencyError(
         `[LakeLocal] Optimistic merge start failed for dataset '${definition.id}': expected latest version '${input.expectedLatestVersionId}', found '${latestVersion?.versionId ?? "none"}'`
       )
     }
@@ -467,6 +474,7 @@ export class LocalLakeStorage implements LakeStorage {
 
   async commitMerge(options: CommitMergeInput): Promise<DatasetMergeCommitResult> {
     return this.withDatasetCommitLock(options.merge.dataset.id, async () => {
+      options.commit?.signal?.throwIfAborted()
       const definition = await this.getDataset(options.merge.dataset.id)
       if (!definition) {
         throw new LakeStorageError(`[LakeLocal] Unknown dataset '${options.merge.dataset.id}'`)
@@ -476,7 +484,7 @@ export class LocalLakeStorage implements LakeStorage {
       const latestVersion = await this.getLatestVersion(options.merge.dataset.id)
       const actualVersionId = latestVersion?.versionId ?? null
       if (actualVersionId !== options.baseVersionId) {
-        throw new LakeStorageError(
+        throw new LakeConcurrencyError(
           `[LakeLocal] Optimistic merge commit failed for dataset '${options.merge.dataset.id}': expected latest version '${options.baseVersionId ?? "none"}', found '${actualVersionId ?? "none"}'`
         )
       }
@@ -562,6 +570,7 @@ export class LocalLakeStorage implements LakeStorage {
           }),
           ...(ordered ? { sequences: [...ordered.states] } : {}),
         })
+        options.commit?.signal?.throwIfAborted()
         await writeJsonAtomic(this.statePath(options.merge.dataset.id), {
           latestVersionId: versionId,
         })
@@ -773,7 +782,8 @@ export class LocalLakeStorage implements LakeStorage {
   }
 
   private async withDatasetCommitLock<T>(datasetId: string, run: () => Promise<T>): Promise<T> {
-    return withLocalDatasetCommitLock(`${this.rootPath}\u0000${datasetId}`, run)
+    const root = await realpath(this.rootPath)
+    return withLocalDatasetCommitLock(`${root}\u0000${datasetId}`, run)
   }
 
   private async ensureBaseDirs(): Promise<void> {

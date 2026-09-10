@@ -1,4 +1,5 @@
 import type { DatasetDefinition, MergeChange } from "../datasets"
+import { LakeConcurrencyError } from "./errors"
 import type { DatasetProducer, DatasetRow, DatasetVersion, DatasetVersionRef } from "./types"
 
 export interface BeginDatasetMergeInput {
@@ -12,6 +13,38 @@ export interface BeginDatasetMergeInput {
 
 export interface CommitDatasetMergeInput {
   readonly commitMessage?: string
+  /** Retry sequenced merges up to three times total; ignored when an explicit version guard is set. */
+  readonly retryOnConflict?: boolean
+  /** Checked before each attempt; a durable commit is never cancelled retroactively. */
+  readonly signal?: AbortSignal
+}
+
+/** Providers retain their staging session throughout this bounded commit loop. */
+export async function retryDatasetMergeCommit(
+  merge: BeginDatasetMergeInput,
+  commit: CommitDatasetMergeInput | undefined,
+  run: (rebase: boolean) => Promise<DatasetMergeCommitResult>
+): Promise<DatasetMergeCommitResult> {
+  const attempts =
+    commit?.retryOnConflict &&
+    merge.dataset.sequenceBy !== undefined &&
+    merge.expectedLatestVersionId === undefined
+      ? 3
+      : 1
+  for (let attempt = 0; ; attempt += 1) {
+    commit?.signal?.throwIfAborted()
+    try {
+      return await run(attempt > 0)
+    } catch (error) {
+      if (!(error instanceof LakeConcurrencyError) || attempts === 1) throw error
+      if (attempt + 1 === attempts) {
+        throw new LakeConcurrencyError(
+          `[SixbLake] Dataset '${merge.dataset.id}' merge exhausted ${attempts} concurrency attempts. No changes from this operation were committed.`,
+          { cause: error }
+        )
+      }
+    }
+  }
 }
 
 /**
@@ -32,7 +65,7 @@ export interface LakeMergeSession {
       | Iterable<MergeChange<DatasetRow, DatasetRow>>
       | AsyncIterable<MergeChange<DatasetRow, DatasetRow>>
   ): Promise<void>
-  /** Commit only if the latest version still matches the version captured when the session began. */
+  /** Commit against the captured version; opt-in retries rebase sequenced changes on a fresh head. */
   commit(input?: CommitDatasetMergeInput): Promise<DatasetMergeCommitResult>
   abort(): Promise<void>
 }

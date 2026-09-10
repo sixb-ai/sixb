@@ -2,13 +2,14 @@ import { randomUUID } from "node:crypto"
 import type { DatasetDefinition, DatasetSchema, MergeChange } from "../datasets"
 import { getDatasetRowValidationError } from "../datasets/validation"
 import { mergeStrictDatasetDefinition } from "./definition-updates"
-import { LakeStorageError } from "./errors"
+import { LakeConcurrencyError, LakeStorageError } from "./errors"
 import type {
   BeginDatasetMergeInput,
   CommitDatasetMergeInput,
   DatasetMergeCommitResult,
   LakeMergeSession,
 } from "./merge"
+import { retryDatasetMergeCommit } from "./merge"
 import {
   cloneDatasetMergeChange,
   encodeDatasetPrimaryKey,
@@ -183,12 +184,16 @@ class InMemoryLakeMergeSession implements LakeMergeSession {
   async commit(input?: CommitDatasetMergeInput): Promise<DatasetMergeCommitResult> {
     this.assertOpen()
     this.closed = true
-    return this.storage.commitMerge({
-      merge: this.input,
-      baseVersionId: this.baseVersionId,
-      changes: this.changes,
-      commit: input,
-    })
+    return retryDatasetMergeCommit(this.input, input, async (rebase) =>
+      this.storage.commitMerge({
+        merge: this.input,
+        baseVersionId: rebase
+          ? ((await this.storage.getLatestVersion(this.input.dataset.id))?.versionId ?? null)
+          : this.baseVersionId,
+        changes: this.changes,
+        commit: input,
+      })
+    )
   }
 
   async abort(): Promise<void> {
@@ -326,7 +331,7 @@ export class InMemoryLakeStorage implements LakeStorage {
       input.expectedLatestVersionId !== undefined &&
       latestVersion?.versionId !== input.expectedLatestVersionId
     ) {
-      throw new LakeStorageError(
+      throw new LakeConcurrencyError(
         `[LakeStorage] Optimistic merge start failed for dataset '${definition.id}': expected latest version '${input.expectedLatestVersionId}', found '${latestVersion?.versionId ?? "none"}'`
       )
     }
@@ -406,9 +411,10 @@ export class InMemoryLakeStorage implements LakeStorage {
       }
 
       const latestVersion = await this.getLatestVersion(options.merge.dataset.id)
+      options.commit?.signal?.throwIfAborted()
       const actualVersionId = latestVersion?.versionId ?? null
       if (actualVersionId !== options.baseVersionId) {
-        throw new LakeStorageError(
+        throw new LakeConcurrencyError(
           `[LakeStorage] Optimistic merge commit failed for dataset '${options.merge.dataset.id}': expected latest version '${options.baseVersionId ?? "none"}', found '${actualVersionId ?? "none"}'`
         )
       }

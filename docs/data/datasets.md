@@ -116,7 +116,9 @@ absent keys; new deletion state creates a version without requiring a visible ro
 
 #### V1 constraints
 
-- **Merge writes only.** Snapshot, append, and SQL-transform writes to sequenced datasets are rejected.
+- **Snapshot syncs reconcile.** Returned rows become ordered upserts; omitted keys stay. Deletion requires a sequenced delete.
+- **Bounded retries.** Sequenced writes retry known concurrency conflicts up to 3 total attempts, reusing staged changes without re-fetching. Explicit version guards stay strict.
+- **Provider writes use merges.** Direct snapshot/append sessions and SQL-transform writes to sequenced datasets are rejected.
 - **Immutable configuration.** Create a new dataset and backfill to adopt or change `sequenceBy`.
 - **Explicit derivation.** Derived datasets must declare their own `sequenceBy` and primary key.
 

@@ -84,6 +84,32 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
         )
       }))
 
+    test("rebases retained changes while preserving explicit version guards", () =>
+      withStorage(async (storage) => {
+        // Regression proof: disable retryOnConflict in retryDatasetMergeCommit; the second commit fails.
+        const first = await storage.beginMerge({ dataset })
+        const second = await storage.beginMerge({ dataset })
+        await first.writeChanges([upsert(8)])
+        await second.writeChanges([upsert(7, "stale"), upsert(1, "other", "other")])
+        const initial = await first.commit({ retryOnConflict: true })
+        await second.commit({ retryOnConflict: true })
+        expect((await rows(storage)).map((row) => row.name).sort()).toEqual(["Sam", "other"])
+        const guarded = await storage.beginMerge({
+          dataset,
+          expectedLatestVersionId: (await storage.getLatestVersion(dataset.id))?.versionId,
+        })
+        await guarded.writeChanges([upsert(10)])
+        await merge(storage, [change.delete({ id: "42" }, { sequence: 9 })])
+        await expect(guarded.commit({ retryOnConflict: true })).rejects.toThrow("Optimistic")
+        await guarded.abort()
+        const staleDelete = await storage.beginMerge({ dataset })
+        await staleDelete.writeChanges([change.delete({ id: "42" }, { sequence: 9 })])
+        await merge(storage, [upsert(10)])
+        expect((await staleDelete.commit({ retryOnConflict: true })).outcome).toBe("unchanged")
+        expect((await storage.getLatestVersion(dataset.id))?.versionId).not.toBe(
+          initial.version?.versionId
+        )
+      }))
     // Regression proof: bypass reconcileDatasetSequences at the provider commit boundary.
     // The stale-write, conflict, and deletion assertions below must then fail.
     test("orders repeated keys exactly and conflicts atomically", () =>

@@ -60,7 +60,8 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
   await lakeStorage.createDataset(dataset)
   try {
     throwIfAborted(signal)
-    if (input.mode === "merge") {
+    const reconcileSnapshot = dataset.sequenceBy !== undefined && input.mode === "snapshot"
+    if (input.mode === "merge" || reconcileSnapshot) {
       const session = await lakeStorage.beginMerge({
         dataset,
         expectedLatestVersionId: input.expectedLatestVersionId,
@@ -74,12 +75,19 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
         validatedValues(
           input,
           values,
-          (value, itemIndex) => validateMergeChange(value, input, itemIndex),
+          async (value, itemIndex) =>
+            reconcileSnapshot
+              ? { kind: "upsert" as const, row: await validateRow(value, input, itemIndex) }
+              : validateMergeChange(value, input, itemIndex),
           onRead
         )
       )
       throwIfAborted(signal)
-      const result = await session.commit({ commitMessage: input.commitMessage })
+      const result = await session.commit({
+        commitMessage: input.commitMessage,
+        retryOnConflict: dataset.sequenceBy !== undefined,
+        signal,
+      })
       return { ...result, rowsRead }
     }
 

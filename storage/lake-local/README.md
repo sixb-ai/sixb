@@ -105,7 +105,14 @@ For datasets declaring `sequenceBy`, newer source revisions win; older changes a
 conflicting ties abort the merge. Deletes require `change.delete(key, { sequence })`. Each version
 manifest retains source revisions and deletion tombstones, published atomically with the version's
 rows through the dataset head pointer. New tombstones create a version even for absent keys.
-Sequenced datasets currently require merge writes. See [source ordering](../../docs/data/datasets.md#source-ordering).
+Sequenced provider writes use merge sessions; snapshot syncs convert rows to ordered upserts.
+Use `commit({ retryOnConflict: true })` to rebase retained changes, with at most 3 attempts.
+Explicit `expectedLatestVersionId` guards are never relaxed.
+See [source ordering](../../docs/data/datasets.md#source-ordering).
+
+Concurrent commits are serialized across instances in **one process**, including symlinked paths.
+Multiple writer processes sharing a LocalLake directory are not supported; use a DuckLake
+PostgreSQL catalog for cross-process writers.
 
 Application authors normally use `defineSync(..., { mode: "merge" })`; the sync worker executes the
 same provider contract and advances its source checkpoint only after commit succeeds.

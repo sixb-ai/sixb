@@ -18,7 +18,7 @@ export {
   mergeStrictDatasetDefinition,
   planDatasetDefinitionUpdate,
 } from "./definition-updates"
-export { LakeStorageError } from "./errors"
+export { LakeConcurrencyError, LakeStorageError } from "./errors"
 export { InMemoryLakeStorage } from "./in-memory"
 export type {
   BeginDatasetMergeInput,
@@ -26,6 +26,7 @@ export type {
   DatasetMergeCommitResult,
   LakeMergeSession,
 } from "./merge"
+export { retryDatasetMergeCommit } from "./merge"
 export {
   cloneDatasetMergeChange,
   encodeDatasetPrimaryKey,
