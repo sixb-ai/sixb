@@ -9,6 +9,7 @@ export {
   type CustomAuthExperienceBuildResult,
   createCustomApp,
 } from "./createCustomApp"
+export { devReloadResponse } from "./dev-reload"
 export type { AppMetadata } from "./metadata"
 export {
   createTailwindCssCompiler,

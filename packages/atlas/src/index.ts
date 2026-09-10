@@ -1,4 +1,5 @@
 import { join } from "node:path"
+import { devReloadResponse } from "@sixb/app"
 import {
   type AuthSessionAudience,
   DEFAULT_AUTH_SESSION_AUDIENCE,
@@ -125,6 +126,7 @@ async function startDevelopmentServer(
     },
     routes: {
       ...reservedSixbRoutes(),
+      "/__sixb/dev-reload.js": getHeadRoute(devReloadResponse),
       "/__sixb/runtime.json": getHeadRoute((request) => runtimeConfigResponse(request, input)),
       "/favicon.svg": getHeadRoute((request) => fileResponse(request, faviconPath)),
       "/favicon.ico": getHeadRoute(() => new Response(null, { status: 204 })),
