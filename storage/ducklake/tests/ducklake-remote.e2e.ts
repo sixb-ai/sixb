@@ -9,6 +9,89 @@ import { type DuckDbSecretOptions, DuckLakeStorage, type DuckLakeStorageOptions 
 import { collectRows } from "./test-utils"
 
 describe("DuckLakeStorage remote catalogs", () => {
+  // Regression proof: remove the DuckLake snapshot-CAS error classification; one child fails COMMIT.
+  for (const scenario of ["different keys", "same key", "existing key", "deletion"] as const)
+    test(`rebases source changes across processes: ${scenario}`, async () => {
+      const rootDir = await mkdtemp(join(tmpdir(), "sixb-source-processes-"))
+      const dataset = defineDataset(`source.processes.${randomId()}`, {
+        schema: [col("id", "string"), col("revision", "int64")],
+        primaryKey: "id",
+        sequenceBy: "revision",
+      })
+      const options: DuckLakeStorageOptions = {
+        catalog: postgresCatalog(),
+        dataPath: join(rootDir, "data"),
+      }
+      const storage = new DuckLakeStorage(options)
+      await storage.createDataset(dataset)
+      if (scenario === "existing key" || scenario === "deletion") {
+        const seed = await storage.beginMerge({ dataset })
+        await seed.writeChanges([change.upsert({ id: "42", revision: 7 })])
+        await seed.commit()
+      }
+      const children = [
+        [change.upsert({ id: "42", revision: 8 })],
+        scenario === "deletion"
+          ? [change.delete({ id: "42" }, { sequence: 9 })]
+          : [change.upsert({ id: scenario === "different keys" ? "other" : "42", revision: 9 })],
+      ].map((changes) => {
+        let resolveReady!: () => void
+        let rejectReady!: (error: Error) => void
+        const ready = new Promise<void>((resolve, reject) => {
+          resolveReady = resolve
+          rejectReady = reject
+        })
+        const process = Bun.spawn(
+          [
+            Bun.argv[0],
+            join(import.meta.dir, "fixtures/concurrent-source-merge.ts"),
+            JSON.stringify(options),
+            JSON.stringify(dataset),
+            JSON.stringify(changes),
+          ],
+          {
+            stdout: "ignore",
+            stderr: "pipe",
+            timeout: 30_000,
+            ipc(message) {
+              if (
+                typeof message === "object" &&
+                message !== null &&
+                "type" in message &&
+                message.type === "ready"
+              )
+                resolveReady()
+            },
+          }
+        )
+        const stderrText = new Response(process.stderr).text()
+        const finished = process.exited.then(async (code) => {
+          const stderr = await stderrText
+          // Rejecting an already-resolved readiness promise has no effect.
+          rejectReady(new Error(stderr || `child exited ${code} before reaching COMMIT`))
+          return { code, stderr }
+        })
+        return { process, ready, finished }
+      })
+      try {
+        // Both transactions reach COMMIT from the same base in independent Bun processes.
+        await Promise.all(children.map((child) => child.ready))
+        for (const child of children) child.process.send("commit")
+        for (const child of children) {
+          const { code, stderr } = await child.finished
+          if (code !== 0) throw new Error(stderr)
+        }
+        const rows = await collectRows(storage.readRows({ datasetId: dataset.id }))
+        if (scenario === "different keys")
+          expect(rows.map((row) => row.id).sort()).toEqual(["42", "other"])
+        else expect(rows).toEqual(scenario === "deletion" ? [] : [{ id: "42", revision: "9" }])
+      } finally {
+        for (const child of children) child.process.kill()
+        await Promise.all(children.map((child) => child.finished))
+        await storage.close()
+        await rm(rootDir, { recursive: true, force: true })
+      }
+    }, 40_000)
   test("uses a PostgreSQL catalog with a local data path", async () => {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-local-"))
     const dataset = defineDataset(`raw.pg.local.${randomId()}`, {

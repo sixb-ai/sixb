@@ -139,6 +139,13 @@ The sync mode controls how each run writes to the target dataset.
 | `"append"` | Adds new rows to the dataset | Audit logs, webhook deliveries, invoice events |
 | `"merge"` | Upserts and deletes rows by primary key | Ordered source change logs |
 
+For datasets with [`sequenceBy`](./datasets.md#source-ordering), snapshot syncs **reconcile instead of replace**:
+
+- Newer source rows win, even if a webhook-style write commits during the fetch.
+- Missing rows stay; removal requires an explicit sequenced delete.
+- Known concurrency conflicts retry up to 3 total commit attempts using the same staged data.
+- The sync run keeps mode `snapshot`; its dataset version has mode `merge`.
+
 Snapshot is the default — omit `mode` for it. Use append when the source is event-like:
 
 ```ts
@@ -178,7 +185,7 @@ export const syncErpInvoices = defineSync("sync-erp-invoices", { mode: "merge" }
   .intoDataset(erpInvoicesDataset)
 ```
 
-Each upsert is a complete row, not a patch. Deletes provide exactly the primary-key fields. The
+For datasets without `sequenceBy`, each upsert is a complete row, not a patch. Deletes provide exactly the primary-key fields. The
 final change for a repeated key wins, identical upserts and deletes of absent keys are no-ops, and
 no dataset version is created when the visible rows do not change. V1 requires non-null string
 keys, ordered changes, immutable keys, and one registered writer per keyed dataset. Object and link
@@ -187,7 +194,7 @@ datasets are not supported yet.
 
 ### Merge source requirements
 
-Use merge only when the source provides a durable, ordered change log. Each source event needs a
+Without `sequenceBy`, use merge only when the source provides a durable, ordered change log. Each source event needs a
 stable cursor, a complete row for an upsert or the exact key for a delete, and deterministic replay.
 Set the next checkpoint after yielding each event as shown above. Sixb stores the latest checkpoint
 only after the entire merge commits, so retrying a failed run safely replays its changes.
@@ -233,7 +240,7 @@ never received a row, that run does not create a dataset version, so dataset-upd
 not fire. This lets incremental readers advance an initial cursor without inventing placeholder
 rows.
 
-A snapshot is the complete source state, including when that state is empty. A first snapshot that
+Without `sequenceBy`, a snapshot is the complete source state, including when that state is empty. A first snapshot that
 returns no rows therefore commits an addressable empty dataset version. Pipelines and projections
 can consume that version normally, and later empty snapshots reuse it until the visible contents
 change. The initial version emits the normal dataset-version event, so dataset-updated schedules can
@@ -241,8 +248,10 @@ run against the known-empty state. An empty snapshot after a non-empty version s
 empty version so projections can withdraw source-owned objects that disappeared upstream.
 
 A merge run may also succeed and advance its checkpoint without creating a version. This happens
-when an initial run only deletes absent keys, or when every staged change leaves the current rows
-unchanged. Later no-op runs continue to reference the existing dataset version.
+when an unsequenced initial run only deletes absent keys, or when every staged change leaves the
+current source state unchanged. Later no-op runs continue to reference the existing dataset version.
+Sequenced snapshots follow these merge rules; an empty result retains existing rows and creates no
+initial version. New deletion sequences create a version even for absent keys.
 
 ## Read context
 

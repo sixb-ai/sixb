@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { appendFile, mkdtemp, readdir, rm } from "node:fs/promises"
+import { appendFile, mkdtemp, readdir, rm, symlink } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, type DatasetRow, defineDataset } from "@sixb/core"
+import { change, col, type DatasetRow, defineDataset } from "@sixb/core"
 import { runLakeMergeStorageContractSuite, runLakeStorageContractSuite } from "@sixb/core/testing"
 import { LocalLakeStorage } from "../src"
 
@@ -46,6 +46,32 @@ runLakeMergeStorageContractSuite("LocalLakeStorage merge contract", {
 })
 
 describe("LocalLakeStorage definition persistence", () => {
+  test("serializes source commits through symlinked paths in one process", async () => {
+    // Regression proof: use this.rootPath rather than realpath for the lock identity.
+    const root = await mkdtemp(join(tmpdir(), "sixb-lake-alias-"))
+    try {
+      const dataset = defineDataset("source.alias", {
+        schema: [col("id", "string"), col("revision", "int64")],
+        primaryKey: "id",
+        sequenceBy: "revision",
+      })
+      const storage = new LocalLakeStorage({ path: join(root, "lake") })
+      await storage.createDataset(dataset)
+      await symlink(join(root, "lake"), join(root, "alias"))
+      const peer = new LocalLakeStorage({ path: join(root, "alias") })
+      const first = await storage.beginMerge({ dataset })
+      const second = await peer.beginMerge({ dataset })
+      await first.writeChanges([change.upsert({ id: "first", revision: 1 })])
+      await second.writeChanges([change.upsert({ id: "second", revision: 1 })])
+      await Promise.all([
+        first.commit({ retryOnConflict: true }),
+        second.commit({ retryOnConflict: true }),
+      ])
+      expect((await storage.getLatestVersion(dataset.id))?.rowCount).toBe(2)
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
   test("round-trips a keyed definition after reopening", async () => {
     // Regression guard: stripping primaryKey from definition.json makes the reopened reads fail.
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-lake-local-reopen-definition-"))

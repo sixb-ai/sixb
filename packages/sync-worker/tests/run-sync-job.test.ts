@@ -21,6 +21,7 @@ import {
   InMemoryLakeStorage,
   InMemoryStorage,
 } from "@sixb/core"
+import { writeDataset } from "@sixb/core/internal/datasets"
 import type { SyncConnectorSourceResolver } from "@sixb/core/internal/syncs"
 import type { LakeWriteSession } from "@sixb/core/lake-storage"
 import type { ExecutionStorage, SyncRunRecord, SyncRunStorage } from "@sixb/core/storage"
@@ -246,6 +247,119 @@ async function collectRows(rows: AsyncIterable<DatasetRow>): Promise<DatasetRow[
 }
 
 describe("runSyncJob", () => {
+  test("fails a source tie after rebasing a snapshot without advancing its checkpoint", async () => {
+    const dataset = defineDataset("source.conflict", {
+      schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
+      primaryKey: "id",
+      sequenceBy: "revision",
+    })
+    const lakeStorage = new InMemoryLakeStorage()
+    const signal = new AbortController().signal
+    let reads = 0
+    const sync = defineSync("source.conflict-sync", { mode: "snapshot" })
+      .checkpoint<{ page: number }>()
+      .from(erpDb)
+      .read(async (_client, context) => {
+        reads += 1
+        context.setCheckpoint({ page: 2 })
+        await writeDataset({
+          lakeStorage,
+          blobStorage: new InMemoryBlobStorage(),
+          dataset,
+          signal,
+          mode: "merge",
+          readValues: async () => [
+            { value: change.upsert({ id: "42", revision: 8, name: "webhook" }) },
+          ],
+        })
+        return [
+          { id: "other", revision: 1, name: "partial" },
+          { id: "42", revision: 8, name: "snapshot" },
+        ]
+      })
+      .intoDataset(dataset)
+    const runtime = createRuntime({ sync, lakeStorage })
+    await expect(
+      runSyncJob({ runtime, job: { id: "conflict-run", syncId: sync.id }, signal })
+    ).rejects.toThrow("conflicting content")
+    expect(reads).toBe(1)
+    expect(
+      (await collectRows(lakeStorage.readRows({ datasetId: dataset.id }))).map((row) => row.name)
+    ).toEqual(["webhook"])
+    const run = await runtime.syncRunsStorage.getById({ projectId: runtime.id, id: "conflict-run" })
+    expect(run?.status).toBe("failed")
+    expect(run?.checkpoint).toBeUndefined()
+  })
+  for (const provider of ["memory", "local"] as const)
+    test(`${provider}: reconciles a one-shot snapshot with concurrent source writes`, async () => {
+      // Regression proof: disable snapshot reconciliation or provider retries; the stale snapshot fails/overwrites.
+      const path = await mkdtemp(join(tmpdir(), "sixb-ordered-snapshot-"))
+      tempDirs.push(path)
+      const lakeStorage =
+        provider === "memory" ? new InMemoryLakeStorage() : new LocalLakeStorage({ path })
+      const dataset = defineDataset("source.people", {
+        schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
+        primaryKey: "id",
+        sequenceBy: "revision",
+      })
+      const signal = new AbortController().signal
+      const ingest = (changes: DatasetRow[]) =>
+        writeDataset({
+          lakeStorage,
+          blobStorage: new InMemoryBlobStorage(),
+          dataset,
+          signal,
+          mode: "merge",
+          readValues: async () => changes.map((row) => ({ value: change.upsert(row) })),
+        })
+      let reads = 0
+      const sync = defineSync("source.snapshot", { mode: "snapshot" })
+        .checkpoint<{ page: string }>()
+        .from(erpDb)
+        .read(async function* (_client, { setCheckpoint }) {
+          reads += 1
+          setCheckpoint({ page: "done" })
+          const reused = { id: "42", revision: 7, name: "snapshot" }
+          yield reused
+          await ingest([
+            { id: "42", revision: 8, name: "webhook" },
+            { id: "new", revision: 1, name: "created" },
+          ])
+          reused.id = "snapshot-only"
+          reused.name = "snapshot-only"
+          yield reused
+        })
+        .intoDataset(dataset)
+      const runtime = createRuntime({ sync, lakeStorage })
+      const result = await runSyncJob({
+        runtime,
+        job: { id: "ordered-run", syncId: sync.id },
+        signal,
+      })
+      expect(reads).toBe(1)
+      expect(result.rowsRead).toBe(2)
+      expect(result.version?.mode).toBe("merge")
+      expect(
+        (await collectRows(lakeStorage.readRows({ datasetId: dataset.id })))
+          .map((row) => row.name)
+          .sort()
+      ).toEqual(["created", "snapshot-only", "webhook"])
+      expect(
+        (await runtime.syncRunsStorage.getById({ projectId: runtime.id, id: "ordered-run" }))
+          ?.checkpoint
+      ).toEqual(storedErpCheckpoint({ page: "done" }))
+      const empty = defineSync("source.empty", { mode: "snapshot" })
+        .from(erpDb)
+        .read(() => [])
+        .intoDataset(dataset)
+      const emptyResult = await runSyncJob({
+        runtime: createRuntime({ sync: empty, lakeStorage }),
+        job: { id: "empty-run", syncId: empty.id },
+        signal,
+      })
+      expect(emptyResult.versionCreated).toBe(false)
+      expect(emptyResult.version?.versionId).toBe(result.version?.versionId)
+    })
   test("commits a snapshot sync, defines the dataset first, and stores a succeeded run", async () => {
     const calls: string[] = []
     const lakeStorage = new InMemoryLakeStorage()

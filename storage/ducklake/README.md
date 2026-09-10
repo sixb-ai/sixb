@@ -191,7 +191,14 @@ identical ties are unchanged, and conflicting ties abort the merge. Deletes requ
 `change.delete(key, { sequence })`. Source revisions and deletion tombstones are stored in a
 companion DuckLake table in the same transaction as visible rows, surviving snapshot expiration.
 New tombstone state creates a version even when the visible row count stays zero. Sequenced
-datasets currently require merge writes. See [source ordering](../../docs/data/datasets.md#source-ordering).
+provider writes use merge sessions; snapshot syncs convert rows to ordered upserts.
+Use `commit({ retryOnConflict: true })` to rebase retained changes, with at most 3 attempts.
+Explicit `expectedLatestVersionId` guards are never relaxed.
+See [source ordering](../../docs/data/datasets.md#source-ordering).
+
+Local catalogs serialize commits within one process. PostgreSQL catalogs support concurrent
+writer processes; known snapshot-ID conflicts are retried from the retained staging table.
+Other provider/connection failures propagate without an automatic retry.
 
 Snapshot, append, and SQL-transform writes to keyed datasets also enforce unique keys so a later
 merge never starts from an ambiguous baseline. Application authors normally use

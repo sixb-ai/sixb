@@ -13,7 +13,9 @@ import type {
 import {
   assertUnsequencedDatasetWrite,
   getDatasetPrimaryKeyColumns,
+  LakeConcurrencyError,
   LakeStorageError,
+  retryDatasetMergeCommit,
 } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
@@ -59,6 +61,7 @@ interface DuckLakeCommitVersionOutcomeInput
   readonly mode: DatasetWriteMode | "merge"
   readonly expectedLatestVersionId?: string | null
   readonly allowInitialNoOp?: boolean
+  readonly signal?: AbortSignal
   readonly disableRetries?: boolean
   readonly optimisticOperation?: "commit" | "merge commit"
 }
@@ -138,7 +141,7 @@ export class DuckLakeWriteCoordinator {
       input.expectedLatestVersionId !== undefined &&
       latestVersion?.versionId !== input.expectedLatestVersionId
     ) {
-      throw new LakeStorageError(
+      throw new LakeConcurrencyError(
         `[SixbDuckLake] Optimistic merge start failed for dataset '${definition.id}': expected latest version '${input.expectedLatestVersionId}', found '${latestVersion?.versionId ?? "none"}'.`
       )
     }
@@ -187,35 +190,43 @@ export class DuckLakeWriteCoordinator {
       )
     }
 
-    return this.withCommitRuntime((runtime) =>
-      this.commitVersionOutcomeOnExclusiveRuntime(runtime, {
-        dataset: definition,
-        mode: "merge",
-        expectedLatestVersionId: input.baseVersionId,
-        allowInitialNoOp: true,
-        disableRetries: true,
-        optimisticOperation: "merge commit",
-        commitMessage: input.commit?.commitMessage ?? `merge dataset ${definition.id}`,
-        producer: input.merge.producer,
-        inputs: input.merge.inputs,
-        applyChanges: async (commitRuntime, context) => {
-          const result = await applyDatasetMergeFromRelation({
-            options: this.options,
-            runtime: commitRuntime,
-            dataset: definition,
-            stagingTableName: input.stagingTableName,
-            sequenceColumnName: input.sequenceColumnName,
-            kindColumnName: input.kindColumnName,
-            previousRowCount: context.previousRowCount,
-            validatedPrimaryKeyColumns: context.validatedPrimaryKeyColumns,
-          })
-          if (result.sourceRowCount !== input.changesWritten) {
-            throw new LakeStorageError(
-              `[SixbDuckLake] Staged merge for dataset '${definition.id}' accepted ${input.changesWritten} change(s), but DuckLake saw ${result.sourceRowCount} source change(s) at commit time.`
-            )
-          }
-          return result
-        },
+    return retryDatasetMergeCommit(input.merge, input.commit, (rebase) =>
+      this.withCommitRuntime(async (runtime) => {
+        input.commit?.signal?.throwIfAborted()
+        const baseVersionId = rebase
+          ? ((await this.snapshots.getLatestVersionForDefinition(runtime, definition))?.versionId ??
+            null)
+          : input.baseVersionId
+        return this.commitVersionOutcomeOnExclusiveRuntime(runtime, {
+          dataset: definition,
+          mode: "merge",
+          expectedLatestVersionId: baseVersionId,
+          allowInitialNoOp: true,
+          signal: input.commit?.signal,
+          disableRetries: true,
+          optimisticOperation: "merge commit",
+          commitMessage: input.commit?.commitMessage ?? `merge dataset ${definition.id}`,
+          producer: input.merge.producer,
+          inputs: input.merge.inputs,
+          applyChanges: async (commitRuntime, context) => {
+            const result = await applyDatasetMergeFromRelation({
+              options: this.options,
+              runtime: commitRuntime,
+              dataset: definition,
+              stagingTableName: input.stagingTableName,
+              sequenceColumnName: input.sequenceColumnName,
+              kindColumnName: input.kindColumnName,
+              previousRowCount: context.previousRowCount,
+              validatedPrimaryKeyColumns: context.validatedPrimaryKeyColumns,
+            })
+            if (result.sourceRowCount !== input.changesWritten) {
+              throw new LakeStorageError(
+                `[SixbDuckLake] Staged merge for dataset '${definition.id}' accepted ${input.changesWritten} change(s), but DuckLake saw ${result.sourceRowCount} source change(s) at commit time.`
+              )
+            }
+            return result
+          },
+        })
       })
     )
   }
@@ -338,6 +349,7 @@ export class DuckLakeWriteCoordinator {
         previousRowCount: latestVersion?.rowCount,
         validatedPrimaryKeyColumns: latestVersion?.validatedPrimaryKeyColumns,
       })
+      input.signal?.throwIfAborted()
       await this.ensureInitialNoOpHasSnapshot(input, changeResult, latestVersion)
       const commitId = randomUUID()
       await this.setCommitMetadata(
@@ -364,6 +376,24 @@ export class DuckLakeWriteCoordinator {
     } catch (error) {
       if (!committed) {
         await this.rollbackTransaction(input.runtime)
+        // DuckLake's snapshot-id uniqueness constraint is its catalog commit CAS. With native
+        // retries disabled, this error proves the transaction lost to another writer. Do not
+        // classify generic connection/COMMIT errors: their durable outcome may be ambiguous.
+        if (
+          error instanceof Error &&
+          error.message.startsWith(
+            "TransactionContext Error: Failed to commit: Failed to commit DuckLake transaction."
+          ) &&
+          error.message.includes("Exceeded the maximum retry count of 0") &&
+          error.message.includes(
+            'duplicate key value violates unique constraint "ducklake_snapshot_pkey"'
+          )
+        ) {
+          throw new LakeConcurrencyError(
+            `[SixbDuckLake] Concurrent catalog commit for dataset '${input.dataset.id}'.`,
+            { cause: error }
+          )
+        }
       }
       throw error
     }
@@ -639,7 +669,7 @@ export class DuckLakeWriteCoordinator {
     }
 
     if (input.actualLatestVersionId !== input.expectedLatestVersionId) {
-      throw new LakeStorageError(
+      throw new LakeConcurrencyError(
         `[SixbDuckLake] Optimistic ${input.operation} failed for dataset '${input.datasetId}': expected latest version '${input.expectedLatestVersionId ?? "none"}', found '${input.actualLatestVersionId ?? "none"}'.`
       )
     }
