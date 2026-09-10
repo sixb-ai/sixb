@@ -1,18 +1,23 @@
 import { randomUUID } from "node:crypto"
 import type { DatasetDefinition, DatasetSchema } from "@sixb/core"
 import type { DatasetDefinitionUpdatePlan, DatasetSchemaUpdatePlan } from "@sixb/core/lake-storage"
-import { LakeStorageError, planDatasetDefinitionUpdate } from "@sixb/core/lake-storage"
+import {
+  assertDatasetDefinition,
+  LakeStorageError,
+  planDatasetDefinitionUpdate,
+} from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { getBigIntLike, getBoolean, getOptionalBigIntLike, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import {
+  DATASET_SEQUENCE_COLUMN_COMMENT,
   type DuckLakeCatalogColumn,
   duckLakeCatalogColumnsToDatasetSchema,
   duckLakePrimaryKeyColumnComment,
 } from "./ducklake-catalog-schema"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import { readCurrentDatasetDefinitions } from "./ducklake-current-dataset-definitions"
-import { encodeDatasetTableName } from "./names"
+import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "./names"
 import { datasetColumnToDuckDbSql, datasetSchemaToDuckDbColumnsSql } from "./schema"
 import {
   duckLakeAlias,
@@ -76,6 +81,14 @@ export class DuckLakeDatasetCatalog {
         }
 
         await this.applyPrimaryKey(runtime, qualifiedName, definition)
+        if (definition.sequenceBy !== undefined) {
+          await runtime.run(
+            `COMMENT ON COLUMN ${qualifiedName}.${quoteIdentifier(definition.sequenceBy)} IS ${quoteSqlString(DATASET_SEQUENCE_COLUMN_COMMENT)}`
+          )
+          await runtime.run(
+            `CREATE TABLE ${qualifiedTableName(this.options, encodeDatasetSequenceTableName(definition.id))} (source_key VARCHAR NOT NULL, sequence VARCHAR NOT NULL, content VARCHAR)`
+          )
+        }
         await this.applyPartitionBy(runtime, qualifiedName, definition)
 
         await runtime.run("COMMIT")
@@ -208,6 +221,10 @@ export class DuckLakeDatasetCatalog {
   }
 
   assertSchema(definition: DatasetDefinition): void {
+    assertDatasetDefinition(
+      definition,
+      (message) => new LakeStorageError(`[SixbDuckLake] ${message}`)
+    )
     if (!definition.schema) {
       throw new LakeStorageError(
         `[SixbDuckLake] Dataset '${definition.id}' requires a schema for DuckLake storage.`

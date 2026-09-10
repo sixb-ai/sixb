@@ -50,6 +50,28 @@ type _inferredUpsert = Expect<
 >
 
 const invoiceDelete = change.delete({ id: "inv_1" })
+const sequencedDelete = change.delete({ id: "inv_1" }, { sequence: "9223372036854775807" })
+type _deleteSequence = Expect<Equal<typeof sequencedDelete.sequence, "9223372036854775807">>
+const sequencedDataset = defineDataset("sequenced", {
+  schema: [
+    col("id", "string"),
+    col("revision", "int64"),
+    col("optional", "timestamp", { nullable: true }),
+  ],
+  primaryKey: "id",
+  sequenceBy: "revision",
+})
+type _sequenceBy = Expect<Equal<typeof sequencedDataset.sequenceBy, "revision">>
+const invalidSequenceOptions = {
+  schema: sequencedDataset.schema.columns,
+  primaryKey: "id",
+  sequenceBy: "id",
+} as const
+// @ts-expect-error sequence columns must be timestamps or int64
+defineDataset("invalid-sequence", invalidSequenceOptions)
+const nullableSequenceOptions = { ...invalidSequenceOptions, sequenceBy: "optional" } as const
+// @ts-expect-error sequence columns must be non-nullable
+defineDataset("invalid-nullable-sequence", nullableSequenceOptions)
 type _inferredDelete = Expect<
   Equal<typeof invoiceDelete, { readonly kind: "delete"; readonly key: { readonly id: "inv_1" } }>
 >

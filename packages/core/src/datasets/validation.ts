@@ -2,6 +2,7 @@ import { isFileRef } from "../blob-storage"
 import { isJsonValue, isPlainRecord } from "../json"
 import { isDecimalString } from "../ontology/decimal"
 import { DatasetValidationError } from "./errors"
+import { getDatasetSequenceValidationError } from "./sequence"
 import type {
   DatasetColumnDefinition,
   DatasetColumnType,
@@ -185,6 +186,20 @@ export function assertDatasetDefinition(
     assertDatasetPrimaryKey(definition.primaryKey, definition.schema, createError)
   }
 
+  if (definition.sequenceBy !== undefined) {
+    const column = definition.schema.columns.find((column) => column.name === definition.sequenceBy)
+    if (
+      definition.primaryKey === undefined ||
+      !column ||
+      column.nullable ||
+      !["timestamp", "int64"].includes(column.type)
+    ) {
+      throw createError(
+        "Dataset sequenceBy requires a primaryKey and a non-nullable timestamp or int64 column."
+      )
+    }
+  }
+
   if (definition.partitionBy !== undefined) {
     if (!Array.isArray(definition.partitionBy)) {
       throw createError("Dataset partitionBy must be an array of column names.")
@@ -268,6 +283,9 @@ function getColumnValidationError(
 ): string | null {
   const hasValue = Object.hasOwn(row, column.name)
   const value = row[column.name]
+  if (column.name === dataset.sequenceBy) {
+    return getDatasetSequenceValidationError(dataset, value)
+  }
 
   // Treat `undefined` the same as an omitted field so callers either send a real
   // value or use `null` explicitly on nullable columns.

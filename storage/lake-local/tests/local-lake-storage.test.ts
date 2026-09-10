@@ -24,6 +24,13 @@ runLakeStorageContractSuite("LocalLakeStorage", {
 })
 
 runLakeMergeStorageContractSuite("LocalLakeStorage merge contract", {
+  reopen(storage: LocalLakeStorage) {
+    const rootDir = roots.get(storage)
+    if (!rootDir) throw new Error("Missing test root")
+    const reopened = new LocalLakeStorage({ path: join(rootDir, "lake") })
+    roots.set(reopened, rootDir)
+    return reopened
+  },
   async createStorage() {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-lake-local-merge-contract-"))
     const storage = new LocalLakeStorage({ path: join(rootDir, "lake") })

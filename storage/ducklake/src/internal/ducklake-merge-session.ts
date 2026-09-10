@@ -8,6 +8,7 @@ import type {
 } from "@sixb/core/lake-storage"
 import {
   cloneDatasetMergeChange,
+  datasetSequenceChange,
   getDatasetMergeChangeValidationError,
   LakeStorageError,
 } from "@sixb/core/lake-storage"
@@ -54,6 +55,7 @@ export async function createDuckLakeMergeSession(
     CREATE TEMP TABLE ${quoteIdentifier(stagingTableName)} (
       ${quoteIdentifier(sequenceColumnName)} UBIGINT NOT NULL,
       ${quoteIdentifier(kindColumnName)} VARCHAR NOT NULL,
+      ${input.merge.dataset.sequenceBy === undefined ? "" : `${quoteIdentifier(`${sequenceColumnName}_source`)} VARCHAR NOT NULL,`}
       ${datasetSchemaToDuckDbNullableColumnsSql(input.merge.dataset.schema)}
     )
   `)
@@ -122,6 +124,11 @@ class DuckLakeMergeSession implements LakeMergeSession {
       for (const staged of batch) {
         appender.appendBigInt(staged.sequence)
         appender.appendVarchar(staged.change.kind)
+        if (this.input.dataset.sequenceBy !== undefined) {
+          appender.appendVarchar(
+            JSON.stringify(datasetSequenceChange(this.input.dataset, staged.change))
+          )
+        }
         appendDatasetRow(
           appender,
           this.input.dataset.schema,

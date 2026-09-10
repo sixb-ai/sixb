@@ -209,6 +209,83 @@ describe("DuckLakeStorage keyed merges", () => {
     expect(rows[0]).toEqual({ id: "inv_0", status: "paid", note: null })
     expect(rows.at(-1)).toEqual({ id: "inv_999", status: "open", note: null })
   })
+
+  test("rolls back source revisions and tombstones when row insertion fails", async () => {
+    // Regression proof: commit source state outside the row transaction; the later v2/v4
+    // upserts will be incorrectly ignored after the injected insert failure.
+    const dataset = defineDataset("source.atomic", {
+      schema: [col("id", "string"), col("revision", "int64")],
+      primaryKey: "id",
+      sequenceBy: "revision",
+    })
+    await storage.createDataset(dataset)
+    const seed = await storage.beginMerge({ dataset })
+    await seed.writeChanges([change.upsert({ id: "42", revision: 1 })])
+    await seed.commit()
+    const failed = await storage.beginMerge({ dataset })
+    await failed.writeChanges([
+      change.upsert({ id: "42", revision: 3 }),
+      change.delete({ id: "gone" }, { sequence: 5 }),
+    ])
+    const runtime = await internals(storage).connections.runtime()
+    const failure = new Error("source row insert failed")
+    const restore = failNextInsert(
+      runtime,
+      qualifiedTableName(options, encodeDatasetTableName(dataset.id)),
+      failure
+    )
+    try {
+      await expect(failed.commit()).rejects.toBe(failure)
+    } finally {
+      restore()
+    }
+    const next = await storage.beginMerge({ dataset })
+    await next.writeChanges([
+      change.upsert({ id: "42", revision: 2 }),
+      change.upsert({ id: "gone", revision: 4 }),
+    ])
+    await next.commit()
+    expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([
+      { id: "42", revision: "2" },
+      { id: "gone", revision: "4" },
+    ])
+  })
+
+  test("bounds source metadata batches and rolls back conflicts across batches", async () => {
+    // Regression proof: remove LIMIT 1000 from the staged metadata query. The result bound fails.
+    const dataset = defineDataset("source.batches", {
+      schema: [col("id", "string"), col("revision", "int64"), col("name", "string")],
+      primaryKey: "id",
+      sequenceBy: "revision",
+    })
+    await storage.createDataset(dataset)
+    const changes = Array.from({ length: 2001 }, (_, index) =>
+      change.upsert({ id: String(index), revision: 1, name: "original" })
+    )
+    const failed = await storage.beginMerge({ dataset })
+    await failed.writeChanges(changes)
+    await failed.writeChanges([change.upsert({ id: "0", revision: 1, name: "conflict" })])
+    await expect(failed.commit()).rejects.toThrow("conflicting content")
+    expect(await storage.getLatestVersion(dataset.id)).toBeNull()
+    expect(await temporaryMergeTableNames(storage)).toEqual([])
+
+    const merge = await storage.beginMerge({ dataset })
+    await merge.writeChanges(changes)
+    await merge.writeChanges([
+      change.upsert({ id: "0", revision: 2, name: "newer" }),
+      change.upsert({ id: "0", revision: 0, name: "stale" }),
+      change.delete({ id: "2000" }, { sequence: 2 }),
+    ])
+    const runtime = await internals(storage).connections.runtime()
+    const captured = await captureExclusiveSql(runtime, () => merge.commit())
+    expect(captured.maxQueryRows).toBeGreaterThan(0)
+    expect(captured.maxQueryRows).toBeLessThanOrEqual(1000)
+    expect(captured.result).toMatchObject({ outcome: "created", version: { rowCount: 2000 } })
+    const rows = await collectRows(storage.readRows({ datasetId: dataset.id }))
+    expect(rows.find((row) => row.id === "0")?.name).toBe("newer")
+    expect(rows.some((row) => row.id === "2000")).toBe(false)
+    expect(await temporaryMergeTableNames(storage)).toEqual([])
+  })
 })
 
 function internals(storage: DuckLakeStorage): DuckLakeStorageInternals {
@@ -290,9 +367,14 @@ function wrapExclusiveRuntime(
 async function captureExclusiveSql<T>(
   runtime: DuckDbRuntime,
   run: () => Promise<T>
-): Promise<{ readonly result: T; readonly statements: readonly string[] }> {
+): Promise<{
+  readonly result: T
+  readonly statements: readonly string[]
+  readonly maxQueryRows: number
+}> {
   const originalWithExclusive = runtime.withExclusive.bind(runtime)
   const statements: string[] = []
+  let maxQueryRows = 0
 
   runtime.withExclusive = (useRuntime) =>
     originalWithExclusive((exclusiveRuntime) =>
@@ -307,7 +389,9 @@ async function captureExclusiveSql<T>(
         },
         query: async (sql, values) => {
           statements.push(sql)
-          return exclusiveRuntime.query(sql, values)
+          const rows = await exclusiveRuntime.query(sql, values)
+          maxQueryRows = Math.max(maxQueryRows, rows.length)
+          return rows
         },
         withAppender: (tableName, useAppender) =>
           exclusiveRuntime.withAppender(tableName, useAppender),
@@ -315,7 +399,8 @@ async function captureExclusiveSql<T>(
     )
 
   try {
-    return { result: await run(), statements }
+    const result = await run()
+    return { result, statements, maxQueryRows }
   } finally {
     runtime.withExclusive = originalWithExclusive
   }

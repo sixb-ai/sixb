@@ -50,6 +50,34 @@ describe("change", () => {
 })
 
 describe("defineDataset", () => {
+  test("validates source ordering and derives it only when explicitly configured", () => {
+    // Regression proof: remove the sequenceBy check in assertDatasetDefinition.
+    const schema = [
+      col("id", "string"),
+      col("revision", "int64"),
+      col("optional", "timestamp", { nullable: true }),
+    ]
+    for (const options of [
+      { schema, sequenceBy: "revision" },
+      { schema, primaryKey: "id", sequenceBy: "missing" },
+      { schema, primaryKey: "id", sequenceBy: "id" },
+      { schema, primaryKey: "id", sequenceBy: "optional" },
+    ]) {
+      expect(() => defineDataset("invalid", options as never)).toThrow("sequenceBy")
+    }
+    const source = defineDataset("ordered", { schema, primaryKey: "id", sequenceBy: "revision" })
+    expect(source.sequenceBy).toBe("revision")
+    expect(defineDataset("derived").derive(source).sequenceBy).toBeUndefined()
+    expect(
+      defineDataset("ordered-derived").derive(source, { primaryKey: "id", sequenceBy: "revision" })
+        .sequenceBy
+    ).toBe("revision")
+    expect(change.delete({ id: "42" }, { sequence: 9 })).toEqual({
+      kind: "delete",
+      key: { id: "42" },
+      sequence: 9,
+    })
+  })
   test("builds single and composite primary keys", () => {
     const customers = defineDataset("canonical.customers", {
       schema: [col("id", "string")],

@@ -36,6 +36,7 @@ export interface DatasetDefinition<
   readonly id: TId
   readonly schema: DatasetSchema<TColumns>
   readonly primaryKey?: DatasetPrimaryKey
+  readonly sequenceBy?: string
   readonly partitionBy?: readonly string[]
   readonly description?: string
 }

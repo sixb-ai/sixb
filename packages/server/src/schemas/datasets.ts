@@ -43,6 +43,7 @@ export const DatasetDefinitionSchema = z.object({
   id: z.string(),
   description: z.string().optional(),
   primaryKey: z.union([z.string(), z.array(z.string()).min(2)]).optional(),
+  sequenceBy: z.string().optional(),
   partitionBy: z.array(z.string()).optional(),
   schema: DatasetSchema,
 })

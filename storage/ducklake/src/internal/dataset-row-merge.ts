@@ -1,10 +1,16 @@
 import type { DatasetDefinition } from "@sixb/core"
-import { getDatasetPrimaryKeyColumns, LakeStorageError } from "@sixb/core/lake-storage"
+import {
+  type DatasetSequenceChange,
+  type DatasetSequenceState,
+  getDatasetPrimaryKeyColumns,
+  LakeStorageError,
+  reconcileDatasetSequences,
+} from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { type ApplyDatasetRowsResult, inspectUniqueKeyedRelation } from "./dataset-row-commit"
-import { getBigIntLike } from "./duckdb-row"
+import { getBigIntLike, getOptionalString, getString } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
-import { encodeDatasetTableName } from "./names"
+import { encodeDatasetSequenceTableName, encodeDatasetTableName } from "./names"
 import { datasetSchemaColumnNamesSql } from "./schema"
 import { qualifiedTableName, quoteIdentifier, quoteSqlString } from "./sql"
 
@@ -40,23 +46,26 @@ export async function applyDatasetMergeFromRelation(
   const sourceRowCount = await countRows(input.runtime, stagingTable)
   const previousRowCount = await currentBaselineRowCount(input, targetTable, primaryKeyColumns)
 
-  return withMaterializedFinalChanges(input, primaryKeyColumns, async (finalChanges) => {
-    const effects = await countMergeEffects(input, targetTable, finalChanges, primaryKeyColumns)
-    const effectiveChangeCount = effects.inserts + effects.updates + effects.deletes
+  return withMaterializedFinalChanges(
+    input,
+    primaryKeyColumns,
+    async (finalChanges, orderingChanged) => {
+      const effects = await countMergeEffects(input, targetTable, finalChanges, primaryKeyColumns)
+      const effectiveChangeCount = effects.inserts + effects.updates + effects.deletes
 
-    if (effectiveChangeCount === 0) {
-      return {
-        dataChangeExpected: false,
-        sourceRowCount,
-        resultingRowCount: { kind: "exact", value: previousRowCount },
+      if (effectiveChangeCount === 0) {
+        return {
+          dataChangeExpected: orderingChanged,
+          sourceRowCount,
+          resultingRowCount: { kind: "exact", value: previousRowCount },
+        }
       }
-    }
 
-    const keyMatchSql = primaryKeyMatchSql(primaryKeyColumns, "target", "source")
-    const rowDifferenceSql = datasetRowDifferenceSql(input.dataset, "target", "source")
-    const kindColumn = `source.${quoteIdentifier(input.kindColumnName)}`
+      const keyMatchSql = primaryKeyMatchSql(primaryKeyColumns, "target", "source")
+      const rowDifferenceSql = datasetRowDifferenceSql(input.dataset, "target", "source")
+      const kindColumn = `source.${quoteIdentifier(input.kindColumnName)}`
 
-    await input.runtime.run(`
+      await input.runtime.run(`
       DELETE FROM ${targetTable} AS target
       USING ${finalChanges} AS source
       WHERE ${keyMatchSql}
@@ -69,12 +78,12 @@ export async function applyDatasetMergeFromRelation(
         )
     `)
 
-    const columnsSql = datasetSchemaColumnNamesSql(input.dataset.schema)
-    const selectedColumnsSql = input.dataset.schema.columns
-      .map((column) => `source.${quoteIdentifier(column.name)}`)
-      .join(", ")
-    const firstSequenceColumnName = firstSequenceName(input.sequenceColumnName)
-    await input.runtime.run(`
+      const columnsSql = datasetSchemaColumnNamesSql(input.dataset.schema)
+      const selectedColumnsSql = input.dataset.schema.columns
+        .map((column) => `source.${quoteIdentifier(column.name)}`)
+        .join(", ")
+      const firstSequenceColumnName = firstSequenceName(input.sequenceColumnName)
+      await input.runtime.run(`
       INSERT INTO ${targetTable} (${columnsSql})
       SELECT ${selectedColumnsSql}
       FROM ${finalChanges} AS source
@@ -87,15 +96,77 @@ export async function applyDatasetMergeFromRelation(
       ORDER BY source.${quoteIdentifier(firstSequenceColumnName)}
     `)
 
-    return {
-      dataChangeExpected: true,
-      sourceRowCount,
-      resultingRowCount: {
-        kind: "exact",
-        value: previousRowCount + effects.inserts - effects.deletes,
-      },
+      return {
+        dataChangeExpected: true,
+        sourceRowCount,
+        resultingRowCount: {
+          kind: "exact",
+          value: previousRowCount + effects.inserts - effects.deletes,
+        },
+      }
     }
-  })
+  )
+}
+
+/** The companion table is current state, committed in the same DuckLake transaction as rows.
+ * It is not recovered from expirable snapshot history. Only keys present in staging are read.
+ */
+async function applySourceOrdering(
+  input: ApplyDatasetMergeFromRelationInput,
+  acceptedTable: string
+): Promise<boolean> {
+  const source = quoteIdentifier(`${input.sequenceColumnName}_source`)
+  const ordinal = quoteIdentifier(input.sequenceColumnName)
+  const staging = quoteIdentifier(input.stagingTableName)
+  const stateTable = qualifiedTableName(
+    input.options,
+    encodeDatasetSequenceTableName(input.dataset.id)
+  )
+  await input.runtime.run(
+    `CREATE TEMP TABLE ${acceptedTable} (source_key VARCHAR, ordinal UBIGINT)`
+  )
+  let lastOrdinal = -1n
+  let changed = false
+  while (true) {
+    const staged = await input.runtime.query(
+      `SELECT ${ordinal} AS ordinal, ${source} AS source FROM ${staging}
+       WHERE ${ordinal} > ${lastOrdinal} ORDER BY ${ordinal} LIMIT 1000`
+    )
+    if (staged.length === 0) return changed
+    const changes = staged.map(
+      (row) => JSON.parse(getString(row, "source")) as DatasetSequenceChange
+    )
+    lastOrdinal = getBigIntLike(staged[staged.length - 1]!, "ordinal")
+    const batchKeys = changes.map((change) => quoteSqlString(change.key)).join(",")
+    const current = await input.runtime.query(
+      `SELECT * FROM ${stateTable} WHERE source_key IN (${batchKeys})`
+    )
+    const previous = new Map<string, DatasetSequenceState>()
+    for (const row of current) {
+      previous.set(getString(row, "source_key"), {
+        sequence: getString(row, "sequence"),
+        content: getOptionalString(row, "content") ?? null,
+      })
+    }
+    // Earlier batches are visible inside this transaction. A later conflict rolls them all back.
+    const { states, accepted } = reconcileDatasetSequences(input.dataset, previous, changes)
+    if (accepted.size === 0) continue
+    changed = true
+    const stateValues: string[] = []
+    const acceptedValues: string[] = []
+    for (const [key, index] of accepted) {
+      const state = states.get(key)!
+      stateValues.push(
+        `(${quoteSqlString(key)}, ${quoteSqlString(state.sequence)}, ${state.content === null ? "NULL" : quoteSqlString(state.content)})`
+      )
+      acceptedValues.push(`(${quoteSqlString(key)}, ${getBigIntLike(staged[index]!, "ordinal")})`)
+    }
+    const keys = [...accepted.keys()].map(quoteSqlString).join(",")
+    await input.runtime.run(`DELETE FROM ${stateTable} WHERE source_key IN (${keys})`)
+    await input.runtime.run(`INSERT INTO ${stateTable} VALUES ${stateValues.join(",")}`)
+    await input.runtime.run(`DELETE FROM ${acceptedTable} WHERE source_key IN (${keys})`)
+    await input.runtime.run(`INSERT INTO ${acceptedTable} VALUES ${acceptedValues.join(",")}`)
+  }
 }
 
 async function currentBaselineRowCount(
@@ -120,25 +191,32 @@ async function currentBaselineRowCount(
 async function withMaterializedFinalChanges<T>(
   input: ApplyDatasetMergeFromRelationInput,
   primaryKeyColumns: readonly string[],
-  run: (finalChangesTable: string) => Promise<T>
+  run: (finalChangesTable: string, orderingChanged: boolean) => Promise<T>
 ): Promise<T> {
   const table = quoteIdentifier(`${input.stagingTableName}_final`)
-  await input.runtime.run(`
-    CREATE TEMP TABLE ${table} AS
-    ${finalChangesSelectSql(input, primaryKeyColumns)}
-  `)
+  const acceptedTable = quoteIdentifier(`${input.stagingTableName}_accepted`)
 
   let outcome:
     | { readonly kind: "success"; readonly value: T }
     | { readonly kind: "error"; readonly error: unknown }
   try {
-    outcome = { kind: "success", value: await run(table) }
+    const sequenced = input.dataset.sequenceBy !== undefined
+    const orderingChanged = sequenced ? await applySourceOrdering(input, acceptedTable) : false
+    const ordinal = quoteIdentifier(input.sequenceColumnName)
+    const selectSql = sequenced
+      ? `SELECT source.*, source.${ordinal} AS ${quoteIdentifier(firstSequenceName(input.sequenceColumnName))}
+         FROM ${quoteIdentifier(input.stagingTableName)} AS source
+         JOIN ${acceptedTable} AS accepted ON source.${ordinal} = accepted.ordinal`
+      : finalChangesSelectSql(input, primaryKeyColumns)
+    await input.runtime.run(`CREATE TEMP TABLE ${table} AS ${selectSql}`)
+    outcome = { kind: "success", value: await run(table, orderingChanged) }
   } catch (error) {
     outcome = { kind: "error", error }
   }
 
   try {
     await input.runtime.run(`DROP TABLE IF EXISTS ${table}`)
+    await input.runtime.run(`DROP TABLE IF EXISTS ${acceptedTable}`)
   } catch (cleanupError) {
     if (outcome.kind === "success") {
       throw cleanupError

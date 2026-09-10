@@ -4,6 +4,7 @@ import type {
   BeginDatasetWriteInput,
   CommitDatasetMergeInput,
   CommitDatasetWriteInput,
+  DatasetSequenceState,
   DatasetVersion,
   DatasetVersionMode,
   DatasetVersionRef,
@@ -19,6 +20,7 @@ export interface DatasetState {
 }
 
 export interface StoredDatasetVersionManifest {
+  readonly sequences?: readonly (readonly [string, DatasetSequenceState])[]
   readonly datasetId: string
   readonly versionId: string
   readonly parentVersionId?: string

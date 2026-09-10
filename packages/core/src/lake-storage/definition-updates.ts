@@ -1,4 +1,5 @@
 import type { DatasetColumnDefinition, DatasetDefinition } from "../datasets"
+import { assertDatasetDefinition } from "../datasets/validation"
 import { LakeStorageError } from "./errors"
 import type { LakeStorage } from "./types"
 
@@ -36,6 +37,12 @@ export function planDatasetDefinitionUpdate(
   requested: DatasetDefinition
 ): DatasetDefinitionUpdatePlan {
   assertSameDataset(existing, requested)
+  assertDatasetDefinition(requested, (message) => new LakeStorageError(`[SixbLake] ${message}`))
+  if (existing.sequenceBy !== requested.sequenceBy) {
+    throw new LakeStorageError(
+      `[SixbLake] Dataset '${requested.id}' sequenceBy is immutable. Create a new dataset and backfill to adopt or change source ordering.`
+    )
+  }
   assertPrimaryKeyUnchanged(existing, requested)
 
   const addedColumns = getAddedColumnsAfterValidatingExistingColumns(existing, requested)
@@ -66,6 +73,7 @@ export function mergeStrictDatasetDefinition(options: {
   readonly existing?: DatasetDefinition | null
   readonly next: DatasetDefinition
 }): DatasetDefinition {
+  assertDatasetDefinition(options.next, (message) => new LakeStorageError(`[SixbLake] ${message}`))
   if (!options.existing) {
     return structuredClone(options.next)
   }
@@ -221,6 +229,7 @@ function mergeDatasetDefinition(
     id: requested.id,
     schema: { columns },
     ...(primaryKey !== undefined ? { primaryKey: structuredClone(primaryKey) } : {}),
+    ...(existing.sequenceBy !== undefined ? { sequenceBy: existing.sequenceBy } : {}),
     ...(partitionBy !== undefined ? { partitionBy: [...partitionBy] } : {}),
     ...(description !== undefined ? { description } : {}),
   }

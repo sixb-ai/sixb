@@ -97,9 +97,15 @@ const result = await merge.commit()
 ```
 
 The session captures the latest version when it begins and rejects its commit if another write wins
-first. The final change for a repeated key wins. Deletes of absent keys, identical upserts, and
+first. Without `sequenceBy`, the final change for a repeated key wins. Deletes of absent keys, identical upserts, and
 other changes that leave the visible rows unchanged do not create a version. An initial no-op
 returns `{ outcome: "unchanged", version: null }`.
+
+For datasets declaring `sequenceBy`, newer source revisions win; older changes are ignored and
+conflicting ties abort the merge. Deletes require `change.delete(key, { sequence })`. Each version
+manifest retains source revisions and deletion tombstones, published atomically with the version's
+rows through the dataset head pointer. New tombstones create a version even for absent keys.
+Sequenced datasets currently require merge writes. See [source ordering](../../docs/data/datasets.md#source-ordering).
 
 Application authors normally use `defineSync(..., { mode: "merge" })`; the sync worker executes the
 same provider contract and advances its source checkpoint only after commit succeeds.

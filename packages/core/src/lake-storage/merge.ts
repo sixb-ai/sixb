@@ -23,7 +23,10 @@ export type DatasetMergeCommitResult =
   | { readonly outcome: "unchanged"; readonly version: DatasetVersion | null }
 
 export interface LakeMergeSession {
-  /** Stage ordered complete-row upserts and exact primary-key deletes. */
+  /**
+   * Stage ordered complete-row upserts and exact primary-key deletes. With sequenceBy, deletes
+   * require a sequence, stale changes are ignored, and conflicting ties abort the whole merge.
+   */
   writeChanges(
     changes:
       | Iterable<MergeChange<DatasetRow, DatasetRow>>

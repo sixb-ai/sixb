@@ -18,6 +18,7 @@ import {
   type MergeChange,
 } from "@sixb/core"
 import {
+  assertUnsequencedDatasetWrite,
   type BeginDatasetMergeInput,
   type BeginDatasetWriteInput,
   type CommitDatasetMergeInput,
@@ -28,6 +29,7 @@ import {
   type DatasetVersion,
   type DatasetWriteCommitResult,
   type DatasetWriteMode,
+  datasetSequenceChange,
   encodeDatasetPrimaryKey,
   getDatasetMergeChangeValidationError,
   getDatasetPrimaryKeyColumns,
@@ -37,6 +39,7 @@ import {
   type LakeWriteSession,
   mergeStrictDatasetDefinition,
   type ReadDatasetRowsInput,
+  reconcileDatasetSequences,
 } from "@sixb/core/lake-storage"
 import type {
   CommitMergeInput,
@@ -338,6 +341,7 @@ export class LocalLakeStorage implements LakeStorage {
       throw new LakeStorageError(`[LakeLocal] Unknown dataset '${input.dataset.id}'`)
     }
 
+    assertUnsequencedDatasetWrite(definition)
     await this.ensureBaseDirs()
 
     const sessionDir = join(this.tempRootPath(), `session-${randomUUID()}`)
@@ -482,10 +486,28 @@ export class LocalLakeStorage implements LakeStorage {
         : []
       const previousByKey = this.rowsByPrimaryKey(previousRows, definition)
       const stagedChanges = await this.readMergeChanges(options.tempRowsPath, definition)
+      const previousManifest =
+        definition.sequenceBy !== undefined && latestVersion
+          ? await readJsonFile<StoredDatasetVersionManifest>(
+              this.versionManifestPath(definition.id, latestVersion.versionId)
+            )
+          : null
+      const ordered =
+        definition.sequenceBy === undefined
+          ? undefined
+          : reconcileDatasetSequences(
+              definition,
+              new Map(previousManifest?.sequences ?? []),
+              stagedChanges.map((change) => datasetSequenceChange(definition, change))
+            )
       const finalChanges = new Map<string, MergeChange<DatasetRow, DatasetRow>>()
-      for (const change of stagedChanges) {
-        const value = change.kind === "upsert" ? change.row : change.key
-        finalChanges.set(encodeDatasetPrimaryKey(definition, value), change)
+      if (ordered) {
+        for (const [key, index] of ordered.accepted) finalChanges.set(key, stagedChanges[index]!)
+      } else {
+        for (const change of stagedChanges) {
+          const value = change.kind === "upsert" ? change.row : change.key
+          finalChanges.set(encodeDatasetPrimaryKey(definition, value), change)
+        }
       }
 
       const nextByKey = new Map(previousByKey)
@@ -497,7 +519,11 @@ export class LocalLakeStorage implements LakeStorage {
         }
       }
 
-      if (this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema)) {
+      if (
+        ordered
+          ? ordered.accepted.size === 0
+          : this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema)
+      ) {
         await rm(options.sessionDir, { recursive: true, force: true })
         return { outcome: "unchanged", version: latestVersion }
       }
@@ -528,14 +554,14 @@ export class LocalLakeStorage implements LakeStorage {
           sizeBytes: versionRowsStat.size,
         }
 
-        await writeJsonAtomic(
-          versionManifestPath,
-          toStoredManifest({
+        await writeJsonAtomic(versionManifestPath, {
+          ...toStoredManifest({
             version,
             rowFile: basename(versionRowsPath),
             commitMessage: options.commit?.commitMessage,
-          })
-        )
+          }),
+          ...(ordered ? { sequences: [...ordered.states] } : {}),
+        })
         await writeJsonAtomic(this.statePath(options.merge.dataset.id), {
           latestVersionId: versionId,
         })
@@ -573,6 +599,7 @@ export class LocalLakeStorage implements LakeStorage {
     }
 
     const mode = options.write.mode ?? "snapshot"
+    assertUnsequencedDatasetWrite(definition)
 
     if (getDatasetPrimaryKeyColumns(definition) !== null) {
       if (mode === "append" && latestVersion) {

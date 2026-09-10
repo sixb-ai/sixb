@@ -77,8 +77,9 @@ function createTestApp(lakeStorage: LakeStorage, definitions: readonly DatasetDe
 
 const definitions: DatasetDefinition[] = [
   defineDataset("raw.catalog.dataset_0", {
-    schema: [col("source", "string"), col("id", "string")],
+    schema: [col("source", "string"), col("id", "string"), col("revision", "int64")],
     primaryKey: ["source", "id"],
+    sequenceBy: "revision",
   }),
   ...Array.from({ length: 4 }, (_, index) =>
     defineDataset(`raw.catalog.dataset_${index + 1}`, { schema: [col("id", "string")] })
@@ -108,12 +109,14 @@ describe("dataset catalog routes", () => {
     const body = (await response.json()) as Array<{
       id: string
       primaryKey?: string | string[]
+      sequenceBy?: string
       materialized: boolean
       latestVersion: { versionId: string; mode: string; rowCount?: number } | null
     }>
 
     expect(body).toHaveLength(5)
     expect(body[0]?.primaryKey).toEqual(["source", "id"])
+    expect(body[0]?.sequenceBy).toBe("revision")
     for (const item of body) {
       expect(item.materialized).toBe(true)
       expect(item.latestVersion?.mode).toBe("snapshot")
@@ -135,11 +138,13 @@ describe("dataset catalog routes", () => {
 
     const item = (await response.json()) as {
       primaryKey?: string | string[]
+      sequenceBy?: string
       materialized: boolean
       latestVersion: { mode: string } | null
     }
     expect(item.materialized).toBe(true)
     expect(item.primaryKey).toEqual(["source", "id"])
+    expect(item.sequenceBy).toBe("revision")
     expect(item.latestVersion?.mode).toBe("snapshot")
 
     expect(calls()).toBe(1)
