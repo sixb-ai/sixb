@@ -1215,7 +1215,7 @@ describe("bound Sixb surface", () => {
     expect(Object.keys(scoped.actions).sort()).toEqual(
       ["getById", "list", "listForType", "listGlobal", "request", "requestAndWait", "runs"].sort()
     )
-    expect(Object.keys(scoped.datasets).sort()).toEqual(["getById", "list"])
+    expect(Object.keys(scoped.datasets).sort()).toEqual(["getById", "ingest", "list"])
     expect(Object.keys(scoped.workflows).sort()).toEqual(
       ["getById", "interventions", "list", "request", "requestById", "runs"].sort()
     )
