@@ -82,6 +82,7 @@
         "./packages/core/src/storage/connector-connections/provider.ts"
       ],
       "@sixb/core/internal/edits": ["./packages/core/src/edits/index.ts"],
+      "@sixb/core/internal/datasets": ["./packages/core/src/datasets/write.ts"],
       "@sixb/core/internal/error-reporting": ["./packages/core/src/error-reporting/internal.ts"],
       "@sixb/core/internal/errors": ["./packages/core/src/errors/internal.ts"],
       "@sixb/core/internal/events": ["./packages/core/src/events/index.ts"],

@@ -68,16 +68,6 @@ export async function runAbortable<T>(
   }
 }
 
-export function assertDatasetRow(value: unknown, syncId: string, itemIndex: number): DatasetRow {
-  if (isPlainObject(value)) {
-    return value
-  }
-
-  throw new Error(
-    `[SixbSyncWorker] Sync '${syncId}' returned an invalid row at item ${itemIndex}. Dataset rows must be plain objects.`
-  )
-}
-
 export async function* normalizeReadResult(
   readResult: SyncReadResult,
   syncId: string,
