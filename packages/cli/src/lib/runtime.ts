@@ -204,9 +204,6 @@ export async function startSixbRuntime(
   sixb: LoadedSixbHost,
   options: StartSixbRuntimeOptions = {}
 ): Promise<RunningSixbRuntime> {
-  await migrateRuntimeStorage(sixb)
-  await checkRuntimeLakeDefinitions(sixb)
-
   let rulesRuntime: RunningRulesRuntime | null = null
   let schedulerRuntime: RunningSchedulerRuntime | null = null
   let orchestratorRuntime: RunningOrchestratorRuntime | null = null
@@ -234,6 +231,9 @@ export async function startSixbRuntime(
   }
 
   try {
+    // Own providers from the first startup phase, including preflight failures.
+    await migrateRuntimeStorage(sixb)
+    await checkRuntimeLakeDefinitions(sixb)
     rulesRuntime = await startRulesRuntime(sixb)
     rulesWorker = rulesRuntime.rulesWorker
 

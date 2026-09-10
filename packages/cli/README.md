@@ -65,6 +65,29 @@ bun add @sixb/cli
 
 Scaffold a new project without installing the CLI first with `bun create sixb <name>`.
 
+### Development reload
+
+`sixb dev` watches source and configuration files under the config module's directory.
+Changes to ontology, actions, pipelines, other discovered definitions, shared helpers, or
+configuration restart the local dev stack in a fresh process and regenerate project types.
+File additions and deletions are picked up too. Custom `app/` edits use frontend HMR once
+the app server is running; adding the first route starts it automatically.
+
+Native file events trigger targeted checks. An asynchronous source scan every five seconds
+recovers missed events without scanning the running frontend's files. A missed native event
+can therefore take a few seconds to reload. Hidden browser tabs pause reload polling and
+check again when visible; disconnected tabs back off retries until the server returns.
+
+Backend restarts stop the old workers before starting replacements and reload connected
+browser pages when the new stack is ready. In-memory state resets; persisted state remains.
+Startup errors are displayed and the watcher stays alive so the next save can recover.
+Generated `.sixb/` files, dependencies, build output, and non-source storage files are ignored.
+Source outside the project root is not watched. Environment-file changes require restarting
+`sixb dev`, because Bun loads them into the supervisor's environment at launch.
+Stop the supervisor and its child with Ctrl+C.
+On macOS/Linux, the dev child also enforces its own ten-second cleanup deadline if the
+supervisor disappears, so a stuck startup cannot leave its process group running indefinitely.
+
 ## Options
 
 | Flag | Applies to | Default | Description |

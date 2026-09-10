@@ -147,6 +147,61 @@ async function appendScheduleTriggered(
 }
 
 describe("startSixbRuntime", () => {
+  // Guard: move migration/lake validation back above startSixbRuntime's try.
+  // Both failures still throw, but neither closes the providers and these assertions fail.
+  for (const phase of ["migration", "lake validation"] as const) {
+    test(`closes providers exactly once when ${phase} fails before workers start`, async () => {
+      const closes: string[] = []
+      const migrator: StorageMigrator = {
+        adapterId: "preflight-fixture",
+        latestVersion: 1,
+        async status() {
+          return {
+            adapterId: "preflight-fixture",
+            latestVersion: 1,
+            appliedVersion: 0,
+            state: "pending",
+            reason: "fixture migration pending",
+          }
+        },
+        async migrate() {
+          throw new Error("migration failed")
+        },
+      }
+      const storage = Object.assign(new InMemoryStorage(), {
+        ...(phase === "migration" ? { migrators: [migrator] } : {}),
+        async close() {
+          closes.push("storage")
+        },
+      })
+      const lakeStorage = Object.assign(createLakeStorage(), {
+        async assertDatasetDefinitionsCompatible() {
+          throw new Error("lake validation failed")
+        },
+        async close() {
+          closes.push("lake")
+        },
+      })
+      const sixb = new SixbHost({
+        id: "preflight-cleanup",
+        ontology: [Zone],
+        storage,
+        lakeStorage,
+        broker: new InMemoryBroker(),
+        blobStorage: new InMemoryBlobStorage(),
+        queues: Object.assign(new InMemoryQueues(), {
+          async close() {
+            closes.push("queues")
+          },
+        }),
+      })
+      await expect(startSixbRuntime(sixb, { cohostWorkers: true })).rejects.toThrow(
+        `${phase} failed`
+      )
+      expect(closes).toEqual(["queues", "storage", "lake"])
+    })
+  }
+
   test("runs adapter migrations before starting background runtimes", async () => {
     const calls: string[] = []
     const migrator: StorageMigrator = {
