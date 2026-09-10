@@ -20,7 +20,7 @@ describe("DuckLakeStorage", () => {
 
     await expect(rejected).rejects.toBeInstanceOf(LakeStorageError)
     await expect(rejected).rejects.toThrow(
-      "Dataset 'raw.erp.orders' requires a schema for DuckLake storage"
+      "[SixbDuckLake] Dataset definitions must declare a schema."
     )
   })
 

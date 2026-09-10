@@ -225,11 +225,6 @@ export class DuckLakeDatasetCatalog {
       definition,
       (message) => new LakeStorageError(`[SixbDuckLake] ${message}`)
     )
-    if (!definition.schema) {
-      throw new LakeStorageError(
-        `[SixbDuckLake] Dataset '${definition.id}' requires a schema for DuckLake storage.`
-      )
-    }
   }
 
   private async applyExistingDatasetUpdate(plan: DatasetDefinitionUpdatePlan): Promise<void> {
