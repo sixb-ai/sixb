@@ -19,7 +19,8 @@ export interface DatasetVersionRef {
 }
 
 export interface DatasetProducer {
-  readonly kind: "sync" | "pipeline"
+  readonly kind: "sync" | "pipeline" | "ingest"
+  /** For ingestion, the bound execution id; otherwise the sync/pipeline definition id. */
   readonly id?: string
   readonly runId?: string
   readonly stepId?: string

@@ -113,7 +113,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
 function isDatasetProducer(value: unknown): value is NonNullable<DatasetVersion["producer"]> {
   return (
     isRecord(value) &&
-    (value.kind === "sync" || value.kind === "pipeline") &&
+    (value.kind === "sync" || value.kind === "pipeline" || value.kind === "ingest") &&
     optionalString(value.id) &&
     optionalString(value.runId)
   )

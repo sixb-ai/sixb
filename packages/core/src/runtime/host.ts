@@ -318,6 +318,7 @@ export class SixbHost<
         ? {}
         : { connectorConnections: this.connectorService.connectionProcess }),
       blobStorage: this.blobStorage,
+      lakeStorage: this.lakeStorage,
     }
   }
 }

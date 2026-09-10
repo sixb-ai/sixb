@@ -4304,7 +4304,7 @@ export type ListDatasetVersionsResponses = {
         }>
       }
       producer?: {
-        kind: "sync" | "pipeline"
+        kind: "sync" | "pipeline" | "ingest"
         id?: string
         runId?: string
       }
@@ -4380,7 +4380,7 @@ export type GetDatasetVersionResponses = {
       }>
     }
     producer?: {
-      kind: "sync" | "pipeline"
+      kind: "sync" | "pipeline" | "ingest"
       id?: string
       runId?: string
     }
@@ -4460,7 +4460,7 @@ export type ListDatasetRowsResponses = {
         }>
       }
       producer?: {
-        kind: "sync" | "pipeline"
+        kind: "sync" | "pipeline" | "ingest"
         id?: string
         runId?: string
       }

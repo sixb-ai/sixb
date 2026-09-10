@@ -11,6 +11,7 @@ import type { ConnectorService } from "../connectors/service"
 import { createDatasetsRuntime, type DatasetsRuntime } from "../datasets/execution"
 import { createEventsRuntime, type EventsRuntime } from "../events/execution"
 import type { ExecutionContext } from "../execution"
+import type { LakeStorage } from "../lake-storage/types"
 import { createLogsRuntime, type LogsRuntime } from "../logging/execution"
 import type { LoggingService } from "../logging/service"
 import { createObjectsRuntime, type ObjectsRuntime } from "../objects/execution"
@@ -54,6 +55,7 @@ export interface SixbDependencies {
   readonly connectorService: ConnectorService
   readonly connectorConnections?: ConnectorConnectionProcess
   readonly blobStorage: BlobStorage
+  readonly lakeStorage: LakeStorage
 }
 
 export function createBoundSixb<TOntologySources extends readonly OntologySource[]>(
@@ -91,7 +93,13 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
   return {
     objects: createObjectsRuntime<TOntologySources>(runtime, execution),
     actions: createActionsRuntime(runtime, execution),
-    datasets: createDatasetsRuntime(runtime, dependencies.definitions.datasets),
+    datasets: createDatasetsRuntime(
+      runtime,
+      execution,
+      dependencies.definitions.datasets,
+      dependencies.lakeStorage,
+      dependencies.blobStorage
+    ),
     workflows: createWorkflowsRuntime(runtime, execution, dependencies.definitions.workflows),
     syncs: createSyncsRuntime(runtime, execution, dependencies.definitions.syncs),
     pipelines: createPipelinesRuntime(runtime, execution, dependencies.definitions.pipelines),

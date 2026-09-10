@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBlobStorage } from "../blob-storage"
+import { InMemoryBroker } from "../broker"
 import { change, col, type DatasetDefinition, defineDataset, type MergeChange } from "../datasets"
 import { writeDataset } from "../datasets/write"
 import type { DatasetMergeCommitResult, DatasetRow, LakeStorage } from "../lake-storage"
+import { InMemoryQueues } from "../queues"
+import { SixbHost } from "../runtime/host"
+import { InMemoryStorage } from "../storage"
+import { createTestSixb } from "./execution"
 import type { LakeMergeStorageContractSuiteOptions } from "./lake-merge-storage-contract"
 
 const dataset = defineDataset("contract.source_order", {
@@ -139,6 +144,37 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
         )
       }))
 
+    test("ingests through the bound SDK and preserves execution provenance", async () => {
+      // Regression proof: remove ingest from DuckLake's producer parser; reopen loses provenance.
+      let storage = await options.createStorage()
+      const broker = new InMemoryBroker()
+      try {
+        const host = new SixbHost({
+          id: "ingest-contract",
+          ontology: [],
+          datasets: [dataset],
+          lakeStorage: storage,
+          broker,
+          storage: new InMemoryStorage(),
+          queues: new InMemoryQueues(),
+          blobStorage: new InMemoryBlobStorage(),
+        })
+        const sixb = createTestSixb(host)
+        const result = await sixb.datasets.ingest(dataset, { changes: [upsert(8)] })
+        expect(result.outcome).toBe("created")
+        if (options.reopen) storage = await options.reopen(storage)
+        expect((await storage.getLatestVersion(dataset.id))?.producer).toEqual({
+          kind: "ingest",
+          id: sixb.execution.id,
+        })
+        expect((await rows(storage)).map((row) => row.name)).toEqual(["Sam"])
+        expect(await host.events.read()).toMatchObject([
+          { type: "dataset.version.committed", payload: { versionId: result.version?.versionId } },
+        ])
+      } finally {
+        await options.teardown?.(storage)
+      }
+    })
     test("rebases retained changes while preserving explicit version guards", () =>
       withStorage(async (storage) => {
         // Regression proof: disable retryOnConflict in retryDatasetMergeCommit; the second commit fails.
