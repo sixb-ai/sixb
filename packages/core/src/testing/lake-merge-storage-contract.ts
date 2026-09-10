@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test"
 import { change, col, defineDataset } from "../datasets"
 import type { DatasetMergeCommitResult, DatasetRow, LakeStorage } from "../lake-storage"
+import { runDatasetSequenceContract } from "./dataset-sequence-contract"
 
 export interface LakeMergeStorageContractSuiteOptions<TStorage extends LakeStorage = LakeStorage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
   readonly teardown?: (storage: TStorage) => void | Promise<void>
+  readonly reopen?: (storage: TStorage) => TStorage | Promise<TStorage>
 }
 
 const invoices = defineDataset("contract.merges.invoices", {
@@ -35,6 +37,7 @@ export function runLakeMergeStorageContractSuite<TStorage extends LakeStorage>(
   }
 
   describe(label, () => {
+    runDatasetSequenceContract(options)
     test("creates an initial merge version from async changes", async () => {
       await withStorage(async (storage) => {
         await storage.createDataset(invoices)

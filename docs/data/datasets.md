@@ -38,6 +38,7 @@ The id `erp.invoices` is the name every other part of the project references.
 | --- | --- | --- |
 | `schema` | `col(...)[]` | Required. The ordered list of column definitions. |
 | `primaryKey` | `string \| string[]` | Optional. One key column or an ordered composite key. |
+| `sequenceBy` | `string` | Optional. Non-nullable `timestamp` or `int64` column used to order source changes; requires a primary key. |
 | `partitionBy` | `string[]` | Optional. Logical partition columns; each name must exist in `schema`. |
 | `description` | `string` | Optional. Human-readable description. |
 
@@ -71,6 +72,56 @@ V1 primary keys have these constraints:
 
 Use a keyed dataset with a [merge sync](./syncs.md#sync-modes) when the source exposes ordered row
 changes and the dataset should stay current without replacing every row on each run.
+
+### Source ordering
+
+Use `sequenceBy` to keep the newest source record when changes arrive out of order:
+
+```ts
+export const people = defineDataset("crm.people", {
+  schema: [col("id", "string"), col("name", "string"), col("updatedAt", "timestamp")],
+  primaryKey: "id",
+  sequenceBy: "updatedAt",
+})
+```
+
+Use the **source's** revision or timestamp, not fetch/receipt time. Submit complete rows or sequenced deletes:
+
+```ts
+import { change } from "@sixb/core"
+
+change.upsert({ id: "42", name: "Sam", updatedAt: "2026-09-09T10:00:00.123Z" })
+change.delete({ id: "42" }, { sequence: "2026-09-09T10:01:00.000Z" })
+```
+
+#### Merge behavior
+
+| Incoming change | Result |
+| --- | --- |
+| Newer sequence | Applies |
+| Older sequence | Ignored |
+| Equal sequence, identical content | Unchanged |
+| Equal sequence, different content or upsert/delete tie | Entire merge fails |
+| Delete v9 → upsert v8 → upsert v10 | Stays deleted at v8; restored at v10 |
+
+Repeated keys are processed in submission order. Deletions retain durable ordering state, even for
+absent keys; new deletion state creates a version without requiring a visible row change.
+
+#### Sequence values
+
+| Column type | Accepted values |
+| --- | --- |
+| `int64` | Signed 64-bit integers. Use decimal strings outside JavaScript's safe integer range. |
+| `timestamp` | Valid `Date` or ISO timestamp with `Z`/`±HH:MM` and at most 3 fractional digits. Equivalent instants compare equally. |
+
+#### V1 constraints
+
+- **Merge writes only.** Snapshot, append, and SQL-transform writes to sequenced datasets are rejected.
+- **Immutable configuration.** Create a new dataset and backfill to adopt or change `sequenceBy`.
+- **Explicit derivation.** Derived datasets must declare their own `sequenceBy` and primary key.
+
+For content equality, object-key order is ignored; array order matters. Nullable columns treat
+omitted, `undefined`, and `null` equally. Integer, decimal, date, and timestamp columns use canonical values.
 
 ### `col` options
 
@@ -198,6 +249,7 @@ export const invoicesSummary = defineDataset("invoices.summary").derive(rawInvoi
 | `pick` | `string[]` | Keep only these parent columns. Each name must exist on the parent. |
 | `add` | `col(...)[]` | Append these columns after the kept ones. |
 | `primaryKey` | `string \| string[]` | Optional key over the resulting columns. |
+| `sequenceBy` | `string` | Optional ordering column over the resulting columns; requires an explicit primary key. |
 | `partitionBy` | `string[]` | Optional partition columns for the derived dataset. |
 | `description` | `string` | Optional description for the derived dataset. |
 

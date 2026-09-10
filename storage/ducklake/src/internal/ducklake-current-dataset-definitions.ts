@@ -10,6 +10,7 @@ import {
 } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import {
+  DATASET_SEQUENCE_COLUMN_COMMENT,
   type DuckLakeCatalogColumn,
   duckLakeCatalogColumnsToDatasetPrimaryKey,
   duckLakeCatalogColumnsToDatasetSchema,
@@ -59,12 +60,16 @@ export async function readCurrentDatasetDefinitions(
   for (const table of tables) {
     const columns = columnsByTableName.get(table.tableName) ?? []
     const primaryKey = duckLakeCatalogColumnsToDatasetPrimaryKey(table.tableName, columns)
+    const sequenceBy = columns.find(
+      (column) => column.comment === DATASET_SEQUENCE_COLUMN_COMMENT
+    )?.columnName
     const partitionBy = partitionByTableName.get(table.tableName) ?? []
     definitions.set(table.datasetId, {
       kind: "dataset",
       id: table.datasetId,
       schema: duckLakeCatalogColumnsToDatasetSchema(table.tableName, columns),
       ...(primaryKey !== undefined ? { primaryKey } : {}),
+      ...(sequenceBy !== undefined ? { sequenceBy } : {}),
       ...(partitionBy.length > 0 ? { partitionBy } : {}),
       ...(table.comment !== undefined ? { description: table.comment } : {}),
     })

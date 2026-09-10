@@ -1,5 +1,6 @@
 import type { DatasetDefinition, MergeChange } from "../datasets"
 import { getDatasetRowValidationError } from "../datasets"
+import { getDatasetSequenceValidationError } from "../datasets/sequence"
 import { isPlainRecord } from "../json"
 import { LakeStorageError } from "./errors"
 import type { DatasetRow } from "./types"
@@ -58,7 +59,11 @@ export function getDatasetMergeChangeValidationError(
     if (shapeError) {
       return shapeError
     }
-    return getDeleteKeyValidationError(change.key, dataset, primaryKeyColumns)
+    const keyError = getDeleteKeyValidationError(change.key, dataset, primaryKeyColumns)
+    if (keyError) return keyError
+    return dataset.sequenceBy === undefined
+      ? null
+      : getDatasetSequenceValidationError(dataset, change.sequence)
   }
 
   return `Dataset '${dataset.id}' merge change kind must be 'upsert' or 'delete'.`
@@ -70,7 +75,11 @@ export function cloneDatasetMergeChange(
 ): MergeChange<DatasetRow, DatasetRow> {
   return change.kind === "upsert"
     ? { kind: "upsert", row: structuredClone(change.row) }
-    : { kind: "delete", key: structuredClone(change.key) }
+    : {
+        kind: "delete",
+        key: structuredClone(change.key),
+        ...(change.sequence !== undefined ? { sequence: structuredClone(change.sequence) } : {}),
+      }
 }
 
 function getChangeShapeError(
@@ -79,6 +88,7 @@ function getChangeShapeError(
   payloadField: "row" | "key"
 ): string | null {
   const allowedFields = new Set(["kind", payloadField])
+  if (payloadField === "key" && dataset.sequenceBy !== undefined) allowedFields.add("sequence")
   for (const field of Object.keys(change)) {
     if (!allowedFields.has(field)) {
       return `Dataset '${dataset.id}' ${change.kind as string} change contains unknown field '${field}'.`

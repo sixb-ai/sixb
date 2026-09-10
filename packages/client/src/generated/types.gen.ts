@@ -4134,6 +4134,7 @@ export type ListDatasetsResponses = {
     id: string
     description?: string
     primaryKey?: string | Array<string>
+    sequenceBy?: string
     partitionBy?: Array<string>
     schema: {
       columns: Array<{
@@ -4207,6 +4208,7 @@ export type GetDatasetResponses = {
     id: string
     description?: string
     primaryKey?: string | Array<string>
+    sequenceBy?: string
     partitionBy?: Array<string>
     schema: {
       columns: Array<{
@@ -4507,6 +4509,7 @@ export type ListSyncsResponses = {
         id: string
         description?: string
         primaryKey?: string | Array<string>
+        sequenceBy?: string
         partitionBy?: Array<string>
         schema: {
           columns: Array<{
@@ -4613,6 +4616,7 @@ export type GetSyncResponses = {
         id: string
         description?: string
         primaryKey?: string | Array<string>
+        sequenceBy?: string
         partitionBy?: Array<string>
         schema: {
           columns: Array<{
@@ -4855,6 +4859,7 @@ export type ListPipelinesResponses = {
               id: string
               description?: string
               primaryKey?: string | Array<string>
+              sequenceBy?: string
               partitionBy?: Array<string>
               schema: {
                 columns: Array<{
@@ -4878,6 +4883,7 @@ export type ListPipelinesResponses = {
             id: string
             description?: string
             primaryKey?: string | Array<string>
+            sequenceBy?: string
             partitionBy?: Array<string>
             schema: {
               columns: Array<{
@@ -4991,6 +4997,7 @@ export type GetPipelineResponses = {
               id: string
               description?: string
               primaryKey?: string | Array<string>
+              sequenceBy?: string
               partitionBy?: Array<string>
               schema: {
                 columns: Array<{
@@ -5014,6 +5021,7 @@ export type GetPipelineResponses = {
             id: string
             description?: string
             primaryKey?: string | Array<string>
+            sequenceBy?: string
             partitionBy?: Array<string>
             schema: {
               columns: Array<{

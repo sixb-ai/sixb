@@ -15,6 +15,12 @@ import {
   getDatasetMergeChangeValidationError,
   getDatasetPrimaryKeyColumns,
 } from "./merge-validation"
+import {
+  assertUnsequencedDatasetWrite,
+  type DatasetSequenceState,
+  datasetSequenceChange,
+  reconcileDatasetSequences,
+} from "./source-ordering"
 import type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
@@ -201,6 +207,7 @@ export class InMemoryLakeStorage implements LakeStorage {
   private readonly datasets = new Map<string, DatasetDefinition>()
   private readonly versionsByDataset = new Map<string, DatasetVersion[]>()
   private readonly rowsByVersionId = new Map<string, readonly DatasetRow[]>()
+  private readonly sequencesByVersionId = new Map<string, Map<string, DatasetSequenceState>>()
   private readonly latestVersionIdByDataset = new Map<string, string>()
   private readonly commitLocks = new Map<string, Promise<void>>()
 
@@ -295,6 +302,7 @@ export class InMemoryLakeStorage implements LakeStorage {
       throw new LakeStorageError(`[LakeStorage] Unknown dataset '${input.dataset.id}'`)
     }
 
+    assertUnsequencedDatasetWrite(definition)
     return new InMemoryLakeWriteSession(this, {
       ...input,
       dataset: definition,
@@ -408,9 +416,21 @@ export class InMemoryLakeStorage implements LakeStorage {
       const previousRows = this.rowsByVersionId.get(latestVersion?.versionId ?? "") ?? []
       const previousByKey = this.rowsByPrimaryKey(previousRows, definition)
       const finalChanges = new Map<string, MergeChange<DatasetRow, DatasetRow>>()
-      for (const change of options.changes) {
-        const value = change.kind === "upsert" ? change.row : change.key
-        finalChanges.set(encodeDatasetPrimaryKey(definition, value), change)
+      const ordered =
+        definition.sequenceBy === undefined
+          ? undefined
+          : reconcileDatasetSequences(
+              definition,
+              this.sequencesByVersionId.get(actualVersionId ?? "") ?? new Map(),
+              options.changes.map((change) => datasetSequenceChange(definition, change))
+            )
+      if (ordered) {
+        for (const [key, index] of ordered.accepted) finalChanges.set(key, options.changes[index]!)
+      } else {
+        for (const change of options.changes) {
+          const value = change.kind === "upsert" ? change.row : change.key
+          finalChanges.set(encodeDatasetPrimaryKey(definition, value), change)
+        }
       }
 
       const nextByKey = new Map(previousByKey)
@@ -422,7 +442,11 @@ export class InMemoryLakeStorage implements LakeStorage {
         }
       }
 
-      if (this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema)) {
+      if (
+        ordered
+          ? ordered.accepted.size === 0
+          : this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema)
+      ) {
         return {
           outcome: "unchanged",
           version: latestVersion ? cloneDatasetVersion(latestVersion) : null,
@@ -454,6 +478,7 @@ export class InMemoryLakeStorage implements LakeStorage {
         visibleRows.map((row) => cloneRow(row))
       )
       this.latestVersionIdByDataset.set(options.merge.dataset.id, versionId)
+      if (ordered) this.sequencesByVersionId.set(versionId, ordered.states)
 
       return { outcome: "created", version: cloneDatasetVersion(version) }
     })
@@ -470,6 +495,7 @@ export class InMemoryLakeStorage implements LakeStorage {
     }
 
     const mode = options.write.mode ?? "snapshot"
+    assertUnsequencedDatasetWrite(definition)
     const latestVersion = await this.getLatestVersion(options.write.dataset.id)
 
     if (options.commit?.expectedLatestVersionId !== undefined) {

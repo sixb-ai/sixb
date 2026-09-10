@@ -30,6 +30,14 @@ runLakeStorageContractSuite("DuckLakeStorage LakeStorage contract", {
 })
 
 runLakeMergeStorageContractSuite("DuckLakeStorage merge contract", {
+  async reopen(storage: DuckLakeStorage) {
+    const rootDir = roots.get(storage)
+    if (!rootDir) throw new Error("Missing test root")
+    await storage.close()
+    const reopened = createLocalDuckLakeStorage(rootDir)
+    roots.set(reopened, rootDir)
+    return reopened
+  },
   async createStorage() {
     const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-merge-contract-"))
     const storage = createLocalDuckLakeStorage(rootDir)

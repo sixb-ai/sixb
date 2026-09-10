@@ -12734,6 +12734,9 @@
                           }
                         ]
                       },
+                      "sequenceBy": {
+                        "type": "string"
+                      },
                       "partitionBy": {
                         "type": "array",
                         "items": {
@@ -12913,6 +12916,9 @@
                           "minItems": 2
                         }
                       ]
+                    },
+                    "sequenceBy": {
+                      "type": "string"
                     },
                     "partitionBy": {
                       "type": "array",
@@ -13744,6 +13750,9 @@
                                   }
                                 ]
                               },
+                              "sequenceBy": {
+                                "type": "string"
+                              },
                               "partitionBy": {
                                 "type": "array",
                                 "items": {
@@ -14017,6 +14026,9 @@
                                   "minItems": 2
                                 }
                               ]
+                            },
+                            "sequenceBy": {
+                              "type": "string"
                             },
                             "partitionBy": {
                               "type": "array",
@@ -14759,6 +14771,9 @@
                                                   }
                                                 ]
                                               },
+                                              "sequenceBy": {
+                                                "type": "string"
+                                              },
                                               "partitionBy": {
                                                 "type": "array",
                                                 "items": {
@@ -14833,6 +14848,9 @@
                                               "minItems": 2
                                             }
                                           ]
+                                        },
+                                        "sequenceBy": {
+                                          "type": "string"
                                         },
                                         "partitionBy": {
                                           "type": "array",
@@ -15133,6 +15151,9 @@
                                                 }
                                               ]
                                             },
+                                            "sequenceBy": {
+                                              "type": "string"
+                                            },
                                             "partitionBy": {
                                               "type": "array",
                                               "items": {
@@ -15207,6 +15228,9 @@
                                             "minItems": 2
                                           }
                                         ]
+                                      },
+                                      "sequenceBy": {
+                                        "type": "string"
                                       },
                                       "partitionBy": {
                                         "type": "array",

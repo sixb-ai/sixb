@@ -6,6 +6,7 @@ export type {
   DatasetSchema,
   MergeChange,
 } from "../datasets"
+export { assertDatasetDefinition } from "../datasets/validation"
 export type { JsonValue } from "../json"
 export type {
   DatasetDefinitionUpdatePlan,
@@ -31,6 +32,12 @@ export {
   getDatasetMergeChangeValidationError,
   getDatasetPrimaryKeyColumns,
 } from "./merge-validation"
+export type { DatasetSequenceChange, DatasetSequenceState } from "./source-ordering"
+export {
+  assertUnsequencedDatasetWrite,
+  datasetSequenceChange,
+  reconcileDatasetSequences,
+} from "./source-ordering"
 export type {
   ExecuteSqlTransformInput,
   LakeSqlExecutor,

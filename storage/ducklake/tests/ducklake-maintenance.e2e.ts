@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { col, defineDataset } from "@sixb/core"
+import { change, col, defineDataset } from "@sixb/core"
 import { DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
 import { duckLakeMetadataTableName } from "../src/internal/sql"
 import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
@@ -56,6 +56,33 @@ describe("DuckLakeStorage maintenance", () => {
     expect(await duckLakeSnapshotCount(storage, localDuckLakeOptions(rootDir))).toBe(
       snapshotsBefore
     )
+  })
+
+  test("retains deletion ordering after snapshot expiration and reopen", async () => {
+    // Tombstones live in current transactional state. They must not depend on expired versions.
+    const dataset = defineDataset("source.maintenance", {
+      schema: [col("id", "string"), col("revision", "int64")],
+      primaryKey: "id",
+      sequenceBy: "revision",
+    })
+    await storage.createDataset(dataset)
+    const deleted = await storage.beginMerge({ dataset })
+    await deleted.writeChanges([change.delete({ id: "42" }, { sequence: 9 })])
+    await deleted.commit()
+    // Advance another dataset, making the deletion snapshot eligible for expiration.
+    await writeSnapshot([{ orderId: "other", total: 1 }])
+    await storage.runMaintenance({ expireOlderThan: "0 seconds", deleteOlderThan: "0 seconds" })
+    await storage.close()
+    storage = createLocalDuckLakeStorage(rootDir)
+    const stale = await storage.beginMerge({ dataset })
+    await stale.writeChanges([change.upsert({ id: "42", revision: 8 })])
+    expect((await stale.commit()).outcome).toBe("unchanged")
+    const restore = await storage.beginMerge({ dataset })
+    await restore.writeChanges([change.upsert({ id: "42", revision: 10 })])
+    expect((await restore.commit()).outcome).toBe("created")
+    expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toEqual([
+      { id: "42", revision: "10" },
+    ])
   })
 
   test("non-dry-run maintenance expires eligible snapshots and preserves latest data", async () => {

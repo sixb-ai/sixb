@@ -99,6 +99,11 @@ export function encodeDatasetTableName(datasetId: string): string {
   return `${DATASET_TABLE_PREFIX}${encodeDatasetId(datasetId)}`
 }
 
+/** Current source-ordering state, deliberately outside the dataset table namespace. */
+export function encodeDatasetSequenceTableName(datasetId: string): string {
+  return `sixb__seq__${encodeDatasetTableName(datasetId)}`
+}
+
 /**
  * Decode a physical DuckLake table name back to a Sixb dataset id.
  */

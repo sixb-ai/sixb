@@ -180,11 +180,18 @@ await merge.writeChanges([
 const result = await merge.commit()
 ```
 
-Changes remain ordered across `writeChanges(...)` calls, and the final change for a repeated key
+For datasets without `sequenceBy`, changes remain ordered across `writeChanges(...)` calls, and the final change for a repeated key
 wins. Upserts are complete rows rather than patches. Commit checks the dataset version captured by
 `beginMerge`, applies effective changes atomically, and creates a version only when visible rows
 change. An initial no-op returns `{ outcome: "unchanged", version: null }`; a later no-op returns the
 existing latest version.
+
+Datasets declaring `sequenceBy` instead compare source revisions: older changes are ignored,
+identical ties are unchanged, and conflicting ties abort the merge. Deletes require
+`change.delete(key, { sequence })`. Source revisions and deletion tombstones are stored in a
+companion DuckLake table in the same transaction as visible rows, surviving snapshot expiration.
+New tombstone state creates a version even when the visible row count stays zero. Sequenced
+datasets currently require merge writes. See [source ordering](../../docs/data/datasets.md#source-ordering).
 
 Snapshot, append, and SQL-transform writes to keyed datasets also enforce unique keys so a later
 merge never starts from an ambiguous baseline. Application authors normally use

@@ -10,7 +10,11 @@ import type {
   LakeMergeSession,
   LakeWriteSession,
 } from "@sixb/core/lake-storage"
-import { getDatasetPrimaryKeyColumns, LakeStorageError } from "@sixb/core/lake-storage"
+import {
+  assertUnsequencedDatasetWrite,
+  getDatasetPrimaryKeyColumns,
+  LakeStorageError,
+} from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {
@@ -93,6 +97,7 @@ export class DuckLakeWriteCoordinator {
     }
 
     this.datasets.assertSchema(definition)
+    assertUnsequencedDatasetWrite(definition)
     const mode = input.mode ?? "snapshot"
     assertDatasetWriteMode(mode, "write")
 
@@ -235,6 +240,7 @@ export class DuckLakeWriteCoordinator {
     runtime: DuckDbQueryRuntime,
     input: DuckLakeCommitDatasetVersionInput
   ): Promise<DatasetWriteCommitResult> {
+    assertUnsequencedDatasetWrite(input.dataset)
     const result = await this.commitVersionOutcomeOnExclusiveRuntime(runtime, {
       ...input,
       // DuckLake has no primary-key constraint. Do not let its automatic retry replay a keyed

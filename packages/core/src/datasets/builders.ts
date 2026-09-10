@@ -15,6 +15,7 @@ type DatasetColumnOptions = {
 type DefineDatasetOptions = {
   readonly schema: readonly DatasetColumnDefinition[]
   readonly primaryKey?: DatasetPrimaryKey
+  readonly sequenceBy?: string
   readonly partitionBy?: readonly string[]
   readonly description?: string
 }
@@ -23,6 +24,7 @@ type DeriveDatasetOptions<TParent extends DatasetDefinition> = {
   readonly pick?: readonly DatasetColumnNameOf<TParent>[]
   readonly add?: readonly DatasetColumnDefinition[]
   readonly primaryKey?: DatasetPrimaryKey
+  readonly sequenceBy?: string
   readonly partitionBy?: readonly string[]
   readonly description?: string
 }
@@ -58,7 +60,21 @@ type PrimaryKeyColumnNameOf<TColumns extends readonly DatasetColumnDefinition[]>
 
 type CheckedDefineDatasetOptions<TOptions extends DefineDatasetOptions> = TOptions & {
   readonly primaryKey?: DatasetPrimaryKey<PrimaryKeyColumnNameOf<TOptions["schema"]>>
+  readonly sequenceBy?: SequenceColumnNameOf<TOptions["schema"]>
 }
+
+type SequenceColumnNameOf<TColumns extends readonly DatasetColumnDefinition[]> =
+  string extends ColumnNameOf<TColumns>
+    ? string
+    : {
+        [TName in ColumnNameOf<TColumns>]: ColumnDefinitionOf<TColumns, TName>["type"] extends
+          | "timestamp"
+          | "int64"
+          ? ColumnDefinitionOf<TColumns, TName> extends { readonly nullable: true }
+            ? never
+            : TName
+          : never
+      }[ColumnNameOf<TColumns>]
 
 type PickColumns<
   TColumns extends readonly DatasetColumnDefinition[],
@@ -107,8 +123,9 @@ type DatasetColumnResult<
 
 type DatasetDefinitionResult<TId extends string, TOptions extends DefineDatasetOptions> = Omit<
   DatasetDefinition<TId, TOptions["schema"]>,
-  "primaryKey" | "partitionBy" | "description"
+  "primaryKey" | "sequenceBy" | "partitionBy" | "description"
 > &
+  FieldFromOptions<TOptions, "sequenceBy", string> &
   FieldFromOptions<TOptions, "primaryKey", DatasetPrimaryKey> &
   FieldFromOptions<TOptions, "partitionBy", readonly string[]> &
   FieldFromOptions<TOptions, "description", string>
@@ -119,8 +136,9 @@ type DerivedDatasetDefinitionResult<
   TOptions extends DeriveDatasetOptions<TParent> | undefined,
 > = Omit<
   DatasetDefinition<TId, DerivedColumns<TParent, TOptions>>,
-  "primaryKey" | "partitionBy" | "description"
+  "primaryKey" | "sequenceBy" | "partitionBy" | "description"
 > &
+  FieldFromOptions<TOptions, "sequenceBy", string> &
   FieldFromOptions<TOptions, "primaryKey", DatasetPrimaryKey> &
   FieldFromOptions<TOptions, "partitionBy", readonly string[]> &
   FieldFromOptions<TOptions, "description", string>
@@ -130,6 +148,7 @@ type CheckedDeriveDatasetOptions<
   TOptions extends DeriveDatasetOptions<TParent>,
 > = TOptions & {
   readonly primaryKey?: DatasetPrimaryKey<PrimaryKeyColumnNameOf<DerivedColumns<TParent, TOptions>>>
+  readonly sequenceBy?: SequenceColumnNameOf<DerivedColumns<TParent, TOptions>>
 }
 
 export function col<const TName extends string, const TType extends DatasetColumnType>(
@@ -177,6 +196,7 @@ function createDatasetDefinition(id: string, options: DefineDatasetOptions): Dat
         }
       : {}),
     ...(options.partitionBy !== undefined ? { partitionBy: [...options.partitionBy] } : {}),
+    ...(options.sequenceBy !== undefined ? { sequenceBy: options.sequenceBy } : {}),
     ...(options.description !== undefined ? { description: options.description } : {}),
   }
 
@@ -230,6 +250,7 @@ function deriveDatasetDefinition(
   return createDatasetDefinition(id, {
     schema: [...pickedColumns, ...(options.add ?? [])],
     ...(options.primaryKey !== undefined ? { primaryKey: options.primaryKey } : {}),
+    ...(options.sequenceBy !== undefined ? { sequenceBy: options.sequenceBy } : {}),
     ...(options.partitionBy !== undefined ? { partitionBy: options.partitionBy } : {}),
     ...(options.description !== undefined ? { description: options.description } : {}),
   })

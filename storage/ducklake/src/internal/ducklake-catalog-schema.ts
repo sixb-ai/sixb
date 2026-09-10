@@ -14,6 +14,7 @@ export interface DuckLakeCatalogColumn {
 }
 
 const SIXB_PRIMARY_KEY_COMMENT_NAMESPACE = "sixb:primary-key:"
+export const DATASET_SEQUENCE_COLUMN_COMMENT = "sixb.sequenceBy.v1"
 const SIXB_PRIMARY_KEY_COMMENT_PREFIX = `${SIXB_PRIMARY_KEY_COMMENT_NAMESPACE}v1:`
 
 const FILE_REF_STRUCT_CHILDREN = [
