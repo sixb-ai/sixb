@@ -3,12 +3,12 @@ import { Spinner } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { Search } from "lucide-react"
 
-interface ContextPickerResult {
+export interface ContextPickerResult {
   readonly context: AgentContextInput
   readonly label: string
 }
 
-interface ContextPickerProps {
+export interface ContextPickerProps {
   readonly open: boolean
   readonly query: string
   readonly loading: boolean

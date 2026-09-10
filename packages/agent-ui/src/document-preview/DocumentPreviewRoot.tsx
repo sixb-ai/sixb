@@ -55,7 +55,7 @@ import {
 } from "./state"
 import type { AgentDocumentPreviewRenderer, AgentDocumentSource } from "./types"
 
-interface DocumentPreviewContextValue {
+export interface DocumentPreviewContextValue {
   readonly canPreview: (document: AgentDocumentSource) => boolean
   readonly openDocument: (document: AgentDocumentSource) => void
 }
