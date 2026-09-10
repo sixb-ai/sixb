@@ -164,6 +164,64 @@ restored.
 
 ## Use a dataset
 
+### Ingest source changes
+
+Webhook handlers and other trusted backend executions can update a registered, keyed dataset:
+
+```ts
+const result = await sixb.datasets.ingest(people, {
+  changes: [
+    change.upsert({ id: "42", name: "Sam", updatedAt: "2026-09-09T10:00:00.123Z" }),
+    change.delete({ id: "9" }, { sequence: "2026-09-09T10:01:00.000Z" }),
+  ],
+})
+```
+
+| Contract | Behavior |
+| --- | --- |
+| Input | Iterable or async iterable of complete-row upserts and primary-key deletes |
+| Cancellation | Optional `signal: AbortSignal` |
+| Validation | Registered schema, primary key, source sequence, and referenced blobs |
+| Result | `{ outcome: "created" \| "unchanged", version, rowsRead }`; `version` can be `null` for an initial no-op |
+| Downstream work | New versions emit `dataset.version.committed`; pipelines/projections run asynchronously |
+| Authority | Trusted backend executions, or explicitly disabled authorization; dataset-view grants do not permit ingestion |
+
+Use [`sequenceBy`](#source-ordering) when [webhooks and syncs share a dataset](./connectors.md#webhooks-updating-source-datasets).
+
+| Dataset | Concurrent writes | Snapshot sync |
+| --- | --- | --- |
+| With `sequenceBy` | Newer source values win; concurrency conflicts retry | Ordered upserts; omitted rows stay |
+| Without `sequenceBy` | A concurrent version change fails ingestion | Replaces rows |
+
+**Existing unkeyed dataset?** Create a new keyed dataset → backfill → repoint consumers.
+Stored primary keys and `sequenceBy` are immutable.
+
+#### Objects and relationships
+
+Ingestion updates source data. Existing pipelines and projections determine the object result:
+
+| Change | Downstream behavior |
+| --- | --- |
+| Source record updated | Pipeline recalculates merged data; projection updates its properties and links |
+| Application edit | Projection's [conflict policy](./projections.md#source-and-managed-edit-conflict-resolution) still applies |
+| Source row removed | Projection withdraws its claims; the ontology object is not automatically deleted |
+| Foreign-key target missing | Properties can materialize, but no edge is created; the old source-owned link is withdrawn |
+
+#### Ingestion recovery
+
+> Commits and notifications are separate. A crash can leave committed data without its notification
+> or completed run record. Durable receipts and automatic notification recovery are deferred.
+
+- Notification failures are reported through `onError`.
+- Identical sequenced retries are no-ops; they do not resend notifications.
+- Rerun the downstream pipeline after missed notifications or pipeline failures:
+
+```ts
+await sixb.pipelines.request({ pipelineId: "merge-contacts" })
+```
+
+### Syncs, pipelines, and projections
+
 A dataset on its own is just a shape. The pieces that produce and consume rows reference it.
 
 A [sync](./syncs.md) reads from a [connector](./connectors.md) and writes into one dataset. It does not repeat the schema; it points at the definition:

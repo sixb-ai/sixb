@@ -13172,7 +13172,7 @@
                             "properties": {
                               "kind": {
                                 "type": "string",
-                                "enum": ["sync", "pipeline"]
+                                "enum": ["sync", "pipeline", "ingest"]
                               },
                               "id": {
                                 "type": "string"
@@ -13354,7 +13354,7 @@
                       "properties": {
                         "kind": {
                           "type": "string",
-                          "enum": ["sync", "pipeline"]
+                          "enum": ["sync", "pipeline", "ingest"]
                         },
                         "id": {
                           "type": "string"
@@ -13560,7 +13560,7 @@
                           "properties": {
                             "kind": {
                               "type": "string",
-                              "enum": ["sync", "pipeline"]
+                              "enum": ["sync", "pipeline", "ingest"]
                             },
                             "id": {
                               "type": "string"

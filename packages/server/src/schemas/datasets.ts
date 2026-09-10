@@ -54,7 +54,7 @@ export const DatasetVersionRefSchema = z.object({
 })
 
 export const DatasetProducerSchema = z.object({
-  kind: z.enum(["sync", "pipeline"]),
+  kind: z.enum(["sync", "pipeline", "ingest"]),
   id: z.string().optional(),
   runId: z.string().optional(),
 })

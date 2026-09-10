@@ -14,6 +14,7 @@ import {
   type SixbErrorContext,
   SixbHost,
 } from "../src"
+import type { DatasetProducer } from "../src/lake-storage"
 import { ProjectionRunDispatcher } from "../src/projections/run-dispatch"
 
 const Device = defineObjectType({
@@ -73,7 +74,7 @@ function createDependencies(
 
 async function commitDevicesVersion(
   lakeStorage: InMemoryLakeStorage,
-  producer: { readonly kind: "sync"; readonly id: string; readonly runId: string } = {
+  producer: DatasetProducer = {
     kind: "sync",
     id: "sync-devices",
     runId: "sync-run",
@@ -108,6 +109,30 @@ function dispatchInput(
 }
 
 describe("ProjectionRunDispatcher", () => {
+  test("inherits correlation from the execution that ingested a dataset version", async () => {
+    // Regression proof: remove resolveProducerExecution's ingest branch; correlation falls back.
+    const { host, lakeStorage, storage } = createDependencies()
+    await storage.executions.create({
+      id: "webhook-execution",
+      projectId: host.id,
+      executor: { type: "primitive", kind: "webhook", runId: "delivery" },
+      source: { type: "webhook", deliveryId: "delivery" },
+      correlationId: "webhook-correlation",
+      authorizationRef: {
+        type: "trustedPrimitive",
+        primitive: { kind: "webhook", id: "crm/person", runId: "delivery" },
+      },
+    })
+    const version = await commitDevicesVersion(lakeStorage, {
+      kind: "ingest",
+      id: "webhook-execution",
+    })
+    const dispatched = await new ProjectionRunDispatcher(host).dispatch(dispatchInput(version))
+    const run = await storage.projectionRuns.getById({ projectId: host.id, id: dispatched.runId })
+    expect(
+      await storage.executions.getById({ projectId: host.id, id: run!.executionId })
+    ).toMatchObject({ correlationId: "webhook-correlation" })
+  })
   test("bounds grouped telemetry batches by their maximum mapped point count", async () => {
     const { host, lakeStorage, storage } = createDependencies(groupedTelemetryProjection)
     const version = await commitDevicesVersion(lakeStorage)

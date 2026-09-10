@@ -4,7 +4,7 @@ import { createSixbError, toSixbFailure } from "../errors/internal"
 import type { SixbFailure } from "../errors/types"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
-import type { LakeStorage } from "../lake-storage"
+import type { DatasetProducer, LakeStorage } from "../lake-storage"
 import type { Queues } from "../queues"
 import type { SixbDefinitions } from "../runtime/definitions"
 import type { ExecutionRecord, ProjectionRunRecord, Storage } from "../storage"
@@ -289,14 +289,11 @@ async function assertExistingRun(
 async function resolveProducerExecution(
   storage: Storage,
   projectId: string,
-  producer:
-    | {
-        readonly kind: "sync" | "pipeline"
-        readonly id?: string
-        readonly runId?: string
-      }
-    | undefined
+  producer: DatasetProducer | undefined
 ): Promise<ExecutionRecord | null> {
+  if (producer?.kind === "ingest") {
+    return producer.id ? storage.executions.getById({ projectId, id: producer.id }) : null
+  }
   if (!producer?.runId) return null
   if (producer.kind === "sync") {
     const run = await storage.syncRuns?.getById({ projectId, id: producer.runId })
@@ -342,10 +339,7 @@ async function requireProducerExecution(input: {
   )
 }
 
-function assertProducerId(
-  producer: { readonly kind: "sync" | "pipeline"; readonly id?: string; readonly runId?: string },
-  runOwnerId: string
-): void {
+function assertProducerId(producer: DatasetProducer, runOwnerId: string): void {
   if (producer.id === undefined || producer.id === runOwnerId) return
   throw new ProjectionValidationError(
     `[Sixb] Dataset producer '${producer.kind}:${producer.id}' does not match run '${producer.runId}'.`

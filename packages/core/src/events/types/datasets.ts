@@ -1,3 +1,4 @@
+import type { DatasetProducer } from "../../lake-storage/types"
 import type { EventEnvelope } from "../envelope"
 
 export interface DatasetVersionCommittedEvent extends EventEnvelope {
@@ -9,12 +10,7 @@ export interface DatasetVersionCommittedEvent extends EventEnvelope {
     versionId: string
     /** Canonical UTC ISO timestamp from the committed immutable dataset version. */
     createdAt: string
-    producer: {
-      kind: "sync" | "pipeline"
-      id?: string
-      runId?: string
-      stepId?: string
-    }
+    producer: DatasetProducer
   }
 }
 

@@ -469,6 +469,52 @@ export const acmeErpConnector = defineConnector("acme-erp", {
 (it gives `body` its `type`, `invoiceId`, and `deliveryId` fields). Bare `.json()` is also valid
 when you do not need a typed body. Verification and idempotency resolution run before admission; only the handler receives an execution-bound `sixb` and run logger.
 
+### Webhooks updating source datasets
+
+Use [`sixb.datasets.ingest`](./datasets.md#ingest-source-changes) to update the same source rows as a
+sync. These examples use the sequenced [`people` dataset](./datasets.md#source-ordering).
+
+**Webhook handler:** fetch the current record and submit a complete row.
+
+```ts
+.handle(async ({ body, client, sixb, request }) => {
+  const crm = await client()
+  const person = await crm.getPerson(body.personId)
+  await sixb.datasets.ingest(people, {
+    changes: [change.upsert({
+      id: String(person.id),
+      name: person.name,
+      updatedAt: person.updatedAt,
+    })],
+    signal: request.signal,
+  })
+})
+```
+
+**Snapshot sync:** use the same row mapping and source timestamp.
+
+```ts
+export const syncPeople = defineSync("crm-people")
+  .from(crmConnector)
+  .read(async (crm) => (await crm.listPeople()).map((person) => ({
+    id: String(person.id),
+    name: person.name,
+    updatedAt: person.updatedAt,
+  })))
+  .intoDataset(people)
+```
+
+**Downstream pipeline:** attach a dataset-update schedule with `.when(peopleUpdated)`.
+
+```ts
+export const peopleUpdated = defineSchedule("crm-people-updated")
+  .on(events.dataset(people).updated())
+```
+
+- Equal source revisions must map to identical rows. Use source time, never fetch time.
+- Missing snapshot rows stay. Delete explicitly with `change.delete(key, { sequence })`.
+- Delivery deduplication runs before the handler. See [recovery limits](./datasets.md#ingestion-recovery).
+
 ## Discovery and registration
 
 Put connector definitions in `connectors/` and export them. `createSixb()` discovers them
