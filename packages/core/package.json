@@ -179,6 +179,12 @@
       "import": "./dist/storage/connector-connections/provider.js",
       "default": "./dist/storage/connector-connections/provider.js"
     },
+    "./internal/datasets": {
+      "types": "./dist/datasets/write.d.ts",
+      "bun": "./src/datasets/write.ts",
+      "import": "./dist/datasets/write.js",
+      "default": "./dist/datasets/write.js"
+    },
     "./internal/edits": {
       "types": "./dist/edits/index.d.ts",
       "bun": "./src/edits/index.ts",

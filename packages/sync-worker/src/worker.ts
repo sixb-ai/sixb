@@ -162,6 +162,8 @@ async function emitSyncRunFinishedEvents(
   correlationId: string,
   createdVersion?: DatasetVersion
 ): Promise<void> {
+  // Sync owns notification after its run is finalized; the shared dataset writer returns the
+  // created version but does not publish events. Durable delivery is a separate follow-up.
   await host.events?.emit(
     {
       events: [

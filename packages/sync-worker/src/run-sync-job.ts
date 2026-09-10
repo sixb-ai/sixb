@@ -1,14 +1,5 @@
-import {
-  type BlobStorage,
-  cloneJsonValue,
-  type DatasetDefinition,
-  type DatasetRow,
-  type FileRef,
-  getDatasetRowValidationError,
-  isFileRef,
-  type JsonValue,
-  type MergeChange,
-} from "@sixb/core"
+import { cloneJsonValue, type DatasetDefinition, type JsonValue } from "@sixb/core"
+import { writeDataset } from "@sixb/core/internal/datasets"
 import {
   captureSixbFailure,
   createSixbError,
@@ -16,9 +7,9 @@ import {
   summarizeErrorMessage,
 } from "@sixb/core/internal/errors"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
-import { type DatasetVersion, getDatasetMergeChangeValidationError } from "@sixb/core/lake-storage"
+import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { SYNC_RUN_FAILURE_CODES, type SyncRunRecord } from "@sixb/core/storage"
-import { assertDatasetRow, throwIfAborted } from "./normalize"
+import { throwIfAborted } from "./normalize"
 import { readSyncValues, type SyncSourceValue } from "./source-read"
 import type { RunSyncJobInput, SyncRunFinishedHandler, SyncRunResult } from "./types"
 
@@ -97,151 +88,6 @@ function translateSyncExecutionError(
   )
 }
 
-async function verifyFileRef(options: {
-  blobStorage: BlobStorage
-  syncId: string
-  datasetId: string
-  columnName: string
-  itemIndex: number
-  fileRef: FileRef
-}): Promise<void> {
-  const blobInfo = await options.blobStorage.stat(options.fileRef.blobId)
-  if (!blobInfo) {
-    throw new Error(
-      `[SixbSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing unknown blob '${options.fileRef.blobId}'.`
-    )
-  }
-
-  if (blobInfo.digest !== options.fileRef.digest) {
-    throw new Error(
-      `[SixbSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing blob '${options.fileRef.blobId}' with digest '${options.fileRef.digest}', but blob storage has '${blobInfo.digest}'.`
-    )
-  }
-
-  if (blobInfo.sizeBytes !== options.fileRef.sizeBytes) {
-    throw new Error(
-      `[SixbSyncWorker] Sync '${options.syncId}' returned row ${options.itemIndex} with dataset '${options.datasetId}' column '${options.columnName}' referencing blob '${options.fileRef.blobId}' with size ${options.fileRef.sizeBytes}, but blob storage has ${blobInfo.sizeBytes}.`
-    )
-  }
-}
-
-async function verifyRowFileRefs(options: {
-  blobStorage: BlobStorage
-  syncId: string
-  dataset: { id: string; schema: { columns: readonly { name: string; type: string }[] } }
-  row: Record<string, unknown>
-  itemIndex: number
-}): Promise<void> {
-  const fileRefColumns = options.dataset.schema.columns.filter(
-    (column) => column.type === "fileRef"
-  )
-  for (const column of fileRefColumns) {
-    const value = options.row[column.name]
-    if (!isFileRef(value)) {
-      continue
-    }
-
-    await verifyFileRef({
-      blobStorage: options.blobStorage,
-      syncId: options.syncId,
-      datasetId: options.dataset.id,
-      columnName: column.name,
-      itemIndex: options.itemIndex,
-      fileRef: value,
-    })
-  }
-}
-
-function assertMergeChange(
-  value: unknown,
-  syncId: string,
-  dataset: DatasetDefinition,
-  itemIndex: number
-): MergeChange<DatasetRow, DatasetRow> {
-  const validationError = getDatasetMergeChangeValidationError(value, dataset)
-  if (validationError) {
-    throw new Error(
-      `[SixbSyncWorker] Sync '${syncId}' returned an invalid merge change at item ${itemIndex}. ${validationError}`
-    )
-  }
-  return value as MergeChange<DatasetRow, DatasetRow>
-}
-
-async function* validatedDatasetRows(options: {
-  values: AsyncIterable<SyncSourceValue>
-  signal: AbortSignal
-  blobStorage: BlobStorage
-  syncId: string
-  runId: string
-  dataset: DatasetDefinition
-  onRead(): void
-}): AsyncIterable<DatasetRow> {
-  let itemIndex = 0
-  for await (const sourceValue of options.values) {
-    throwIfAborted(options.signal)
-    itemIndex += 1
-
-    let row: DatasetRow
-    try {
-      row = assertDatasetRow(sourceValue.value, options.syncId, itemIndex)
-      // Validate before handing rows to lake storage so sync failures include
-      // the source item index; lake storage still re-validates as the final boundary.
-      const validationError = getDatasetRowValidationError(row, options.dataset)
-      if (validationError) {
-        throw new Error(
-          `[SixbSyncWorker] Sync '${options.syncId}' returned an invalid row at item ${itemIndex}. ${validationError}`
-        )
-      }
-
-      // Lake storage validates fileRef shape; the worker owns existence checks against blob storage.
-      await verifyRowFileRefs({
-        blobStorage: options.blobStorage,
-        syncId: options.syncId,
-        dataset: options.dataset,
-        row,
-        itemIndex,
-      })
-      options.onRead()
-    } catch (error) {
-      throw sourceValidationError(error, sourceValue, options, itemIndex)
-    }
-    yield row
-  }
-}
-
-async function* validatedMergeChanges(options: {
-  values: AsyncIterable<SyncSourceValue>
-  signal: AbortSignal
-  blobStorage: BlobStorage
-  syncId: string
-  runId: string
-  dataset: DatasetDefinition
-  onRead(): void
-}): AsyncIterable<MergeChange<DatasetRow, DatasetRow>> {
-  let itemIndex = 0
-  for await (const sourceValue of options.values) {
-    throwIfAborted(options.signal)
-    itemIndex += 1
-    let mergeChange: MergeChange<DatasetRow, DatasetRow>
-    try {
-      mergeChange = assertMergeChange(sourceValue.value, options.syncId, options.dataset, itemIndex)
-      if (mergeChange.kind === "upsert") {
-        await verifyRowFileRefs({
-          blobStorage: options.blobStorage,
-          syncId: options.syncId,
-          dataset: options.dataset,
-          row: mergeChange.row,
-          itemIndex,
-        })
-      }
-      options.onRead()
-    } catch (error) {
-      throw sourceValidationError(error, sourceValue, options, itemIndex)
-    }
-    yield mergeChange
-  }
-}
-
 function sourceValidationError(
   error: unknown,
   sourceValue: SyncSourceValue,
@@ -265,11 +111,6 @@ function sourceValidationError(
       accountId: connection.account.id,
     },
   })
-}
-
-interface SyncCommitResult {
-  readonly outcome: "created" | "unchanged"
-  readonly version?: DatasetVersion
 }
 
 /**
@@ -317,7 +158,6 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
     id: job.id,
   })
   const logger = logSession.logger
-  let abortWrite: (() => Promise<void>) | undefined
   let rowsRead = 0
   let committedVersion: DatasetVersion | undefined
 
@@ -338,9 +178,6 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
         `[SixbSyncWorker] Sync '${sync.id}' targets unknown dataset '${run.datasetId}'.`
       )
     }
-
-    throwIfAborted(signal)
-    await lakeStorage.createDataset(dataset)
 
     const latestSuccessfulRuns = await syncRunsStorage.list({
       projectId: runtime.id,
@@ -372,115 +209,24 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
           nextCheckpoint = next === undefined ? undefined : cloneJsonValue(next)
         },
       })
-    const onRead = () => {
-      rowsRead += 1
-    }
-    const commitMessage = job.commitMessage ?? `sync ${sync.id} run ${job.id}`
-    let commitResult: SyncCommitResult
-
-    if (sync.config.mode === "merge") {
-      const mergeWrite = await lakeStorage.beginMerge({
-        dataset,
-        expectedLatestVersionId: job.expectedLatestVersionId,
-        producer,
-      })
-      abortWrite = () => mergeWrite.abort()
-
-      const values = await readValues()
-      throwIfAborted(signal)
-      await mergeWrite.writeChanges(
-        validatedMergeChanges({
-          values,
-          signal,
-          blobStorage,
-          syncId: sync.id,
-          runId: job.id,
-          dataset,
-          onRead,
-        })
-      )
-      throwIfAborted(signal)
-
-      const commit = await mergeWrite.commit({ commitMessage })
-      abortWrite = undefined
-      commitResult = {
-        outcome: commit.outcome,
-        ...(commit.version ? { version: commit.version } : {}),
-      }
-    } else {
-      const values = await readValues()
-      throwIfAborted(signal)
-
-      const rowWrite = await lakeStorage.beginWrite({
-        dataset,
-        mode: sync.config.mode,
-        producer,
-      })
-      abortWrite = () => rowWrite.abort()
-      await rowWrite.writeRows(
-        validatedDatasetRows({
-          values,
-          signal,
-          blobStorage,
-          syncId: sync.id,
-          runId: job.id,
-          dataset,
-          onRead,
-        })
-      )
-      throwIfAborted(signal)
-
-      if (rowsRead === 0 && sync.config.mode === "append") {
-        const version = await lakeStorage.getLatestVersion(dataset.id)
-        await rowWrite.abort()
-        abortWrite = undefined
-        const finishedRun = await syncRunsStorage.finish({
-          projectId: runtime.id,
-          id: job.id,
-          status: "succeeded",
-          rowsRead,
-          ...(version
-            ? { output: { datasetId: version.datasetId, versionId: version.versionId } }
-            : {}),
-          checkpoint: nextCheckpoint,
-        })
-        const finishedAt = requireFinishedAt({
-          syncId: sync.id,
-          runId: job.id,
-          finishedAt: finishedRun.finishedAt,
-        })
-        await notifyRunFinished(input.onRunFinished, finishedRun)
-
-        return {
-          id: job.id,
-          syncId: sync.id,
-          datasetId: dataset.id,
-          mode: sync.config.mode,
-          startedAt: requireStartedAt(job.id, startedRun.startedAt),
-          finishedAt,
-          rowsRead,
-          ...(version ? { version } : {}),
-          versionCreated: false,
-        }
-      }
-
-      const { outcome, ...version } = await rowWrite.commit({
-        expectedLatestVersionId: job.expectedLatestVersionId,
-        commitMessage,
-      })
-      abortWrite = undefined
-      commitResult = { outcome, version }
-    }
-
-    const { outcome, version } = commitResult
+    const { outcome, version } = await writeDataset({
+      lakeStorage,
+      blobStorage,
+      dataset,
+      mode: sync.config.mode,
+      signal,
+      producer,
+      readValues,
+      expectedLatestVersionId: job.expectedLatestVersionId,
+      commitMessage: job.commitMessage ?? `sync ${sync.id} run ${job.id}`,
+      sourceLabel: `[SixbSyncWorker] Sync '${sync.id}'`,
+      onRead(count) {
+        rowsRead = count
+      },
+      mapValidationError: (error, value, itemIndex) =>
+        sourceValidationError(error, value, { syncId: sync.id, runId: job.id, dataset }, itemIndex),
+    })
     if (outcome === "created") {
-      if (!version) {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbSyncWorker] Sync '${sync.id}' created no dataset version.`,
-          { details: { syncId: sync.id, runId: job.id, datasetId: dataset.id } }
-        )
-      }
       committedVersion = version
     }
     let finishedRun: SyncRunRecord
@@ -528,9 +274,7 @@ export async function runSyncJob(input: RunSyncJobInput): Promise<SyncRunResult>
       : { ...result, versionCreated: false }
   } catch (error) {
     if (!committedVersion) {
-      // Without a created commit, best-effort clean up any open session and the run record.
-      await abortWrite?.().catch(() => {})
-
+      // The shared writer has already cleaned up its session. Finalize the failed sync run.
       const status = signal.aborted ? "cancelled" : "failed"
       try {
         const failureError =
