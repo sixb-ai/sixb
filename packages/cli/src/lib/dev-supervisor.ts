@@ -66,7 +66,7 @@ export async function runDevSupervisor(options: DevOptions): Promise<void> {
         // All saves before this spawn are already in its fresh module graph.
         pending = false
         clearTimeout(timer)
-        const proc = spawn(process.execPath, process.argv.slice(1), {
+        const proc = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
           env: {
             ...process.env,
             SIXB_DEV_CHILD: "1",
