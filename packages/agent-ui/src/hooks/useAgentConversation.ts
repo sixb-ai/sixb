@@ -61,6 +61,8 @@ export interface UseAgentConversationInput {
   readonly onThreadCreated: (threadId: string) => void
 }
 
+export type AgentConversation = ReturnType<typeof useAgentConversation>
+
 /** Shared route-independent controller for full-page and embedded agent conversations. */
 export function useAgentConversation({
   threadId,
