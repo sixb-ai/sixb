@@ -4,7 +4,7 @@ import {
   type SqliteObjectQuerySource,
   type SqliteValue,
   sqliteJsonEachValue,
-} from "./object-query-compiler"
+} from "./query-compiler"
 
 export interface SqliteSelectedObjectReadSource extends SqliteObjectQuerySource {
   readonly objectPropertyPermissionsTable: string

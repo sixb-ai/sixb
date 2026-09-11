@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { ObjectQuery } from "@sixb/core"
-import { compileObjectQuery } from "../src/object-query-compiler"
+import { compileObjectQuery } from "../src/objects/query-compiler"
 
 test("refs compile to one de-duplicated JSON table source in canonical order", () => {
   const refs = [
