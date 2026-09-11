@@ -30,84 +30,20 @@ export async function getTelemetryHistoryBatch(
   const projectId = objectReader.projectId
   const request = snapshotTelemetryHistoryInput(input, objectReader)
 
-  const uniqueSeries = new Map<string, TimeseriesHistorySeriesInput>()
-  for (const series of request.series) {
-    const key = seriesKey(series)
-    if (!uniqueSeries.has(key)) uniqueSeries.set(key, series)
-  }
-  const deduplicatedSeries = [...uniqueSeries.values()]
-  const readable = await objectReader.canReadObjectPropertiesBatch({
-    items: deduplicatedSeries.map(objectPropertySelection),
-  })
-  const visibility = new Map(
-    deduplicatedSeries.map(
-      (series, index) => [seriesKey(series), readable[index] === true] as const
-    )
-  )
-  const visibleSeries = deduplicatedSeries.filter(
-    (series) => visibility.get(seriesKey(series)) === true
-  )
-
-  // The provider receives its own detached request. It must never retain or mutate the canonical
-  // series snapshot that admission and the final release check rely on.
-  const providerRequest = structuredClone({
+  const uniqueSeries = deduplicateSeries(request.series)
+  const readableSeries = await selectReadableSeries(uniqueSeries, objectReader)
+  const resultsBySeries = await readAndValidateHistory({
+    storage,
     projectId,
-    series: visibleSeries,
-    ...(request.from === undefined ? {} : { from: request.from }),
-    ...(request.to === undefined ? {} : { to: request.to }),
-    ...(request.limitPerSeries === undefined ? {} : { limitPerSeries: request.limitPerSeries }),
-    ...(request.order === undefined ? {} : { order: request.order }),
+    request,
+    series: readableSeries,
   })
-  const stored = visibleSeries.length === 0 ? [] : await storage.getHistoryBatch(providerRequest)
 
-  // Fully detach and validate provider-owned data before the final live check. A provider result
-  // may contain accessors or a custom iterator; none of that code may run after release admission.
-  if (!Array.isArray(stored)) throw invalidTimeseriesProviderResult()
-  const storedCount = stored.length
-  if (!Number.isSafeInteger(storedCount) || storedCount > visibleSeries.length) {
-    throw invalidTimeseriesProviderResult()
-  }
-  const visibleSeriesKeys = new Set(visibleSeries.map(seriesKey))
-  const providerResultBySeries = new Map<string, TimeseriesHistoryBatchResult>()
-  for (let index = 0; index < storedCount; index += 1) {
-    const providerResult = snapshotProviderResult(stored[index]!, request.limitPerSeries)
-    const key = seriesKey(providerResult)
-    if (providerResultBySeries.has(key) || !visibleSeriesKeys.has(key)) {
-      throw invalidTimeseriesProviderResult()
-    }
-    for (const point of providerResult.points) {
-      assertTimeseriesPointMatchesSeries(projectId, providerResult, point)
-    }
-    providerResultBySeries.set(key, providerResult)
-  }
-
-  // Objects and telemetry do not yet share a portable read snapshot. This second exact check is
-  // the release point: a series revoked while the provider was reading is never returned.
-  const releaseReadable =
-    visibleSeries.length === 0
-      ? []
-      : await objectReader.canReadObjectPropertiesBatch({
-          items: visibleSeries.map(objectPropertySelection),
-        })
-  const releasableSeriesKeys = new Set(
-    visibleSeries.flatMap((series, index) =>
-      releaseReadable[index] === true ? [seriesKey(series)] : []
-    )
-  )
-
-  const releasedPoints = request.series.map((series) =>
-    releasableSeriesKeys.has(seriesKey(series))
-      ? (providerResultBySeries.get(seriesKey(series))?.points ?? [])
-      : []
-  )
-  const pointOccurrences = releasedPoints.reduce((total, points) => total + points.length, 0)
-  if (request.maxPointOccurrences !== undefined && pointOccurrences > request.maxPointOccurrences) {
-    throw invalidTimeseriesProviderResult()
-  }
-  const result = request.series.map((series, index) => ({
-    ...series,
-    points: releasedPoints[index]!.map((point) => structuredClone(point)),
-  }))
+  // Objects and telemetry do not share a portable read snapshot. Recheck live selection after
+  // all provider-owned values have been detached, before deciding which points to return.
+  const releasableSeries =
+    readableSeries.length === 0 ? [] : await selectReadableSeries(readableSeries, objectReader)
+  const result = assembleHistoryResults({ request, resultsBySeries, releasableSeries })
   objectReader.assertVisibleOutputWithinLimit(result)
   return result
 }
@@ -133,6 +69,94 @@ export async function getLatestTelemetryPoint(
   if (!releaseReadable) return visibleLatestResult(null, objectReader)
 
   return visibleLatestResult(result, objectReader)
+}
+
+function deduplicateSeries(
+  series: readonly TimeseriesHistorySeriesInput[]
+): TimeseriesHistorySeriesInput[] {
+  const uniqueSeries = new Map<string, TimeseriesHistorySeriesInput>()
+  for (const item of series) {
+    const key = seriesKey(item)
+    if (!uniqueSeries.has(key)) uniqueSeries.set(key, item)
+  }
+  return [...uniqueSeries.values()]
+}
+
+async function selectReadableSeries(
+  series: readonly TimeseriesHistorySeriesInput[],
+  objectReader: AuthorizedObjectReader
+): Promise<readonly TimeseriesHistorySeriesInput[]> {
+  const readable = await objectReader.canReadObjectPropertiesBatch({
+    items: series.map(objectPropertySelection),
+  })
+  return series.filter((_, index) => readable[index] === true)
+}
+
+async function readAndValidateHistory(input: {
+  readonly storage: TimeseriesStorage
+  readonly projectId: string
+  readonly request: SnapshotTelemetryHistoryRequest
+  readonly series: readonly TimeseriesHistorySeriesInput[]
+}): Promise<ReadonlyMap<string, TimeseriesHistoryBatchResult>> {
+  const { storage, projectId, request, series } = input
+
+  // The provider receives its own detached request. It must never retain or mutate the canonical
+  // series snapshot that admission and the final release check rely on.
+  const providerRequest = structuredClone({
+    projectId,
+    series,
+    ...(request.from === undefined ? {} : { from: request.from }),
+    ...(request.to === undefined ? {} : { to: request.to }),
+    ...(request.limitPerSeries === undefined ? {} : { limitPerSeries: request.limitPerSeries }),
+    ...(request.order === undefined ? {} : { order: request.order }),
+  })
+  const stored = series.length === 0 ? [] : await storage.getHistoryBatch(providerRequest)
+
+  // Fully detach and validate provider-owned data before the final live check. A provider result
+  // may contain accessors or a custom iterator; none of that code may run after release admission.
+  if (!Array.isArray(stored)) throw invalidTimeseriesProviderResult()
+  const storedCount = stored.length
+  if (!Number.isSafeInteger(storedCount) || storedCount > series.length) {
+    throw invalidTimeseriesProviderResult()
+  }
+  const seriesKeys = new Set(series.map(seriesKey))
+  const providerResultBySeries = new Map<string, TimeseriesHistoryBatchResult>()
+  for (let index = 0; index < storedCount; index += 1) {
+    const providerResult = snapshotProviderResult(stored[index]!, request.limitPerSeries)
+    const key = seriesKey(providerResult)
+    if (providerResultBySeries.has(key) || !seriesKeys.has(key)) {
+      throw invalidTimeseriesProviderResult()
+    }
+    for (const point of providerResult.points) {
+      assertTimeseriesPointMatchesSeries(projectId, providerResult, point)
+    }
+    providerResultBySeries.set(key, providerResult)
+  }
+
+  return providerResultBySeries
+}
+
+/** Restore request order and duplicates, with independent point copies for every occurrence. */
+function assembleHistoryResults(input: {
+  readonly request: SnapshotTelemetryHistoryRequest
+  readonly resultsBySeries: ReadonlyMap<string, TimeseriesHistoryBatchResult>
+  readonly releasableSeries: readonly TimeseriesHistorySeriesInput[]
+}): readonly TimeseriesHistoryBatchResult[] {
+  const { request, resultsBySeries, releasableSeries } = input
+  const releasableSeriesKeys = new Set(releasableSeries.map(seriesKey))
+  const releasedPoints = request.series.map((series) =>
+    releasableSeriesKeys.has(seriesKey(series))
+      ? (resultsBySeries.get(seriesKey(series))?.points ?? [])
+      : []
+  )
+  const pointOccurrences = releasedPoints.reduce((total, points) => total + points.length, 0)
+  if (request.maxPointOccurrences !== undefined && pointOccurrences > request.maxPointOccurrences) {
+    throw invalidTimeseriesProviderResult()
+  }
+  return request.series.map((series, index) => ({
+    ...series,
+    points: releasedPoints[index]!.map((point) => structuredClone(point)),
+  }))
 }
 
 function snapshotTelemetrySeries(
