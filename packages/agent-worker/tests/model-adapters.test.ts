@@ -7,13 +7,13 @@ import {
   noopLogger,
   stringEnum,
 } from "@sixb/core"
+import { aiModelCallUsageFromModel } from "@sixb/core/internal/model-execution"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type { ModelAssistantPart, ModelStep, ModelUsage, ProviderData } from "@sixb/core/models"
 import {
   agentToolErrorText,
   agentTraceFromModelSteps,
   agentTraceFromPartialModelLoop,
-  aiModelCallUsageFromModel,
   modelToolsFromAgentDefinitions,
 } from "../src/model-adapters"
 import { WorkerTestModel } from "./worker-model-fixture"

@@ -1,33 +1,33 @@
-import type { AuthorizablePrincipal } from "@sixb/core"
-import {
-  aiLimitSubjectsFromAttribution,
-  aiUsageLimitExceededError,
-  aiUsageLimitUnavailableError,
-  applicableAiLimitPolicies,
-} from "@sixb/core/internal/ai-limit-enforcement"
-import { isSixbError } from "@sixb/core/internal/errors"
+import { isSixbError } from "../../errors/internal"
+import type { AuthorizablePrincipal } from "../../execution"
 import type {
   AiLimitPolicy,
   AiLimitQuantity,
   AiModelCallReservationIdentity,
   ReserveAiModelCallResult,
-} from "@sixb/core/storage"
+} from "../../storage"
+import {
+  aiLimitSubjectsFromAttribution,
+  aiUsageLimitExceededError,
+  aiUsageLimitUnavailableError,
+  applicableAiLimitPolicies,
+} from "../../storage/ai-limits/enforcement"
 import type {
   AiModelCallAdmissionDecision,
   AiModelCallAdmissionInput,
   BeforeAiModelCall,
   MarkAiModelCallUnknown,
 } from "./model-call-admission"
-import type { AgentWorkerStorage } from "./types"
+import type { ModelCallAccountingStorage } from "./types"
 
 export interface AiModelCallLimitController {
   readonly beforeModelCall: BeforeAiModelCall
   readonly markModelCallUnknown: MarkAiModelCallUnknown
 }
 
-/** Build the shared reservation lifecycle used by conversation and workflow model calls. */
+/** Build the reservation lifecycle for model calls from any execution. */
 export function createAiModelCallLimitController(input: {
-  readonly storage: AgentWorkerStorage
+  readonly storage: Pick<ModelCallAccountingStorage, "aiLimits">
   readonly projectId: string
   readonly requestedBy?: AuthorizablePrincipal
   readonly requesterGroupIds: readonly string[]

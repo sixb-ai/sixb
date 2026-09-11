@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryQueues, InMemoryStorage, type ReadonlyJsonValue } from "@sixb/core"
+import {
+  isPermanentAiUsageRecoveryError,
+  type RecoverAiModelCallInput,
+  recordRecoveredAiModelCall,
+} from "@sixb/core/internal/model-execution"
 import { rateModelCall } from "@sixb/core/models"
 import type { AgentAiUsageRecordRequestedQueueJob } from "@sixb/core/queues"
 import { AiUsageStorageError, type RecordAiModelCallInput } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import {
-  agentAiUsageRecoveryJobId,
-  enqueueAiModelCallRecovery,
-  isPermanentAiUsageRecoveryError,
-  recordRecoveredAiModelCall,
-} from "../src/model-call-recovery"
+import { agentAiUsageRecoveryJobId, enqueueAiModelCallRecovery } from "../src/model-call-recovery"
 
 const projectId = "project_1"
 const executionId = "test_agent_execution:run_1"
@@ -39,11 +39,20 @@ function modelCall(): RecordAiModelCallInput {
   }
 }
 
+function accounting(usage: RecordAiModelCallInput): RecoverAiModelCallInput {
+  return {
+    usage,
+    cost: { status: "unpriceable", reason: "missing-rate-card" },
+    ratedAt: usage.occurredAt,
+  }
+}
+
 describe("AI usage recovery", () => {
   test.each([
+    undefined,
     {},
     { routedProviderId: "openai", routedModelId: "gpt-5" },
-  ])("preserves usage from legacy pricing-context recovery jobs (%j)", async (pricingContext) => {
+  ])("preserves usage from legacy recovery jobs (%j)", async (pricingContext) => {
     // Regression proof: remove the legacy pricingContext branch in accountingFromQueuePayload.
     const queues = new InMemoryQueues()
     const storage = new InMemoryStorage()
@@ -54,7 +63,7 @@ describe("AI usage recovery", () => {
       executionId,
     })
     const record = modelCall()
-    await enqueueAiModelCallRecovery(queues.agents, record)
+    await enqueueAiModelCallRecovery(queues.agents, accounting(record))
     const [claim] = await queues.agents.claim({ projectId, workerId: "test", limit: 1 })
     if (claim?.job.type !== "agent.ai-usage.record.requested")
       throw new Error("Expected recovery job")
@@ -64,7 +73,10 @@ describe("AI usage recovery", () => {
         ...claim.job,
         payload: {
           ...claim.job.payload,
-          accounting: { pricingContext, ratedAt: record.recordedAt?.toISOString() },
+          accounting:
+            pricingContext === undefined
+              ? undefined
+              : { pricingContext, ratedAt: record.recordedAt?.toISOString() },
         },
       })
     )
@@ -149,8 +161,8 @@ describe("AI usage recovery", () => {
     })
 
     const record = modelCall()
-    await enqueueAiModelCallRecovery(queues.agents, record)
-    await enqueueAiModelCallRecovery(queues.agents, record)
+    await enqueueAiModelCallRecovery(queues.agents, accounting(record))
+    await enqueueAiModelCallRecovery(queues.agents, accounting(record))
 
     const [claimed] = await queues.agents.claim({
       projectId,
@@ -425,7 +437,7 @@ describe("AI usage recovery", () => {
     expect(invalidJobError).toMatchObject({
       name: "InvalidAiUsageRecoveryJobError",
       message:
-        "[SixbAgentWorker] AI usage recovery job 'agt_usage_job_usage_1' has an invalid occurredAt timestamp.",
+        "[SixbModels] AI usage recovery job 'agt_usage_job_usage_1' has an invalid occurredAt timestamp.",
     })
     expect(isPermanentAiUsageRecoveryError(invalidJobError)).toBe(true)
     expect(isPermanentAiUsageRecoveryError(new TypeError("invalid"))).toBe(true)

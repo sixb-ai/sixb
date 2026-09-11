@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryStorage } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import type { AiModelCallAdmissionInput } from "../src/model-call-admission"
-import { createAiModelCallLimitController } from "../src/model-call-limits"
+import type { AiModelCallAdmissionInput } from "../src/models/execution/model-call-admission"
+import { createAiModelCallLimitController } from "../src/models/execution/model-call-limits"
 
 const projectId = "project_1"
 const executionId = "test_agent_execution:run_limits"
