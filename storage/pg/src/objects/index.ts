@@ -1,0 +1,1 @@
+export { PgObjectStorage } from "./storage"

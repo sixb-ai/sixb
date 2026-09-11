@@ -3,7 +3,7 @@ import {
   type CompiledPgObjectQuery,
   compilePgObjectStatement,
   type PgObjectQuerySource,
-} from "./pg-object-query-compiler"
+} from "./query-compiler"
 
 export interface PgSelectedObjectReadSource extends PgObjectQuerySource {
   readonly objectPropertyPermissionsTable: string
