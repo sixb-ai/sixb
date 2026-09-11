@@ -5,7 +5,7 @@ import {
   type LinkPathSelectionInput,
   type LinkPathSelectionMode,
   snapshotLinkPathSelection,
-} from "../ontology/tokens"
+} from "../ontology/link-path-selection"
 import { ShareDefinitionError } from "./errors"
 import type {
   DefineShareOptions,
