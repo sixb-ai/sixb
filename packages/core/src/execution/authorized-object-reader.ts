@@ -472,8 +472,9 @@ function objectStorageForAuthority(
         scope: authority.objectRead.scope,
         limits: authority.objectRead.limits,
       })
+    default:
+      return assertNever(authority)
   }
-  return assertNever(authority)
 }
 
 function assertNever(value: never): never {
