@@ -1,9 +1,11 @@
 import type { AuthorizablePrincipal } from "@sixb/core"
+import {
+  AiModelCallRecorder,
+  createAiModelCallLimitController,
+} from "@sixb/core/internal/model-execution"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { AgentRunRecord } from "@sixb/core/storage"
 import { AgentTurnTimeoutError } from "./errors"
-import { createAiModelCallLimitController } from "./model-call-limits"
-import { AiModelCallRecorder } from "./model-call-recorder"
 import type { AgentTurnContext } from "./types"
 
 export interface AgentTurnRuntime {
@@ -40,10 +42,8 @@ export function createAgentTurnRuntime(input: {
     executionId: input.run.executionId,
     attempt: input.run.attempt,
     requesterGroupIds: input.run.requesterGroupIds,
-    beforeModelCall: modelCallLimits.beforeModelCall,
-    markModelCallUnknown: modelCallLimits.markModelCallUnknown,
+    limits: modelCallLimits,
     recoverAiModelCall: input.context.recoverAiModelCall,
-    errorRunId: input.run.id,
   })
   const timeout = new AbortController()
   let timedOut = false

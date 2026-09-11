@@ -7,14 +7,16 @@ export type {
   ModelRoute,
 } from "../models"
 export type { ModelProviderIds } from "../models/events"
+export type {
+  AiModelCallAccountingPayload,
+  AiModelCallRecordPayload,
+} from "../models/execution/types"
 export type { ProviderScope } from "../provider-scope"
 export { QueueError } from "./errors"
 export { InMemoryQueues } from "./in-memory"
 export type {
   ActionQueueJobFailureCode,
   ActionRunRequestedQueueJob,
-  AgentAiUsageAccountingPayload,
-  AgentAiUsageRecordPayload,
   AgentAiUsageRecordRequestedQueueJob,
   AgentQueueJob,
   AgentQueueJobFailureCode,

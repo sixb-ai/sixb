@@ -9,8 +9,8 @@ import {
 } from "@sixb/core/models"
 import { type AiLimitPolicyStatus, InMemoryStorage } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
-import { createAiModelCallLimitController } from "../src/model-call-limits"
-import { AiModelCallRecorder } from "../src/model-call-recorder"
+import { createAiModelCallLimitController } from "../src/models/execution/model-call-limits"
+import { AiModelCallRecorder } from "../src/models/execution/model-call-recorder"
 
 const projectId = "limits-runtime"
 const executionId = "test_agent_execution:run"
@@ -29,8 +29,7 @@ async function setup(events: () => AsyncIterable<LanguageModelStreamEvent>) {
     executionId,
     attempt: 1,
     requesterGroupIds: [],
-    ...controller,
-    errorRunId: "run",
+    limits: controller,
     recoverAiModelCall: async () => {
       throw new Error("Unexpected recovery")
     },

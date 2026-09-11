@@ -4,7 +4,7 @@ import {
   aiModelCallOutputTokenAllowance,
   estimateAiModelCallInputTokens,
   estimatedAiModelCallTotalTokens,
-} from "../src/model-call-admission"
+} from "../src/models/execution/model-call-admission"
 
 describe("AI model-call admission estimates", () => {
   test("produces the same estimate for the same prepared text request", () => {

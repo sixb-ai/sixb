@@ -15,25 +15,6 @@ export class AgentContextCompactionError extends Error {
   }
 }
 
-/** A completed provider call was not recorded synchronously, so this turn must stop. */
-export class AgentUsageRecordingError extends Error {
-  readonly name = "AgentUsageRecordingError"
-
-  constructor(
-    readonly runId: string,
-    readonly callId: string,
-    readonly recoveryScheduled: boolean,
-    options?: ErrorOptions
-  ) {
-    super(
-      recoveryScheduled
-        ? `[SixbAgentWorker] AI usage for call '${callId}' in agent execution '${runId}' was deferred to durable recovery.`
-        : `[SixbAgentWorker] Could not preserve AI usage for call '${callId}' in agent execution '${runId}'.`,
-      options
-    )
-  }
-}
-
 /** This delivery's execution token is stale, so it must make no further durable writes. */
 export class AgentExecutionLostError extends Error {
   readonly name = "AgentExecutionLostError"

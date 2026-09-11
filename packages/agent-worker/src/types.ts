@@ -13,14 +13,14 @@ import type {
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
 import type { RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
-import type { ModelCallCost, ModelCostEstimate, ModelRoute, ModelTool } from "@sixb/core/models"
+import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
+import type { ModelTool } from "@sixb/core/models"
 import type {
   AgentStorage,
   AiCostStorage,
   AiLimitStorage,
   AiUsageStorage,
   AuthStorage,
-  RecordAiModelCallInput,
 } from "@sixb/core/storage"
 import type { AgentSkill } from "./agent-skills"
 import type { PreparedAgentAttachmentContext } from "./attachments"
@@ -35,18 +35,6 @@ export type AgentWorkerStorage = Storage & {
   readonly aiLimits: AiLimitStorage
   readonly auth: AuthStorage
 }
-
-export interface RecoverAiModelCallInput {
-  readonly usage: RecordAiModelCallInput
-  readonly cost: ModelCallCost
-  readonly estimate?: ModelCostEstimate
-  readonly route?: ModelRoute
-  readonly ratedAt: Date
-  /** True only when admission created an aggregate-budget reservation for this provider attempt. */
-  readonly reconcileLimitReservation?: boolean
-}
-
-export type RecoverAiModelCall = (input: RecoverAiModelCallInput) => Promise<void>
 
 /**
  * The host surface the agent worker is constructed with. `SixbHost` satisfies it structurally, so
