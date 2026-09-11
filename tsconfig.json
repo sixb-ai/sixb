@@ -90,6 +90,7 @@
       "@sixb/core/internal/logging": ["./packages/core/src/logging/index.ts"],
       "@sixb/core/internal/materialization": ["./packages/core/src/materialization/index.ts"],
       "@sixb/core/internal/materializer": ["./packages/core/src/materializer/index.ts"],
+      "@sixb/core/internal/model-execution": ["./packages/core/src/models/execution/index.ts"],
       "@sixb/core/internal/objects": ["./packages/core/src/objects/index.ts"],
       "@sixb/core/internal/ontology": ["./packages/core/src/ontology/internal.ts"],
       "@sixb/core/internal/ontology-storage-provider": [

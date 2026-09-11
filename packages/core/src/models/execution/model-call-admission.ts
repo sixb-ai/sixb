@@ -1,5 +1,5 @@
-import type { ModelCostEstimator } from "@sixb/core/models"
-import type { AiModelCallReservationIdentity } from "@sixb/core/storage"
+import type { AiModelCallReservationIdentity } from "../../storage"
+import type { ModelCostEstimator } from "../pricing"
 
 /** Fixed internal allowance used only to estimate aggregate-budget reservations. */
 export const AI_MODEL_CALL_OUTPUT_TOKEN_ALLOWANCE = 4_096
@@ -79,7 +79,7 @@ export function aiModelCallOutputTokenAllowance(maxOutputTokens: number | undefi
   if (maxOutputTokens === undefined) return AI_MODEL_CALL_OUTPUT_TOKEN_ALLOWANCE
   if (!Number.isSafeInteger(maxOutputTokens) || maxOutputTokens <= 0) {
     throw new TypeError(
-      "[SixbAgentWorker] AI model-call maxOutputTokens must be a positive safe integer."
+      "[SixbModels] AI model-call maxOutputTokens must be a positive safe integer."
     )
   }
   return maxOutputTokens
@@ -92,7 +92,7 @@ export function estimatedAiModelCallTotalTokens(
   if (inputTokens.status !== "estimated") return undefined
   const total = inputTokens.tokens + outputTokenAllowance
   if (!Number.isSafeInteger(total)) {
-    throw new TypeError("[SixbAgentWorker] AI model-call token estimate exceeds the safe range.")
+    throw new TypeError("[SixbModels] AI model-call token estimate exceeds the safe range.")
   }
   return total
 }

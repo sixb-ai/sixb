@@ -239,6 +239,12 @@
       "import": "./dist/materializer/index.js",
       "default": "./dist/materializer/index.js"
     },
+    "./internal/model-execution": {
+      "types": "./dist/models/execution/index.d.ts",
+      "bun": "./src/models/execution/index.ts",
+      "import": "./dist/models/execution/index.js",
+      "default": "./dist/models/execution/index.js"
+    },
     "./internal/objects": {
       "types": "./dist/objects/index.d.ts",
       "bun": "./src/objects/index.ts",

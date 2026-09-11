@@ -10,6 +10,11 @@ import {
   summarizeErrorMessage,
   toSixbFailure,
 } from "@sixb/core/internal/errors"
+import {
+  AiModelCallRecorder,
+  createAiModelCallLimitController,
+  ModelUsageRecordingError,
+} from "@sixb/core/internal/model-execution"
 import type { QueueDelivery } from "@sixb/core/internal/workers"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowAgentNodeDefinition } from "@sixb/core/internal/workflows"
@@ -33,12 +38,9 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { prepareAgentModel } from "./context-budget"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
-import { AgentUsageRecordingError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { resolveWorkflowAgentStepExecutionPlan } from "./execution-plan"
 import { toAgentExecutionFailure } from "./failure"
-import { createAiModelCallLimitController } from "./model-call-limits"
-import { AiModelCallRecorder } from "./model-call-recorder"
 import {
   type AgentExecutionEnvironment,
   createWorkflowAgentNodeEnvironment,
@@ -140,10 +142,8 @@ export async function executeWorkflowAgentNode(
       executionId: executionRecord.executionId,
       attempt: reserved.attempt,
       requesterGroupIds: workflowRun.requesterGroupIds,
-      beforeModelCall: modelCallLimits.beforeModelCall,
-      markModelCallUnknown: modelCallLimits.markModelCallUnknown,
+      limits: modelCallLimits,
       recoverAiModelCall: context.recoverAiModelCall,
-      errorRunId: nodeRun.id,
     })
     totalNodes = workflow.nodes.length
     const configuredPlan = resolveWorkflowAgentStepExecutionPlan({
@@ -247,12 +247,12 @@ export async function executeWorkflowAgentNode(
     if (cancel.signal.aborted && (await isAlreadyCancelled(runs, context.id, nodeRun.id))) {
       // The cancellation endpoint has already made the execution terminal, so it cannot be fenced
       // again. Still surface an accounting failure instead of silently acknowledging it.
-      if (executionError instanceof AgentUsageRecordingError) throw executionError
+      if (executionError instanceof ModelUsageRecordingError) throw executionError
       return
     }
 
     const status =
-      cancel.signal.aborted && !(executionError instanceof AgentUsageRecordingError)
+      cancel.signal.aborted && !(executionError instanceof ModelUsageRecordingError)
         ? "cancelled"
         : "failed"
     const failed = await finishWorkflowAgentNodeFailed({

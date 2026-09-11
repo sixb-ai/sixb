@@ -6168,17 +6168,21 @@ describe("AgentWorker", () => {
       return retry({ ...params, availableAt: new Date(0).toISOString() })
     }
     await enqueueAiModelCallRecovery(queue, {
-      id: "usage_recovery_1",
-      projectId: PROJECT_ID,
-      executionId,
-      attempt: 1,
-      callId: "call_recovery_1",
-      requesterGroupIds: ["support"],
-      providerId: "gateway",
-      requestedModelId: "mock-model",
-      responseId: "response_recovery_1",
-      usage: { inputTokens: 12, outputTokens: 8 },
-      occurredAt: new Date("2026-07-01T12:00:00.000Z"),
+      usage: {
+        id: "usage_recovery_1",
+        projectId: PROJECT_ID,
+        executionId,
+        attempt: 1,
+        callId: "call_recovery_1",
+        requesterGroupIds: ["support"],
+        providerId: "gateway",
+        requestedModelId: "mock-model",
+        responseId: "response_recovery_1",
+        usage: { inputTokens: 12, outputTokens: 8 },
+        occurredAt: new Date("2026-07-01T12:00:00.000Z"),
+      },
+      cost: { status: "unpriceable", reason: "missing-rate-card" },
+      ratedAt: new Date("2026-07-01T12:00:00.000Z"),
     })
 
     const worker = new AgentWorker(workerHost, workerOptions())

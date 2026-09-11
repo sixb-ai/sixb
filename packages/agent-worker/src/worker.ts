@@ -10,6 +10,11 @@ import {
 } from "@sixb/core/internal/agents"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
+import {
+  isPermanentAiUsageRecoveryError,
+  ModelUsageRecordingError,
+  recordRecoveredAiModelCall,
+} from "@sixb/core/internal/model-execution"
 import type { QueueDelivery, QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { isAbortError, QueueDeliveryLeaseLostError, QueueWorker } from "@sixb/core/internal/workers"
 import type { AgentQueueJob, ClaimedQueueJob, SubagentQueueJob } from "@sixb/core/queues"
@@ -24,21 +29,12 @@ import {
   MAX_AGENT_DELIVERY_ATTEMPTS,
   shouldRetryAgentPreparation,
 } from "./delivery-policy"
-import {
-  AgentExecutionLostError,
-  AgentFinalizationError,
-  AgentTurnTimeoutError,
-  AgentUsageRecordingError,
-} from "./errors"
+import { AgentExecutionLostError, AgentFinalizationError, AgentTurnTimeoutError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { resolveAgentExecutionPlan, resolveSubagentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
-import {
-  enqueueAiModelCallRecovery,
-  isPermanentAiUsageRecoveryError,
-  recordRecoveredAiModelCall,
-} from "./model-call-recovery"
+import { enqueueAiModelCallRecovery } from "./model-call-recovery"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
 import {
   type AgentExecutionEnvironment,
@@ -367,7 +363,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // is redelivered rather than acked with the thread left silently locked. A user cancel is
       // detected off its own signal so it records `cancelled` however the aborted stream surfaced.
       const aborted =
-        !(error instanceof AgentUsageRecordingError) &&
+        !(error instanceof ModelUsageRecordingError) &&
         (signal.aborted || cancel.signal.aborted || isAbortError(error))
       const finalized = await this.recordFate(
         context,
@@ -537,7 +533,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       }
 
       const aborted =
-        !(error instanceof AgentUsageRecordingError) &&
+        !(error instanceof ModelUsageRecordingError) &&
         (signal.aborted ||
           cancel.signal.aborted ||
           parentCancel.signal.aborted ||

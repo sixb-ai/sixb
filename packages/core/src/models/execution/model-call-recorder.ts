@@ -1,37 +1,38 @@
 import { randomUUID } from "node:crypto"
-import type {
-  LanguageModel,
-  LanguageModelRequest,
-  ModelCallEndEvent,
-  ModelUsage,
-} from "@sixb/core/models"
-import type { ReadonlyJsonObject, RecordAiModelCallInput } from "@sixb/core/storage"
-import { AgentUsageRecordingError } from "./errors"
-import { aiModelCallUsageFromModel } from "./model-adapters"
-import { normalizeModelCallAccounting, recordAiModelCallAccounting } from "./model-call-accounting"
+import type { ReadonlyJsonObject, RecordAiModelCallInput } from "../../storage"
+import type { ModelCallEndEvent, ModelUsage } from "../events"
+import type { LanguageModel, LanguageModelRequest } from "../language-model"
+import { ModelUsageRecordingError } from "./errors"
+import {
+  normalizeModelCallAccounting,
+  recordAiModelCallAccounting,
+  requireAccountingCapabilities,
+} from "./model-call-accounting"
 import {
   aiModelCallOutputTokenAllowance,
   type BeforeAiModelCall,
   estimateAiModelCallInputTokens,
   estimatedAiModelCallTotalTokens,
-  type MarkAiModelCallUnknown,
 } from "./model-call-admission"
+import type { AiModelCallLimitController } from "./model-call-limits"
 import { isPermanentAiUsageRecoveryError } from "./model-call-recovery"
-import type { AgentWorkerStorage, RecoverAiModelCall, RecoverAiModelCallInput } from "./types"
+import type {
+  ModelCallAccountingStorage,
+  RecoverAiModelCall,
+  RecoverAiModelCallInput,
+} from "./types"
+import { aiModelCallUsageFromModel } from "./usage"
 
 const STORAGE_RETRY_DELAYS_MS = [50, 200, 600] as const
 
 export interface AiModelCallRecorderInput {
-  readonly storage: AgentWorkerStorage
+  readonly storage: ModelCallAccountingStorage
   readonly projectId: string
   readonly executionId: string
   readonly attempt: number
   readonly requesterGroupIds: readonly string[]
-  readonly beforeModelCall?: BeforeAiModelCall
-  readonly markModelCallUnknown?: MarkAiModelCallUnknown
+  readonly limits: AiModelCallLimitController
   readonly recoverAiModelCall: RecoverAiModelCall
-  /** Run identity used only in terminal recorder diagnostics. */
-  readonly errorRunId: string
 }
 
 interface AiModelCallRecorderInternals {
@@ -51,12 +52,13 @@ export class AiModelCallRecorder {
   private readonly recordAccounting: (input: RecoverAiModelCallInput) => Promise<void>
   private readonly reservations = new Set<string>()
   private admissionError: unknown
-  private recordingError: AgentUsageRecordingError | undefined
+  private recordingError: ModelUsageRecordingError | undefined
 
   constructor(
     private readonly input: AiModelCallRecorderInput,
     internals: AiModelCallRecorderInternals = {}
   ) {
+    requireAccountingCapabilities(input.storage)
     this.generateId = internals.generateId ?? (() => `ai_usage_${randomUUID()}`)
     this.now = internals.now ?? (() => new Date())
     this.retryDelaysMs = internals.retryDelaysMs ?? STORAGE_RETRY_DELAYS_MS
@@ -68,7 +70,7 @@ export class AiModelCallRecorder {
       })
   }
 
-  /** Wrap the resolved model so conversation, compaction, and workflow calls share admission. */
+  /** Wrap the resolved model so all calls in an execution share admission. */
   wrapModel(model: LanguageModel): LanguageModel {
     return {
       providerId: model.providerId,
@@ -83,9 +85,9 @@ export class AiModelCallRecorder {
           responseFormat: request.responseFormat,
         })
         const outputTokenAllowance = aiModelCallOutputTokenAllowance(request.maxOutputTokens)
-        let decision: Awaited<ReturnType<BeforeAiModelCall>> | undefined
+        let decision: Awaited<ReturnType<BeforeAiModelCall>>
         try {
-          decision = await this.input.beforeModelCall?.({
+          decision = await this.input.limits.beforeModelCall({
             ...this.identity(request),
             requesterGroupIds: this.input.requesterGroupIds,
             providerId: model.providerId,
@@ -99,16 +101,16 @@ export class AiModelCallRecorder {
             ),
           })
         } catch (error) {
-          // Compaction and workflow boundaries must retain the original coded admission failure.
+          // Execution boundaries must retain the original coded admission failure.
           this.admissionError = error
           throw error
         }
-        if (decision?.reservation === "active") this.reservations.add(request.callId)
+        if (decision.reservation === "active") this.reservations.add(request.callId)
         try {
           return await model.stream(request)
         } catch (error) {
           if (this.reservations.has(request.callId)) {
-            await this.input.markModelCallUnknown?.(this.identity(request))
+            await this.input.limits.markModelCallUnknown(this.identity(request))
           }
           throw error
         }
@@ -126,8 +128,8 @@ export class AiModelCallRecorder {
   }
 
   readonly onModelCallEnd = async (event: ModelCallEndEvent): Promise<void> => {
-    if (this.recordingError) throw this.recordingError
-
+    // Calls already in flight still need their own accounting after another call fails.
+    // Only admission is gated by the execution's sticky failure.
     try {
       const occurredAt = this.now()
       const record: RecordAiModelCallInput = {
@@ -181,18 +183,19 @@ export class AiModelCallRecorder {
             "Direct AI accounting and durable recovery both failed."
           )
         }
-        throw new AgentUsageRecordingError(this.input.errorRunId, event.callId, true, {
+        throw new ModelUsageRecordingError(this.input.executionId, event.callId, true, {
           cause: storageError,
         })
       }
     } catch (error) {
-      this.recordingError =
-        error instanceof AgentUsageRecordingError
+      const recordingError =
+        error instanceof ModelUsageRecordingError
           ? error
-          : new AgentUsageRecordingError(this.input.errorRunId, event.callId, false, {
+          : new ModelUsageRecordingError(this.input.executionId, event.callId, false, {
               cause: error,
             })
-      throw this.recordingError
+      this.recordingError ??= recordingError
+      throw recordingError
     }
   }
 
@@ -203,7 +206,7 @@ export class AiModelCallRecorder {
 }
 
 function rawUsage(usage: ModelUsage): ReadonlyJsonObject {
-  return structuredClone(usage.raw ?? {}) as ReadonlyJsonObject
+  return structuredClone(usage.raw ?? {})
 }
 
 async function retryOperation<TResult>(

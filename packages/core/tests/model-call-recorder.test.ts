@@ -1,13 +1,18 @@
 import { describe, expect, test } from "bun:test"
 import { type ModelCallEndEvent, rateModelCall } from "@sixb/core/models"
 import { AiUsageStorageError, InMemoryStorage } from "@sixb/core/storage"
-import { createTestAgentExecution } from "@sixb/core/testing"
-import { AgentUsageRecordingError } from "../src/errors"
-import { AiModelCallRecorder } from "../src/model-call-recorder"
-import type { AgentWorkerStorage, RecoverAiModelCall, RecoverAiModelCallInput } from "../src/types"
+import { ModelUsageRecordingError } from "../src/models/execution/errors"
+import { recordAiModelCallAccounting } from "../src/models/execution/model-call-accounting"
+import { createAiModelCallLimitController } from "../src/models/execution/model-call-limits"
+import { AiModelCallRecorder } from "../src/models/execution/model-call-recorder"
+import type {
+  ModelCallAccountingStorage,
+  RecoverAiModelCall,
+  RecoverAiModelCallInput,
+} from "../src/models/execution/types"
 
 const occurredAt = new Date("2026-07-01T12:00:00.000Z")
-const executionId = "test_agent_execution:run_1"
+const executionId = "test_request_execution:request_1"
 
 function callEndEvent(): ModelCallEndEvent {
   return {
@@ -42,7 +47,7 @@ function callEndEvent(): ModelCallEndEvent {
 }
 
 function recorder(
-  storage: AgentWorkerStorage,
+  storage: ModelCallAccountingStorage,
   internals: ConstructorParameters<typeof AiModelCallRecorder>[1] = {},
   recoverAiModelCall: RecoverAiModelCall = async () => {
     throw new Error("Unexpected AI usage recovery handoff.")
@@ -55,33 +60,51 @@ function recorder(
       executionId,
       attempt: 2,
       requesterGroupIds: ["support", "engineering"],
+      limits: createAiModelCallLimitController({
+        storage,
+        projectId: "project_1",
+        requesterGroupIds: ["support", "engineering"],
+      }),
       recoverAiModelCall,
-      errorRunId: "run_1",
     },
     internals
   )
 }
 
-function workerStorage(): AgentWorkerStorage {
+async function seededStorage() {
   const storage = new InMemoryStorage()
-  if (!storage.agents || !storage.aiUsage || !storage.aiCosts || !storage.auth) {
-    throw new Error("Expected complete in-memory agent accounting storage.")
-  }
-  return storage as AgentWorkerStorage
-}
-
-async function seededWorkerStorage(): Promise<AgentWorkerStorage> {
-  const storage = workerStorage()
-  await createTestAgentExecution(storage, {
+  await storage.executions.create({
+    id: executionId,
     projectId: "project_1",
-    actorId: "assistant",
-    runId: "run_1",
-    executionId,
+    executor: { type: "request", requestId: "request_1" },
+    source: { type: "http", requestId: "request_1" },
+    correlationId: "request_1",
+    authorizationRef: { type: "disabled" },
   })
   return storage
 }
 
 describe("AiModelCallRecorder", () => {
+  test.each([
+    "aiUsage",
+    "aiCosts",
+    "aiLimits",
+  ] as const)("requires %s before inference can start", (missing) => {
+    // Removal proof: remove requireAccountingCapabilities from the recorder constructor.
+    const storage = new InMemoryStorage()
+    const incomplete = {
+      aiUsage: storage.aiUsage,
+      aiCosts: storage.aiCosts,
+      aiLimits: storage.aiLimits,
+      transaction: storage.transaction.bind(storage),
+      [missing]: undefined,
+    }
+    // Model a JavaScript caller whose storage violates the required internal contract.
+    expect(() => recorder(incomplete as ModelCallAccountingStorage)).toThrow(
+      "AI model-call accounting requires storage.aiUsage, storage.aiCosts, and storage.aiLimits."
+    )
+  })
+
   test("invalid estimates cannot discard usage or inline provider costs", async () => {
     // Removal proof: bypass validatedEstimate in model-call-accounting; the first append rejects.
     const estimates = [
@@ -98,7 +121,7 @@ describe("AiModelCallRecorder", () => {
     for (const { reported, estimate } of estimates.flatMap((estimate) =>
       [true, false].map((reported) => ({ reported, estimate }))
     )) {
-      const storage = await seededWorkerStorage()
+      const storage = await seededStorage()
       const event = callEndEvent()
       await recorder(storage, { now: () => occurredAt }).onModelCallEnd({
         ...event,
@@ -127,7 +150,7 @@ describe("AiModelCallRecorder", () => {
     // Removal proof: construct recoveryInput without normalizeModelCallAccounting in the recorder.
     let recovered: RecoverAiModelCallInput | undefined
     const usage = recorder(
-      await seededWorkerStorage(),
+      await seededStorage(),
       {
         retryDelaysMs: [],
         recordAccounting: async () => {
@@ -154,7 +177,7 @@ describe("AiModelCallRecorder", () => {
     const inputs: RecoverAiModelCallInput[] = []
     const delays: number[] = []
     let attempts = 0
-    const usage = recorder(workerStorage(), {
+    const usage = recorder(new InMemoryStorage(), {
       generateId: () => "usage_1",
       now: () => occurredAt,
       retryDelaysMs: [10, 20],
@@ -213,9 +236,16 @@ describe("AiModelCallRecorder", () => {
   })
 
   test("deduplicates a repeated callback without duplicating usage or valuation", async () => {
-    const storage = await seededWorkerStorage()
+    const storage = await seededStorage()
     let nextId = 0
-    const usage = recorder(storage, {
+    // A request execution needs only accounting stores, not an agent/auth/run store.
+    const accounting: ModelCallAccountingStorage = {
+      aiUsage: storage.aiUsage,
+      aiCosts: storage.aiCosts,
+      aiLimits: storage.aiLimits,
+      transaction: storage.transaction.bind(storage),
+    }
+    const usage = recorder(accounting, {
       generateId: () => `usage_${++nextId}`,
       now: () => occurredAt,
     })
@@ -252,7 +282,7 @@ describe("AiModelCallRecorder", () => {
 
   test("preserves missing usage without inventing zeroes", async () => {
     const inputs: RecoverAiModelCallInput[] = []
-    const usage = recorder(workerStorage(), {
+    const usage = recorder(new InMemoryStorage(), {
       generateId: () => "usage_missing",
       now: () => occurredAt,
       recordAccounting: async (input) => {
@@ -273,7 +303,7 @@ describe("AiModelCallRecorder", () => {
     let attempts = 0
     const recovered: RecoverAiModelCallInput[] = []
     const usage = recorder(
-      workerStorage(),
+      new InMemoryStorage(),
       {
         retryDelaysMs: [10, 20],
         sleep: async () => undefined,
@@ -292,16 +322,16 @@ describe("AiModelCallRecorder", () => {
     expect(attempts).toBe(3)
     expect(recovered).toHaveLength(1)
     expect(recovered[0]?.usage).toMatchObject({ executionId, callId: "call_1" })
-    expect(failure).toBeInstanceOf(AgentUsageRecordingError)
+    expect(failure).toBeInstanceOf(ModelUsageRecordingError)
     expect(failure).toMatchObject({ recoveryScheduled: true })
-    expect(() => usage.assertHealthy()).toThrow(AgentUsageRecordingError)
+    expect(() => usage.assertHealthy()).toThrow(ModelUsageRecordingError)
   })
 
   test("blocks the next model step when accounting and durable recovery both fail", async () => {
     let accountingAttempts = 0
     let recoveryAttempts = 0
     const usage = recorder(
-      workerStorage(),
+      new InMemoryStorage(),
       {
         retryDelaysMs: [10, 20],
         sleep: async () => undefined,
@@ -320,15 +350,84 @@ describe("AiModelCallRecorder", () => {
 
     expect(accountingAttempts).toBe(3)
     expect(recoveryAttempts).toBe(3)
-    expect(failure).toBeInstanceOf(AgentUsageRecordingError)
+    expect(failure).toBeInstanceOf(ModelUsageRecordingError)
     expect(failure).toMatchObject({ recoveryScheduled: false })
+  })
+
+  test.each([
+    false,
+    true,
+  ])("accounts for in-flight calls after another call fails (second recovery: %s)", async (recoverSecond) => {
+    // Removal proof: restore the early recordingError throw in onModelCallEnd.
+    // Also fails if a later error overwrites the execution's first accounting failure.
+    const storage = await seededStorage()
+    const recovered: string[] = []
+    const attempts: string[] = []
+    const usage = recorder(
+      storage,
+      {
+        now: () => occurredAt,
+        retryDelaysMs: [],
+        recordAccounting: async (input) => {
+          attempts.push(input.usage.callId)
+          if (input.usage.callId === "first" || recoverSecond) {
+            throw new Error("storage unavailable")
+          }
+          await recordAiModelCallAccounting({ storage, ...input })
+        },
+      },
+      async (input) => {
+        recovered.push(input.usage.callId)
+      }
+    )
+    let providerCalls = 0
+    const model = usage.wrapModel({
+      providerId: "gateway",
+      modelId: "openai/gpt-5",
+      definition: {
+        kind: "language",
+        providerId: "gateway",
+        modelId: "openai/gpt-5",
+        capabilities: {},
+      },
+      async stream() {
+        providerCalls += 1
+        return { events: (async function* () {})() }
+      },
+    })
+    const start = (callId: string) =>
+      model.stream({
+        callId,
+        messages: [],
+        tools: [],
+        signal: new AbortController().signal,
+      })
+    // Both requests have reached the provider before either completes.
+    await Promise.all([start("first"), start("second")])
+    await expect(
+      usage.onModelCallEnd({ ...callEndEvent(), callId: "first" })
+    ).rejects.toMatchObject({ callId: "first", recoveryScheduled: true })
+
+    const second = usage.onModelCallEnd({ ...callEndEvent(), callId: "second" })
+    if (recoverSecond) {
+      await expect(second).rejects.toMatchObject({ callId: "second", recoveryScheduled: true })
+    } else {
+      await second
+      await expect(
+        storage.aiUsage.summarizeExecution({ projectId: "project_1", executionId })
+      ).resolves.toMatchObject({ modelCallCount: 1 })
+    }
+    expect(attempts).toEqual(["first", "second"])
+    expect(recovered).toEqual(recoverSecond ? ["first", "second"] : ["first"])
+    await expect(start("third")).rejects.toMatchObject({ callId: "first" })
+    expect(providerCalls).toBe(2)
   })
 
   test("does not retry or enqueue a permanently invalid ledger append", async () => {
     let accountingAttempts = 0
     let recoveryAttempts = 0
     const usage = recorder(
-      workerStorage(),
+      new InMemoryStorage(),
       {
         retryDelaysMs: [10, 20],
         sleep: async () => undefined,
@@ -346,13 +445,13 @@ describe("AiModelCallRecorder", () => {
 
     expect(accountingAttempts).toBe(1)
     expect(recoveryAttempts).toBe(0)
-    expect(failure).toBeInstanceOf(AgentUsageRecordingError)
+    expect(failure).toBeInstanceOf(ModelUsageRecordingError)
     expect(failure).toMatchObject({ recoveryScheduled: false })
   })
 
   test("retains failures raised while constructing the accounting record", async () => {
     let records = 0
-    const usage = recorder(workerStorage(), {
+    const usage = recorder(new InMemoryStorage(), {
       generateId: () => {
         throw new Error("ID generation unavailable")
       },
@@ -362,9 +461,9 @@ describe("AiModelCallRecorder", () => {
     })
 
     await expect(usage.onModelCallEnd(callEndEvent())).rejects.toBeInstanceOf(
-      AgentUsageRecordingError
+      ModelUsageRecordingError
     )
     expect(records).toBe(0)
-    expect(() => usage.assertHealthy()).toThrow(AgentUsageRecordingError)
+    expect(() => usage.assertHealthy()).toThrow(ModelUsageRecordingError)
   })
 })

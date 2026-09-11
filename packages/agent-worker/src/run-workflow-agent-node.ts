@@ -1,6 +1,7 @@
 import type { AgentMessagePart, SchemaOrRef, ValueType } from "@sixb/core"
 import { runModelLoop } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
+import type { AiModelCallRecorder } from "@sixb/core/internal/model-execution"
 import { schemaRecordToJsonSchema } from "@sixb/core/internal/ontology"
 import {
   type AgentStepDefinition,
@@ -17,7 +18,6 @@ import {
 } from "./agent-prompt"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps } from "./model-adapters"
-import type { AiModelCallRecorder } from "./model-call-recorder"
 import { monitorSandboxReadiness } from "./sandbox-readiness"
 import type { AgentTurnContext } from "./types"
 
