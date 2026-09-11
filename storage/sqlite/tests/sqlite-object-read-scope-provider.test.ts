@@ -16,8 +16,8 @@ import {
 } from "@sixb/core/storage"
 import { SqliteStorage } from "../src"
 import { installFreshSqliteSchema, sqliteStoragePath } from "../src/migrations"
-import { compileSqliteSelectedObjectReadSource } from "../src/object-read-scope"
-import { SqliteObjectStorage } from "../src/object-storage"
+import { SqliteObjectStorage } from "../src/objects"
+import { compileSqliteSelectedObjectReadSource } from "../src/objects/read-scope"
 import { runImmediateTransactionAsync } from "../src/transactions"
 
 const projectId = "sqlite-selected-reader"
@@ -300,6 +300,7 @@ describe("SqliteObjectStorage selected reader invariants", () => {
   })
 
   test("keeps the traversal probe and every terminal statement on one WAL snapshot", async () => {
+    // Regression check: return run() immediately from runDeferredReadTransaction; this must fail.
     const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-selected-snapshot-"))
     const databasePath = join(directory, "scope.sqlite")
     const setup = new Database(databasePath)
@@ -317,10 +318,6 @@ describe("SqliteObjectStorage selected reader invariants", () => {
     try {
       insertObject(originalDb, RootType, "root-1", { id: "root-1" })
       insertObject(originalDb, TargetType, "target-1", { id: "target-1" })
-      const reader = createReader(storage, singlePathScope(), {
-        ...generousLimits,
-        maxTraversalFacts: 1,
-      })
       let writerCommitted = false
 
       holder.db = {
@@ -344,6 +341,11 @@ describe("SqliteObjectStorage selected reader invariants", () => {
         },
       } as unknown as Database
 
+      // Install the interleaving before construction: the reader captures its database instance.
+      const reader = createReader(storage, singlePathScope(), {
+        ...generousLimits,
+        maxTraversalFacts: 1,
+      })
       expect(await reader.list({ projectId })).toEqual({
         objects: [expect.objectContaining({ primaryId: "root-1" })],
         hasMore: false,

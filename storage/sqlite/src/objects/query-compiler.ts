@@ -106,7 +106,7 @@ export interface SqliteObjectQuerySource {
   wrapQuery(query: CompiledObjectQuery): CompiledObjectQuery
 }
 
-const DEFAULT_OBJECT_QUERY_SOURCE: SqliteObjectQuerySource = {
+export const DEFAULT_OBJECT_QUERY_SOURCE: SqliteObjectQuerySource = {
   objectsTable: "objects",
   linksTable: "links",
   wrapStatement: (sql, args = []) => ({ sql, args: [...args] }),
