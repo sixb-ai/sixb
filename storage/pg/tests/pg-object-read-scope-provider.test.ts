@@ -4,16 +4,16 @@ import {
   type ObjectReadExecutionLimits,
   type SelectedObjectReadScope,
 } from "@sixb/core/storage"
-import type { SQLClient, SqlParameter } from "../src/pg-client"
+import { PgObjectStorage } from "../src/objects"
 import {
   compilePgObjectCountQuery,
   compilePgObjectExistsQuery,
   compilePgObjectFacetQuery,
   compilePgObjectQuery,
   compilePgObjectStatement,
-} from "../src/pg-object-query-compiler"
-import { compilePgSelectedObjectReadSource } from "../src/pg-object-read-scope"
-import { PgObjectStorage } from "../src/pg-object-storage"
+} from "../src/objects/query-compiler"
+import { compilePgSelectedObjectReadSource } from "../src/objects/read-scope"
+import type { SQLClient, SqlParameter } from "../src/pg-client"
 import type { PgStoreClient } from "../src/transactions"
 
 const projectId = "pg-selected-reader"

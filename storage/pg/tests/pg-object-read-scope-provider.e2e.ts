@@ -10,8 +10,8 @@ import {
   type SelectedObjectReadScope,
 } from "@sixb/core/storage"
 import type { PostgresStorage } from "../src"
+import { PgObjectStorage } from "../src/objects"
 import type { SQL, SQLClient, SqlParameter } from "../src/pg-client"
-import { PgObjectStorage } from "../src/pg-object-storage"
 import type { PgStoreClient } from "../src/transactions"
 import { createTestStorage } from "./helpers"
 

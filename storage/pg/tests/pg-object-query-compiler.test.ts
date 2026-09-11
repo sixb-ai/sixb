@@ -4,7 +4,7 @@ import {
   compilePgObjectCountQuery,
   compilePgObjectFacetQuery,
   compilePgObjectQuery,
-} from "../src/pg-object-query-compiler"
+} from "../src/objects/query-compiler"
 
 const sitePointQuery: ObjectQuery = {
   kind: "filter",

@@ -143,7 +143,7 @@ export function compilePgObjectStatement(
   return numberCompiledQuery((source ?? DEFAULT_OBJECT_QUERY_SOURCE).wrapStatement(sql, args))
 }
 
-const DEFAULT_OBJECT_QUERY_SOURCE: PgObjectQuerySource = {
+export const DEFAULT_OBJECT_QUERY_SOURCE: PgObjectQuerySource = {
   objectsTable: "objects",
   linksTable: "links",
   wrapStatement: (sql, args = []) => ({ sql, args: [...args] }),
