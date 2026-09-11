@@ -148,6 +148,7 @@ export type InferPropertySemanticType<
  *
  * Semantic type can come either directly from the property or indirectly from
  * a referenced value type.
+ * Guard `never` explicitly: UnitsOf<never> is keyof never (string | number | symbol).
  */
 export type InferPropertyUnit<
   TProperty extends Pick<Property, "schema" | "semanticType">,
@@ -155,7 +156,9 @@ export type InferPropertyUnit<
 > =
   InferPropertySemanticType<TProperty, TValueTypes> extends infer TSemanticType extends
     QuantitativeTypeId
-    ? UnitsOf<TSemanticType>
+    ? [TSemanticType] extends [never]
+      ? never
+      : UnitsOf<TSemanticType>
     : never
 
 export type InferObjectProperties<
