@@ -175,7 +175,6 @@ describe("Postgres storage migrations", () => {
             "034-device-authorizations",
             "035-share-grants",
             "036-share-sessions",
-            "037-delegated-executions",
           ],
         },
       ])
@@ -432,13 +431,6 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 36,
         },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "037-delegated-executions",
-          status: "applied",
-          version: 37,
-        },
       ])
     })
   })
@@ -460,7 +452,7 @@ describe("Postgres storage migrations", () => {
       }
       try {
         const migration = postgresStorageMigrations.steps.find(
-          (candidate) => candidate.id === "037-delegated-executions"
+          (candidate) => candidate.id === "036-share-sessions"
         )
         if (!migration) {
           throw new Error("PostgreSQL delegated-executions migration is missing.")
@@ -476,10 +468,9 @@ describe("Postgres storage migrations", () => {
             "022-projection-executions",
             "031-subagent-runs",
             "035-share-grants",
-            "036-share-sessions",
           ].includes(candidate.id)
         )
-        expect(preDelegationTableMigrations).toHaveLength(6)
+        expect(preDelegationTableMigrations).toHaveLength(5)
         for (const previous of preDelegationTableMigrations) {
           await previous.up(context)
         }
@@ -516,6 +507,11 @@ describe("Postgres storage migrations", () => {
             '2026-08-20T12:00:00.000Z', '2026-08-20T13:00:00.000Z'
           );
 
+        `)
+
+        await migration.up(context)
+
+        await migrationSql.unsafe(`
           INSERT INTO share_sessions (
             project_id, id, grant_id, token_hash, created_at, expires_at, absolute_expires_at
           ) VALUES (
@@ -524,8 +520,6 @@ describe("Postgres storage migrations", () => {
             '2026-08-20T13:00:00.000Z'
           );
         `)
-
-        await migration.up(context)
       } finally {
         await migrationSql.end()
       }
@@ -2156,13 +2150,6 @@ describe("Postgres storage migrations", () => {
           id: "036-share-sessions",
           status: "applied",
           version: 36,
-        },
-        {
-          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
-          checksum_length: 64,
-          id: "037-delegated-executions",
-          status: "applied",
-          version: 37,
         },
       ])
     } finally {
