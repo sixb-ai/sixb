@@ -1,7 +1,14 @@
-export type { DiscoveredProjectDefinitions } from "./discovery"
+export type {
+  BundledProjectModule,
+  DiscoveredProjectDefinitions,
+  DiscoveryModuleKind,
+  ProjectModule,
+} from "./discovery"
 export {
   discoverOntologySources,
   discoverProjectDefinitions,
+  listProjectModules,
+  withProjectModules,
 } from "./discovery"
 export type {
   GenerateOntologyTypeManifestOptions,

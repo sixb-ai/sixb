@@ -184,6 +184,18 @@ cd my-project && bun install && sixb dev
 sixb init .
 ```
 
+## Production builds
+
+`sixb build` bundles the config and all convention-discovered backend modules together. Configured
+tools and discovered definitions share the same module instances. Production discovery uses this
+built inventory, so the original `ontology/`, `connectors/`, and other discovery directories are
+not required at startup. Rebuild to include added or changed definitions.
+
+The runtime entry remains `.sixb/dist/sixb.config.js` (or the configured `--outdir`). Installed
+package dependencies and any files your application reads at runtime must still be deployed.
+Both top-level host exports and config factories are supported. Run production commands from the
+deployed project root; an explicit `createSixb({ projectRoot })` must resolve to that same root.
+
 ## Profiles and remote commands
 
 Login validates `/api/project`, saves the profile in `~/.config/sixb/config.json`, and selects it.
