@@ -37,7 +37,7 @@ The golden journey is:
 alarm -> coverage -> dispatch -> diagnosis -> quote -> repair -> recovery -> closure
 ```
 
-| Folder | Demonstrates |
+| Path | Demonstrates |
 | --- | --- |
 | `ontology/` | Eleven focused object types including `Equipment`, `ServiceCase`, `WorkOrder`, `ServiceVisit`, and `Quote` — see [Ontology](../ontology/overview.md) |
 | `lib/sources/`, `connectors/` | Validated, atomic file-backed source clients behind three typed connectors — see [Connectors](../data/connectors.md) |
@@ -47,7 +47,7 @@ alarm -> coverage -> dispatch -> diagnosis -> quote -> repair -> recovery -> clo
 | `actions/` | Contract-aware lifecycle commands with idempotent source writeback — see [Actions](../actions/overview.md) |
 | `rules/` | Dispatch, SLA, assignment, and recovery attention state — see [Rules](../rules/overview.md) |
 | `workflows/` | Deterministic dispatch and repair-quote reviews with human interventions — see [Workflows](../workflows/overview.md) |
-| `agents/` | An optional Vercel AI Gateway operations assistant backed by a local development sandbox or hosted smolvm — see [Agents](../agents/overview.md) |
+| `sixb.config.ts` | Project language models and sandbox configuration for the operations assistant — see [Built-in Agent](../models/built-in-agent.md) |
 | `app/` | Northline Operations: a compact desktop shell, mobile technician route, and contextual agent panel — see [Apps](../apps/overview.md) |
 | `tests/` | Fixed-clock scenario, source persistence, and business identity checks — see [Testing](../testing/overview.md) |
 

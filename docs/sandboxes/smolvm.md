@@ -171,4 +171,4 @@ new SmolvmSandboxFactory({ image: null, overlayGiB: 8 })
 
 - [Sandboxes overview](./overview.md) — the shared contract and network model
 - [Local sandbox](./local.md) — OS-level isolation for development
-- [Agent tools and the gateway](../agents/tools-and-gateway.md) — what the sandbox tools reach
+- [Tools and Authorization](../models/tools-and-authorization.md) — what the sandbox tools reach

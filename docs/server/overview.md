@@ -78,7 +78,7 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Action runs    | `GET /api/action-runs`, `GET /api/action-runs/:runId`                                | [Actions](../actions/overview.md)               |
 | Ontology       | `GET /api/object-types`, `GET /api/object-types/:objectTypeId`                       | [Ontology](../ontology/overview.md)             |
 | Events (WS)    | `GET /ws/events`                                                                     | [Events](../events/overview.md)                 |
-| Agents         | `GET /api/agent`, `/api/agent-threads`, `.../messages`, `/api/agent-runs/:runId`, `GET /ws/agents` | [Agents](../agents/overview.md)  |
+| Built-in Agent | `GET /api/agent`, `/api/agent-threads`, `.../messages`, `/api/agent-runs/:runId`, `GET /ws/agents` | [Built-in Agent](../models/built-in-agent.md) |
 | Logs           | `GET /api/logs`, `GET /ws/logs`                                                      | [Logging](../logging/overview.md)               |
 | Workflows      | `GET /api/workflows`, `/api/workflow-runs`, `/api/workflows/:id/runs`                | [Workflows](../workflows/overview.md)           |
 | Interventions  | `/api/workflow-interventions`, `.../:id/submit`, `.../:id/cancel`                    | [Interventions](../workflows/interventions.md)  |
@@ -162,7 +162,7 @@ On connect, the server sends a `connected` control frame. Send a `subscribe` mes
 
 The example above streams create and update events for `Invoice` objects only — useful for a billing dashboard that reacts as invoices are created, sent, or marked paid. The server replies with `subscribed` and `unsubscribed` control frames, streams matching events as `{ "type": "event", "event": ... }`, and reports problems as `{ "type": "error", "message": ... }`. For a typed client over this stream, see [Client](../client/overview.md).
 
-Two more WebSocket streams follow the same connect/subscribe shape: `/ws/logs` for run [logs](../logging/overview.md) and `/ws/agents` for live [agent](../agents/overview.md) runs.
+Two more WebSocket streams follow the same connect/subscribe shape: `/ws/logs` for run [logs](../logging/overview.md) and `/ws/agents` for live [Agent](../models/built-in-agent.md) runs.
 
 ## OpenAPI
 

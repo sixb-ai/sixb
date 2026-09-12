@@ -430,7 +430,7 @@ export const githubConnector = defineConnector("github", github({ token: process
 ```
 
 Each factory's connected client and full options are documented in its package README. Exa also
-exports bounded [`web_search` and `web_fetch` tools](../agents/tools-and-gateway.md#exa-web-tools).
+exports bounded [`web_search` and `web_fetch` tools](../models/tools-and-authorization.md#exa-web-tools).
 
 ## Webhooks
 

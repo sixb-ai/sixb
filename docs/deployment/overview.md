@@ -225,7 +225,7 @@ drops its siblings.
 
 Two paths skip the orchestrator. Requesting an [action](../actions/overview.md)
 enqueues onto `queues.actions` directly (the `action.requested` event is an
-observation, not a route) and posting a message to an [agent](../agents/overview.md)
+observation, not a route) and posting a message to the [built-in Agent](../models/built-in-agent.md)
 thread enqueues onto `queues.agents`, while the API can enqueue a sync, pipeline,
 or workflow run on demand. All still flow through the queue/worker half of the model.
 
