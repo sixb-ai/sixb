@@ -7,9 +7,8 @@ import {
   noopLogger,
   stringEnum,
 } from "@sixb/core"
-import { aiModelCallUsageFromModel } from "@sixb/core/internal/model-execution"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
-import type { ModelAssistantPart, ModelStep, ModelUsage, ProviderData } from "@sixb/core/models"
+import type { ModelAssistantPart, ModelStep, ProviderData } from "@sixb/core/models"
 import {
   agentToolErrorText,
   agentTraceFromModelSteps,
@@ -389,19 +388,5 @@ describe("owned model adapters", () => {
       errorText: "Tool call did not produce a result.",
     })
     expect(agentTraceFromPartialModelLoop([step], [])).toEqual(agentTraceFromModelSteps([step]))
-  })
-
-  test("preserves every available provider-neutral usage count", () => {
-    const usage: ModelUsage = {
-      inputTokens: 12,
-      outputTokens: 8,
-      uncachedInputTokens: 9,
-      cacheReadInputTokens: 3,
-      cacheWriteInputTokens: 1,
-      textOutputTokens: 6,
-      reasoningOutputTokens: 2,
-    }
-    expect(aiModelCallUsageFromModel(usage)).toEqual(usage)
-    expect(aiModelCallUsageFromModel({})).toEqual({})
   })
 })

@@ -11,11 +11,11 @@ import type {
   RecordAiModelCallResult,
   Storage,
 } from "../../storage"
-import { normalizeAiModelCallRecord } from "../../storage/ai-usage/record"
 import {
   aiModelCallCostMatchesUsage,
   normalizeAiModelCallCostRecord,
 } from "../../storage/ai-cost/provider"
+import { normalizeAiModelCallRecord } from "../../storage/ai-usage/record"
 import type { ModelCostEstimate } from "../pricing"
 import type { ModelCallAccountingStorage, RecoverAiModelCallInput } from "./types"
 
