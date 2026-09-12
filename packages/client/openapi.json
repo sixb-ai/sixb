@@ -11,13 +11,19 @@
         "type": "apiKey",
         "in": "header",
         "name": "x-sixb-csrf",
-        "description": "Required for authenticated mutating requests. Use the csrfToken returned by GET /api/auth/session."
+        "description": "Required for cookie-authenticated mutating requests. Use the csrfToken returned by the corresponding session endpoint."
       },
       "sixbBearer": {
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "Sixb access token",
         "description": "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on routes that explicitly document this scheme."
+      },
+      "sixbSharedGrant": {
+        "type": "apiKey",
+        "in": "header",
+        "name": "x-sixb-share-grant",
+        "description": "Selects the shared grant whose grant-specific HttpOnly session cookie must authenticate the request."
       }
     },
     "schemas": {
@@ -23051,6 +23057,341 @@
         }
       }
     },
+    "/api/shared-access/{grantId}/exchange": {
+      "post": {
+        "summary": "Exchange a shared link for a short-lived session",
+        "tags": ["Shared Access"],
+        "operationId": "exchangeSharedAccess",
+        "security": [],
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                },
+                "required": ["secret"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                },
+                "required": ["secret"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "secret": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z0-9_-]{43}$"
+                  }
+                },
+                "required": ["secret"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grantId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "destinationPath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "absoluteExpiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "csrfToken": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{43}$"
+                    }
+                  },
+                  "required": [
+                    "grantId",
+                    "destinationPath",
+                    "expiresAt",
+                    "absoluteExpiresAt",
+                    "csrfToken"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shared-access/{grantId}/session": {
+      "get": {
+        "summary": "Get the current shared-access session",
+        "tags": ["Shared Access"],
+        "operationId": "getSharedAccessSession",
+        "security": [],
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "grantId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 128
+                    },
+                    "destinationPath": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 4096
+                    },
+                    "expiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "absoluteExpiresAt": {
+                      "type": "string",
+                      "format": "date-time"
+                    },
+                    "csrfToken": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z0-9_-]{43}$"
+                    }
+                  },
+                  "required": [
+                    "grantId",
+                    "destinationPath",
+                    "expiresAt",
+                    "absoluteExpiresAt",
+                    "csrfToken"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/shared-access/{grantId}/sign-out": {
+      "post": {
+        "summary": "Sign out a shared-access session",
+        "tags": ["Shared Access"],
+        "operationId": "signOutSharedAccess",
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "grantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 128
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "signedOut": {
+                      "type": "boolean",
+                      "enum": [true]
+                    }
+                  },
+                  "required": ["signedOut"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Response for status 403",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/object-types": {
       "get": {
         "summary": "List registered object types",
@@ -23059,6 +23400,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "responses": {
@@ -23361,6 +23705,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "parameters": [
@@ -23688,6 +24035,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "parameters": [
@@ -23797,6 +24147,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "parameters": [
@@ -23992,6 +24345,10 @@
           },
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": [],
+            "sixbCsrf": []
           }
         ],
         "requestBody": {
@@ -24059,6 +24416,10 @@
           },
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": [],
+            "sixbCsrf": []
           }
         ],
         "requestBody": {
@@ -24126,6 +24487,10 @@
           },
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": [],
+            "sixbCsrf": []
           }
         ],
         "requestBody": {
@@ -24193,6 +24558,10 @@
           },
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": [],
+            "sixbCsrf": []
           }
         ],
         "requestBody": {
@@ -24260,6 +24629,10 @@
           },
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": [],
+            "sixbCsrf": []
           }
         ],
         "requestBody": {
@@ -24324,6 +24697,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "responses": {
@@ -24431,6 +24807,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "responses": {
@@ -24524,6 +24903,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "parameters": [
@@ -24765,6 +25147,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "responses": {
@@ -24856,6 +25241,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "parameters": [
@@ -24977,6 +25365,10 @@
           },
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": [],
+            "sixbCsrf": []
           }
         ],
         "parameters": [
@@ -26426,6 +26818,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "parameters": [
@@ -31888,6 +32283,10 @@
           },
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": [],
+            "sixbCsrf": []
           }
         ],
         "requestBody": {
@@ -32147,6 +32546,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "parameters": [
@@ -32293,6 +32695,9 @@
         "security": [
           {
             "sixbBearer": []
+          },
+          {
+            "sixbSharedGrant": []
           }
         ],
         "parameters": [

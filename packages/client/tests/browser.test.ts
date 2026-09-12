@@ -6,6 +6,7 @@ import {
 import { SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/api"
 import {
   configureSixbBrowserClient,
+  configureSixbSharedBrowserClient,
   createSixbSignInUrl,
   isSixbApiError,
   requireSixbBrowserAuthSession,
@@ -18,6 +19,7 @@ import { client } from "../src/generated/client.gen"
 import {
   listAuthMembers,
   listAuthSessions,
+  requestAction,
   requestSyncRun,
   signOut,
 } from "../src/generated/sdk.gen"
@@ -211,6 +213,116 @@ describe("agent stream websocket helpers", () => {
     expect(
       parseAgentRunStreamServerMessage(JSON.stringify({ type: "record", record: {} }))
     ).toBeNull()
+  })
+})
+
+describe("shared browser client", () => {
+  test("exchanges, resumes, mutates, and signs out through the ordinary singleton", async () => {
+    installDocument("visible")
+    setSystemTime(new Date("2026-08-29T10:00:00.000Z"))
+    const csrfToken = "C".repeat(43)
+    const session = {
+      grantId: "shr_1",
+      destinationPath: "/proposals/proposal-1",
+      expiresAt: "2026-08-29T10:15:00.000Z",
+      absoluteExpiresAt: "2026-08-30T10:00:00.000Z",
+      csrfToken,
+    }
+    const requests: Request[] = []
+    const fetchMock = Object.assign(
+      async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        const request = input instanceof Request && !init ? input : new Request(input, init)
+        requests.push(request.clone())
+        const pathname = new URL(request.url).pathname
+        if (pathname.endsWith("/exchange") || pathname.endsWith("/session")) {
+          return Response.json(session, {
+            headers: { [SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME]: csrfToken },
+          })
+        }
+        if (pathname.endsWith("/sign-out")) return Response.json({ signedOut: true })
+        return Response.json({
+          runId: "run_1",
+          queuedAt: "2026-08-29T10:00:00.000Z",
+          created: true,
+        })
+      },
+      { preconnect: fetch.preconnect }
+    ) satisfies typeof fetch
+    const controller = configureSixbSharedBrowserClient(runtimeConfig, {
+      grantId: "shr_1",
+      fetch: fetchMock,
+    })
+    controllers.push(controller)
+
+    await controller.establish("S".repeat(43))
+    await controller.getSession()
+    await requestAction({
+      path: { actionId: "approve" },
+      body: { subject: { kind: "none" } },
+    })
+    await controller.signOut()
+
+    expect(requests.map((request) => request.method)).toEqual(["POST", "GET", "POST", "POST"])
+    expect(new URL(requests[0]?.url ?? "").pathname).toBe("/api/shared-access/shr_1/exchange")
+    expect(await requests[0]?.json()).toEqual({ secret: "S".repeat(43) })
+    expect(new URL(requests[1]?.url ?? "").pathname).toBe("/api/shared-access/shr_1/session")
+    expect(new URL(requests[2]?.url ?? "").pathname).toBe("/api/actions/approve")
+    expect(new URL(requests[3]?.url ?? "").pathname).toBe("/api/shared-access/shr_1/sign-out")
+    for (const request of requests) {
+      expect(request.credentials).toBe("include")
+      expect(request.headers.get("authorization")).toBeNull()
+      expect(request.headers.get("x-sixb-share-grant")).toBe("shr_1")
+      expect(request.headers.get("x-sixb-session-activity")).toBe("1")
+    }
+    expect(requests[0]?.headers.get("x-sixb-csrf")).toBeNull()
+    expect(requests[1]?.headers.get("x-sixb-csrf")).toBeNull()
+    expect(requests[2]?.headers.get("x-sixb-csrf")).toBe(csrfToken)
+    expect(requests[3]?.headers.get("x-sixb-csrf")).toBe(csrfToken)
+    expect(controller.getCsrfToken()).toBeNull()
+
+    controller.dispose()
+    expect(client.getConfig().fetch).toBeUndefined()
+  })
+
+  test("rejects malformed secrets before making a request", async () => {
+    let fetchCalled = false
+    const controller = configureSixbSharedBrowserClient(runtimeConfig, {
+      grantId: "shr_1",
+      fetch: Object.assign(
+        async () => {
+          fetchCalled = true
+          return Response.json({})
+        },
+        { preconnect: fetch.preconnect }
+      ),
+    })
+    controllers.push(controller)
+
+    await expect(controller.exchange("short")).rejects.toThrow("Shared access secret is invalid")
+    expect(fetchCalled).toBe(false)
+  })
+
+  test("rejects a non-same-origin destination returned by the session endpoint", async () => {
+    const controller = configureSixbSharedBrowserClient(runtimeConfig, {
+      grantId: "shr_1",
+      fetch: Object.assign(
+        async () =>
+          Response.json({
+            grantId: "shr_1",
+            destinationPath: "//outside.example.test/proposal-1",
+            expiresAt: "2026-08-29T10:15:00.000Z",
+            absoluteExpiresAt: "2026-08-30T10:00:00.000Z",
+            csrfToken: "C".repeat(43),
+          }),
+        { preconnect: fetch.preconnect }
+      ),
+    })
+    controllers.push(controller)
+
+    await expect(controller.getSession()).rejects.toThrow(
+      "Shared access session response is invalid"
+    )
+    expect(controller.getCsrfToken()).toBeNull()
   })
 })
 

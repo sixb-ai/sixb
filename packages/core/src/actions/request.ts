@@ -20,7 +20,9 @@ import {
   type ActionRunStorage,
   isTerminalActionRun,
 } from "../storage"
+import { assertObjectReadOutputWithinLimit } from "../storage/objects/execution-limits"
 import { admitDelegatedObjectAction, assertDelegatedActionTarget } from "./delegated-admission"
+import { actionRunBelongsToShareGrant, canDelegationAccessActionRun } from "./run-authorization"
 import { dispatchActionRun } from "./run-dispatch"
 import { createActionRunId } from "./run-id"
 import type { ActionDefinition, ActionSubject } from "./types"
@@ -144,7 +146,7 @@ export async function requestAction(
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
 
   // `dispatchActionRun` checks an existing run id before creating its durable execution. Keep
-  // process-local delegation outside that oracle until durable grant provenance is implemented.
+  // process-local delegation outside that oracle unless it carries durable grant provenance.
   void getAuthorizationRef(runtimeAuthorization)
 
   return dispatchActionRun({
@@ -157,6 +159,29 @@ export async function requestAction(
     subject,
     params: actionParams,
     runId: request.runId,
+    ...(authorization.type === "delegated"
+      ? {
+          assertCanReuseExisting: async (
+            storage: SixbRuntimeContext["storage"],
+            existing: ActionRunRecord
+          ) => {
+            if (
+              !authorization.delegation ||
+              !(await actionRunBelongsToShareGrant({
+                storage,
+                projectId,
+                run: existing,
+                grantId: authorization.delegation.grantId,
+              }))
+            ) {
+              throw new AuthorizationError(
+                `apply:action:${actionId}`,
+                "[Sixb] Delegated authority cannot reuse this Action run."
+              )
+            }
+          },
+        }
+      : {}),
     createExecution: async (executionId, runId) => {
       const caller = await ensureExecutionRecord(
         runtime.storage.executions,
@@ -233,7 +258,7 @@ export async function waitForActionRun(
       "[Sixb] Protected operations require registered runtime authorization for this project."
     )
   }
-  // Polling cannot be delegated safely until durable runs carry their originating grant.
+  // Process-local delegation cannot poll durable runs without originating grant provenance.
   if (authorization.type === "delegated") void getAuthorizationRef(runtimeAuthorization)
   const actionRuns = requireActionRunStorage(runtime)
   const timeoutMs = request.timeoutMs ?? DEFAULT_ACTION_WAIT_TIMEOUT_MS
@@ -296,8 +321,19 @@ export async function waitForActionRun(
         const visible =
           record &&
           (authorization.type === "unrestricted" ||
-            (authorization.type === "principal" && canViewActionRun(authorization.context, record)))
+            (authorization.type === "principal" &&
+              canViewActionRun(authorization.context, record)) ||
+            (authorization.type === "delegated" &&
+              (await canDelegationAccessActionRun({
+                storage: runtime.storage,
+                projectId,
+                authority: authorization,
+                run: record,
+              }))))
         if (visible && isTerminalActionRun(record)) {
+          if (authorization.type === "delegated") {
+            assertObjectReadOutputWithinLimit(record, authorization.objectRead.limits)
+          }
           cleanup()
           resolve(record)
           return

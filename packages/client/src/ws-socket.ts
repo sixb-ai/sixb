@@ -7,6 +7,7 @@
  * protocol while sharing one reconnection loop. React is an optional peer of `@sixb/client`;
  * nothing here may import it.
  */
+import { hasClientSharedAuthority, SHARED_ACCESS_REALTIME_UNAVAILABLE } from "./client-authority"
 import { client } from "./generated/client.gen"
 
 const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
@@ -65,6 +66,16 @@ const INITIAL_STATE: ReconnectingSocketState = {
 }
 
 export function createReconnectingSocket(options: ReconnectingSocketOptions): ReconnectingSocket {
+  if (hasClientSharedAuthority(client)) {
+    options.onError?.(SHARED_ACCESS_REALTIME_UNAVAILABLE)
+    options.onStateChange?.({
+      connected: false,
+      reconnecting: false,
+      error: SHARED_ACCESS_REALTIME_UNAVAILABLE,
+    })
+    return { close: () => undefined }
+  }
+
   const { reconnect = true, reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS } = options
 
   let state = INITIAL_STATE

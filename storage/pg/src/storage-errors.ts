@@ -5,6 +5,7 @@
 
 /** PostgreSQL SQLSTATE for a unique-constraint violation. */
 const UNIQUE_VIOLATION = "23505"
+const FOREIGN_KEY_VIOLATION = "23503"
 
 /**
  * PostgreSQL SQLSTATEs in class 40 (transaction rollback) that are transient and safe to retry by
@@ -44,6 +45,11 @@ export function pgErrorCode(error: unknown): string | undefined {
 /** True when the error is a PostgreSQL unique-constraint violation (SQLSTATE 23505). */
 export function isUniqueViolation(error: unknown): boolean {
   return pgErrorCode(error) === UNIQUE_VIOLATION
+}
+
+/** True when the error is a PostgreSQL foreign-key violation (SQLSTATE 23503). */
+export function isForeignKeyViolation(error: unknown): boolean {
+  return pgErrorCode(error) === FOREIGN_KEY_VIOLATION
 }
 
 /**

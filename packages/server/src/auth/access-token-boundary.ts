@@ -3,6 +3,8 @@ import { matchesPathPattern, normalizeRoutePath, SIXB_API_ROUTES } from "@sixb/c
 import {
   SIXB_BEARER_SECURITY_REQUIREMENT,
   SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+  SIXB_SHARED_MUTATION_SECURITY_REQUIREMENT,
+  SIXB_SHARED_READ_SECURITY_REQUIREMENT,
 } from "../openapi/security"
 import type { RouteAccess } from "./public-routes"
 
@@ -12,6 +14,7 @@ export interface AccessTokenRoute {
   readonly operationId: string
   readonly method: string
   readonly path: string
+  readonly sharedSession: boolean
 }
 
 // The routes that accept bearer access tokens: the `accessToken` projection of the canonical
@@ -26,7 +29,12 @@ export interface AccessTokenRoute {
 // from SIXB_API_ROUTES.
 export const ACCESS_TOKEN_ROUTES: readonly AccessTokenRoute[] = SIXB_API_ROUTES.filter(
   (route) => route.accessToken
-).map((route) => ({ operationId: route.operationId, method: route.method, path: route.path }))
+).map((route) => ({
+  operationId: route.operationId,
+  method: route.method,
+  path: route.path,
+  sharedSession: route.sharedSession ?? false,
+}))
 
 /**
  * OpenAPI security requirement for a bearer-capable route, derived from the
@@ -43,9 +51,16 @@ export function bearerSecurityRequirement(operationId: string) {
     )
   }
 
-  return isCsrfExemptMethod(route.method)
+  const standard = isCsrfExemptMethod(route.method)
     ? SIXB_BEARER_SECURITY_REQUIREMENT
     : SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT
+  if (!route.sharedSession) return standard
+  return [
+    ...standard,
+    isCsrfExemptMethod(route.method)
+      ? SIXB_SHARED_READ_SECURITY_REQUIREMENT
+      : SIXB_SHARED_MUTATION_SECURITY_REQUIREMENT,
+  ]
 }
 
 export function isAccessTokenRoute(request: Request): boolean {
