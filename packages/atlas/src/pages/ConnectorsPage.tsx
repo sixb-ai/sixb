@@ -330,7 +330,7 @@ function WebhookRunCard({ run }: { run: WebhookRun }) {
           {run.idempotencyKey}
         </p>
       )}
-      {run.error && <SixbFailureSummary failure={run.error} className="mt-3 text-xs" />}
+      {run.error && <SixbFailureSummary failure={run.error} showDetails className="mt-3 text-sm" />}
     </div>
   )
 }
@@ -381,6 +381,7 @@ function WebhookRunsList({ runs }: { runs: WebhookRun[] }) {
                     {run.error && (
                       <SixbFailureSummary
                         failure={run.error}
+                        showDetails
                         className="mt-1 max-w-[260px] text-xs"
                         truncateMessage
                       />

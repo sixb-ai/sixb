@@ -31,13 +31,23 @@ interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
   readonly retryable: boolean
   readonly at: string
   readonly details?: JsonValue
+  readonly httpStatus?: number
+  readonly redacted?: true
   readonly truncated?: true
 }
 ```
 
-Messages are safe, bounded summaries owned by Sixb. Native errors, stacks, and causes stay on the
-private `error` argument passed to `onError`; they are never copied into storage or API responses.
-`truncated` indicates that optional context exceeded the durable failure size budget.
+`code` stays stable. `message` adds recognized HTTP, network, or Sixb information from the
+error's causal chain. `httpStatus` is the upstream response status, not Sixb's API response status.
+Unknown exceptions keep the generic message. No connector changes are required.
+
+Native exception messages, stacks, and provider payloads are not copied. Selected context is
+credential-filtered before storage and on read; `redacted` signals masking and `truncated` signals
+omitted data. Filtering cannot identify every opaque secret: never put credentials in `details`.
+The native exception remains available to `onError`, whose logging must protect it separately.
+
+Existing records remain readable without migration. Read filtering does not rewrite historical
+rows or recover causes that were never stored.
 
 `retryable` is the policy attached to the code. It does not override a worker's safety rules; a
 worker may still refuse to replay work that has already produced side effects.

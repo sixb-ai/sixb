@@ -1,5 +1,6 @@
 import { cloneJsonValue, isJsonValue, isPlainRecord, type ReadonlyJsonValue } from "../json"
 import { SIXB_ERROR_CODES, SIXB_ERROR_DEFINITIONS } from "./catalog"
+import { createFailureRedactor } from "./redaction"
 import type { SixbErrorCode, SixbFailure } from "./types"
 
 export const SIXB_FAILURE_MAX_MESSAGE_BYTES = 4 * 1024
@@ -103,7 +104,11 @@ export function captureSixbFailure<const TCodes extends SixbErrorCodeTuple>(
 
 /** Identifies errors created by Sixb without making their class part of the contract. */
 export function isSixbError(error: unknown): error is SixbCodedError {
-  return error instanceof SixbError
+  try {
+    return error instanceof SixbError
+  } catch {
+    return false
+  }
 }
 
 /**
@@ -128,9 +133,12 @@ export function toSixbFailure(
     throw new Error(`[Sixb] Error code '${error.code}' is not allowed by this failure contract.`)
   }
   const code = error.code
-  const details = error.details
+  const redactor = createFailureRedactor()
+  const details = error.details === undefined ? undefined : redactor.context(error.details)
+  const { detail, truncated } = findFailureDetail(error, code)
+  const summary = SIXB_ERROR_DEFINITIONS[code].publicMessage
   const message = truncateUtf8(
-    SIXB_ERROR_DEFINITIONS[code].publicMessage,
+    redactor.text(detail && detail.message !== summary ? `${summary} ${detail.message}` : summary),
     SIXB_FAILURE_MAX_MESSAGE_BYTES
   )
   const failure: SixbFailure = {
@@ -139,7 +147,9 @@ export function toSixbFailure(
     retryable: SIXB_ERROR_DEFINITIONS[code].retryable,
     at: failureTimestamp(options.at),
     ...(details === undefined ? {} : { details: cloneJsonValue(details, "Sixb failure details") }),
-    ...(message.truncated ? { truncated: true } : {}),
+    ...(detail?.httpStatus === undefined ? {} : { httpStatus: detail.httpStatus }),
+    ...(redactor.redacted ? { redacted: true } : {}),
+    ...(message.truncated || truncated || redactor.truncated ? { truncated: true } : {}),
   }
 
   if (serializedByteLength(failure) <= SIXB_FAILURE_MAX_SERIALIZED_BYTES) return failure
@@ -149,8 +159,65 @@ export function toSixbFailure(
     message: failure.message,
     retryable: failure.retryable,
     at: failure.at,
+    ...(failure.httpStatus === undefined ? {} : { httpStatus: failure.httpStatus }),
+    ...(failure.redacted ? { redacted: true } : {}),
     truncated: true,
   }
+}
+
+const NETWORK_MESSAGES: Readonly<Record<string, string>> = {
+  ECONNREFUSED: "The remote service refused the connection.",
+  ECONNRESET: "The remote service reset the connection.",
+  ENOTFOUND: "The remote host could not be resolved.",
+  EAI_AGAIN: "DNS resolution temporarily failed.",
+  ETIMEDOUT: "The connection timed out.",
+}
+
+function isHttpStatus(value: unknown): value is number {
+  return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599
+}
+
+/** Select one explanation along the causal chain; unrelated aggregate errors stay separate. */
+function findFailureDetail(
+  error: SixbCodedError,
+  boundaryCode: SixbErrorCode
+): { detail?: { message: string; httpStatus?: number }; truncated: boolean } {
+  const seen = new Set<object>()
+  let current: unknown = error
+  while (typeof current === "object" && current !== null && !seen.has(current)) {
+    if (seen.size === 8) return { truncated: true }
+    seen.add(current)
+    if (
+      isSixbError(current) &&
+      current.code !== boundaryCode &&
+      current.code !== "internal.unexpected"
+    ) {
+      return {
+        detail: { message: SIXB_ERROR_DEFINITIONS[current.code].publicMessage },
+        truncated: false,
+      }
+    }
+    try {
+      // Read only data properties: arbitrary messages and getters remain private.
+      const status =
+        Object.getOwnPropertyDescriptor(current, "status")?.value ??
+        Object.getOwnPropertyDescriptor(current, "statusCode")?.value
+      if (isHttpStatus(status)) {
+        return {
+          detail: { message: `Upstream request returned HTTP ${status}.`, httpStatus: status },
+          truncated: false,
+        }
+      }
+      const code = Object.getOwnPropertyDescriptor(current, "code")?.value
+      if (typeof code === "string" && Object.hasOwn(NETWORK_MESSAGES, code)) {
+        return { detail: { message: NETWORK_MESSAGES[code] }, truncated: false }
+      }
+      current = Object.getOwnPropertyDescriptor(current, "cause")?.value
+    } catch {
+      break
+    }
+  }
+  return { truncated: false }
 }
 
 /** Serializes a validated failure for durable storage. */
@@ -186,7 +253,7 @@ export function parseSixbFailure(
     throw invalidStoredFailure("expected a JSON object")
   }
 
-  const { code, message, retryable, at, details, truncated } = candidate
+  const { code, message, retryable, at, details, httpStatus, redacted, truncated } = candidate
   if (typeof code !== "string" || !SIXB_ERROR_CODE_SET.has(code)) {
     throw invalidStoredFailure("code is not a known Sixb error code")
   }
@@ -215,15 +282,28 @@ export function parseSixbFailure(
     throw invalidStoredFailure("truncated must be true when present")
   }
 
+  if (redacted !== undefined && redacted !== true) {
+    throw invalidStoredFailure("redacted must be true when present")
+  }
+  if (httpStatus !== undefined && !isHttpStatus(httpStatus)) {
+    throw invalidStoredFailure("httpStatus must be an integer HTTP status")
+  }
+  const redactor = createFailureRedactor()
+  const safeMessage = truncateUtf8(redactor.text(message), SIXB_FAILURE_MAX_MESSAGE_BYTES)
+  const safeDetails =
+    details === undefined ? undefined : redactor.context(details as ReadonlyJsonValue)
+
   const failure: SixbFailure = {
     code: code as SixbErrorCode,
-    message,
+    message: safeMessage.value,
     retryable,
     at,
-    ...(details === undefined
+    ...(safeDetails === undefined
       ? {}
-      : { details: cloneJsonValue(details, "Stored Sixb failure details") }),
-    ...(truncated === true ? { truncated: true } : {}),
+      : { details: cloneJsonValue(safeDetails, "Stored Sixb failure details") }),
+    ...(httpStatus === undefined ? {} : { httpStatus: httpStatus as number }),
+    ...(redacted || redactor.redacted ? { redacted: true } : {}),
+    ...(truncated || redactor.truncated || safeMessage.truncated ? { truncated: true } : {}),
   }
   if (serializedByteLength(failure) > SIXB_FAILURE_MAX_SERIALIZED_BYTES) {
     throw invalidStoredFailure(
@@ -255,7 +335,7 @@ function invalidStoredFailure(reason: string): Error {
  * Extracts a diagnostic message for an internal error or log entry.
  *
  * The result can contain provider data and must not be persisted or returned by an API.
- * `toSixbFailure()` selects the catalog-owned public message instead.
+ * `toSixbFailure()` constructs a message from recognized HTTP, network, or Sixb information instead.
  */
 export function summarizeErrorMessage(value: unknown, fallback?: string): string {
   const message = readStringProperty(value, "message")

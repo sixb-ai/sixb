@@ -202,7 +202,7 @@ describe("Sixb error model", () => {
     const oversized = toSixbFailure(
       createSixbError("internal.unexpected", "Provider failed", {
         cause: new Error("provider secret"),
-        details: { payload: "x".repeat(SIXB_FAILURE_MAX_SERIALIZED_BYTES) },
+        details: { note: "x".repeat(SIXB_FAILURE_MAX_SERIALIZED_BYTES) },
       }),
       { at: AT }
     )

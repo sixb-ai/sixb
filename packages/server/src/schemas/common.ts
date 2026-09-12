@@ -47,6 +47,8 @@ export function sixbFailureSchema<
     retryable: z.boolean(),
     at: z.string().datetime(),
     details: JsonValueSchema.optional(),
+    httpStatus: z.number().int().min(100).max(599).optional(),
+    redacted: z.literal(true).optional(),
     truncated: z.literal(true).optional(),
   })
 }

@@ -10818,6 +10818,15 @@
                                 }
                               ]
                             },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
                             "truncated": {
                               "type": "boolean",
                               "enum": [true]
@@ -11479,6 +11488,15 @@
                                   "additionalProperties": true
                                 }
                               ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -12178,6 +12196,15 @@
                                   "additionalProperties": true
                                 }
                               ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -13912,6 +13939,15 @@
                                   }
                                 ]
                               },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
                               "truncated": {
                                 "type": "boolean",
                                 "enum": [true]
@@ -14186,6 +14222,15 @@
                                 }
                               ]
                             },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
                             "truncated": {
                               "type": "boolean",
                               "enum": [true]
@@ -14416,6 +14461,15 @@
                                     "additionalProperties": true
                                   }
                                 ]
+                              },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
                               },
                               "truncated": {
                                 "type": "boolean",
@@ -14978,6 +15032,15 @@
                                   }
                                 ]
                               },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
                               "truncated": {
                                 "type": "boolean",
                                 "enum": [true]
@@ -15352,6 +15415,15 @@
                                 }
                               ]
                             },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
                             "truncated": {
                               "type": "boolean",
                               "enum": [true]
@@ -15551,6 +15623,15 @@
                                   }
                                 ]
                               },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
                               "truncated": {
                                 "type": "boolean",
                                 "enum": [true]
@@ -15722,6 +15803,15 @@
                                 }
                               ]
                             },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
                             "truncated": {
                               "type": "boolean",
                               "enum": [true]
@@ -15848,6 +15938,15 @@
                                     "additionalProperties": true
                                   }
                                 ]
+                              },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
                               },
                               "truncated": {
                                 "type": "boolean",
@@ -16444,6 +16543,15 @@
                                   }
                                 ]
                               },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
                               "truncated": {
                                 "type": "boolean",
                                 "enum": [true]
@@ -16906,6 +17014,15 @@
                                   "additionalProperties": true
                                 }
                               ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -18394,6 +18511,15 @@
                                   }
                                 ]
                               },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
                               "truncated": {
                                 "type": "boolean",
                                 "enum": [true]
@@ -18586,6 +18712,15 @@
                                   "additionalProperties": true
                                 }
                               ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -18812,6 +18947,15 @@
                                     "additionalProperties": true
                                   }
                                 ]
+                              },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
                               },
                               "truncated": {
                                 "type": "boolean",
@@ -19704,6 +19848,15 @@
                             }
                           ]
                         },
+                        "httpStatus": {
+                          "type": "integer",
+                          "minimum": 100,
+                          "maximum": 599
+                        },
+                        "redacted": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
                         "truncated": {
                           "type": "boolean",
                           "enum": [true]
@@ -19915,6 +20068,15 @@
                                   "additionalProperties": true
                                 }
                               ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -20141,6 +20303,15 @@
                                     "additionalProperties": true
                                   }
                                 ]
+                              },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
                               },
                               "truncated": {
                                 "type": "boolean",
@@ -25474,6 +25645,15 @@
                                 "required": ["actionId", "runId", "phase"],
                                 "additionalProperties": false
                               },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
                               "truncated": {
                                 "type": "boolean",
                                 "enum": [true]
@@ -25691,6 +25871,15 @@
                           "required": ["actionId", "runId", "phase"],
                           "additionalProperties": false
                         },
+                        "httpStatus": {
+                          "type": "integer",
+                          "minimum": 100,
+                          "maximum": 599
+                        },
+                        "redacted": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
                         "truncated": {
                           "type": "boolean",
                           "enum": [true]
@@ -25792,6 +25981,15 @@
                                   "required": ["actionId", "runId", "phase"],
                                   "additionalProperties": false
                                 },
+                                "httpStatus": {
+                                  "type": "integer",
+                                  "minimum": 100,
+                                  "maximum": 599
+                                },
+                                "redacted": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                },
                                 "truncated": {
                                   "type": "boolean",
                                   "enum": [true]
@@ -25871,6 +26069,15 @@
                                   },
                                   "required": ["actionId", "runId", "phase"],
                                   "additionalProperties": false
+                                },
+                                "httpStatus": {
+                                  "type": "integer",
+                                  "minimum": 100,
+                                  "maximum": 599
+                                },
+                                "redacted": {
+                                  "type": "boolean",
+                                  "enum": [true]
                                 },
                                 "truncated": {
                                   "type": "boolean",
@@ -28296,6 +28503,15 @@
                                 }
                               ]
                             },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
                             "truncated": {
                               "type": "boolean",
                               "enum": [true]
@@ -29025,6 +29241,15 @@
                                 }
                               ]
                             },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
                             "truncated": {
                               "type": "boolean",
                               "enum": [true]
@@ -29436,6 +29661,15 @@
                                   "additionalProperties": true
                                 }
                               ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -29916,6 +30150,15 @@
                                   }
                                 ]
                               },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
+                              },
                               "truncated": {
                                 "type": "boolean",
                                 "enum": [true]
@@ -30300,6 +30543,15 @@
                               "additionalProperties": true
                             }
                           ]
+                        },
+                        "httpStatus": {
+                          "type": "integer",
+                          "minimum": 100,
+                          "maximum": 599
+                        },
+                        "redacted": {
+                          "type": "boolean",
+                          "enum": [true]
                         },
                         "truncated": {
                           "type": "boolean",
@@ -34784,6 +35036,15 @@
                                           }
                                         ]
                                       },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      },
                                       "truncated": {
                                         "type": "boolean",
                                         "enum": [true]
@@ -34959,6 +35220,15 @@
                                             "additionalProperties": true
                                           }
                                         ]
+                                      },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
                                       },
                                       "truncated": {
                                         "type": "boolean",
@@ -35138,6 +35408,15 @@
                                             "additionalProperties": true
                                           }
                                         ]
+                                      },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
                                       },
                                       "truncated": {
                                         "type": "boolean",
@@ -35364,6 +35643,15 @@
                                           }
                                         ]
                                       },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      },
                                       "truncated": {
                                         "type": "boolean",
                                         "enum": [true]
@@ -35539,6 +35827,15 @@
                                             "additionalProperties": true
                                           }
                                         ]
+                                      },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
                                       },
                                       "truncated": {
                                         "type": "boolean",
@@ -35718,6 +36015,15 @@
                                             "additionalProperties": true
                                           }
                                         ]
+                                      },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
                                       },
                                       "truncated": {
                                         "type": "boolean",
@@ -35955,6 +36261,15 @@
                                           }
                                         ]
                                       },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
+                                      },
                                       "truncated": {
                                         "type": "boolean",
                                         "enum": [true]
@@ -36130,6 +36445,15 @@
                                             "additionalProperties": true
                                           }
                                         ]
+                                      },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
                                       },
                                       "truncated": {
                                         "type": "boolean",
@@ -36309,6 +36633,15 @@
                                             "additionalProperties": true
                                           }
                                         ]
+                                      },
+                                      "httpStatus": {
+                                        "type": "integer",
+                                        "minimum": 100,
+                                        "maximum": 599
+                                      },
+                                      "redacted": {
+                                        "type": "boolean",
+                                        "enum": [true]
                                       },
                                       "truncated": {
                                         "type": "boolean",
@@ -36605,6 +36938,15 @@
                                         }
                                       ]
                                     },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    },
                                     "truncated": {
                                       "type": "boolean",
                                       "enum": [true]
@@ -36774,6 +37116,15 @@
                                           "additionalProperties": true
                                         }
                                       ]
+                                    },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
                                     },
                                     "truncated": {
                                       "type": "boolean",
@@ -36947,6 +37298,15 @@
                                           "additionalProperties": true
                                         }
                                       ]
+                                    },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
                                     },
                                     "truncated": {
                                       "type": "boolean",
@@ -37164,6 +37524,15 @@
                                         }
                                       ]
                                     },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    },
                                     "truncated": {
                                       "type": "boolean",
                                       "enum": [true]
@@ -37333,6 +37702,15 @@
                                           "additionalProperties": true
                                         }
                                       ]
+                                    },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
                                     },
                                     "truncated": {
                                       "type": "boolean",
@@ -37506,6 +37884,15 @@
                                           "additionalProperties": true
                                         }
                                       ]
+                                    },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
                                     },
                                     "truncated": {
                                       "type": "boolean",
@@ -37734,6 +38121,15 @@
                                         }
                                       ]
                                     },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
+                                    },
                                     "truncated": {
                                       "type": "boolean",
                                       "enum": [true]
@@ -37903,6 +38299,15 @@
                                           "additionalProperties": true
                                         }
                                       ]
+                                    },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
                                     },
                                     "truncated": {
                                       "type": "boolean",
@@ -38076,6 +38481,15 @@
                                           "additionalProperties": true
                                         }
                                       ]
+                                    },
+                                    "httpStatus": {
+                                      "type": "integer",
+                                      "minimum": 100,
+                                      "maximum": 599
+                                    },
+                                    "redacted": {
+                                      "type": "boolean",
+                                      "enum": [true]
                                     },
                                     "truncated": {
                                       "type": "boolean",
@@ -38390,6 +38804,15 @@
                                       }
                                     ]
                                   },
+                                  "httpStatus": {
+                                    "type": "integer",
+                                    "minimum": 100,
+                                    "maximum": 599
+                                  },
+                                  "redacted": {
+                                    "type": "boolean",
+                                    "enum": [true]
+                                  },
                                   "truncated": {
                                     "type": "boolean",
                                     "enum": [true]
@@ -38559,6 +38982,15 @@
                                         "additionalProperties": true
                                       }
                                     ]
+                                  },
+                                  "httpStatus": {
+                                    "type": "integer",
+                                    "minimum": 100,
+                                    "maximum": 599
+                                  },
+                                  "redacted": {
+                                    "type": "boolean",
+                                    "enum": [true]
                                   },
                                   "truncated": {
                                     "type": "boolean",
@@ -38732,6 +39164,15 @@
                                         "additionalProperties": true
                                       }
                                     ]
+                                  },
+                                  "httpStatus": {
+                                    "type": "integer",
+                                    "minimum": 100,
+                                    "maximum": 599
+                                  },
+                                  "redacted": {
+                                    "type": "boolean",
+                                    "enum": [true]
                                   },
                                   "truncated": {
                                     "type": "boolean",
@@ -38979,6 +39420,15 @@
                                 }
                               ]
                             },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
+                            },
                             "truncated": {
                               "type": "boolean",
                               "enum": [true]
@@ -39148,6 +39598,15 @@
                                   "additionalProperties": true
                                 }
                               ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -39321,6 +39780,15 @@
                                   "additionalProperties": true
                                 }
                               ]
+                            },
+                            "httpStatus": {
+                              "type": "integer",
+                              "minimum": 100,
+                              "maximum": 599
+                            },
+                            "redacted": {
+                              "type": "boolean",
+                              "enum": [true]
                             },
                             "truncated": {
                               "type": "boolean",
@@ -39642,6 +40110,15 @@
                                     "additionalProperties": true
                                   }
                                 ]
+                              },
+                              "httpStatus": {
+                                "type": "integer",
+                                "minimum": 100,
+                                "maximum": 599
+                              },
+                              "redacted": {
+                                "type": "boolean",
+                                "enum": [true]
                               },
                               "truncated": {
                                 "type": "boolean",
