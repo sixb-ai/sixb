@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../authorization"
+import { bindModelExecutionAttempt } from "../models/execution/binding"
 import type { OntologySource } from "../ontology"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import {
@@ -32,6 +33,7 @@ export type { AuthorizationContext } from "../authorization"
 export type { DatasetsRuntime } from "../datasets/execution"
 export type { EventsRuntime } from "../events/execution"
 export type { LogsRuntime } from "../logging/execution"
+export type { LanguageModelsRuntime, ModelsRuntime } from "../models/generation-types"
 export type {
   ExecutionObjectByIdHandle,
   ExecutionObjectSet,
@@ -104,6 +106,7 @@ export function bindRequestExecution(
   if (!isBoundSixb(sixb)) {
     throw new Error("[Sixb] Request host did not return an execution-bound Sixb SDK.")
   }
+  bindModelExecutionAttempt(sixb.models, { attempt: 1, signal: input.request.signal })
   return sixb
 }
 

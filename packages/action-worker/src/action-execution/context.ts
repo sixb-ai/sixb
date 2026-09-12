@@ -31,6 +31,7 @@ export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): Ac
       },
     },
     connector: runtime.sixb.connector,
+    models: runtime.sixb.models,
     objects(objectType) {
       return {
         appendTelemetryBatch(items) {

@@ -16,6 +16,8 @@ import { assertAuthorizedObjectReaderBinding } from "../execution/authorized-obj
 import type { LakeStorage } from "../lake-storage/types"
 import { createLogsRuntime, type LogsRuntime } from "../logging/execution"
 import type { LoggingService } from "../logging/service"
+import { createModelsRuntime } from "../models/execution"
+import type { ModelsRuntime } from "../models/generation-types"
 import { createObjectsRuntime, type ObjectsRuntime } from "../objects/execution"
 import { createPipelinesRuntime, type PipelinesRuntime } from "../pipelines/execution"
 import { createProjectionsRuntime, type ProjectionsRuntime } from "../projections/execution"
@@ -42,6 +44,7 @@ export interface Sixb<
   readonly projections: ProjectionsRuntime
   readonly rules: RulesRuntime
   readonly agent: AgentRuntime
+  readonly models: ModelsRuntime
   readonly aiUsage: AiUsageRuntime
   readonly events: EventsRuntime
   readonly logs: LogsRuntime
@@ -118,6 +121,7 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),
     agent: createAgentRuntime(runtime, execution, dependencies.definitions.models),
+    models: createModelsRuntime(runtime, execution, dependencies.definitions.models),
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),
     events: createEventsRuntime(runtime),
     logs: createLogsRuntime(runtime, dependencies.logging),
