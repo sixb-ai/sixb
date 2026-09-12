@@ -22,6 +22,7 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
+import { writeDataset } from "@sixb/core/internal/datasets"
 import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../../server/src/server"
 import { startSixbRuntime } from "../src/lib/runtime"
@@ -190,12 +191,17 @@ test("verified webhooks and snapshots feed merged contacts through orchestration
     })
   const pipeline = definePipeline("contacts").when(pdUpdated).when(docUpdated).then(merge)
   const lakeStorage = new InMemoryLakeStorage()
-  // Both pipeline inputs must have a first source version before either triggers the merge.
+  // A first empty snapshot is a real pipeline input; no fake source rows or deletions are needed.
+  // Regression proof: remove createInitialVersion from the writer; the first contact never appears.
   for (const dataset of [pipedrive, pandadoc]) {
-    await lakeStorage.createDataset(dataset)
-    const session = await lakeStorage.beginMerge({ dataset })
-    await session.writeChanges([change.delete({ id: "seed" }, { sequence: 0 })])
-    await session.commit()
+    await writeDataset({
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      dataset,
+      mode: "snapshot",
+      signal: new AbortController().signal,
+      readValues: async () => [],
+    })
   }
   const host = new SixbHost({
     id: "webhook-ingestion",
