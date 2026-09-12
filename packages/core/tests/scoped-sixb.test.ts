@@ -1146,14 +1146,14 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
           executor: { type: "agent", actorId: "contract-agent", runId: "agent-run-2" },
         },
       })
-    ).toThrow("agent authority does not match its execution binding")
+    ).toThrow("authority is bound to different execution provenance")
 
     expect(() =>
       host.withScope({
         authorization: scope.authorization,
         execution: { ...scope.execution, id: "exec_forged" },
       })
-    ).toThrow("agent authority does not match its execution binding")
+    ).toThrow("authority is bound to different execution provenance")
   })
 })
 

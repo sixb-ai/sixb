@@ -5,7 +5,11 @@ import {
   type ExecutionStorage,
   ExecutionStorageError,
 } from "../storage/executions"
-import { createTrustedPrimitiveRuntimeAuthorization, getAuthorizationRef } from "./authorization"
+import {
+  createTrustedPrimitiveRuntimeAuthorization,
+  getAuthorizationRef,
+  resolveExecutionScopeAuthorization,
+} from "./authorization"
 import type {
   ExecutionContext,
   ExecutionScope,
@@ -19,6 +23,10 @@ export function executionRecordInputFromRuntime(input: {
   readonly runtimeAuthorization: RuntimeAuthorization
 }): CreateExecutionInput {
   const execution = input.execution
+  resolveExecutionScopeAuthorization(execution.projectId, {
+    execution,
+    authorization: input.runtimeAuthorization,
+  })
   return {
     id: execution.id,
     projectId: execution.projectId,
@@ -135,7 +143,7 @@ export function restoreTrustedPrimitiveExecutionScope(input: {
   return Object.freeze({
     execution: context,
     authorization: createTrustedPrimitiveRuntimeAuthorization({
-      projectId: input.execution.projectId,
+      execution: context,
       primitive: input.primitive,
     }),
   })

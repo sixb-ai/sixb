@@ -13,6 +13,7 @@ import type {
   UserRecord,
 } from "../storage/auth"
 import { AuthStorageError } from "../storage/auth"
+import { agentServiceAccountId } from "./identity"
 
 export type AgentExecutionAuthorization =
   | { readonly type: "principal"; readonly context: AuthorizationContext }
@@ -28,14 +29,12 @@ interface CredentialedUserAuthorizationRef {
   readonly credential: UserCredentialRef
 }
 
+export { agentServiceAccountId } from "./identity"
+
 export interface AgentExecutionIdentity {
   readonly serviceAccount: ServiceAccountRecord
   readonly principal: Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
   readonly groupMemberships: readonly ServiceAccountGroupMembershipRecord[]
-}
-
-export function agentServiceAccountId(actorId: string): string {
-  return `svc_agent_${actorId}`
 }
 
 /** Ensure a framework-managed Agent actor exists with exactly its declared group memberships. */
