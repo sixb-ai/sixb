@@ -83,6 +83,17 @@ export function builtAppOutdir(buildOutdir: string): string {
   return resolve(buildOutdir, "app")
 }
 
+export async function hasBuiltCustomApp(appOutdir: string): Promise<boolean> {
+  const shells = await Promise.all(
+    ["index.html", "shared-index.html"].map((file) =>
+      stat(resolve(appOutdir, file))
+        .then((info) => info.isFile())
+        .catch(() => false)
+    )
+  )
+  return shells.every(Boolean)
+}
+
 export function builtAtlasOutdir(buildOutdir: string): string {
   return resolve(buildOutdir, "atlas")
 }

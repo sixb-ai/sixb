@@ -3,7 +3,7 @@ import { resolve } from "node:path"
 import { createSixbServer, type SixbServer } from "@sixb/server"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import type { LoadedSixbHost } from "../lib/loadSixb"
-import { builtAppOutdir, loadProductionSixb } from "../lib/production"
+import { builtAppOutdir, hasBuiltCustomApp, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import { migrateStorageForRole } from "../lib/storage-migration"
 import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
@@ -49,9 +49,7 @@ export async function runApi(options: ApiOptions = {}) {
     })
 
     const appOutdir = builtAppOutdir(loaded.buildOutdir)
-    const hasBuiltCustomApp = await stat(resolve(appOutdir, "index.html"))
-      .then(() => true)
-      .catch(() => false)
+    const hasCustomApp = await hasBuiltCustomApp(appOutdir)
     const authExperienceOutdir = resolve(appOutdir, "auth")
     const hasAuthExperience = await stat(resolve(authExperienceOutdir, "index.html"))
       .then(() => true)
@@ -65,7 +63,7 @@ export async function runApi(options: ApiOptions = {}) {
       apiPublicOrigin: options.apiPublicOrigin,
       atlasPublicOrigin: options.atlasPublicOrigin,
       appPublicOrigin: options.appPublicOrigin,
-      hasCustomApp: hasBuiltCustomApp,
+      hasCustomApp,
     })
 
     server = createSixbServer({

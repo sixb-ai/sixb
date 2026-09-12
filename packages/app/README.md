@@ -34,9 +34,9 @@ Two functions generate the entry point files into `.sixb/generated/`:
 - **`generateRouteManifest(routes, generatedDir)`** -- writes `routes.ts` with static page and
   layout imports plus native nested `RouteObject` entries. Routes are eager on purpose: project
   apps bundle small, and a single bundle means no loading gap when navigating between pages.
-- **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes `index.html` (HTML shell), `main.tsx` (React entry with BrowserRouter, TanStack Query, and the `@sixb/client` SDK), and `app.webmanifest`.
+- **`generateAppEntry(projectRoot, generatedDir, options)`** -- writes the ordinary and shared HTML bootstraps, their entry points, one common React route tree, and `app.webmanifest`.
 
-The generated entry also intercepts plain same-origin `<a href="/...">` clicks and routes them client-side, so internal links work like react-router's `<Link>` without authors having to remember it. The interceptor is conservative — modified clicks, `target`/`download`/`rel="external"` anchors, cross-origin URLs, reserved Sixb paths (`/api`, `/auth`, `/ws`, `/docs`), and destinations that don't match an app route all keep native browser navigation. `<Link>` remains the idiomatic choice in app code.
+The generated entry also intercepts plain same-origin `<a href="/...">` clicks and routes them client-side, so internal links work like react-router's `<Link>` without authors having to remember it. The interceptor is conservative — modified clicks, `target`/`download`/`rel="external"` anchors, cross-origin URLs, reserved Sixb paths (`/api`, `/auth`, `/ws`, `/docs`, `/shared`), and destinations that don't match an app route all keep native browser navigation. `<Link>` remains the idiomatic choice in app code.
 
 If `app/layout.tsx` exists, it is the global wrapper outside the route tree. It can also export a
 `metadata` object (`title`, `description`, `favicon`, `themeColor`, and `backgroundColor`). Metadata
@@ -49,6 +49,19 @@ A descendant `app/**/layout.tsx` wraps only pages at its URL prefix. It receives
 React Router hooks such as `useParams`, and stays mounted while navigation remains inside its
 subtree. Descendant layout metadata is not read. A layout with no project or framework page below
 it creates no route and is not bundled.
+
+### Shared links
+
+`/shared/:grantId/...` reuses ordinary pages, layouts, query hooks, and Action mutations. Sixb
+removes the URL secret and establishes an isolated session before loading app code or styles.
+`app/shared` is reserved; no separate pages or data hooks are needed.
+
+- Each request is restricted to the Share grant's selected objects, properties, link paths, and Actions.
+- V1 excludes WebSockets, uploads, direct object/link/telemetry writes, and Action-run listing or files.
+- Open shared URLs with native `<a href={url}>` links, not programmatic SPA navigation.
+- Shared pages are not indexable or installable as a PWA.
+- In development, shared pages build on demand and require a browser reload after edits; ordinary
+  pages retain HMR.
 
 Add an optional `app/auth.tsx` default export to customize the app audience's magic-link pages. It receives `AuthExperienceProps` from `@sixb/app/auth` with `signIn`, `checkEmail`, `confirm`, `invalidLink`, and `error` states plus framework-owned actions. Sixb builds it separately, includes `app/globals.css`, and serves it from the API's existing `/auth/*` routes. It is not wrapped by `app/layout.tsx`, and it never owns tokens, cookies, callbacks, audience validation, or return redirects. When the file is absent, the generic server login remains the fallback.
 
@@ -168,6 +181,10 @@ Tailwind's source detection is scoped to `app/`, and the CLI is resolved from th
 ### 4. Start
 
 `createCustomApp().start(options)` serves the built app from `.sixb/dist/app/` on a Bun server. When `apiBaseUrl` is provided, it is injected into the served HTML at runtime so the public custom app shell can call the Sixb API origin with credentials.
+
+Shared links require the built-in server in V1; static SPA fallbacks and external hosting adapters
+are unsupported. It serves the isolated shell with a fresh CSP nonce, `no-store`, `no-referrer`,
+and no eager asset loading. App and API must be same-site (`SameSite=Strict` cookies).
 
 ## Usage
 

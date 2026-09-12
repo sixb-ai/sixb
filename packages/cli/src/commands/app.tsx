@@ -1,9 +1,7 @@
-import { stat } from "node:fs/promises"
-import { resolve } from "node:path"
 import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
 import type { LoadedSixbHost } from "../lib/loadSixb"
-import { builtAppOutdir, loadProductionSixb } from "../lib/production"
+import { builtAppOutdir, hasBuiltCustomApp, loadProductionSixb } from "../lib/production"
 import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
 import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
@@ -28,11 +26,7 @@ export async function runApp(options: AppOptions = {}) {
 
   try {
     const appOutdir = builtAppOutdir(loaded.buildOutdir)
-    const hasBuiltCustomApp = await stat(resolve(appOutdir, "index.html"))
-      .then(() => true)
-      .catch(() => false)
-
-    if (!hasBuiltCustomApp) {
+    if (!(await hasBuiltCustomApp(appOutdir))) {
       throw new Error(
         `[SixbCustomApp] No built app found in ${appOutdir}. Run \`sixb build\` before \`sixb app\`.`
       )
