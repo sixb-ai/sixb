@@ -178,5 +178,5 @@ new VercelSandboxFactory({
 ## Related
 
 - [Sandboxes overview](./overview.md)
-- [Agent tools and the gateway](../agents/tools-and-gateway.md)
+- [Tools and Authorization](../models/tools-and-authorization.md)
 - [smolvm sandbox](./smolvm.md)

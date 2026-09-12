@@ -3,7 +3,7 @@ import type { DocConfig } from "./config"
 import type { DocHeading } from "./types"
 
 const codeBlockPattern = /<pre><code(?: class="language-([^"]+)")?>([\s\S]*?)<\/code><\/pre>/g
-const localMarkdownLinkPattern = /href="([^"]+\.md)"/g
+const localMarkdownLinkPattern = /href="([^"]+\.md(?:#[^"]*)?)"/g
 const headingPattern = /<h([23]) id="([^"]+)">([\s\S]*?)<\/h\1>/g
 const firstParagraphPattern = /<p>([\s\S]*?)<\/p>/
 

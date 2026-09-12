@@ -71,7 +71,7 @@ agent sandboxes.
 | `pipelines/` | Pipeline definitions | [Pipelines](../data/pipelines.md) |
 | `rules/` | Rule definitions | [Rules](../rules/overview.md) |
 | `workflows/` | Workflow definitions | [Workflows](../workflows/overview.md) |
-| `skills/` | Agent Skills (`<name>/SKILL.md` plus references/assets/scripts) read by the agent worker | [Agents](../agents/overview.md) |
+| `skills/` | Agent Skills (`<name>/SKILL.md` plus references/assets/scripts) read by the agent worker | [Tools and Authorization](../models/tools-and-authorization.md) |
 | `security/groups/` | Group definitions | [Authorization](../auth/authorization.md) |
 | `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |
 | `security/policies/` | Membership-policy definitions | [Authorization](../auth/authorization.md) |
