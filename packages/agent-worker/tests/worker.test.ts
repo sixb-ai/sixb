@@ -6199,6 +6199,53 @@ describe("AgentWorker", () => {
     }
   })
 
+  test("recovers direct generation accounting through the configured agent worker", async () => {
+    // Removal proof: omit recordRecoveredAiModelCall in AgentWorker.execute; recovery never drains.
+    const storage = new InMemoryStorage()
+    let available = false
+    const host = new SixbHost({
+      id: PROJECT_ID,
+      ontology: [],
+      models: { language: [answerModel()] },
+      sandboxes: new RecordingSandboxFactory(),
+      storage: withAiUsageRecordInterceptor(storage, async (_input, record) => {
+        if (!available) throw new Error("accounting temporarily unavailable")
+        return record()
+      }),
+      broker: new InMemoryBroker(),
+      queues: new InMemoryQueues(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+    })
+    const sixb = bindRequestExecution(host, {
+      request: new Request("http://localhost/generate"),
+      authorization: { type: "disabled" },
+    })
+    await expect(
+      sixb.models.language.generate({ model: answerModel(), prompt: "Hi" })
+    ).rejects.toMatchObject({ name: "ModelUsageRecordingError", recoveryScheduled: true })
+    const identity = { projectId: host.id, executionId: sixb.execution.id }
+    expect((await storage.aiUsage.summarizeExecution(identity)).modelCallCount).toBe(0)
+    available = true
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      const summary = await waitFor(
+        async () => {
+          const result = await storage.aiUsage.summarizeExecution(identity)
+          return result.modelCallCount === 1 ? result : null
+        },
+        { label: "direct request accounting recovery" }
+      )
+      expect(summary.modelCallCount).toBe(1)
+      await expect(
+        sixb.models.language.generate({ model: answerModel(), prompt: "Again" })
+      ).rejects.toMatchObject({ name: "ModelUsageRecordingError" })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("fails the run before another provider call when storage and recovery queue fail", async () => {
     let modelCalls = 0
     const model = new WorkerTestModel({

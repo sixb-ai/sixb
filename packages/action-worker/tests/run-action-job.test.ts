@@ -103,6 +103,7 @@ async function createContext(
     actionRunsStorage: host.storage.actionRuns!,
     ontologyMutations: execution.ontologyMutations,
     sixb: {
+      models: execution.sixb.models,
       objects: execution.sixb.objects,
       actions: execution.sixb.actions,
       connector: execution.sixb.connector,

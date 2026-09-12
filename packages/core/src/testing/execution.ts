@@ -1,6 +1,7 @@
 import type { AuthorizationContext } from "../authorization"
 import { createTestingScope } from "../execution/scopes"
 import type { ExecutionScope } from "../execution/types"
+import { bindModelExecutionAttempt } from "../models/execution/binding"
 import type { OntologySource } from "../ontology"
 import { SixbHost, type SixbHostOptions } from "../runtime/host"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
@@ -8,6 +9,7 @@ import { isBoundSixb, type Sixb } from "../runtime/sixb"
 export type { AuthorizationContext } from "../authorization"
 
 export interface TestExecutionOptions {
+  readonly signal?: AbortSignal
   readonly authorization?: AuthorizationContext
   readonly executionId?: string
   readonly requestId?: string
@@ -44,5 +46,9 @@ export function createTestSixb<
   if (!isBoundSixb<TOntologySources>(sixb)) {
     throw new Error("[Sixb] Test host did not return an execution-bound Sixb SDK.")
   }
+  bindModelExecutionAttempt(sixb.models, {
+    attempt: 1,
+    signal: options.signal ?? new AbortController().signal,
+  })
   return sixb
 }

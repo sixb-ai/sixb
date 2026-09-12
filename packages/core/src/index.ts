@@ -1059,6 +1059,14 @@ export type {
   ModelCatalog,
   ModelCatalogInput,
 } from "./models"
+export type {
+  InferLanguageModelOutput,
+  LanguageModelGenerateInput,
+  LanguageModelGenerateResult,
+  LanguageModelOutputShape,
+  LanguageModelsRuntime,
+  ModelsRuntime,
+} from "./models/generation-types"
 
 // ── Scheduling ──────────────────────────────────────────────
 

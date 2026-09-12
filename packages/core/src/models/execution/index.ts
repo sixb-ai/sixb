@@ -1,3 +1,4 @@
+export { resolveLanguageModel } from "../resolve"
 export { ModelUsageRecordingError } from "./errors"
 export type {
   AiModelCallAdmissionDecision,

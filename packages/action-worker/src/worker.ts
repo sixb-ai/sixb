@@ -130,6 +130,7 @@ export class ActionWorker extends QueueWorker<
 
     const actionJob: ActionJob = { id: run.id, actionId: run.actionId }
     const execution = bindDurablePrimitiveExecution(this.host, {
+      modelExecution: { attempt: job.attempt, signal },
       execution: durableExecution,
       primitive: {
         kind: "action",
@@ -223,6 +224,7 @@ function buildActionContext(
     )
   }
   const sixb = {
+    models: execution.sixb.models,
     objects: execution.sixb.objects,
     actions: execution.sixb.actions,
     connector: execution.sixb.connector,
