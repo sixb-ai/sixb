@@ -2,7 +2,7 @@ import { isFileRef } from "../blob-storage"
 import { isJsonValue, isPlainRecord } from "../json"
 import { isDecimalString } from "../ontology/decimal"
 import { DatasetValidationError } from "./errors"
-import { getDatasetSequenceValidationError } from "./sequence"
+import { getDatasetSequenceValidationError, parseDatasetTimestamp } from "./sequence"
 import type {
   DatasetColumnDefinition,
   DatasetColumnType,
@@ -301,6 +301,14 @@ function getColumnValidationError(
       return `Dataset '${dataset.id}' column '${column.name}' does not allow null values.`
     }
     return null
+  }
+
+  // Every timestamp contributes to a sequenced row's millisecond-precision content digest.
+  // Reject ambiguous or lossy values before staging, even when another column orders the row.
+  if (dataset.sequenceBy !== undefined && column.type === "timestamp") {
+    return parseDatasetTimestamp(value) === null
+      ? `Dataset '${dataset.id}' column '${column.name}' must be a valid Date or ISO timestamp with an explicit timezone and at most millisecond precision.`
+      : null
   }
 
   if (!matchesColumnType(value, column.type)) {

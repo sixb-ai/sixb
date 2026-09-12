@@ -122,6 +122,9 @@ absent keys; new deletion state creates a version without requiring a visible ro
 
 For content equality, object-key order is ignored; array order matters. Nullable columns treat
 omitted, `undefined`, and `null` equally. Integer, decimal, date, and timestamp columns use canonical values.
+On a sequenced dataset, **every timestamp column** must use a valid `Date` or timezone-explicit
+ISO string with at most 3 fractional digits, including columns other than `sequenceBy`. Higher
+precision is rejected before staging so content comparison never silently discards it.
 
 ### `col` options
 
