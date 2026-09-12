@@ -181,7 +181,14 @@ export interface AiAccountingOverview {
   readonly workflows: readonly AiAccountingWorkflowBreakdown[]
 }
 
+/**
+ * The execution that made the model call, rather than the request that triggered its work.
+ * `request` identifies a direct call from a request-bound SDK, outside an action or workflow.
+ */
 export type AiAccountingAttribution =
+  | { readonly kind: "request"; readonly requestId: string }
+  | { readonly kind: "action"; readonly actionId: string; readonly actionRunId: string }
+  | { readonly kind: "workflow"; readonly workflowId: string; readonly workflowRunId: string }
   | {
       readonly kind: "agent"
       readonly agentRunId: string

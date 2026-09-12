@@ -193,6 +193,9 @@ export const AiModelCallAccountingItemSchema = z.object({
   usage: AiModelCallUsageRecordSchema,
   attribution: z
     .discriminatedUnion("kind", [
+      z.object({ kind: z.literal("request"), requestId: z.string() }),
+      z.object({ kind: z.literal("action"), actionId: z.string(), actionRunId: z.string() }),
+      z.object({ kind: z.literal("workflow"), workflowId: z.string(), workflowRunId: z.string() }),
       z.object({
         kind: z.literal("agent"),
         agentRunId: z.string(),

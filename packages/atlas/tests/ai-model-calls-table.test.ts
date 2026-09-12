@@ -81,7 +81,7 @@ function render(overrides: Partial<Parameters<typeof AiModelCallsTable>[0]> = {}
   }
 }
 
-test("starts collapsed with aggregate totals, source navigation and run pagination", () => {
+test("starts collapsed with aggregate totals, source navigation and execution pagination", () => {
   // Rendering flat calls, using only direct costs, or opening child rows by default fails this.
   const html = render()
   expect(html).toContain("Workplace forecast")
@@ -90,7 +90,7 @@ test("starts collapsed with aggregate totals, source navigation and run paginati
   expect(html).toContain("2 models")
   expect(html).toContain("USD 0.048007392")
   expect(html).toContain("81,668")
-  expect(html).toContain("1–1 of 30 runs")
+  expect(html).toContain("1–1 of 30 executions")
   expect(html).toContain('href="/agents/thread"')
   expect(html).not.toContain("research-task")
   expect(html).not.toContain("Loading calls")

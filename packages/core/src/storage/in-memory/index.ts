@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from "node:async_hooks"
 import { InMemoryActionRunStorage } from "../action-runs"
 import { type AgentStorage, InMemoryAgentStorage } from "../agents"
 import { type AiAccountingAttribution, type AiCostStorage, InMemoryAiCostStorage } from "../ai-cost"
+import { directModelCallAttribution } from "../ai-cost/attribution"
 import { type AiLimitStorage, InMemoryAiLimitStorage } from "../ai-limits"
 import { type AiUsageStorage, InMemoryAiUsageStorage } from "../ai-usage"
 import { type AuthStorage, InMemoryAuthStorage } from "../auth"
@@ -177,7 +178,21 @@ export class InMemoryStorage implements Storage {
       projectId: input.projectId,
       id: input.executionId,
     })
-    if (!execution || execution.executor.type !== "agent") return undefined
+    if (!execution) return undefined
+    if (execution.executor.type !== "agent") {
+      const executor = execution.executor
+      return directModelCallAttribution(
+        executor.type === "primitive" ? executor.kind : executor.type,
+        executor.type === "request"
+          ? executor.requestId
+          : executor.type === "primitive"
+            ? executor.runId
+            : null,
+        execution.authorizationRef.type === "trustedPrimitive"
+          ? execution.authorizationRef.primitive.id
+          : null
+      )
+    }
     const directRun = await this.agentStorage.runs.getById({
       projectId: input.projectId,
       id: execution.executor.runId,

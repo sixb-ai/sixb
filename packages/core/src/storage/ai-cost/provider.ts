@@ -12,6 +12,7 @@ export {
   normalizeAiModelCallAccountingQuery,
   toAccountingItem,
 } from "./analytics"
+export { directModelCallAttribution } from "./attribution"
 export type { AiModelCallCostDetails } from "./codec"
 export { aiModelCallCostDetails, parseAiModelCallCostDetails } from "./codec"
 export type {

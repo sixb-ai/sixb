@@ -467,7 +467,7 @@ export function AiUsagePage() {
               {workflowCosts.length > 1 ? (
                 <ChartCard
                   title="Cost by workflow"
-                  description="Highest recorded workflow Agent node cost in this range"
+                  description="Highest recorded workflow model cost in this range"
                 >
                   <AiUsageBreakdown
                     data={workflowCosts}
