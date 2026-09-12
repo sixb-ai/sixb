@@ -1,17 +1,19 @@
 import type { JsonObject } from "../json"
 import { OntologyValidationError } from "./errors"
-import { isObjectRefSchema, type SchemaOrRef } from "./refs"
+import type { SchemaOrRef } from "./refs"
 import type { Schema, ValueType } from "./types"
 
+type DeepReadonly<T> = T extends object ? { readonly [K in keyof T]: DeepReadonly<T[K]> } : T
+
 export interface SchemaJsonField {
-  readonly schema: SchemaOrRef
+  readonly schema: DeepReadonly<SchemaOrRef>
   readonly required?: boolean
   readonly nullable?: boolean
 }
 
 /** Convert a record of Sixb schemas into the strict JSON object schema used by model outputs. */
 export function schemaRecordToJsonSchema(input: {
-  readonly shape: Readonly<Record<string, SchemaOrRef>>
+  readonly shape: Readonly<Record<string, DeepReadonly<SchemaOrRef>>>
   readonly valueTypesById: ReadonlyMap<string, ValueType>
 }): JsonObject {
   return schemaFieldsToJsonSchema({
@@ -44,11 +46,11 @@ export function schemaFieldsToJsonSchema(input: {
 }
 
 function schemaOrRefJsonSchema(
-  schema: SchemaOrRef,
+  schema: DeepReadonly<SchemaOrRef>,
   valueTypesById: ReadonlyMap<string, ValueType>,
   resolving: ReadonlySet<string>
 ): JsonObject {
-  if (isObjectRefSchema(schema)) {
+  if (typeof schema !== "string" && schema.type === "objectRef") {
     return {
       type: "object",
       properties: {
@@ -63,7 +65,7 @@ function schemaOrRefJsonSchema(
 }
 
 function schemaJsonSchema(
-  schema: Schema,
+  schema: DeepReadonly<Schema>,
   valueTypesById: ReadonlyMap<string, ValueType>,
   resolving: ReadonlySet<string>
 ): JsonObject {

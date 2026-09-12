@@ -1,9 +1,13 @@
-import { assertAuthorized, isAllowed } from "../authorization"
+import { shareSixbErrorReporter } from "../error-reporting/capability"
 import type { ExecutionContext } from "../execution"
-import { assertAuthorizedObjectReaderBinding } from "../execution/authorized-object-reader"
+import {
+  assertAuthorizedObjectReaderBinding,
+  getAuthorizedOntologyView,
+} from "../execution/authorized-object-reader"
 import type { ValueType } from "../ontology"
 import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
+import { shareOntologyMutationRuntime } from "../runtime/ontology-mutations"
 import type {
   ListResult,
   ObjectByIdHandle,
@@ -169,65 +173,66 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
   runtime: SixbRuntimeContext,
   execution: ExecutionContext
 ): ObjectsRuntime<TOntologySources> {
+  const runtimeAuthorization = runtime.runtimeAuthorization
+  const objectReader = runtime.objectReader
   assertAuthorizedObjectReaderBinding({
-    reader: runtime.objectReader,
-    scope: { execution, authorization: runtime.runtimeAuthorization },
+    reader: objectReader,
+    scope: { execution, authorization: runtimeAuthorization },
   })
+  const authorization = runtime.authorization
+  const capturedRuntime: SixbRuntimeContext = {
+    projectId: runtime.projectId,
+    broker: runtime.broker,
+    ontology: runtime.ontology,
+    actionRegistry: runtime.actionRegistry,
+    events: runtime.events,
+    storage: runtime.storage,
+    queues: runtime.queues,
+    runtimeAuthorization,
+    objectReader,
+    ...(authorization === undefined ? {} : { authorization }),
+  }
+  shareOntologyMutationRuntime(runtime, capturedRuntime)
+  shareSixbErrorReporter(runtime, capturedRuntime)
+  Object.freeze(capturedRuntime)
+  const ontologyView = () => getAuthorizedOntologyView(objectReader)
   const objects = Object.assign(
     <TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) => {
-      assertObjectTypeRegistered(runtime.ontology.getObjectTypesById(), objectType)
+      assertObjectTypeRegistered(capturedRuntime.ontology.getObjectTypesById(), objectType)
       return createObjectSet<
         TObjectType,
         RegisteredObjectType<TOntologySources>,
         RegisteredValueTypes<TOntologySources>
-      >({ ...runtime, execution, objectType }) as ExecutionObjectSet<
+      >({ ...capturedRuntime, execution, objectType }) as ExecutionObjectSet<
         TObjectType,
         RegisteredValueTypes<TOntologySources>,
         RegisteredObjectType<TOntologySources>
       >
     },
     {
-      listTypes: () =>
-        runtime.ontology.listObjectTypes().filter((objectType) =>
-          isAllowed(runtime.authorization, {
-            kind: "object.view",
-            objectTypeId: objectType.id,
-          })
-        ),
-      getTypeById: (objectTypeId: string) => {
-        const objectType = runtime.ontology.getObjectTypeById(objectTypeId)
-        return objectType && isAllowed(runtime.authorization, { kind: "object.view", objectTypeId })
-          ? objectType
-          : null
-      },
-      resolveType: (objectTypeId: string) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-        return runtime.ontology.resolveObjectType(objectTypeId)
-      },
-      getValueTypesById: () => runtime.ontology.getValueTypesById(),
-      listSubTypes: (objectTypeId: string) => runtime.ontology.listSubTypes(objectTypeId),
+      listTypes: () => ontologyView().listObjectTypes(),
+      getTypeById: (objectTypeId: string) => ontologyView().getObjectTypeById(objectTypeId),
+      resolveType: (objectTypeId: string) => ontologyView().resolveObjectType(objectTypeId),
+      getValueTypesById: () => ontologyView().getValueTypesById(),
+      listSubTypes: (objectTypeId: string) => ontologyView().listSubTypes(objectTypeId),
       isValidLinkTarget: (expected: string | string[], actual: string) =>
-        runtime.ontology.isValidLinkTarget(expected, actual),
+        ontologyView().isValidLinkTarget(expected, actual),
       executeQuery: (input: Omit<ExecuteObjectQueryInput, "projectId">) =>
-        runtime.objectReader.executeQuery(input),
-      queryLinks: (input: ObjectQueryLinksInput) => runtime.objectReader.queryLinks(input),
-      count: (input: Omit<ExecuteObjectCountInput, "projectId">) =>
-        runtime.objectReader.count(input),
-      exists: (input: Omit<ExecuteObjectExistsInput, "projectId">) =>
-        runtime.objectReader.exists(input),
-      facet: (input: Omit<ExecuteObjectFacetsInput, "projectId">) =>
-        runtime.objectReader.facet(input),
+        objectReader.executeQuery(input),
+      queryLinks: (input: ObjectQueryLinksInput) => objectReader.queryLinks(input),
+      count: (input: Omit<ExecuteObjectCountInput, "projectId">) => objectReader.count(input),
+      exists: (input: Omit<ExecuteObjectExistsInput, "projectId">) => objectReader.exists(input),
+      facet: (input: Omit<ExecuteObjectFacetsInput, "projectId">) => objectReader.facet(input),
       listLinks: async (input: {
         objectTypeId: string
         objectId: string
         linkId?: string
         direction?: LinkDirection
       }) => {
-        return runtime.objectReader.listLinks(input)
+        return objectReader.listLinks(input)
       },
       getTelemetryHistoryBatch: (input: Omit<TimeseriesHistoryBatchInput, "projectId">) => {
-        const objectReader = runtime.objectReader
-        const timeseries = runtime.storage.timeseries
+        const timeseries = capturedRuntime.storage.timeseries
         return getTelemetryHistoryBatch(input, { storage: timeseries, objectReader })
       },
       getTelemetryHistory: async (input: {
@@ -239,8 +244,7 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
         limit?: number
         order?: "asc" | "desc"
       }) => {
-        const objectReader = runtime.objectReader
-        const timeseries = runtime.storage.timeseries
+        const timeseries = capturedRuntime.storage.timeseries
         const objectTypeId = input.objectTypeId
         const objectId = input.objectId
         const propertyId = input.propertyId
@@ -265,8 +269,7 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
         objectId: string
         propertyId: string
       }) => {
-        const objectReader = runtime.objectReader
-        const timeseries = runtime.storage.timeseries
+        const timeseries = capturedRuntime.storage.timeseries
         const objectTypeId = input.objectTypeId
         const objectId = input.objectId
         const propertyId = input.propertyId
@@ -275,25 +278,24 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
           { storage: timeseries, objectReader }
         )
       },
-      list: (params: ListObjectsParams) => objectService.listObjects(runtime, params),
+      list: (params: ListObjectsParams) => objectService.listObjects(capturedRuntime, params),
       get: (objectTypeId: string, primaryId: string) =>
-        runtime.objectReader.getByPrimaryId({ objectTypeId, primaryId }),
+        objectReader.getByPrimaryId({ objectTypeId, primaryId }),
       getPrimaryPropertyId: (objectTypeId: string) => {
-        assertAuthorized(runtime, { kind: "object.view", objectTypeId })
-        return runtime.ontology.getPrimaryPropertyId(objectTypeId)
+        return ontologyView().getPrimaryPropertyId(objectTypeId)
       },
       upsert: (objectTypeId: string, properties: Record<string, unknown>) =>
-        objectService.upsertObject(runtime, objectTypeId, properties),
+        objectService.upsertObject(capturedRuntime, objectTypeId, properties),
       upsertBatch: (
         objectTypeId: string,
         items: readonly { properties: Record<string, unknown> }[]
-      ) => objectService.upsertObjectBatch(runtime, objectTypeId, items),
+      ) => objectService.upsertObjectBatch(capturedRuntime, objectTypeId, items),
       upsertLink: (
         objectTypeId: string,
         sourceId: string,
         linkId: string,
         target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
-      ) => objectService.upsertLink(runtime, objectTypeId, sourceId, linkId, target),
+      ) => objectService.upsertLink(capturedRuntime, objectTypeId, sourceId, linkId, target),
       upsertLinkBatch: (
         items: readonly {
           objectTypeId: string
@@ -301,17 +303,17 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
           linkId: string
           target: { targetTypeId: string; targetId: string; properties?: Record<string, unknown> }
         }[]
-      ) => objectService.upsertLinkBatch(runtime, items),
+      ) => objectService.upsertLinkBatch(capturedRuntime, items),
       removeLink: (
         objectTypeId: string,
         sourceId: string,
         linkId: string,
         target: { targetTypeId: string; targetId: string }
-      ) => objectService.removeLink(runtime, objectTypeId, sourceId, linkId, target),
+      ) => objectService.removeLink(capturedRuntime, objectTypeId, sourceId, linkId, target),
       appendTelemetry: (
         objectTypeId: string,
         items: readonly { id: string; properties: Record<string, unknown>; at?: Date }[]
-      ) => objectService.appendTelemetry(runtime, objectTypeId, items),
+      ) => objectService.appendTelemetry(capturedRuntime, objectTypeId, items),
     }
   )
 

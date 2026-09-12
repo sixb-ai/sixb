@@ -1,6 +1,10 @@
 import { canViewActionRun, isAllowed } from "../authorization"
 import type { ExecutionContext } from "../execution"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import {
+  assertAuthorizedObjectReaderBinding,
+  getAuthorizedOntologyView,
+} from "../execution/authorized-object-reader"
 import type { ObjectType } from "../ontology"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
@@ -8,6 +12,8 @@ import type {
   ListActionRunsInput,
   ListActionRunsResult,
 } from "../storage/action-runs"
+import { assertObjectReadOutputWithinLimit } from "../storage/objects/execution-limits"
+import { type ActionDescriptor, snapshotActionDescriptor } from "./descriptor"
 import {
   type RequestActionAndWaitInput,
   type RequestActionInput,
@@ -25,10 +31,10 @@ export interface ActionRunsRuntime {
 }
 
 export interface ActionsRuntime {
-  list(): readonly ActionDefinition[]
-  getById(actionId: string): ActionDefinition | null
-  listGlobal(): readonly ActionDefinition[]
-  listForType(objectType: ObjectType): readonly ActionDefinition[]
+  list(): readonly ActionDescriptor[]
+  getById(actionId: string): ActionDescriptor | null
+  listGlobal(): readonly ActionDescriptor[]
+  listForType(objectType: ObjectType): readonly ActionDescriptor[]
   request(input: RequestActionInput): Promise<RequestActionResult>
   requestAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
   readonly runs: ActionRunsRuntime
@@ -40,12 +46,28 @@ export function createActionsRuntime(
 ): ActionsRuntime {
   const projectId = runtime.projectId
   const runtimeAuthorization = runtime.runtimeAuthorization
+  const objectReader = runtime.objectReader
+  assertAuthorizedObjectReaderBinding({
+    reader: objectReader,
+    scope: { execution, authorization: runtimeAuthorization },
+  })
   const authorization = resolveRuntimeAuthorizationForProject({
     projectId,
     runtimeAuthorization,
   })
   const canList = (action: ActionDefinition) => {
-    if (authorization.type === "denied" || authorization.type === "delegated") return false
+    if (authorization.type === "denied") return false
+    if (authorization.type === "delegated") {
+      const binding = action.binding
+      return (
+        binding.kind === "object" &&
+        authorization.actionApply.some(
+          (target) =>
+            target.actionId === action.id && target.subject.objectTypeId === binding.objectType.id
+        ) &&
+        getAuthorizedOntologyView(objectReader).getObjectTypeById(binding.objectType.id) !== null
+      )
+    }
     if (authorization.type === "unrestricted") return true
     return (
       isAllowed(authorization.context, { kind: "action.apply", actionId: action.id }) &&
@@ -57,14 +79,32 @@ export function createActionsRuntime(
     )
   }
 
+  const release = <T>(value: T): T => {
+    if (authorization.type === "delegated") {
+      assertObjectReadOutputWithinLimit(value, authorization.objectRead.limits)
+    }
+    return value
+  }
+  const describeAll = (actions: readonly ActionDefinition[]) =>
+    release(actions.filter(canList).map(snapshotActionDescriptor))
+
   return {
-    list: () => runtime.actionRegistry.list().filter(canList),
+    list: () => describeAll(runtime.actionRegistry.list()),
     getById: (actionId) => {
       const action = runtime.actionRegistry.getById(actionId)
-      return action && canList(action) ? action : null
+      return release(action && canList(action) ? snapshotActionDescriptor(action) : null)
     },
-    listGlobal: () => runtime.actionRegistry.listGlobal().filter(canList),
-    listForType: (objectType) => runtime.actionRegistry.listForType(objectType).filter(canList),
+    listGlobal: () => describeAll(runtime.actionRegistry.listGlobal()),
+    listForType: (objectType) =>
+      describeAll(
+        runtime.actionRegistry
+          .listForType(objectType)
+          .filter(
+            (action) =>
+              authorization.type !== "delegated" ||
+              (action.binding.kind === "object" && action.binding.objectType.id === objectType.id)
+          )
+      ),
     request: (input) => requestAction(runtime, execution, input),
     requestAndWait: (input) => requestActionAndWait(runtime, execution, input),
     runs: {
