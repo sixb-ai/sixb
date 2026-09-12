@@ -3011,7 +3011,7 @@ describe("runProjectionJob", () => {
       attempt: 1,
       error: {
         code: "projection.execution_failed",
-        message: "Projection execution failed.",
+        message: "Projection execution failed. Dataset version is incompatible.",
         retryable: false,
       },
     })
@@ -3061,7 +3061,7 @@ describe("runProjectionJob", () => {
       attempt: 1,
       error: {
         code: "projection.execution_failed",
-        message: "Projection execution failed.",
+        message: "Projection execution failed. Projection not found.",
         retryable: false,
       },
     })
@@ -3117,7 +3117,7 @@ describe("runProjectionJob", () => {
       attempt: 1,
       error: {
         code: "projection.execution_failed",
-        message: "Projection execution failed.",
+        message: "Projection execution failed. Dataset not found.",
         retryable: false,
       },
     })
@@ -3165,7 +3165,7 @@ describe("runProjectionJob", () => {
       attempt: 1,
       error: {
         code: "projection.execution_failed",
-        message: "Projection execution failed.",
+        message: "Projection execution failed. Dataset version not found.",
         retryable: false,
       },
     })
@@ -3575,7 +3575,7 @@ describe("runProjectionJob", () => {
       attempt: 1,
       error: {
         code: "projection.execution_failed",
-        message: "Projection execution failed.",
+        message: "Projection execution failed. Projection definition is invalid.",
         retryable: false,
       },
     })

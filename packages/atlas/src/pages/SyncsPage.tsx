@@ -463,7 +463,7 @@ function SyncRunCard({ run }: { run: DisplayRun }) {
           </p>
         </div>
       </div>
-      {run.error && <SixbFailureSummary failure={run.error} className="mt-3 text-xs" />}
+      {run.error && <SixbFailureSummary failure={run.error} showDetails className="mt-3 text-sm" />}
     </div>
   )
 }
@@ -538,7 +538,9 @@ function SyncRunList({
                       {run.output.versionId}
                     </p>
                   )}
-                  {run.error && <SixbFailureSummary failure={run.error} className="mt-1 text-xs" />}
+                  {run.error && (
+                    <SixbFailureSummary failure={run.error} showDetails className="mt-1 text-sm" />
+                  )}
                 </td>
                 <td className="px-3 py-3">
                   <RunStatusBadge status={run.status} />
