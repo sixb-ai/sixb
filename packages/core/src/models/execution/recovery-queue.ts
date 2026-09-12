@@ -1,12 +1,10 @@
-import { createSixbError } from "@sixb/core/internal/errors"
-import {
-  modelCallRecoveryPayload,
-  type RecoverAiModelCallInput,
-} from "@sixb/core/internal/model-execution"
-import type { AgentQueueJob, Queue } from "@sixb/core/queues"
+import { createSixbError } from "../../errors/internal"
+import type { AgentQueueJob, Queue } from "../../queues"
+import { modelCallRecoveryPayload } from "./model-call-recovery"
+import type { RecoverAiModelCallInput } from "./types"
 
 /** Stable queue identity: a lost enqueue response can safely retry the same accounting handoff. */
-export function agentAiUsageRecoveryJobId(recordId: string): string {
+function agentAiUsageRecoveryJobId(recordId: string): string {
   return `agt_usage_job_${recordId}`
 }
 
@@ -26,7 +24,7 @@ export async function enqueueAiModelCallRecovery(
   if (job?.id !== jobId || job.type !== "agent.ai-usage.record.requested") {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbAgentWorker] Agent queue did not confirm AI usage recovery job '${jobId}'.`,
+      `[SixbModels] Agent queue did not confirm AI usage recovery job '${jobId}'.`,
       { details: { jobId } }
     )
   }

@@ -11,6 +11,7 @@ import {
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import {
+  enqueueAiModelCallRecovery,
   isPermanentAiUsageRecoveryError,
   ModelUsageRecordingError,
   recordRecoveredAiModelCall,
@@ -34,7 +35,6 @@ import { createAgentExecutionContext } from "./execution-context"
 import { resolveAgentExecutionPlan, resolveSubagentExecutionPlan } from "./execution-plan"
 import { type AgentRunFailure, toAgentExecutionFailure, toAgentRunFailure } from "./failure"
 import { finishRunOrThrow } from "./finalize"
-import { enqueueAiModelCallRecovery } from "./model-call-recovery"
 import { DEFAULT_MAX_STEPS, runAgentTurn } from "./run-agent-turn"
 import {
   type AgentExecutionEnvironment,

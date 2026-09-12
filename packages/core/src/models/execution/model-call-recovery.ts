@@ -1,4 +1,3 @@
-import { isJsonObject } from "../../json"
 import type { RecordAiModelCallInput, RecordAiModelCallResult } from "../../storage"
 import {
   AiCostStorageError,
@@ -43,26 +42,7 @@ export async function recordRecoveredAiModelCall(
 ): Promise<RecordAiModelCallResult> {
   const usage = fromQueuePayload(job)
   const accounting = accountingFromQueuePayload(job)
-  if (accounting) return recordAiModelCallAccounting({ storage, usage, ...accounting })
-  return storage.transaction(async (tx) => {
-    if (!tx.aiUsage || !tx.aiLimits)
-      throw new Error("[SixbModels] Recovery requires usage and limit storage.")
-    const result = await tx.aiUsage.recordModelCall(usage)
-    if (result.created)
-      await tx.aiLimits.recordModelCallActuals({
-        projectId: result.record.projectId,
-        usageRecordId: result.record.id,
-      })
-    if (job.payload.accounting?.reconcileLimitReservation)
-      await tx.aiLimits.reconcileModelCall({
-        projectId: result.record.projectId,
-        executionId: result.record.executionId,
-        attempt: result.record.attempt,
-        callId: result.record.callId,
-        usageRecordId: result.record.id,
-      })
-    return result
-  })
+  return recordAiModelCallAccounting({ storage, usage, ...accounting })
 }
 
 /** Validation and referential-integrity failures cannot become valid through queue redelivery. */
@@ -125,18 +105,8 @@ function fromQueuePayload(job: AiModelCallRecoveryRecord): RecordAiModelCallInpu
 
 function accountingFromQueuePayload(
   job: AiModelCallRecoveryRecord
-): Omit<RecoverAiModelCallInput, "usage"> | undefined {
+): Omit<RecoverAiModelCallInput, "usage"> {
   const accounting = job.payload.accounting
-  if (!accounting) return undefined
-  // Older workers captured a pricing context, not a completed-call valuation. Preserve their
-  // usage without inventing a historical price from today's catalog.
-  if (
-    !Object.hasOwn(accounting, "cost") &&
-    "pricingContext" in accounting &&
-    isJsonObject(accounting.pricingContext)
-  ) {
-    return undefined
-  }
   return {
     cost: structuredClone(accounting.cost),
     ...(accounting.estimate === undefined
