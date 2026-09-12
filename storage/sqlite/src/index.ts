@@ -39,7 +39,7 @@ import {
   installFreshSqliteSchema,
   sqliteStoragePath,
 } from "./migrations"
-import { SqliteObjectStorage } from "./object-storage"
+import { SqliteObjectStorage } from "./objects"
 import { SqliteOntologyStorage, type SqliteOntologyTransactionContext } from "./ontology-storage"
 import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
 import { SqliteProjectionRunStorage } from "./projection-run-storage"
