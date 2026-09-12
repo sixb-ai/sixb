@@ -16,6 +16,7 @@ import {
   generateAuthExperienceEntry,
   generateRouteManifest,
 } from "./codegen"
+import { devReloadResponse } from "./dev-reload"
 import { renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, routePatternKey, scanAppRoutes } from "./scanner"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
@@ -339,6 +340,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
           routes: {
             ...publicRoutes,
             ...reservedSixbRoutes(),
+            "/__sixb/dev-reload.js": getHeadRoute(devReloadResponse),
             [customAppManifestRoute]: manifestRoute(manifestPath),
             [internalAppShellRoute]: htmlBundleRoute(bundle),
             "/": spaHtmlRoute(() => internalOrigin),
@@ -911,7 +913,11 @@ function spaHtmlRoute(internalOrigin: () => string): BunServeRoute {
       })
     }
 
-    return new Response(restoreAppStaticUrls(await bundleResponse.text()), {
+    const html = restoreAppStaticUrls(await bundleResponse.text()).replace(
+      "</head>",
+      '<script src="/__sixb/dev-reload.js"></script></head>'
+    )
+    return new Response(html, {
       status: bundleResponse.status,
       statusText: bundleResponse.statusText,
       headers: responseHeaders,

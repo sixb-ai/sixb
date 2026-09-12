@@ -171,6 +171,12 @@ async function loadDevRuntimeConfig(): Promise<void> {
   const config: unknown = await response.json()
   if (isSixbBrowserRuntimeConfig(config)) {
     window.__SIXB_RUNTIME__ = config
+    if (!document.querySelector("script[data-sixb-dev-reload]")) {
+      const script = document.createElement("script")
+      script.dataset.sixbDevReload = ""
+      script.src = "/__sixb/dev-reload.js"
+      document.head.append(script)
+    }
   }
 }
 
