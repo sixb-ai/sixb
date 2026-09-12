@@ -1,4 +1,3 @@
-import { normalizeRequesterGroupIds } from "../../auth/attribution"
 import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
 import type { AgentRunFailureCode } from "../agents"
@@ -143,7 +142,6 @@ export class InMemoryWorkflowRunStorage implements WorkflowRunStorage {
       queuedAt,
       startedAt: queuedAt,
       attempt: 0,
-      requesterGroupIds: normalizeRequesterGroupIds(input.requesterGroupIds),
     }
 
     this.runs.set(key, cloneRecord(record))

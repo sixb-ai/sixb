@@ -42,7 +42,6 @@ export interface AgentRunRow {
   spawn_key: string | null
   spec: ConversationAgentRunSpec | SubagentRunSpec | string | null
   result: SubagentRunResult | string | null
-  requester_group_ids: string[] | string
   status: AgentRunRecord["status"]
   model_id: string | null
   finish_reason: string | null
@@ -111,10 +110,6 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     id: row.id,
     projectId: row.project_id,
     executionId: row.execution_id,
-    requesterGroupIds:
-      typeof row.requester_group_ids === "string"
-        ? (JSON.parse(row.requester_group_ids) as string[])
-        : row.requester_group_ids,
     status: row.status,
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),

@@ -79,7 +79,6 @@ async function seedThread(withCheckpoint: boolean) {
     threadId,
     triggerMessageId: "message_1",
     spec: { model: { provider: "test", modelId: "test-model" } },
-    requesterGroupIds: [],
   })
   await agents.runs.start({
     id: "run_1",
@@ -123,7 +122,6 @@ async function seedThread(withCheckpoint: boolean) {
     threadId,
     triggerMessageId: "message_3",
     spec: { model: { provider: "test", modelId: "test-model" } },
-    requesterGroupIds: [],
   })
   const started = await agents.runs.start({
     id: "run_2",

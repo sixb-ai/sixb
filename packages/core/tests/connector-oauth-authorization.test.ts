@@ -42,7 +42,7 @@ describe("connector OAuth lifecycle", () => {
     expect(execution).not.toBeNull()
     if (!execution) throw new Error("Expected the initiating execution to be persisted.")
     const { createdAt: _createdAt, ...persistedInput } = execution
-    expect(persistedInput).toEqual(command.execution)
+    expect(persistedInput).toEqual({ ...command.execution, requesterGroupIds: [] })
 
     const attempts = [...connectionSnapshot(harness.storage).attempts.values()]
     expect(attempts).toHaveLength(1)
@@ -109,6 +109,7 @@ describe("connector OAuth lifecycle", () => {
     await harness.storage.executions.create({
       id: "exec_invalid_initiator",
       projectId: "project",
+      requesterGroupIds: [],
       executor: { type: "request", requestId: "request-invalid" },
       source: { type: "http", requestId: "request-invalid" },
       correlationId: "correlation-invalid",

@@ -3,8 +3,7 @@ import {
   type ExecutionStorageRow,
   executionRecordFromStorageRow,
   executionRecordToStorageRow,
-  normalizeExecutionRecord,
-  validateExecutionRecordReferences,
+  prepareExecutionRecord,
 } from "@sixb/core/internal/execution-storage"
 import type {
   CreateExecutionInput,
@@ -23,8 +22,7 @@ export class SqliteExecutionStorage implements ExecutionStorage {
   ) {}
 
   async create(input: CreateExecutionInput): Promise<ExecutionRecord> {
-    const record = normalizeExecutionRecord(input)
-    await validateExecutionRecordReferences(record, {
+    const record = await prepareExecutionRecord(input, {
       auth: this.auth,
       getExecution: (params) => this.getById(params),
       getShareSession: (params) => this.shareSessions.getById(params),
@@ -44,6 +42,7 @@ export class SqliteExecutionStorage implements ExecutionStorage {
             source_id,
             requested_by_user_id,
             requested_by_service_account_id,
+            requester_group_ids,
             correlation_id,
             parent_execution_id,
             authority_kind,
@@ -58,7 +57,7 @@ export class SqliteExecutionStorage implements ExecutionStorage {
             authority_delegation_id,
             authority_delegation_session_id,
             created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -70,6 +69,7 @@ export class SqliteExecutionStorage implements ExecutionStorage {
           row.sourceId,
           row.requestedByUserId,
           row.requestedByServiceAccountId,
+          JSON.stringify(row.requesterGroupIds),
           row.correlationId,
           row.parentExecutionId,
           row.authorityKind,
@@ -127,6 +127,7 @@ function toStorageRow(row: SqliteExecutionRow): ExecutionStorageRow {
     sourceId: row.source_id,
     requestedByUserId: row.requested_by_user_id,
     requestedByServiceAccountId: row.requested_by_service_account_id,
+    requesterGroupIds: JSON.parse(row.requester_group_ids),
     correlationId: row.correlation_id,
     parentExecutionId: row.parent_execution_id,
     authorityKind: row.authority_kind,
@@ -160,6 +161,7 @@ interface SqliteExecutionRow {
   readonly source_id: string
   readonly requested_by_user_id: string | null
   readonly requested_by_service_account_id: string | null
+  readonly requester_group_ids: string
   readonly correlation_id: string
   readonly parent_execution_id: string | null
   readonly authority_kind: ExecutionStorageRow["authorityKind"]

@@ -93,7 +93,6 @@ function runInput(overrides: Partial<TestRunInput> = {}): TestRunInput {
     triggerMessageId: "msg_user_1",
     spec: { model: { provider: "test", modelId: "large" } },
     executionId: "test_agent_execution:run_1",
-    requesterGroupIds: ["support", "engineering", "support"],
     execution: execution("exec_1"),
     createdAt: at("2026-06-23T10:00:10.000Z"),
     ...overrides,
@@ -491,7 +490,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           spawnKey: "research-orders",
           status: "queued",
           attempt: 0,
-          requesterGroupIds: ["engineering", "support"],
           spec: input.spec,
         })
         expect(child).not.toHaveProperty("threadId")
@@ -655,7 +653,6 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
         const run = await createAndStartRun(storage, fixture, runInput({ id: "run_1" }))
         expect(run).toMatchObject({ status: "running", attempt: 1, threadId: "thr_1" })
         expect(run.executionId).toBe("test_agent_execution:run_1")
-        expect(run.requesterGroupIds).toEqual(["engineering", "support"])
         expect(run.execution?.token).toBe("exec_1")
         await expect(storage.threads.getById({ projectId, id: "thr_1" })).resolves.toMatchObject({
           activeRunId: "run_1",
@@ -791,10 +788,8 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           mutableExecution.token = "mutated"
           mutableExecution.queueLeaseExpiresAt.setTime(0)
         }
-        ;(run.requesterGroupIds as string[]).push("mutated")
         const reread = await storage.runs.getById({ projectId, id: "run_1" })
         expect(reread?.execution?.token).toBe("exec_1")
-        expect(reread?.requesterGroupIds).toEqual(["engineering", "support"])
       })
     })
 

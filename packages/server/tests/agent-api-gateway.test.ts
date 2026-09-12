@@ -661,7 +661,6 @@ async function createGatewayRuntime(
     executionId: completedWorkflowExecutionId,
     workflowId: inspectDevices.id,
     input: { document: fileRefJson(completedWorkflowOutput) },
-    requesterGroupIds: [],
     queuedAt: NOW,
   })
   await storage.workflowRuns.start({
@@ -739,7 +738,6 @@ async function createGatewayRuntime(
       executionId: parentWorkflowExecutionId,
       workflowId: inspectDevices.id,
       input: {},
-      requesterGroupIds: [],
       queuedAt: NOW,
     })
     await storage.workflowRuns.start({
@@ -800,7 +798,6 @@ async function createGatewayRuntime(
       threadId,
       triggerMessageId: "msg-1",
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: [agentRuntime.id],
       createdAt: NOW,
     })
     await storage.agents.runs.start({
@@ -856,7 +853,6 @@ async function createGatewayRuntime(
       threadId,
       triggerMessageId: "msg-1",
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: ["engineering"],
       createdAt: NOW,
     })
     await storage.agents.runs.start({
@@ -919,6 +915,7 @@ async function createMainAgentExecution(storage: InMemoryStorage, runId: string)
     id: "execution-main-request",
     projectId: PROJECT_ID,
     requestedBy: { type: "user", id: userId },
+    requesterGroupIds: [],
     executor: { type: "request", requestId: "request-main" },
     source: { type: "http", requestId: "request-main" },
     correlationId: "request-main",

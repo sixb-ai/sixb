@@ -29,6 +29,8 @@ export interface ExecutionRecord {
   readonly id: string
   readonly projectId: string
   readonly requestedBy?: AuthorizablePrincipal
+  /** Requester memberships at admission, independent of current execution authority. */
+  readonly requesterGroupIds: readonly string[]
   readonly executor: DurableExecutionExecutor
   readonly source: DurableExecutionSource
   readonly correlationId: string
@@ -36,8 +38,10 @@ export interface ExecutionRecord {
   readonly createdAt: Date
 }
 
-/** Creation input; the storage boundary assigns the immutable creation timestamp. */
-export type CreateExecutionInput = Omit<ExecutionRecord, "createdAt">
+/** Storage captures root memberships or inherits the parent's snapshot when omitted. */
+export type CreateExecutionInput = Omit<ExecutionRecord, "createdAt" | "requesterGroupIds"> & {
+  readonly requesterGroupIds?: readonly string[]
+}
 
 /** Immutable execution ledger. Records can be created and read, never updated or deleted. */
 export interface ExecutionStorage {

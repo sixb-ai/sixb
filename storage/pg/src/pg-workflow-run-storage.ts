@@ -1,5 +1,4 @@
 import type { JsonValue } from "@sixb/core"
-import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   assertWorkflowAgentNodeRunExecution,
@@ -83,7 +82,6 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           input,
           queued_at,
           started_at,
-          requester_group_ids,
           attempt
         ) VALUES (
           ${input.projectId},
@@ -94,7 +92,6 @@ export class PgWorkflowRunStorage implements WorkflowRunStorage {
           ${serializeRecord(input.input)}::text::jsonb,
           ${queuedAt},
           ${queuedAt},
-          ${JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds))}::text::jsonb,
           ${0}
         )
         RETURNING *
@@ -822,7 +819,6 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
-    requesterGroupIds: parseJson(row.requester_group_ids),
     attempt: Number(row.attempt),
     ...(row.execution_token && row.execution_queue_lease_expires_at
       ? {
@@ -883,7 +879,6 @@ interface WorkflowRunDatabaseRow {
   started_at: Date | string
   finished_at: Date | string | null
   error: JsonValue | null
-  requester_group_ids: string[] | string
   attempt: number | string
   execution_token: string | null
   execution_queue_lease_expires_at: Date | string | null

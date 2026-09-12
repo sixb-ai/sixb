@@ -22,7 +22,6 @@ async function createQueuedRun(storage: InMemoryStorage, id = "run-1") {
     threadId: `thread-${id}`,
     triggerMessageId: `message-${id}`,
     spec: { model: { provider: "test", modelId: "test-model" } },
-    requesterGroupIds: [],
   })
 }
 

@@ -117,7 +117,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       context,
       run,
       signal,
-      requestedBy: durableExecution.requestedBy,
+      execution: durableExecution,
     })
   }
   const usageRecorder = runtime.usageRecorder

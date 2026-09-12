@@ -82,6 +82,7 @@ type PrimitiveExecutionOrigin =
       >
       readonly correlationId: string
       readonly requestedBy?: CreateExecutionInput["requestedBy"]
+      readonly requesterGroupIds?: readonly string[]
     }
 
 /** Build an immutable primitive execution from its parent execution or automatic trigger. */
@@ -94,6 +95,7 @@ export function createPrimitiveExecutionRecord(input: {
     input.origin.type === "execution"
       ? {
           projectId: input.origin.parent.projectId,
+          requesterGroupIds: [...input.origin.parent.requesterGroupIds],
           ...(input.origin.parent.requestedBy === undefined
             ? {}
             : { requestedBy: structuredClone(input.origin.parent.requestedBy) }),
@@ -102,6 +104,9 @@ export function createPrimitiveExecutionRecord(input: {
         }
       : {
           projectId: input.origin.projectId,
+          ...(input.origin.requesterGroupIds === undefined
+            ? {}
+            : { requesterGroupIds: [...input.origin.requesterGroupIds] }),
           ...(input.origin.requestedBy === undefined
             ? {}
             : { requestedBy: structuredClone(input.origin.requestedBy) }),
@@ -171,7 +176,12 @@ function assertExecutionRecordMatches(
   input: CreateExecutionInput
 ): void {
   const { createdAt: _createdAt, ...stored } = existing
-  if (!isDeepStrictEqual(stored, input)) {
+  if (
+    !isDeepStrictEqual(stored, {
+      ...input,
+      requesterGroupIds: input.requesterGroupIds ?? stored.requesterGroupIds,
+    })
+  ) {
     throw new ExecutionStorageError(
       "duplicate_execution",
       `[Sixb] Execution '${input.id}' already exists with different immutable provenance.`

@@ -50,7 +50,6 @@ function createWorkflowRunStorage() {
           projectId: input.projectId,
           workflowId: input.workflowId,
           input: input.input,
-          requesterGroupIds: [],
         })
       }
       return start({
@@ -150,7 +149,6 @@ describe("InMemoryWorkflowRunStorage", () => {
         executionId: "orphan-workflow-execution",
         workflowId: "reconcile-transaction",
         input: {},
-        requesterGroupIds: [],
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -166,7 +164,6 @@ describe("InMemoryWorkflowRunStorage", () => {
         executionId,
         workflowId: "reconcile-transaction",
         input: {},
-        requesterGroupIds: [],
       })
     ).rejects.toBeInstanceOf(WorkflowRunError)
 
@@ -183,7 +180,6 @@ describe("InMemoryWorkflowRunStorage", () => {
         executionId: automaticExecutionId,
         workflowId: "reconcile-transaction",
         input: {},
-        requesterGroupIds: [],
       })
     ).resolves.toMatchObject({ id: "wf-run-automatic", executionId: automaticExecutionId })
   })
@@ -195,7 +191,6 @@ describe("InMemoryWorkflowRunStorage", () => {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
       input: {},
-      requesterGroupIds: [],
     })
 
     const results = await Promise.allSettled([
@@ -228,7 +223,6 @@ describe("InMemoryWorkflowRunStorage", () => {
       workflowId: "reconcile-transaction",
       input: { transactionId: "txn_123" },
       queuedAt,
-      requesterGroupIds: ["support", "engineering", "support"],
     })
 
     const running = await storage.start({
@@ -244,7 +238,6 @@ describe("InMemoryWorkflowRunStorage", () => {
     expect(running.status).toBe("running")
     expect(running.queuedAt?.toISOString()).toBe(queuedAt.toISOString())
     expect(running.startedAt.toISOString()).toBe(startedAt.toISOString())
-    expect(running.requesterGroupIds).toEqual(["engineering", "support"])
 
     const failed = await storage.queue({
       id: "wf-run-failed-before-start",
@@ -252,7 +245,6 @@ describe("InMemoryWorkflowRunStorage", () => {
       workflowId: "reconcile-transaction",
       input: { transactionId: "txn_456" },
       queuedAt,
-      requesterGroupIds: [],
     })
     expect(failed.status).toBe("queued")
 

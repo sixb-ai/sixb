@@ -586,6 +586,7 @@ describe("execution scopes", () => {
     const primitiveScope = restoreTrustedPrimitiveExecutionScope({
       execution: {
         id: "execution-action-binding",
+        requesterGroupIds: [],
         projectId: "project-1",
         executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
         source: { type: "event", eventId: "event-1" },
@@ -670,6 +671,7 @@ describe("execution scopes", () => {
         id: "execution-action-1",
         projectId: "project-1",
         requestedBy: { type: "user", id: "user-1" },
+        requesterGroupIds: [],
         executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
         source: { type: "event", eventId: "event-1" },
         correlationId: "correlation-1",
@@ -711,6 +713,7 @@ describe("execution scopes", () => {
         id: "execution-agent-1",
         projectId: "project-1",
         requestedBy: { type: "user", id: "user-1" },
+        requesterGroupIds: [],
         executor: { type: "agent", runId: "agent-run-1" },
         source: { type: "execution", executionId: "execution-parent" },
         correlationId: "correlation-1",
@@ -750,6 +753,7 @@ describe("execution scopes", () => {
         execution: {
           id: "execution-agent-2",
           projectId: "project-1",
+          requesterGroupIds: [],
           executor: { type: "agent", runId: "agent-run-2" },
           source: { type: "execution", executionId: "execution-parent" },
           correlationId: "correlation-1",
@@ -788,6 +792,7 @@ describe("execution scopes", () => {
       id: "execution-request-1",
       projectId: "project-1",
       requestedBy: { type: "user", id: "user-1" } as const,
+      requesterGroupIds: [],
       executor: { type: "request", requestId: "request-1" } as const,
       source: { type: "http", requestId: "request-1" } as const,
       correlationId: "correlation-1",
@@ -805,6 +810,7 @@ describe("execution scopes", () => {
         runId: "main-run-1",
       }),
       createdAt: new Date("2026-01-01T00:00:01.000Z"),
+      requesterGroupIds: parent.requesterGroupIds,
     }
     const scope = restoreAgentExecutionScope({
       runId: "main-run-1",
@@ -836,6 +842,7 @@ describe("execution scopes", () => {
           id: "execution-parent",
           projectId: "project-1",
           requestedBy: { type: "user", id: "user-1" },
+          requesterGroupIds: [],
           executor: { type: "request", requestId: "request-1" },
           source: { type: "http", requestId: "request-1" },
           correlationId: "correlation-1",

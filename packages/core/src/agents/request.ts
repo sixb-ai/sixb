@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { Principal } from "../auth"
 import { SYSTEM_PRINCIPAL } from "../auth"
-import { snapshotRequesterGroupIds } from "../auth/attribution"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
 import {
@@ -28,7 +27,7 @@ import {
   applicableAiLimitPolicyStatuses,
 } from "../storage/ai-limits/enforcement"
 import type { AiLimitPolicyStatus } from "../storage/ai-limits/types"
-import type { CreateExecutionInput } from "../storage/executions"
+import type { ExecutionRecord } from "../storage/executions"
 import type { AgentContextEntryInput } from "./context/entries"
 import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
@@ -106,14 +105,7 @@ export async function requestAgentRun(
       : (input.principal ?? SYSTEM_PRINCIPAL)
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
-  const requesterGroupIds = durableExecution.requestedBy
-    ? await snapshotRequesterGroupIds({
-        auth: runtime.storage.auth,
-        projectId,
-        principal: durableExecution.requestedBy,
-      })
-    : []
-  await assertAiLimitPreflight(runtime, durableExecution, requesterGroupIds)
+  await assertAiLimitPreflight(runtime, durableExecution)
 
   const { thread, createdThread } = await resolveThread(agents, {
     projectId,
@@ -161,7 +153,6 @@ export async function requestAgentRun(
         threadId: thread.id,
         triggerMessageId,
         spec,
-        requesterGroupIds,
       })
     })
   } catch (error) {
@@ -214,14 +205,7 @@ export async function retryAgentRun(
   }
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
-  const requesterGroupIds = durableExecution.requestedBy
-    ? await snapshotRequesterGroupIds({
-        auth: runtime.storage.auth,
-        projectId: runtime.projectId,
-        principal: durableExecution.requestedBy,
-      })
-    : []
-  await assertAiLimitPreflight(runtime, durableExecution, requesterGroupIds)
+  await assertAiLimitPreflight(runtime, durableExecution)
   const run = await runtime.storage.transaction(async (tx) => {
     const agents = tx.agents
     if (!agents) {
@@ -245,7 +229,6 @@ export async function retryAgentRun(
           models,
           input: {},
         }),
-      requesterGroupIds,
     })
   })
   await publishRunActivity(runtime, run)
@@ -255,13 +238,15 @@ export async function retryAgentRun(
 
 async function assertAiLimitPreflight(
   runtime: SixbRuntimeContext,
-  execution: CreateExecutionInput,
-  requesterGroupIds: readonly string[]
+  execution: Pick<ExecutionRecord, "requestedBy" | "requesterGroupIds">
 ): Promise<void> {
   const limits = runtime.storage.aiLimits
   if (!limits) throw aiUsageLimitUnavailableError(["limitStorageUnavailable"])
 
-  const subjects = aiLimitSubjectsFromAttribution(execution.requestedBy, requesterGroupIds)
+  const subjects = aiLimitSubjectsFromAttribution(
+    execution.requestedBy,
+    execution.requesterGroupIds
+  )
   let applicable: readonly AiLimitPolicyStatus[]
   try {
     applicable = applicableAiLimitPolicyStatuses(
@@ -322,7 +307,7 @@ async function prepareDurableAgentExecution(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   runId: string
-): Promise<CreateExecutionInput> {
+): Promise<Omit<ExecutionRecord, "createdAt">> {
   const parent = await ensureExecutionRecord(
     runtime.storage.executions,
     executionRecordInputFromRuntime({
