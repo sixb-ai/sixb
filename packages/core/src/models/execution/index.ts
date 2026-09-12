@@ -12,9 +12,9 @@ export type { AiModelCallRecorderInput } from "./model-call-recorder"
 export { AiModelCallRecorder } from "./model-call-recorder"
 export {
   isPermanentAiUsageRecoveryError,
-  modelCallRecoveryPayload,
   recordRecoveredAiModelCall,
 } from "./model-call-recovery"
+export { enqueueAiModelCallRecovery } from "./recovery-queue"
 export type {
   AiModelCallAccountingPayload,
   AiModelCallRecordPayload,

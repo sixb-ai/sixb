@@ -43,7 +43,7 @@ export interface AiModelCallAccountingPayload {
   readonly cost: ModelCallCost
   readonly route?: ModelRoute
   readonly ratedAt: string
-  /** Absent on pre-limit jobs; those model calls did not create a reservation. */
+  /** True when admission created a reservation that recovery must reconcile. */
   readonly reconcileLimitReservation?: boolean
 }
 
@@ -53,7 +53,6 @@ export interface AiModelCallRecoveryRecord {
   readonly projectId: string
   readonly payload: {
     readonly record: AiModelCallRecordPayload
-    /** Absent only on legacy jobs that predate atomic valuation recovery. */
-    readonly accounting?: AiModelCallAccountingPayload
+    readonly accounting: AiModelCallAccountingPayload
   }
 }

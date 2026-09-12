@@ -217,8 +217,7 @@ export interface AgentAiUsageRecordRequestedQueueJob
     "agent.ai-usage.record.requested",
     {
       readonly record: AiModelCallRecordPayload
-      /** Absent only on legacy jobs that predate atomic valuation recovery. */
-      readonly accounting?: AiModelCallAccountingPayload
+      readonly accounting: AiModelCallAccountingPayload
     }
   > {}
 
