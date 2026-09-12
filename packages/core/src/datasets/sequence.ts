@@ -19,7 +19,7 @@ export function datasetSequenceValue(dataset: DatasetDefinition, value: unknown)
     )
   }
   if (column?.type === "timestamp") {
-    const millis = parseSequenceTimestamp(value)
+    const millis = parseDatasetTimestamp(value)
     if (millis !== null) return BigInt(millis)
     throw new Error(
       `Dataset '${dataset.id}' sequence must be a valid Date or ISO timestamp with an explicit timezone and at most millisecond precision.`
@@ -31,7 +31,7 @@ export function datasetSequenceValue(dataset: DatasetDefinition, value: unknown)
 }
 
 /** Date.parse alone normalizes impossible calendar dates instead of rejecting them. */
-function parseSequenceTimestamp(value: unknown): number | null {
+export function parseDatasetTimestamp(value: unknown): number | null {
   if (value instanceof Date && Number.isFinite(value.getTime())) return value.getTime()
   if (typeof value === "string") {
     const match =

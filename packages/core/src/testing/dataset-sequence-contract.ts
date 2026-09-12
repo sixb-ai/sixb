@@ -51,6 +51,39 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
   }
 
   describe("source ordering", () => {
+    test("rejects lossy timestamps outside the ordering column before changing source state", () =>
+      withStorage(async (storage) => {
+        // Regression proof: remove the sequenced timestamp check in getColumnValidationError;
+        // submillisecond content is accepted and its distinct values collapse to one digest.
+        const timestamps = defineDataset("contract.content_timestamps", {
+          schema: [...dataset.schema.columns, col("at", "timestamp", { nullable: true })],
+          primaryKey: "id",
+          sequenceBy: "revision",
+        })
+        await storage.createDataset(timestamps)
+        const row = (at: unknown, id = "42") => change.upsert({ id, revision: 1, name: "Sam", at })
+        const initial = await merge(storage, [row("2026-09-09T10:00:00.123Z")], timestamps)
+        for (const at of [
+          "2026-09-09T10:00:00.123001Z",
+          "2026-09-09T10:00:00.123999Z",
+          "2026-09-09T10:00:00",
+          "2026-02-30T00:00:00Z",
+        ]) {
+          await expect(merge(storage, [row(at, "new")], timestamps)).rejects.toThrow("column 'at'")
+          expect(await storage.getLatestVersion(timestamps.id)).toEqual(initial.version)
+        }
+        for (const at of ["2026-09-09T12:00:00.123+02:00", new Date("2026-09-09T10:00:00.123Z")]) {
+          expect((await merge(storage, [row(at)], timestamps)).outcome).toBe("unchanged")
+        }
+        await expect(merge(storage, [row("2026-09-09T10:00:00.124Z")], timestamps)).rejects.toThrow(
+          "conflicting content"
+        )
+        await merge(storage, [row(null, "nullable")], timestamps)
+        expect((await merge(storage, [row(undefined, "nullable")], timestamps)).outcome).toBe(
+          "unchanged"
+        )
+      }))
+
     // Regression proof: bypass reconcileDatasetSequences at the provider commit boundary.
     // The stale-write, conflict, and deletion assertions below must then fail.
     test("orders repeated keys exactly and conflicts atomically", () =>
