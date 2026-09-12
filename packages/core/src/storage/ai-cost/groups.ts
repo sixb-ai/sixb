@@ -1,5 +1,6 @@
 import type { AiAccountingRecordSetItem } from "./analytics"
 import { aiAccountingItemMatchesQuery, normalizeAiModelCallAccountingQuery } from "./analytics"
+import { directModelCallAttribution } from "./attribution"
 import type {
   AiAccountingAttribution,
   AiBillingIdentity,
@@ -56,12 +57,15 @@ export interface AiModelCallGroupRow {
   readonly workflow_node_run_id: string | null
   readonly workflow_id: string | null
   readonly workflow_run_id: string | null
+  readonly executor_kind: string | null
+  readonly executor_id: string | null
+  readonly primitive_id: string | null
 }
 
 export function aiModelCallGroupFragmentFromRow(
   row: AiModelCallGroupRow
 ): AiModelCallGroupFragment {
-  let attribution: AiAccountingAttribution | undefined
+  let attribution = directModelCallAttribution(row.executor_kind, row.executor_id, row.primitive_id)
   if (row.root_agent_run_id && row.root_thread_id) {
     attribution = {
       kind: "agent",

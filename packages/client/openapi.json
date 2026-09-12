@@ -6005,6 +6005,54 @@
                                 "properties": {
                                   "kind": {
                                     "type": "string",
+                                    "enum": ["request"]
+                                  },
+                                  "requestId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "requestId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["action"]
+                                  },
+                                  "actionId": {
+                                    "type": "string"
+                                  },
+                                  "actionRunId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "actionId", "actionRunId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["workflow"]
+                                  },
+                                  "workflowId": {
+                                    "type": "string"
+                                  },
+                                  "workflowRunId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "workflowId", "workflowRunId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
                                     "enum": ["agent"]
                                   },
                                   "agentRunId": {
@@ -8725,6 +8773,54 @@
                                 "properties": {
                                   "kind": {
                                     "type": "string",
+                                    "enum": ["request"]
+                                  },
+                                  "requestId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "requestId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["action"]
+                                  },
+                                  "actionId": {
+                                    "type": "string"
+                                  },
+                                  "actionRunId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "actionId", "actionRunId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
+                                    "enum": ["workflow"]
+                                  },
+                                  "workflowId": {
+                                    "type": "string"
+                                  },
+                                  "workflowRunId": {
+                                    "type": "string"
+                                  }
+                                },
+                                "required": ["kind", "workflowId", "workflowRunId"],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "kind": {
+                                    "type": "string",
                                     "enum": ["agent"]
                                   },
                                   "agentRunId": {
@@ -8856,6 +8952,54 @@
                                 },
                                 "attribution": {
                                   "anyOf": [
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": ["request"]
+                                        },
+                                        "requestId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["kind", "requestId"],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": ["action"]
+                                        },
+                                        "actionId": {
+                                          "type": "string"
+                                        },
+                                        "actionRunId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["kind", "actionId", "actionRunId"],
+                                      "additionalProperties": false
+                                    },
+                                    {
+                                      "type": "object",
+                                      "properties": {
+                                        "kind": {
+                                          "type": "string",
+                                          "enum": ["workflow"]
+                                        },
+                                        "workflowId": {
+                                          "type": "string"
+                                        },
+                                        "workflowRunId": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["kind", "workflowId", "workflowRunId"],
+                                      "additionalProperties": false
+                                    },
                                     {
                                       "type": "object",
                                       "properties": {
