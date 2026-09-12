@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryQueues, InMemoryStorage, type ReadonlyJsonValue } from "@sixb/core"
-import { rateModelCall } from "@sixb/core/models"
-import type { AgentAiUsageRecordRequestedQueueJob } from "@sixb/core/queues"
-import { AiUsageStorageError, type RecordAiModelCallInput } from "@sixb/core/storage"
-import { createTestAgentExecution } from "@sixb/core/testing"
+import { InMemoryQueues, InMemoryStorage, type ReadonlyJsonValue } from "../src"
+import { rateModelCall } from "../src/models"
 import {
-  agentAiUsageRecoveryJobId,
-  enqueueAiModelCallRecovery,
   isPermanentAiUsageRecoveryError,
   recordRecoveredAiModelCall,
-} from "../src/model-call-recovery"
+} from "../src/models/execution/model-call-recovery"
+import { enqueueAiModelCallRecovery } from "../src/models/execution/recovery-queue"
+import type { RecoverAiModelCallInput } from "../src/models/execution/types"
+import type { AgentAiUsageRecordRequestedQueueJob } from "../src/queues"
+import { AiUsageStorageError, type RecordAiModelCallInput } from "../src/storage"
+import { createTestAgentExecution } from "../src/testing"
 
 const projectId = "project_1"
 const executionId = "test_agent_execution:run_1"
@@ -39,56 +39,15 @@ function modelCall(): RecordAiModelCallInput {
   }
 }
 
-describe("AI usage recovery", () => {
-  test.each([
-    {},
-    { routedProviderId: "openai", routedModelId: "gpt-5" },
-  ])("preserves usage from legacy pricing-context recovery jobs (%j)", async (pricingContext) => {
-    // Regression proof: remove the legacy pricingContext branch in accountingFromQueuePayload.
-    const queues = new InMemoryQueues()
-    const storage = new InMemoryStorage()
-    await createTestAgentExecution(storage, {
-      projectId,
-      actorId: "assistant",
-      runId: "run_1",
-      executionId,
-    })
-    const record = modelCall()
-    await enqueueAiModelCallRecovery(queues.agents, record)
-    const [claim] = await queues.agents.claim({ projectId, workerId: "test", limit: 1 })
-    if (claim?.job.type !== "agent.ai-usage.record.requested")
-      throw new Error("Expected recovery job")
-    // Model the JSON boundary of a job persisted before completed-call costs were captured.
-    const legacyJob: AgentAiUsageRecordRequestedQueueJob = JSON.parse(
-      JSON.stringify({
-        ...claim.job,
-        payload: {
-          ...claim.job.payload,
-          accounting: { pricingContext, ratedAt: record.recordedAt?.toISOString() },
-        },
-      })
-    )
-    await expect(recordRecoveredAiModelCall(storage, legacyJob)).resolves.toMatchObject({
-      created: true,
-    })
-    await expect(recordRecoveredAiModelCall(storage, legacyJob)).resolves.toMatchObject({
-      created: false,
-    })
-    await expect(
-      storage.aiUsage.summarizeExecution({ projectId, executionId })
-    ).resolves.toMatchObject({
-      modelCallCount: 1,
-      usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
-    })
-    const page = await storage.aiCosts.listModelCalls({
-      projectId,
-      from: new Date("2026-07-01"),
-      to: new Date("2026-07-02"),
-    })
-    expect(page.total).toBe(1)
-    expect(page.items[0]?.cost).toBeUndefined()
-  })
+function accounting(usage: RecordAiModelCallInput): RecoverAiModelCallInput {
+  return {
+    usage,
+    cost: { status: "unpriceable", reason: "missing-rate-card" },
+    ratedAt: usage.occurredAt,
+  }
+}
 
+describe("AI usage recovery", () => {
   test("retains the estimate and inline cost through queue serialization and replay", async () => {
     // Regression proof: drop estimate from either recovery codec; only the report will survive.
     const queues = new InMemoryQueues()
@@ -149,15 +108,15 @@ describe("AI usage recovery", () => {
     })
 
     const record = modelCall()
-    await enqueueAiModelCallRecovery(queues.agents, record)
-    await enqueueAiModelCallRecovery(queues.agents, record)
+    await enqueueAiModelCallRecovery(queues.agents, accounting(record))
+    await enqueueAiModelCallRecovery(queues.agents, accounting(record))
 
     const [claimed] = await queues.agents.claim({
       projectId,
       workerId: "test-worker",
       limit: 2,
     })
-    expect(claimed?.job.id).toBe(agentAiUsageRecoveryJobId(record.id))
+    expect(claimed?.job.id).toBe(`agt_usage_job_${record.id}`)
     expect(claimed?.job.type).toBe("agent.ai-usage.record.requested")
     if (claimed?.job.type !== "agent.ai-usage.record.requested") {
       throw new Error("Expected an AI usage recovery job.")
@@ -190,7 +149,7 @@ describe("AI usage recovery", () => {
     })
   })
 
-  test("recovers route and completed-call valuation atomically for current jobs", async () => {
+  test("recovers route and completed-call valuation atomically", async () => {
     const queues = new InMemoryQueues()
     const storage = new InMemoryStorage()
     await createTestAgentExecution(storage, {
@@ -319,7 +278,7 @@ describe("AI usage recovery", () => {
     if (claimed?.job.type !== "agent.ai-usage.record.requested") {
       throw new Error("Expected an AI usage recovery job.")
     }
-    expect(claimed.job.payload.accounting?.reconcileLimitReservation).toBe(true)
+    expect(claimed.job.payload.accounting.reconcileLimitReservation).toBe(true)
 
     await recordRecoveredAiModelCall(storage, claimed.job)
     await expect(
@@ -404,7 +363,7 @@ describe("AI usage recovery", () => {
   test("rejects malformed jobs instead of retrying them forever", async () => {
     const record = modelCall()
     const job: AgentAiUsageRecordRequestedQueueJob = {
-      id: agentAiUsageRecoveryJobId(record.id),
+      id: `agt_usage_job_${record.id}`,
       projectId,
       createdAt: "2026-07-01T12:00:00.000Z",
       availableAt: "2026-07-01T12:00:00.000Z",
@@ -414,6 +373,10 @@ describe("AI usage recovery", () => {
         record: {
           ...record,
           occurredAt: "not-a-date",
+        },
+        accounting: {
+          cost: { status: "unpriceable", reason: "missing-rate-card" },
+          ratedAt: record.occurredAt.toISOString(),
         },
       },
     }
@@ -425,7 +388,7 @@ describe("AI usage recovery", () => {
     expect(invalidJobError).toMatchObject({
       name: "InvalidAiUsageRecoveryJobError",
       message:
-        "[SixbAgentWorker] AI usage recovery job 'agt_usage_job_usage_1' has an invalid occurredAt timestamp.",
+        "[SixbModels] AI usage recovery job 'agt_usage_job_usage_1' has an invalid occurredAt timestamp.",
     })
     expect(isPermanentAiUsageRecoveryError(invalidJobError)).toBe(true)
     expect(isPermanentAiUsageRecoveryError(new TypeError("invalid"))).toBe(true)

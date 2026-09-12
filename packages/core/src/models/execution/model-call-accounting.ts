@@ -1,9 +1,5 @@
 import { createHash } from "node:crypto"
-import {
-  aiModelCallCostMatchesUsage,
-  normalizeAiModelCallCostRecord,
-} from "@sixb/core/internal/ai-cost-storage-provider"
-import { assertJsonObject, type ModelCostEstimate } from "@sixb/core/models"
+import { assertJsonObject } from "../../json"
 import type {
   AiBillableMeter,
   AiCostStorage,
@@ -14,12 +10,17 @@ import type {
   AiUsageStorage,
   RecordAiModelCallResult,
   Storage,
-} from "@sixb/core/storage"
-import { normalizeAiModelCallRecord } from "@sixb/core/storage"
-import type { AgentWorkerStorage, RecoverAiModelCallInput } from "./types"
+} from "../../storage"
+import { normalizeAiModelCallRecord } from "../../storage"
+import {
+  aiModelCallCostMatchesUsage,
+  normalizeAiModelCallCostRecord,
+} from "../../storage/ai-cost/provider"
+import type { ModelCostEstimate } from "../pricing"
+import type { ModelCallAccountingStorage, RecoverAiModelCallInput } from "./types"
 
 interface RecordAiModelCallAccountingInput extends RecoverAiModelCallInput {
-  readonly storage: AgentWorkerStorage
+  readonly storage: Pick<ModelCallAccountingStorage, "transaction">
 }
 
 interface AiAccountingCapabilities {
@@ -114,7 +115,7 @@ function validatedEstimate(
     return structuredClone(cost)
   } catch {
     console.warn(
-      "[SixbAgentWorker] Invalid model cost estimate; preserving call usage and provider cost."
+      "[SixbModels] Invalid model cost estimate; preserving call usage and provider cost."
     )
     return { status: "unpriceable", reason: "inconsistent-usage" }
   }
@@ -198,10 +199,12 @@ function normalizeMissingMeters(
   return [...new Set<AiBillableMeter>(meters ?? fallback)]
 }
 
-function requireAccountingCapabilities(storage: Storage): AiAccountingCapabilities {
+export function requireAccountingCapabilities(
+  storage: Pick<Storage, "aiUsage" | "aiCosts" | "aiLimits">
+): AiAccountingCapabilities {
   if (!storage.aiUsage || !storage.aiCosts || !storage.aiLimits) {
     throw new Error(
-      "[SixbAgentWorker] AI model-call accounting requires storage.aiUsage, storage.aiCosts, and storage.aiLimits."
+      "[SixbModels] AI model-call accounting requires storage.aiUsage, storage.aiCosts, and storage.aiLimits."
     )
   }
   return { aiUsage: storage.aiUsage, aiCosts: storage.aiCosts, aiLimits: storage.aiLimits }

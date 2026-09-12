@@ -8,12 +8,11 @@ import {
   stringEnum,
 } from "@sixb/core"
 import { runModelLoop } from "@sixb/core/internal/agents"
-import type { ModelStep, ModelUsage } from "@sixb/core/models"
+import type { ModelStep } from "@sixb/core/models"
 import {
   agentToolErrorText,
   agentTraceFromModelSteps,
   agentTraceFromPartialModelLoop,
-  aiModelCallUsageFromModel,
   modelToolsFromAgentDefinitions,
 } from "../src/model-adapters"
 import { WorkerTestModel } from "./worker-model-fixture"
@@ -266,19 +265,5 @@ describe("owned model adapters", () => {
         errorText: "Tool execution was cancelled.",
       },
     ])
-  })
-
-  test("preserves every available provider-neutral usage count", () => {
-    const usage: ModelUsage = {
-      inputTokens: 12,
-      outputTokens: 8,
-      uncachedInputTokens: 9,
-      cacheReadInputTokens: 3,
-      cacheWriteInputTokens: 1,
-      textOutputTokens: 6,
-      reasoningOutputTokens: 2,
-    }
-    expect(aiModelCallUsageFromModel(usage)).toEqual(usage)
-    expect(aiModelCallUsageFromModel({})).toEqual({})
   })
 })

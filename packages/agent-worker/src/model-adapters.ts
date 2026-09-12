@@ -23,9 +23,7 @@ import type {
   ModelTool,
   ModelToolOutput,
   ModelToolResultPart,
-  ModelUsage,
 } from "@sixb/core/models"
-import type { AiModelCallUsageInput } from "@sixb/core/storage"
 import { AgentToolExecutionError, AgentToolOutputError } from "./errors"
 import { agentModelToolSpecFromDefinition } from "./tools/model-spec"
 import type { AgentToolModelOutput } from "./tools/result-output"
@@ -260,25 +258,4 @@ function assertUnreachableModelPart(
 /** Expose only failures that the tool author explicitly marked as safe for the model and storage. */
 export function agentToolErrorText(error: unknown): string {
   return error instanceof AgentToolPublicError ? error.message : "An error occurred."
-}
-
-/** Map one provider-neutral model call into Sixb's durable accounting vocabulary. */
-export function aiModelCallUsageFromModel(usage: ModelUsage): AiModelCallUsageInput {
-  return {
-    ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
-    ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
-    ...(usage.uncachedInputTokens === undefined
-      ? {}
-      : { uncachedInputTokens: usage.uncachedInputTokens }),
-    ...(usage.cacheReadInputTokens === undefined
-      ? {}
-      : { cacheReadInputTokens: usage.cacheReadInputTokens }),
-    ...(usage.cacheWriteInputTokens === undefined
-      ? {}
-      : { cacheWriteInputTokens: usage.cacheWriteInputTokens }),
-    ...(usage.textOutputTokens === undefined ? {} : { textOutputTokens: usage.textOutputTokens }),
-    ...(usage.reasoningOutputTokens === undefined
-      ? {}
-      : { reasoningOutputTokens: usage.reasoningOutputTokens }),
-  }
 }

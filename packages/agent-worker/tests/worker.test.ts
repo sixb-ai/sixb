@@ -47,6 +47,7 @@ import {
 } from "@sixb/core/internal/agents"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
+import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type {
@@ -83,7 +84,6 @@ import { prepareAgentAttachments } from "../src/attachments"
 import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
 import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { finishRunOrThrow } from "../src/finalize"
-import { enqueueAiModelCallRecovery } from "../src/model-call-recovery"
 import { runAgentTurn } from "../src/run-agent-turn"
 import * as agentEnvironment from "../src/run-environment"
 import { createConversationAgentEnvironment } from "../src/run-environment"
@@ -6168,17 +6168,21 @@ describe("AgentWorker", () => {
       return retry({ ...params, availableAt: new Date(0).toISOString() })
     }
     await enqueueAiModelCallRecovery(queue, {
-      id: "usage_recovery_1",
-      projectId: PROJECT_ID,
-      executionId,
-      attempt: 1,
-      callId: "call_recovery_1",
-      requesterGroupIds: ["support"],
-      providerId: "gateway",
-      requestedModelId: "mock-model",
-      responseId: "response_recovery_1",
-      usage: { inputTokens: 12, outputTokens: 8 },
-      occurredAt: new Date("2026-07-01T12:00:00.000Z"),
+      usage: {
+        id: "usage_recovery_1",
+        projectId: PROJECT_ID,
+        executionId,
+        attempt: 1,
+        callId: "call_recovery_1",
+        requesterGroupIds: ["support"],
+        providerId: "gateway",
+        requestedModelId: "mock-model",
+        responseId: "response_recovery_1",
+        usage: { inputTokens: 12, outputTokens: 8 },
+        occurredAt: new Date("2026-07-01T12:00:00.000Z"),
+      },
+      cost: { status: "unpriceable", reason: "missing-rate-card" },
+      ratedAt: new Date("2026-07-01T12:00:00.000Z"),
     })
 
     const worker = new AgentWorker(workerHost, workerOptions())

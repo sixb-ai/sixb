@@ -1,11 +1,13 @@
 import type { SixbErrorCode, SixbFailure } from "../errors/types"
 import type { JsonValue } from "../json"
-import type { ModelCallCost, ModelCostEstimate, ModelRoute } from "../models"
+import type {
+  AiModelCallAccountingPayload,
+  AiModelCallRecordPayload,
+} from "../models/execution/types"
 import type { ProjectionRunFailureCode } from "../projections/types"
 import type { ProviderScope } from "../provider-scope"
 import type { ActionRunFailureCode } from "../storage/action-runs/types"
 import type { AgentRunFailureCode } from "../storage/agents/types"
-import type { RecordAiModelCallInput } from "../storage/ai-usage"
 import type { PipelineRunFailureCode } from "../storage/pipeline-runs/types"
 import type { SyncRunFailureCode } from "../storage/sync-runs/types"
 import type { WorkflowRunFailureCode } from "../storage/workflow-runs/types"
@@ -210,33 +212,12 @@ export interface AgentWorkflowNodeRequestedQueueJob
     }
   > {}
 
-/** JSON-safe representation of one model-call ledger append awaiting durable recovery. */
-export type AgentAiUsageRecordPayload = Omit<
-  RecordAiModelCallInput,
-  "projectId" | "usage" | "occurredAt" | "recordedAt"
-> & {
-  readonly usage: {
-    readonly [Field in keyof RecordAiModelCallInput["usage"]]: RecordAiModelCallInput["usage"][Field]
-  }
-  readonly occurredAt: string
-}
-
-export interface AgentAiUsageAccountingPayload {
-  readonly estimate?: ModelCostEstimate
-  readonly cost: ModelCallCost
-  readonly route?: ModelRoute
-  readonly ratedAt: string
-  /** Absent on pre-limit jobs; those model calls did not create a reservation. */
-  readonly reconcileLimitReservation?: boolean
-}
-
 export interface AgentAiUsageRecordRequestedQueueJob
   extends QueueJob<
     "agent.ai-usage.record.requested",
     {
-      readonly record: AgentAiUsageRecordPayload
-      /** Absent only on legacy jobs that predate atomic valuation recovery. */
-      readonly accounting?: AgentAiUsageAccountingPayload
+      readonly record: AiModelCallRecordPayload
+      readonly accounting: AiModelCallAccountingPayload
     }
   > {}
 
