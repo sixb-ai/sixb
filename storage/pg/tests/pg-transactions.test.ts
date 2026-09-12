@@ -80,7 +80,7 @@ describe("runPgTransaction isolation", () => {
   test("rejects unverified, read-committed, and escaped transaction clients", async () => {
     await expect(
       runPgRepeatableReadTransaction({} as PgStoreClient, async () => "unverified")
-    ).rejects.toThrow("cannot join an unverified PostgreSQL transaction")
+    ).rejects.toThrow('{ isolation: "serializable" }')
 
     const readCommitted = fakeSql()
     await runPgTransaction(readCommitted.sql, async (tx) => {

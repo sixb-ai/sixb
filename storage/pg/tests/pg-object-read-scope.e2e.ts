@@ -1,4 +1,3 @@
-import type { ObjectReadScopeFactory, ObjectStorage } from "@sixb/core/storage"
 import { runObjectReadScopeContractSuite } from "@sixb/core/testing"
 import { createTestStorage } from "./helpers"
 
@@ -7,7 +6,7 @@ runObjectReadScopeContractSuite("PostgresStorage selected object-read scope cont
     const { storage } = await createTestStorage()
     return {
       storage,
-      objectReadScopeFactory: storage.objects as ObjectStorage & ObjectReadScopeFactory,
+      objectReadScopeFactory: storage.objects,
     }
   },
   teardown: async ({ storage }) => {
