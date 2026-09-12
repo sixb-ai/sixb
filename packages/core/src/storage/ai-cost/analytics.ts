@@ -168,7 +168,7 @@ export function buildAiAccountingOverview(
         item
       )
     }
-    if (item.attribution?.kind === "workflowAgent") {
+    if (item.attribution?.kind === "workflowAgent" || item.attribution?.kind === "workflow") {
       appendGrouped(workflowItems, item.attribution.workflowId, item)
     }
   }

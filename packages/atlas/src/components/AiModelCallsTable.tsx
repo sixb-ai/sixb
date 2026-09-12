@@ -20,7 +20,7 @@ import {
   TableRow,
 } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowUpRight, Bot, ChevronRight, GitBranch, Layers } from "lucide-react"
+import { ArrowUpRight, Bot, ChevronRight, GitBranch, Layers, Workflow, Zap } from "lucide-react"
 import { type ReactNode, useState } from "react"
 import { Link } from "react-router-dom"
 import { formatMoney } from "../lib/aiAccounting"
@@ -59,7 +59,7 @@ export function AiModelCallsTable({
         <div>
           <CardTitle>Model calls</CardTitle>
           <CardDescription>
-            Grouped by initiating run, including sub-agents. Totals follow your filters.
+            Calls by execution, including agent delegations. Totals follow your filters.
           </CardDescription>
         </div>
         {filterControl}
@@ -95,8 +95,8 @@ export function AiModelCallsTable({
         <div className="flex items-center justify-between gap-3 border-t px-6 py-3">
           <p className="text-xs text-muted-foreground">
             {data?.total
-              ? `${offset + 1}–${Math.min(offset + groups.length, data.total)} of ${data.total.toLocaleString()} runs`
-              : "0 runs"}
+              ? `${offset + 1}–${Math.min(offset + groups.length, data.total)} of ${data.total.toLocaleString()} executions`
+              : "0 executions"}
           </p>
           <div className="flex gap-2">
             <Button
@@ -139,16 +139,29 @@ function GroupRows({ group, filters }: { group: Group; filters: Filters }) {
     group.label ||
     (group.attribution?.kind === "agent"
       ? "Agent"
-      : group.attribution?.kind === "workflowAgent"
+      : group.attribution?.kind === "workflowAgent" || group.attribution?.kind === "workflow"
         ? `Workflow · ${group.attribution.workflowId}`
-        : "Execution")
-  const Icon = group.attribution?.kind === "agent" ? Bot : Layers
+        : group.attribution?.kind === "action"
+          ? `Action · ${group.attribution.actionId}`
+          : group.attribution?.kind === "request"
+            ? `Request · ${group.attribution.requestId}`
+            : "Execution")
+  const Icon =
+    group.attribution?.kind === "agent"
+      ? Bot
+      : group.attribution?.kind === "action"
+        ? Zap
+        : group.attribution?.kind === "workflow" || group.attribution?.kind === "workflowAgent"
+          ? Workflow
+          : Layers
   const href =
     group.attribution?.kind === "agent" && group.canOpenThread
       ? `/agents/${encodeURIComponent(group.attribution.threadId)}`
-      : group.attribution?.kind === "workflowAgent"
+      : group.attribution?.kind === "workflowAgent" || group.attribution?.kind === "workflow"
         ? `/workflows/${encodeURIComponent(group.attribution.workflowId)}?run=${encodeURIComponent(group.attribution.workflowRunId)}`
-        : undefined
+        : group.attribution?.kind === "action"
+          ? `/actions/runs/${encodeURIComponent(group.attribution.actionRunId)}`
+          : undefined
   return (
     <>
       <TableRow className={open ? "bg-muted/35 hover:bg-muted/35" : undefined}>

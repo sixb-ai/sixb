@@ -37,6 +37,7 @@ WITH filtered AS (
   SELECT COALESCE(root_agent.execution_id, usage.execution_id) AS root_execution_id,
     usage.execution_id, usage.provider_id, usage.requested_model_id, usage.occurred_at,
     usage.total_tokens,
+    execution.executor_kind, execution.executor_id, execution.authority_primitive_id AS primitive_id,
     COALESCE(cost.status, 'unvalued') AS valuation_status,
     cost.currency AS amount_currency, cost.amount_nanos,
     root_agent.id AS root_agent_run_id,
@@ -49,6 +50,7 @@ WITH filtered AS (
     workflow_node.workflow_id AS workflow_id,
     workflow_node.workflow_run_id AS workflow_run_id
   FROM ai_model_call_usage AS usage
+  JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
   LEFT JOIN agent_runs AS direct_agent
     ON direct_agent.project_id = usage.project_id AND direct_agent.execution_id = usage.execution_id
   LEFT JOIN agent_runs AS root_agent
@@ -86,6 +88,7 @@ SELECT filtered.root_execution_id, execution_id, provider_id, requested_model_id
   CAST(SUM((amount_nanos / 1000000) % 1000000) AS TEXT) AS amount_middle,
   CAST(SUM(amount_nanos % 1000000) AS TEXT) AS amount_low,
   MAX(root_agent_run_id) AS root_agent_run_id,
+  MAX(executor_kind) AS executor_kind, MAX(executor_id) AS executor_id, MAX(primitive_id) AS primitive_id,
   MAX(root_thread_id) AS root_thread_id,
   MAX(direct_kind) AS direct_kind,
   MAX(direct_run_id) AS direct_run_id,

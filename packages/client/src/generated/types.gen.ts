@@ -2001,6 +2001,20 @@ export type ListAiModelCallsResponses = {
       }
       attribution?:
         | {
+            kind: "request"
+            requestId: string
+          }
+        | {
+            kind: "action"
+            actionId: string
+            actionRunId: string
+          }
+        | {
+            kind: "workflow"
+            workflowId: string
+            workflowRunId: string
+          }
+        | {
             kind: "agent"
             agentRunId: string
             threadId: string
@@ -2784,6 +2798,20 @@ export type ListAiModelCallGroupsResponses = {
       executionId: string
       attribution?:
         | {
+            kind: "request"
+            requestId: string
+          }
+        | {
+            kind: "action"
+            actionId: string
+            actionRunId: string
+          }
+        | {
+            kind: "workflow"
+            workflowId: string
+            workflowRunId: string
+          }
+        | {
             kind: "agent"
             agentRunId: string
             threadId: string
@@ -2817,6 +2845,20 @@ export type ListAiModelCallGroupsResponses = {
       executions: Array<{
         executionId: string
         attribution?:
+          | {
+              kind: "request"
+              requestId: string
+            }
+          | {
+              kind: "action"
+              actionId: string
+              actionRunId: string
+            }
+          | {
+              kind: "workflow"
+              workflowId: string
+              workflowRunId: string
+            }
           | {
               kind: "agent"
               agentRunId: string

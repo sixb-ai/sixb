@@ -22,6 +22,80 @@ export function runAiModelCallGroupsContractSuite<T extends AiModelCallGroupsCon
   options: AiStorageContractSuiteOptions<T>
 ): void {
   describe(name, () => {
+    test("attributes direct calls and retries to requests, actions, and workflows", async () => {
+      // Removal proof: return undefined from directModelCallAttribution and run this suite.
+      const storage = await options.createStorage()
+      try {
+        await options.setup?.(storage)
+        const expected = [
+          { kind: "request", requestId: "request" },
+          { kind: "action", actionId: "summarize", actionRunId: "action" },
+          { kind: "workflow", workflowId: "summarize", workflowRunId: "workflow" },
+        ] as const
+        for (const attribution of expected) {
+          const kind = attribution.kind
+          const primitive = {
+            kind: kind === "action" ? ("action" as const) : ("workflow" as const),
+            id: "summarize",
+            runId: kind,
+          }
+          const execution = await storage.executions.create({
+            projectId,
+            id: kind,
+            executor:
+              kind === "request"
+                ? { type: "request", requestId: kind }
+                : { type: "primitive", kind, runId: kind },
+            source:
+              kind === "request"
+                ? { type: "http", requestId: kind }
+                : { type: "event", eventId: kind },
+            correlationId: kind,
+            authorizationRef:
+              kind === "request" ? { type: "disabled" } : { type: "trustedPrimitive", primitive },
+          })
+          for (const attempt of [1, 2]) {
+            await storage.aiUsage.recordModelCall({
+              projectId,
+              id: `${kind}:${attempt}`,
+              executionId: execution.id,
+              attempt,
+              callId: `${kind}:${attempt}`,
+              requesterGroupIds: execution.requesterGroupIds,
+              providerId: "test",
+              requestedModelId: "small",
+              responseId: `${kind}:${attempt}`,
+              usage: { inputTokens: 2, outputTokens: 3 },
+              occurredAt: new Date("2026-09-01T12:00:00Z"),
+            })
+          }
+          const calls = await storage.aiCosts.listModelCalls({
+            ...range,
+            executionId: execution.id,
+          })
+          expect(calls.total).toBe(2)
+          expect(calls.items.map((call) => call.attribution)).toEqual([attribution, attribution])
+        }
+        const groups = await storage.aiCosts.listModelCallGroups(range)
+        expect(groups.total).toBe(3)
+        for (const attribution of expected) {
+          const group = groups.items.find((item) => item.executionId === attribution.kind)
+          expect(group).toMatchObject({
+            attribution,
+            modelCallCount: 2,
+            totalTokens: 10,
+            executions: [{ attribution, modelCallCount: 2 }],
+          })
+        }
+        const overview = await storage.aiCosts.queryProjectOverview({ ...range, bucket: "day" })
+        expect(overview.totals.modelCallCount).toBe(6)
+        expect(overview.agents).toEqual([])
+        expect(overview.workflows).toMatchObject([{ workflowId: "summarize", modelCallCount: 2 }])
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
     test("attributes workflow usage to step references and keeps same-named steps separate", async () => {
       const storage = await options.createStorage()
       try {

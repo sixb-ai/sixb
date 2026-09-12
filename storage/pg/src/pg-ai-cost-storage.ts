@@ -4,6 +4,7 @@ import {
   aiModelCallCostDetails,
   aiModelCallCostMatchesUsage,
   buildAiAccountingOverviewFromFragments,
+  directModelCallAttribution,
   normalizeAiAccountingQuery,
   normalizeAiModelCallAccountingQuery,
   normalizeAiModelCallCostRecord,
@@ -117,11 +118,14 @@ export class PgAiCostStorage implements AiCostStorage {
             ELSE NULL
           END AS attribution_agent_kind,
           workflow_node.node_id AS attribution_agent_step_id,
-          workflow_node.workflow_id AS attribution_workflow_id,
+          COALESCE(workflow_node.workflow_id,
+            CASE WHEN execution.executor_kind = 'workflow' THEN execution.authority_primitive_id END
+          ) AS attribution_workflow_id,
           cost.status AS cost_status,
           cost.currency AS cost_currency,
           cost.amount_nanos AS cost_amount_nanos
         FROM ai_model_call_usage AS usage
+        JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
         LEFT JOIN agent_runs AS direct_agent
           ON direct_agent.project_id = usage.project_id
           AND direct_agent.execution_id = usage.execution_id
@@ -251,6 +255,7 @@ export class PgAiCostStorage implements AiCostStorage {
         workflow_agent.node_run_id AS attribution_node_run_id,
         workflow_node.workflow_id AS attribution_workflow_id,
         workflow_node.workflow_run_id AS attribution_workflow_run_id,
+        execution.executor_kind, execution.executor_id, execution.authority_primitive_id AS primitive_id,
         COALESCE((
           SELECT jsonb_agg(groups.group_id ORDER BY groups.group_id)
           FROM ai_model_call_usage_groups AS groups
@@ -265,6 +270,7 @@ export class PgAiCostStorage implements AiCostStorage {
         cost.details AS cost_details,
         cost.rated_at AS cost_rated_at
       FROM ai_model_call_usage AS usage
+      JOIN executions AS execution ON execution.project_id = usage.project_id AND execution.id = usage.execution_id
       LEFT JOIN agent_runs AS direct_agent
         ON direct_agent.project_id = usage.project_id
         AND direct_agent.execution_id = usage.execution_id
@@ -342,6 +348,9 @@ interface UsageRow {
 }
 
 interface JoinedRow extends UsageRow {
+  readonly executor_kind: string | null
+  readonly executor_id: string | null
+  readonly primitive_id: string | null
   readonly attribution_kind: "agent" | "subagent" | "workflowAgent" | null
   readonly attribution_agent_step_id: string | null
   readonly attribution_agent_run_id: string | null
@@ -491,7 +500,7 @@ function accountingItemFromRow(row: JoinedRow): AiAccountingRecordSetItem {
   const cost = row.cost_status === null ? undefined : costFromJoinedRow(row)
   const attribution =
     row.attribution_kind === null
-      ? undefined
+      ? directModelCallAttribution(row.executor_kind, row.executor_id, row.primitive_id)
       : row.attribution_kind === "agent"
         ? {
             kind: "agent" as const,
