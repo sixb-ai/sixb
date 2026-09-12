@@ -1,3 +1,8 @@
+import {
+  createLinkPathSelection,
+  type LinkPathSelectionBuilder,
+  type LinkPathSelectionInput,
+} from "./link-path-selection"
 import type { ObjectLink, ObjectType, Property } from "./types"
 
 declare const propertyTokenBrand: unique symbol
@@ -38,7 +43,7 @@ export type LinkToken<
   readonly id: TLinkId
   readonly targetObjectTypeId: TTargetObjectTypeId
   readonly link: TLink
-}
+} & LinkPathSelectionBuilder<TObjectTypeId, TLinkId, TTargetObjectTypeId>
 
 export type LinkTokenMap<TObjectType extends ObjectType> = {
   readonly [L in TObjectType["links"][number] as L["id"]]: LinkToken<
@@ -95,17 +100,19 @@ export function createLinkTokenMap<TObjectType extends ObjectType>(
   objectType: TObjectType
 ): LinkTokenMap<TObjectType> {
   const tokenEntries = objectType.links.map((link) => {
-    const token: LinkToken<
-      TObjectType["id"],
-      typeof link.id,
-      typeof link.targetObjectTypeId,
-      typeof link
-    > = {
+    const token = {
       objectTypeId: objectType.id,
       id: link.id,
       targetObjectTypeId: link.targetObjectTypeId,
       link,
-    }
+    } as LinkToken<TObjectType["id"], typeof link.id, typeof link.targetObjectTypeId, typeof link>
+    Object.defineProperty(token, "withLinks", {
+      configurable: false,
+      enumerable: false,
+      writable: false,
+      value: (...args: [links?: readonly LinkPathSelectionInput[]]) =>
+        createLinkPathSelection(token, args.length === 0 ? undefined : args[0]),
+    })
     return [link.id, token] as const
   })
 

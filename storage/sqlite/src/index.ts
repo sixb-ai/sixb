@@ -24,6 +24,7 @@ import {
   type AiLimitStorage,
   type AiUsageStorage,
   createTransactionStorageProxy,
+  type ShareGrantStorage,
   StorageTransactionError,
   throwNestedStorageTransaction,
 } from "@sixb/core/storage"
@@ -45,6 +46,7 @@ import { SqliteOntologyStorage, type SqliteOntologyTransactionContext } from "./
 import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
 import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
+import { SqliteShareGrantStorage } from "./share-grant-storage"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { registerSqliteStorageTestingAdapter } from "./testing"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
@@ -97,6 +99,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly timeseries: Storage["timeseries"]
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
+  readonly shareGrants: ShareGrantStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly migrators: readonly StorageMigrator[]
 
@@ -161,6 +164,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.workflowInterventions = createOperationScopedFacade(stores.workflowInterventions, scope)
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
+    this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
     registerSqliteStorageTestingAdapter(this, (durationMs) =>
@@ -318,6 +322,7 @@ function createSqliteStores(
     workflowInterventions: new SqliteWorkflowInterventionStorage({ connection }),
     webhookRuns: new SqliteWebhookRunStorage({ connection, executions }),
     rules: new SqliteRulesStorage({ connection }),
+    shareGrants: new SqliteShareGrantStorage({ connection }),
     connectorConnections: new SqliteConnectorConnectionStorage(connection),
   }
 }
@@ -340,6 +345,7 @@ interface SqliteStoreSet {
   readonly timeseries: SqliteTimeseriesStorage
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
+  readonly shareGrants: SqliteShareGrantStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
 }
 
