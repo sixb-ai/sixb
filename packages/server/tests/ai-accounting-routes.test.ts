@@ -38,7 +38,6 @@ async function createApp(inlineCost = false) {
     threadId: "thread_1",
     triggerMessageId: "message_1",
     spec: { model: { provider: "test", modelId: "test-model" } },
-    requesterGroupIds: [],
   })
   await storage.transaction(async (tx) => {
     const usage = await tx.aiUsage!.recordModelCall({
@@ -154,7 +153,6 @@ async function createSubagentApp(viewer?: { id: string; canRun: boolean }) {
     threadId: "thread_1",
     triggerMessageId: "message_1",
     spec: { model: { provider: "test", modelId: "test-model" } },
-    requesterGroupIds: [],
   })
   await storage.agents.runs.start({
     id: parentRunId,

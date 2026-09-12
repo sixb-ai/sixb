@@ -1421,6 +1421,7 @@ async function queueWorkflowAgentNode(input: {
     workflowId: workflow.id,
     runId: input.runId,
     requestedBy,
+    requesterGroupIds: input.requesterGroupIds ?? ["workflow-users"],
   })
   await runs.queue({
     id: input.runId,
@@ -1428,7 +1429,6 @@ async function queueWorkflowAgentNode(input: {
     executionId,
     workflowId: workflow.id,
     input: { query: "alpha" },
-    requesterGroupIds: input.requesterGroupIds ?? ["workflow-users"],
   })
   await runs.start({ id: input.runId, projectId: PROJECT_ID })
   await runs.nodes.start({
@@ -1773,7 +1773,6 @@ async function seedCompletedConversationTurn(input: {
     threadId: input.threadId,
     triggerMessageId: userMessageId,
     spec: { model: { provider: "test", modelId: "test-model" } },
-    requesterGroupIds: [],
   })
   const executionToken = `history_execution_${input.index}`
   await storage.runs.start({
@@ -2850,6 +2849,7 @@ describe("AgentWorker", () => {
       workflowId: workflow.id,
       runId,
       requestedBy: REQUESTER,
+      requesterGroupIds: ["operations", "project-alpha"],
     })
     await runs.queue({
       id: runId,
@@ -2857,7 +2857,6 @@ describe("AgentWorker", () => {
       executionId,
       workflowId: workflow.id,
       input: { query: "alpha" },
-      requesterGroupIds: ["operations", "project-alpha"],
     })
     await runs.start({
       id: runId,
@@ -3699,7 +3698,6 @@ describe("AgentWorker", () => {
       executionId,
       workflowId: workflow.id,
       input: { query: "alpha" },
-      requesterGroupIds: [],
     })
     await runs.start({ id: runId, projectId: PROJECT_ID })
     await runs.nodes.start({
@@ -3852,7 +3850,6 @@ describe("AgentWorker", () => {
       executionId,
       workflowId: workflow.id,
       input: { query: "alpha" },
-      requesterGroupIds: [],
     })
     await runs.start({ id: runId, projectId: PROJECT_ID })
     await runs.nodes.start({
@@ -8421,6 +8418,7 @@ describe("AgentWorker", () => {
     const executionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
       runId,
+      requesterGroupIds: ["engineering"],
     })
     await storage.runs.create({
       id: runId,
@@ -8429,7 +8427,6 @@ describe("AgentWorker", () => {
       threadId,
       triggerMessageId,
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: ["engineering"],
     })
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,

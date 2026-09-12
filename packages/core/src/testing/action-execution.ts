@@ -10,6 +10,7 @@ export async function createTestActionExecution(
     readonly actionId: string
     readonly runId: string
     readonly executionId?: string
+    readonly requesterGroupIds?: readonly string[]
   }
 ): Promise<string> {
   const parentExecutionId = `test_request_execution:${input.runId}`
@@ -27,6 +28,7 @@ export async function createTestActionExecution(
   if (!parent) {
     await executions.create({
       id: parentExecutionId,
+      requesterGroupIds: input.requesterGroupIds ?? [],
       projectId: input.projectId,
       executor: { type: "request", requestId: `test_request:${input.runId}` },
       source: { type: "http", requestId: `test_request:${input.runId}` },
@@ -36,6 +38,7 @@ export async function createTestActionExecution(
   }
   await executions.create({
     id: executionId,
+    requesterGroupIds: input.requesterGroupIds ?? [],
     projectId: input.projectId,
     executor: { type: "primitive", kind: primitive.kind, runId: primitive.runId },
     source: { type: "execution", executionId: parentExecutionId },
@@ -49,13 +52,17 @@ export async function createTestActionExecution(
 /** Queue an Action run with the valid durable execution fixture required by every provider. */
 export async function queueTestActionRun(
   storage: Pick<Storage, "actionRuns" | "executions">,
-  input: Omit<QueueActionRunInput, "executionId">
+  input: Omit<QueueActionRunInput, "executionId"> & {
+    readonly requesterGroupIds?: readonly string[]
+  }
 ): Promise<ActionRunRecord> {
   if (!storage.actionRuns) throw new Error("Action run storage is not configured for this test.")
   const executionId = await createTestActionExecution(storage.executions, {
     projectId: input.projectId,
     actionId: input.actionId,
     runId: input.id,
+    requesterGroupIds: input.requesterGroupIds,
   })
-  return storage.actionRuns.queue({ ...input, executionId })
+  const { requesterGroupIds: _groups, ...run } = input
+  return storage.actionRuns.queue({ ...run, executionId })
 }

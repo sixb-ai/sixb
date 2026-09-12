@@ -1,6 +1,5 @@
 import { AGENT_MESSAGE_CONTENT_VERSION } from "../../agents/message"
 import { principalsEqual } from "../../auth"
-import { normalizeRequesterGroupIds } from "../../auth/attribution"
 import { parseSixbFailure } from "../../errors/internal"
 import type { SixbFailure } from "../../errors/types"
 import type { ExecutionStorage } from "../executions"
@@ -234,7 +233,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
       threadId: input.threadId,
       triggerMessageId: input.triggerMessageId,
       spec: clone(input.spec),
-      requesterGroupIds: normalizeRequesterGroupIds(input.requesterGroupIds),
       status: "queued",
       attempt: 0,
       createdAt,
@@ -330,7 +328,6 @@ class InMemoryAgentRunStore implements AgentRunStore {
       parentRunId: input.parentRunId,
       spawnKey: input.spawnKey,
       spec: clone(input.spec),
-      requesterGroupIds: clone(parent.requesterGroupIds),
       status: "queued",
       attempt: 0,
       createdAt: new Date(input.createdAt ?? new Date()),

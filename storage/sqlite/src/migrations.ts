@@ -181,6 +181,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("034-device-authorizations", deviceAuthorizationsSql),
     sqliteSql("035-share-grants", shareGrantsSql),
     sqliteSql("036-share-sessions", shareSessionsSql),
+    sqliteSql("037-execution-requester-groups", executionRequesterGroupsSql),
   ],
 })
 
@@ -395,4 +396,8 @@ function rollbackQuietly(db: Database): void {
   } catch {
     // Ignore rollback errors so the original migration failure is preserved.
   }
+}
+
+import executionRequesterGroupsSql from "./migrations/037-execution-requester-groups.sql" with {
+  type: "text",
 }

@@ -41,7 +41,6 @@ describe("SqliteStorage agents", () => {
           threadId: "thread",
           triggerMessageId: "message",
           spec: { model: { provider: "test", modelId: "test-model" } },
-          requesterGroupIds: [],
         })
       ).resolves.toMatchObject({ id: "run", status: "queued" })
     } finally {
@@ -95,7 +94,6 @@ describe("SqliteStorage agents", () => {
             threadId: "thr_1",
             triggerMessageId: "msg_1",
             spec: { model: { provider: "test", modelId: "test-model" } },
-            requesterGroupIds: ["engineering"],
             createdAt: new Date("2026-06-23T10:00:10.000Z"),
           })
           await tx.agents?.messages.append({

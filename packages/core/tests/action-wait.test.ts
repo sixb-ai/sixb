@@ -197,6 +197,7 @@ function delegatedRuntimeForRun(
     delegation: { kind: "share", grantId: "share-grant", sessionId: "share-session" },
   })
   const parent: ExecutionRecord = {
+    requesterGroupIds: [],
     id: "shared-request-execution",
     projectId: "test",
     executor: { type: "request", requestId: "shared-request" },
@@ -209,6 +210,7 @@ function delegatedRuntimeForRun(
     createdAt: new Date("2026-01-01T00:00:00.000Z"),
   }
   const child: ExecutionRecord = {
+    requesterGroupIds: [],
     id: run.executionId,
     projectId: "test",
     executor: { type: "primitive", kind: "action", runId: run.id },

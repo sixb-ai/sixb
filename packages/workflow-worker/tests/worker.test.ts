@@ -593,7 +593,6 @@ describe("WorkflowWorker", () => {
       executionId,
       workflowId: workflow.id,
       input: {},
-      requesterGroupIds: [],
     })
     await sixb.queues.workflows.enqueue({
       projectId: sixb.id,

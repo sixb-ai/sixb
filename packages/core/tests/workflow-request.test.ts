@@ -323,8 +323,10 @@ describe("sixb.workflows.request", () => {
     expect(run).toBeDefined()
     await expect(
       host.storage.executions.getById({ projectId: host.id, id: run?.executionId ?? "" })
-    ).resolves.toMatchObject({ requestedBy: principal })
-    expect(run?.requesterGroupIds).toEqual(["finance", "operations"])
+    ).resolves.toMatchObject({
+      requestedBy: principal,
+      requesterGroupIds: ["finance", "operations"],
+    })
   })
 
   test("retried webhook delivery with a deterministic runId enqueues a single run", async () => {

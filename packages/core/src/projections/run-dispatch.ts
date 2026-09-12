@@ -144,6 +144,7 @@ async function persistProjectionRun(input: {
         versionId: input.identity.datasetVersion.versionId,
       },
       correlationId: input.producerExecution?.correlationId ?? input.runId,
+      requesterGroupIds: input.producerExecution?.requesterGroupIds,
       ...(input.producerExecution?.requestedBy === undefined
         ? {}
         : { requestedBy: input.producerExecution.requestedBy }),
