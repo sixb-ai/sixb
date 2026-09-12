@@ -6,8 +6,8 @@ import {
   type ObjectBatchKey,
   type ObjectLinkCursor,
   type ObjectLinkRow,
+  type ObjectReadStorage,
   type ObjectRow,
-  type ObjectStorage,
   objectBatchKey,
   objectLinkCursor,
 } from "../../storage"
@@ -271,7 +271,7 @@ async function hydrateLinkQueryObjects(
   projectId: string,
   selected: readonly ObjectRow[],
   links: readonly ObjectLinkRow[],
-  storage: ObjectStorage
+  storage: ObjectReadStorage
 ): Promise<ObjectRow[]> {
   const byIdentity = new Map(
     selected.map((row) => [objectIdentity(row.objectTypeId, row.primaryId), row])
