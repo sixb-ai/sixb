@@ -1,9 +1,9 @@
 import { AgentDefinitionError } from "@sixb/core"
+import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import {
   defineLanguageModel,
   type LanguageModel,
   type LanguageModelDefinition,
-  ModelCatalogUnavailableError,
   type ModelReasoning,
 } from "@sixb/core/models"
 
@@ -27,24 +27,8 @@ export async function prepareAgentModel(selection: AgentModelSelection): Promise
   readonly model: LanguageModel
   readonly budget: AgentContextBudget
 }> {
-  const binding = selection.model
-  const offline = hasContextLimit(binding.definition)
-  let model: LanguageModel
-  try {
-    model = (await binding.resolve?.({ offline })) ?? binding
-  } catch (cause) {
-    if (offline || !(cause instanceof ModelCatalogUnavailableError)) throw cause
-    model = (await binding.resolve?.({ offline: true })) ?? binding
-  }
+  const model = await resolveLanguageModel(selection.model)
   const definition = defineLanguageModel(model.definition)
-  if (
-    definition.providerId !== binding.providerId ||
-    definition.modelId !== binding.modelId ||
-    model.providerId !== binding.providerId ||
-    model.modelId !== binding.modelId
-  ) {
-    throw invalidBudget("resolved model identity does not match the selected model.")
-  }
   const budget = resolveAgentContextBudget({ model, reasoning: selection.reasoning }, definition)
   if (budget.source === "fallback") {
     console.warn(
@@ -75,10 +59,6 @@ export async function prepareAgentModel(selection: AgentModelSelection): Promise
         }),
     }),
   }
-}
-
-function hasContextLimit(definition: LanguageModelDefinition): boolean {
-  return definition.contextWindow !== undefined || definition.maxInputTokens !== undefined
 }
 
 /** Input-only limits are a conservative window: leave the same reserve without inventing a total. */

@@ -19,6 +19,11 @@ import {
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
+import {
+  defineLanguageModel,
+  type LanguageModel,
+  type LanguageModelStreamEvent,
+} from "@sixb/core/models"
 import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
 import {
   createTestSixb,
@@ -152,6 +157,61 @@ async function waitFor<T>(
 }
 
 describe("WorkflowWorker", () => {
+  test("ordinary workflow steps generate inline under the workflow execution", async () => {
+    // Removal proof: remove modelExecution from the Workflow worker's primitive binding.
+    const model: LanguageModel = {
+      providerId: "test",
+      modelId: "summarize",
+      definition: defineLanguageModel({
+        kind: "language",
+        providerId: "test",
+        modelId: "summarize",
+        capabilities: {},
+      }),
+      async stream() {
+        return {
+          events: (async function* (): AsyncIterable<LanguageModelStreamEvent> {
+            yield { type: "stream-start" }
+            yield { type: "text-start", id: "text" }
+            yield { type: "text-delta", id: "text", delta: "Summary" }
+            yield { type: "text-end", id: "text" }
+            yield {
+              type: "finish",
+              finishReason: "stop",
+              usage: { inputTokens: 7, outputTokens: 2 },
+            }
+          })(),
+        }
+      },
+    }
+    const step = defineWorkflowStep("summarize")
+      .input({})
+      .output({ summary: "string" })
+      .run(async ({ sixb }) => ({
+        summary: (await sixb.models.language.generate({ model, prompt: "Summarize" })).output,
+      }))
+    const workflow = defineWorkflow("inline-model").input({}).then(step)
+    const host = createSixb({ workflows: [workflow] })
+    const worker = new WorkflowWorker(host)
+    await worker.start()
+    try {
+      await requestWorkflowRun(host, workflow, "model-run", {})
+      const run = await waitFor(
+        () => host.storage.workflowRuns!.getById({ projectId: host.id, id: "model-run" }),
+        (value) => value?.status === "succeeded" || value?.status === "failed"
+      )
+      expect(run?.status).toBe("succeeded")
+      expect(
+        await host.storage.aiUsage!.getLatestForExecution({
+          projectId: host.id,
+          executionId: run!.executionId,
+        })
+      ).toMatchObject({ attempt: 1, requesterGroupIds: [], usage: { totalTokens: 9 } })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("defaults to one concurrent job and accepts an explicit limit", () => {
     const workflow = defineWorkflow("concurrency-options")
       .input({ transaction: ref(Transaction) })

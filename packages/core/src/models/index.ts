@@ -36,6 +36,14 @@ export type {
 } from "./events"
 export { normalizeModelProviderIds } from "./events"
 export type {
+  InferLanguageModelOutput,
+  LanguageModelGenerateInput,
+  LanguageModelGenerateResult,
+  LanguageModelOutputShape,
+  LanguageModelsRuntime,
+  ModelsRuntime,
+} from "./generation-types"
+export type {
   LanguageModel,
   LanguageModelProvider,
   LanguageModelRequest,

@@ -16,6 +16,11 @@ import {
 } from "@sixb/core"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
+import {
+  defineLanguageModel,
+  type LanguageModel,
+  type LanguageModelStreamEvent,
+} from "@sixb/core/models"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { ActionWorker } from "../src"
@@ -77,6 +82,69 @@ function captureThrown(callback: () => unknown): unknown {
 }
 
 describe("ActionWorker", () => {
+  test("accounts for direct generation in action writeback before persisting the result", async () => {
+    // Removal proof: remove models from the Action facade or its worker attempt binding.
+    const model: LanguageModel = {
+      providerId: "test",
+      modelId: "extract",
+      definition: defineLanguageModel({
+        kind: "language",
+        providerId: "test",
+        modelId: "extract",
+        capabilities: { nativeStructuredOutput: true },
+      }),
+      async stream() {
+        return {
+          events: (async function* (): AsyncIterable<LanguageModelStreamEvent> {
+            yield { type: "stream-start" }
+            yield { type: "text-start", id: "text" }
+            yield { type: "text-delta", id: "text", delta: '{"status":"ready"}' }
+            yield { type: "text-end", id: "text" }
+            yield {
+              type: "finish",
+              finishReason: "stop",
+              usage: { inputTokens: 5, outputTokens: 3 },
+            }
+          })(),
+        }
+      },
+    }
+    const action = defineAction("extract-status")
+      .on(Device)
+      .params({})
+      .writeback(async ({ sixb }) => {
+        const result = await sixb.models.language.generate({
+          model,
+          prompt: "Extract status",
+          output: { status: "string" },
+        })
+        return result.output
+      })
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.status })
+      })
+    const { host, sixb } = createSixb([action])
+    const worker = new ActionWorker(host)
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device" })
+    await worker.start()
+    try {
+      const run = await deviceObjects(sixb).requestActionAndWait({
+        id: "device-1",
+        actionId: action.id,
+      })
+      expect(run.status).toBe("succeeded")
+      expect(run.writeback).toMatchObject({ status: "succeeded", result: { status: "ready" } })
+      expect(
+        await host.storage.aiUsage!.getLatestForExecution({
+          projectId: host.id,
+          executionId: run.executionId,
+        })
+      ).toMatchObject({ attempt: 1, requesterGroupIds: [], usage: { totalTokens: 8 } })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("idles without action definitions or action-run storage", async () => {
     const storage = createStorageWithoutActionRuns()
     const worker = new ActionWorker(createSixb([], storage).host)

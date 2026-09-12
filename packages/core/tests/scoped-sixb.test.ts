@@ -1187,6 +1187,7 @@ describe("bound Sixb surface", () => {
         "events",
         "execution",
         "logs",
+        "models",
         "objects",
         "pipelines",
         "projections",

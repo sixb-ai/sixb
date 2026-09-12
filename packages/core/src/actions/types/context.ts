@@ -7,6 +7,7 @@ import type {
   EffectiveObjectChange,
   OntologyOperationOutcome,
 } from "../../materializer"
+import type { ModelsRuntime } from "../../models/generation-types"
 import type { ObjectType, Property, ValueType } from "../../ontology"
 import type { InferPropertyUnit, InferPropertyValue } from "../../ontology/inference"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
@@ -196,6 +197,7 @@ export interface ActionRuntimeFacade<
   TValueTypes extends readonly ValueType[] = readonly ValueType[],
 > {
   readonly blobs: ActionBlobContext
+  readonly models: ModelsRuntime
   readonly connector: ConnectorRuntime
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
