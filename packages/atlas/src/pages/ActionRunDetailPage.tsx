@@ -68,13 +68,10 @@ export function ActionRunDetailPage() {
               <ActionRunStatusBadge status={run.status} />
               <span className="text-sm font-medium text-foreground">Failure</span>
             </div>
-            <SixbFailureSummary failure={run.error} />
+            <SixbFailureSummary failure={run.error} showDetails />
             <p className="mt-2 text-xs text-muted-foreground">
               Phase <span className="font-mono text-foreground">{run.error.details.phase}</span>
             </p>
-            <div className="mt-4">
-              <DataPanel label="Details" value={run.error.details} />
-            </div>
           </CardContent>
         </Card>
       ) : null}

@@ -97,7 +97,7 @@ export function AgentExecutionPanel({
                 ? "Failed during agent work"
                 : "Execution failed"}
           </p>
-          <SixbFailureSummary failure={failure} className="text-sm" />
+          <SixbFailureSummary failure={failure} showDetails className="text-sm" />
         </div>
       ) : null}
 

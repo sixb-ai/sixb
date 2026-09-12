@@ -3552,6 +3552,8 @@ export type GetConnectorConnectionRunResponses = {
                 [key: string]: unknown
               }
             | null
+          httpStatus?: number
+          redacted?: true
           truncated?: true
         }
         finishedAt: string
@@ -3760,6 +3762,8 @@ export type AddConnectorConnectionResponses = {
                 [key: string]: unknown
               }
             | null
+          httpStatus?: number
+          redacted?: true
           truncated?: true
         }
         finishedAt: string
@@ -3969,6 +3973,8 @@ export type SelectConnectorConnectionRunAccountResponses = {
                 [key: string]: unknown
               }
             | null
+          httpStatus?: number
+          redacted?: true
           truncated?: true
         }
         finishedAt: string
@@ -4571,6 +4577,8 @@ export type ListSyncsResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     } | null
@@ -4678,6 +4686,8 @@ export type GetSyncResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     } | null
@@ -4762,6 +4772,8 @@ export type ListSyncRunsResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     }>
@@ -4938,6 +4950,8 @@ export type ListPipelinesResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     } | null
@@ -5076,6 +5090,8 @@ export type GetPipelineResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     } | null
@@ -5154,6 +5170,8 @@ export type ListPipelineRunsResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     }>
@@ -5234,6 +5252,8 @@ export type GetPipelineRunResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     }
@@ -5278,6 +5298,8 @@ export type GetPipelineRunResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     }>
@@ -5492,6 +5514,8 @@ export type ListWorkflowsResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       requestedBy: {
@@ -5676,6 +5700,8 @@ export type GetWorkflowResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       requestedBy: {
@@ -6183,6 +6209,8 @@ export type ListWorkflowRunsResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       requestedBy: {
@@ -6264,6 +6292,8 @@ export type GetWorkflowRunResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       requestedBy: {
@@ -6349,6 +6379,8 @@ export type GetWorkflowRunResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       agentExecution?: {
@@ -6668,6 +6700,8 @@ export type GetWorkflowAgentNodeExecutionResponses = {
             [key: string]: unknown
           }
         | null
+      httpStatus?: number
+      redacted?: true
       truncated?: true
     }
     createdAt: string
@@ -6746,6 +6780,8 @@ export type CancelWorkflowRunResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       requestedBy: {
@@ -6831,6 +6867,8 @@ export type CancelWorkflowRunResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       agentExecution?: {
@@ -9055,6 +9093,8 @@ export type ListActionRunsResponses = {
             | "effects"
             | "cancelled"
         }
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     }>
@@ -9149,6 +9189,8 @@ export type GetActionRunResponses = {
           | "effects"
           | "cancelled"
       }
+      httpStatus?: number
+      redacted?: true
       truncated?: true
     }
     params: {
@@ -9188,6 +9230,8 @@ export type GetActionRunResponses = {
               runId: string
               phase: "writeback"
             }
+            httpStatus?: number
+            redacted?: true
             truncated?: true
           }
         }
@@ -9213,6 +9257,8 @@ export type GetActionRunResponses = {
               runId: string
               phase: "effects"
             }
+            httpStatus?: number
+            redacted?: true
             truncated?: true
           }
         }
@@ -10028,6 +10074,8 @@ export type PostAgentThreadMessageResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       attempt: number
@@ -10281,6 +10329,8 @@ export type CancelAgentRunResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       attempt: number
@@ -10451,6 +10501,8 @@ export type RetryAgentRunResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       attempt: number
@@ -10597,6 +10649,8 @@ export type ListAgentThreadRunsResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
       attempt: number
@@ -10740,6 +10794,8 @@ export type GetAgentRunResponses = {
             [key: string]: unknown
           }
         | null
+      httpStatus?: number
+      redacted?: true
       truncated?: true
     }
     attempt: number
@@ -12218,6 +12274,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12271,6 +12329,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12325,6 +12385,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12390,6 +12452,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12443,6 +12507,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12497,6 +12563,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12566,6 +12634,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12619,6 +12689,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12673,6 +12745,8 @@ export type ListProjectionsResponses = {
                     [key: string]: unknown
                   }
                 | null
+              httpStatus?: number
+              redacted?: true
               truncated?: true
             }
             identity: {
@@ -12783,6 +12857,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -12836,6 +12912,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -12890,6 +12968,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -12955,6 +13035,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -13008,6 +13090,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -13062,6 +13146,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -13131,6 +13217,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -13184,6 +13272,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -13238,6 +13328,8 @@ export type GetProjectionResponses = {
                       [key: string]: unknown
                     }
                   | null
+                httpStatus?: number
+                redacted?: true
                 truncated?: true
               }
               identity: {
@@ -13338,6 +13430,8 @@ export type ListProjectionRunsResponses = {
                   [key: string]: unknown
                 }
               | null
+            httpStatus?: number
+            redacted?: true
             truncated?: true
           }
           identity: {
@@ -13391,6 +13485,8 @@ export type ListProjectionRunsResponses = {
                   [key: string]: unknown
                 }
               | null
+            httpStatus?: number
+            redacted?: true
             truncated?: true
           }
           identity: {
@@ -13445,6 +13541,8 @@ export type ListProjectionRunsResponses = {
                   [key: string]: unknown
                 }
               | null
+            httpStatus?: number
+            redacted?: true
             truncated?: true
           }
           identity: {
@@ -13544,6 +13642,8 @@ export type GetProjectionRunResponses = {
                 [key: string]: unknown
               }
             | null
+          httpStatus?: number
+          redacted?: true
           truncated?: true
         }
         identity: {
@@ -13597,6 +13697,8 @@ export type GetProjectionRunResponses = {
                 [key: string]: unknown
               }
             | null
+          httpStatus?: number
+          redacted?: true
           truncated?: true
         }
         identity: {
@@ -13651,6 +13753,8 @@ export type GetProjectionRunResponses = {
                 [key: string]: unknown
               }
             | null
+          httpStatus?: number
+          redacted?: true
           truncated?: true
         }
         identity: {
@@ -13744,6 +13848,8 @@ export type ListWebhookRunsResponses = {
               [key: string]: unknown
             }
           | null
+        httpStatus?: number
+        redacted?: true
         truncated?: true
       }
     }>
