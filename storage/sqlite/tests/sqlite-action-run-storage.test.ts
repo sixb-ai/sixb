@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import type { ActionRunFailure, ActionRunPhase, QueueActionRunInput } from "@sixb/core/storage"
+import type { ActionRunFailure, ActionRunPhase } from "@sixb/core/storage"
 import { ActionRunError } from "@sixb/core/storage"
 import { queueTestActionRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
@@ -37,11 +37,14 @@ describe("SqliteActionRunStorage", () => {
     root.close()
   })
 
-  const queue = (input: Omit<QueueActionRunInput, "executionId">) => queueTestActionRun(root, input)
+  const queue = (input: Parameters<typeof queueTestActionRun>[1]) => queueTestActionRun(root, input)
 
   test("queues, starts, and finishes runs", async () => {
+    // Removal proof: omit requesterGroupIds from executionRecordFromStorageRow.
     const storage = root.actionRuns
+    const groups = ["sales", "sales"]
     await queue({
+      requesterGroupIds: groups,
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -53,6 +56,7 @@ describe("SqliteActionRunStorage", () => {
       queuedAt: new Date("2026-04-29T10:14:00.000Z"),
     })
 
+    groups.push("later-group")
     await storage.start({
       id: "act_1",
       projectId: "my-app",
@@ -67,6 +71,10 @@ describe("SqliteActionRunStorage", () => {
     })
 
     expect(finished.status).toBe("succeeded")
+    await expect(
+      root.executions.getById({ projectId: "my-app", id: finished.executionId })
+    ).resolves.toMatchObject({ requesterGroupIds: ["sales"] })
+    expect(finished).not.toHaveProperty("requesterGroupIds")
     expect(finished.phase).toBe("validation")
     expect(finished.params).toEqual({ amount: 50_000 })
     expect(finished.idempotencyKey).toBe("action:my-app:act_1")

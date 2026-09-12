@@ -39,6 +39,56 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
   }
 
   describe(label, () => {
+    test("captures memberships once and inherits them independently of current authority", async () => {
+      // Removal proof: skip prepareExecutionRecord's membership capture or parent inheritance.
+      await withStorage(async (storage) => {
+        await seedAuth(storage.auth)
+        for (const groupId of ["support", "finance"]) {
+          await storage.auth.groupMemberships.upsert({
+            projectId,
+            userId: "user-one",
+            groupId,
+            source: "manual",
+          })
+        }
+        const parent = await storage.executions.create({
+          ...principalRequest({ id: "parent" }),
+          requesterGroupIds: undefined,
+        })
+        expect(parent.requesterGroupIds).toEqual(["finance", "support"])
+        await storage.auth.groupMemberships.remove({
+          projectId,
+          userId: "user-one",
+          groupId: "finance",
+        })
+        const childInput = trustedPrimitive("child", {
+          source: { type: "execution", executionId: parent.id },
+          correlationId: parent.correlationId,
+        })
+        const child = await storage.executions.create({
+          ...childInput,
+          requesterGroupIds: undefined,
+        })
+        expect(child.requesterGroupIds).toEqual(["finance", "support"])
+        ;(child.requesterGroupIds as string[]).push("mutated")
+        await expect(
+          storage.executions.getById({ projectId, id: child.id })
+        ).resolves.toMatchObject({ requesterGroupIds: ["finance", "support"] })
+        await expect(
+          storage.executions.create({
+            ...childInput,
+            id: "wrong-groups",
+            requesterGroupIds: ["support"],
+          })
+        ).rejects.toMatchObject({ code: "invalid_parent_execution" })
+        const next = await storage.executions.create({
+          ...principalRequest({ id: "next" }),
+          requesterGroupIds: undefined,
+        })
+        expect(next.requesterGroupIds).toEqual(["support"])
+      })
+    })
+
     test("round-trips every durable executor and authority shape", async () => {
       await withStorage(async (storage) => {
         await seedAuth(storage.auth)
@@ -63,7 +113,10 @@ export function runExecutionStorageContractSuite<TStorage extends ExecutionStora
           const creationStartedAt = new Date()
           const created = await storage.executions.create(input)
           const { createdAt: persistedAt, ...persistedInput } = created
-          expect(persistedInput).toEqual(input)
+          expect(persistedInput).toEqual({
+            ...input,
+            requesterGroupIds: input.requesterGroupIds ?? [],
+          })
           expect(Number.isFinite(persistedAt.getTime())).toBe(true)
           expect(persistedAt.getTime()).toBeGreaterThanOrEqual(creationStartedAt.getTime())
           expect(
@@ -334,6 +387,7 @@ function principalRequest(input: {
     id: input.id,
     projectId,
     requestedBy: principal,
+    requesterGroupIds: [],
     executor: { type: "request", requestId: `request-${input.id}` },
     source: { type: "http", requestId: `request-${input.id}` },
     correlationId: input.id === "parent" ? "correlation-parent" : `correlation-${input.id}`,
@@ -349,6 +403,7 @@ function disabledRequest(id: string, inputProjectId = projectId): CreateExecutio
   return {
     id,
     projectId: inputProjectId,
+    requesterGroupIds: [],
     executor: { type: "request", requestId: `request-${id}` },
     source: { type: "http", requestId: `request-${id}` },
     correlationId: `correlation-${id}`,
@@ -366,6 +421,7 @@ function trustedPrimitive(
     id,
     projectId,
     requestedBy: { type: "user", id: "user-one" },
+    requesterGroupIds: [],
     executor: { type: "primitive", kind, runId },
     source: trustedPrimitiveSource(kind, id),
     correlationId: `correlation-${id}`,
@@ -412,6 +468,7 @@ function agentExecution(id: string): CreateExecutionInput {
     id,
     projectId,
     requestedBy: { type: "user", id: "user-one" },
+    requesterGroupIds: [],
     executor: { type: "agent", runId: `run-${id}` },
     source: { type: "execution", executionId: "principal-request" },
     correlationId: "correlation-principal-request",
@@ -428,6 +485,7 @@ function kernelExecution(id: string): CreateExecutionInput {
     id,
     projectId,
     executor: { type: "kernel", operation },
+    requesterGroupIds: [],
     source: { type: "event", eventId: `event-${id}` },
     correlationId: `correlation-${id}`,
     authorizationRef: { type: "kernel", operation },

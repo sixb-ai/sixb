@@ -1,5 +1,4 @@
 import type { Database } from "bun:sqlite"
-import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   assertWorkflowAgentNodeRunExecution,
@@ -112,9 +111,8 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
             input,
             queued_at,
             started_at,
-            requester_group_ids,
             attempt
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         `
         )
         .run(
@@ -126,7 +124,6 @@ export class SqliteWorkflowRunStorage implements WorkflowRunStorage {
           serializeRecord(input.input),
           queuedAt.toISOString(),
           queuedAt.toISOString(),
-          JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds)),
           0
         )
     } catch (error) {
@@ -983,7 +980,6 @@ function rowToWorkflowRunRecord(row: WorkflowRunDatabaseRow): WorkflowRunRecord 
     startedAt: new Date(row.started_at),
     finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
     error: row.error === null ? undefined : parseSixbFailure(row.error, WORKFLOW_RUN_FAILURE_CODES),
-    requesterGroupIds: JSON.parse(row.requester_group_ids) as string[],
     attempt: row.attempt,
     ...(row.execution_token && row.execution_queue_lease_expires_at
       ? {
@@ -1046,7 +1042,6 @@ interface WorkflowRunDatabaseRow {
   started_at: string
   finished_at: string | null
   error: string | null
-  requester_group_ids: string
   attempt: number
   execution_token: string | null
   execution_queue_lease_expires_at: string | null

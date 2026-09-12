@@ -150,7 +150,6 @@ describe("single project Agent", () => {
       threadId: thread.id,
       executionId,
       triggerMessageId: message.id,
-      requesterGroupIds: [],
       spec: { model: { provider: "test", modelId: "test-model" } },
     })
     const run = await storage.agents.runs.finishQueued({

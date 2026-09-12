@@ -6,7 +6,6 @@ import {
   assertSubagentRunResult,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
-import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
@@ -83,11 +82,10 @@ export class SqliteAgentRunStore implements AgentRunStore {
               thread_id,
               trigger_message_id,
               spec,
-              requester_group_ids,
               status,
               attempt,
               created_at
-            ) VALUES (?, ?, ?, 'conversation', ?, ?, ?, ?, 'queued', 0, ?)
+            ) VALUES (?, ?, ?, 'conversation', ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
@@ -97,7 +95,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.threadId,
             input.triggerMessageId,
             JSON.stringify(input.spec),
-            JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds)),
             createdAt.toISOString()
           )
       } catch (error) {
@@ -197,8 +194,8 @@ export class SqliteAgentRunStore implements AgentRunStore {
             `
             INSERT INTO agent_runs (
               project_id, id, execution_id, kind, parent_run_id, spawn_key, spec,
-              requester_group_ids, status, attempt, created_at
-            ) VALUES (?, ?, ?, 'subagent', ?, ?, ?, ?, 'queued', 0, ?)
+              status, attempt, created_at
+            ) VALUES (?, ?, ?, 'subagent', ?, ?, ?, 'queued', 0, ?)
           `
           )
           .run(
@@ -208,7 +205,6 @@ export class SqliteAgentRunStore implements AgentRunStore {
             input.parentRunId,
             input.spawnKey,
             JSON.stringify(input.spec),
-            parentRow.requester_group_ids,
             (input.createdAt ?? new Date()).toISOString()
           )
       } catch (error) {

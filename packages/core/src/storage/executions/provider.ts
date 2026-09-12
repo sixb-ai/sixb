@@ -6,6 +6,7 @@ import { normalizeExecutionRecord } from "./validation"
 export {
   type ExecutionValidationLookup,
   normalizeExecutionRecord,
+  prepareExecutionRecord,
   validateExecutionRecordReferences,
 } from "./validation"
 
@@ -19,6 +20,7 @@ export interface ExecutionStorageRow {
   readonly sourceId: string
   readonly requestedByUserId: string | null
   readonly requestedByServiceAccountId: string | null
+  readonly requesterGroupIds: readonly string[]
   readonly correlationId: string
   /** SQL-only projection of an execution source, used to enforce the parent foreign key. */
   readonly parentExecutionId: string | null
@@ -40,6 +42,7 @@ export function executionRecordToStorageRow(record: ExecutionRecord): ExecutionS
   return {
     projectId: record.projectId,
     id: record.id,
+    requesterGroupIds: [...record.requesterGroupIds],
     ...executor,
     ...source,
     requestedByUserId: record.requestedBy?.type === "user" ? record.requestedBy.id : null,
@@ -67,6 +70,7 @@ export function executionRecordFromStorageRow(row: ExecutionStorageRow): Executi
     {
       id: row.id,
       projectId: row.projectId,
+      requesterGroupIds: row.requesterGroupIds,
       ...(requestedBy === undefined ? {} : { requestedBy }),
       executor,
       source,

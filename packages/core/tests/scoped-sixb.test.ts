@@ -471,10 +471,12 @@ describe("bound Sixb operational access", () => {
     expect(run).toBeDefined()
     await expect(
       host.storage.executions.getById({ projectId: host.id, id: run?.executionId ?? "" })
-    ).resolves.toMatchObject({ requestedBy: principal })
+    ).resolves.toMatchObject({
+      requestedBy: principal,
+      requesterGroupIds: ["commercial", "operations"],
+    })
     // The authorization context carries only "operations". Attribution resolves the complete
     // durable membership set so a token-scoped caller cannot avoid the commercial group quota.
-    expect(run?.requesterGroupIds).toEqual(["commercial", "operations"])
     await expect(runner.workflows.runs.listNodes(result.runId)).resolves.toMatchObject({
       nodes: [],
       total: 0,
@@ -698,11 +700,13 @@ describe("bound Sixb operational access", () => {
       text: "Summarize this account.",
     })
     expect(result.run.id).toBeString()
-    expect(result.run.requesterGroupIds).toEqual(["commercial", "operations"])
     expect(result.run.usage).toBeUndefined()
     await expect(
       host.storage.executions.getById({ projectId: host.id, id: result.run.executionId })
-    ).resolves.toMatchObject({ requestedBy: principal })
+    ).resolves.toMatchObject({
+      requestedBy: principal,
+      requesterGroupIds: ["commercial", "operations"],
+    })
 
     await host.storage.aiUsage?.recordModelCall({
       id: "usage_contract_agent",
@@ -710,7 +714,7 @@ describe("bound Sixb operational access", () => {
       executionId: result.run.executionId,
       attempt: 1,
       callId: "call_contract_agent",
-      requesterGroupIds: result.run.requesterGroupIds,
+      requesterGroupIds: ["commercial", "operations"],
       providerId: "gateway",
       requestedModelId: "openai/gpt-5",
       responseId: "response_contract_agent",
@@ -735,7 +739,9 @@ describe("bound Sixb operational access", () => {
       projectId: host.id,
       id: result.run.id,
     })
-    expect(stored?.requesterGroupIds).toEqual(["commercial", "operations"])
+    await expect(
+      host.storage.executions.getById({ projectId: host.id, id: stored!.executionId })
+    ).resolves.toMatchObject({ requesterGroupIds: ["commercial", "operations"] })
     expect(stored).not.toHaveProperty("usage")
 
     const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
@@ -1125,6 +1131,7 @@ describe("bound Sixb fails closed on ungranted surfaces", () => {
       execution: {
         id: "agent-execution-1",
         projectId: host.id,
+        requesterGroupIds: [],
         executor: { type: "agent", runId: "agent-run-1" },
         source: { type: "execution", executionId: "request-execution-1" },
         correlationId: "agent-correlation-1",

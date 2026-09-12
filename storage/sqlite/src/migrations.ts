@@ -177,6 +177,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("032-conversation-run-spec", conversationRunSpecSql),
     sqliteSql("033-retire-agent-definitions", retireAgentDefinitionsSql),
     sqliteSql("034-device-authorizations", deviceAuthorizationsSql),
+    sqliteSql("035-execution-requester-groups", executionRequesterGroupsSql),
   ],
 })
 
@@ -391,4 +392,8 @@ function rollbackQuietly(db: Database): void {
   } catch {
     // Ignore rollback errors so the original migration failure is preserved.
   }
+}
+
+import executionRequesterGroupsSql from "./migrations/035-execution-requester-groups.sql" with {
+  type: "text",
 }

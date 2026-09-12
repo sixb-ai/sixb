@@ -122,7 +122,6 @@ describe("SqliteStorage AI accounting", () => {
         executionId: workflowExecutionId,
         workflowId,
         input: {},
-        requesterGroupIds: [],
       })
       await storage.workflowRuns.start({ id: workflowRunId, projectId: "project_1" })
       await storage.workflowRuns.nodes.start({
@@ -218,6 +217,7 @@ describe("SqliteStorage AI accounting", () => {
         projectId: "project_1",
         runId: parentRunId,
         authority: "inherited",
+        requesterGroupIds: ["users"],
       })
       await storage.agents.runs.create({
         id: parentRunId,
@@ -226,7 +226,6 @@ describe("SqliteStorage AI accounting", () => {
         threadId: "thread_1",
         triggerMessageId: "message_1",
         spec: { model: { provider: "test", modelId: "test-model" } },
-        requesterGroupIds: ["users"],
       })
       await storage.agents.runs.start({
         id: parentRunId,
@@ -313,7 +312,6 @@ describe("SqliteStorage AI accounting", () => {
         threadId: "thread_1",
         triggerMessageId: "message_1",
         spec: { model: { provider: "test", modelId: "test-model" } },
-        requesterGroupIds: [],
       })
       await storage.transaction(async (tx) => {
         const usage = await tx.aiUsage!.recordModelCall({

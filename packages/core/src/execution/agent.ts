@@ -1,7 +1,7 @@
 import { type AgentExecutionAuthorization, agentServiceAccountId } from "../agents/authority"
 import type { OntologySource } from "../ontology"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
-import type { CreateExecutionInput, ExecutionRecord } from "../storage/executions"
+import type { ExecutionRecord } from "../storage/executions"
 import { ExecutionStorageError } from "../storage/executions"
 
 export { ensureExecutionRecord } from "./durable"
@@ -36,11 +36,12 @@ export function createAgentExecutionRecord(input: {
   readonly actorId: string
   readonly runId: string
   readonly principal: Extract<AuthorizablePrincipal, { readonly type: "serviceAccount" }>
-}): CreateExecutionInput {
+}): Omit<ExecutionRecord, "createdAt"> {
   assertAgentPrincipal(input.actorId, input.principal)
   return {
     id: input.id,
     projectId: input.parent.projectId,
+    requesterGroupIds: [...input.parent.requesterGroupIds],
     ...(input.parent.requestedBy === undefined
       ? {}
       : { requestedBy: structuredClone(input.parent.requestedBy) }),
@@ -59,7 +60,7 @@ export function createInheritedAgentExecutionRecord(input: {
   readonly id: string
   readonly parent: ExecutionRecord
   readonly runId: string
-}): CreateExecutionInput {
+}): Omit<ExecutionRecord, "createdAt"> {
   const authority = input.parent.authorizationRef
   if (
     authority.type !== "disabled" &&
@@ -78,6 +79,7 @@ export function createInheritedAgentExecutionRecord(input: {
   return {
     id: input.id,
     projectId: input.parent.projectId,
+    requesterGroupIds: [...input.parent.requesterGroupIds],
     ...(input.parent.requestedBy === undefined
       ? {}
       : { requestedBy: structuredClone(input.parent.requestedBy) }),

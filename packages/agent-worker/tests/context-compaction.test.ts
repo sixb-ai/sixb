@@ -49,7 +49,6 @@ describe("agent conversation context estimation", () => {
       threadId,
       triggerMessageId: user.id,
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: [],
     })
     await agents.runs.start({
       id: "run_1",
@@ -204,7 +203,6 @@ describe("agent conversation context estimation", () => {
       threadId,
       triggerMessageId: user.id,
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: [],
     })
     await agents.runs.start({
       id: "fallback_run",

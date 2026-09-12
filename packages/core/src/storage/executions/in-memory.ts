@@ -1,11 +1,7 @@
 import type { AuthStorage } from "../auth"
 import { ExecutionStorageError } from "./errors"
 import type { CreateExecutionInput, ExecutionRecord, ExecutionStorage } from "./types"
-import {
-  cloneExecutionRecord,
-  normalizeExecutionRecord,
-  validateExecutionRecordReferences,
-} from "./validation"
+import { cloneExecutionRecord, prepareExecutionRecord } from "./validation"
 
 type RunRootOperation = <T>(run: () => Promise<T> | T) => Promise<T>
 
@@ -39,16 +35,15 @@ export class InMemoryExecutionStorage implements ExecutionStorage {
 
   async create(input: CreateExecutionInput): Promise<ExecutionRecord> {
     return this.runRootOperation(async () => {
-      const record = normalizeExecutionRecord(input)
-      const key = executionKey(record.projectId, record.id)
+      const key = executionKey(input.projectId, input.id)
       if (this.rows.has(key)) {
         throw new ExecutionStorageError(
           "duplicate_execution",
-          `[Sixb] Execution '${record.id}' already exists in project '${record.projectId}'.`
+          `[Sixb] Execution '${input.id}' already exists in project '${input.projectId}'.`
         )
       }
 
-      await validateExecutionRecordReferences(record, {
+      const record = await prepareExecutionRecord(input, {
         auth: this.auth,
         getExecution: async ({ projectId, id }) => {
           const existing = this.rows.get(executionKey(projectId, id))
