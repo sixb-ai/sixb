@@ -106,6 +106,8 @@ conflicting ties abort the merge. Deletes require `change.delete(key, { sequence
 manifest retains source revisions and deletion tombstones, published atomically with the version's
 rows through the dataset head pointer. New tombstones create a version even for absent keys.
 Sequenced provider writes use merge sessions; snapshot syncs convert rows to ordered upserts.
+Snapshot syncs use `commit({ createInitialVersion: true })` to make a first empty result
+addressable. Later no-op commits reuse the current version, including after a concurrent write.
 Use `commit({ retryOnConflict: true })` to rebase retained changes, with at most 3 attempts.
 Explicit `expectedLatestVersionId` guards are never relaxed.
 See [source ordering](../../docs/data/datasets.md#source-ordering).

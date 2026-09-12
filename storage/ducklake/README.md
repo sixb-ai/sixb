@@ -192,6 +192,8 @@ identical ties are unchanged, and conflicting ties abort the merge. Deletes requ
 companion DuckLake table in the same transaction as visible rows, surviving snapshot expiration.
 New tombstone state creates a version even when the visible row count stays zero. Sequenced
 provider writes use merge sessions; snapshot syncs convert rows to ordered upserts.
+Snapshot syncs use `commit({ createInitialVersion: true })` to make a first empty result
+addressable. Later no-op commits reuse the current version, including after a concurrent write.
 Use `commit({ retryOnConflict: true })` to rebase retained changes, with at most 3 attempts.
 Explicit `expectedLatestVersionId` guards are never relaxed.
 See [source ordering](../../docs/data/datasets.md#source-ordering).

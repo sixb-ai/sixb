@@ -85,6 +85,7 @@ export async function writeDataset<TValue extends DatasetWriteValue>(
       throwIfAborted(signal)
       const result = await session.commit({
         commitMessage: input.commitMessage,
+        createInitialVersion: reconcileSnapshot,
         retryOnConflict: dataset.sequenceBy !== undefined,
         signal,
       })

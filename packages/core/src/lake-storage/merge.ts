@@ -13,6 +13,8 @@ export interface BeginDatasetMergeInput {
 
 export interface CommitDatasetMergeInput {
   readonly commitMessage?: string
+  /** Create an addressable first version even without changes; reuse an existing version on no-op. */
+  readonly createInitialVersion?: boolean
   /** Retry sequenced merges up to three times total; ignored when an explicit version guard is set. */
   readonly retryOnConflict?: boolean
   /** Checked before each attempt; a durable commit is never cancelled retroactively. */

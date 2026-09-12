@@ -39,7 +39,8 @@ export interface ExecuteSqlTransformInput<TSqlDialect extends SqlDialect = SqlDi
   readonly target: DatasetDefinition
   readonly mode: DatasetWriteMode
   readonly producer?: DatasetProducer
-  readonly expectedLatestVersionId?: string
+  /** Atomic target version guard; null requires that no version exists. */
+  readonly expectedLatestVersionId?: string | null
   readonly commitMessage?: string
 }
 

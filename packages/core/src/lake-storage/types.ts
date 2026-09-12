@@ -73,7 +73,8 @@ export interface ReadDatasetRowsInput {
 }
 
 export interface CommitDatasetWriteInput {
-  readonly expectedLatestVersionId?: string
+  /** Atomic version guard; null requires that no version exists, undefined leaves it unguarded. */
+  readonly expectedLatestVersionId?: string | null
   readonly commitMessage?: string
 }
 
@@ -81,11 +82,14 @@ export interface DatasetWriteCommitResult extends DatasetVersion {
   /**
    * Whether this operation created the returned version or reused the
    * unchanged latest version. When a latest version exists, providers must
-   * report `unchanged` and reuse it for commits that cannot change visible
-   * dataset content: a snapshot whose rows equal the latest visible rows
+   * report `unchanged` and reuse it for commits that change neither visible
+   * dataset content nor explicitly supplied input lineage: a snapshot whose
+   * rows equal the latest visible rows
    * (order-insensitive, with equal duplicate counts), or an append of zero
    * rows. Without a latest version, an empty snapshot or append still creates
-   * the first addressable dataset version.
+   * the first addressable dataset version. New input versions create a version
+   * even for identical rows, so a newer pipeline calculation fences concurrent
+   * work based on older inputs.
    */
   readonly outcome: "created" | "unchanged"
 }

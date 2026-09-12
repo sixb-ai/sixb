@@ -68,3 +68,4 @@ export type {
   LakeWriteSession,
   ReadDatasetRowsInput,
 } from "./types"
+export { hasDatasetInputChanges } from "./version-inputs"

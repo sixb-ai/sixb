@@ -710,6 +710,7 @@ describe("runPipelineJob", () => {
 
     expect(lakeStorage.executeCalls).toHaveLength(1)
     expect(lakeStorage.executeCalls[0]).toMatchObject({
+      expectedLatestVersionId: null,
       target: customerStatsDataset,
       mode: "append",
       producer: {
@@ -753,6 +754,9 @@ describe("runPipelineJob", () => {
         versionId: result.version?.versionId,
       },
     })
+    // Removing the worker's output guard must fail these assertions.
+    await runPipelineJob({ runtime, job: { id: "run_sql_second", pipelineId: "customers" } })
+    expect(lakeStorage.executeCalls[1]?.expectedLatestVersionId).toBe(result.version?.versionId)
   })
 
   test("fails SQL steps clearly when lake storage has no SQL transform support", async () => {
@@ -830,3 +834,71 @@ describe("runPipelineJob", () => {
     expect(stepRuns.steps[0]?.error?.message).toBe("Pipeline step execution failed.")
   })
 })
+
+for (const baseline of ["missing", "existing", "same-as-newer"] as const) {
+  test(`fences a stale pipeline with ${baseline} output`, async () => {
+    // Regression proof: omit the output guard in executeRunStep, or capture it after reading
+    // inputs; the slow run publishes stale data. Ignoring changed input lineage also breaks
+    // same-as-newer: the fast run must fence old work even when its rows equal the prior output.
+    const lakeStorage = new InMemoryLakeStorage()
+    const source = rawCustomersDataset
+    const target = customersDataset
+    await seedDatasetVersion(lakeStorage, source, [{ id: "42", name: "Sam" }])
+    if (baseline !== "missing") {
+      await seedDatasetVersion(lakeStorage, target, [
+        { id: "42", name: baseline === "same-as-newer" ? "Samuel" : "Before" },
+      ])
+    }
+    let release!: () => void
+    let started!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    const ready = new Promise<void>((resolve) => {
+      started = resolve
+    })
+    const readLatest = lakeStorage.getLatestVersion.bind(lakeStorage)
+    let holdSourceRead = true
+    lakeStorage.getLatestVersion = async (datasetId) => {
+      const version = await readLatest(datasetId)
+      if (datasetId === source.id && holdSourceRead) {
+        holdSourceRead = false
+        started()
+        await gate
+      }
+      return version
+    }
+    const step = definePipelineStep("copy")
+      .inputs({ source })
+      .output(target)
+      .run(async ({ inputs, output }) => {
+        const rows = await collectRows(inputs.source!.readRows())
+        await output.writeRows(rows)
+      })
+    const pipeline = definePipeline("copy").then(step)
+    const runtime = createRuntime({
+      pipelines: [pipeline],
+      datasets: [source, target],
+      lakeStorage,
+    })
+    const slow = runPipelineJob({ runtime, job: { id: "slow", pipelineId: pipeline.id } })
+    await ready
+    try {
+      await seedDatasetVersion(lakeStorage, source, [{ id: "42", name: "Samuel" }])
+      await runPipelineJob({ runtime, job: { id: "fast", pipelineId: pipeline.id } })
+    } finally {
+      release()
+    }
+    await expect(slow).rejects.toThrow("Optimistic")
+    expect(await collectRows(lakeStorage.readRows({ datasetId: target.id }))).toEqual([
+      { id: "42", name: "Samuel" },
+    ])
+    expect(
+      await runtime.pipelineRunsStorage.getById({ projectId: runtime.id, id: "slow" })
+    ).toMatchObject({ status: "failed", error: { code: "pipeline.step_failed", retryable: false } })
+    // An explicit new run reads current inputs. Repeating the same inputs is still a no-op.
+    const latest = await lakeStorage.getLatestVersion(target.id)
+    await runPipelineJob({ runtime, job: { id: "fresh", pipelineId: pipeline.id } })
+    expect(await lakeStorage.getLatestVersion(target.id)).toEqual(latest)
+  })
+}

@@ -13,6 +13,7 @@ import type {
 import {
   assertUnsequencedDatasetWrite,
   getDatasetPrimaryKeyColumns,
+  hasDatasetInputChanges,
   LakeConcurrencyError,
   LakeStorageError,
   retryDatasetMergeCommit,
@@ -46,7 +47,7 @@ import { parseCommitMetadata, type SixbCommitMetadata } from "./versions"
 export interface DuckLakeCommitDatasetVersionInput {
   readonly dataset: DatasetDefinition
   readonly mode: DatasetWriteMode
-  readonly expectedLatestVersionId?: string
+  readonly expectedLatestVersionId?: string | null
   readonly commitMessage: string
   readonly producer?: BeginDatasetWriteInput["producer"]
   readonly inputs?: BeginDatasetWriteInput["inputs"]
@@ -201,7 +202,7 @@ export class DuckLakeWriteCoordinator {
           dataset: definition,
           mode: "merge",
           expectedLatestVersionId: baseVersionId,
-          allowInitialNoOp: true,
+          allowInitialNoOp: !input.commit?.createInitialVersion,
           signal: input.commit?.signal,
           disableRetries: true,
           optimisticOperation: "merge commit",
@@ -350,7 +351,7 @@ export class DuckLakeWriteCoordinator {
         validatedPrimaryKeyColumns: latestVersion?.validatedPrimaryKeyColumns,
       })
       input.signal?.throwIfAborted()
-      await this.ensureInitialNoOpHasSnapshot(input, changeResult, latestVersion)
+      await this.ensureNoOpHasSnapshot(input, changeResult, latestVersion)
       const commitId = randomUUID()
       await this.setCommitMetadata(
         input,
@@ -523,26 +524,30 @@ export class DuckLakeWriteCoordinator {
     )
   }
 
-  private async ensureInitialNoOpHasSnapshot(
+  private async ensureNoOpHasSnapshot(
     input: DuckLakeCommitVersionOutcomeRuntimeInput,
     changeResult: ApplyDatasetRowsResult,
     knownLatestVersion: DuckLakeVersionSummary | null
   ): Promise<void> {
-    if (changeResult.dataChangeExpected || input.allowInitialNoOp) {
+    if (changeResult.dataChangeExpected) {
       return
     }
 
     const latestVersion =
       knownLatestVersion ??
       (await this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset))
-    if (latestVersion) {
+    if (
+      latestVersion
+        ? input.mode === "merge" || !hasDatasetInputChanges(latestVersion.inputs, input.inputs)
+        : input.allowInitialNoOp
+    ) {
       return
     }
 
     // DuckLake 1.5.2 does not create a snapshot for a transaction whose data and metadata are
     // unchanged, and set_commit_message alone cannot force one. Reapplying the current table
     // comment is an idempotent metadata write: it leaves the visible DatasetDefinition unchanged
-    // while giving the first empty write a real DuckLake snapshot for time travel and lineage.
+    // while giving initial empty writes and changed input lineage a real DuckLake snapshot.
     const table = qualifiedTableName(this.options, encodeDatasetTableName(input.dataset.id))
     const descriptionSql =
       input.dataset.description === undefined ? "NULL" : quoteSqlString(input.dataset.description)

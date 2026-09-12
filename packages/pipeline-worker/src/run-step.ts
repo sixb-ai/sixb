@@ -47,13 +47,8 @@ export async function runStep(input: {
   throwIfAborted(signal)
   let resolvedInputs: readonly ResolvedStepInput[]
   let outputDataset: DatasetDefinition
+  let expectedLatestVersionId: string | null
   try {
-    resolvedInputs = await resolveStepInputs({
-      runtime,
-      pipeline,
-      step,
-      pipelineRunId: job.id,
-    })
     outputDataset = requireRegisteredDataset({
       dataset: runtime.datasets.getById(step.output.id),
       pipelineId: pipeline.id,
@@ -64,6 +59,16 @@ export async function runStep(input: {
     })
 
     await runtime.lakeStorage.createDataset(outputDataset)
+    // Capture the output guard before any input is pinned. A later capture could legitimize
+    // overwriting a concurrent run with results computed from older inputs.
+    expectedLatestVersionId =
+      (await runtime.lakeStorage.getLatestVersion(outputDataset.id))?.versionId ?? null
+    resolvedInputs = await resolveStepInputs({
+      runtime,
+      pipeline,
+      step,
+      pipelineRunId: job.id,
+    })
   } catch (error) {
     if (statusForFailure(signal, error) === "failed") {
       throw createPipelineStepFailure({
@@ -102,6 +107,7 @@ export async function runStep(input: {
       signal,
       logSession: input.logSession,
       outputDataset,
+      expectedLatestVersionId,
       resolvedInputs,
     })
     committedVersion = execution.version
@@ -187,6 +193,7 @@ async function executeStep(input: {
   readonly signal: AbortSignal
   readonly logSession: PipelineLogSession
   readonly outputDataset: DatasetDefinition
+  readonly expectedLatestVersionId: string | null
   readonly resolvedInputs: readonly ResolvedStepInput[]
 }): Promise<StepExecutionResult> {
   switch (input.step.executor.kind) {

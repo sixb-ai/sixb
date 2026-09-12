@@ -575,6 +575,42 @@ describe("DuckLake SQL transforms", () => {
     ])
   })
 
+  // Regression: remove the null guard or lineage-only snapshot creation; this test must fail.
+  test("guards initial SQL output and advances lineage even when rows stay identical", async () => {
+    const target = defineDataset("guarded.sql-output", { schema: customersDataset.schema.columns })
+    await storage.createDataset(target)
+    const firstSource = await commitRows(storage, customersDataset, [
+      { customerId: "one", name: "Ada" },
+    ])
+    const execute = (versionId: string, expectedLatestVersionId: string | null) =>
+      storage.sql.execute({
+        sources: { customers: { dataset: customersDataset, versionId } },
+        target,
+        mode: "snapshot",
+        expectedLatestVersionId,
+        sql: ({ customers }) => `SELECT customerId, 'Constant' AS name FROM ${customers}`,
+      })
+    const first = await execute(firstSource.versionId, null)
+    expect(first.outcome).toBe("created")
+    const nextSource = await commitRows(storage, customersDataset, [
+      { customerId: "one", name: "Grace" },
+    ])
+    const next = await execute(nextSource.versionId, first.versionId)
+    expect(next.outcome).toBe("created")
+    expect(next.versionId).not.toBe(first.versionId)
+    expect(next.inputs).toEqual([
+      { datasetId: customersDataset.id, versionId: nextSource.versionId },
+    ])
+    await expect(execute(firstSource.versionId, first.versionId)).rejects.toThrow("Optimistic")
+    await expect(execute(nextSource.versionId, null)).rejects.toThrow("Optimistic")
+    const repeated = await execute(nextSource.versionId, next.versionId)
+    expect(repeated.outcome).toBe("unchanged")
+    expect(repeated.versionId).toBe(next.versionId)
+    expect(await collectRows(storage.readRows({ datasetId: target.id }))).toEqual([
+      { customerId: "one", name: "Constant" },
+    ])
+  })
+
   test("rejects stale expected latest versions for SQL execute commits", async () => {
     const firstVersion = await storage.sql.execute({
       sources: {},
