@@ -79,6 +79,7 @@ type PublicReaderMethod =
   | "count"
   | "exists"
   | "facet"
+  | "admitTelemetryHistoryRead"
 
 type InputsWithoutProjectId = {
   [Method in PublicReaderMethod]: "projectId" extends keyof Parameters<
@@ -101,6 +102,7 @@ const inputsWithoutProjectId: InputsWithoutProjectId = {
   count: true,
   exists: true,
   facet: true,
+  admitTelemetryHistoryRead: true,
 }
 
 type FacadeIsNominal =
@@ -331,6 +333,7 @@ describe("AuthorizedObjectReader", () => {
     })
 
     expect(backend.selectedScopeCalls).toBe(0)
+    expect(backend.calls.filter((call) => call.operation === "selectsObjectProperties")).toEqual([])
     for (const call of backend.calls) {
       if (call.operation === "queryCapabilities") continue
       expect(call.input).toMatchObject({ projectId })
