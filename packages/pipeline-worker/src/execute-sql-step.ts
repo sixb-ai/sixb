@@ -60,6 +60,7 @@ export async function executeSqlStep(input: {
   readonly job: PipelineJob
   readonly signal: AbortSignal
   readonly outputDataset: DatasetDefinition
+  readonly expectedLatestVersionId: string | null
   readonly resolvedInputs: readonly ResolvedStepInput[]
 }): Promise<{
   readonly version: DatasetVersion
@@ -126,6 +127,7 @@ export async function executeSqlStep(input: {
     ),
     sql: step.executor.sql,
     target: outputDataset,
+    expectedLatestVersionId: input.expectedLatestVersionId,
     mode: step.mode,
     producer: {
       kind: "pipeline",

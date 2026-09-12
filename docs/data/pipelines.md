@@ -235,6 +235,14 @@ sixb worker-group sync pipeline projection
 
 See [deployment](../deployment/overview.md) for running workers in production.
 
+## Concurrent runs
+
+Each step captures its output version before pinning inputs, including when no version exists.
+
+If the output changes before commit, the step fails. Start a new run to recompute; there is no automatic retry.
+
+New input versions create an output version and update event even when rows are unchanged, protecting against older runs. Identical inputs and rows remain a no-op.
+
 ## Notes
 
 - Steps write `snapshot` output by default; use `{ mode: "append" }` when you mean to add rows.

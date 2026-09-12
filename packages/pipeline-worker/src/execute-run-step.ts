@@ -19,6 +19,7 @@ export async function executeRunStep(input: {
   readonly signal: AbortSignal
   readonly logSession: PipelineLogSession
   readonly outputDataset: DatasetDefinition
+  readonly expectedLatestVersionId: string | null
   readonly resolvedInputs: readonly ResolvedStepInput[]
 }): Promise<{
   readonly version: DatasetVersion
@@ -80,6 +81,7 @@ export async function executeRunStep(input: {
     throwIfAborted(signal)
 
     const commit = await write.commit({
+      expectedLatestVersionId: input.expectedLatestVersionId,
       commitMessage: `pipeline ${pipeline.id} step ${step.id} run ${job.id}`,
     })
     const { outcome, ...version } = commit

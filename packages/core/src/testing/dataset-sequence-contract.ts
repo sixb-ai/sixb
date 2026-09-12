@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
+import { InMemoryBlobStorage } from "../blob-storage"
 import { change, col, type DatasetDefinition, defineDataset, type MergeChange } from "../datasets"
-import type { DatasetRow, LakeStorage } from "../lake-storage"
+import { writeDataset } from "../datasets/write"
+import type { DatasetMergeCommitResult, DatasetRow, LakeStorage } from "../lake-storage"
 import type { LakeMergeStorageContractSuiteOptions } from "./lake-merge-storage-contract"
 
 const dataset = defineDataset("contract.source_order", {
@@ -31,7 +33,7 @@ async function merge(
   }
 }
 
-async function rows(storage: LakeStorage, definition = dataset) {
+async function rows(storage: LakeStorage, definition: DatasetDefinition = dataset) {
   const result: DatasetRow[] = []
   for await (const row of storage.readRows({ datasetId: definition.id })) result.push(row)
   return result
@@ -51,6 +53,59 @@ export function runDatasetSequenceContract<TStorage extends LakeStorage>(
   }
 
   describe("source ordering", () => {
+    test("initializes empty snapshots and preserves versions across retries and reopen", async () => {
+      // Regression proof: remove createInitialVersion from the writer or provider; the first
+      // snapshot has no version. Ignore the rebased head and the concurrent-write assertion fails.
+      let storage = await options.createStorage()
+      const snapshot = () =>
+        writeDataset({
+          lakeStorage: storage,
+          blobStorage: new InMemoryBlobStorage(),
+          dataset,
+          mode: "snapshot",
+          signal: new AbortController().signal,
+          readValues: async () => [],
+        })
+      try {
+        await storage.createDataset(dataset)
+        expect(await merge(storage, [])).toEqual({ outcome: "unchanged", version: null })
+        const initialized = await Promise.all([snapshot(), snapshot()])
+        expect(initialized.map((result) => result.outcome).sort()).toEqual(["created", "unchanged"])
+        const initial = initialized.find((result) => result.outcome === "created")!
+        expect(initialized[0]?.version).toEqual(initialized[1]?.version)
+        expect(initial).toMatchObject({
+          outcome: "created",
+          version: { rowCount: 0, mode: "merge" },
+        })
+        expect(await rows(storage)).toEqual([])
+        if (options.reopen) storage = await options.reopen(storage)
+        expect(await storage.getLatestVersion(dataset.id)).toEqual(initial.version)
+        expect(await snapshot()).toMatchObject({ outcome: "unchanged", version: initial.version })
+
+        const concurrent = defineDataset("contract.empty_race", {
+          schema: dataset.schema.columns,
+          primaryKey: "id",
+          sequenceBy: "revision",
+        })
+        let committed: DatasetMergeCommitResult | undefined
+        const rebased = await writeDataset({
+          lakeStorage: storage,
+          blobStorage: new InMemoryBlobStorage(),
+          dataset: concurrent,
+          mode: "snapshot",
+          signal: new AbortController().signal,
+          readValues: async () => {
+            committed = await merge(storage, [upsert(8)], concurrent)
+            return []
+          },
+        })
+        expect(rebased).toMatchObject({ outcome: "unchanged", version: committed?.version })
+        expect(await rows(storage, concurrent)).toHaveLength(1)
+      } finally {
+        await options.teardown?.(storage)
+      }
+    })
+
     test("rejects lossy timestamps outside the ordering column before changing source state", () =>
       withStorage(async (storage) => {
         // Regression proof: remove the sequenced timestamp check in getColumnValidationError;

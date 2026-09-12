@@ -471,6 +471,64 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
         })
       })
 
+      test("guards initial and existing versions before accepting even an unchanged write", () =>
+        withStorage(async (storage) => {
+          // Regression proof: treat null like undefined or move the version guard after no-op
+          // detection. An old writer then succeeds after a competing version has committed.
+          await storage.createDataset(writeDataset)
+          const first = await storage.beginWrite({ dataset: writeDataset })
+          const stale = await storage.beginWrite({ dataset: writeDataset })
+          const initial = await first.commit({ expectedLatestVersionId: null })
+          await expect(stale.commit({ expectedLatestVersionId: null })).rejects.toThrow(
+            "Optimistic"
+          )
+          await stale.abort()
+          const replacement = await storage.beginWrite({ dataset: writeDataset })
+          await replacement.writeRows([{ orderId: "ord_1", customerName: "Ada" }])
+          const next = await replacement.commit({ expectedLatestVersionId: initial.versionId })
+          const identical = await storage.beginWrite({ dataset: writeDataset })
+          await identical.writeRows([{ orderId: "ord_1", customerName: "Ada" }])
+          await expect(
+            identical.commit({ expectedLatestVersionId: initial.versionId })
+          ).rejects.toThrow("Optimistic")
+          await identical.abort()
+          expect((await storage.getLatestVersion(writeDataset.id))?.versionId).toBe(next.versionId)
+        }))
+
+      test("versions changed input lineage even when output rows are identical", () =>
+        withStorage(async (storage) => {
+          // Regression proof: omit hasDatasetInputChanges in the provider's no-op branch.
+          // The updated input reference is lost and the stale writer is no longer fenced.
+          await storage.createDataset(writeDataset)
+          await storage.createDataset(definitionDataset)
+          const sourceWrite = await storage.beginWrite({ dataset: definitionDataset })
+          const source1 = await sourceWrite.commit()
+          const rows = [{ orderId: "ord_1", customerName: "Ada" }]
+          const ref1 = { datasetId: definitionDataset.id, versionId: source1.versionId }
+          const first = await storage.beginWrite({ dataset: writeDataset, inputs: [ref1] })
+          await first.writeRows(rows)
+          const initial = await first.commit({ expectedLatestVersionId: null })
+          const stale = await storage.beginWrite({ dataset: writeDataset, inputs: [ref1] })
+          await stale.writeRows([{ orderId: "ord_1", customerName: "Stale" }])
+          const sourceUpdate = await storage.beginWrite({ dataset: definitionDataset })
+          await sourceUpdate.writeRows([{ orderId: "source", customerName: "Changed" }])
+          const source2 = await sourceUpdate.commit()
+          const ref2 = { datasetId: definitionDataset.id, versionId: source2.versionId }
+          const update = await storage.beginWrite({ dataset: writeDataset, inputs: [ref2] })
+          await update.writeRows(rows)
+          const newer = await update.commit({ expectedLatestVersionId: initial.versionId })
+          expect(newer).toMatchObject({ outcome: "created", inputs: [ref2] })
+          await expect(
+            stale.commit({ expectedLatestVersionId: initial.versionId })
+          ).rejects.toThrow("Optimistic")
+          await stale.abort()
+          const same = await storage.beginWrite({ dataset: writeDataset, inputs: [ref2] })
+          await same.writeRows(rows)
+          const unchanged = await same.commit({ expectedLatestVersionId: newer.versionId })
+          expect(unchanged).toMatchObject({ outcome: "unchanged", versionId: newer.versionId })
+          expect(await collectRows(storage.readRows({ datasetId: writeDataset.id }))).toEqual(rows)
+        }))
+
       test("creates an initial empty append version", async () => {
         await withStorage(async (storage) => {
           await storage.createDataset(writeDataset)

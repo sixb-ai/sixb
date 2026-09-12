@@ -59,6 +59,7 @@ interface VisibleSnapshotRowsInput {
 export interface DuckLakeVersionSummary {
   readonly datasetId: string
   readonly versionId: string
+  readonly inputs?: readonly DatasetVersionRef[]
   readonly rowCount?: number
   readonly validatedPrimaryKeyColumns?: readonly string[]
 }
@@ -444,6 +445,7 @@ export class DuckLakeSnapshotReader {
     return {
       datasetId: tableRef.datasetId,
       versionId: toVersionId(row.snapshotId),
+      inputs: row.metadata?.inputs,
       ...(row.metadata?.rowCount !== undefined ? { rowCount: row.metadata.rowCount } : {}),
       ...(row.metadata?.validatedPrimaryKeyColumns !== undefined
         ? { validatedPrimaryKeyColumns: row.metadata.validatedPrimaryKeyColumns }

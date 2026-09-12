@@ -34,6 +34,7 @@ import {
   encodeDatasetPrimaryKey,
   getDatasetMergeChangeValidationError,
   getDatasetPrimaryKeyColumns,
+  hasDatasetInputChanges,
   LakeConcurrencyError,
   type LakeMergeSession,
   type LakeStorage,
@@ -527,10 +528,12 @@ export class LocalLakeStorage implements LakeStorage {
         }
       }
 
+      const createInitialVersion = options.commit?.createInitialVersion && latestVersion === null
       if (
-        ordered
+        !createInitialVersion &&
+        (ordered
           ? ordered.accepted.size === 0
-          : this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema)
+          : this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema))
       ) {
         await rm(options.sessionDir, { recursive: true, force: true })
         return { outcome: "unchanged", version: latestVersion }
@@ -599,10 +602,10 @@ export class LocalLakeStorage implements LakeStorage {
 
     const latestVersion = await this.getLatestVersion(options.write.dataset.id)
     if (options.commit?.expectedLatestVersionId !== undefined) {
-      const actual = latestVersion?.versionId
+      const actual = latestVersion?.versionId ?? null
       if (actual !== options.commit.expectedLatestVersionId) {
-        throw new LakeStorageError(
-          `[LakeLocal] Optimistic commit failed for dataset '${options.write.dataset.id}': expected latest version '${options.commit.expectedLatestVersionId}', found '${actual ?? "none"}'`
+        throw new LakeConcurrencyError(
+          `[LakeLocal] Optimistic commit failed for dataset '${options.write.dataset.id}': expected latest version '${options.commit.expectedLatestVersionId ?? "none"}', found '${actual ?? "none"}'`
         )
       }
     }
@@ -625,8 +628,12 @@ export class LocalLakeStorage implements LakeStorage {
     }
 
     // Content-identical snapshots and empty appends reuse the latest version
-    // instead of creating a new one.
-    if (latestVersion && (await this.isUnchangedWrite(mode, options, latestVersion, definition))) {
+    // unless explicitly supplied input lineage has changed.
+    if (
+      latestVersion &&
+      !hasDatasetInputChanges(latestVersion.inputs, options.write.inputs) &&
+      (await this.isUnchangedWrite(mode, options, latestVersion, definition))
+    ) {
       await rm(options.sessionDir, { recursive: true, force: true })
       return { ...latestVersion, outcome: "unchanged" }
     }

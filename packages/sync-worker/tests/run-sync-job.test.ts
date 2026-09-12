@@ -360,6 +360,36 @@ describe("runSyncJob", () => {
       expect(emptyResult.versionCreated).toBe(false)
       expect(emptyResult.version?.versionId).toBe(result.version?.versionId)
     })
+  test("initializes an empty sequenced snapshot and stores its version and checkpoint", async () => {
+    // Regression proof: remove createInitialVersion in writeDataset; the first sync succeeds
+    // without an output version and cannot feed dataset-updated consumers.
+    const dataset = defineDataset("source.empty-initial", {
+      schema: [col("id", "string"), col("revision", "int64")],
+      primaryKey: "id",
+      sequenceBy: "revision",
+    })
+    const sync = defineSync("source.empty-initial", { mode: "snapshot" })
+      .checkpoint<{ page: string }>()
+      .from(erpDb)
+      .read((_client, { setCheckpoint }) => {
+        setCheckpoint({ page: "done" })
+        return []
+      })
+      .intoDataset(dataset)
+    const runtime = createRuntime({ sync })
+    const first = await runSyncJob({ runtime, job: { id: "empty-first", syncId: sync.id } })
+    expect(first).toMatchObject({ rowsRead: 0, versionCreated: true, version: { rowCount: 0 } })
+    expect(
+      await runtime.syncRunsStorage.getById({ projectId: runtime.id, id: first.id })
+    ).toMatchObject({
+      status: "succeeded",
+      output: { datasetId: dataset.id, versionId: first.version?.versionId },
+      checkpoint: storedErpCheckpoint({ page: "done" }),
+    })
+    const second = await runSyncJob({ runtime, job: { id: "empty-second", syncId: sync.id } })
+    expect(second).toMatchObject({ versionCreated: false, version: first.version })
+  })
+
   test("commits a snapshot sync, defines the dataset first, and stores a succeeded run", async () => {
     const calls: string[] = []
     const lakeStorage = new InMemoryLakeStorage()

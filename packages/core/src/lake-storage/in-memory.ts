@@ -34,6 +34,7 @@ import type {
   LakeWriteSession,
   ReadDatasetRowsInput,
 } from "./types"
+import { hasDatasetInputChanges } from "./version-inputs"
 
 function cloneDatasetDefinition(definition: DatasetDefinition): DatasetDefinition {
   return structuredClone(definition)
@@ -448,10 +449,12 @@ export class InMemoryLakeStorage implements LakeStorage {
         }
       }
 
+      const createInitialVersion = options.commit?.createInitialVersion && latestVersion === null
       if (
-        ordered
+        !createInitialVersion &&
+        (ordered
           ? ordered.accepted.size === 0
-          : this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema)
+          : this.sameKeyedRowContent(previousByKey, nextByKey, definition.schema))
       ) {
         return {
           outcome: "unchanged",
@@ -505,10 +508,10 @@ export class InMemoryLakeStorage implements LakeStorage {
     const latestVersion = await this.getLatestVersion(options.write.dataset.id)
 
     if (options.commit?.expectedLatestVersionId !== undefined) {
-      const actual = latestVersion?.versionId
+      const actual = latestVersion?.versionId ?? null
       if (actual !== options.commit.expectedLatestVersionId) {
-        throw new LakeStorageError(
-          `[LakeStorage] Optimistic commit failed for dataset '${options.write.dataset.id}': expected latest version '${options.commit.expectedLatestVersionId}', found '${actual ?? "none"}'`
+        throw new LakeConcurrencyError(
+          `[LakeStorage] Optimistic commit failed for dataset '${options.write.dataset.id}': expected latest version '${options.commit.expectedLatestVersionId ?? "none"}', found '${actual ?? "none"}'`
         )
       }
     }
@@ -516,9 +519,10 @@ export class InMemoryLakeStorage implements LakeStorage {
     this.assertKeyedWriteIsUnique(mode, options.rows, latestVersion, definition)
 
     // Content-identical snapshots and empty appends reuse the latest version
-    // instead of creating a new one.
+    // unless explicitly supplied input lineage has changed.
     if (
       latestVersion &&
+      !hasDatasetInputChanges(latestVersion.inputs, options.write.inputs) &&
       this.isUnchangedWrite(mode, latestVersion, options.rows, definition.schema)
     ) {
       return { ...latestVersion, outcome: "unchanged" }
