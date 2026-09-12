@@ -42,6 +42,8 @@ interface ModelLoopOptions {
   readonly maxOutputTokens?: number
   readonly caching?: "auto" | "off"
   readonly maxSteps: number
+  /** Direct generation cannot execute or synthesize local tool results. */
+  readonly rejectLocalToolCalls?: boolean
   readonly signal: AbortSignal
   /** Reserve the final provider call for a tool-free synthesis response. */
   readonly finalStepInstruction?: string
@@ -245,6 +247,12 @@ export async function runModelLoop(
     }
 
     const localCalls = response.toolCalls.filter((call) => call.part.providerExecuted !== true)
+    if (
+      input.rejectLocalToolCalls &&
+      (localCalls.length > 0 || response.finishReason === "tool-calls")
+    ) {
+      throw new ModelStreamError("[SixbModels] Direct generation cannot continue local tool calls.")
+    }
     if (response.finishReason === "pause" && localCalls.length === 0) {
       const step = modelStep(response, responseId, response.content, cost)
       steps.push(step)

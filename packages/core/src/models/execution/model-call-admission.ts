@@ -1,7 +1,7 @@
 import type { AiModelCallReservationIdentity } from "../../storage"
 import type { ModelCostEstimator } from "../pricing"
 
-/** Fixed internal allowance used only to estimate aggregate-budget reservations. */
+/** Default output ceiling when a call and its resolved model supply no limit. */
 export const AI_MODEL_CALL_OUTPUT_TOKEN_ALLOWANCE = 4_096
 
 export type AiModelCallInputTokenEstimate =

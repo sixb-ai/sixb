@@ -95,6 +95,10 @@ export class WorkflowWorker extends QueueWorker<
     const executionScope = bindDurablePrimitiveExecution(this.host, {
       execution: durableExecution,
       primitive: { kind: "workflow", id: run.workflowId, runId: run.id },
+      modelExecution: {
+        attempt: claimed.job.attempt,
+        signal,
+      },
     })
     const context = buildWorkflowContext(this.host, this.workflowRuns, executionScope.sixb)
     const stopOwnershipProjection = delivery.onLeaseRenewed((renewed) => {

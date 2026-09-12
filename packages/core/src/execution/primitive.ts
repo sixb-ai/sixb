@@ -1,3 +1,4 @@
+import { bindModelExecutionAttempt, type ModelExecutionAttempt } from "../models/execution/binding"
 import type { OntologySource } from "../ontology"
 import type { OntologyMutationRuntime } from "../runtime/ontology-mutations"
 import { getOntologyMutationRuntime } from "../runtime/ontology-mutations"
@@ -24,9 +25,12 @@ export function bindDurablePrimitiveExecution(
   input: {
     readonly execution: ExecutionRecord
     readonly primitive: TrustedPrimitiveRef
+    readonly modelExecution?: ModelExecutionAttempt
   }
 ): BoundPrimitiveExecution {
-  return bindPrimitiveScope(host, restoreTrustedPrimitiveExecutionScope(input))
+  const bound = bindPrimitiveScope(host, restoreTrustedPrimitiveExecutionScope(input))
+  if (input.modelExecution) bindModelExecutionAttempt(bound.sixb.models, input.modelExecution)
+  return bound
 }
 
 function bindPrimitiveScope(

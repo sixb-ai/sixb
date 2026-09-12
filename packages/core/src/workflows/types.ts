@@ -15,6 +15,7 @@ import type { EventsRuntime } from "../events/execution"
 import type { JsonValue } from "../json"
 import type { Logger } from "../logging"
 import type { LogsRuntime } from "../logging/execution"
+import type { ModelsRuntime } from "../models/generation-types"
 import type { LanguageModel } from "../models/language-model"
 import type { ObjectsRuntime } from "../objects/execution"
 import type { InferSchemaOrRef, ObjectRef, OntologySource, SchemaOrRef } from "../ontology"
@@ -60,6 +61,7 @@ export interface StepRunContext<TInput extends Record<string, unknown>> {
  * It is a type-level cycle break, not a separate runtime or compatibility surface.
  */
 export interface WorkflowRuntimeFacade {
+  readonly models: ModelsRuntime
   readonly objects: ObjectsRuntime<readonly OntologySource[]>
   readonly actions: ActionsRuntime
   readonly agent: AgentRuntime
