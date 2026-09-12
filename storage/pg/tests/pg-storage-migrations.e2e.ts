@@ -42,6 +42,49 @@ const Room = defineObjectType({
 const ontology = new OntologyRegistry({ sources: [Room] })
 
 describe("Postgres storage migrations", () => {
+  test("moves historical snapshots to executions and preserves empty child snapshots", async () => {
+    // Removal proof: omit 035's recursive backfill; the snapshots below become empty.
+    await withStorage(false, async (_storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
+        await sql.unsafe(`
+          CREATE TABLE executions (project_id TEXT, id TEXT, parent_execution_id TEXT);
+          CREATE TABLE workflow_runs (project_id TEXT, execution_id TEXT, requester_group_ids JSONB);
+          CREATE TABLE agent_runs (project_id TEXT, execution_id TEXT, requester_group_ids JSONB);
+          INSERT INTO executions VALUES ('p', 'root', NULL), ('p', 'workflow', 'root'),
+            ('p', 'task', 'workflow'), ('p', 'agent', 'root'), ('p', 'child', 'agent'),
+            ('p', 'empty', 'agent'), ('other', 'workflow', NULL);
+          INSERT INTO workflow_runs VALUES ('p', 'workflow', '["finance"]');
+          INSERT INTO agent_runs VALUES ('p', 'agent', '["support"]'), ('p', 'empty', '[]');
+        `)
+        const migration = postgresStorageMigrations.steps.find(
+          (step) => step.id === "035-execution-requester-groups"
+        )!
+        await migration.up({
+          exec: async (text) => {
+            await sql.unsafe(text)
+          },
+        })
+        const rows =
+          await sql`SELECT project_id, id, requester_group_ids FROM executions ORDER BY project_id, id`
+        expect([...rows]).toEqual([
+          { project_id: "other", id: "workflow", requester_group_ids: [] },
+          { project_id: "p", id: "agent", requester_group_ids: ["support"] },
+          { project_id: "p", id: "child", requester_group_ids: ["support"] },
+          { project_id: "p", id: "empty", requester_group_ids: [] },
+          { project_id: "p", id: "root", requester_group_ids: [] },
+          { project_id: "p", id: "task", requester_group_ids: ["finance"] },
+          { project_id: "p", id: "workflow", requester_group_ids: ["finance"] },
+        ])
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
   test("upgrades model accounting in one step without losing historical evidence or constraints", async () => {
     // Regression proof: omit 029's reason conversion or native ID columns, or change shipped 026.
     await withStorage(false, async (_storage, schemaName) => {
@@ -173,6 +216,7 @@ describe("Postgres storage migrations", () => {
             "032-conversation-run-spec",
             "033-retire-agent-definitions",
             "034-device-authorizations",
+            "035-execution-requester-groups",
           ],
         },
       ])
@@ -414,6 +458,13 @@ describe("Postgres storage migrations", () => {
           id: "034-device-authorizations",
           status: "applied",
           version: 34,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "035-execution-requester-groups",
+          status: "applied",
+          version: 35,
         },
       ])
     })
@@ -1421,7 +1472,7 @@ describe("Postgres storage migrations", () => {
       )
       expect(workflowAgentNodeColumns).toContain("actor_id")
       expect(workflowAgentNodeColumns).not.toContain("agent_id")
-      expect(agentRunColumns).toContain("requester_group_ids")
+      expect(agentRunColumns).not.toContain("requester_group_ids")
       expect(agentRunColumns).toEqual(
         expect.arrayContaining(["kind", "parent_run_id", "spawn_key", "spec", "result"])
       )
@@ -1433,7 +1484,10 @@ describe("Postgres storage migrations", () => {
       expect(agentRunColumns).not.toContain("usage_reasoning_tokens")
       expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
       expect(workflowAgentNodeColumns).not.toContain("usage")
-      expect(await readTableColumns(schemaName, "workflow_runs")).toContain("requester_group_ids")
+      expect(await readTableColumns(schemaName, "workflow_runs")).not.toContain(
+        "requester_group_ids"
+      )
+      expect(await readTableColumns(schemaName, "executions")).toContain("requester_group_ids")
     })
   })
 
@@ -1975,6 +2029,13 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 34,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "035-execution-requester-groups",
+          status: "applied",
+          version: 35,
+        },
       ])
     } finally {
       await storages[0]?.dropSchema()
@@ -2078,7 +2139,6 @@ async function seedExistingStoreRows(storage: PostgresStorage): Promise<void> {
     input: {
       transactionId: "txn-1",
     },
-    requesterGroupIds: [],
     queuedAt: new Date("2026-04-19T11:59:59.000Z"),
   })
   await storage.workflowRuns.start({

@@ -231,7 +231,6 @@ describe("agent routes", () => {
       executionId,
       threadId: thread.id,
       triggerMessageId: "legacy-message",
-      requesterGroupIds: [],
       spec: { model: { provider: "test", modelId: "test-model" } },
     })
     await storage.agents.runs.finishQueued({
@@ -572,7 +571,6 @@ describe("agent routes", () => {
       projectId: sixb.id,
       threadId: thread.id,
       triggerMessageId: "trigger-diagnostics",
-      requesterGroupIds: [],
       execution: testExecution(executionToken),
     })
     await storage.agents.messages.append({
@@ -647,7 +645,6 @@ describe("agent routes", () => {
       projectId: sixb.id,
       threadId: thread.id,
       triggerMessageId: "msg-current-user",
-      requesterGroupIds: [],
       execution: testExecution(executionToken),
     })
     const checkpoint = await storage.agents.checkpoints.create({
@@ -716,7 +713,6 @@ describe("agent routes", () => {
       projectId: sixb.id,
       threadId: thread.id,
       triggerMessageId: "msg-existing",
-      requesterGroupIds: [],
       execution: testExecution(),
     })
 
@@ -878,12 +874,14 @@ describe("agent routes", () => {
       id: request.run.id,
     })
     expect(originalRun).toMatchObject({
-      requesterGroupIds: ["admins", "support-users"],
       spec: { model: { provider: "test", modelId: "test-model" }, reasoning: "medium" },
     })
     await expect(
       storage.executions.getById({ projectId: sixb.id, id: originalRun?.executionId ?? "" })
-    ).resolves.toMatchObject({ requestedBy: { type: "user", id: "usr_retry" } })
+    ).resolves.toMatchObject({
+      requestedBy: { type: "user", id: "usr_retry" },
+      requesterGroupIds: ["admins", "support-users"],
+    })
     const execution = testExecution()
     await storage.agents.runs.start({
       id: request.run.id,
@@ -958,12 +956,14 @@ describe("agent routes", () => {
     expect(body.run.id).not.toBe(request.run.id)
     const retriedRun = await storage.agents.runs.getById({ projectId: sixb.id, id: body.run.id })
     expect(retriedRun).toMatchObject({
-      requesterGroupIds: ["ops-users", "support-users"],
       spec: originalRun?.spec,
     })
     await expect(
       storage.executions.getById({ projectId: sixb.id, id: retriedRun?.executionId ?? "" })
-    ).resolves.toMatchObject({ requestedBy: { type: "user", id: "usr_retry" } })
+    ).resolves.toMatchObject({
+      requestedBy: { type: "user", id: "usr_retry" },
+      requesterGroupIds: ["ops-users", "support-users"],
+    })
 
     await expect(
       storage.agents.messages.list({ projectId: sixb.id, threadId: request.run.threadId })
@@ -1037,7 +1037,6 @@ describe("agent routes", () => {
       projectId: sixb.id,
       threadId: thread.id,
       triggerMessageId: "msg-user",
-      requesterGroupIds: [],
       modelId: "test-model",
       execution: testExecution(),
       createdAt: new Date("2026-06-27T10:00:00.000Z"),
@@ -1124,7 +1123,6 @@ describe("agent routes", () => {
       threadId: thread.id,
       triggerMessageId: "msg-list-1",
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: [],
     })
     await storage.agents.runs.finishQueued({
       id: "run-list-1",
@@ -1142,7 +1140,6 @@ describe("agent routes", () => {
       threadId: thread.id,
       triggerMessageId: "msg-list-2",
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: [],
     })
 
     const aiUsage = storage.aiUsage
@@ -1189,7 +1186,6 @@ describe("agent routes", () => {
       projectId: sixb.id,
       threadId: thread.id,
       triggerMessageId: "msg-user",
-      requesterGroupIds: [],
       execution: testExecution(),
     })
 
@@ -1228,7 +1224,6 @@ describe("agent routes", () => {
       projectId: sixb.id,
       threadId: otherThread.id,
       triggerMessageId: "msg-other",
-      requesterGroupIds: [],
       execution: testExecution(),
     })
     const crossThread = await app.fetch(

@@ -266,6 +266,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 34,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "035-execution-requester-groups",
+    status: "applied",
+    version: 35,
+  },
 ]
 
 afterEach(async () => {
@@ -279,6 +286,44 @@ afterEach(async () => {
 })
 
 describe("SQLite storage migrations", () => {
+  test("moves historical snapshots to executions and preserves empty child snapshots", async () => {
+    // Removal proof: omit 035's recursive backfill; the snapshots below become empty.
+    const db = new Database(":memory:")
+    try {
+      db.exec(`
+        CREATE TABLE executions (project_id TEXT, id TEXT, parent_execution_id TEXT);
+        CREATE TABLE workflow_runs (project_id TEXT, execution_id TEXT, requester_group_ids TEXT);
+        CREATE TABLE agent_runs (project_id TEXT, execution_id TEXT, requester_group_ids TEXT);
+        INSERT INTO executions VALUES ('p', 'root', NULL), ('p', 'workflow', 'root'),
+          ('p', 'task', 'workflow'), ('p', 'agent', 'root'), ('p', 'child', 'agent'),
+          ('p', 'empty', 'agent'), ('other', 'workflow', NULL);
+        INSERT INTO workflow_runs VALUES ('p', 'workflow', '["finance"]');
+        INSERT INTO agent_runs VALUES ('p', 'agent', '["support"]'), ('p', 'empty', '[]');
+      `)
+      const migration = sqliteStorageMigrations.steps.find(
+        (step) => step.id === "035-execution-requester-groups"
+      )!
+      await migration.up(db)
+      expect(
+        db
+          .query(
+            "SELECT project_id, id, requester_group_ids FROM executions ORDER BY project_id, id"
+          )
+          .all()
+      ).toEqual([
+        { project_id: "other", id: "workflow", requester_group_ids: "[]" },
+        { project_id: "p", id: "agent", requester_group_ids: '["support"]' },
+        { project_id: "p", id: "child", requester_group_ids: '["support"]' },
+        { project_id: "p", id: "empty", requester_group_ids: "[]" },
+        { project_id: "p", id: "root", requester_group_ids: "[]" },
+        { project_id: "p", id: "task", requester_group_ids: '["finance"]' },
+        { project_id: "p", id: "workflow", requester_group_ids: '["finance"]' },
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
   test("upgrades model accounting in one step without losing historical evidence or constraints", () => {
     // Regression proof: omit 029's reason conversion or native ID columns, or change shipped 026.
     const db = new Database(":memory:")
@@ -1992,7 +2037,7 @@ describe("SQLite storage migrations", () => {
     const workflowAgentNodeColumns = readTableColumns(path, "workflow_agent_node_runs")
     expect(workflowAgentNodeColumns).toContain("actor_id")
     expect(workflowAgentNodeColumns).not.toContain("agent_id")
-    expect(agentRunColumns).toContain("requester_group_ids")
+    expect(agentRunColumns).not.toContain("requester_group_ids")
     expect(agentRunColumns).toEqual(
       expect.arrayContaining(["kind", "parent_run_id", "spawn_key", "spec", "result"])
     )
@@ -2004,7 +2049,8 @@ describe("SQLite storage migrations", () => {
     expect(agentRunColumns).not.toContain("usage_reasoning_tokens")
     expect(agentRunColumns).not.toContain("usage_cached_input_tokens")
     expect(workflowAgentNodeColumns).not.toContain("usage")
-    expect(readTableColumns(path, "workflow_runs")).toContain("requester_group_ids")
+    expect(readTableColumns(path, "workflow_runs")).not.toContain("requester_group_ids")
+    expect(readTableColumns(path, "executions")).toContain("requester_group_ids")
   })
 
   test("AI cost accounting migration preserves existing Phase 1 usage rows", () => {

@@ -372,6 +372,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("032-conversation-run-spec", conversationRunSpecSql),
     pgSql("033-retire-agent-definitions", retireAgentDefinitionsSql),
     pgSql("034-device-authorizations", deviceAuthorizationsSql),
+    pgSql("035-execution-requester-groups", executionRequesterGroupsSql),
   ],
 })
 
@@ -383,4 +384,8 @@ interface PostgresMigrationRow {
   readonly status: MigrationRecord["status"]
   readonly started_at: Date | string
   readonly finished_at: Date | string | null
+}
+
+import executionRequesterGroupsSql from "./migrations/035-execution-requester-groups.sql" with {
+  type: "text",
 }

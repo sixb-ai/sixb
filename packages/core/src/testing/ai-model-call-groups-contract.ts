@@ -195,7 +195,6 @@ async function seedWorkflowCall(
     workflowId,
     executionId: sourceExecutionId,
     input: {},
-    requesterGroupIds: [],
   })
   await storage.workflowRuns.start({ projectId, id: runId })
   const nodeRunId = `${runId}:node:0`
@@ -275,7 +274,6 @@ async function seed(storage: AiModelCallGroupsContractStorage) {
       threadId: "thread",
       triggerMessageId: `message_${runId}`,
       spec: { model: { provider: "parent-provider", modelId: "large" } },
-      requesterGroupIds: [],
     })
     await storage.agents.runs.start({
       id: runId,

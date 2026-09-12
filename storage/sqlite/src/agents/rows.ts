@@ -42,7 +42,6 @@ export interface AgentRunRow {
   spawn_key: string | null
   spec: string | null
   result: string | null
-  requester_group_ids: string
   status: AgentRunRecord["status"]
   model_id: string | null
   finish_reason: string | null
@@ -111,7 +110,6 @@ export function rowToRunRecord(row: AgentRunRow): AgentRunRecord {
     id: row.id,
     projectId: row.project_id,
     executionId: row.execution_id,
-    requesterGroupIds: JSON.parse(row.requester_group_ids) as string[],
     status: row.status,
     modelId: row.model_id ?? undefined,
     finishReason: coerceAgentRunFinishReason(row.finish_reason),

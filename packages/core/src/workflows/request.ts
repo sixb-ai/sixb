@@ -1,4 +1,3 @@
-import { snapshotRequesterGroupIds } from "../auth/attribution"
 import { assertAuthorized } from "../authorization"
 import {
   createPrimitiveExecutionRecord,
@@ -45,13 +44,6 @@ export async function requestWorkflowRun(
   options: WorkflowRunRequestOptions = {}
 ): Promise<WorkflowRunRequestResult> {
   assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
-  const requesterGroupIds = execution.requestedBy
-    ? await snapshotRequesterGroupIds({
-        auth: runtime.storage.auth,
-        projectId: runtime.projectId,
-        principal: execution.requestedBy,
-      })
-    : []
   return dispatchWorkflowRun({
     errorReporterHost: runtime,
     projectId: runtime.projectId,
@@ -63,7 +55,6 @@ export async function requestWorkflowRun(
     runId: options.runId,
     input: options.input,
     source: options.source,
-    requesterGroupIds,
     createExecution: async (executionId, runId) => {
       const caller = await ensureExecutionRecord(
         runtime.storage.executions,

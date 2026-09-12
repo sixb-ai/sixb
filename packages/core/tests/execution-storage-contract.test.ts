@@ -16,6 +16,7 @@ describe("execution SQL mapping", () => {
     const execution: ExecutionRecord = {
       id: "child",
       projectId: "project-1",
+      requesterGroupIds: [],
       executor: { type: "primitive", kind: "workflow", runId: "run-1" },
       source: { type: "execution", executionId: "parent" },
       correlationId: "correlation-1",

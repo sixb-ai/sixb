@@ -1,4 +1,5 @@
 import { isDeepStrictEqual } from "node:util"
+import { normalizeRequesterGroupIds, snapshotRequesterGroupIds } from "../../auth/attribution"
 import type {
   AuthorizablePrincipal,
   AuthorizationRef,
@@ -21,6 +22,30 @@ export interface ExecutionValidationLookup {
   }): Promise<ExecutionRecord | null>
 }
 
+/** Capture accounting attribution at the same storage boundary that admits the execution. */
+export async function prepareExecutionRecord(
+  input: CreateExecutionInput,
+  lookup: ExecutionValidationLookup
+): Promise<ExecutionRecord> {
+  let groups = input.requesterGroupIds
+  if (groups === undefined && input.source.type === "execution") {
+    const parent = await lookup.getExecution({
+      projectId: input.projectId,
+      id: input.source.executionId,
+    })
+    groups = parent?.requesterGroupIds
+  } else if (groups === undefined && input.requestedBy) {
+    groups = await snapshotRequesterGroupIds({
+      auth: lookup.auth,
+      projectId: input.projectId,
+      principal: input.requestedBy,
+    })
+  }
+  const record = normalizeExecutionRecord({ ...input, requesterGroupIds: groups ?? [] })
+  await validateExecutionRecordReferences(record, lookup)
+  return record
+}
+
 export function normalizeExecutionRecord(
   input: CreateExecutionInput,
   createdAt: Date = new Date()
@@ -28,6 +53,7 @@ export function normalizeExecutionRecord(
   const record: ExecutionRecord = {
     id: input.id,
     projectId: input.projectId,
+    requesterGroupIds: normalizeRequesterGroupIds(input.requesterGroupIds ?? []),
     ...(input.requestedBy === undefined ? {} : { requestedBy: structuredClone(input.requestedBy) }),
     executor: structuredClone(input.executor),
     source: structuredClone(input.source),
@@ -321,6 +347,12 @@ async function validateParent(
     throw new ExecutionStorageError(
       "invalid_parent_execution",
       `[Sixb] Child execution '${record.id}' must preserve its parent requested-by principal.`
+    )
+  }
+  if (!isDeepStrictEqual(parent.requesterGroupIds, record.requesterGroupIds)) {
+    throw new ExecutionStorageError(
+      "invalid_parent_execution",
+      `[Sixb] Child execution '${record.id}' must preserve its parent requester-group snapshot.`
     )
   }
   if (

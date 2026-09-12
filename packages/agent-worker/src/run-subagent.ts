@@ -47,7 +47,7 @@ export async function runSubagent(input: {
       context,
       run,
       signal,
-      requestedBy: execution.requestedBy,
+      execution,
     })
   }
   const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])

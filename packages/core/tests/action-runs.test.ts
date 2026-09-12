@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import type { ActionRunFailure, ActionRunPhase, QueueActionRunInput } from "../src/storage"
+import type { ActionRunFailure, ActionRunPhase } from "../src/storage"
 import { ActionRunError, InMemoryStorage } from "../src/storage"
 import { createTestActionExecution, queueTestActionRun } from "../src/testing"
 
@@ -27,7 +27,7 @@ function createActionRunFixture() {
   const provider = new InMemoryStorage()
   return {
     storage: provider.actionRuns,
-    queue: (input: Omit<QueueActionRunInput, "executionId">) => queueTestActionRun(provider, input),
+    queue: (input: Parameters<typeof queueTestActionRun>[1]) => queueTestActionRun(provider, input),
   }
 }
 
@@ -96,12 +96,15 @@ describe("InMemoryActionRunStorage", () => {
   })
 
   test("queues, starts, and finishes a successful action run", async () => {
+    // Removal proof: omit requesterGroupIds from the in-memory queued record.
     const { storage, queue } = createActionRunFixture()
     const queuedAt = new Date("2026-04-29T10:14:00.000Z")
     const startedAt = new Date("2026-04-29T10:14:01.000Z")
     const finishedAt = new Date("2026-04-29T10:14:03.842Z")
+    const groups = ["sales", "sales"]
 
     const queued = await queue({
+      requesterGroupIds: groups,
       id: "act_1",
       projectId: "my-app",
       actionId: "sendQuote",
@@ -112,6 +115,7 @@ describe("InMemoryActionRunStorage", () => {
     })
 
     ;(queued.params as { amount: number }).amount = 1
+    groups.push("later-group")
 
     const started = await storage.start({
       id: "act_1",
@@ -139,6 +143,7 @@ describe("InMemoryActionRunStorage", () => {
       idempotencyKey: "action:my-app:act_1",
     })
     expect(finished.queuedAt.toISOString()).toBe(queuedAt.toISOString())
+    expect(finished).not.toHaveProperty("requesterGroupIds")
     expect(finished.startedAt?.toISOString()).toBe(startedAt.toISOString())
     expect(finished.finishedAt?.toISOString()).toBe(finishedAt.toISOString())
   })

@@ -87,7 +87,7 @@ export async function executeWorkflowAgentNode(
   if (!loaded) return
 
   const { context, job, signal, delivery } = input
-  const { runs, executionRecord, nodeRun, workflowRun } = loaded
+  const { runs, executionRecord, nodeRun } = loaded
   // Preparation belongs to the owned attempt too, so failures can durably finish the task and
   // its workflow without claiming a second token in the failure handler.
   const reserved = await reserveWorkflowAgentNode({
@@ -134,14 +134,14 @@ export async function executeWorkflowAgentNode(
       storage: context.storage,
       projectId: context.id,
       requestedBy: durableExecution.requestedBy,
-      requesterGroupIds: workflowRun.requesterGroupIds,
+      requesterGroupIds: durableExecution.requesterGroupIds,
     })
     usageRecorder = new AiModelCallRecorder({
       storage: context.storage,
       projectId: context.id,
       executionId: executionRecord.executionId,
       attempt: reserved.attempt,
-      requesterGroupIds: workflowRun.requesterGroupIds,
+      requesterGroupIds: durableExecution.requesterGroupIds,
       limits: modelCallLimits,
       recoverAiModelCall: context.recoverAiModelCall,
     })

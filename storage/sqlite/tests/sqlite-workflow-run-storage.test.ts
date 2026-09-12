@@ -127,7 +127,6 @@ describe("SqliteWorkflowRunStorage", () => {
       projectId: "my-app",
       workflowId: "reconcile-transaction",
       input: {},
-      requesterGroupIds: ["support", "engineering", "support"],
     })
 
     const results = await Promise.allSettled([
@@ -149,7 +148,7 @@ describe("SqliteWorkflowRunStorage", () => {
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1)
     await expect(
       storage.getById({ projectId: "my-app", id: "wf-run-claim" })
-    ).resolves.toMatchObject({ requesterGroupIds: ["engineering", "support"] })
+    ).resolves.toMatchObject({ status: "running" })
   })
 
   test("waits and resumes workflow and intervention node runs", async () => {
@@ -704,7 +703,6 @@ function createWorkflowRunStorage(root: SqliteStorage) {
           projectId: input.projectId,
           workflowId: input.workflowId,
           input: input.input,
-          requesterGroupIds: [],
         })
       }
       return start({

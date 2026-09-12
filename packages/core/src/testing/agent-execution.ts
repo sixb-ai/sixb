@@ -13,6 +13,7 @@ export async function createTestAgentExecution(
     readonly runId: string
     readonly executionId?: string
     readonly sourceExecutionId?: string
+    readonly requesterGroupIds?: readonly string[]
     /** Conversational runs inherit authority; workflow fixtures use managed authority. */
     readonly authority?: "managed" | "inherited"
   }
@@ -65,6 +66,7 @@ export async function createTestAgentExecution(
   if (!parent) {
     parent = await storage.executions.create({
       id: sourceExecutionId,
+      requesterGroupIds: input.requesterGroupIds ?? [],
       projectId: input.projectId,
       executor: { type: "request", requestId: `test_request:${input.runId}` },
       source: { type: "http", requestId: `test_request:${input.runId}` },
@@ -74,6 +76,7 @@ export async function createTestAgentExecution(
   }
   await storage.executions.create({
     id: executionId,
+    requesterGroupIds: parent.requesterGroupIds,
     projectId: input.projectId,
     executor: { type: "agent", runId: input.runId },
     source: { type: "execution", executionId: sourceExecutionId },

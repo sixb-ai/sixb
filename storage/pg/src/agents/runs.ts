@@ -5,7 +5,6 @@ import {
   assertSubagentRunResult,
   subagentRunMatchesCreateInput,
 } from "@sixb/core/internal/agent-run-storage-provider"
-import { normalizeRequesterGroupIds } from "@sixb/core/internal/auth"
 import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
@@ -79,7 +78,6 @@ export class PgAgentRunStore implements AgentRunStore {
             thread_id,
             trigger_message_id,
             spec,
-            requester_group_ids,
             status,
             attempt,
             created_at
@@ -91,7 +89,6 @@ export class PgAgentRunStore implements AgentRunStore {
             ${input.threadId},
             ${input.triggerMessageId},
             ${JSON.stringify(input.spec)}::text::jsonb,
-            ${JSON.stringify(normalizeRequesterGroupIds(input.requesterGroupIds))}::text::jsonb,
             ${"queued"},
             ${0},
             ${createdAt}
@@ -178,7 +175,6 @@ export class PgAgentRunStore implements AgentRunStore {
             `[SixbPg] Parent Agent run '${parent.id}' is no longer owned by this execution.`
           )
         }
-        const parentRecord = rowToRunRecord(parent)
 
         const [countRow] = await tx<{ count: string | number }[]>`
           SELECT COUNT(*)::bigint AS count FROM agent_runs
@@ -197,12 +193,11 @@ export class PgAgentRunStore implements AgentRunStore {
         const [row] = await tx<AgentRunRow[]>`
           INSERT INTO agent_runs (
             project_id, id, execution_id, kind, parent_run_id, spawn_key, spec,
-            requester_group_ids, status, attempt, created_at
+            status, attempt, created_at
           ) VALUES (
             ${input.projectId}, ${input.id}, ${input.executionId}, ${"subagent"},
             ${input.parentRunId}, ${input.spawnKey},
             ${JSON.stringify(input.spec)}::text::jsonb,
-            ${JSON.stringify(parentRecord.requesterGroupIds)}::text::jsonb,
             ${"queued"}, ${0}, ${input.createdAt ?? new Date()}
           )
           RETURNING *

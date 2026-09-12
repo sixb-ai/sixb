@@ -306,7 +306,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         context: executionContext,
         run,
         signal: turnSignal,
-        requestedBy: durableExecution.requestedBy,
+        execution: durableExecution,
       })
       // Delegation is temporarily disabled; retain the child runtime for later re-enablement.
       const prepared = await prepareAgentConversationContext({

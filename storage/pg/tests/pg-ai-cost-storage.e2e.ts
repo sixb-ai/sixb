@@ -71,7 +71,6 @@ test("PgAiCostStorage returns direct agent attribution with each model-call page
       threadId: "thread_1",
       triggerMessageId: "message_1",
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: [],
     })
     await storage.aiUsage.recordModelCall({
       id: "usage_1",
@@ -124,6 +123,7 @@ test("PgAiCostStorage returns child-agent attribution with each model-call page"
       projectId: "project_1",
       runId: parentRunId,
       authority: "inherited",
+      requesterGroupIds: ["users"],
     })
     await storage.agents.runs.create({
       id: parentRunId,
@@ -132,7 +132,6 @@ test("PgAiCostStorage returns child-agent attribution with each model-call page"
       threadId: "thread_1",
       triggerMessageId: "message_1",
       spec: { model: { provider: "test", modelId: "test-model" } },
-      requesterGroupIds: ["users"],
     })
     await storage.agents.runs.start({
       id: parentRunId,
