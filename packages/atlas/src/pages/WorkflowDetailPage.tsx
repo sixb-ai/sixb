@@ -1295,6 +1295,7 @@ function RunSummaryPanel({
         {run.error ? (
           <SixbFailureSummary
             failure={run.error}
+            showDetails
             className="rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-xs"
           />
         ) : null}
