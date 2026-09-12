@@ -280,13 +280,6 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 36,
   },
-  {
-    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
-    checksum_length: 64,
-    id: "037-delegated-executions",
-    status: "applied",
-    version: 37,
-  },
 ]
 
 afterEach(async () => {
@@ -463,7 +456,7 @@ describe("SQLite storage migrations", () => {
     const db = new Database(":memory:")
     try {
       const migrationIndex = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "037-delegated-executions"
+        (migration) => migration.id === "036-share-sessions"
       )
       const migration = sqliteStorageMigrations.steps[migrationIndex]
       if (!migration || migrationIndex < 0) {
@@ -519,11 +512,11 @@ describe("SQLite storage migrations", () => {
   })
 
   test("delegated migration preserves inherited Agent authority", () => {
-    // Regression proof: restore 037's old service-account-only Agent CHECK; migration fails.
+    // Regression proof: restore 036's old service-account-only Agent CHECK; migration fails.
     const db = new Database(":memory:")
     try {
       const index = sqliteStorageMigrations.steps.findIndex(
-        (migration) => migration.id === "037-delegated-executions"
+        (migration) => migration.id === "036-share-sessions"
       )
       const migration = sqliteStorageMigrations.steps[index]
       if (!migration || index < 0) throw new Error("Expected delegated executions migration.")
