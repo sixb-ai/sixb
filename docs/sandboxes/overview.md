@@ -1,7 +1,7 @@
 # Sandboxes
 
 A sandbox is an isolated environment where an agent reads files and runs Bash commands. Reach for
-one whenever an [agent](../agents/overview.md) needs file work, scripts, or the `sixb` CLI. The
+one whenever the [built-in Agent](../models/built-in-agent.md) needs file work, scripts, or the `sixb` CLI. The
 sandbox keeps that work off your host — its filesystem, network, and processes are walled off from
 the machine the runtime runs on.
 
@@ -171,7 +171,7 @@ You rarely call `runCommand` yourself. The agent worker does it:
 
 Because egress is locked to the gateway, the agent's only way to read or write app data is through
 that gateway — there is no open internet. See
-[Agent tools and the gateway](../agents/tools-and-gateway.md) for what the gateway exposes.
+[Tools and Authorization](../models/tools-and-authorization.md) for what the gateway exposes.
 
 ## Choosing a provider
 
@@ -194,5 +194,5 @@ Vercel gives you remote managed microVMs, but the Sixb API gateway must be reach
 - [Apple Container sandbox](./apple-container.md) — local Apple Container-backed sandboxes
 - [smolvm sandbox](./smolvm.md) — hardware-isolated microVMs
 - [Vercel sandbox](./vercel.md) — managed Vercel-hosted microVMs
-- [Agent tools and the gateway](../agents/tools-and-gateway.md) — how sandbox tools reach files
+- [Tools and Authorization](../models/tools-and-authorization.md) — how sandbox tools reach files
   and the API gateway

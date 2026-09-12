@@ -54,6 +54,8 @@ and carrying the ERP receipt id across the boundary. The graph and the external 
 
 ## The builder
 
+For model-generated edits, call `sixb.models.language.generate()` in writeback and consume the persisted result in edits. See the [action example](../models/generation.md#in-an-action).
+
 `defineAction(id, options?)` starts the chain. `options.description` is optional human-readable
 text. From there you pick a binding, declare params, then attach phase handlers.
 

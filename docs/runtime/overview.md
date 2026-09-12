@@ -51,7 +51,7 @@ local for dev, hosted backends for production).
 Optional: `id` (project id), `auth` (a `SixbAuthConfig`, see
 [Authentication](../auth/authentication.md)), `sandboxes` (a `SandboxFactory`), `logger` (a
 `LoggerProvider` for process-level log output), `models` (the
-[project model catalog](../agents/defining-agents.md#the-project-model-catalog)),
+[project model catalog](../models/configuration.md)),
 `observability` (broker log-capture controls),
 `onError` ([runtime failure notifications](error-handling.md)), `ontologyMaintenance` (recovery and
 retention intervals), and `projectRoot` (discovery root, defaults to `process.cwd()`). Logging options are covered in
@@ -105,6 +105,19 @@ const invoice = await invoices.byId("inv-1001").get()
 
 For CRUD, querying, telemetry, links, and actions see [Objects](../objects/overview.md). For
 cross-type listing (dashboards, search), use `sixb.objects.list({ ... })`.
+
+### Language-model calls
+
+Use `sixb.models.language.generate()` inside an action or workflow step:
+
+```ts
+const { output } = await sixb.models.language.generate({
+  prompt: "Summarize this document: ...",
+})
+// output: string
+```
+
+See [Models](../models/overview.md) for configuration, structured output, usage, and limits.
 
 ### Events
 

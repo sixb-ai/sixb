@@ -58,6 +58,24 @@ const loadInvoiceContext = defineWorkflowStep("load-invoice-context")
 
 A field typed `ref(Invoice)` carries an object reference of the shape `{ objectTypeId, primaryId }`.
 
+## Call a model from a step
+
+For one text or structured response, call `generate()` from an ordinary step:
+
+```ts
+import { defineWorkflowStep } from "@sixb/core"
+
+export const summarize = defineWorkflowStep("summarize")
+  .input({ document: "string" })
+  .output({ summary: "string" })
+  .run(async ({ input, sixb }) => {
+    const { output } = await sixb.models.language.generate({ prompt: input.document })
+    return { summary: output }
+  })
+```
+
+See [Generation](../models/generation.md) for structured output and controls, and [Configuration](../models/configuration.md) for the default model.
+
 ## Define agent tasks
 
 An agent task is a fresh, headless Agent execution dedicated to one workflow node. It does not
