@@ -98,11 +98,11 @@ family.
 | `run:workflow` | `can.run(...)` | Start workflows | [Workflows](../workflows/overview.md) |
 | `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
 | `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
-| `run:agent` | `can.run(agent)` | Run the project Agent and read its threads | [Agents](../agents/overview.md) |
+| `run:agent` | `can.run(agent)` | Run the project Agent and read its threads | [Built-in Agent](../models/built-in-agent.md) |
 | `manage:connector` | `can.manage(...)` | Authorize, select, disconnect, and revoke OAuth connector accounts | [Connectors](../data/connectors.md) |
-| `manage:aiUsage` | `can.manage(agent.usage)` | Create, edit, disable, and delete AI usage limits | [AI usage limits](../agents/usage-limits.md) |
+| `manage:aiUsage` | `can.manage(agent.usage)` | Create, edit, disable, and delete AI usage limits | [Usage and limits](../models/usage-and-limits.md) |
 | `observe:logs` | `can.observe("logs")` | Read captured run logs | [Logging](../logging/overview.md) |
-| `observe:aiUsage` | `can.observe(agent.usage)` | Read project AI accounting and limit status | [AI usage limits](../agents/usage-limits.md) |
+| `observe:aiUsage` | `can.observe(agent.usage)` | Read project AI accounting and limit status | [Usage and limits](../models/usage-and-limits.md) |
 
 `can.access` accepts the built-in `applications.atlas` and `applications.app` definitions.
 `can.view` resolves to `view:object` or `view:dataset` from the definition you pass. `can.run`
@@ -110,7 +110,7 @@ accepts workflow, sync, and pipeline definitions; `can.run(agent)` grants the pr
 Agent. Each is type-checked, so mixing target families in one call does not compile. `can.manage`
 accepts connector definitions or `agent.usage`. `can.observe` accepts `"logs"` or `agent.usage`;
 these independently gate captured [logs](../logging/overview.md) and
-[AI accounting](../agents/usage-limits.md).
+[AI accounting](../models/usage-and-limits.md).
 `can.share` accepts Share definitions and controls their grant lifecycle; it does not itself grant
 access to the shared objects.
 
