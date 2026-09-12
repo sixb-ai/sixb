@@ -1,10 +1,23 @@
+export type { ObjectReadExecutionLimits, ObjectReadLimitMetric } from "./execution-limits"
+export {
+  assertObjectReadFacetCount,
+  assertObjectReadOutputWithinLimit,
+  MAX_OBJECT_READ_FACETS,
+  ObjectReadLimitExceededError,
+  snapshotObjectReadExecutionLimits,
+} from "./execution-limits"
 export type { LinkBatchKey, ObjectBatchKey } from "./keys"
 export {
   linkBatchKey,
   objectBatchKey,
   objectLinkCursor,
 } from "./keys"
+export { assertObjectReaderProject, compileSelectedObjectReadScope } from "./read-scope"
 export type {
+  CompiledObjectReadObjectSelection,
+  CompiledObjectReadRoot,
+  CompiledObjectReadStep,
+  CompiledSelectedObjectReadScope,
   CountObjectsInput,
   CountObjectsResult,
   ExistsObjectsInput,
@@ -23,6 +36,12 @@ export type {
   ObjectQueryCapabilityMap,
   ObjectQueryScalarOperation,
   ObjectQueryScalarOperations,
+  ObjectReadLinkDefinitionSelection,
+  ObjectReadLinkSelection,
+  ObjectReadNode,
+  ObjectReadObjectSelection,
+  ObjectReadRoot,
+  ObjectReadScopeFactory,
   ObjectReadStorage,
   ObjectRow,
   ObjectRowLinks,
@@ -31,4 +50,5 @@ export type {
   QueryObjectLinksResult,
   QueryObjectsInput,
   QueryObjectsResult,
+  SelectedObjectReadScope,
 } from "./types"
