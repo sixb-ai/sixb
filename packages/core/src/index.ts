@@ -598,6 +598,7 @@ export type {
   SandboxFileRecord,
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
+  SandboxPersistence,
   SandboxStatus,
 } from "./sandboxes"
 export {

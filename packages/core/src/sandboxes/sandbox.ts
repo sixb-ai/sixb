@@ -121,4 +121,26 @@ export interface Sandbox {
  */
 export interface SandboxFactory {
   create(options?: CreateSandboxOptions): Promise<Sandbox>
+  /** Optional named filesystem persistence. Absence means unsupported, never an ephemeral fallback. */
+  readonly persistence?: SandboxPersistence
+}
+
+/**
+ * Retention-bound filesystem persistence, not a durable file store or a distributed lock.
+ * The caller owns the name namespace and must serialize its complete create/resume/stop lifecycle.
+ * Credentials and current execution authority must be supplied again, never inferred from files.
+ * Both methods return a handle targeting one execution session, with no automatic resume on use.
+ * Its stop() resolves only after filesystem preservation is confirmed; failure must reject.
+ * destroy() permanently removes the named state and requires exclusive lifecycle ownership,
+ * including after stop(). Never use it as routine persistent-run teardown.
+ */
+export interface SandboxPersistence {
+  /** Create a new persistent sandbox. An existing name must fail, never attach or overwrite. */
+  create(name: string, options?: CreateSandboxOptions): Promise<Sandbox>
+  /**
+   * Resume an existing, stopped sandbox. Missing/expired state throws SandboxStateUnavailableError;
+   * it must never create an empty replacement. An already running sandbox must be rejected.
+   * Runtime options must be provided again; they are not recovered from the previous handle.
+   */
+  resume(name: string, options?: CreateSandboxOptions): Promise<Sandbox>
 }
