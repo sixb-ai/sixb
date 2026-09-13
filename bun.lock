@@ -224,6 +224,22 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/notion": {
+      "name": "@sixb/connector-notion",
+      "version": "0.1.0",
+      "dependencies": {
+        "@notionhq/client": "5.26.0",
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/pandadoc": {
       "name": "@sixb/connector-pandadoc",
       "version": "0.1.1",
@@ -1221,6 +1237,8 @@
 
     "@next/swc-win32-x64-msvc": ["@next/swc-win32-x64-msvc@16.2.10", "", { "os": "win32", "cpu": "x64" }, "sha512-0JXq3b85Jk9Jg4ntLUbXSPvoDw3gpZou7twuKdoFG2jOw635v7+IiXfTaa0TxVMyx78pUjnrVYwLgjKfX4e6/A=="],
 
+    "@notionhq/client": ["@notionhq/client@5.26.0", "", {}, "sha512-Oc3438nQ5YmZkVO7YJG8fcTYl0V46CirdCvO33azZ9f7ZfD2rsHE4fUVANJiBB9Xf1sqpCs82nd8oKPxeXLmMg=="],
+
     "@octokit/webhooks-types": ["@octokit/webhooks-types@7.6.1", "", {}, "sha512-S8u2cJzklBC0FgTwWVLaM8tMrDuDMVE4xiTK4EYXM9GntyvrdbSoxqDQa+Fh57CCNApyIpyeqPhhFEmHPfrXgw=="],
 
     "@oven/bun-darwin-aarch64": ["@oven/bun-darwin-aarch64@1.3.14", "", { "os": "darwin", "cpu": "arm64" }, "sha512-Omj20SuiHBOUjUBIyqtkNjSUIjOtEOJwmbix/ZyFH4BaQ6OZTaaRWIR4TjHVz0yadHgli6lLTiAh1uarnvD49A=="],
@@ -1474,6 +1492,8 @@
     "@sixb/connector-mercury": ["@sixb/connector-mercury@workspace:connectors/mercury"],
 
     "@sixb/connector-meta": ["@sixb/connector-meta@workspace:connectors/meta"],
+
+    "@sixb/connector-notion": ["@sixb/connector-notion@workspace:connectors/notion"],
 
     "@sixb/connector-pandadoc": ["@sixb/connector-pandadoc@workspace:connectors/pandadoc"],
 

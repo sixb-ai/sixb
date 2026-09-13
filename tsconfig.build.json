@@ -41,6 +41,9 @@
       "path": "connectors/meta/tsconfig.build.json"
     },
     {
+      "path": "connectors/notion/tsconfig.build.json"
+    },
+    {
       "path": "connectors/pipedrive/tsconfig.build.json"
     },
     {
