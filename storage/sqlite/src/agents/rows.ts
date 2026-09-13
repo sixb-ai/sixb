@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { AgentMessagePart, Principal } from "@sixb/core"
+import { snapshotAgentThreadWorkspace } from "@sixb/core/internal/agent-run-storage-provider"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
@@ -23,6 +24,7 @@ export interface AgentThreadRow {
   owner_principal_type: Principal["type"]
   owner_principal_id: string
   title: string | null
+  workspace: string | null
   status: AgentThreadRecord["status"]
   active_run_id: string | null
   last_message_at: string | null
@@ -97,6 +99,9 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
     projectId: row.project_id,
     ownerPrincipal: { type: row.owner_principal_type, id: row.owner_principal_id },
     title: row.title ?? undefined,
+    ...(row.workspace == null
+      ? {}
+      : { workspace: snapshotAgentThreadWorkspace(JSON.parse(row.workspace)) }),
     status: row.status,
     activeRunId: row.active_run_id,
     lastMessageAt: row.last_message_at ? new Date(row.last_message_at) : undefined,

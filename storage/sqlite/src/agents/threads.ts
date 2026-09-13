@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { snapshotAgentThreadWorkspace } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   AgentStorageError,
   type AgentThreadRecord,
@@ -15,6 +16,10 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
   constructor(private readonly db: Database) {}
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
+    const workspace =
+      input.workspace === undefined
+        ? null
+        : JSON.stringify(snapshotAgentThreadWorkspace(input.workspace))
     const createdAt = input.createdAt ?? new Date()
     const updatedAt = input.updatedAt ?? createdAt
 
@@ -28,13 +33,14 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
             owner_principal_type,
             owner_principal_id,
             title,
+            workspace,
             status,
             active_run_id,
             last_message_at,
             message_count,
             created_at,
             updated_at
-          ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, NULL, 0, ?, ?)
         `
         )
         .run(
@@ -43,6 +49,7 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
           input.ownerPrincipal.type,
           input.ownerPrincipal.id,
           input.title ?? null,
+          workspace,
           input.status ?? "active",
           createdAt.toISOString(),
           updatedAt.toISOString()
