@@ -1,7 +1,7 @@
 # @sixb/connector-stripe
 
-Typed Stripe Billing connector for Sixb. It covers Customers, Subscriptions, Invoices, Refunds,
-and v1 snapshot Events, with optional verified webhook delivery. Each resource lives in an
+Typed Stripe Billing and Payments connector for Sixb. It covers Customers, Subscriptions, Invoices,
+Payment Intents, Charges, Refunds, and v1 snapshot Events, with optional verified webhook delivery. Each resource lives in an
 independent module so another Stripe surface can be added without growing a monolithic client.
 
 The connector delegates wire-level behavior to Stripe's official SDK: generated request and
@@ -104,7 +104,7 @@ for await (const invoice of billing.invoices.listAll({ customer: "cus_123", limi
 `has_more` is false. `starting_after` and `ending_before` are rejected together, and page limits are
 validated as integers from 1 to 100 before a request is sent.
 
-Customer, Subscription, and Invoice search methods also expose `searchAll`. Stripe Search is
+Customer, Subscription, Invoice, Payment Intent, and Charge search methods also expose `searchAll`. Stripe Search is
 eventually consistent: don't use it for read-after-write flows. Stripe documents normal propagation
 under one minute, possible delays up to one hour during outages, and no Search API availability for
 merchants in India.
@@ -166,6 +166,91 @@ Retrieving an already deleted customer returns Stripe's reduced `StripeDeletedCu
 `delete` applies only to eligible draft invoices. Use `void` for a finalized invoice; voiding is
 irreversible and preserves the accounting record. A preview is ephemeral and does not appear in
 invoice lists.
+
+## Payment Intents
+
+The [Payment Intents API](https://docs.stripe.com/api/payment_intents) manages a payment from
+creation through authentication, authorization, and capture. All methods retain the installed
+SDK's generated parameter types and return the provider's current state.
+
+| Client method | Stripe endpoint |
+| --- | --- |
+| `billing.paymentIntents.create(params, options?)` | `POST /v1/payment_intents` |
+| `billing.paymentIntents.update(id, params?, options?)` | `POST /v1/payment_intents/:id` |
+| `billing.paymentIntents.get(id, params?, options?)` | `GET /v1/payment_intents/:id` |
+| `billing.paymentIntents.list(params?, options?)` | `GET /v1/payment_intents` |
+| `billing.paymentIntents.listAll(params?, options?)` | Auto-pagination over the list endpoint |
+| `billing.paymentIntents.confirm(id, params?, options?)` | `POST /v1/payment_intents/:id/confirm` |
+| `billing.paymentIntents.capture(id, params?, options?)` | `POST /v1/payment_intents/:id/capture` |
+| `billing.paymentIntents.cancel(id, params?, options?)` | `POST /v1/payment_intents/:id/cancel` |
+| `billing.paymentIntents.incrementAuthorization(id, params, options?)` | `POST /v1/payment_intents/:id/increment_authorization` |
+| `billing.paymentIntents.applyCustomerBalance(id, params?, options?)` | `POST /v1/payment_intents/:id/apply_customer_balance` |
+| `billing.paymentIntents.verifyMicrodeposits(id, params?, options?)` | `POST /v1/payment_intents/:id/verify_microdeposits` |
+| `billing.paymentIntents.search(params, options?)` | `GET /v1/payment_intents/search` |
+| `billing.paymentIntents.searchAll(params, options?)` | Auto-pagination over the search endpoint |
+| `billing.paymentIntents.listAmountDetailsLineItems(id, params?, options?)` | `GET /v1/payment_intents/:id/amount_details_line_items` |
+| `billing.paymentIntents.listAllAmountDetailsLineItems(id, params?, options?)` | Auto-pagination over the line-item endpoint |
+
+```ts
+const payment = await billing.paymentIntents.create(
+  {
+    amount: 2_500,
+    currency: "eur",
+    customer: "cus_123",
+    automatic_payment_methods: { enabled: true },
+    metadata: { order_id: "order-123" },
+  },
+  { idempotencyKey: "payment:order-123:v1" }
+)
+
+const current = await billing.paymentIntents.get(payment.id)
+```
+
+Amounts use the currency's smallest unit. Reuse one PaymentIntent per order or customer session,
+with a stable idempotency key for retried writes. `update` does not confirm the payment.
+`confirm` can return `requires_action` and `next_action`; the application must complete the
+authentication flow with Stripe's client SDK. Never log or put `client_secret` in URLs, and only
+send it to the customer completing that payment.
+
+`capture` applies to payments in `requires_capture`; `amount_to_capture` supports partial capture.
+Stripe enforces eligibility for cancellation, incremental authorization, customer-balance
+reconciliation, and microdeposit verification. Refund completed payments through `billing.refunds`.
+
+Existing verified webhooks also receive `payment_intent.*` snapshot events. Handle
+`payment_intent.succeeded` for successful payment reconciliation; a successful HTTP response from
+`create` or `confirm` alone does not mean the payment has succeeded.
+
+## Charges
+
+The [Charges API](https://docs.stripe.com/api/charges) exposes individual payment attempts,
+including captured/refunded amounts, payment-method details, receipts, and the balance transaction.
+
+| Client method | Stripe endpoint |
+| --- | --- |
+| `billing.charges.get(id, params?, options?)` | `GET /v1/charges/:id` |
+| `billing.charges.update(id, params?, options?)` | `POST /v1/charges/:id` |
+| `billing.charges.list(params?, options?)` | `GET /v1/charges` |
+| `billing.charges.listAll(params?, options?)` | Auto-pagination over the list endpoint |
+| `billing.charges.search(params, options?)` | `GET /v1/charges/search` |
+| `billing.charges.searchAll(params, options?)` | Auto-pagination over the search endpoint |
+
+```ts
+for await (const charge of billing.charges.listAll({ payment_intent: "pi_123", limit: 100 })) {
+  // Reconcile each attempt, including unsuccessful charges.
+}
+
+const charge = await billing.charges.get("ch_123", { expand: ["balance_transaction"] })
+await billing.charges.update(charge.id, { metadata: { order_id: "order-123" } })
+```
+
+Lists accept customer, creation-date, PaymentIntent, and transfer-group filters. Stripe limits
+transfer-group filtering to 100 charges. Search has the consistency limitations described above.
+`update` changes the fields Stripe permits, such as metadata and description; changing
+`receipt_email` sends a new receipt.
+
+Create and capture payments through `billing.paymentIntents`, and refund them through
+`billing.refunds`. Direct charge creation and capture are intentionally not exposed.
+The existing verified event webhook also accepts `charge.*` snapshot events.
 
 ## Refunds
 

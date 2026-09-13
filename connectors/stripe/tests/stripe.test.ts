@@ -10,7 +10,7 @@ afterEach(() => {
 })
 
 describe("stripe connector", () => {
-  test("exposes only the five supported resource groups", async () => {
+  test("exposes the supported resource groups", async () => {
     mockFetch(async () => json({}))
     const client = await createTestClient()
 
@@ -18,6 +18,8 @@ describe("stripe connector", () => {
       "customers",
       "subscriptions",
       "invoices",
+      "paymentIntents",
+      "charges",
       "refunds",
       "events",
     ])
