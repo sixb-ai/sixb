@@ -1,4 +1,4 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises"
+import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, extname, join, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { OntologyDocumentInput } from "../ontology/registry"
@@ -75,11 +75,17 @@ export async function generateOntologyTypeManifest(
   const discovery = await discoverOntologyTypeManifest(projectRoot)
 
   if (discovery.moduleCount === 0) {
-    return {
-      ...discovery,
-      path: outFile,
-      written: false,
-      skipped: true,
+    // Leave projects without ontology untouched, but clear a previously generated map.
+    try {
+      await access(outFile)
+    } catch (error) {
+      if (!isNotFoundError(error)) throw error
+      return {
+        ...discovery,
+        path: outFile,
+        written: false,
+        skipped: true,
+      }
     }
   }
 

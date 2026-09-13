@@ -70,5 +70,41 @@ describe("ontology type manifest", () => {
     expect(result.skipped).toBe(true)
     expect(result.written).toBe(false)
     expect(result.entries).toEqual([])
+    expect(await Bun.file(result.path).exists()).toBe(false)
+  })
+
+  // Guard: restore the unconditional moduleCount === 0 early return in the generator.
+  // Both deletion cases then retain the removed Customer import and fail.
+  test.each([
+    "file",
+    "directory",
+  ] as const)("clears the existing manifest after deleting the last ontology %s", async (target) => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "sixb-type-manifest-deleted-"))
+    tempDirs.push(projectRoot)
+    const ontologyDir = join(projectRoot, "ontology")
+    const modulePath = join(ontologyDir, "customer.ts")
+    await mkdir(ontologyDir)
+    await writeFile(
+      modulePath,
+      'export const Customer = { id: "Customer", name: "Customer", properties: [], links: [], p: {} }'
+    )
+
+    const initial = await generateOntologyTypeManifest({ projectRoot })
+    expect(await readFile(initial.path, "utf-8")).toContain('"Customer": typeof import(')
+    await rm(target === "file" ? modulePath : ontologyDir, { recursive: true })
+
+    const result = await generateOntologyTypeManifest({ projectRoot })
+    const content = await readFile(result.path, "utf-8")
+    expect(content).not.toContain("Customer")
+    expect(content).not.toContain("typeof import(")
+    expect(content).toContain('declare module "@sixb/core/ontology"')
+    expect(content).toContain("interface SixbObjectTypeMap")
+    expect(result.entries).toEqual([])
+    expect(result.written).toBe(true)
+    expect(result.skipped).toBe(false)
+
+    const unchanged = await generateOntologyTypeManifest({ projectRoot })
+    expect(unchanged.written).toBe(false)
+    expect(await readFile(result.path, "utf-8")).toBe(content)
   })
 })
