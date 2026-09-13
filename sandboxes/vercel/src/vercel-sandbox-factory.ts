@@ -6,8 +6,18 @@ import {
   type SandboxFactory,
   type SandboxNetworkPolicy,
 } from "@sixb/core"
+import type { SandboxPersistence } from "@sixb/core/sandboxes"
 import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { toVercelNetworkPolicy } from "./network"
+import {
+  assertPersistentName,
+  assertStoppedPersistent,
+  bindPersistentSandbox,
+  persistentSandboxError,
+  type VercelPersistenceOperations,
+  type VercelPersistentClient,
+  vercelPersistenceOperations,
+} from "./vercel-persistence"
 import {
   type VercelCommandFinishedClient,
   VercelSandbox,
@@ -88,10 +98,70 @@ const DEFAULT_SETUP_TIMEOUT_MS = 30_000
 
 /** Pluggable factory for Vercel Sandbox-backed Sixb sandboxes. */
 export class VercelSandboxFactory implements SandboxFactory {
+  readonly persistence: SandboxPersistence
+
   constructor(
     private readonly defaults: VercelSandboxFactoryOptions = {},
-    private readonly createRemote: VercelCreateSandbox = createVercelSandbox
-  ) {}
+    private readonly createRemote: VercelCreateSandbox = createVercelSandbox,
+    persistentRemote: VercelPersistenceOperations = vercelPersistenceOperations
+  ) {
+    const runtimeOptions = (options: CreateSandboxOptions): CreateSandboxOptions => ({
+      ...options,
+      env: { ...defaults.env, ...options.env },
+      timeout: options.timeout ?? defaults.timeout,
+      network: options.network ?? defaults.network ?? { mode: "none" },
+    })
+    this.persistence = {
+      create: async (name, options = {}) => {
+        assertPersistentName(name)
+        validateSourceOptions(defaults)
+        const resolved = runtimeOptions(options)
+        // Validate before provisioning; persistent VM defaults contain no run env or authority.
+        toVercelNetworkPolicy(resolved.network ?? { mode: "none" })
+        const params = buildCreateParams({
+          defaults: { ...defaults, persistent: true },
+          env: {},
+          network: { mode: "none" },
+          name,
+        })
+        let client: VercelPersistentClient | undefined
+        try {
+          client = await persistentRemote.create(params)
+          const sandbox = await bindPersistentSandbox(client, resolved)
+          if (options.workingDirectory !== undefined) {
+            const result = await sandbox.runCommand("mkdir", ["-p", sandbox.workingDirectory], {
+              cwd: "/",
+              timeout: defaults.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
+            })
+            if (result.exitCode !== 0) {
+              throw new SandboxError("[Sandbox] Vercel persistent working directory setup failed.")
+            }
+          }
+          return sandbox
+        } catch (error) {
+          // A failed/uncertain request must never delete a name that another attempt may own.
+          await stopFailedPersistentSession(client)
+          throw persistentSandboxError(error, "create")
+        }
+      },
+      resume: async (name, options = {}) => {
+        assertPersistentName(name)
+        const resolved = runtimeOptions(options)
+        toVercelNetworkPolicy(resolved.network ?? { mode: "none" })
+        const params = { ...resolveCredentials(defaults.credentials), name }
+        let client: VercelPersistentClient | undefined
+        try {
+          const existing = await persistentRemote.get({ ...params, resume: false })
+          assertStoppedPersistent(existing)
+          client = await persistentRemote.get({ ...params, resume: true })
+          return await bindPersistentSandbox(client, resolved)
+        } catch (error) {
+          await stopFailedPersistentSession(client)
+          throw persistentSandboxError(error, "resume")
+        }
+      },
+    }
+  }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
     validateSourceOptions(this.defaults)
@@ -126,6 +196,19 @@ export class VercelSandboxFactory implements SandboxFactory {
       }
       throw new SandboxError(`[Sandbox] vercel create failed: ${errorMessage(error)}`)
     }
+  }
+}
+
+async function stopFailedPersistentSession(
+  client: VercelPersistentClient | undefined
+): Promise<void> {
+  if (client === undefined) return
+  try {
+    await client.currentSession().stop()
+  } catch {
+    throw new SandboxError(
+      "[Sandbox] Vercel persistent setup failed and its session could not be stopped. Inspect the named sandbox before retrying."
+    )
   }
 }
 

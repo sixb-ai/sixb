@@ -30,7 +30,7 @@ export interface VercelCommandFinishedClient {
 
 export interface VercelCommandClient {
   wait(params?: { readonly signal?: AbortSignal }): Promise<VercelCommandFinishedClient>
-  kill(signal?: string, opts?: { readonly abortSignal?: AbortSignal }): Promise<void>
+  kill(signal?: "SIGKILL", opts?: { readonly abortSignal?: AbortSignal }): Promise<void>
 }
 
 export interface VercelSandboxClient {
@@ -67,6 +67,7 @@ export class VercelSandbox implements Sandbox {
   private readonly defaultTimeoutMs: number | undefined
   private readonly inFlight = new Set<VercelCommandClient>()
   private destroyed = false
+  private stopPromise: Promise<void> | undefined
 
   constructor(options: VercelSandboxOptions) {
     this.client = options.client
@@ -82,10 +83,14 @@ export class VercelSandbox implements Sandbox {
     if (this.currentStatus !== "running") {
       return this.currentStatus
     }
-    if (this.client.status === "failed") {
+    if (this.client.status === "failed" || this.client.status === "aborted") {
       return "failed"
     }
-    if (this.client.status === "stopped") {
+    if (
+      this.client.status === "stopped" ||
+      this.client.status === "stopping" ||
+      this.client.status === "snapshotting"
+    ) {
       return "stopped"
     }
     return "running"
@@ -211,10 +216,17 @@ export class VercelSandbox implements Sandbox {
   }
 
   async stop(): Promise<void> {
+    // Concurrent/repeated callers must await the same confirmed outcome, including failure.
+    if (this.stopPromise !== undefined) return this.stopPromise
     if (this.currentStatus !== "running") {
       return
     }
     this.currentStatus = "stopped"
+    this.stopPromise = this.stopRemote()
+    return this.stopPromise
+  }
+
+  private async stopRemote(): Promise<void> {
     for (const commandHandle of this.inFlight) {
       commandHandle.kill("SIGKILL").catch(() => {})
     }
@@ -222,6 +234,7 @@ export class VercelSandbox implements Sandbox {
     try {
       await this.client.stop()
     } catch (error) {
+      this.currentStatus = "failed"
       throw new SandboxError(`[Sandbox] vercel stop failed for ${this.id}: ${errorMessage(error)}`)
     }
   }

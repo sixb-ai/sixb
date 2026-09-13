@@ -42,6 +42,40 @@ interface Sandbox {
 The worker calls `factory.create()` once per agent run, `writeFiles(...)` to install the CLI, skill,
 and run context, and `runCommand(...)` per command. It calls `destroy()` on teardown.
 
+### Optional filesystem persistence
+
+Providers may expose `factory.persistence`, a `SandboxPersistence` capability exported from
+`@sixb/core/sandboxes`. Currently only Vercel implements it. Callers must check the capability;
+absence must not silently fall back to an ephemeral sandbox.
+
+```ts
+if (!factory.persistence) {
+  throw new Error("This task requires persistent sandbox support.")
+}
+
+const first = await factory.persistence.create("project-thread-workspace")
+await first.writeFiles([{ path: "draft.txt", contents: "Uncommitted work" }])
+await first.stop() // Resolves only after the provider confirms preservation.
+
+const next = await factory.persistence.resume("project-thread-workspace")
+await next.runCommand("cat", ["draft.txt"])
+await next.stop()
+```
+
+Creation rejects an existing name. Resume requires stopped, existing state: an expired/deleted
+snapshot throws `SandboxStateUnavailableError`, never an empty replacement. Retention belongs to
+the provider configuration. Files are preserved, not running processes; this is not an independent
+durable file store. Handles must not automatically boot another VM while running a command.
+
+The caller owns namespacing and exclusive lifecycle access. This API is not a distributed lock:
+serialize the whole operation, not just individual calls. Runtime options (`env`, `network`,
+`workingDirectory`, command timeout) must be supplied on each acquisition. Persisted files are
+untrusted and never establish execution authority. `destroy()` is an explicit permanent deletion
+requiring exclusive ownership of the name, not routine teardown after a persistent run.
+
+This is a provider capability only. Conversational agents, workflow nodes and subagents still use
+the existing per-run ephemeral lifecycle; configuring snapshot retention does not opt them in.
+
 ### File materialization
 
 `writeFiles` is how bytes get into a sandbox — the worker never writes to the host filesystem
