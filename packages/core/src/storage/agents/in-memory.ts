@@ -14,6 +14,7 @@ import {
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
+  snapshotAgentThreadWorkspace,
   subagentRunMatchesCreateInput,
 } from "./provider"
 import type {
@@ -56,7 +57,7 @@ function normalizeFailure(
 }
 
 function key(projectId: string, id: string): string {
-  return `${projectId}:${id}`
+  return JSON.stringify([projectId, id])
 }
 
 function clone<T>(value: T): T {
@@ -119,6 +120,8 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   constructor(private readonly state: AgentStoreState) {}
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
+    const workspace =
+      input.workspace === undefined ? undefined : snapshotAgentThreadWorkspace(input.workspace)
     const threadKey = key(input.projectId, input.id)
     if (this.state.threads.has(threadKey)) {
       throw new AgentStorageError(
@@ -132,6 +135,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       id: input.id,
       projectId: input.projectId,
       ownerPrincipal: clone(input.ownerPrincipal),
+      ...(workspace === undefined ? {} : { workspace }),
       ...(input.title === undefined ? {} : { title: input.title }),
       status: input.status ?? "active",
       activeRunId: null,

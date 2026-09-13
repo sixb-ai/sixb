@@ -261,6 +261,17 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // observer. Storage keeps this projection monotonic, so racing confirmations are safe.
       await this.confirmExecutionOwnership(context, run.id, executionToken, delivery.leaseExpiresAt)
 
+      const thread = await context.storage.agents.threads.getById({
+        projectId: context.id,
+        id: run.threadId,
+      })
+      if (thread?.workspace !== undefined) {
+        throw createSixbError(
+          "agent.execution_failed",
+          "[SixbAgentWorker] Persistent workspace execution is not available in this release."
+        )
+      }
+
       const configuredPlan = resolveAgentExecutionPlan({
         spec: run.spec,
         models: this.host.definitions.models?.language,

@@ -72,6 +72,7 @@ function serializeThread(thread: AgentThreadRecord): ReturnType<typeof AgentThre
     projectId: thread.projectId,
     ownerPrincipal: thread.ownerPrincipal,
     title: thread.title,
+    workspace: thread.workspace,
     status: thread.status,
     activeRunId: thread.activeRunId,
     lastMessageAt: thread.lastMessageAt ? toIsoString(thread.lastMessageAt) : undefined,
@@ -190,12 +191,15 @@ function handleAgentRouteError(
         break
       case "active_run_exists":
       case "run_not_retryable":
+      case "workspace_execution_unavailable":
         set.status = 409
         break
       case "authority_not_inheritable":
         set.status = 403
         break
       case "storage_unavailable":
+      case "workspace_not_configured":
+      case "invalid_workspace_params":
       case "agent_selector_removed":
       case "invalid_context":
       case "invalid_model_selection":
@@ -360,6 +364,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const thread = await sixb.agent.threads.create({
             ...(parsed.threadId === undefined ? {} : { id: parsed.threadId }),
             ...(parsed.title === undefined ? {} : { title: parsed.title }),
+            ...(parsed.workspace === undefined ? {} : { workspace: parsed.workspace }),
           })
 
           set.status = 201

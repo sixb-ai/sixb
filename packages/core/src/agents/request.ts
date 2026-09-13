@@ -114,6 +114,7 @@ export async function requestAgentRun(
     principal,
   })
 
+  assertWorkspaceExecutionAvailable(thread)
   // Fast single-flight check for a clear error. `runs.create` below is the atomic authority.
   if (thread.activeRunId !== null) {
     throw new AgentRequestError(
@@ -203,6 +204,7 @@ export async function retryAgentRun(
       `[Sixb] Agent thread '${failedRun.threadId}' was not found.`
     )
   }
+  assertWorkspaceExecutionAvailable(thread)
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
@@ -234,6 +236,15 @@ export async function retryAgentRun(
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
+}
+
+function assertWorkspaceExecutionAvailable(thread: AgentThreadRecord): void {
+  if (thread.workspace !== undefined) {
+    throw new AgentRequestError(
+      "workspace_execution_unavailable",
+      "[Sixb] Persistent workspace execution is not available in this release. The thread binding has been preserved."
+    )
+  }
 }
 
 async function assertAiLimitPreflight(

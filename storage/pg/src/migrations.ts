@@ -90,6 +90,9 @@ import shareSessionsSql from "./migrations/036-share-sessions.sql" with { type: 
 import projectionSourceRootsSql from "./migrations/039-projection-source-roots.sql" with {
   type: "text",
 }
+import agentThreadWorkspacesSql from "./migrations/037-agent-thread-workspaces.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -383,6 +386,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("038-outbox-publication-order", outboxPublicationOrderSql),
     pgSql("039-projection-source-roots", projectionSourceRootsSql),
     pgSql("040-connector-optional-pkce", connectorOptionalPkceSql),
+    pgSql("037-agent-thread-workspaces", agentThreadWorkspacesSql),
   ],
 })
 

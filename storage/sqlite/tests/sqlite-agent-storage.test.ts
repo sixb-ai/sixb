@@ -15,6 +15,37 @@ runAgentStorageContractSuite("SqliteAgentStorage", {
 })
 
 describe("SqliteStorage agents", () => {
+  test("preserves workspace bindings when a durable store is reopened", async () => {
+    // Regression proof: omit workspace from the thread INSERT or remove migration 036.
+    const path = await mkdtemp(join(tmpdir(), "sixb-workspace-binding-"))
+    let storage = new SqliteStorage({ path })
+    try {
+      await migrateStorage(storage)
+      await storage.agents.threads.create({
+        id: "workspace",
+        projectId: "project",
+        ownerPrincipal: { type: "user", id: "owner" },
+        workspace: { params: { clientId: "acme" } },
+      })
+      await storage.agents.threads.create({
+        id: "ephemeral",
+        projectId: "project",
+        ownerPrincipal: { type: "user", id: "owner" },
+      })
+      storage.close()
+      storage = new SqliteStorage({ path })
+      await migrateStorage(storage)
+      expect(
+        (await storage.agents.threads.getById({ projectId: "project", id: "workspace" }))?.workspace
+      ).toEqual({ params: { clientId: "acme" } })
+      expect(
+        await storage.agents.threads.getById({ projectId: "project", id: "ephemeral" })
+      ).not.toHaveProperty("workspace")
+    } finally {
+      storage.close()
+      await rm(path, { recursive: true, force: true })
+    }
+  })
   test("admits a conversation run after file-backed migrations", async () => {
     // Bun 1.3.14 enables legacy_alter_table by default. With foreign_keys OFF during migrations,
     // SQLite does not rewrite a temporary self-reference on rename. Reintroducing

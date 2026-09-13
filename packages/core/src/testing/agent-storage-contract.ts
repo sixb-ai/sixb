@@ -290,6 +290,62 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
   }
 
   describe(label, () => {
+    test("snapshots workspace bindings without accepting runtime state or credentials", async () => {
+      // Regression proof: remove snapshotAgentThreadWorkspace from a provider's thread create.
+      await withStorage(async (storage) => {
+        const workspace = { params: { clientId: "acme", nested: { branch: "main" } } }
+        const record = await storage.threads.create(threadInput({ workspace }))
+        workspace.params.nested.branch = "changed"
+        const read = await storage.threads.getById({ projectId, id: record.id })
+        expect(read?.workspace).toEqual({
+          params: { clientId: "acme", nested: { branch: "main" } },
+        })
+        const mutable = record.workspace?.params.nested
+        if (mutable && typeof mutable === "object" && !Array.isArray(mutable))
+          mutable.branch = "tampered"
+        expect((await storage.threads.list({ projectId })).threads[0]?.workspace).toEqual(
+          read?.workspace
+        )
+        await expectAgentError(
+          storage.threads.create(
+            threadInput({
+              id: "unsafe",
+              // @ts-expect-error runtime metadata cannot be supplied through a thread binding
+              workspace: { params: {}, env: { TOKEN: "secret" } },
+            })
+          ),
+          "invalid_input"
+        )
+        await expectAgentError(
+          storage.threads.create(
+            threadInput({
+              id: "non-json",
+              // @ts-expect-error storage accepts normalized JSON, not typed Dates
+              workspace: { params: { at: new Date() } },
+            })
+          ),
+          "invalid_input"
+        )
+      })
+    })
+
+    test("keeps delimiter-containing project and workspace thread ids distinct", async () => {
+      // Regression proof: change the memory store key back to projectId + ":" + id.
+      await withStorage(async (storage) => {
+        await storage.threads.create(
+          threadInput({ projectId: "a:b", id: "c", workspace: { params: { repo: "one" } } })
+        )
+        await storage.threads.create(
+          threadInput({ projectId: "a", id: "b:c", workspace: { params: { repo: "two" } } })
+        )
+        expect(
+          (await storage.threads.getById({ projectId: "a:b", id: "c" }))?.workspace?.params.repo
+        ).toBe("one")
+        expect(
+          (await storage.threads.getById({ projectId: "a", id: "b:c" }))?.workspace?.params.repo
+        ).toBe("two")
+      })
+    })
     // ── threads ───────────────────────────────────────────────────────────────────────────────
 
     test("creates threads, isolates projects, and rejects duplicate ids", async () => {

@@ -222,6 +222,7 @@ describe("Postgres storage migrations", () => {
             "038-outbox-publication-order",
             "039-projection-source-roots",
             "040-connector-optional-pkce",
+            "037-agent-thread-workspaces",
           ],
         },
       ])
@@ -505,6 +506,13 @@ describe("Postgres storage migrations", () => {
           id: "040-connector-optional-pkce",
           status: "applied",
           version: 40,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "037-agent-thread-workspaces",
+          status: "applied",
+          version: 41,
         },
       ])
     })
@@ -2257,6 +2265,13 @@ describe("Postgres storage migrations", () => {
           id: "040-connector-optional-pkce",
           status: "applied",
           version: 40,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "037-agent-thread-workspaces",
+          status: "applied",
+          version: 41,
         },
       ])
     } finally {
