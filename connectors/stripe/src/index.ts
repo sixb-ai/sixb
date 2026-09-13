@@ -1,5 +1,13 @@
 export { createStripeClient, type StripeClient } from "./client"
 export type {
+  ChargesResource,
+  StripeCharge,
+  StripeChargeListParams,
+  StripeChargeRetrieveParams,
+  StripeChargeSearchParams,
+  StripeChargeUpdateParams,
+} from "./resources/charges"
+export type {
   CustomersResource,
   StripeCustomer,
   StripeCustomerCreateParams,
@@ -34,6 +42,23 @@ export type {
   StripeInvoiceUpdateParams,
   StripeInvoiceVoidParams,
 } from "./resources/invoices"
+export type {
+  PaymentIntentsResource,
+  StripePaymentIntent,
+  StripePaymentIntentAmountDetailsLineItem,
+  StripePaymentIntentApplyCustomerBalanceParams,
+  StripePaymentIntentCancelParams,
+  StripePaymentIntentCaptureParams,
+  StripePaymentIntentConfirmParams,
+  StripePaymentIntentCreateParams,
+  StripePaymentIntentIncrementAuthorizationParams,
+  StripePaymentIntentListAmountDetailsLineItemsParams,
+  StripePaymentIntentListParams,
+  StripePaymentIntentRetrieveParams,
+  StripePaymentIntentSearchParams,
+  StripePaymentIntentUpdateParams,
+  StripePaymentIntentVerifyMicrodepositsParams,
+} from "./resources/payment-intents"
 export type {
   RefundsResource,
   StripeRefund,

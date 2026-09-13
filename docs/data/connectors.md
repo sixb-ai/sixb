@@ -410,7 +410,7 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 | `@sixb/connector-meta` | `meta(...)` | Meta Graph API (Facebook/Instagram) | — |
 | `@sixb/connector-notion` | `notion(...)` | Notion pages, properties, and Markdown | — |
 | `@sixb/connector-pipedrive` | `pipedrive(...)` | Pipedrive CRM | `pipedriveEventsWebhook` |
-| `@sixb/connector-stripe` | `stripe(...)` | Stripe customers, subscriptions, invoices, refunds, events | `stripeEventsWebhook` |
+| `@sixb/connector-stripe` | `stripe(...)` | Stripe customers, subscriptions, invoices, payment intents, charges, refunds, events | `stripeEventsWebhook` |
 | `@sixb/connector-teamleader` | `teamleader(...)` | Teamleader CRM, invoicing, quotations | `defineTeamleaderWebhook` |
 | `@sixb/connector-tiktok` | `tiktok(...)` | TikTok Display, Business Organic, and Ads reporting | — |
 | `@sixb/connector-pandadoc` | `pandadoc(...)` | PandaDoc documents and e-signatures | `pandaDocEventsWebhook` |
