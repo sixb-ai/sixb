@@ -35,6 +35,7 @@
       "@sixb/connector-linkedin": ["./connectors/linkedin/src/index.ts"],
       "@sixb/connector-mercury": ["./connectors/mercury/src/index.ts"],
       "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
+      "@sixb/connector-notion": ["./connectors/notion/src/index.ts"],
       "@sixb/connector-pandadoc": ["./connectors/pandadoc/src/index.ts"],
       "@sixb/connector-pennylane": ["./connectors/pennylane/src/index.ts"],
       "@sixb/connector-pipedrive": ["./connectors/pipedrive/src/index.ts"],
