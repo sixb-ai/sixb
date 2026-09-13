@@ -90,6 +90,10 @@ export const CreateAgentThreadBodySchema = z
   .object({
     title: z.string().trim().min(1).optional(),
     threadId: z.string().trim().min(1).optional(),
+    workspace: z
+      .object({ params: z.record(z.string(), JsonValueSchema) })
+      .strict()
+      .optional(),
   })
   .strict()
 
@@ -98,6 +102,10 @@ export const AgentThreadSchema = z.object({
   projectId: z.string(),
   ownerPrincipal: AgentPrincipalSchema,
   title: z.string().optional(),
+  workspace: z
+    .object({ params: z.record(z.string(), JsonValueSchema) })
+    .strict()
+    .optional(),
   status: AgentThreadStatusSchema,
   activeRunId: z.string().nullable(),
   lastMessageAt: z.string().optional(),

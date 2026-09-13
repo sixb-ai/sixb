@@ -26,6 +26,7 @@ import {
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
 import type { AgentDescriptor } from "./types"
+import { type AgentWorkspaceDefinition, normalizeAgentWorkspaceBinding } from "./workspace"
 
 export type ExecutionAgentRequestInput = Omit<RequestAgentRunInput, "principal">
 export type ListExecutionAgentThreadsInput = Omit<
@@ -33,16 +34,20 @@ export type ListExecutionAgentThreadsInput = Omit<
   "projectId" | "ownerPrincipal"
 >
 
-export interface CreateExecutionAgentThreadInput {
+export type CreateExecutionAgentThreadInput<
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+> = {
   readonly id?: string
   readonly title?: string
+  readonly workspace?: { readonly params: TParams }
 }
 
-export interface AgentThreadsRuntime {
-  create(input: CreateExecutionAgentThreadInput): Promise<AgentThreadRecord>
-  getById(threadId: string): Promise<AgentThreadRecord | null>
-  list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadsResult>
-}
+export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
+  {
+    create(input: CreateExecutionAgentThreadInput<TParams>): Promise<AgentThreadRecord>
+    getById(threadId: string): Promise<AgentThreadRecord | null>
+    list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadsResult>
+  }
 
 export interface AgentRunsRuntime {
   request(input: ExecutionAgentRequestInput): Promise<ExecutionAgentRunResult>
@@ -71,18 +76,21 @@ export interface ExecutionAgentRunResult extends Omit<RequestAgentRunResult, "ru
   readonly run: AgentRunView
 }
 
-export interface AgentRuntime {
+export type AgentRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> = {
   /** Null when no language models are configured or the caller cannot run the Agent. */
   get(): AgentDescriptor | null
-  readonly threads: AgentThreadsRuntime
+  readonly threads: AgentThreadsRuntime<TParams>
   readonly runs: AgentRunsRuntime
 }
 
-export function createAgentRuntime(
+export function createAgentRuntime<
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+>(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  models?: ModelCatalog
-): AgentRuntime {
+  models?: ModelCatalog,
+  workspace?: AgentWorkspaceDefinition
+): AgentRuntime<TParams> {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const principal = authority.type === "principal" ? authority.context.principal : SYSTEM_PRINCIPAL
   const allowed = () => isRuntimeAllowed(runtime, { kind: "agent.run" })
@@ -143,7 +151,12 @@ export function createAgentRuntime(
             "[Sixb] Agent storage is not configured."
           )
         }
+        const binding =
+          input.workspace === undefined
+            ? undefined
+            : normalizeAgentWorkspaceBinding(workspace, input.workspace, runtime.ontology)
         return storage.threads.create({
+          ...(binding === undefined ? {} : { workspace: binding }),
           id: input.id ?? createAgentThreadId(),
           projectId: runtime.projectId,
           ownerPrincipal: principal,
