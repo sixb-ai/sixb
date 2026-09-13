@@ -10,12 +10,18 @@ import type { LanguageModelRef } from "../../models"
 
 export type AgentThreadStatus = "active" | "archived"
 
+/** Immutable, non-secret application input. Never store resolved env or credentials here. */
+export interface AgentThreadWorkspace {
+  readonly params: Readonly<Record<string, JsonValue>>
+}
+
 export interface AgentThreadRecord {
   readonly id: string
   readonly projectId: string
   /** Who owns/opened the thread. Reuses the canonical auth principal (gains `agent` later for free). */
   readonly ownerPrincipal: Principal
   readonly title?: string
+  readonly workspace?: AgentThreadWorkspace
   readonly status: AgentThreadStatus
   /** Single-flight anchor: the id of the one run currently allowed to write, or `null` when idle. */
   readonly activeRunId: string | null
@@ -30,6 +36,7 @@ export interface CreateAgentThreadInput {
   readonly projectId: string
   readonly ownerPrincipal: Principal
   readonly title?: string
+  readonly workspace?: AgentThreadWorkspace
   readonly status?: AgentThreadStatus
   readonly createdAt?: Date
   readonly updatedAt?: Date

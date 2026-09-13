@@ -47,6 +47,32 @@ const { run } = await sixb.agent.runs.request({ threadId: thread.id, text: "Whic
 
 Use the request-bound SDK so the run inherits the authenticated user's authority.
 
+## Workspace bindings
+
+Opt in at thread creation; omitting `workspace` keeps the existing ephemeral run behavior:
+
+```ts
+const thread = await sixb.agent.threads.create({
+  title: "Improve the client portal",
+  workspace: { params: { clientId: "acme" } },
+})
+```
+
+HTTP clients use the same shape on `POST /api/agent-threads`:
+
+```json
+{ "workspace": { "params": { "clientId": "acme" } } }
+```
+
+The project must have [workspace configuration](./defining-agents.md#workspace-configuration-foundation).
+Missing required parameters, unknown fields and invalid values are rejected before storage.
+The binding is immutable and visible only through the existing owner-scoped thread APIs.
+Use a new thread to select a different binding. Parameters are not a secret store.
+
+**In this foundation release, posting a message or retrying a run on a workspace thread returns
+HTTP 409. No message or run is created.** The SDK reports `workspace_execution_unavailable`.
+Threads without a workspace remain runnable. Workflows and child agents do not gain a workspace.
+
 ## Trigger a run
 
 There is no separate run-trigger endpoint — posting a message is the trigger. The `202` response

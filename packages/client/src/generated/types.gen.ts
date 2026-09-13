@@ -9266,6 +9266,19 @@ export type ListAgentThreadsResponses = {
         id: string
       }
       title?: string
+      workspace?: {
+        params: {
+          [key: string]:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      }
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -9284,6 +9297,19 @@ export type CreateAgentThreadData = {
   body: {
     title?: string
     threadId?: string
+    workspace?: {
+      params: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+      }
+    }
   }
   path?: never
   query?: never
@@ -9332,6 +9358,19 @@ export type CreateAgentThreadResponses = {
         id: string
       }
       title?: string
+      workspace?: {
+        params: {
+          [key: string]:
+            | string
+            | number
+            | boolean
+            | Array<unknown>
+            | {
+                [key: string]: unknown
+              }
+            | null
+        }
+      }
       status: "active" | "archived"
       activeRunId: string | null
       lastMessageAt?: string
@@ -9388,6 +9427,19 @@ export type GetAgentThreadResponses = {
       id: string
     }
     title?: string
+    workspace?: {
+      params: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+      }
+    }
     status: "active" | "archived"
     activeRunId: string | null
     lastMessageAt?: string

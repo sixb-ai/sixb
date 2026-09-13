@@ -174,6 +174,7 @@ describe("Postgres storage migrations", () => {
             "033-retire-agent-definitions",
             "034-device-authorizations",
             "035-share-grants",
+            "036-agent-thread-workspaces",
           ],
         },
       ])
@@ -422,6 +423,13 @@ describe("Postgres storage migrations", () => {
           id: "035-share-grants",
           status: "applied",
           version: 35,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "036-agent-thread-workspaces",
+          status: "applied",
+          version: 36,
         },
       ])
     })
@@ -1989,6 +1997,13 @@ describe("Postgres storage migrations", () => {
           id: "035-share-grants",
           status: "applied",
           version: 35,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "036-agent-thread-workspaces",
+          status: "applied",
+          version: 36,
         },
       ])
     } finally {

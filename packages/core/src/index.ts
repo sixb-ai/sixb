@@ -1066,7 +1066,19 @@ export {
   MAX_AGENT_CONTEXT_ENTRIES,
   requestAgentRun,
 } from "./agents"
-export type { AgentThreadRecord, ListAgentThreadsResult } from "./storage/agents"
+export type {
+  AgentWorkspaceConfig,
+  AgentWorkspaceDefinition,
+  AgentWorkspaceResolveContext,
+  ResolvedAgentWorkspace,
+} from "./agents/workspace"
+export type { ParamOptions } from "./shared/params/builders"
+export type { InferParams, ParamConfig, ParamsConfig } from "./shared/params/types"
+export type {
+  AgentThreadRecord,
+  AgentThreadWorkspace,
+  ListAgentThreadsResult,
+} from "./storage/agents"
 
 // ── Models ──────────────────────────────────────────────────
 

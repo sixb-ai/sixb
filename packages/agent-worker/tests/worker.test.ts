@@ -1955,6 +1955,64 @@ function hangingCompactionModel(): WorkerTestModel {
 }
 
 describe("AgentWorker", () => {
+  test("refuses a stored workspace before model or sandbox work", async () => {
+    // Regression proof: remove the workspace guard in worker.ts after ownership confirmation.
+    let modelCalls = 0
+    const factory = new RecordingSandboxFactory()
+    const model = answerModel(() => {
+      modelCalls++
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), factory)
+    attachSixbErrorReporter(sixb, () => {})
+    const thread = await agentStorageOf(sixb).threads.create({
+      projectId: PROJECT_ID,
+      id: "workspace-thread",
+      ownerPrincipal: { type: "system", id: "system" },
+      workspace: { params: { clientId: "acme" } },
+    })
+    const executionId = await createTestAgentExecution(sixb.storage, {
+      projectId: PROJECT_ID,
+      runId: "workspace-run",
+      authority: "inherited",
+    })
+    await agentStorageOf(sixb).messages.append({
+      projectId: PROJECT_ID,
+      id: "workspace-message",
+      threadId: thread.id,
+      runId: null,
+      role: "user",
+      parts: [{ type: "text", text: "Already queued" }],
+    })
+    const run = await agentStorageOf(sixb).runs.create({
+      id: "workspace-run",
+      projectId: PROJECT_ID,
+      threadId: thread.id,
+      executionId,
+      triggerMessageId: "workspace-message",
+      requesterGroupIds: [],
+      spec: { model: { provider: model.providerId, modelId: model.modelId } },
+    })
+    await sixb.queues.agents.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [
+        { id: "agt_job_workspace-run", type: "agent.run.requested", payload: { runId: run.id } },
+      ],
+    })
+    const completion = observeQueueSettlement(sixb.queues.agents)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(modelCalls).toBe(0)
+      expect(factory.sandboxes).toHaveLength(0)
+      expect(
+        await agentStorageOf(sixb).runs.getById({ projectId: PROJECT_ID, id: run.id })
+      ).toMatchObject({ status: "failed", error: { code: "agent.execution_failed" } })
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+  })
   test("keeps delegation tools unavailable to the conversational Agent", async () => {
     // Regression proof: restore SubagentCoordinator injection in the worker; this fails.
     let toolNames: readonly string[] = []
