@@ -2,6 +2,7 @@ export {
   SandboxError,
   SandboxIsolationUnavailableError,
   SandboxNotRunningError,
+  SandboxStateUnavailableError,
   SandboxTimeoutError,
 } from "./errors"
 export type { ExecOptions } from "./exec"
@@ -15,5 +16,6 @@ export type {
   SandboxFileRecord,
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
+  SandboxPersistence,
   SandboxStatus,
 } from "./sandbox"
