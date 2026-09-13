@@ -82,6 +82,7 @@ export type {
   AgentThreadRecord,
   AgentThreadStatus,
   AgentThreadStore,
+  AgentThreadWorkspace,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,

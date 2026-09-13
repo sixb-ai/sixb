@@ -273,6 +273,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 35,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "036-agent-thread-workspaces",
+    status: "applied",
+    version: 36,
+  },
 ]
 
 afterEach(async () => {

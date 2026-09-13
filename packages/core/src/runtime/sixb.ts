@@ -31,6 +31,7 @@ import type { OntologySource, SixbRuntimeContext } from "./types"
 /** Domain SDK bound to one immutable execution and one registered runtime authority. */
 export interface Sixb<
   TOntologySources extends readonly OntologySource[] = readonly OntologySource[],
+  TParams extends Record<string, unknown> = Record<string, unknown>,
 > {
   readonly execution: ExecutionContext
   readonly objects: ObjectsRuntime<TOntologySources>
@@ -41,7 +42,7 @@ export interface Sixb<
   readonly pipelines: PipelinesRuntime
   readonly projections: ProjectionsRuntime
   readonly rules: RulesRuntime
-  readonly agent: AgentRuntime
+  readonly agent: AgentRuntime<TParams>
   readonly aiUsage: AiUsageRuntime
   readonly events: EventsRuntime
   readonly logs: LogsRuntime
@@ -62,11 +63,14 @@ export interface SixbDependencies {
   readonly lakeStorage: LakeStorage
 }
 
-export function createBoundSixb<TOntologySources extends readonly OntologySource[]>(
+export function createBoundSixb<
+  TOntologySources extends readonly OntologySource[],
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+>(
   runtime: SixbRuntimeContext,
   dependencies: SixbDependencies,
   execution: ExecutionContext
-): Sixb<TOntologySources> {
+): Sixb<TOntologySources, TParams> {
   resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
     authorization: runtime.runtimeAuthorization,
@@ -75,9 +79,9 @@ export function createBoundSixb<TOntologySources extends readonly OntologySource
     reader: runtime.objectReader,
     scope: { execution, authorization: runtime.runtimeAuthorization },
   })
-  const sixb: Sixb<TOntologySources> = {
+  const sixb: Sixb<TOntologySources, TParams> = {
     execution,
-    ...createExecutionFacades<TOntologySources>(runtime, execution, dependencies),
+    ...createExecutionFacades<TOntologySources, TParams>(runtime, execution, dependencies),
   }
   shareOntologyMutationRuntime(runtime, sixb)
   if (dependencies.connectorConnections) {
@@ -93,15 +97,19 @@ export function createBoundSixb<TOntologySources extends readonly OntologySource
 /** Internal nominal guard for execution boundaries that accept a narrow structural host. */
 export function isBoundSixb<
   TOntologySources extends readonly OntologySource[] = readonly OntologySource[],
->(value: unknown): value is Sixb<TOntologySources> {
+  TParams extends Record<string, unknown> = Record<string, unknown>,
+>(value: unknown): value is Sixb<TOntologySources, TParams> {
   return typeof value === "object" && value !== null && boundSixbInstances.has(value)
 }
 
-function createExecutionFacades<TOntologySources extends readonly OntologySource[]>(
+function createExecutionFacades<
+  TOntologySources extends readonly OntologySource[],
+  TParams extends Record<string, unknown>,
+>(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   dependencies: SixbDependencies
-): Omit<Sixb<TOntologySources>, "execution"> {
+): Omit<Sixb<TOntologySources, TParams>, "execution"> {
   return {
     objects: createObjectsRuntime<TOntologySources>(runtime, execution),
     actions: createActionsRuntime(runtime, execution),
@@ -117,7 +125,12 @@ function createExecutionFacades<TOntologySources extends readonly OntologySource
     pipelines: createPipelinesRuntime(runtime, execution, dependencies.definitions.pipelines),
     projections: createProjectionsRuntime(runtime, dependencies.definitions.projections),
     rules: createRulesRuntime(runtime, dependencies.definitions.rules),
-    agent: createAgentRuntime(runtime, execution, dependencies.definitions.models),
+    agent: createAgentRuntime<TParams>(
+      runtime,
+      execution,
+      dependencies.definitions.models,
+      dependencies.definitions.agentWorkspace
+    ),
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),
     events: createEventsRuntime(runtime),
     logs: createLogsRuntime(runtime, dependencies.logging),

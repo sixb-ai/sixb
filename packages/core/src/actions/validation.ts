@@ -1,9 +1,7 @@
-import type { JsonValue } from "../json"
-import { type SchemaOrRef, type ValueType, validateSchemaOrRefValue } from "../ontology"
+import type { ValueType } from "../ontology"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
-import type { Schema } from "../ontology/types"
-import { coerceSchemaValueToTyped, normalizeSchemaValue } from "../ontology/validation"
+import { coerceParamsToTyped, normalizeParams } from "../shared/params/validation"
 import type { ActionRunParams } from "../storage/action-runs"
 import { ActionDefinitionError } from "./errors"
 import type {
@@ -54,53 +52,10 @@ export function normalizeActionParams(
   params: Record<string, unknown>,
   pathPrefix: string
 ): ActionRunParams {
-  const knownParamIds = new Set(Object.keys(paramsConfig))
-  const normalized: Record<string, JsonValue> = {}
-
-  for (const paramId of Object.keys(params)) {
-    if (!knownParamIds.has(paramId)) {
-      throw new OntologyValidationError(`Unknown param '${paramId}' for action '${pathPrefix}'`)
-    }
-  }
-
-  for (const [paramId, paramDef] of Object.entries(paramsConfig)) {
-    const value = params[paramId]
-
-    if (value === undefined) {
-      if (paramDef.required) {
-        throw new OntologyValidationError(
-          `Missing required param '${paramId}' for action '${pathPrefix}'`
-        )
-      }
-      continue
-    }
-
-    if (value === null) {
-      if (!paramDef.nullable) {
-        throw new OntologyValidationError(
-          `[Sixb] Action param ${pathPrefix}.${paramId} cannot be null`
-        )
-      }
-      normalized[paramId] = null
-      continue
-    }
-
-    validateSchemaOrRefValue(
-      paramDef.schema,
-      value,
-      `${pathPrefix}.${paramId}`,
-      runtime.ontology.getValueTypesById()
-    )
-
-    normalized[paramId] = normalizeSchemaOrRefValue(
-      paramDef.schema,
-      value,
-      `${pathPrefix}.${paramId}`,
-      runtime.ontology.getValueTypesById()
-    )
-  }
-
-  return normalized
+  return normalizeParams(runtime.ontology.getValueTypesById(), paramsConfig, params, {
+    kind: "action",
+    id: pathPrefix,
+  })
 }
 
 /**
@@ -114,21 +69,7 @@ export function coerceActionParamsToTyped(
   params: Record<string, unknown>,
   valueTypesById: ReadonlyMap<string, ValueType>
 ): Record<string, unknown> {
-  const coerced: Record<string, unknown> = { ...params }
-
-  for (const [paramId, paramDef] of Object.entries(paramsConfig)) {
-    const value = params[paramId]
-    if (value === undefined) continue
-
-    const schema = paramDef.schema
-    if (typeof schema === "object" && schema !== null && schema.type === "objectRef") {
-      continue
-    }
-
-    coerced[paramId] = coerceSchemaValueToTyped(schema as Schema, value, valueTypesById)
-  }
-
-  return coerced
+  return coerceParamsToTyped(paramsConfig, params, valueTypesById)
 }
 
 export function validateActionSubject(action: ActionDefinition, subject: ActionSubject): void {
@@ -166,21 +107,4 @@ function actionAppliesToObjectType(
   return runtime.actionRegistry
     .listForType(objectType)
     .some((candidate) => candidate.id === action.id)
-}
-
-function normalizeSchemaOrRefValue(
-  schema: SchemaOrRef,
-  value: unknown,
-  path: string,
-  valueTypesById: ReadonlyMap<string, ValueType>
-): JsonValue {
-  if (typeof schema === "object" && schema !== null && schema.type === "objectRef") {
-    const refValue = value as { objectTypeId: string; primaryId: string }
-    return {
-      objectTypeId: refValue.objectTypeId,
-      primaryId: refValue.primaryId,
-    }
-  }
-
-  return normalizeSchemaValue(schema as Schema, value, path, valueTypesById)
 }

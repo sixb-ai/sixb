@@ -6,22 +6,11 @@ import {
   type ValueType,
   validateSchemaValue,
 } from "../ontology"
+import { assertValidSchema } from "../ontology/validation/definition"
 import { AgentDefinitionError } from "./errors"
 import type { AgentToolDefinition, AgentToolInputSchema } from "./types"
 
 const AGENT_TOOL_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/
-const AGENT_TOOL_PRIMITIVE_SCHEMAS = new Set([
-  "string",
-  "integer",
-  "double",
-  "decimal",
-  "boolean",
-  "date",
-  "timestamp",
-  "uuid",
-  "fileRef",
-])
-
 export const AGENT_RESERVED_TOOL_NAMES = [
   "bash",
   "read",
@@ -69,7 +58,7 @@ export function assertValidAgentToolInput(name: string, input: unknown): void {
         `[Sixb] Agent tool '${name}' input field names must not be empty.`
       )
     }
-    assertValidAgentToolSchema(name, schema, `input.${field}`, new Set())
+    assertValidSchema(schema, `input.${field}`, (path) => invalidAgentToolSchema(name, path))
   }
 }
 
@@ -119,80 +108,6 @@ export function validateAndNormalizeAgentToolInput(
   )
 }
 
-function assertValidAgentToolSchema(
-  toolName: string,
-  schema: unknown,
-  path: string,
-  visiting: Set<object>
-): void {
-  if (typeof schema === "string") {
-    if (AGENT_TOOL_PRIMITIVE_SCHEMAS.has(schema)) {
-      return
-    }
-    throw invalidAgentToolSchema(toolName, path)
-  }
-  if (!isPlainRecord(schema) || typeof schema.type !== "string" || visiting.has(schema)) {
-    throw invalidAgentToolSchema(toolName, path)
-  }
-
-  visiting.add(schema)
-  switch (schema.type) {
-    case "enum": {
-      const values = schema.values
-      const validValues = isValidAgentToolEnumValues(values, schema.valueType)
-      if (!validValues || new Set(values).size !== values.length) {
-        throw invalidAgentToolSchema(toolName, path)
-      }
-      break
-    }
-    case "array":
-      assertValidAgentToolSchema(toolName, schema.items, `${path}.items`, visiting)
-      break
-    case "map":
-      if (schema.keySchema !== "string") {
-        throw invalidAgentToolSchema(toolName, path)
-      }
-      assertValidAgentToolSchema(toolName, schema.valueSchema, `${path}.valueSchema`, visiting)
-      break
-    case "object": {
-      if (!isPlainRecord(schema.properties)) {
-        throw invalidAgentToolSchema(toolName, path)
-      }
-      for (const [fieldId, field] of Object.entries(schema.properties)) {
-        if (!fieldId.trim() || !isPlainRecord(field) || !("schema" in field)) {
-          throw invalidAgentToolSchema(toolName, `${path}.properties.${fieldId}`)
-        }
-        if (
-          (field.required !== undefined && typeof field.required !== "boolean") ||
-          (field.nullable !== undefined && typeof field.nullable !== "boolean") ||
-          (field.description !== undefined &&
-            (typeof field.description !== "string" || !field.description.trim()))
-        ) {
-          throw invalidAgentToolSchema(toolName, `${path}.properties.${fieldId}`)
-        }
-        assertValidAgentToolSchema(
-          toolName,
-          field.schema,
-          `${path}.properties.${fieldId}.schema`,
-          visiting
-        )
-      }
-      break
-    }
-    case "valueTypeRef":
-      if (typeof schema.valueTypeId !== "string" || !schema.valueTypeId.trim()) {
-        throw invalidAgentToolSchema(toolName, path)
-      }
-      if (schema._resolved !== undefined) {
-        assertValidAgentToolSchema(toolName, schema._resolved, `${path}._resolved`, visiting)
-      }
-      break
-    default:
-      throw invalidAgentToolSchema(toolName, path)
-  }
-  visiting.delete(schema)
-}
-
 function invalidAgentToolSchema(toolName: string, path: string): AgentDefinitionError {
   return new AgentDefinitionError(
     `[Sixb] Agent tool '${toolName}' ${path} must be a valid Sixb schema.`
@@ -221,27 +136,6 @@ export function assertValidProjectAgentToolDefinitions(
     }
     seen.add(tool.name)
   }
-}
-
-function isValidAgentToolEnumValues(values: unknown, valueType: unknown): values is unknown[] {
-  if (!Array.isArray(values) || values.length === 0) {
-    return false
-  }
-
-  for (let index = 0; index < values.length; index += 1) {
-    if (!Object.hasOwn(values, index)) {
-      return false
-    }
-    const value = values[index]
-    if (
-      valueType === "string"
-        ? typeof value !== "string"
-        : valueType !== "integer" || typeof value !== "number" || !Number.isInteger(value)
-    ) {
-      return false
-    }
-  }
-  return true
 }
 
 function deepFreeze<T>(value: T, seen: Set<object> = new Set()): T {

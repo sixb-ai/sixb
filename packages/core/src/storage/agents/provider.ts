@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from "node:util"
 import { AGENT_REASONING_LEVELS } from "../../agents/types"
 import { isFileRef } from "../../blob-storage"
+import { isJsonObject, isPlainRecord } from "../../json"
 import { isModelReasoning } from "../../models/language-model"
 import type { ExecutionRecord, ExecutionStorage } from "../executions"
 import { findAgentRunExecution } from "../executions/run-link"
@@ -10,12 +11,28 @@ import type {
   AgentMessageRecord,
   AgentRunRecord,
   AgentThreadRecord,
+  AgentThreadWorkspace,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
   SubagentRunRecord,
   SubagentRunResult,
 } from "./types"
+
+/** Keep caller-controlled binding data separate from future worker-owned workspace state. */
+export function snapshotAgentThreadWorkspace(value: unknown): AgentThreadWorkspace {
+  if (
+    !isPlainRecord(value) ||
+    Object.keys(value).some((key) => key !== "params") ||
+    !isJsonObject(value.params)
+  ) {
+    throw new AgentStorageError(
+      "invalid_input",
+      "[Sixb] Thread workspace must contain only JSON params."
+    )
+  }
+  return { params: structuredClone(value.params) }
+}
 
 /** Validate the provider-neutral model selection captured for a conversational turn. */
 export function assertConversationAgentRunSpec(
