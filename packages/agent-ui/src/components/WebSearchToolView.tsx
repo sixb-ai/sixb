@@ -1,7 +1,7 @@
 import { Search } from "lucide-react"
-import { ActivityStatusText } from "../components/ActivityStatus"
 import type { NormalizedTool } from "../parts"
-import { coerceWebSearchOutput, webSearchQuery } from "./interpret"
+import { coerceWebSearchOutput, webSearchQuery } from "../utils/webSearch"
+import { ActivityStatusText } from "./ActivityStatus"
 
 export function WebSearchToolView({ tool }: { tool: NormalizedTool }) {
   const running = tool.state === "input-streaming" || tool.state === "input-available"

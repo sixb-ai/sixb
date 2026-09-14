@@ -3,10 +3,10 @@ import type { AgentRunStreamEvent } from "@sixb/client"
 import { renderToStaticMarkup } from "react-dom/server"
 import { latestWorkLabel } from "../src/activity-label"
 import { AssistantBody } from "../src/components/MessageParts"
+import { WebSearchToolView } from "../src/components/WebSearchToolView"
 import { createLiveRunState, liveRunReducer } from "../src/liveRun"
 import { type NormalizedPart, normalizeDurableParts } from "../src/parts"
-import { coerceWebSearchOutput, collectWebSources } from "../src/web/interpret"
-import { WebSearchToolView } from "../src/web/WebSearchToolView"
+import { coerceWebSearchOutput, collectWebSources } from "../src/utils/webSearch"
 
 const result = {
   url: "https://www.example.com/article",
