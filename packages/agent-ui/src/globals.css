@@ -1,5 +1,40 @@
 @source "./**/*.{ts,tsx}";
 
+@keyframes sixb-web-source-in {
+  from {
+    opacity: 0;
+    transform: translateY(var(--sixb-web-source-offset, -3px));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes sixb-web-source-out {
+  to {
+    opacity: 0;
+  }
+}
+
+.sixb-web-source-popover[data-side="top"] {
+  --sixb-web-source-offset: 3px;
+}
+
+.sixb-web-source-popover[data-state="open"] {
+  animation: sixb-web-source-in 160ms ease-out;
+}
+
+.sixb-web-source-popover[data-state="closed"] {
+  animation: sixb-web-source-out 100ms ease-in;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sixb-web-source-popover[data-state] {
+    animation: none;
+  }
+}
+
 @keyframes sixb-reasoning-max {
   0%,
   100% {

@@ -21,6 +21,11 @@ export function latestWorkLabel(parts: readonly NormalizedPart[]): string {
 }
 
 function toolProgressLabel(tool: NormalizedTool): string {
+  if (tool.toolName === "web_search") {
+    if (tool.state === "output-error") return "Continuing after a web search failed"
+    if (tool.state === "output-available") return "Reviewing web results"
+    return "Searching the web"
+  }
   if (tool.toolName === "bash") {
     if (tool.state === "input-streaming") return "Preparing a command"
     const input = coerceBashInput(tool.input)
