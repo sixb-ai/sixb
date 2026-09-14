@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
-import { type ObjectSchema, validateSchemaOrRefValue } from "@sixb/core"
+import type { ObjectSchema } from "@sixb/core"
 import { runModelLoop } from "@sixb/core/internal/agents"
-import { schemaFieldsToJsonSchema } from "@sixb/core/internal/ontology"
+import { schemaFieldsToJsonSchema, validateSchemaOrRefValue } from "@sixb/core/internal/ontology"
 import type { LanguageModelStreamEvent } from "@sixb/core/models"
 import { vercelGateway } from "../src"
 
