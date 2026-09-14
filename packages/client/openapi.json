@@ -29101,6 +29101,23 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "workspaceState": {
+                            "type": "object",
+                            "properties": {
+                              "generation": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": ["new", "busy", "ready", "blocked", "unavailable"]
+                              },
+                              "initialized": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["generation", "status", "initialized"],
+                            "additionalProperties": false
+                          },
                           "id": {
                             "type": "string"
                           },
@@ -29385,6 +29402,23 @@
                     "thread": {
                       "type": "object",
                       "properties": {
+                        "workspaceState": {
+                          "type": "object",
+                          "properties": {
+                            "generation": {
+                              "type": "string"
+                            },
+                            "status": {
+                              "type": "string",
+                              "enum": ["new", "busy", "ready", "blocked", "unavailable"]
+                            },
+                            "initialized": {
+                              "type": "boolean"
+                            }
+                          },
+                          "required": ["generation", "status", "initialized"],
+                          "additionalProperties": false
+                        },
                         "id": {
                           "type": "string"
                         },
@@ -29570,6 +29604,23 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "workspaceState": {
+                      "type": "object",
+                      "properties": {
+                        "generation": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["new", "busy", "ready", "blocked", "unavailable"]
+                        },
+                        "initialized": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["generation", "status", "initialized"],
+                      "additionalProperties": false
+                    },
                     "id": {
                       "type": "string"
                     },
@@ -29692,6 +29743,243 @@
           },
           "501": {
             "description": "Response for status 501",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/agent-threads/{threadId}/workspace/recreate": {
+      "post": {
+        "summary": "Explicitly recreate an unavailable or uncertain workspace without deleting its previous state",
+        "operationId": "recreateAgentThreadWorkspace",
+        "tags": ["Agent Threads"],
+        "security": [
+          {
+            "sixbCsrf": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "threadId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expectedGeneration": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["expectedGeneration"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expectedGeneration": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["expectedGeneration"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "expectedGeneration": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["expectedGeneration"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "workspaceState": {
+                      "type": "object",
+                      "properties": {
+                        "generation": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "string",
+                          "enum": ["new", "busy", "ready", "blocked", "unavailable"]
+                        },
+                        "initialized": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": ["generation", "status", "initialized"],
+                      "additionalProperties": false
+                    },
+                    "id": {
+                      "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "ownerPrincipal": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "enum": ["user", "serviceAccount", "system"]
+                        },
+                        "id": {
+                          "type": "string",
+                          "minLength": 1
+                        }
+                      },
+                      "required": ["type", "id"],
+                      "additionalProperties": false
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "workspace": {
+                      "type": "object",
+                      "properties": {
+                        "params": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": ["params"],
+                      "additionalProperties": false
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["active", "archived"]
+                    },
+                    "activeRunId": {
+                      "type": "string",
+                      "nullable": true
+                    },
+                    "lastMessageAt": {
+                      "type": "string"
+                    },
+                    "messageCount": {
+                      "type": "number"
+                    },
+                    "createdAt": {
+                      "type": "string"
+                    },
+                    "updatedAt": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "projectId",
+                    "ownerPrincipal",
+                    "status",
+                    "activeRunId",
+                    "messageCount",
+                    "createdAt",
+                    "updatedAt"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Response for status 400",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Response for status 404",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
             "content": {
               "application/json": {
                 "schema": {

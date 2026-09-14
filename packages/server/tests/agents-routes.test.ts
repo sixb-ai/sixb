@@ -218,7 +218,59 @@ function jsonRequest(
 }
 
 describe("agent routes", () => {
-  test("round-trips validated sandbox bindings and rejects runs without writing messages", async () => {
+  test("owner-scopes explicit workspace recovery and hides ownership tokens", async () => {
+    const { app, storage, sixb } = createApp({ sandbox: true, auth: true })
+    const owner = await seedSession(storage, "workspace-owner")
+    const stranger = await seedSession(storage, "workspace-stranger")
+    await storage.agents.threads.create({
+      projectId: sixb.id,
+      id: "recovery",
+      ownerPrincipal: { type: "user", id: "workspace-owner" },
+      sandbox: { clientId: "acme" },
+    })
+    await createStartedRun(storage, {
+      projectId: sixb.id,
+      id: "recovery-run",
+      threadId: "recovery",
+      triggerMessageId: "trigger",
+      requesterGroupIds: [],
+      execution: testExecution("private-owner-token"),
+    })
+    await storage.agents.threads.transitionWorkspace({
+      projectId: sixb.id,
+      id: "recovery",
+      action: "acquire",
+      runId: "recovery-run",
+      executionToken: "private-owner-token",
+      generation: "old-generation",
+      sourceFingerprint: "a".repeat(64),
+    })
+    const path = "/api/agent-threads/recovery/workspace/recreate"
+    const body = { expectedGeneration: "old-generation" }
+    expect((await app.fetch(jsonRequest(path, "POST", body, stranger.csrfHeaders))).status).toBe(
+      404
+    )
+    expect((await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))).status).toBe(409)
+    const visible = await app.fetch(
+      new Request("http://localhost/api/agent-threads/recovery", { headers: owner.headers })
+    )
+    expect(await visible.text()).not.toContain("private-owner-token")
+    await storage.agents.runs.finish({
+      projectId: sixb.id,
+      id: "recovery-run",
+      executionToken: "private-owner-token",
+      status: "failed",
+    })
+    const response = await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      sandbox: { clientId: "acme" },
+      workspaceState: { status: "new", initialized: false },
+    })
+    expect((await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))).status).toBe(409)
+  })
+
+  test("round-trips validated workspace bindings and admits fresh workspace runs", async () => {
     const { app, storage, sixb } = createApp({ sandbox: true })
     const created = await app.fetch(
       jsonRequest("/api/agent-threads", "POST", {
@@ -237,11 +289,11 @@ describe("agent routes", () => {
     const run = await app.fetch(
       jsonRequest("/api/agent-threads/sandbox-thread/messages", "POST", { text: "Work" })
     )
-    expect(run.status).toBe(409)
+    expect(run.status).toBe(202)
     expect(
       (await storage.agents.messages.list({ projectId: sixb.id, threadId: "sandbox-thread" }))
         .messages
-    ).toHaveLength(0)
+    ).toHaveLength(1)
   })
 
   test("validates dynamic sandbox params and rejects runtime fields", async () => {

@@ -12,6 +12,7 @@ import {
   listAgentThreadsQueryKey,
   listModelsOptions,
   postAgentThreadMessageMutation,
+  recreateAgentThreadWorkspaceMutation,
   retryAgentRunMutation,
   useAgentActivityStream,
 } from "@sixb/client/hooks"
@@ -200,6 +201,7 @@ export function useAgentConversation({
   const postMessage = useMutation(postAgentThreadMessageMutation())
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
+  const recreateWorkspace = useMutation(recreateAgentThreadWorkspaceMutation())
 
   const presentation = presentActiveTurn({
     activeRunId,
@@ -338,6 +340,24 @@ export function useAgentConversation({
     void send("Continue from where you left off.", [], [])
   }
 
+  const handleRecreateWorkspace = () => {
+    if (!thread?.workspaceState || isRunning) return
+    recreateWorkspace.mutate(
+      {
+        path: { threadId: thread.id },
+        body: { expectedGeneration: thread.workspaceState.generation },
+      },
+      {
+        onSuccess: () => {
+          void queryClient.invalidateQueries({
+            queryKey: getAgentThreadQueryKey({ path: { threadId: thread.id } }),
+          })
+          void refreshThreads()
+        },
+      }
+    )
+  }
+
   const selectModel = (model: LanguageModel) => {
     const reasoning = model.reasoningLevels.includes(selectedReasoning ?? "provider-default")
       ? selectedReasoning
@@ -369,8 +389,19 @@ export function useAgentConversation({
       ? pendingUser
       : null
 
+  const workspaceRecovery =
+    thread?.workspaceState &&
+    !isRunning &&
+    ["busy", "blocked", "unavailable"].includes(thread.workspaceState.status)
+      ? thread.workspaceState
+      : null
+
   return {
     agentLoading: agentQuery.isLoading,
+    workspaceRecovery,
+    recreatingWorkspace: recreateWorkspace.isPending,
+    workspaceRecoveryError: recreateWorkspace.isError,
+    recreateWorkspace: handleRecreateWorkspace,
     agentError: agentQuery.isError,
     models,
     modelsLoading: modelsQuery.isLoading,

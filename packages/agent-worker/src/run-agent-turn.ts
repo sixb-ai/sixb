@@ -253,6 +253,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     const interruptedBeforeCommit = await finalizeIfInterrupted()
     if (interruptedBeforeCommit) return interruptedBeforeCommit
 
+    await context.beforeFinalize?.()
     const finalizedRun = await appendMessageAndFinishRunOrThrow(storage, {
       message: {
         id: assistantMessageId,
@@ -338,6 +339,8 @@ async function finalizeInterruptedTurn(input: {
   const parts = input.parts?.some((part) => part.type !== "step-start")
     ? assistantPartsWithAttachments(input.parts)
     : undefined
+
+  await context.beforeFinalize?.()
 
   if (!parts) {
     const finalizedRun = await finishRunOrThrow(agents, {

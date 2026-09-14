@@ -3,6 +3,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
 import type { ReactNode } from "react"
 import { ConversationPanel } from "./components/ConversationPanel"
+import { WorkspaceRecovery } from "./components/WorkspaceRecovery"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 import { useAgentConversation } from "./hooks/useAgentConversation"
@@ -123,13 +124,16 @@ export function AgentChat({
             : undefined
         }
         onRetry={
-          presentation.kind === "failed" ||
-          (presentation.kind === "timeout" && !presentation.hasProgress)
+          !conversation.workspaceRecovery &&
+          (presentation.kind === "failed" ||
+            (presentation.kind === "timeout" && !presentation.hasProgress))
             ? () => conversation.retry(presentation.run)
             : undefined
         }
         onContinue={
-          presentation.kind === "timeout" && presentation.hasProgress
+          !conversation.workspaceRecovery &&
+          presentation.kind === "timeout" &&
+          presentation.hasProgress
             ? conversation.continueAfterTimeout
             : undefined
         }
@@ -148,7 +152,16 @@ export function AgentChat({
         onSend={conversation.send}
         onNewChat={onNavigateHome}
         onSelectThread={onNavigateThread}
-        composerDisabled={conversation.isRunning}
+        workspaceRecovery={
+          conversation.workspaceRecovery ? (
+            <WorkspaceRecovery
+              pending={conversation.recreatingWorkspace}
+              error={conversation.workspaceRecoveryError}
+              onRecreate={conversation.recreateWorkspace}
+            />
+          ) : undefined
+        }
+        composerDisabled={conversation.isRunning || Boolean(conversation.workspaceRecovery)}
         composerPending={conversation.composerPending}
         composerRunning={conversation.isRunning}
         composerStopping={conversation.stopping}

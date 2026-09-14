@@ -12,12 +12,85 @@ import type {
   AgentRunRecord,
   AgentThreadRecord,
   AgentThreadSandbox,
+  AgentWorkspaceState,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
   SubagentRunRecord,
   SubagentRunResult,
+  TransitionAgentWorkspaceInput,
 } from "./types"
+
+/** Shared state machine. Providers must lock the run, then thread, around this decision/write. */
+export function transitionAgentWorkspace(
+  thread: AgentThreadRecord | null,
+  run: AgentRunRecord | null,
+  input: TransitionAgentWorkspaceInput
+): AgentWorkspaceState {
+  const fail = (message: string): never => {
+    throw new AgentStorageError("invalid_state", `[Sixb] Workspace ${message}`)
+  }
+  if (!thread?.sandbox) return fail("is not configured on this thread.")
+  if (!/^[a-zA-Z0-9-]{1,80}$/.test(input.generation)) return fail("generation is invalid.")
+  const state = thread.workspaceState
+  if (input.action === "recreate") {
+    if (thread.activeRunId !== null) return fail("cannot be recreated during an active run.")
+    if (
+      !state ||
+      state.generation !== input.expectedGeneration ||
+      input.generation === state.generation
+    )
+      return fail("changed; reload before recreating.")
+    if (!["busy", "blocked", "unavailable"].includes(state.status)) {
+      return fail("does not require recovery.")
+    }
+    return { generation: input.generation, status: "new", initialized: false }
+  }
+  if (
+    run?.kind !== "conversation" ||
+    run.threadId !== thread.id ||
+    run.status !== "running" ||
+    thread.activeRunId !== run.id ||
+    run.id !== input.runId ||
+    run.execution?.token !== input.executionToken ||
+    run.execution.queueLeaseExpiresAt.getTime() <= Date.now()
+  ) {
+    throw new AgentStorageError("execution_lost", "[Sixb] Workspace execution ownership was lost.")
+  }
+  if (input.action === "acquire") {
+    if (state && state.status !== "new" && state.status !== "ready") {
+      return fail("requires recovery; previous operations may still be in flight.")
+    }
+    if (state && state.generation !== input.generation) return fail("generation changed.")
+    if (!/^[a-f0-9]{64}$/.test(input.sourceFingerprint))
+      return fail("source fingerprint is invalid.")
+    if (state?.sourceFingerprint && state.sourceFingerprint !== input.sourceFingerprint) {
+      return fail("source identity changed; the existing checkout was not opened.")
+    }
+    return {
+      generation: input.generation,
+      status: "busy",
+      initialized: state?.initialized ?? false,
+      sourceFingerprint: input.sourceFingerprint,
+      owner: { runId: input.runId, executionToken: input.executionToken },
+    }
+  }
+  if (
+    state?.status !== "busy" ||
+    state.generation !== input.generation ||
+    state.owner?.runId !== input.runId ||
+    state.owner.executionToken !== input.executionToken
+  ) {
+    return fail("is not owned by this execution.")
+  }
+  if (input.status === "ready" && !input.initialized) return fail("initialization is incomplete.")
+  return {
+    generation: state.generation,
+    status: input.status,
+    initialized: input.initialized,
+    sourceFingerprint: state.sourceFingerprint,
+  }
+}
 
 /** Keep caller-controlled binding data separate from future worker-owned sandbox state. */
 export function snapshotAgentThreadSandbox(value: unknown): AgentThreadSandbox {
