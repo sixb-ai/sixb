@@ -85,6 +85,13 @@ Missing rate cards or incomplete cache/token meters remain explicitly unpriceabl
 and model identities are stored separately from the gateway identity. Catalog discovery is never on
 the inference or accounting path.
 
+## Attachments
+
+Assistant file attachments remain structured message parts for display and download; they are not
+replayed as assistant text. Earlier files in the retained conversation are discoverable through the
+sandbox's `$SIXB_ATTACHMENTS` manifest and inspectable using `view_file` when materialized. Current
+user attachments and file-producing tool results retain their model-input projections.
+
 ## Live Stream
 
 Each run has a broker stream named `agents.runs.${runId}`.

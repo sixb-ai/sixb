@@ -1098,6 +1098,14 @@ class RecordingSandbox implements Sandbox {
         durationMs: 1,
       }
     }
+    if (command === "bash" && script === 'cat "$SIXB_ATTACHMENTS"') {
+      return {
+        exitCode: 0,
+        stdout: this.readFileContents(String(options.env?.SIXB_ATTACHMENTS)),
+        stderr: "",
+        durationMs: 1,
+      }
+    }
     if (
       command === "bash" &&
       typeof script === "string" &&
@@ -6649,9 +6657,75 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("attaches files written to the sandbox output directory to the assistant message", async () => {
+  // Regression check: restore assistant fileText projection in core/src/agents/adapters.ts.
+  // The second turn's assistant-history assertion must fail even though retrieval still works.
+  test("publishes outputs and retrieves them next turn without fabricating assistant text", async () => {
     const sandboxes = new RecordingSandboxFactory()
-    const sixb = buildSixb(outputBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
+    let call = 0
+    let replayedAssistantText = ""
+    let inspectedFile = false
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => {
+        call += 1
+        if (call === 3) {
+          replayedAssistantText = options.messages
+            .filter((message) => message.role === "assistant")
+            .flatMap((message) =>
+              message.content.flatMap((part) => (part.type === "text" ? [part.text] : []))
+            )
+            .join("")
+        }
+        let tool: { toolName: string; input: string } | undefined
+        if (call === 1) {
+          tool = { toolName: "bash", input: JSON.stringify({ command: "create-agent-output" }) }
+        } else if (call === 3) {
+          tool = { toolName: "bash", input: JSON.stringify({ command: 'cat "$SIXB_ATTACHMENTS"' }) }
+        } else if (call === 4) {
+          const result = options.messages
+            .flatMap((message) => (message.role === "tool" ? message.content : []))
+            .find((part) => part.toolCallId === "file-call-3")?.output
+          if (
+            result?.type !== "json" ||
+            typeof result.value !== "object" ||
+            result.value === null ||
+            Array.isArray(result.value) ||
+            typeof result.value.stdout !== "string"
+          ) {
+            throw new Error("Expected manifest from bash tool result")
+          }
+          const manifest: { attachments: { fileName: string; sandboxPath: string }[] } = JSON.parse(
+            result.value.stdout
+          )
+          const attachment = manifest.attachments[0]
+          if (!attachment) throw new Error("Expected historical attachment")
+          const sandbox = sandboxes.sandboxes.at(-1)
+          if (!sandbox) throw new Error("Expected second-turn sandbox")
+          expect(attachment.fileName).toBe("report.txt")
+          expect(sandbox.files.get(join(sandbox.workingDirectory, attachment.sandboxPath))).toEqual(
+            new TextEncoder().encode("generated report")
+          )
+          tool = { toolName: "view_file", input: JSON.stringify({ path: attachment.sandboxPath }) }
+        } else if (call === 5) {
+          inspectedFile = JSON.stringify(options.messages).includes("generated report")
+        }
+        if (tool) {
+          return stream([
+            { type: "stream-start", warnings: [] },
+            { type: "tool-call", toolCallId: `file-call-${call}`, ...tool },
+            finish("tool-calls"),
+          ])
+        }
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "t" },
+          { type: "text-delta", id: "t", delta: "I created the report." },
+          { type: "text-end", id: "t" },
+          finish("stop"),
+        ])
+      },
+    })
+    const sixb = buildSixb(model, new InMemoryBroker(), sandboxes)
     const storage = agentStorageOf(sixb)
 
     const worker = new AgentWorker(sixb, workerOptions())
@@ -6697,6 +6771,19 @@ describe("AgentWorker", () => {
       const listScript = String(listCommand?.args.at(-1))
       expect(listScript).toContain('find "$dir" -type f -print0 | while')
       expect(listScript).not.toContain("< <(")
+
+      const second = await requestAgent(sixb, { threadId, text: "Read the report you created." })
+      const secondRun = await waitFor(
+        async () => {
+          const record = await storage.runs.getById({ projectId: PROJECT_ID, id: second.run.id })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "historical output retrieval terminal" }
+      )
+      expect(secondRun.status).toBe("succeeded")
+      expect(replayedAssistantText).toBe("I created the report.")
+      expect(inspectedFile).toBe(true)
+      expect(call).toBe(5)
     } finally {
       await worker.stop()
     }

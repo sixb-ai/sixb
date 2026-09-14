@@ -114,7 +114,8 @@ function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSk
   const fileContext =
     mode === "conversation" || mode === "subagent"
       ? [
-          "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow. Current attachments are provided directly; use view_file with a listed sandbox path to inspect historical files on demand.",
+          "Message attachments, when present, are listed in $SIXB_ATTACHMENTS and materialized under $SIXB_ATTACHMENT_DIR when size limits allow. Current user attachments are provided directly. To find earlier attachments, inspect $SIXB_ATTACHMENTS. Use view_file with a listed sandbox path; if no path is available, use the listed content URL to retrieve the file.",
+          "Attachment metadata is internal context, not reply content. Do not reproduce attachment metadata blocks, internal URLs, or sandbox paths in replies. Sixb attaches published output files automatically; describe the deliverable naturally.",
           `Prepare result files under $SIXB_OUTPUT_STAGING_DIR, then atomically publish each complete file or directory with mv into $SIXB_OUTPUT_DIR. Only files under $SIXB_OUTPUT_DIR are attached to the ${mode === "conversation" ? "final chat message" : "result returned to the parent Agent"} when size limits allow.`,
           "Never write a file directly in $SIXB_OUTPUT_DIR and never modify it after publication; publish only complete outputs.",
         ]
