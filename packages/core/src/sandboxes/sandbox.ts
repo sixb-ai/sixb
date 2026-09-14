@@ -72,15 +72,23 @@ export interface SandboxNetworkTarget {
   readonly origin: string
 }
 
-/**
- * Options accepted by every SandboxFactory.create. Provider-specific factories
- * may extend this type with their own options.
- */
-export interface CreateSandboxOptions {
+/** Current execution defaults, supplied on both creation and resume, never recovered from files. */
+export interface SandboxSessionOptions {
   readonly workingDirectory?: string
   readonly env?: Readonly<Record<string, string>>
   readonly timeout?: number
   readonly network?: SandboxNetworkPolicy
+}
+
+/** Options accepted by every SandboxFactory.create. */
+export interface CreateSandboxOptions extends SandboxSessionOptions {
+  /** Create new named state; reject an existing name or unsupported persistence before provisioning. */
+  readonly persistence?: { readonly name: string }
+}
+
+/** Resume changes execution defaults, not the identity or creation configuration of saved state. */
+export interface ResumeSandboxOptions extends SandboxSessionOptions {
+  readonly persistence?: never
 }
 
 export interface Sandbox {
@@ -109,16 +117,36 @@ export interface Sandbox {
    */
   writeFiles(files: readonly SandboxFileRecord[]): Promise<void>
 
-  /** Mark the sandbox stopped; subsequent runCommand calls reject. Idempotent. */
+  /** Stop this session; subsequent operations reject. Idempotent.
+   * Persistent handles confirm preservation and share the outcome, including failure,
+   * across repeated/concurrent calls.
+   */
   stop(): Promise<void>
-  /** Stop and reclaim any provider-side resources. Idempotent. */
+  /** Stop and reclaim resources, permanently deleting named state when persistent. Idempotent.
+   * Requires exclusive lifecycle ownership, including after stop(); never routine persistent teardown.
+   */
   destroy(): Promise<void>
 }
 
 /**
  * What createSixb({ sandboxes }) accepts. Provider-specific factories hold
  * their defaults set once and expose create(options) for each run.
+ * Persistent files are retention-bound, not a durable file store or a distributed lock.
+ * Callers own namespacing and must serialize the entire create/resume/use/stop/destroy lifecycle.
+ * Credentials and current authority must be supplied again, never inferred from saved files.
  */
 export interface SandboxFactory {
+  /** Create an ephemeral sandbox unless persistence is requested. Existing names must fail,
+   * never attach or overwrite. Unsupported providers must reject persistence before provisioning.
+   * A persistent handle targets one session; operations must not automatically resume another VM.
+   */
   create(options?: CreateSandboxOptions): Promise<Sandbox>
+  /**
+   * Present only when named persistent creation and resume are supported.
+   * Resume an existing, stopped sandbox. Missing/expired state throws SandboxStateUnavailableError;
+   * it must never create an empty replacement. An already running sandbox must be rejected.
+   * Returns a handle bound to the resumed session, with no automatic resume on use.
+   * Runtime options must be provided again; no creation settings or persistence option are accepted.
+   */
+  resume?(name: string, options?: ResumeSandboxOptions): Promise<Sandbox>
 }
