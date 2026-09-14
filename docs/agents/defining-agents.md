@@ -85,7 +85,7 @@ the composer offers the named levels. Unknown capabilities are not treated as un
 ## Workspace configuration
 
 `agentWorkspace` configures persistent checkouts for [opt-in threads](./running-and-streaming.md#workspace-bindings).
-It requires a sandbox factory with persistence support. Other threads, workflows and subagents
+It requires a sandbox factory exposing `resume()`. Other threads, workflows and subagents
 remain ephemeral. This example assumes an application-defined `Client` with a `repositoryUrl`:
 
 ```ts

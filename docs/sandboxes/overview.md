@@ -40,7 +40,7 @@ interface Sandbox {
 }
 ```
 
-The worker calls `factory.create()` once per agent run, `writeFiles(...)` to install the CLI, skill,
+For ephemeral runs, the worker calls `factory.create()`, `writeFiles(...)` to install the CLI, skill,
 and run context, and `runCommand(...)` per command. It calls `destroy()` on teardown.
 
 ### Optional filesystem persistence
@@ -75,8 +75,8 @@ accepts only these session options, not `persistence` or creation settings. Pers
 untrusted and never establish execution authority. `destroy()` is an explicit permanent deletion
 requiring exclusive ownership of the name, not routine teardown after a persistent run.
 
-This is a provider capability only. Conversational agents, workflow nodes and subagents still use
-the existing per-run ephemeral lifecycle; configuring snapshot retention does not opt them in.
+Conversations opt in through [workspace bindings](../agents/running-and-streaming.md#workspace-bindings).
+Other threads, workflow nodes and subagents remain ephemeral; retention settings alone do not opt them in.
 
 ### File materialization
 

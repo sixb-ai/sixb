@@ -146,7 +146,8 @@ package repositories and add latency to every run.
 For [persistent files](./overview.md#optional-filesystem-persistence), use
 `factory.create({ persistence: { name } })`, then `factory.resume(name)` after a confirmed `stop()`.
 The former factory option `persistent` is rejected: remove it for ephemeral creation or use the
-named creation option. Agent runs remain ephemeral in this provider-only slice.
+named creation option. Conversations opt in through
+[workspace bindings](../agents/running-and-streaming.md#workspace-bindings); other runs remain ephemeral.
 
 ## Example configurations
 
