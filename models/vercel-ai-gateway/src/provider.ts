@@ -670,7 +670,8 @@ class ResponseState {
   readonly toolEnded = new Set<string>()
   readonly textStarted = new Set<string>()
   readonly refusalSpans = new Map<string, { text: string; complete: boolean }>()
-  readonly reasoningStarted = new Set<string>()
+  readonly reasoningSpans = new Map<string, { itemId: string; text: string; complete: boolean }>()
+  readonly reasoningItemsEnded = new Set<string>()
   started = false
   finished = false
   sawToolCall = false
@@ -723,8 +724,19 @@ class ResponseState {
       return events
     }
 
-    if (type === "response.content_part.added") {
+    if (type === "response.content_part.added" || type === "response.content_part.done") {
       const part = object(value.part)
+      if (part?.type === "reasoning_text") {
+        events.push(
+          ...this.reasoningEvents(
+            value,
+            "content",
+            string(part.text),
+            type.endsWith(".done") ? "done" : "snapshot"
+          )
+        )
+      }
+      if (type === "response.content_part.done") return events
       if (part?.type === "refusal") {
         events.push(...this.refusalEvents(value, string(part.refusal), false))
       }
@@ -768,20 +780,23 @@ class ResponseState {
 
     if (
       type === "response.reasoning_summary_part.added" ||
+      type === "response.reasoning_summary_part.done" ||
       type === "response.reasoning_summary_text.delta" ||
-      type === "response.reasoning_summary_text.done"
+      type === "response.reasoning_summary_text.done" ||
+      type === "response.reasoning.delta" ||
+      type === "response.reasoning.done" ||
+      type === "response.reasoning_text.delta" ||
+      type === "response.reasoning_text.done"
     ) {
-      const id = reasoningSpanId(value)
-      if (!this.reasoningStarted.has(id)) {
-        this.reasoningStarted.add(id)
-        events.push({ type: "reasoning-start", id })
-      }
-      if (type === "response.reasoning_summary_text.delta") {
-        events.push({ type: "reasoning-delta", id, delta: string(value.delta) })
-      }
-      if (type === "response.reasoning_summary_text.done") {
-        events.push({ type: "reasoning-end", id })
-      }
+      const delta = type.endsWith(".delta")
+      events.push(
+        ...this.reasoningEvents(
+          value,
+          type.startsWith("response.reasoning_summary_") ? "summary" : "content",
+          string(delta ? value.delta : (value.text ?? object(value.part)?.text)),
+          delta ? "delta" : type.endsWith(".done") ? "done" : "snapshot"
+        )
+      )
       return events
     }
 
@@ -824,6 +839,10 @@ class ResponseState {
       if (!item) return events
       const key = itemKey(value, item)
       this.items.set(key, item)
+      if (item.type === "reasoning") {
+        events.push(...this.reasoningItemEvents(key, item))
+        return events
+      }
       if (item.type === "message" && typeof item.phase === "string") {
         // Phase can arrive after the text spans have closed. Keep message-level replay metadata
         // separately, without duplicating the full visible text in provider state.
@@ -875,6 +894,17 @@ class ResponseState {
 
     if (type === "response.completed" || type === "response.incomplete") {
       const response = object(value.response) ?? value
+      if (Array.isArray(response.output)) {
+        for (const [outputIndex, output] of response.output.entries()) {
+          const item = object(output)
+          if (item?.type === "reasoning") {
+            events.push(
+              ...this.reasoningItemEvents(string(item.id) || `output:${outputIndex}`, item)
+            )
+          }
+        }
+      }
+      events.push(...this.closeReasoningSpans())
       const status = string(response.status)
       const rawReason = incompleteReason(response) || status || type
       const usage = normalizeUsage(object(response.usage))
@@ -927,6 +957,77 @@ class ResponseState {
     return new ModelProviderError(`[SixbVercelGateway] ${message}`, this.providerId, this.modelId, {
       ...(this.requestId === undefined ? {} : { requestId: this.requestId }),
     })
+  }
+
+  /** Gateway uses reasoning.delta; native Responses streams use reasoning_text/summary_text. */
+  private reasoningEvents(
+    value: JsonObject,
+    field: "content" | "summary",
+    text: string,
+    mode: "delta" | "snapshot" | "done"
+  ): LanguageModelStreamEvent[] {
+    const itemId = string(value.item_id) || `output:${integer(value.output_index) ?? 0}`
+    const index = integer(value[`${field}_index`]) ?? 0
+    const id = `${itemId}:${field === "summary" ? "reasoning" : "reasoning-text"}:${index}`
+    const events: LanguageModelStreamEvent[] = []
+    let span = this.reasoningSpans.get(id)
+    if (!span) {
+      span = { itemId, text: "", complete: false }
+      this.reasoningSpans.set(id, span)
+      events.push({ type: "reasoning-start", id })
+    }
+    if (span.complete) return events
+    // Done/part/item snapshots repeat the full text; only append a missing suffix.
+    const delta =
+      mode === "delta" ? text : text.startsWith(span.text) ? text.slice(span.text.length) : ""
+    if (delta) {
+      span.text += delta
+      events.push({ type: "reasoning-delta", id, delta })
+    }
+    if (mode === "done") {
+      span.complete = true
+      span.text = ""
+      events.push({ type: "reasoning-end", id })
+    }
+    return events
+  }
+
+  private closeReasoningSpans(itemId?: string): LanguageModelStreamEvent[] {
+    const events: LanguageModelStreamEvent[] = []
+    for (const [id, span] of this.reasoningSpans) {
+      if (!span.complete && (itemId === undefined || span.itemId === itemId)) {
+        span.complete = true
+        span.text = ""
+        events.push({ type: "reasoning-end", id })
+      }
+    }
+    return events
+  }
+
+  private reasoningItemEvents(key: string, item: JsonObject): LanguageModelStreamEvent[] {
+    if (this.reasoningItemsEnded.has(key)) return []
+    this.reasoningItemsEnded.add(key)
+    const events: LanguageModelStreamEvent[] = []
+    for (const field of ["content", "summary"] as const) {
+      const parts = item[field]
+      if (!Array.isArray(parts)) continue
+      for (const [index, content] of parts.entries()) {
+        const part = object(content)
+        if (part?.type !== (field === "summary" ? "summary_text" : "reasoning_text")) continue
+        events.push(
+          ...this.reasoningEvents(
+            { item_id: key, [`${field}_index`]: index },
+            field,
+            string(part.text),
+            "done"
+          )
+        )
+      }
+    }
+    events.push(...this.closeReasoningSpans(key))
+    // Keep the native item (including encrypted content) for tool-loop/history replay.
+    events.push({ type: "provider-state", providerId: this.providerId, data: { item } })
+    return events
   }
 
   /** Completion events may repeat streamed refusals or provide their only visible text. */
@@ -1226,10 +1327,6 @@ function toolCallId(event: JsonObject, items: ReadonlyMap<string, JsonObject>): 
 
 function textSpanId(event: JsonObject): string {
   return `${string(event.item_id) || `output:${integer(event.output_index) ?? 0}`}:text:${integer(event.content_index) ?? 0}`
-}
-
-function reasoningSpanId(event: JsonObject): string {
-  return `${string(event.item_id) || `output:${integer(event.output_index) ?? 0}`}:reasoning:${integer(event.summary_index) ?? 0}`
 }
 
 async function providerHttpError(
