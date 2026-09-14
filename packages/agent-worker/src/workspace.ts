@@ -35,8 +35,8 @@ export async function openAgentWorkspace(input: {
   readonly signal: AbortSignal
 }): Promise<AgentWorkspaceLifecycle> {
   const { context, thread, run, signal } = input
-  const persistence = context.sandboxes.persistence
-  if (!input.definition || !thread.workspace || !persistence) {
+  const factory = context.sandboxes
+  if (!input.definition || !thread.workspace || typeof factory.resume !== "function") {
     throw workspaceError("requires a configured recipe and persistent sandbox provider.")
   }
   const recipe = structuredClone(
@@ -159,7 +159,11 @@ export async function openAgentWorkspace(input: {
     await assertOwner()
     signal.throwIfAborted()
     const acquired = await waitForAbort(
-      bounded(initialized ? persistence.resume(name, options) : persistence.create(name, options)),
+      bounded(
+        initialized
+          ? factory.resume(name, options)
+          : factory.create({ ...options, persistence: { name } })
+      ),
       signal
     )
     // Stay inside the provider's writable root; never assume the guest can create /sixb.
