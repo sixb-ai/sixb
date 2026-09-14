@@ -11,6 +11,7 @@ import { MessagesSquare } from "lucide-react"
 import { type CSSProperties, type ReactNode, useState } from "react"
 import { ConversationPanel } from "./components/ConversationPanel"
 import { ThreadSidebar } from "./components/ThreadSidebar"
+import { WorkspaceRecovery } from "./components/WorkspaceRecovery"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 import { useAgentConversation } from "./hooks/useAgentConversation"
@@ -155,13 +156,16 @@ export function AgentChat({
             : undefined
         }
         onRetry={
-          presentation.kind === "failed" ||
-          (presentation.kind === "timeout" && !presentation.hasProgress)
+          !conversation.workspaceRecovery &&
+          (presentation.kind === "failed" ||
+            (presentation.kind === "timeout" && !presentation.hasProgress))
             ? () => conversation.retry(presentation.run)
             : undefined
         }
         onContinue={
-          presentation.kind === "timeout" && presentation.hasProgress
+          !conversation.workspaceRecovery &&
+          presentation.kind === "timeout" &&
+          presentation.hasProgress
             ? conversation.continueAfterTimeout
             : undefined
         }
@@ -174,7 +178,16 @@ export function AgentChat({
         onOpenWorkspaceNavigation={() => setMobileSidebarOpen(true)}
         onNewChat={startNewThread}
         onSelectThread={selectThread}
-        composerDisabled={conversation.isRunning}
+        workspaceRecovery={
+          conversation.workspaceRecovery ? (
+            <WorkspaceRecovery
+              pending={conversation.recreatingWorkspace}
+              error={conversation.workspaceRecoveryError}
+              onRecreate={conversation.recreateWorkspace}
+            />
+          ) : undefined
+        }
+        composerDisabled={conversation.isRunning || Boolean(conversation.workspaceRecovery)}
         composerPending={conversation.composerPending}
         composerRunning={conversation.isRunning}
         composerStopping={conversation.stopping}

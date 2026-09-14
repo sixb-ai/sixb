@@ -25,6 +25,7 @@ export type {
   AgentThreadStatus,
   AgentThreadStore,
   AgentThreadWorkspace,
+  AgentWorkspaceState,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,
@@ -47,6 +48,7 @@ export type {
   SubagentRunRecord,
   SubagentRunResult,
   SubagentRunSpec,
+  TransitionAgentWorkspaceInput,
 } from "./types"
 export {
   AGENT_RUN_DIAGNOSTIC_CODES,

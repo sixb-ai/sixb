@@ -114,6 +114,7 @@ import {
   queryObjects,
   reactivateAuthMember,
   reauthorizeConnectorConnection,
+  recreateAgentThreadWorkspace,
   removeObjectLink,
   requestAction,
   requestPipelineRun,
@@ -438,6 +439,9 @@ import type {
   ReauthorizeConnectorConnectionData,
   ReauthorizeConnectorConnectionError,
   ReauthorizeConnectorConnectionResponse,
+  RecreateAgentThreadWorkspaceData,
+  RecreateAgentThreadWorkspaceError,
+  RecreateAgentThreadWorkspaceResponse,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -3964,6 +3968,33 @@ export const getAgentThreadOptions = (options: Options<GetAgentThreadData>) =>
     },
     queryKey: getAgentThreadQueryKey(options),
   })
+
+/**
+ * Explicitly recreate an unavailable or uncertain workspace without deleting its previous state
+ */
+export const recreateAgentThreadWorkspaceMutation = (
+  options?: Partial<Options<RecreateAgentThreadWorkspaceData>>
+): UseMutationOptions<
+  RecreateAgentThreadWorkspaceResponse,
+  RecreateAgentThreadWorkspaceError,
+  Options<RecreateAgentThreadWorkspaceData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RecreateAgentThreadWorkspaceResponse,
+    RecreateAgentThreadWorkspaceError,
+    Options<RecreateAgentThreadWorkspaceData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await recreateAgentThreadWorkspace({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
 
 export const listAgentThreadMessagesQueryKey = (options: Options<ListAgentThreadMessagesData>) =>
   createQueryKey("listAgentThreadMessages", options)

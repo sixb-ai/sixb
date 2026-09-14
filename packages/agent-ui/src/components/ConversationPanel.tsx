@@ -18,6 +18,7 @@ import { Composer } from "./Composer"
 import { Transcript } from "./Transcript"
 
 export interface ConversationPanelProps {
+  readonly workspaceRecovery?: ReactNode
   readonly agent: Agent | undefined
   readonly threadId: string | null
   readonly messages: readonly AgentMessage[]
@@ -128,6 +129,7 @@ export function ConversationPanel({
   compact = false,
   welcomeContent,
   workspace = false,
+  workspaceRecovery,
 }: ConversationPanelProps) {
   const name = agent?.name ?? "Agent"
   // Optimistic activity (a just-sent message or a live run) takes over the pane immediately, so the
@@ -212,6 +214,7 @@ export function ConversationPanel({
         >
           <Welcome agent={agent} compact={compact} content={welcomeContent} />
           <div className="shrink-0">
+            {workspaceRecovery}
             {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
           </div>
         </div>
@@ -249,7 +252,10 @@ export function ConversationPanel({
             )}
           </div>
 
-          <div className="shrink-0">{renderComposer()}</div>
+          <div className="shrink-0">
+            {workspaceRecovery}
+            {renderComposer()}
+          </div>
         </>
       )}
     </div>

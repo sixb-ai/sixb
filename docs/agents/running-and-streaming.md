@@ -58,20 +58,38 @@ const thread = await sixb.agent.threads.create({
 })
 ```
 
-HTTP clients use the same shape on `POST /api/agent-threads`:
+HTTP uses the same shape on `POST /api/agent-threads`. Requires
+[workspace configuration](./defining-agents.md#workspace-configuration). Parameters are validated,
+owner-scoped and immutable: create a new thread to change them. Do not store secrets in them.
 
-```json
-{ "workspace": { "params": { "clientId": "acme" } } }
+- The first run initializes the checkout; later runs resume saved files, including uncommitted work.
+  Snapshots expire according to provider retention; they are not permanent backups.
+- Each run refreshes runtime files and attachments, publishes outputs as normal FileRefs, and
+  confirms cleanup and saving **before finalization**. Background processes may not survive.
+- The checkout is under the provider's writable root, in `repository`. Its `.sixb/agent`
+  directory is reserved and cleaned; tracked files there or a symlinked `.sixb` block cleanup.
+  Copies elsewhere are not erased. API authorization is independent of file cleanup.
+
+### Workspace recovery
+
+Missing snapshots, failed initialization, or unconfirmed operations/cleanup/save block reuse
+instead of silently starting fresh. Messages and retries return `409 workspace_execution_unavailable`.
+After a crash, an old sandbox operation may still be running; automatic recovery is not guaranteed.
+
+The chat offers a confirmed reset. SDK callers use the generation from the thread's
+`workspaceState` to explicitly start fresh while idle:
+
+```ts
+await sixb.agent.threads.recreateWorkspace(thread.id, {
+  expectedGeneration: thread.workspaceState!.generation,
+})
 ```
 
-The project must have [workspace configuration](./defining-agents.md#workspace-configuration-foundation).
-Missing required parameters, unknown fields and invalid values are rejected before storage.
-The binding is immutable and visible only through the existing owner-scoped thread APIs.
-Use a new thread to select a different binding. Parameters are not a secret store.
+HTTP: `POST /api/agent-threads/:threadId/workspace/recreate` with `{ "expectedGeneration": "..." }`.
+Active runs and stale generations are rejected.
 
-**In this foundation release, posting a message or retrying a run on a workspace thread returns
-HTTP 409. No message or run is created.** The SDK reports `workspace_execution_unavailable`.
-Threads without a workspace remain runnable. Workflows and child agents do not gain a workspace.
+Reset keeps the binding, history and published attachments, but **does not copy uncommitted files**.
+The old sandbox is not deleted or guaranteed stopped and remains subject to provider retention.
 
 ## Trigger a run
 

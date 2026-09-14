@@ -3,6 +3,7 @@ import { OntologyValidationError } from "../ontology/errors"
 import type { OntologyRegistry } from "../ontology/registry"
 import { assertValidSchema } from "../ontology/validation/definition"
 import type { Sixb } from "../runtime/sixb"
+import type { SandboxNetworkPolicy } from "../sandboxes/sandbox"
 import type { InferParams, ParamsConfig } from "../shared/params/types"
 import { coerceParamsToTyped, normalizeParams } from "../shared/params/validation"
 import type { AgentThreadWorkspace } from "../storage/agents/types"
@@ -17,6 +18,11 @@ export interface ResolvedAgentWorkspace {
     readonly access?: "read" | "write"
   }
   readonly setup?: readonly string[]
+  /** Additional destinations beyond the Sixb API and repository. Omitted/none adds none;
+   * restricted adds declared origins; all explicitly enables unrestricted network access.
+   * Resolved and applied afresh on every run, including resume.
+   */
+  readonly network?: SandboxNetworkPolicy
   readonly env?: Readonly<Record<string, string>>
 }
 

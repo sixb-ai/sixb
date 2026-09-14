@@ -8,6 +8,7 @@ import type {
   SubagentRunRecord,
   WorkflowAgentNodeRunRecord,
 } from "@sixb/core/storage"
+import { waitForAbort } from "./abort"
 import { type AgentExecutionMode, renderAgentSystemPrompt } from "./agent-prompt"
 import { assertAgentRuntimeProfile } from "./agent-runtime/preflight"
 import type { AgentSkill } from "./agent-skills"
@@ -29,6 +30,7 @@ import { AgentToolResultMediaBridge } from "./tools/result-media"
 import { createViewFileTool } from "./tools/view-file"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
+import type { AgentWorkspaceLifecycle } from "./workspace"
 
 export interface AgentExecutionEnvironment {
   readonly turnContext: AgentTurnContext
@@ -48,6 +50,7 @@ interface CreateAgentEnvironmentInput {
 }
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
+  readonly workspace?: AgentWorkspaceLifecycle
   readonly run: ConversationAgentRunRecord
   /** Retained model tail selected by preflight. Falls back to storage for direct callers. */
   readonly messages?: readonly AgentMessageRecord[]
@@ -103,8 +106,9 @@ export async function createConversationAgentEnvironment(
     signal: input.signal,
   })
 
-  return startAgentEnvironment({
+  const environment = startAgentEnvironment({
     mode: "conversation",
+    workspace: input.workspace,
     context,
     plan,
     runId: run.id,
@@ -116,6 +120,16 @@ export async function createConversationAgentEnvironment(
     frameworkTools: input.frameworkTools,
     onDetachedTeardown: input.onDetachedTeardown,
   })
+  if (input.workspace) {
+    try {
+      const ready = environment.turnContext.sandboxReady
+      if (ready) await waitForAbort(ready, input.signal)
+    } catch (error) {
+      await environment.dispose()
+      throw error
+    }
+  }
+  return environment
 }
 
 /** Build an isolated environment for one fresh, headless child Agent. */
@@ -194,6 +208,7 @@ export async function createWorkflowAgentNodeEnvironment(
 }
 
 interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
+  readonly workspace?: AgentWorkspaceLifecycle
   readonly toolRun: AgentToolRunInfo
   readonly actorId?: string
   readonly parentRunId?: string
@@ -277,6 +292,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   for (const frameworkTool of input.frameworkTools ?? []) appendBuiltInTool(tools, frameworkTool)
 
   ready = provisionSandbox({
+    workspace: input.workspace,
     context,
     actorId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
@@ -297,6 +313,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
 
   return {
     turnContext: {
+      ...(input.workspace ? { beforeFinalize: () => input.workspace!.save() } : {}),
       id: context.id,
       ...(context.authorPrincipal === undefined
         ? {}
@@ -316,7 +333,9 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     },
     async dispose() {
       await Promise.all([
-        disposeEnvironment(ready, () => settled, input.onDetachedTeardown),
+        input.workspace
+          ? Promise.resolve()
+          : disposeEnvironment(ready, () => settled, input.onDetachedTeardown),
         logSession.flush(),
       ])
     },
@@ -334,6 +353,7 @@ function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentConte
 }
 
 interface ProvisionSandboxInput {
+  readonly workspace?: AgentWorkspaceLifecycle
   readonly context: AgentExecutionContext
   readonly actorId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
@@ -347,9 +367,11 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
   const { context, actorId, run, apiBaseUrl, apiOrigin, skills } = input
   let sandbox: Sandbox | null = null
   try {
-    sandbox = await context.sandboxes.create({
-      network: { mode: "restricted", allow: [{ name: "sixb-api", origin: apiOrigin }] },
-    })
+    sandbox =
+      input.workspace?.sandbox ??
+      (await context.sandboxes.create({
+        network: { mode: "restricted", allow: [{ name: "sixb-api", origin: apiOrigin }] },
+      }))
     const apiContext = await prepareAgentSandboxApiContext({
       sandbox,
       apiBaseUrl,
@@ -365,10 +387,10 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       env: apiContext.env,
       projectId: context.id,
     })
-    return { sandbox, env: apiContext.env }
+    return { sandbox, env: { ...input.workspace?.env, ...apiContext.env } }
   } catch (error) {
     // Reclaim a half-created sandbox before propagating to the awaiter.
-    await sandbox?.destroy().catch(() => {})
+    if (!input.workspace) await sandbox?.destroy().catch(() => {})
     throw error
   }
 }
