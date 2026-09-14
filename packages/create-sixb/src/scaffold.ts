@@ -20,11 +20,7 @@ export async function scaffoldProject(
 ): Promise<ScaffoldProjectResult> {
   const targetDir = resolve(directory)
   await prepareTargetDirectory(targetDir, options.allowExisting ?? false)
-  await cp(await resolveTemplateDir(), targetDir, {
-    recursive: true,
-    force: false,
-    errorOnExist: true,
-  })
+  await copyTemplateContents(targetDir)
   await installGitignore(targetDir)
   await installProjectTsconfig(targetDir)
 
@@ -36,6 +32,21 @@ export async function scaffoldProject(
     name,
     targetDir,
     files: await collectRelativeFiles(targetDir),
+  }
+}
+
+async function copyTemplateContents(targetDir: string): Promise<void> {
+  const templateDir = await resolveTemplateDir()
+
+  // Bun 1.4 matches Node's fs.cp behavior when the destination directory already exists:
+  // errorOnExist applies to the directory itself. Copy each entry so collisions are still rejected
+  // without treating the prepared target directory as a collision.
+  for (const entry of await readdir(templateDir)) {
+    await cp(join(templateDir, entry), join(targetDir, entry), {
+      recursive: true,
+      force: false,
+      errorOnExist: true,
+    })
   }
 }
 

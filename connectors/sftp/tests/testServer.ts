@@ -93,6 +93,7 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
 
   const server = new Server({ hostKeys: [hostKey] }, (client) => {
     activeConnections += 1
+    const openFileHandles = new Set<OpenFileHandle["handle"]>()
 
     client
       .on("authentication", (context) => {
@@ -113,7 +114,7 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
 
           session.on("sftp", (acceptSftp) => {
             const sftp = acceptSftp()
-            bindSftpHandlers(sftp, rootDir, {
+            bindSftpHandlers(sftp, rootDir, openFileHandles, {
               behavior: () => readBehavior,
               finishRequest() {
                 activeReadRequests -= 1
@@ -129,8 +130,14 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
         })
       })
       .on("close", () => {
-        activeConnections -= 1
-        resolveIdleWaiters()
+        // A transport can disappear before the client sends SFTP CLOSE (the disconnect/read-ahead
+        // test does this deliberately). Real SFTP servers release session handles with the
+        // connection; mirror that lifecycle explicitly so Node 26/Bun 1.4 does not have to close a
+        // FileHandle from its garbage-collection finalizer.
+        void closeFileHandles(openFileHandles).finally(() => {
+          activeConnections -= 1
+          resolveIdleWaiters()
+        })
       })
       .on("end", () => {
         // Bun can leave ssh2's accepted socket half-open after the peer ends
@@ -188,6 +195,7 @@ export async function startTestSftpServer(): Promise<TestSftpServer> {
 function bindSftpHandlers(
   sftp: SFTPWrapper,
   rootDir: string,
+  openFileHandles: Set<OpenFileHandle["handle"]>,
   readControl: {
     readonly behavior: () => TestSftpReadBehavior
     readonly finishRequest: () => void
@@ -256,6 +264,7 @@ function bindSftpHandlers(
 
       try {
         const fileHandle = await open(resolveRemotePath(rootDir, filename), mode)
+        openFileHandles.add(fileHandle)
         sftp.handle(reqid, createHandle({ kind: "file", handle: fileHandle }))
       } catch (error) {
         sftp.status(reqid, mapErrorToStatus(error))
@@ -321,7 +330,11 @@ function bindSftpHandlers(
 
       try {
         if (entry.kind === "file") {
-          await entry.handle.close()
+          try {
+            await entry.handle.close()
+          } finally {
+            openFileHandles.delete(entry.handle)
+          }
         }
 
         sftp.status(reqid, utils.sftp.STATUS_CODE.OK)
@@ -406,6 +419,12 @@ function bindSftpHandlers(
         sftp.status(reqid, mapErrorToStatus(error))
       }
     })
+}
+
+async function closeFileHandles(handles: Set<OpenFileHandle["handle"]>): Promise<void> {
+  const openHandles = [...handles]
+  handles.clear()
+  await Promise.allSettled(openHandles.map((handle) => handle.close()))
 }
 
 function delay(durationMs: number): Promise<void> {
