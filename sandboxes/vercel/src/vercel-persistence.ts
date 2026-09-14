@@ -5,7 +5,7 @@ import {
   SandboxStateUnavailableError,
 } from "@sixb/core/sandboxes"
 import { APIError, type Session, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
-import { toVercelNetworkPolicy } from "./network"
+import { toVercelNetworkPolicy, withRequestCredentials } from "./network"
 import { VercelSandbox, type VercelSandboxClient } from "./vercel-sandbox"
 
 type PersistentSession = Pick<
@@ -106,6 +106,11 @@ export async function bindPersistentSandbox(
     networkPolicy: toVercelNetworkPolicy(options.network ?? { mode: "none" }),
   })
   const pinned: VercelSandboxClient = {
+    setRequestCredentials: async (credentials) => {
+      await session.update({
+        networkPolicy: withRequestCredentials(options.network, credentials),
+      })
+    },
     name: client.name,
     cwd: session.cwd,
     get status() {
