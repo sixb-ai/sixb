@@ -6,11 +6,11 @@ import { latestWorkLabel } from "../activity-label"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { ReadToolView } from "../read/ReadToolView"
-import { coerceWebSearchOutput, collectWebSources } from "../web/interpret"
-import { WebSearchToolView } from "../web/WebSearchToolView"
-import { WebSources } from "../web/WebSources"
+import { coerceWebSearchOutput, collectWebSources } from "../utils/webSearch"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./ActivityStatus"
 import { FileAttachmentCard } from "./FileAttachmentCard"
+import { WebSearchToolView } from "./WebSearchToolView"
+import { WebSources } from "./WebSources"
 
 /**
  * Render an assistant body from normalized parts. Narration text stays on the main reading path;

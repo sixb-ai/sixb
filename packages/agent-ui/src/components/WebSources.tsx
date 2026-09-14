@@ -2,7 +2,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowUpRight, Globe, X } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
-import type { WebSource } from "./interpret"
+import type { WebSource } from "../utils/webSearch"
 
 const CHIP_CLASS_NAME =
   "inline-flex min-h-7 max-w-full items-center gap-1.5 rounded-full border border-transparent bg-muted/60 py-1 pr-2.5 pl-1.5 text-xs text-muted-foreground transition-colors hover:border-border hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring data-[state=open]:border-border data-[state=open]:text-foreground pointer-coarse:min-h-11 motion-reduce:transition-none"
