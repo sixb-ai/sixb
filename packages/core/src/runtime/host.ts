@@ -182,7 +182,7 @@ export class SixbHost<
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
 
     const definitions = resolveDefinitions(options)
-    if (options.agentWorkspace !== undefined && !options.sandboxes?.persistence) {
+    if (options.agentWorkspace !== undefined && typeof options.sandboxes?.resume !== "function") {
       throw new AgentDefinitionError(
         "[Sixb] agentWorkspace requires a sandbox provider with persistence support."
       )
