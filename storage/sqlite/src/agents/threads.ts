@@ -1,19 +1,49 @@
 import type { Database } from "bun:sqlite"
-import { snapshotAgentThreadSandbox } from "@sixb/core/internal/agent-run-storage-provider"
+import {
+  snapshotAgentThreadSandbox,
+  transitionAgentWorkspace,
+} from "@sixb/core/internal/agent-run-storage-provider"
 import {
   AgentStorageError,
   type AgentThreadRecord,
   type AgentThreadStore,
+  type AgentWorkspaceState,
   type CreateAgentThreadInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
+  type TransitionAgentWorkspaceInput,
 } from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
-import { type AgentThreadRow, queryAgentList, rowToThreadRecord } from "./rows"
+import {
+  type AgentRunRow,
+  type AgentThreadRow,
+  queryAgentList,
+  rowToRunRecord,
+  rowToThreadRecord,
+} from "./rows"
 
 export class SqliteAgentThreadStore implements AgentThreadStore {
   constructor(private readonly db: Database) {}
+
+  async transitionWorkspace(input: TransitionAgentWorkspaceInput): Promise<AgentWorkspaceState> {
+    return this.db
+      .transaction(() => {
+        const run =
+          input.action === "recreate"
+            ? null
+            : (this.db
+                .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
+                .get(input.projectId, input.runId) as AgentRunRow | null)
+        const thread = this.requireThread(input.projectId, input.id)
+        const state = transitionAgentWorkspace(thread, run ? rowToRunRecord(run) : null, input)
+        this.db
+          .query("UPDATE agent_threads SET workspace_state = ? WHERE project_id = ? AND id = ?")
+          .run(JSON.stringify(state), input.projectId, input.id)
+        return state
+      })
+      .immediate()
+  }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
     const sandboxParams =

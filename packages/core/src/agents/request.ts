@@ -239,10 +239,10 @@ export async function retryAgentRun(
 }
 
 function assertSandboxExecutionAvailable(thread: AgentThreadRecord): void {
-  if (thread.sandbox !== undefined) {
+  if (thread.workspaceState && !["new", "ready"].includes(thread.workspaceState.status)) {
     throw new AgentRequestError(
       "sandbox_execution_unavailable",
-      "[Sixb] Persistent sandbox execution is not available in this release. The thread binding has been preserved."
+      "[Sixb] Workspace recovery is required before another run. Reload the thread and explicitly recreate it to start fresh."
     )
   }
 }

@@ -9860,6 +9860,11 @@ export type ListAgentThreadsResponses = {
    */
   200: {
     threads: Array<{
+      workspaceState?: {
+        generation: string
+        status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+        initialized: boolean
+      }
       id: string
       projectId: string
       ownerPrincipal: {
@@ -9948,6 +9953,11 @@ export type CreateAgentThreadResponses = {
    */
   201: {
     thread: {
+      workspaceState?: {
+        generation: string
+        status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+        initialized: boolean
+      }
       id: string
       projectId: string
       ownerPrincipal: {
@@ -10015,6 +10025,11 @@ export type GetAgentThreadResponses = {
    * Response for status 200
    */
   200: {
+    workspaceState?: {
+      generation: string
+      status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+      initialized: boolean
+    }
     id: string
     projectId: string
     ownerPrincipal: {
@@ -10043,6 +10058,83 @@ export type GetAgentThreadResponses = {
 }
 
 export type GetAgentThreadResponse = GetAgentThreadResponses[keyof GetAgentThreadResponses]
+
+export type RecreateAgentThreadWorkspaceData = {
+  body: {
+    expectedGeneration: string
+  }
+  path: {
+    threadId: string
+  }
+  query?: never
+  url: "/api/agent-threads/{threadId}/workspace/recreate"
+}
+
+export type RecreateAgentThreadWorkspaceErrors = {
+  /**
+   * Response for status 400
+   */
+  400: {
+    error: string
+  }
+  /**
+   * Response for status 404
+   */
+  404: {
+    error: string
+  }
+  /**
+   * Response for status 409
+   */
+  409: {
+    error: string
+  }
+}
+
+export type RecreateAgentThreadWorkspaceError =
+  RecreateAgentThreadWorkspaceErrors[keyof RecreateAgentThreadWorkspaceErrors]
+
+export type RecreateAgentThreadWorkspaceResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    workspaceState?: {
+      generation: string
+      status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+      initialized: boolean
+    }
+    id: string
+    projectId: string
+    ownerPrincipal: {
+      type: "user" | "serviceAccount" | "system"
+      id: string
+    }
+    title?: string
+    workspace?: {
+      params: {
+        [key: string]:
+          | string
+          | number
+          | boolean
+          | Array<unknown>
+          | {
+              [key: string]: unknown
+            }
+          | null
+      }
+    }
+    status: "active" | "archived"
+    activeRunId: string | null
+    lastMessageAt?: string
+    messageCount: number
+    createdAt: string
+    updatedAt: string
+  }
+}
+
+export type RecreateAgentThreadWorkspaceResponse =
+  RecreateAgentThreadWorkspaceResponses[keyof RecreateAgentThreadWorkspaceResponses]
 
 export type ListAgentThreadMessagesData = {
   body?: never
