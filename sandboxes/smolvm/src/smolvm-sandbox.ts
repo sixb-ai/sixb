@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto"
 import { dirname } from "node:path"
 import {
   type CommandResult,
-  type CreateSandboxOptions,
   type RunCommandOptions,
   type Sandbox,
   SandboxError,
   type SandboxFileRecord,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
+  type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
 import { exec } from "@sixb/core/sandboxes"
@@ -24,7 +24,7 @@ import {
 import { buildNetworkFlags, withRegistryEgress } from "./network"
 import { cleanupWorkdir, type ResolvedWorkdir, resolveWorkdir } from "./workdir"
 
-export interface SmolvmSandboxOptions extends CreateSandboxOptions {
+export interface SmolvmSandboxOptions extends SandboxSessionOptions {
   readonly id?: string
   readonly cli: SmolvmCliConfig
   /**

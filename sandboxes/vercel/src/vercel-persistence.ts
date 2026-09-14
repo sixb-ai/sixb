@@ -1,7 +1,7 @@
 import {
-  type CreateSandboxOptions,
   type Sandbox,
   SandboxError,
+  type SandboxSessionOptions,
   SandboxStateUnavailableError,
 } from "@sixb/core/sandboxes"
 import { APIError, type Session, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
@@ -67,7 +67,12 @@ export function persistentSandboxError(
 }
 
 export function assertPersistentName(name: string): void {
-  if (name.length === 0 || name.trim() !== name || /[\u0000-\u001f\u007f]/.test(name)) {
+  if (
+    typeof name !== "string" ||
+    name.length === 0 ||
+    name.trim() !== name ||
+    /[\u0000-\u001f\u007f]/.test(name)
+  ) {
     throw new SandboxError(
       "[Sandbox] A non-empty sandbox name without surrounding whitespace or control characters is required."
     )
@@ -88,7 +93,7 @@ export function assertStoppedPersistent(client: VercelPersistentClient): void {
 /** Bind every operation to this VM, never the SDK's automatically-resuming named handle. */
 export async function bindPersistentSandbox(
   client: VercelPersistentClient,
-  options: CreateSandboxOptions
+  options: SandboxSessionOptions
 ): Promise<Sandbox> {
   if (!client.persistent) {
     throw new SandboxError("[Sandbox] Vercel did not enable requested persistence.")

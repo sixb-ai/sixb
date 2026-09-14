@@ -174,6 +174,35 @@ describe("VercelSandbox", () => {
 })
 
 describe("VercelSandboxFactory", () => {
+  test.each([
+    true,
+    false,
+  ])("rejects the legacy persistent flag (%s) with migration guidance", (persistent) => {
+    // Regression proof: remove assertNoLegacyPersistence; the old configuration is silently accepted.
+    expect(
+      () =>
+        new VercelSandboxFactory({
+          // @ts-expect-error Removed even when false: callers must migrate explicitly.
+          persistent,
+        })
+    ).toThrow("Use create({ persistence: { name } })")
+  })
+
+  test("rejects a legacy per-call persistent flag without provisioning", async () => {
+    let calls = 0
+    const factory = new VercelSandboxFactory({}, async () => {
+      calls++
+      return new FakeVercelClient()
+    })
+    await expect(
+      factory.create({
+        // @ts-expect-error Persistence has one explicit named creation path.
+        persistent: true,
+      })
+    ).rejects.toThrow("Use create({ persistence: { name } })")
+    expect(calls).toBe(0)
+  })
+
   test("builds Vercel create params and keeps Sixb command timeout separate", async () => {
     const client = new FakeVercelClient()
     let captured: unknown
