@@ -3,7 +3,6 @@ import type { AgentWorkspaceConfig, OntologySource, ParamsConfig, SandboxFactory
 import {
   AgentDefinitionError,
   defineObjectType,
-  emptyGrantIndex,
   objectRef,
   optional,
   param,
@@ -11,6 +10,7 @@ import {
   ref,
   SixbHost,
 } from "../src"
+import { emptyGrantIndex } from "../src/authorization/types"
 import { createTestAgentExecution, createTestSixb } from "../src/testing"
 import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -20,7 +20,7 @@ const forbidden = async (): Promise<never> => {
 }
 const sandboxes: SandboxFactory = {
   create: forbidden,
-  persistence: { create: forbidden, resume: forbidden },
+  resume: forbidden,
 }
 
 function setup(agentWorkspace?: AgentWorkspaceConfig, ontology: readonly OntologySource[] = []) {
@@ -42,11 +42,19 @@ const recipe = (): AgentWorkspaceConfig => ({
 })
 
 describe("Agent workspace binding", () => {
-  test("requires persistent provider support at configuration time", () => {
+  test.each([
+    undefined,
+    { create: forbidden },
+    { create: forbidden, persistence: { create: forbidden, resume: forbidden } },
+    { create: forbidden, resume: true },
+  ])("requires a callable resume capability at configuration time: %j", (provider) => {
+    // Regression proof: remove the host's capability guard (or check only truthiness).
+    // Missing, legacy and malformed capabilities must not admit a workspace configuration.
     expect(() => {
       new SixbHost({
         ontology: [],
         ...createTestRuntimeDeps(),
+        sandboxes: provider as unknown as SandboxFactory | undefined,
         agentWorkspace: recipe(),
       })
     }).toThrow("requires a sandbox provider with persistence support")
