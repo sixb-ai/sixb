@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { AuthorizationError, emptyGrantIndex, type OntologySource, SixbHost } from "../src"
+import { AuthorizationError, type OntologySource, SixbHost } from "../src"
+import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 

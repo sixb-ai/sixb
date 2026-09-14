@@ -15,8 +15,8 @@ import {
   prop,
   SixbHost,
 } from "@sixb/core"
-import { agentRunControlStreamId, agentRunStreamId } from "@sixb/core/agents/streams"
 import { createAgentRunExecutionToken } from "@sixb/core/internal/agents"
+import { agentRunControlStreamId, agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import { createSessionCredential } from "@sixb/core/internal/auth"
 import type {
   AgentRunFailureCode,

@@ -25,7 +25,7 @@ export type {
   LinkPathSelectionMode,
 } from "./link-path-selection"
 export type { InferSchemaOrRef, ObjectRef, ObjectRefSchema, SchemaOrRef } from "./refs"
-export { isObjectRefSchema, objectRef, ref, validateSchemaOrRefValue } from "./refs"
+export { isObjectRefSchema, objectRef, ref } from "./refs"
 export type {
   LinkToken,
   LinkTokenMap,
@@ -88,4 +88,3 @@ export {
   valueTypeRef,
 } from "./builders"
 export * from "./units"
-export * from "./validation"

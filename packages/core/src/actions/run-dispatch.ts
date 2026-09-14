@@ -10,13 +10,9 @@ import type {
   CreateExecutionInput,
   Storage,
 } from "../storage"
-import {
-  ACTION_RUN_FAILURE_CODES,
-  ActionRunError,
-  actionRunParamsEqual,
-  actionSubjectsEqual,
-} from "../storage"
+import { ACTION_RUN_FAILURE_CODES, ActionRunError } from "../storage"
 import { parseActionRunFailure } from "../storage/action-runs/failure"
+import { actionRunParamsEqual, actionSubjectsEqual } from "../storage/action-runs/idempotency"
 import type { RequestActionResult } from "./request"
 import { createActionRunId, createActionRunIdempotencyKey } from "./run-id"
 import type { ActionSubject } from "./types"

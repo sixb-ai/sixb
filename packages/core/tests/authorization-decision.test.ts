@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test"
-import { type AuthorizationContext, emptyGrantIndex, isAllowed } from "../src"
+import { type AuthorizationContext, isAllowed } from "../src"
 import {
   assertAuthorized,
   assertCanAppendTelemetry,
   assertCanEdit,
   canViewEvent,
+  emptyGrantIndex,
   evaluate,
 } from "../src/authorization"
 import type {

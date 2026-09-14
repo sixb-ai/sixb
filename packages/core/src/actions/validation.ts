@@ -1,6 +1,7 @@
 import type { JsonValue } from "../json"
-import { type SchemaOrRef, type ValueType, validateSchemaOrRefValue } from "../ontology"
+import type { SchemaOrRef, ValueType } from "../ontology"
 import { OntologyValidationError } from "../ontology/errors"
+import { validateSchemaOrRefValue } from "../ontology/refs"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { Schema } from "../ontology/types"
 import { coerceSchemaValueToTyped, normalizeSchemaValue } from "../ontology/validation"

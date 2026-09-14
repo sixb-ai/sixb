@@ -10,7 +10,7 @@ import {
   isAgentRunActivityEvent,
   isAgentRunStreamEvent,
   publishAgentRunActivity,
-} from "../src/agents/streams"
+} from "../src/agents/streams/protocol"
 import type { ConversationAgentRunRecord, SubagentRunRecord } from "../src/storage"
 
 const OCCURRED_AT = new Date("2026-01-02T03:04:05.000Z")

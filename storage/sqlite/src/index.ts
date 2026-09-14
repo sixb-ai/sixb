@@ -11,6 +11,10 @@ import type {
 } from "@sixb/core"
 import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal/ontology-storage-provider"
 import {
+  createTransactionStorageProxy,
+  throwNestedStorageTransaction,
+} from "@sixb/core/internal/storage"
+import {
   createAgentOperationScope,
   createAuthOperationScope,
   createObjectOperationScope,
@@ -23,11 +27,9 @@ import {
   type AiCostStorage,
   type AiLimitStorage,
   type AiUsageStorage,
-  createTransactionStorageProxy,
   type ShareGrantStorage,
   type ShareSessionStorage,
   StorageTransactionError,
-  throwNestedStorageTransaction,
 } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAgentStorage } from "./agents"

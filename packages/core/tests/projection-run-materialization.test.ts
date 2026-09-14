@@ -3,7 +3,7 @@ import type { ProjectionMaterializationIdentity } from "../src/materialization/m
 import { InMemoryAuthStorage } from "../src/storage/auth"
 import { InMemoryExecutionStorage } from "../src/storage/executions/in-memory"
 import type { ExecutionStorage } from "../src/storage/executions/types"
-import { InMemoryStorage } from "../src/storage/index"
+import { InMemoryStorage } from "../src/storage/in-memory/index"
 import { InMemoryProjectionRunStorage } from "../src/storage/projection-runs/in-memory"
 import type {
   ProjectionRunStorage,

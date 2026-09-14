@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import { createServer } from "node:net"
 import {
   type AuthorizationContext,
-  emptyGrantIndex,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -17,10 +16,13 @@ import {
 import {
   AGENT_RUN_STREAM_SCHEMA_VERSION,
   type AgentRunStreamEvent,
+} from "@sixb/core/agents/streams"
+import {
   agentRunStreamDefinition,
   agentRunStreamId,
   publishAgentRunActivity,
-} from "@sixb/core/agents/streams"
+} from "@sixb/core/internal/agents/streams"
+import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type { AgentStorage } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"

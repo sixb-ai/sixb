@@ -11,6 +11,10 @@ import type {
 } from "@sixb/core"
 import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal/ontology-storage-provider"
 import {
+  createTransactionStorageProxy,
+  throwNestedStorageTransaction,
+} from "@sixb/core/internal/storage"
+import {
   createAgentOperationScope,
   createAuthOperationScope,
   createObjectOperationScope,
@@ -23,10 +27,8 @@ import {
   type AiCostStorage,
   type AiLimitStorage,
   type AiUsageStorage,
-  createTransactionStorageProxy,
   type ObjectStorage,
   StorageTransactionError,
-  throwNestedStorageTransaction,
 } from "@sixb/core/storage"
 import { PgAgentStorage } from "./agents"
 import { PgAuthStorage } from "./auth-storage"

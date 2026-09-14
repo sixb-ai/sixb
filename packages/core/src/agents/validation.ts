@@ -1,11 +1,7 @@
 import { getInvalidJsonValueReason, isPlainRecord, type JsonValue } from "../json"
-import {
-  normalizeSchemaValue,
-  type ObjectSchema,
-  OntologyValidationError,
-  type ValueType,
-  validateSchemaValue,
-} from "../ontology"
+import { type ObjectSchema, OntologyValidationError, type ValueType } from "../ontology"
+import { normalizeSchemaValue } from "../ontology/validation/normalize"
+import { validateSchemaValue } from "../ontology/validation/schema"
 import { AgentDefinitionError } from "./errors"
 import type { AgentToolDefinition, AgentToolInputSchema } from "./types"
 

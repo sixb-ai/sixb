@@ -1,6 +1,7 @@
 import type { Database } from "bun:sqlite"
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
+import { canRequeueSyncRunAfterEnqueueFailure } from "@sixb/core/internal/storage"
 import { assertSyncRunExecution } from "@sixb/core/internal/sync-run-storage-provider"
 import type {
   ExecutionStorage,
@@ -14,11 +15,7 @@ import type {
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
-import {
-  canRequeueSyncRunAfterEnqueueFailure,
-  SYNC_RUN_FAILURE_CODES,
-  SyncRunError,
-} from "@sixb/core/storage"
+import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import { installFreshSqliteSchema } from "./migrations"
 import {

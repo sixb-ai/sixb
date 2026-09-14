@@ -1,5 +1,5 @@
 import type { DomainEvent } from "@sixb/core"
-import { scopeKeysForEvent } from "@sixb/core/events/scope"
+import { scopeKeysForEvent } from "@sixb/core/internal/event-scope"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../../schemas/events"

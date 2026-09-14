@@ -1,7 +1,7 @@
 import type { FileRef } from "../blob-storage"
 import type { JsonValue } from "../json"
 import type { ProviderData } from "../models"
-import type { AgentContextPart } from "./context"
+import type { AgentContextPart } from "./context/entries"
 
 /**
  * The agent's own, SDK-independent message. We store messages and threads — not an SDK transport —

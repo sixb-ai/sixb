@@ -1,6 +1,7 @@
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
 import { assertPipelineRunExecution } from "@sixb/core/internal/pipeline-run-storage-provider"
+import { canRequeuePipelineRunAfterEnqueueFailure } from "@sixb/core/internal/storage"
 import type { DatasetVersionRef } from "@sixb/core/lake-storage"
 import type {
   ExecutionStorage,
@@ -19,11 +20,7 @@ import type {
   StartPipelineRunInput,
   StartPipelineStepRunInput,
 } from "@sixb/core/storage"
-import {
-  canRequeuePipelineRunAfterEnqueueFailure,
-  PIPELINE_RUN_FAILURE_CODES,
-  PipelineRunError,
-} from "@sixb/core/storage"
+import { PIPELINE_RUN_FAILURE_CODES, PipelineRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"

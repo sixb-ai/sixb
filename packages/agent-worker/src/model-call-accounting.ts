@@ -3,6 +3,7 @@ import {
   aiModelCallCostMatchesUsage,
   normalizeAiModelCallCostRecord,
 } from "@sixb/core/internal/ai-cost-storage-provider"
+import { normalizeAiModelCallRecord } from "@sixb/core/internal/storage"
 import { assertJsonObject, type ModelCostEstimate } from "@sixb/core/models"
 import type {
   AiBillableMeter,
@@ -15,7 +16,6 @@ import type {
   RecordAiModelCallResult,
   Storage,
 } from "@sixb/core/storage"
-import { normalizeAiModelCallRecord } from "@sixb/core/storage"
 import type { AgentWorkerStorage, RecoverAiModelCallInput } from "./types"
 
 interface RecordAiModelCallAccountingInput extends RecoverAiModelCallInput {

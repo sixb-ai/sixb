@@ -51,11 +51,6 @@ export {
   ACTION_RUN_FAILURE_CODES,
   ACTION_RUN_PHASES,
   ActionRunError,
-  actionRunParamsEqual,
-  actionRunPhaseRecordsEqual,
-  actionSubjectsEqual,
-  canRequeueActionRunAfterEnqueueFailure,
-  finishActionRunPhase,
   InMemoryActionRunStorage,
   isTerminalActionRun,
 } from "./action-runs"
@@ -197,14 +192,7 @@ export type {
   SummarizeAiUsageExecutionInput,
   SummarizeAiUsageExecutionsInput,
 } from "./ai-usage"
-export {
-  AiUsageStorageError,
-  aggregateAiModelCallUsage,
-  assertAiUsageExecutionId,
-  InMemoryAiUsageStorage,
-  normalizeAiModelCallRecord,
-  normalizeAiModelCallUsage,
-} from "./ai-usage"
+export { AiUsageStorageError, aggregateAiModelCallUsage, InMemoryAiUsageStorage } from "./ai-usage"
 export type {
   AccessTokenRecord,
   AccessTokenSubjectType,
@@ -367,8 +355,6 @@ export type {
   FileUploadStrategy,
 } from "./file-upload-sessions"
 export {
-  createFileUploadId,
-  createUploadExpiresAt,
   DEFAULT_FILE_UPLOAD_SESSION_TTL_MS,
   DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS,
   FileUploadSessionError,
@@ -584,7 +570,6 @@ export type {
   StartPipelineStepRunInput,
 } from "./pipeline-runs"
 export {
-  canRequeuePipelineRunAfterEnqueueFailure,
   InMemoryPipelineRunStorage,
   PIPELINE_RUN_FAILURE_CODES,
   PipelineRunError,
@@ -623,8 +608,6 @@ export {
   PROJECTION_RUN_FAILURE_CODES,
   PROJECTION_RUN_PROGRESS_KEYS,
   ProjectionRunError,
-  projectionRunObjectTypesVisible,
-  zeroProjectionRunProgress,
 } from "./projection-runs"
 export type {
   ListActiveRuleStatesInput,
@@ -675,12 +658,7 @@ export type {
   SyncRunStatus,
   SyncRunStorage,
 } from "./sync-runs"
-export {
-  canRequeueSyncRunAfterEnqueueFailure,
-  InMemorySyncRunStorage,
-  SYNC_RUN_FAILURE_CODES,
-  SyncRunError,
-} from "./sync-runs"
+export { InMemorySyncRunStorage, SYNC_RUN_FAILURE_CODES, SyncRunError } from "./sync-runs"
 export type {
   TimeseriesHistoryBatchInput,
   TimeseriesHistoryBatchResult,
@@ -688,11 +666,7 @@ export type {
   TimeseriesPoint,
   TimeseriesStorage,
 } from "./timeseries"
-export {
-  assertTransactionActive,
-  createTransactionStorageProxy,
-  throwNestedStorageTransaction,
-} from "./transaction"
+
 export type { Storage, StorageTransactionOptions } from "./types"
 export type {
   FinishWebhookRunInput,

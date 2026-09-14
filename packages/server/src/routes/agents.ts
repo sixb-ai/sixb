@@ -1,6 +1,6 @@
 import { AgentRequestError, type AgentRunView, type FileRef, type SixbHostView } from "@sixb/core"
-import { agentRunStreamId } from "@sixb/core/agents/streams"
 import { publishAgentRunCancel, publishAgentRunFinished } from "@sixb/core/internal/agents"
+import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import {
   type AgentContextCheckpointRecord,
   type AgentMessageRecord,

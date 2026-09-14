@@ -43,7 +43,8 @@ import {
 import { createAuthorizedObjectReader } from "../execution/authorized-object-reader"
 import type { ExecutionScope } from "../execution/types"
 import type { LakeStorage } from "../lake-storage"
-import { type LoggerProvider, LoggingService, type ObservabilityOptions } from "../logging"
+import type { LoggerProvider } from "../logging"
+import { LoggingService, type ObservabilityOptions } from "../logging/service"
 import {
   OntologyMaintenance,
   type OntologyMaintenanceHandle,
