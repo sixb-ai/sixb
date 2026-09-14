@@ -243,7 +243,8 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
     // signal joins the turn's abort sources, so a cancel stops the model stream just like a shutdown.
     const cancel = await this.watchForCancel(run.id)
-    const turnSignal = AbortSignal.any([signal, cancel.signal])
+    const workspaceFailure = new AbortController()
+    const turnSignal = AbortSignal.any([signal, cancel.signal, workspaceFailure.signal])
 
     try {
       // The queue remains the sole source of ownership timing. Persist its latest confirmed
@@ -315,6 +316,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           thread,
           run,
           signal: runtime.signal,
+          onAuthFailure: (error) => workspaceFailure.abort(error),
         })
       }
       const preparedModel = await prepareAgentModel(configuredPlan)
