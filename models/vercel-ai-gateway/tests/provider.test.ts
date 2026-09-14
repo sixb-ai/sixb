@@ -1,23 +1,20 @@
 import { describe, expect, spyOn, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type {
+  JsonObject,
   LanguageModelRequest,
   LanguageModelStreamEvent,
   ModelCallEndEvent,
   ModelOutput,
 } from "@sixb/core/models"
-import {
-  ModelCatalogUnavailableError,
-  ModelProviderError,
-  UnsupportedModelFeatureError,
-} from "@sixb/core/models"
+import { ModelCatalogUnavailableError, ModelProviderError } from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
 import { BASH_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/bash"
 import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
 import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
 import { createVercelGateway, vercelGateway } from "../src"
 import { decodeServerSentEvents } from "../src/sse"
-import { gatewayOutputSchema } from "../src/structured-output"
+import { isStrictGatewaySchema } from "../src/structured-output"
 
 function request(overrides: Partial<LanguageModelRequest> = {}): LanguageModelRequest {
   return {
@@ -453,12 +450,15 @@ describe("Vercel AI Gateway provider", () => {
           },
         })
       )
-    ).rejects.toBeInstanceOf(UnsupportedModelFeatureError)
+    ).resolves.toHaveProperty("events")
+    expect(resolved.definition.capabilities.nativeStructuredOutput).toBeUndefined()
+    expect(catalogs).toBe(2)
     await resolved.stream(request())
     await resolved.stream(request({ maxOutputTokens: 100 }))
-    expect(bodies.map((body) => body.max_output_tokens)).toEqual([512, 100])
+    expect(bodies.map((body) => body.max_output_tokens)).toEqual([512, 512, 100])
     expect(bodies[0]?.tools).toBeUndefined()
-    expect(bodies[0]?.text).toBeUndefined()
+    expect(bodies[0]?.text).toMatchObject({ format: { type: "json_schema", strict: true } })
+    expect(bodies[1]?.text).toBeUndefined()
     expect(model.definition.contextWindow).toBeUndefined()
     expect(await resolved.resolve!()).toBe(resolved)
   })
@@ -616,21 +616,21 @@ describe("Vercel AI Gateway provider", () => {
   })
   test("declines native decoding for schemas outside the strict Responses subset", () => {
     expect(
-      gatewayOutputSchema({
+      isStrictGatewaySchema({
         type: "object",
         properties: { answer: { type: "string" } },
         required: [],
         additionalProperties: false,
       })
-    ).toBeUndefined()
+    ).toBe(false)
     expect(
-      gatewayOutputSchema({
+      isStrictGatewaySchema({
         type: "object",
         properties: { values: { type: "object", additionalProperties: { type: "string" } } },
         required: ["values"],
         additionalProperties: false,
       })
-    ).toBeUndefined()
+    ).toBe(false)
   })
 
   test("maps requests and normalizes fragmented text/usage streams", async () => {
@@ -798,7 +798,13 @@ describe("Vercel AI Gateway provider", () => {
     ])
   })
 
-  test("resolves native structured output through the callable provider path", async () => {
+  // Regression proof: restore the boolean capability gate; missing metadata cases fail before POST.
+  test.each([
+    { parameters: ["response_format"], resolved: false },
+    { parameters: [], resolved: false },
+    { parameters: undefined, resolved: false },
+    { parameters: [], resolved: true },
+  ])("sends structured output with catalog metadata %j", async ({ parameters, resolved }) => {
     const requested: string[] = []
     let responseBody: Record<string, unknown> | undefined
     const gateway = createVercelGateway({
@@ -813,7 +819,7 @@ describe("Vercel AI Gateway provider", () => {
               {
                 id: "creator/model",
                 type: "language",
-                supported_parameters: ["response_format"],
+                supported_parameters: parameters,
               },
             ],
           })
@@ -857,8 +863,10 @@ describe("Vercel AI Gateway provider", () => {
       },
     })
 
+    const binding = gateway("creator/model")
+    const model = resolved ? await binding.resolve!() : binding
     const result = await runModelLoop({
-      model: gateway("creator/model"),
+      model,
       messages: [{ role: "user", content: [{ type: "text", text: "Answer yes." }] }],
       output: answerOutput(),
       maxSteps: 1,
@@ -881,6 +889,8 @@ describe("Vercel AI Gateway provider", () => {
       },
     })
     expect(responseBody?.tools).toBeUndefined()
+    if (!parameters?.length)
+      expect(model.definition.capabilities.nativeStructuredOutput).toBeUndefined()
   })
 
   // Regression proof: restore the JSON-tool fallback in prepareRequest.
@@ -907,8 +917,124 @@ describe("Vercel AI Gateway provider", () => {
           },
         })
       )
-    ).rejects.toBeInstanceOf(UnsupportedModelFeatureError)
+    ).rejects.toMatchObject({
+      name: "UnsupportedModelFeatureError",
+      reason: nativeStructuredOutput ? "unsupported-schema" : "unsupported-model",
+    })
     expect(requests).toBe(0)
+  })
+
+  test.each<JsonObject>([
+    { ...answerOutput().schema, type: "string" },
+    { ...answerOutput().schema, type: ["object", "null"] },
+    { ...answerOutput().schema, properties: { answer: { type: ["object", "null"] } } },
+    {
+      type: "object",
+      properties: { answer: { type: "not-a-type" } },
+      required: ["answer"],
+      additionalProperties: false,
+    },
+    { type: "object", properties: {}, required: ["missing"], additionalProperties: false },
+    {
+      type: "object",
+      properties: { answer: { anyOf: [] } },
+      required: ["answer"],
+      additionalProperties: false,
+    },
+  ])("rejects malformed strict schemas before catalog or inference %j", async (schema) => {
+    // Regression proof: remove type/required/composition checks, or ignore object in type arrays.
+    let calls = 0
+    const model = createVercelGateway({
+      fetch: async () => {
+        calls += 1
+        return sseResponse([])
+      },
+    })("creator/model")
+    await expect(
+      model.validateResponseFormat!({ type: "json", name: "invalid", schema })
+    ).rejects.toMatchObject({ reason: "unsupported-schema" })
+    expect(calls).toBe(0)
+  })
+
+  test("accepts strict nullable nested objects", () => {
+    expect(
+      isStrictGatewaySchema({
+        ...answerOutput().schema,
+        properties: { answer: { ...answerOutput().schema, type: ["object", "null"] } },
+      })
+    ).toBe(true)
+  })
+
+  // Regression proof: restore catch-all metadata handling, or skip output validation in runModelLoop.
+  test("unknown capability preserves catalog errors and validates endpoint output", async () => {
+    for (const unavailable of [false, true]) {
+      let posts = 0
+      const model = createVercelGateway({
+        fetch: async (url) => {
+          if (String(url).endsWith("/models")) {
+            return unavailable
+              ? new Response("unavailable", { status: 503 })
+              : Response.json({ data: [{ id: "creator/model", type: "language" }] })
+          }
+          posts += 1
+          return sseResponse([
+            { type: "response.output_text.done", item_id: "message", text: '{"answer":42}' },
+            { type: "response.completed", response: { status: "completed" } },
+          ])
+        },
+      })("creator/model")
+      await expect(
+        runModelLoop({
+          model,
+          messages: request().messages,
+          output: answerOutput(),
+          maxSteps: 1,
+          signal: request().signal,
+        })
+      ).rejects.toMatchObject({ name: "StructuredOutputError" })
+      expect(posts).toBe(1)
+    }
+    const malformed = createVercelGateway({ fetch: async () => new Response("not JSON") })(
+      "creator/model"
+    )
+    await expect(
+      malformed.stream(
+        request({
+          responseFormat: {
+            type: "json",
+            name: "answer",
+            schema: answerOutput().schema,
+          },
+        })
+      )
+    ).rejects.toBeInstanceOf(SyntaxError)
+  })
+
+  // Regression proof: restore the unknown-as-unsupported gate; endpoint rejection is never observed.
+  test.each([
+    "model_not_supported",
+    "invalid_json_schema",
+  ])("preserves endpoint rejection %s with unknown capability", async (code) => {
+    let posts = 0
+    const model = createVercelGateway({
+      fetch: async (url) => {
+        if (String(url).endsWith("/models")) return Response.json({ data: [] })
+        posts += 1
+        return Response.json({ error: { code, message: "Rejected by endpoint" } }, { status: 400 })
+      },
+    })("creator/model")
+    await expect(
+      model.stream(
+        request({
+          responseFormat: {
+            type: "json",
+            name: "answer",
+            schema: answerOutput().schema,
+          },
+        })
+      )
+    ).rejects.toMatchObject({ name: "ModelProviderError", status: 400, code })
+    expect(posts).toBe(1)
   })
 
   // Regression proof: restore the unsupported-effort throw in gatewayReasoningRequest.

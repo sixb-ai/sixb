@@ -75,6 +75,9 @@ export class AiModelCallRecorder {
       modelId: model.modelId,
       definition: model.definition,
       costEstimator: model.costEstimator,
+      ...(model.validateResponseFormat === undefined
+        ? {}
+        : { validateResponseFormat: model.validateResponseFormat.bind(model) }),
       stream: async (request) => {
         this.assertHealthy()
         const inputTokens = estimateAiModelCallInputTokens({

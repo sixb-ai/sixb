@@ -43,6 +43,18 @@ export class ModelStreamError extends Error {
 
 export class UnsupportedModelFeatureError extends Error {
   readonly name = "UnsupportedModelFeatureError"
+
+  constructor(
+    message?: string,
+    options?: ErrorOptions & {
+      readonly reason?: "unsupported-model" | "unsupported-schema"
+    }
+  ) {
+    super(message, options)
+    this.reason = options?.reason
+  }
+
+  readonly reason?: "unsupported-model" | "unsupported-schema"
 }
 
 export class StructuredOutputError extends Error {

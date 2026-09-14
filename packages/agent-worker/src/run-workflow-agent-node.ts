@@ -9,7 +9,7 @@ import {
   type WorkflowIOSnapshot,
 } from "@sixb/core/internal/workflows"
 import type { ModelMessage, ModelStep } from "@sixb/core/models"
-import { StructuredOutputError } from "@sixb/core/models"
+import { StructuredOutputError, UnsupportedModelFeatureError } from "@sixb/core/models"
 import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/core/storage"
 import {
   DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
@@ -44,7 +44,7 @@ export interface WorkflowAgentNodeResult {
   readonly trace: readonly AgentMessagePart[]
 }
 
-export type WorkflowAgentFailurePhase = "agent-loop" | "structured-finalizer"
+export type WorkflowAgentFailurePhase = "output-preflight" | "agent-loop" | "structured-finalizer"
 
 /** Carries best-effort debug context across the workflow node's terminal error boundary. */
 export class WorkflowAgentNodeExecutionError extends Error {
@@ -70,10 +70,6 @@ export async function runWorkflowAgentNode(
   input: RunWorkflowAgentNodeInput
 ): Promise<WorkflowAgentNodeResult> {
   const maxSteps = input.plan.maxSteps
-  const outputSchema = schemaRecordToJsonSchema({
-    shape: input.agentStep.output as Readonly<Record<string, SchemaOrRef>>,
-    valueTypesById: input.valueTypesById,
-  })
   const validateOutput = (value: unknown): Record<string, unknown> => ({
     ...validateWorkflowAgentStepOutput({
       workflowId: input.workflowId,
@@ -94,9 +90,25 @@ export async function runWorkflowAgentNode(
     workflowRunId: input.workflowRunId,
     nodeRunId: input.nodeRunId,
   }
-  let phase: WorkflowAgentFailurePhase = "agent-loop"
+  let phase: WorkflowAgentFailurePhase = "output-preflight"
   let finishReason: AgentRunFinishReason | undefined
   try {
+    const outputSchema = schemaRecordToJsonSchema({
+      shape: input.agentStep.output as Readonly<Record<string, SchemaOrRef>>,
+      valueTypesById: input.valueTypesById,
+    })
+    if (input.plan.model.definition.capabilities.nativeStructuredOutput === false) {
+      throw new UnsupportedModelFeatureError(
+        "[SixbAgentWorker] Workflow output requires a model supporting structured output.",
+        { reason: "unsupported-model" }
+      )
+    }
+    await input.plan.model.validateResponseFormat?.({
+      type: "json",
+      name: input.agentStep.id,
+      schema: outputSchema,
+    })
+    phase = "agent-loop"
     const research = await runModelLoop({
       model: input.usageRecorder.wrapModel(input.plan.model),
       messages: [

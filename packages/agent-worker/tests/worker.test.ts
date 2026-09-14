@@ -58,6 +58,7 @@ import type {
   ModelTool,
   ModelUsage,
 } from "@sixb/core/models"
+import { ModelProviderError, UnsupportedModelFeatureError } from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import {
   type AgentRunRecord,
@@ -75,6 +76,7 @@ import {
   createTestSixb,
   createTestWorkflowExecution,
 } from "@sixb/core/testing"
+import { createVercelGateway } from "../../../models/vercel-ai-gateway/src"
 import { AgentWorker, type AgentWorkerOptions } from "../src"
 import { renderAgentSystemPrompt } from "../src/agent-prompt"
 import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
@@ -3230,6 +3232,138 @@ describe("AgentWorker", () => {
     }
   })
 
+  // Regression proof: restore Gateway's unknown-as-unsupported gate; research/finalization fails.
+  test("finalizes workflow output through Gateway with missing capability metadata", async () => {
+    const formats: unknown[] = []
+    const gateway = createVercelGateway({
+      fetch: async (url, init) => {
+        if (String(url).endsWith("/models"))
+          return Response.json({
+            data: [
+              {
+                id: "creator/model",
+                type: "language",
+                context_window: 64_000,
+              },
+            ],
+          })
+        const body = JSON.parse(String(init?.body))
+        formats.push(body.text?.format)
+        const events = [
+          {
+            type: "response.output_text.done",
+            item_id: "message",
+            text: body.text
+              ? '{"answer":"Project Alpha","confidence":0.96}'
+              : "Project Alpha is the answer with confidence 0.96.",
+          },
+          {
+            type: "response.completed",
+            response: { status: "completed", usage: { input_tokens: 10, output_tokens: 7 } },
+          },
+        ]
+        return new Response(events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""))
+      },
+    })
+    const runId = "workflow-gateway-unknown-output"
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: gateway("creator/model"),
+      runId,
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const task = await waitFor(
+        async () => {
+          const current = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return current?.status === "succeeded" ? current : null
+        },
+        { label: "Gateway structured workflow output" }
+      )
+      expect(task.modelId).toBe("creator/model")
+      expect(formats).toEqual([
+        undefined,
+        expect.objectContaining({ type: "json_schema", strict: true }),
+      ])
+      expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
+        status: "succeeded",
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: remove output preflight or failure identity propagation; calls/phase differ.
+  test.each([
+    "unsupported-model",
+    "unsupported-schema",
+    "provider-rejection",
+  ] as const)("persists safe workflow output failure %s at the correct phase", async (reason) => {
+    const calls: string[] = []
+    const base = trackedStructuredAnswerModel((call) => calls.push(call))
+    const preflight = reason !== "provider-rejection"
+    const model: LanguageModel = {
+      providerId: base.providerId,
+      modelId: base.modelId,
+      definition: {
+        ...base.definition,
+        capabilities: reason === "unsupported-model" ? { nativeStructuredOutput: false } : {},
+      },
+      validateResponseFormat: (format) => {
+        expect(format.schema).toMatchObject({ type: "object" })
+        if (reason === "unsupported-schema") {
+          throw new UnsupportedModelFeatureError("private schema details secret=123", { reason })
+        }
+      },
+      stream: (request) => {
+        if (request.responseFormat && !preflight) {
+          throw new ModelProviderError("private request secret=123", "test", base.modelId, {
+            status: 400,
+          })
+        }
+        return base.stream(request)
+      },
+    }
+    const runId = `workflow-output-failure-${reason}`
+    const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
+      model,
+      runId,
+    })
+    attachSixbErrorReporter(sixb, () => {})
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await waitFor(
+        async () => {
+          const current = await runs.getById({ projectId: PROJECT_ID, id: runId })
+          return current?.status === "failed" ? current : null
+        },
+        { label: "workflow output failure" }
+      )
+      const node = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
+      const run = await runs.getById({ projectId: PROJECT_ID, id: runId })
+      expect(node?.error).toMatchObject({
+        code: "workflow.node_failed",
+        details: {
+          failurePhase: preflight ? "output-preflight" : "structured-finalizer",
+          modelId: model.modelId,
+          modelFailure: { reason, message: expect.any(String) },
+        },
+      })
+      expect(run?.error).toEqual(node?.error)
+      expect(JSON.stringify(node?.error)).not.toContain("secret=123")
+      expect(calls).toEqual(preflight ? [] : ["research"])
+      await expect(
+        aiUsageStorageOf(sixb).summarizeExecution({
+          projectId: PROJECT_ID,
+          executionId: agentExecutionId,
+        })
+      ).resolves.toMatchObject({ modelCallCount: preflight ? 0 : 1 })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("keeps workflow usage when structured output validation fails", async () => {
     const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
       model: invalidStructuredAnswerModel(),
@@ -3251,6 +3385,13 @@ describe("AgentWorker", () => {
       )
 
       expect(execution.status).toBe("failed")
+      const node = await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })
+      expect(node?.error).toMatchObject({
+        details: {
+          failurePhase: "structured-finalizer",
+          modelFailure: { reason: "invalid-output" },
+        },
+      })
       await expect(
         aiUsageStorageOf(sixb).summarizeExecution({
           projectId: PROJECT_ID,
