@@ -85,7 +85,7 @@ the composer offers the named levels. Unknown capabilities are not treated as un
 ## Workspace configuration (foundation)
 
 `agentWorkspace` declares one project recipe. It does not enable a workspace on every thread.
-It requires a sandbox factory with the optional persistence capability.
+It requires a sandbox factory exposing `resume()` for persistent creation and resume.
 
 **This release stores thread bindings only. Workspace runs and retries are rejected until the
 persistent execution lifecycle is available. Existing threads without a workspace are unchanged.**
