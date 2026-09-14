@@ -633,6 +633,235 @@ describe("Vercel AI Gateway provider", () => {
     ).toBeUndefined()
   })
 
+  // Regression proof: disable reasoningEvents; the live-shape fixture loses its reasoning deltas.
+  // Captured from Gateway GLM 5.3 Flash (Baseten), reasoning: high, on 2026-09-14.
+  test("streams Gateway reasoning through the model loop with usage and replay intact", async () => {
+    const item = {
+      type: "reasoning",
+      id: "rs-1",
+      summary: [],
+      content: [{ type: "reasoning_text", text: "17 × 23 = 391" }],
+    }
+    const address = { item_id: "rs-1", output_index: 0, content_index: 0 }
+    const bodies: Record<string, unknown>[] = []
+    const model = createVercelGateway({
+      fetch: async (_url, init) => {
+        bodies.push(JSON.parse(String(init?.body)))
+        return sseResponse([
+          { type: "response.created", response: { id: "resp-1" } },
+          { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
+          ...["17", " × 23 =", " 391"].map((delta) => ({
+            type: "response.reasoning.delta",
+            ...address,
+            delta,
+          })),
+          { type: "response.reasoning.done", ...address, text: "17 × 23 = 391" },
+          { type: "response.output_item.done", output_index: 0, item },
+          { type: "response.output_text.done", item_id: "msg-1", output_index: 1, text: "391" },
+          {
+            type: "response.completed",
+            response: {
+              status: "completed",
+              output: [item],
+              usage: {
+                input_tokens: 27,
+                output_tokens: 12,
+                output_tokens_details: { reasoning_tokens: 8 },
+              },
+            },
+          },
+        ])
+      },
+    })("zai/glm-5.3-flash")
+    const reasoningEvents: unknown[] = []
+    const result = await runModelLoop({
+      model,
+      messages: request().messages,
+      maxSteps: 1,
+      signal: request().signal,
+      reasoning: "high",
+      onEvent: (event) => {
+        if (event.type.startsWith("reasoning-")) reasoningEvents.push(event)
+      },
+    })
+    expect(result.status).toBe("completed")
+    expect(bodies[0]?.reasoning).toEqual({ effort: "high" })
+    expect(reasoningEvents).toEqual([
+      { type: "reasoning-start", id: "rs-1:reasoning-text:0" },
+      ...["17", " × 23 =", " 391"].map((delta) => ({
+        type: "reasoning-delta",
+        id: "rs-1:reasoning-text:0",
+        delta,
+      })),
+      { type: "reasoning-end", id: "rs-1:reasoning-text:0" },
+    ])
+    expect(result.steps[0]?.usage).toMatchObject({
+      outputTokens: 12,
+      reasoningOutputTokens: 8,
+      textOutputTokens: 4,
+    })
+    expect(result.steps[0]?.content.filter((part) => part.type === "reasoning")).toEqual([
+      { type: "reasoning", text: "17 × 23 = 391" },
+    ])
+    const replay = toModelMessages([
+      {
+        role: "assistant",
+        parts: JSON.parse(JSON.stringify(agentTraceFromModelSteps(result.steps))),
+      },
+    ])
+    await collect((await model.stream(request({ messages: replay }))).events)
+    expect(bodies[1]?.input).toEqual([
+      item,
+      { role: "assistant", content: [{ type: "output_text", text: "391" }] },
+    ])
+  })
+
+  // Regression proof: disable reasoningEvents or restore summary-only handling.
+  test.each([
+    "response.reasoning",
+    "response.reasoning_text",
+    "response.reasoning_summary_text",
+  ])("normalizes %s deltas and completion-only text without duplicates", async (prefix) => {
+    const summary = prefix.includes("summary")
+    const address = { item_id: "rs-1", output_index: 0, content_index: 2, summary_index: 2 }
+    const id = `rs-1:${summary ? "reasoning" : "reasoning-text"}:2`
+    for (const streamed of [true, false]) {
+      const model = createVercelGateway({
+        fetch: async () =>
+          sseResponse([
+            ...(streamed ? [{ type: `${prefix}.delta`, ...address, delta: "Think" }] : []),
+            { type: `${prefix}.done`, ...address, text: "Thinking" },
+            { type: `${prefix}.done`, ...address, text: "Thinking" },
+            { type: "response.completed", response: { status: "completed" } },
+          ]),
+      })("test/model")
+      const events = await collect((await model.stream(request())).events)
+      expect(events.filter((event) => event.type.startsWith("reasoning-"))).toEqual([
+        { type: "reasoning-start", id },
+        ...(streamed ? [{ type: "reasoning-delta" as const, id, delta: "Think" }] : []),
+        { type: "reasoning-delta", id, delta: streamed ? "ing" : "Thinking" },
+        { type: "reasoning-end", id },
+      ])
+    }
+  })
+
+  // Regression proof: restore the old reasoningStarted handler; part.done is lost and indexes collide.
+  test("keeps reasoning content and summary parts distinct and closes each only once", async () => {
+    const address = { item_id: "rs-1", output_index: 0, content_index: 0, summary_index: 0 }
+    const model = createVercelGateway({
+      fetch: async () =>
+        sseResponse([
+          {
+            type: "response.content_part.added",
+            ...address,
+            part: { type: "reasoning_text", text: "" },
+          },
+          { type: "response.reasoning_text.delta", ...address, delta: "Detail" },
+          {
+            type: "response.reasoning_summary_part.added",
+            ...address,
+            part: { type: "summary_text", text: "" },
+          },
+          { type: "response.reasoning_summary_text.delta", ...address, delta: "Summary" },
+          { type: "response.reasoning_summary_text.done", ...address, text: "Summary" },
+          {
+            type: "response.reasoning_summary_part.done",
+            ...address,
+            part: { type: "summary_text", text: "Summary" },
+          },
+          {
+            type: "response.content_part.done",
+            ...address,
+            part: { type: "reasoning_text", text: "Detail" },
+          },
+          {
+            type: "response.reasoning_summary_part.done",
+            ...address,
+            summary_index: 1,
+            part: { type: "summary_text", text: "Next" },
+          },
+          { type: "response.completed", response: { status: "completed" } },
+        ]),
+    })("test/model")
+    const events = await collect((await model.stream(request())).events)
+    expect(events.filter((event) => event.type.startsWith("reasoning-"))).toEqual([
+      { type: "reasoning-start", id: "rs-1:reasoning-text:0" },
+      { type: "reasoning-delta", id: "rs-1:reasoning-text:0", delta: "Detail" },
+      { type: "reasoning-start", id: "rs-1:reasoning:0" },
+      { type: "reasoning-delta", id: "rs-1:reasoning:0", delta: "Summary" },
+      { type: "reasoning-end", id: "rs-1:reasoning:0" },
+      { type: "reasoning-end", id: "rs-1:reasoning-text:0" },
+      { type: "reasoning-start", id: "rs-1:reasoning:1" },
+      { type: "reasoning-delta", id: "rs-1:reasoning:1", delta: "Next" },
+      { type: "reasoning-end", id: "rs-1:reasoning:1" },
+    ])
+  })
+
+  // Regression proof: remove reasoningItemEvents/closeReasoningSpans; snapshots and open spans are lost.
+  test("recovers completed reasoning items and closes truncated spans without exposing encrypted content", async () => {
+    for (const terminal of ["response.completed", "response.incomplete"]) {
+      const item = {
+        type: "reasoning",
+        id: "rs-2",
+        summary: [{ type: "summary_text", text: "Summary" }],
+        encrypted_content: "signed",
+      }
+      const model = createVercelGateway({
+        fetch: async () =>
+          sseResponse([
+            {
+              type: "response.reasoning.delta",
+              item_id: "rs-1",
+              content_index: 0,
+              delta: "Partial",
+            },
+            { type: "response.output_item.done", output_index: 1, item },
+            {
+              type: terminal,
+              response: {
+                status: terminal.split(".")[1],
+                output: [
+                  {
+                    type: "reasoning",
+                    id: "rs-1",
+                    content: [{ type: "reasoning_text", text: "Partial" }],
+                  },
+                  item,
+                  { type: "reasoning", id: "rs-3", encrypted_content: "opaque" },
+                  {
+                    type: "reasoning",
+                    id: "rs-4",
+                    content: [{ type: "reasoning_text", text: "Final only" }],
+                  },
+                ],
+              },
+            },
+          ]),
+      })("test/model")
+      const events = await collect((await model.stream(request())).events)
+      expect(
+        events.filter((event) => event.type === "reasoning-delta").map((event) => event.delta)
+      ).toEqual(["Partial", "Summary", "Final only"])
+      expect(events.filter((event) => event.type === "reasoning-start")).toHaveLength(3)
+      expect(events.filter((event) => event.type === "reasoning-end")).toHaveLength(3)
+      expect(events.filter((event) => event.type === "provider-state")).toHaveLength(4)
+      expect(events.at(-1)?.type).toBe("finish")
+    }
+    const model = createVercelGateway({
+      fetch: async () =>
+        sseResponse([
+          { type: "response.reasoning.delta", output_index: 2, delta: "Partial" },
+          {
+            type: "response.incomplete",
+            response: { status: "incomplete", incomplete_details: { reason: "max_output_tokens" } },
+          },
+        ]),
+    })("test/model")
+    const events = await collect((await model.stream(request())).events)
+    expect(events).toContainEqual({ type: "reasoning-end", id: "output:2:reasoning-text:0" })
+    expect(events.at(-1)).toMatchObject({ type: "finish", finishReason: "length" })
+  })
+
   test("maps requests and normalizes fragmented text/usage streams", async () => {
     let capturedUrl = ""
     let capturedHeaders: Headers | undefined
