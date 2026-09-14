@@ -4,7 +4,7 @@ import type {
   SandboxFactory,
   SandboxNetworkPolicy,
 } from "@sixb/core"
-import { SandboxIsolationUnavailableError } from "@sixb/core"
+import { SandboxError, SandboxIsolationUnavailableError } from "@sixb/core"
 import { AppleContainerSandbox } from "./apple-container-sandbox"
 import {
   type AppleContainerCliConfig,
@@ -65,6 +65,9 @@ export class AppleContainerSandboxFactory implements SandboxFactory {
   constructor(private readonly defaults: AppleContainerSandboxFactoryOptions = {}) {}
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    if (options.persistence !== undefined) {
+      throw new SandboxError("[Sandbox] apple-container does not support persistent sandboxes.")
+    }
     const cli = this.resolveCli()
     this.ensureAvailable(cli)
     return await AppleContainerSandbox.create({

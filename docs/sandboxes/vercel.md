@@ -140,7 +140,13 @@ package repositories and add latency to every run.
 | `resources` | Vercel resources, e.g. `{ vcpus: 2 }`. |
 | `env` | Environment variables merged into every sandbox command. |
 | `credentials` | Explicit Vercel `{ token, teamId, projectId }` for non-OIDC environments. |
-| `persistent` | Defaults to `false`; set `true` only if you intentionally want Vercel snapshots. |
+| `snapshotExpiration` | Snapshot retention in milliseconds; does not enable persistence by itself. |
+| `keepLastSnapshots` | Retention policy for named persistent sandboxes. |
+
+For [persistent files](./overview.md#optional-filesystem-persistence), use
+`factory.create({ persistence: { name } })`, then `factory.resume(name)` after a confirmed `stop()`.
+The former factory option `persistent` is rejected: remove it for ephemeral creation or use the
+named creation option. Agent runs remain ephemeral in this provider-only slice.
 
 ## Example configurations
 

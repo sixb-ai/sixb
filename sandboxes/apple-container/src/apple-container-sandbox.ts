@@ -2,12 +2,12 @@ import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 import {
   type CommandResult,
-  type CreateSandboxOptions,
   type RunCommandOptions,
   type Sandbox,
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
+  type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
 import {
@@ -27,7 +27,7 @@ import {
 } from "./network"
 import { runAppleContainerCli } from "./process"
 
-export interface AppleContainerSandboxOptions extends CreateSandboxOptions {
+export interface AppleContainerSandboxOptions extends SandboxSessionOptions {
   readonly id?: string
   readonly cli: AppleContainerCliConfig
   /** Network attached for mode=all and downgraded mode=restricted. Defaults to Apple's default. */

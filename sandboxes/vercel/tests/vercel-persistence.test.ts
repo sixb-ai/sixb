@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { SandboxError, SandboxStateUnavailableError } from "@sixb/core/sandboxes"
+import {
+  type CreateSandboxOptions,
+  SandboxError,
+  SandboxStateUnavailableError,
+} from "@sixb/core/sandboxes"
 import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import type { VercelPersistenceOperations } from "../src/vercel-persistence"
 import { VercelSandboxFactory } from "../src/vercel-sandbox-factory"
@@ -148,9 +152,55 @@ function fixture() {
 }
 
 describe("Vercel named persistence", () => {
+  test.each([
+    null,
+    false,
+    true,
+    {},
+    { name: "" },
+    { name: 42 },
+    { name: "x", expiration: 100 },
+  ])("rejects malformed persistence before provisioning: %j", async (persistence) => {
+    const f = fixture()
+    // Exercise JavaScript callers; removing validation must fail without making a real request.
+    await expect(
+      f.factory.create({ persistence } as unknown as CreateSandboxOptions)
+    ).rejects.toThrow()
+    expect(f.requests).toHaveLength(0)
+  })
+
+  test("resume rejects creation options, including a typed create-options variable", async () => {
+    const f = fixture()
+    const options: CreateSandboxOptions = { persistence: { name: "other" }, env: {} }
+    // Regression proof: remove resume's option guard; the error becomes 'saved state is unavailable'.
+    // @ts-expect-error Creation options must not flow into resume through a variable either.
+    await expect(f.factory.resume("workspace-1", options)).rejects.toThrow("resume accepts only")
+    await expect(
+      // @ts-expect-error Source is a creation setting, not a session option.
+      f.factory.resume("workspace-1", { source: { type: "git", url: "https://example.com/repo" } })
+    ).rejects.toThrow("resume accepts only")
+    expect(f.requests).toHaveLength(0)
+  })
+
+  test("destroy explicitly deletes saved state; repeated deletion is idempotent", async () => {
+    const f = fixture()
+    const sandbox = await f.factory.create({ persistence: { name: "workspace-1" } })
+    await sandbox.stop()
+    expect(f.requests.filter((request) => request.method === "DELETE")).toHaveLength(0)
+    await sandbox.destroy()
+    await sandbox.destroy()
+    expect(f.requests.filter((request) => request.method === "DELETE")).toHaveLength(1)
+    await expect(f.factory.resume("workspace-1")).rejects.toBeInstanceOf(
+      SandboxStateUnavailableError
+    )
+  })
+
   test("creates explicitly with retention, no durable run env, and a deny-all boot policy", async () => {
     const f = fixture()
-    await f.factory.persistence.create("workspace-1", { env: { RUN_ACCESS: "temporary" } })
+    await f.factory.create({
+      persistence: { name: "workspace-1" },
+      env: { RUN_ACCESS: "temporary" },
+    })
     expect(f.requests[0].body).toMatchObject({
       name: "workspace-1",
       persistent: true,
@@ -159,16 +209,16 @@ describe("Vercel named persistence", () => {
       snapshotExpiration: 604_800_000,
       keepLastSnapshots: { count: 1 },
     })
-    await expect(f.factory.persistence.create("workspace-1")).rejects.toThrow()
+    await expect(f.factory.create({ persistence: { name: "workspace-1" } })).rejects.toThrow()
     expect(f.requests.some((request) => request.method === "DELETE")).toBe(false)
   })
 
   test("stop confirms the snapshot; resume opens a new pinned session with current options", async () => {
     const f = fixture()
-    const first = await f.factory.persistence.create("workspace-1")
+    const first = await f.factory.create({ persistence: { name: "workspace-1" } })
     await first.writeFiles([{ path: "notes.txt", contents: "draft" }])
     await first.stop()
-    const next = await f.factory.persistence.resume("workspace-1", {
+    const next = await f.factory.resume("workspace-1", {
       env: { RUN_ACCESS: "new" },
       network: { mode: "all" },
     })
@@ -203,7 +253,7 @@ describe("Vercel named persistence", () => {
   ] as const)("missing state (%s/%s) never creates or deletes a replacement", async (status, code) => {
     const f = fixture()
     f.setError(status, code)
-    await expect(f.factory.persistence.resume("workspace-1")).rejects.toBeInstanceOf(
+    await expect(f.factory.resume("workspace-1")).rejects.toBeInstanceOf(
       SandboxStateUnavailableError
     )
     expect(f.requests).toHaveLength(1)
@@ -213,7 +263,7 @@ describe("Vercel named persistence", () => {
   test("authorization errors are not classified as lost state", async () => {
     const f = fixture()
     f.setError(403, "forbidden")
-    const error: unknown = await f.factory.persistence.resume("workspace-1").then(
+    const error: unknown = await f.factory.resume("workspace-1").then(
       () => undefined,
       (error: unknown) => error
     )
@@ -226,11 +276,11 @@ describe("Vercel named persistence", () => {
 
   test("a snapshot expiring between inspection and resume never triggers creation", async () => {
     const f = fixture()
-    const sandbox = await f.factory.persistence.create("workspace-1")
+    const sandbox = await f.factory.create({ persistence: { name: "workspace-1" } })
     await sandbox.stop()
     f.expireSnapshot()
     const before = f.requests.length
-    await expect(f.factory.persistence.resume("workspace-1")).rejects.toBeInstanceOf(
+    await expect(f.factory.resume("workspace-1")).rejects.toBeInstanceOf(
       SandboxStateUnavailableError
     )
     expect(f.requests.slice(before).map((request) => request.method)).toEqual(["GET", "GET"])
@@ -238,17 +288,17 @@ describe("Vercel named persistence", () => {
 
   test("never attaches to an active or non-persistent sandbox", async () => {
     const f = fixture()
-    await f.factory.persistence.create("workspace-1")
-    await expect(f.factory.persistence.resume("workspace-1")).rejects.toThrow("must be stopped")
+    await f.factory.create({ persistence: { name: "workspace-1" } })
+    await expect(f.factory.resume("workspace-1")).rejects.toThrow("must be stopped")
     f.setStatus("stopped")
     f.setPersistent(false)
-    await expect(f.factory.persistence.resume("workspace-1")).rejects.toThrow("non-persistent")
+    await expect(f.factory.resume("workspace-1")).rejects.toThrow("non-persistent")
     expect(f.requests.some((request) => request.path.includes("resume=true"))).toBe(false)
   })
 
   test.each(["failed", "missing"])("%s snapshot rejects every stop call", async (kind) => {
     const f = fixture()
-    const sandbox = await f.factory.persistence.create("workspace-1")
+    const sandbox = await f.factory.create({ persistence: { name: "workspace-1" } })
     if (kind === "failed") f.failSnapshot()
     else f.omitSnapshot()
     await expect(sandbox.stop()).rejects.toThrow("did not confirm")
@@ -261,7 +311,7 @@ describe("Vercel named persistence", () => {
 
   test("concurrent stop callers both wait for snapshot completion", async () => {
     const f = fixture()
-    const sandbox = await f.factory.persistence.create("workspace-1")
+    const sandbox = await f.factory.create({ persistence: { name: "workspace-1" } })
     let release: () => void = () => {}
     f.gateStop(
       new Promise<void>((resolve) => {
@@ -285,7 +335,7 @@ describe("Vercel named persistence", () => {
 
   test("network cleanup failure still stops the VM and rejects preservation", async () => {
     const f = fixture()
-    const sandbox = await f.factory.persistence.create("workspace-1")
+    const sandbox = await f.factory.create({ persistence: { name: "workspace-1" } })
     f.failNetwork()
     await expect(sandbox.stop()).rejects.toThrow("network cleanup failed")
     expect(f.requests.some((request) => request.path.includes("/stop"))).toBe(true)
@@ -294,16 +344,16 @@ describe("Vercel named persistence", () => {
   test("setup failure stops only the obtained session and preserves the named state", async () => {
     const f = fixture()
     f.failNetwork()
-    await expect(f.factory.persistence.create("workspace-1")).rejects.toThrow()
+    await expect(f.factory.create({ persistence: { name: "workspace-1" } })).rejects.toThrow()
     expect(f.requests.some((request) => request.path.includes("session-1/stop"))).toBe(true)
     expect(f.requests.some((request) => request.method === "DELETE")).toBe(false)
   })
 
   test("invalid options fail before any provider request", async () => {
     const f = fixture()
-    await expect(f.factory.persistence.create(" ")).rejects.toThrow()
+    await expect(f.factory.create({ persistence: { name: " " } })).rejects.toThrow()
     await expect(
-      f.factory.persistence.resume("workspace-1", {
+      f.factory.resume("workspace-1", {
         network: {
           mode: "restricted",
           allow: [{ name: "local", origin: "http://localhost:3000" }],
