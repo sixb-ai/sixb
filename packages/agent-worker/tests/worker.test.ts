@@ -1969,7 +1969,7 @@ function hangingCompactionModel(): WorkerTestModel {
 
 describe("AgentWorker", () => {
   test("quarantines an interrupted acquisition even when the provider resolves late", async () => {
-    // Regression proof: remove durable acquisition before persistence.create; recovery has no anchor.
+    // Regression proof: remove durable acquisition before factory.create; recovery has no anchor.
     let resolveCreate!: (sandbox: Sandbox) => void
     let requestedName: string | undefined
     const late = new Promise<Sandbox>((resolve) => {
@@ -1979,17 +1979,13 @@ describe("AgentWorker", () => {
       answerModel(),
       new InMemoryBroker(),
       {
-        create: async () => {
-          throw new Error("No ephemeral fallback")
+        create: (options) => {
+          if (!options?.persistence) throw new Error("No ephemeral fallback")
+          requestedName = options.persistence.name
+          return late
         },
-        persistence: {
-          create: (name) => {
-            requestedName = name
-            return late
-          },
-          resume: async () => {
-            throw new Error("Must not resume")
-          },
+        resume: async () => {
+          throw new Error("Must not resume")
         },
       },
       {
@@ -2042,23 +2038,24 @@ describe("AgentWorker", () => {
     const names: string[] = []
     const policies: CreateSandboxOptions["network"][] = []
     const factory: SandboxFactory = {
-      create: async () => {
-        throw new Error("No ephemeral fallback")
+      async create(options) {
+        // Regression proof: omit persistence from workspace creation; the first run must fail.
+        if (!options?.persistence) throw new Error("No ephemeral fallback")
+        expect(this).toBe(factory)
+        creates++
+        policies.push(options.network)
+        names.push(options.persistence.name)
+        return sandbox
       },
-      persistence: {
-        create: async (name, options) => {
-          creates++
-          policies.push(options?.network)
-          names.push(name)
-          return sandbox
-        },
-        resume: async (name, options) => {
-          resumes++
-          policies.push(options?.network)
-          names.push(name)
-          sandbox.status = "running"
-          return sandbox
-        },
+      async resume(name, options) {
+        // Class-based providers require their receiver, not a detached resume function.
+        expect(this).toBe(factory)
+        expect(options).not.toHaveProperty("persistence")
+        resumes++
+        policies.push(options?.network)
+        names.push(name)
+        sandbox.status = "running"
+        return sandbox
       },
     }
     const host = buildSixb(answerModel(), new InMemoryBroker(), factory, {
@@ -2136,7 +2133,7 @@ describe("AgentWorker", () => {
           sourceUrl = "https://example.com/other.git"
         } else {
           sourceUrl = "https://example.com/repository.git"
-          factory.persistence!.resume = async () => {
+          factory.resume = async () => {
             throw new SandboxStateUnavailableError("expired")
           }
         }
@@ -2187,10 +2184,11 @@ describe("AgentWorker", () => {
       answerModel(),
       new InMemoryBroker(),
       {
-        create: async () => {
-          throw new Error("No ephemeral fallback")
+        create: async (options) => {
+          if (!options?.persistence) throw new Error("No ephemeral fallback")
+          return sandbox
         },
-        persistence: { create: async () => sandbox, resume: async () => sandbox },
+        resume: async () => sandbox,
       },
       {
         agentWorkspace: {
