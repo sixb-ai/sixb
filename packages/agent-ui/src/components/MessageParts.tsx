@@ -6,9 +6,11 @@ import { latestWorkLabel } from "../activity-label"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { ReadToolView } from "../read/ReadToolView"
+import { coerceWebFetchOutput } from "../utils/webFetch"
 import { coerceWebSearchOutput, collectWebSources } from "../utils/webSearch"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./ActivityStatus"
 import { FileAttachmentCard } from "./FileAttachmentCard"
+import { WebFetchToolView } from "./WebFetchToolView"
 import { WebSearchToolView } from "./WebSearchToolView"
 import { WebSources } from "./WebSources"
 
@@ -190,6 +192,12 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
     )
   }
   if (tool.toolName === "read") return <ReadToolView tool={tool} />
+  if (
+    tool.toolName === "web_fetch" &&
+    (tool.state !== "output-available" || coerceWebFetchOutput(tool.output) !== null)
+  ) {
+    return <WebFetchToolView tool={tool} />
+  }
   if (
     tool.toolName === "web_search" &&
     (tool.state !== "output-available" || coerceWebSearchOutput(tool.output) !== null)

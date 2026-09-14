@@ -225,6 +225,10 @@ with inline props, use React's `ComponentProps<typeof Component>`.
 Exa `web_search` results appear as source chips with favicons and clickable previews, in both live
 and saved conversations. Native provider search and inline citations are not yet supported.
 
+Exa `web_fetch` calls show a compact page-title row with a favicon and secondary domain inside work
+details. Expand the row for a short text preview and an Open page link. Live and failed calls retain
+the domain; unrecognized output shapes fall back to the generic tool inspector.
+
 ## Document previews
 
 Durable files attached by a user or produced by an agent open directly from the conversation when
