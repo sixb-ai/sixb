@@ -2,6 +2,68 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-14 — Framework 0.1.8
+
+### Highlights
+
+- Add scoped Share grants and isolated shared sessions, with expiration, revocation, CSRF
+  protection, and execution provenance. Ordinary custom-app pages and layouts can run under
+  shared access without loading application code before authority is established.
+- Enforce selected object, link, telemetry, metadata, and Action access throughout delegated
+  runtimes, and expose inert, authority-scoped Action descriptors.
+- Add `sixb.datasets.ingest` for backend and webhook ingestion, shared source-writing behavior,
+  and `sequenceBy` ordering with retained deletion sequences and concurrent-merge retries.
+- Initialize empty dataset snapshots, reconcile sequenced snapshots without deleting omitted
+  rows, and validate pipeline outputs before committing them.
+- Export Agent chat components and hooks for custom layouts, simplify model-message adapters,
+  and defer model preparation until needed.
+- Reload development apps after backend source changes and preserve Bun runtime options in
+  development child processes.
+- Clear generated ontology types when the last definition is deleted and correct unit inference
+  for unitless telemetry.
+- Introduce the token-authenticated Notion Pages and Markdown connector, and add Payment Intents
+  and Charges resources to the Stripe connector.
+
+### Upgrade notes
+
+- Apply PostgreSQL or SQLite migrations 035 and 036 for Share grants, shared sessions, and
+  delegated execution provenance. Migration 036 replaces execution constraints on PostgreSQL and
+  rebuilds the executions table on SQLite. Rehearse on a backup of the previous release; there is
+  no database downgrade path. Installations running intermediate main builds must also verify
+  migration history and checksums because session migrations were consolidated before release.
+- Upgrade core, its exact worker and storage consumers, and the CLI to `0.1.8` together. Rebuild
+  custom-app and Atlas assets with the matching release. For SQLite, migrate once before starting
+  multiple runtime roles with `--no-migrate`.
+- Shared pages require the built-in app server and same-site App/API origins in V1. Static hosting
+  adapters are unsupported. Open shared URLs with native links. Shared access excludes WebSockets,
+  uploads, direct object/link/telemetry writes, and Action-run listing or files; shared pages are
+  not installable as PWAs and require a browser reload after development edits.
+- Replace removed legacy `AgentModel*`, `AgentUi*`, and `AgentInboundUi*` message types with the
+  appropriate durable Agent types or `@sixb/core/models` types. The legacy `fromUiMessage` and
+  `toUiMessage` adapters are removed; `toModelMessages` remains available.
+- A sequenced dataset snapshot reconciles rather than replaces: omitted keys remain, and deletion
+  requires an explicit sequenced delete. Equal sequences with different content fail the merge.
+  Primary keys and `sequenceBy` are immutable; create and backfill a new dataset to change them.
+  Timestamp columns in sequenced datasets reject precision beyond milliseconds.
+- Dataset commits and notifications remain separate. A crash can leave committed data without a
+  notification, and identical sequenced retries do not resend it. Rerun the downstream pipeline
+  after a missed notification; durable receipts and automatic notification recovery remain deferred.
+- Delegated readers and metadata now enforce the selected authority throughout the SDK. Verify
+  custom application reads and Action targets against their intended grants when upgrading.
+
+### Package versions
+
+- `0.1.8`: `@sixb/core`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/cli`, `@sixb/client`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/server`, `@sixb/sqlite`, `@sixb/sync-worker`, and
+  `@sixb/workflow-worker`.
+- `0.1.7`: `@sixb/agent-ui` and `@sixb/atlas`.
+- `0.1.6`: `@sixb/app`.
+- `0.1.4`: `@sixb/ducklake`.
+- `0.1.3`: `@sixb/lake-local`.
+- `0.1.1`: `@sixb/connector-stripe`.
+- `0.1.0`: `@sixb/connector-notion` (first publication).
+
 ## 2026-09-09 — Framework 0.1.7
 
 ### Highlights
