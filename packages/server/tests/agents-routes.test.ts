@@ -135,13 +135,8 @@ function createRuntime(options: { readonly auth?: boolean; readonly workspace?: 
             create: async () => {
               throw new Error("Must not create a sandbox")
             },
-            persistence: {
-              create: async () => {
-                throw new Error("Must not create a sandbox")
-              },
-              resume: async () => {
-                throw new Error("Must not resume a sandbox")
-              },
+            resume: async () => {
+              throw new Error("Must not resume a sandbox")
             },
           },
           agentWorkspace: {
