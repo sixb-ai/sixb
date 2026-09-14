@@ -74,6 +74,15 @@ When known model capabilities do not support a requested named effort (including
 adapter emits a `[SixbVercelGateway]` warning and omits the reasoning override. The request continues
 with provider-default reasoning. Omit `reasoning` or use `"provider-default"` to avoid the warning.
 
+Reasoning content is normalized into Sixb's `reasoning-start`, `reasoning-delta`, and
+`reasoning-end` events. This covers Gateway's `response.reasoning.*`, native Responses
+`response.reasoning_text.*`, and `response.reasoning_summary_text/part.*` events, plus completed
+reasoning item snapshots. Repeated completion snapshots do not duplicate streamed text; native
+reasoning items, including encrypted content, are retained separately for replay. Token accounting
+uses the reported `usage.output_tokens_details.reasoning_tokens` as `reasoningOutputTokens`,
+independently of how much reasoning text the provider exposes. These tokens are included in
+`outputTokens`, not added to it again.
+
 Retryable `429` and `5xx` responses are retried only before a stream begins. `maxRetries`,
 `maxRetryDelayMs`, and `catalogTtlMs` are configurable. Provider request IDs and retry hints are
 retained on `ModelProviderError`; the routed provider/model and gateway-reported total are retained
