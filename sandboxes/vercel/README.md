@@ -87,8 +87,8 @@ resume. Retention alone does not enable persistence.
 
 ## Gateway and network policy
 
-The agent worker creates sandboxes with a restricted network policy that allows only the Sixb API
-gateway. This provider maps Sixb policies to Vercel's firewall:
+Ephemeral runs restrict egress to the Sixb API gateway. Workspaces also allow the repository and
+explicitly configured access. This provider maps Sixb policies to Vercel's firewall:
 
 | Sixb policy | Vercel policy |
 | --- | --- |
