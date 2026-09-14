@@ -220,6 +220,22 @@ Named types include `ComposerProps`, `TranscriptProps`, `ConversationPanelProps`
 `UseAgentConversationInput`, and the message, context, model, and normalized-part types. For components
 with inline props, use React's `ComponentProps<typeof Component>`.
 
+## Web search sources
+
+Exa `web_search` results appear as source chips below the work disclosure, visible even when
+"Worked" is closed. The first three pages are shown initially; "+N sources" reveals the rest.
+Repeated page URLs are deduplicated within a work group, while different pages from the same site
+remain distinct. The same rendering handles streaming and saved conversations.
+
+Click a chip to inspect the page title, available author/publication date, and a bounded excerpt
+from the search result. "Open source" opens the page in a new tab. Previews support keyboard focus,
+Escape, small screens, and reduced motion. Favicons are loaded directly from the source origin's
+`/favicon.ico` without a referrer; missing or blocked icons fall back to a globe.
+
+These are search results, not inferred citations for individual statements. Native provider search
+and inline citations are not yet normalized into this presentation. Unrecognized tool outputs keep
+the generic inspector, and search failures or empty results receive a readable status.
+
 ## Document previews
 
 Durable files attached by a user or produced by an agent open directly from the conversation when

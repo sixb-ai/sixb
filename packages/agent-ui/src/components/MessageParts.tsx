@@ -6,6 +6,9 @@ import { latestWorkLabel } from "../activity-label"
 import { BashToolView } from "../bash/BashToolView"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { ReadToolView } from "../read/ReadToolView"
+import { coerceWebSearchOutput, collectWebSources } from "../web/interpret"
+import { WebSearchToolView } from "../web/WebSearchToolView"
+import { WebSources } from "../web/WebSources"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./ActivityStatus"
 import { FileAttachmentCard } from "./FileAttachmentCard"
 
@@ -97,6 +100,17 @@ function WorkGroup({
   inProgress: boolean
 }) {
   const [open, setOpen] = useState(false)
+  const sources = collectWebSources(parts)
+  const searches = parts.flatMap((part) =>
+    part.kind === "tool" && part.tool.toolName === "web_search" ? [part.tool] : []
+  )
+  const searchFailed = searches.some((tool) => tool.state === "output-error")
+  const emptySearch =
+    searches.length > 0 &&
+    searches.every(
+      (tool) =>
+        tool.state === "output-available" && coerceWebSearchOutput(tool.output)?.length === 0
+    )
 
   const toolCount = parts.reduce((count, part) => count + (part.kind === "tool" ? 1 : 0), 0)
   const hasTools = toolCount > 0
@@ -114,7 +128,7 @@ function WorkGroup({
         )}
       >
         {inProgress ? (
-          <ActivityStatusText label={liveLabel} className="shimmer" />
+          <ActivityStatusText label={liveLabel} className="shimmer motion-reduce:animate-none" />
         ) : (
           <span>{label}</span>
         )}
@@ -134,6 +148,12 @@ function WorkGroup({
           })}
         </div>
       </CollapsibleContent>
+      <WebSources sources={sources} />
+      {searchFailed || emptySearch ? (
+        <p className="mt-2 px-1 text-xs text-muted-foreground" role="status">
+          {searchFailed ? "Web search failed. See work details." : "No sources found."}
+        </p>
+      ) : null}
     </Collapsible>
   )
 }
@@ -170,6 +190,12 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
     )
   }
   if (tool.toolName === "read") return <ReadToolView tool={tool} />
+  if (
+    tool.toolName === "web_search" &&
+    (tool.state !== "output-available" || coerceWebSearchOutput(tool.output) !== null)
+  ) {
+    return <WebSearchToolView tool={tool} />
+  }
 
   const isError = tool.state === "output-error"
   const hasInput = tool.input !== undefined || Boolean(tool.inputText)
