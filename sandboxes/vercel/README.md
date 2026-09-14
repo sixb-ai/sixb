@@ -32,7 +32,7 @@ import { VercelSandboxFactory } from "@sixb/sandboxes-vercel"
 createSixb({ sandboxes: new VercelSandboxFactory() })
 ```
 
-Each Sixb agent run creates a fresh Vercel sandbox, materializes skills/context with
+Each ephemeral Sixb agent run creates a fresh Vercel sandbox, materializes skills/context with
 `writeFiles(...)`, runs bash commands via `runCommand(...)`, then permanently deletes the sandbox on
 `destroy()`.
 
@@ -44,7 +44,8 @@ retention on the factory.
 `factory.create({ ...options, persistence: { name } })` creates a named persistent sandbox;
 `factory.resume(name, options)` resumes it without a creation fallback. Both return
 the normal Sixb sandbox handle. Use `stop()` to save and `destroy()` only for deliberate permanent
-deletion. This does not change the Agent worker's current per-run lifecycle.
+deletion. Conversation [workspace bindings](../../docs/agents/running-and-streaming.md#workspace-bindings)
+enable this lifecycle; other runs remain ephemeral.
 
 ```ts
 const factory = new VercelSandboxFactory({
