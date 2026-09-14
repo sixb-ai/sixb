@@ -43,6 +43,7 @@ export interface ModelCapabilities {
   readonly reasoning?: false | ModelReasoningCapabilities
   readonly localTools?: boolean
   readonly parallelToolCalls?: boolean
+  /** `undefined` is unknown, not an assertion that schema-constrained output is unsupported. */
   readonly nativeStructuredOutput?: boolean
   readonly providerExecutedTools?: boolean
 }
@@ -90,6 +91,8 @@ export interface LanguageModel {
    * retry with an offline snapshot. Invalid definitions and other resolver errors remain fatal.
    */
   resolve?(options?: { readonly offline?: boolean }): Promise<LanguageModel>
+  /** Validate known output constraints without inference. Success does not certify endpoint support. */
+  validateResponseFormat?(format: ModelResponseFormat): void | Promise<void>
   stream(request: LanguageModelRequest): Promise<LanguageModelStream>
 }
 
