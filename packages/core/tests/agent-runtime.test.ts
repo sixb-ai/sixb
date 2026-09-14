@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { agent, can, defineGroup, defineRole, emptyGrantIndex, SixbHost } from "../src"
+import { agent, can, defineGroup, defineRole, SixbHost } from "../src"
+import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import { createTestAgentExecution, createTestSixb } from "../src/testing"
 import { testLanguageModel } from "./helpers/language-model"

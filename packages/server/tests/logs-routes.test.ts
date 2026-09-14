@@ -5,7 +5,6 @@ import {
   can,
   defineGroup,
   defineRole,
-  emptyGrantIndex,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -19,6 +18,7 @@ import {
 } from "@sixb/core"
 import type { BrokerRecord } from "@sixb/core/broker"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { Elysia } from "elysia"
 import { registerLogRoutes } from "../src/routes/logs"

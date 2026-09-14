@@ -7,7 +7,7 @@ import {
   agentRunStreamId,
   agentRunStreamIdempotencyKey,
   publishAgentRunActivity,
-} from "@sixb/core/agents/streams"
+} from "@sixb/core/internal/agents/streams"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type {
   AgentContextCheckpointReason,

@@ -11,7 +11,7 @@ export type {
   AgentContextInput,
   AgentContextOrigin,
   AgentContextPart,
-} from "./context"
+} from "./context/entries"
 
 /** Public capability reference used by security grants such as `can.run(agent)`. */
 export interface AgentReference {

@@ -480,7 +480,9 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                   >
                     {run.identity.datasetVersion.versionId}
                   </p>
-                  {run.error && <SixbFailureSummary failure={run.error} className="mt-1 text-xs" />}
+                  {run.error && (
+                    <SixbFailureSummary failure={run.error} showDetails className="mt-1 text-sm" />
+                  )}
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
                   {formatRelativeTime(runActivityAt(run))}
@@ -530,7 +532,9 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                 </span>
               ))}
             </div>
-            {run.error && <SixbFailureSummary failure={run.error} className="mt-2 text-xs" />}
+            {run.error && (
+              <SixbFailureSummary failure={run.error} showDetails className="mt-2 text-sm" />
+            )}
           </div>
         ))}
       </div>

@@ -1,1 +1,1 @@
-export { InMemoryAuthStorage } from "./in-memory/index"
+export { InMemoryAuthStorage } from "./in-memory/auth-storage"

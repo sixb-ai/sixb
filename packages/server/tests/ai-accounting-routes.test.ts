@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import {
   type AuthorizationContext,
   defineGroup,
-  emptyGrantIndex,
   type GroupDefinition,
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -12,6 +11,7 @@ import {
   noopLoggerProvider,
   SixbHost,
 } from "@sixb/core"
+import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { createTestAgentExecution } from "@sixb/core/testing"
 import { Elysia } from "elysia"

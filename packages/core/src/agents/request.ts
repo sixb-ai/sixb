@@ -29,13 +29,13 @@ import {
 } from "../storage/ai-limits/enforcement"
 import type { AiLimitPolicyStatus } from "../storage/ai-limits/types"
 import type { CreateExecutionInput } from "../storage/executions"
-import type { AgentContextEntryInput } from "./context"
+import type { AgentContextEntryInput } from "./context/entries"
 import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
 import { assertNoAgentSelector } from "./retired-config"
-import { publishAgentRunActivity } from "./streams"
+import { publishAgentRunActivity } from "./streams/protocol"
 import { AGENT_REASONING_LEVELS, type AgentReasoningLevel } from "./types"
 
 export interface RequestAgentRunInput {

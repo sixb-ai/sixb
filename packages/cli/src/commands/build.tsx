@@ -2,6 +2,7 @@ import { mkdir } from "node:fs/promises"
 import { dirname, join, resolve } from "node:path"
 import { createCustomApp } from "@sixb/app"
 import { buildAtlasAssets } from "@sixb/atlas"
+import { buildRuntime } from "../lib/build-runtime"
 import { generateProjectTypes } from "../lib/typegen"
 import { BuildView, ErrorView, renderStatic } from "../ui"
 
@@ -18,16 +19,7 @@ export async function runBuild(options: BuildOptions = {}) {
   await generateProjectTypes({ entry })
   await mkdir(outdir, { recursive: true })
 
-  // Build sixb.config.ts
-  const result = await Bun.build({
-    entrypoints: [entry],
-    outdir,
-    target: "bun",
-    sourcemap: "external",
-    minify: false,
-    packages: "external",
-    external: ["@sixb/*"],
-  })
+  const result = await buildRuntime(entry, outdir)
 
   if (!result.success) {
     const details = result.logs.map(String)

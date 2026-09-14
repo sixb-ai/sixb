@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { emptyGrantIndex } from "../src"
+import { emptyGrantIndex } from "../src/authorization"
 import { createTestingScope } from "../src/execution/scopes"
 import { createEventId, MaterializationConflictError } from "../src/materializer"
 import { InMemoryStorage, type Storage, type StoredLinkSlotOverride } from "../src/storage"

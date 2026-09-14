@@ -5,8 +5,8 @@ import {
   getAuthorizedOntologyView,
 } from "../execution/authorized-object-reader"
 import type { ValueType } from "../ontology"
-import { assertObjectTypeRegistered } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
+import { assertObjectTypeRegistered } from "../ontology/validation/properties"
 import { shareOntologyMutationRuntime } from "../runtime/ontology-mutations"
 import type {
   ListResult,

@@ -208,6 +208,8 @@ jobs:
         include:
           - name: cli
             package: "@sixb/cli"
+          - name: app
+            package: "@sixb/app"
           # Packs real tarballs and bundles what they ship. It runs here rather than with the unit
           # tests because it builds three packages from cold, which is a third of that job's
           # runtime, and because it drives the bundler — the one thing that has wedged a whole

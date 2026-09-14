@@ -6,7 +6,9 @@ import { createDelegatedRequestScope, createTestingScope } from "../src/executio
 import type { ExecutionScope } from "../src/execution/types"
 import { ActionRunTimeoutError } from "../src/objects/action/errors"
 import type { SixbRuntimeContext } from "../src/runtime/types"
-import type { ActionRunRecord } from "../src/storage"
+import type { ShareAccessPlan } from "../src/shares/access-plan"
+import type { ActionRunRecord, ExecutionRecord } from "../src/storage"
+import { createSharedTestScope } from "./shared-test-scope"
 
 function runtimeWithSubscription(subscribe: () => Promise<() => void>): SixbRuntimeContext {
   const scope = createTestingScope({ projectId: "test" })
@@ -150,6 +152,121 @@ test("a wait never returns a terminal run hidden from its principal", async () =
       timeoutMs: 25,
     })
   ).resolves.toBe(terminalRun)
+})
+
+function delegatedRuntimeForRun(
+  run: ActionRunRecord,
+  maxOutputJsonBytes: number
+): SixbRuntimeContext {
+  const access: ShareAccessPlan = {
+    grants: [
+      {
+        kind: "object.view",
+        selection: {
+          kind: "selected",
+          roots: [
+            {
+              anchor: {
+                objectTypeId: run.subject.kind === "object" ? run.subject.objectTypeId : "Secret",
+                primaryId: run.subject.kind === "object" ? run.subject.primaryId : "secret-1",
+              },
+              node: {
+                objects: [{ objectTypeId: "Secret", propertyIds: ["id"] }],
+                links: [],
+              },
+            },
+          ],
+        },
+      },
+      {
+        kind: "action.apply",
+        actionId: run.actionId,
+        subjects: [{ objectTypeId: "Secret", primaryId: "secret-1" }],
+      },
+    ],
+  }
+  const scope = createSharedTestScope({
+    projectId: "test",
+    requestId: "shared-request",
+    correlationId: "shared-correlation",
+    access,
+    limits: {
+      maxTraversalFacts: 100,
+      maxOutputJsonBytes,
+    },
+    delegation: { kind: "share", grantId: "share-grant", sessionId: "share-session" },
+  })
+  const parent: ExecutionRecord = {
+    id: "shared-request-execution",
+    projectId: "test",
+    executor: { type: "request", requestId: "shared-request" },
+    source: { type: "http", requestId: "shared-request" },
+    correlationId: "shared-correlation",
+    authorizationRef: {
+      type: "delegated",
+      delegation: { kind: "share", grantId: "share-grant", sessionId: "share-session" },
+    },
+    createdAt: new Date("2026-01-01T00:00:00.000Z"),
+  }
+  const child: ExecutionRecord = {
+    id: run.executionId,
+    projectId: "test",
+    executor: { type: "primitive", kind: "action", runId: run.id },
+    source: { type: "execution", executionId: parent.id },
+    correlationId: parent.correlationId,
+    authorizationRef: {
+      type: "trustedPrimitive",
+      primitive: { kind: "action", id: run.actionId, runId: run.id },
+    },
+    createdAt: new Date("2026-01-01T00:00:00.001Z"),
+  }
+
+  return {
+    projectId: "test",
+    runtimeAuthorization: scope.authorization,
+    storage: {
+      actionRuns: { getById: async () => run },
+      executions: {
+        getById: async ({ id }: { readonly id: string }) => {
+          if (id === child.id) return child
+          if (id === parent.id) return parent
+          return null
+        },
+      },
+    },
+    events: { subscribe: async () => () => {} },
+  } as unknown as SixbRuntimeContext
+}
+
+// Guard proof: removing the output check in waitForActionRun releases this oversized result.
+test("a delegated wait rejects an oversized terminal Action run", async () => {
+  const oversized: ActionRunRecord = {
+    ...terminalRun,
+    writeback: {
+      status: "succeeded",
+      completedAt: new Date("2026-01-01T00:00:01.000Z"),
+      result: { value: "x".repeat(1_024) },
+    },
+  }
+  await expect(
+    waitForActionRun(delegatedRuntimeForRun(oversized, 512), {
+      runId: oversized.id,
+      timeoutMs: 100,
+    })
+  ).rejects.toMatchObject({
+    code: "object_read_limit_exceeded",
+    metric: "outputJsonBytes",
+    limit: 512,
+  })
+})
+
+test("a delegated wait returns a terminal run from its originating grant", async () => {
+  await expect(
+    waitForActionRun(delegatedRuntimeForRun(terminalRun, 8_192), {
+      runId: terminalRun.id,
+      timeoutMs: 100,
+    })
+  ).resolves.toEqual(terminalRun)
 })
 
 /**

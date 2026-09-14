@@ -10,6 +10,8 @@ const FAILURE: SixbFailure<SyncRunFailureCode> = {
   retryable: false,
   at: "2026-04-06T15:00:00.420Z",
   details: { provider: "erp" },
+  // Restoring the base error codec drops this field and fails the round-trip assertions below.
+  httpStatus: 503,
 }
 
 describe("PgSyncRunStorage", () => {

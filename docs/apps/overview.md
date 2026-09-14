@@ -132,8 +132,23 @@ its `href` matches a known route, so you get SPA navigation without React Router
 <a href={`/review/${encodeURIComponent(intervention.id)}`}>Open review</a>
 ```
 
-Links to `/api`, `/auth`, `/ws`, `/docs`, cross-origin URLs, `download` links, and
+Links to `/api`, `/auth`, `/ws`, `/docs`, `/shared`, cross-origin URLs, `download` links, and
 modified clicks (new tab, etc.) fall through to native navigation.
+
+## Shared access uses ordinary pages
+
+`/shared/:grantId/proposals/proposal-1#secret` opens the same page, layout, query hooks, and
+Action mutations as `/proposals/proposal-1`. Sixb removes the secret and establishes an isolated
+session before loading app code or styles. Do not create `app/shared`: that route is reserved.
+
+- **Permissions:** every request is restricted to the objects, properties, link paths, and Actions
+  selected by the Share grant.
+- **V1 limits:** no WebSockets, uploads, direct object/link/telemetry writes, or Action-run listing
+  or files.
+- **Navigation:** shared URLs are bearer credentials. Open them with `<a href={url}>`, not
+  programmatic React Router navigation, so the secret stays out of the ordinary app's SPA state.
+- **Hosting:** use `bun sixb dev`, `bun sixb app`, or `createCustomApp().start()`; a static SPA
+  fallback cannot replace the isolated shared shell. The app and API must be same-site.
 
 ## Layouts and metadata
 

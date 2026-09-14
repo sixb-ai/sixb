@@ -10,13 +10,9 @@ import type {
   CreateExecutionInput,
   Storage,
 } from "../storage"
-import {
-  ACTION_RUN_FAILURE_CODES,
-  ActionRunError,
-  actionRunParamsEqual,
-  actionSubjectsEqual,
-} from "../storage"
+import { ACTION_RUN_FAILURE_CODES, ActionRunError } from "../storage"
 import { parseActionRunFailure } from "../storage/action-runs/failure"
+import { actionRunParamsEqual, actionSubjectsEqual } from "../storage/action-runs/idempotency"
 import type { RequestActionResult } from "./request"
 import { createActionRunId, createActionRunIdempotencyKey } from "./run-id"
 import type { ActionSubject } from "./types"
@@ -32,6 +28,8 @@ interface DispatchActionRunInput {
   readonly params: ActionRunParams
   readonly runId?: string
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
+  /** Runs before payload comparison or retry so an existing run cannot cross authority owners. */
+  readonly assertCanReuseExisting?: (storage: Storage, run: ActionRunRecord) => void | Promise<void>
 }
 
 interface PreparedActionRun {
@@ -73,7 +71,10 @@ async function persistActionRun(
 ): Promise<PersistedActionRun> {
   const actionRuns = requireActionRunStorage(input.storage)
   const existing = await actionRuns.getById({ projectId: input.projectId, id: request.runId })
-  if (existing) return reuseActionRun(input, existing)
+  if (existing) {
+    await input.assertCanReuseExisting?.(input.storage, existing)
+    return reuseActionRun(input, existing)
+  }
 
   const execution = await input.createExecution(`exec_${randomUUID()}`, request.runId)
   const queuedAt = new Date()
@@ -86,6 +87,7 @@ async function persistActionRun(
           id: request.runId,
         })
         if (raced) {
+          await input.assertCanReuseExisting?.(tx, raced)
           assertExistingRunMatchesRequest(raced, input)
           return { publish: false, run: raced }
         }
@@ -109,6 +111,7 @@ async function persistActionRun(
     if (!(error instanceof ActionRunError)) throw error
     const raced = await actionRuns.getById({ projectId: input.projectId, id: request.runId })
     if (!raced) throw error
+    await input.assertCanReuseExisting?.(input.storage, raced)
     assertExistingRunMatchesRequest(raced, input)
     return { publish: false, run: raced }
   }

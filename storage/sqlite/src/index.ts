@@ -11,6 +11,10 @@ import type {
 } from "@sixb/core"
 import { ProviderMaterializationTransactionLifecycle } from "@sixb/core/internal/ontology-storage-provider"
 import {
+  createTransactionStorageProxy,
+  throwNestedStorageTransaction,
+} from "@sixb/core/internal/storage"
+import {
   createAgentOperationScope,
   createAuthOperationScope,
   createObjectOperationScope,
@@ -23,10 +27,9 @@ import {
   type AiCostStorage,
   type AiLimitStorage,
   type AiUsageStorage,
-  createTransactionStorageProxy,
   type ShareGrantStorage,
+  type ShareSessionStorage,
   StorageTransactionError,
-  throwNestedStorageTransaction,
 } from "@sixb/core/storage"
 import { SqliteActionRunStorage } from "./action-run-storage"
 import { SqliteAgentStorage } from "./agents"
@@ -47,6 +50,7 @@ import { SqlitePipelineRunStorage } from "./pipeline-run-storage"
 import { SqliteProjectionRunStorage } from "./projection-run-storage"
 import { SqliteRulesStorage } from "./rules-storage"
 import { SqliteShareGrantStorage } from "./share-grant-storage"
+import { SqliteShareSessionStorage } from "./share-session-storage"
 import { SqliteSyncRunStorage } from "./sync-run-storage"
 import { registerSqliteStorageTestingAdapter } from "./testing"
 import { SqliteTimeseriesStorage } from "./timeseries-storage"
@@ -100,6 +104,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
   readonly shareGrants: ShareGrantStorage
+  readonly shareSessions: ShareSessionStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly migrators: readonly StorageMigrator[]
 
@@ -165,6 +170,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.webhookRuns = createOperationScopedFacade(stores.webhookRuns, scope)
     this.rules = createOperationScopedFacade(stores.rules, scope)
     this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
+    this.shareSessions = createOperationScopedFacade(stores.shareSessions, scope)
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
     registerSqliteStorageTestingAdapter(this, (durationMs) =>
@@ -299,7 +305,9 @@ function createSqliteStores(
   }
 ): SqliteStoreSet {
   const auth = new SqliteAuthStorage({ connection })
-  const executions = new SqliteExecutionStorage(connection.db, auth)
+  const shareGrants = new SqliteShareGrantStorage({ connection })
+  const shareSessions = new SqliteShareSessionStorage({ connection })
+  const executions = new SqliteExecutionStorage(connection.db, auth, shareSessions)
   return {
     objects: new SqliteObjectStorage({ connection }),
     ontology: new SqliteOntologyStorage({
@@ -322,7 +330,8 @@ function createSqliteStores(
     workflowInterventions: new SqliteWorkflowInterventionStorage({ connection }),
     webhookRuns: new SqliteWebhookRunStorage({ connection, executions }),
     rules: new SqliteRulesStorage({ connection }),
-    shareGrants: new SqliteShareGrantStorage({ connection }),
+    shareGrants,
+    shareSessions,
     connectorConnections: new SqliteConnectorConnectionStorage(connection),
   }
 }
@@ -346,6 +355,7 @@ interface SqliteStoreSet {
   readonly webhookRuns: SqliteWebhookRunStorage
   readonly rules: SqliteRulesStorage
   readonly shareGrants: SqliteShareGrantStorage
+  readonly shareSessions: SqliteShareSessionStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
 }
 

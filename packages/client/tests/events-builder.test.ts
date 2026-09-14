@@ -10,6 +10,7 @@ import {
   param,
 } from "@sixb/core"
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
+import { createSixbClient } from "../src/api"
 import type { SixbEvent } from "../src/events"
 import { buildEventPredicate, events } from "../src/events-builder"
 import { telemetryUpdateFromEvent } from "../src/telemetry-events"
@@ -405,6 +406,32 @@ describe("builder subscribe over the transport", () => {
 
   afterEach(() => {
     globalThis.WebSocket = originalWebSocket
+  })
+
+  test("does not construct a websocket under shared authority", () => {
+    const sharedClient = createSixbClient({
+      baseUrl: "https://api.example.test",
+      auth: { kind: "shared", grantId: "shr_1" },
+      fetch: Object.assign(async () => Response.json({}), { preconnect: fetch.preconnect }),
+    })
+    const errors: string[] = []
+    const states: Array<{ connected: boolean; reconnecting: boolean; error: string | null }> = []
+
+    const unsubscribe = events.actions({ client: sharedClient }).subscribe(() => undefined, {
+      onError: (error) => errors.push(error),
+      onStateChange: (state) => states.push(state),
+    })
+
+    expect(FakeWebSocket.instances).toHaveLength(0)
+    expect(errors).toEqual(["Live updates are unavailable during shared access."])
+    expect(states).toEqual([
+      {
+        connected: false,
+        reconnecting: false,
+        error: "Live updates are unavailable during shared access.",
+      },
+    ])
+    unsubscribe()
   })
 
   test("sends a scoped subscribe message and delivers only matching events", () => {

@@ -35,6 +35,7 @@
       "@sixb/connector-linkedin": ["./connectors/linkedin/src/index.ts"],
       "@sixb/connector-mercury": ["./connectors/mercury/src/index.ts"],
       "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
+      "@sixb/connector-microsoft": ["./connectors/microsoft/src/index.ts"],
       "@sixb/connector-notion": ["./connectors/notion/src/index.ts"],
       "@sixb/connector-pandadoc": ["./connectors/pandadoc/src/index.ts"],
       "@sixb/connector-pennylane": ["./connectors/pennylane/src/index.ts"],
@@ -47,19 +48,19 @@
       "@sixb/connector-tiktok": ["./connectors/tiktok/src/index.ts"],
       "@sixb/connector-unipile": ["./connectors/unipile/src/index.ts"],
       "@sixb/core": ["./packages/core/src/index.ts"],
-      "@sixb/core/actions/worker": ["./packages/core/src/actions/worker.ts"],
-      "@sixb/core/agents/context": ["./packages/core/src/agents/context.ts"],
-      "@sixb/core/agents/streams": ["./packages/core/src/agents/streams.ts"],
+      "@sixb/core/agents/context": ["./packages/core/src/agents/context/index.ts"],
+      "@sixb/core/agents/streams": ["./packages/core/src/agents/streams/index.ts"],
       "@sixb/core/auth/strategy": ["./packages/core/src/auth/strategy.ts"],
       "@sixb/core/blob-storage": ["./packages/core/src/blob-storage/browser.ts"],
       "@sixb/core/blob-storage/server": ["./packages/core/src/blob-storage/index.ts"],
       "@sixb/core/broker": ["./packages/core/src/broker/index.ts"],
-      "@sixb/core/events/scope": ["./packages/core/src/events/scope.ts"],
       "@sixb/core/events/selectors": ["./packages/core/src/events/selectors/index.ts"],
       "@sixb/core/internal/action-run-storage": [
         "./packages/core/src/storage/action-runs/failure.ts"
       ],
+      "@sixb/core/internal/action-edits": ["./packages/core/src/actions/worker.ts"],
       "@sixb/core/internal/actions": ["./packages/core/src/actions/index.ts"],
+      "@sixb/core/internal/agents/streams": ["./packages/core/src/agents/streams/internal.ts"],
       "@sixb/core/internal/agents": ["./packages/core/src/agents/index.ts"],
       "@sixb/core/internal/agent-run-storage-provider": [
         "./packages/core/src/storage/agents/provider.ts"
@@ -86,9 +87,10 @@
       "@sixb/core/internal/datasets": ["./packages/core/src/datasets/write.ts"],
       "@sixb/core/internal/error-reporting": ["./packages/core/src/error-reporting/internal.ts"],
       "@sixb/core/internal/errors": ["./packages/core/src/errors/internal.ts"],
+      "@sixb/core/internal/event-scope": ["./packages/core/src/events/scope.ts"],
       "@sixb/core/internal/events": ["./packages/core/src/events/index.ts"],
       "@sixb/core/internal/http": ["./packages/core/src/http/index.ts"],
-      "@sixb/core/internal/logging": ["./packages/core/src/logging/index.ts"],
+      "@sixb/core/internal/logging": ["./packages/core/src/logging/internal.ts"],
       "@sixb/core/internal/materialization": ["./packages/core/src/materialization/index.ts"],
       "@sixb/core/internal/materializer": ["./packages/core/src/materializer/index.ts"],
       "@sixb/core/internal/objects": ["./packages/core/src/objects/index.ts"],
@@ -105,6 +107,10 @@
       "@sixb/core/internal/share-grant-storage-provider": [
         "./packages/core/src/storage/share-grants/provider.ts"
       ],
+      "@sixb/core/internal/share-session-storage-provider": [
+        "./packages/core/src/storage/share-sessions/provider.ts"
+      ],
+      "@sixb/core/internal/shares": ["./packages/core/src/shares/internal.ts"],
       "@sixb/core/internal/sync-run-storage-provider": [
         "./packages/core/src/storage/sync-runs/provider.ts"
       ],
@@ -131,6 +137,7 @@
       "@sixb/core/internal/runtime": ["./packages/core/src/runtime/internal.ts"],
       "@sixb/core/internal/scheduler": ["./packages/core/src/scheduler/index.ts"],
       "@sixb/core/internal/schedules": ["./packages/core/src/schedules/index.ts"],
+      "@sixb/core/internal/storage": ["./packages/core/src/storage/internal.ts"],
       "@sixb/core/internal/storage-operation-scope": [
         "./packages/core/src/storage/operation-scope.ts"
       ],
@@ -138,7 +145,7 @@
       "@sixb/core/internal/workers": ["./packages/core/src/workers/index.ts"],
       "@sixb/core/internal/workflows": ["./packages/core/src/workflows/index.ts"],
       "@sixb/core/lake-storage": ["./packages/core/src/lake-storage/index.ts"],
-      "@sixb/core/logging": ["./packages/core/src/logging/types.ts"],
+      "@sixb/core/logging": ["./packages/core/src/logging/index.ts"],
       "@sixb/core/models": ["./packages/core/src/models/index.ts"],
       "@sixb/core/ontology": ["./packages/core/src/ontology/index.ts"],
       "@sixb/core/query": ["./packages/core/src/query.ts"],

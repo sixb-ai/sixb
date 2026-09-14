@@ -16,6 +16,10 @@ export interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
   /** ISO-8601 UTC timestamp of the failure occurrence. */
   readonly at: string
   readonly details?: ReadonlyJsonValue
+  /** Status returned by the failed upstream request, when one exists. */
+  readonly httpStatus?: number
+  /** Sensitive context was replaced before this record crossed a storage or API boundary. */
+  readonly redacted?: true
   /** Present when optional context exceeded the durable failure size budget and was omitted. */
   readonly truncated?: true
 }

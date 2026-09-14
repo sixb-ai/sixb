@@ -26,7 +26,7 @@ export type {
   AgentContextInput,
   AgentContextOrigin,
   AgentContextPart,
-} from "./context"
+} from "./context/entries"
 export {
   agentContext,
   agentContextFingerprint,
@@ -35,7 +35,7 @@ export {
   MAX_AGENT_APP_STATE_TOTAL_BYTES,
   MAX_AGENT_CONTEXT_ENTRIES,
   normalizeAgentContextEntries,
-} from "./context"
+} from "./context/entries"
 export type {
   AgentContextCompactionBoundary,
   AgentContextEstimateTool,
@@ -116,7 +116,7 @@ export type {
   AgentRunFinishedEvent,
   AgentRunStreamEvent,
   AgentRunStreamId,
-} from "./streams"
+} from "./streams/protocol"
 export {
   AGENT_COMPACTION_FAILURE_CODES,
   AGENT_RUN_CANCEL_RECORD,
@@ -132,7 +132,7 @@ export {
   publishAgentRunCancel,
   publishAgentRunFinished,
   subscribeAgentRunCancel,
-} from "./streams"
+} from "./streams/protocol"
 export type {
   AgentThreadModelContextMessage,
   ProjectAgentThreadModelContextInput,

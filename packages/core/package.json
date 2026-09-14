@@ -1,6 +1,6 @@
 {
   "name": "@sixb/core",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "The ontology-first runtime for Sixb — objects, links, telemetry, actions, and provider contracts",
   "keywords": [
     "sixb",
@@ -29,23 +29,17 @@
       "import": "./dist/index.js",
       "default": "./dist/index.js"
     },
-    "./actions/worker": {
-      "types": "./dist/actions/worker.d.ts",
-      "bun": "./src/actions/worker.ts",
-      "import": "./dist/actions/worker.js",
-      "default": "./dist/actions/worker.js"
-    },
     "./agents/context": {
-      "types": "./dist/agents/context.d.ts",
-      "bun": "./src/agents/context.ts",
-      "import": "./dist/agents/context.js",
-      "default": "./dist/agents/context.js"
+      "types": "./dist/agents/context/index.d.ts",
+      "bun": "./src/agents/context/index.ts",
+      "import": "./dist/agents/context/index.js",
+      "default": "./dist/agents/context/index.js"
     },
     "./agents/streams": {
-      "types": "./dist/agents/streams.d.ts",
-      "bun": "./src/agents/streams.ts",
-      "import": "./dist/agents/streams.js",
-      "default": "./dist/agents/streams.js"
+      "types": "./dist/agents/streams/index.d.ts",
+      "bun": "./src/agents/streams/index.ts",
+      "import": "./dist/agents/streams/index.js",
+      "default": "./dist/agents/streams/index.js"
     },
     "./auth/strategy": {
       "types": "./dist/auth/strategy.d.ts",
@@ -71,17 +65,17 @@
       "import": "./dist/broker/index.js",
       "default": "./dist/broker/index.js"
     },
-    "./events/scope": {
-      "types": "./dist/events/scope.d.ts",
-      "bun": "./src/events/scope.ts",
-      "import": "./dist/events/scope.js",
-      "default": "./dist/events/scope.js"
-    },
     "./events/selectors": {
       "types": "./dist/events/selectors/index.d.ts",
       "bun": "./src/events/selectors/index.ts",
       "import": "./dist/events/selectors/index.js",
       "default": "./dist/events/selectors/index.js"
+    },
+    "./internal/action-edits": {
+      "types": "./dist/actions/worker.d.ts",
+      "bun": "./src/actions/worker.ts",
+      "import": "./dist/actions/worker.js",
+      "default": "./dist/actions/worker.js"
     },
     "./internal/actions": {
       "types": "./dist/actions/index.d.ts",
@@ -118,6 +112,12 @@
       "bun": "./src/storage/webhook-runs/provider.ts",
       "import": "./dist/storage/webhook-runs/provider.js",
       "default": "./dist/storage/webhook-runs/provider.js"
+    },
+    "./internal/agents/streams": {
+      "types": "./dist/agents/streams/internal.d.ts",
+      "bun": "./src/agents/streams/internal.ts",
+      "import": "./dist/agents/streams/internal.js",
+      "default": "./dist/agents/streams/internal.js"
     },
     "./internal/agents": {
       "types": "./dist/agents/index.d.ts",
@@ -203,6 +203,12 @@
       "import": "./dist/errors/internal.js",
       "default": "./dist/errors/internal.js"
     },
+    "./internal/event-scope": {
+      "types": "./dist/events/scope.d.ts",
+      "bun": "./src/events/scope.ts",
+      "import": "./dist/events/scope.js",
+      "default": "./dist/events/scope.js"
+    },
     "./internal/events": {
       "types": "./dist/events/index.d.ts",
       "bun": "./src/events/index.ts",
@@ -222,10 +228,10 @@
       "default": "./dist/http/index.js"
     },
     "./internal/logging": {
-      "types": "./dist/logging/index.d.ts",
-      "bun": "./src/logging/index.ts",
-      "import": "./dist/logging/index.js",
-      "default": "./dist/logging/index.js"
+      "types": "./dist/logging/internal.d.ts",
+      "bun": "./src/logging/internal.ts",
+      "import": "./dist/logging/internal.js",
+      "default": "./dist/logging/internal.js"
     },
     "./internal/materialization": {
       "types": "./dist/materialization/index.d.ts",
@@ -274,6 +280,18 @@
       "bun": "./src/storage/share-grants/provider.ts",
       "import": "./dist/storage/share-grants/provider.js",
       "default": "./dist/storage/share-grants/provider.js"
+    },
+    "./internal/shares": {
+      "types": "./dist/shares/internal.d.ts",
+      "bun": "./src/shares/internal.ts",
+      "import": "./dist/shares/internal.js",
+      "default": "./dist/shares/internal.js"
+    },
+    "./internal/share-session-storage-provider": {
+      "types": "./dist/storage/share-sessions/provider.d.ts",
+      "bun": "./src/storage/share-sessions/provider.ts",
+      "import": "./dist/storage/share-sessions/provider.js",
+      "default": "./dist/storage/share-sessions/provider.js"
     },
     "./internal/projections": {
       "types": "./dist/projections/internal.d.ts",
@@ -335,6 +353,12 @@
       "import": "./dist/schedules/index.js",
       "default": "./dist/schedules/index.js"
     },
+    "./internal/storage": {
+      "types": "./dist/storage/internal.d.ts",
+      "bun": "./src/storage/internal.ts",
+      "import": "./dist/storage/internal.js",
+      "default": "./dist/storage/internal.js"
+    },
     "./internal/storage-operation-scope": {
       "types": "./dist/storage/operation-scope.d.ts",
       "bun": "./src/storage/operation-scope.ts",
@@ -378,10 +402,10 @@
       "default": "./dist/models/index.js"
     },
     "./logging": {
-      "types": "./dist/logging/types.d.ts",
-      "bun": "./src/logging/types.ts",
-      "import": "./dist/logging/types.js",
-      "default": "./dist/logging/types.js"
+      "types": "./dist/logging/index.d.ts",
+      "bun": "./src/logging/index.ts",
+      "import": "./dist/logging/index.js",
+      "default": "./dist/logging/index.js"
     },
     "./ontology": {
       "types": "./dist/ontology/index.d.ts",
