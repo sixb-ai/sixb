@@ -408,6 +408,7 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 | `@sixb/connector-google` | `googleAds(...)` | Google Ads manager-account reporting | — |
 | `@sixb/connector-linkedin` | `linkedin(...)` | LinkedIn advertising and organic Page management | — |
 | `@sixb/connector-meta` | `meta(...)` | Meta Graph API (Facebook/Instagram) | — |
+| `@sixb/connector-microsoft` | `microsoft(...)` | Microsoft Graph (SharePoint sites, libraries, files and delta sync) | — |
 | `@sixb/connector-notion` | `notion(...)` | Notion pages, properties, and Markdown | — |
 | `@sixb/connector-pipedrive` | `pipedrive(...)` | Pipedrive CRM | `pipedriveEventsWebhook` |
 | `@sixb/connector-stripe` | `stripe(...)` | Stripe customers, subscriptions, invoices, payment intents, charges, refunds, events | `stripeEventsWebhook` |
