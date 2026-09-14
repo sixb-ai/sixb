@@ -36,13 +36,13 @@ Each Sixb agent run creates a fresh Vercel sandbox, materializes skills/context 
 `writeFiles(...)`, runs bash commands via `runCommand(...)`, then permanently deletes the sandbox on
 `destroy()`.
 
-Persistence is disabled by default (`persistent: false`) because Sixb sandboxes are per-run. If you
-want a long-lived Vercel sandbox model, opt in explicitly and manage snapshot/storage cost.
+Creation is ephemeral by default. Opt into named persistence per call, and configure snapshot
+retention on the factory.
 
 ### Explicit persistent lifecycle
 
-`factory.persistence.create(name, options)` creates a named persistent sandbox;
-`factory.persistence.resume(name, options)` resumes it without a creation fallback. Both return
+`factory.create({ ...options, persistence: { name } })` creates a named persistent sandbox;
+`factory.resume(name, options)` resumes it without a creation fallback. Both return
 the normal Sixb sandbox handle. Use `stop()` to save and `destroy()` only for deliberate permanent
 deletion. This does not change the Agent worker's current per-run lifecycle.
 
@@ -52,11 +52,11 @@ const factory = new VercelSandboxFactory({
   keepLastSnapshots: { count: 1 },
 })
 
-const sandbox = await factory.persistence.create("my-workspace")
+const sandbox = await factory.create({ persistence: { name: "my-workspace" } })
 await sandbox.writeFiles([{ path: "draft.txt", contents: "Work in progress" }])
 await sandbox.stop()
 
-const resumed = await factory.persistence.resume("my-workspace")
+const resumed = await factory.resume("my-workspace")
 await resumed.runCommand("cat", ["draft.txt"])
 await resumed.stop()
 ```
@@ -79,6 +79,10 @@ await resumed.stop()
   per-command env delivery is not a mechanism for hiding secrets from the guest.
 
 See the [provider-neutral contract](../../docs/sandboxes/overview.md#optional-filesystem-persistence).
+
+Migration: the former factory option `persistent` is rejected, including `false`. Remove it for
+ephemeral creation; use `create({ persistence: { name } })` for confirmed preservation and explicit
+resume. Retention alone does not enable persistence.
 
 ## Gateway and network policy
 
@@ -141,8 +145,7 @@ new VercelSandboxFactory({
 | `sessionTimeoutMs` | Vercel default | Sandbox session lifetime; separate from Sixb's per-command timeout. |
 | `timeout` | — | Default Sixb per-command timeout, in ms. |
 | `setupTimeoutMs` | `30_000` | Timeout for provider setup commands like creating a custom working directory. |
-| `persistent` | `false` | Auto-snapshot on stop; off by default for per-run sandboxes. |
-| `snapshotExpiration` | Vercel default | Snapshot TTL in ms; `persistence.create()` enables persistence regardless of the `persistent` default. |
+| `snapshotExpiration` | Vercel default | Snapshot TTL in ms for named persistent creation. Does not enable persistence. |
 | `keepLastSnapshots` | Vercel default | Provider retention policy, e.g. `{ count: 1 }`. |
 | `credentials` | SDK OIDC/env resolution | `{ token, teamId, projectId }` for external workers. |
 | `env` | `{}` | Env merged into every sandbox. |

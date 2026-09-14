@@ -4,6 +4,7 @@ import type {
   SandboxFactory,
   SandboxNetworkPolicy,
 } from "@sixb/core"
+import { SandboxError } from "@sixb/core"
 import type { LocalIsolation } from "./isolation/detect"
 import { LocalSandbox } from "./local-sandbox"
 
@@ -27,6 +28,9 @@ export class LocalSandboxFactory implements SandboxFactory {
   constructor(private readonly defaults: LocalSandboxFactoryOptions = {}) {}
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    if (options.persistence !== undefined) {
+      throw new SandboxError("[Sandbox] local does not support persistent sandboxes.")
+    }
     return await LocalSandbox.create({
       isolation: this.defaults.isolation,
       readOnlyPaths: this.defaults.readOnlyPaths,

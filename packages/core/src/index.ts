@@ -587,13 +587,14 @@ export type {
   CommandResult,
   CreateSandboxOptions,
   ExecOptions,
+  ResumeSandboxOptions,
   RunCommandOptions,
   Sandbox,
   SandboxFactory,
   SandboxFileRecord,
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
-  SandboxPersistence,
+  SandboxSessionOptions,
   SandboxStatus,
 } from "./sandboxes"
 export {

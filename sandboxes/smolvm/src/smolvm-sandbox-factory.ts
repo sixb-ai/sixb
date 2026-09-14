@@ -2,6 +2,7 @@ import { existsSync } from "node:fs"
 import {
   type CreateSandboxOptions,
   type Sandbox,
+  SandboxError,
   type SandboxFactory,
   SandboxIsolationUnavailableError,
   type SandboxNetworkPolicy,
@@ -57,6 +58,9 @@ export class SmolvmSandboxFactory implements SandboxFactory {
   constructor(private readonly defaults: SmolvmSandboxFactoryOptions = {}) {}
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    if (options.persistence !== undefined) {
+      throw new SandboxError("[Sandbox] smolvm does not support persistent sandboxes.")
+    }
     const cli = this.resolveCli()
     this.ensureAvailable(cli)
     this.ensureImage(cli)

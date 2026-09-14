@@ -10,12 +10,13 @@ export { exec } from "./exec"
 export type {
   CommandResult,
   CreateSandboxOptions,
+  ResumeSandboxOptions,
   RunCommandOptions,
   Sandbox,
   SandboxFactory,
   SandboxFileRecord,
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
-  SandboxPersistence,
+  SandboxSessionOptions,
   SandboxStatus,
 } from "./sandbox"
