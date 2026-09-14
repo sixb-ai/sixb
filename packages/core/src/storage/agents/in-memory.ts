@@ -17,6 +17,7 @@ import {
   assertSubagentRunResult,
   snapshotAgentThreadWorkspace,
   subagentRunMatchesCreateInput,
+  transitionAgentWorkspace,
 } from "./provider"
 import type {
   AgentContextCheckpointRecord,
@@ -29,6 +30,7 @@ import type {
   AgentStorage,
   AgentThreadRecord,
   AgentThreadStore,
+  AgentWorkspaceState,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,
@@ -48,6 +50,7 @@ import type {
   ReclaimAgentRunInput,
   StartAgentRunInput,
   SubagentRunRecord,
+  TransitionAgentWorkspaceInput,
 } from "./types"
 import { AGENT_RUN_FAILURE_CODES } from "./types"
 
@@ -119,6 +122,19 @@ export interface InMemoryAgentStorageSnapshot {
 
 class InMemoryAgentThreadStore implements AgentThreadStore {
   constructor(private readonly state: AgentStoreState) {}
+
+  async transitionWorkspace(input: TransitionAgentWorkspaceInput): Promise<AgentWorkspaceState> {
+    const threadKey = key(input.projectId, input.id)
+    const thread = this.state.threads.get(threadKey) ?? null
+    const run =
+      input.action === "recreate"
+        ? null
+        : (this.state.runs.get(key(input.projectId, input.runId)) ?? null)
+    const workspaceState = transitionAgentWorkspace(thread, run, input)
+    if (!thread) throw new AgentStorageError("thread_not_found", "[Sixb] Thread not found.")
+    this.state.threads.set(threadKey, { ...thread, workspaceState: clone(workspaceState) })
+    return clone(workspaceState)
+  }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
     const workspace =

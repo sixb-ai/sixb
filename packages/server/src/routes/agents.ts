@@ -73,6 +73,11 @@ function serializeThread(thread: AgentThreadRecord): ReturnType<typeof AgentThre
     ownerPrincipal: thread.ownerPrincipal,
     title: thread.title,
     workspace: thread.workspace,
+    workspaceState: thread.workspaceState && {
+      generation: thread.workspaceState.generation,
+      status: thread.workspaceState.status,
+      initialized: thread.workspaceState.initialized,
+    },
     status: thread.status,
     activeRunId: thread.activeRunId,
     lastMessageAt: thread.lastMessageAt ? toIsoString(thread.lastMessageAt) : undefined,
@@ -183,6 +188,7 @@ function handleAgentRouteError(
   }
 
   if (error instanceof AgentRequestError) {
+    // Core performs visibility checks before workspace state transitions.
     switch (error.code) {
       case "agent_not_found":
       case "run_not_found":
@@ -425,6 +431,42 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get agent thread",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "getAgentThread",
+        },
+      }
+    )
+    .post(
+      "/api/agent-threads/:threadId/workspace/recreate",
+      async (context) => {
+        try {
+          const sixb = requireRequestSixb(context)
+          const thread = await sixb.agent.threads.recreateWorkspace(
+            context.params.threadId,
+            context.body
+          )
+          return serializeThread(thread)
+        } catch (error) {
+          if (error instanceof AgentStorageError && error.code === "invalid_state") {
+            context.set.status = 409
+            return { error: "Workspace state changed or a run is active. Reload and try again." }
+          }
+          return handleAgentRouteError(error, context.set)
+        }
+      },
+      {
+        params: AgentThreadParamsSchema,
+        body: z.object({ expectedGeneration: z.string().min(1) }).strict(),
+        response: {
+          200: AgentThreadSchema,
+          400: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+          409: ErrorResponseSchema,
+        },
+        detail: {
+          summary:
+            "Explicitly recreate an unavailable or uncertain workspace without deleting its previous state",
+          operationId: "recreateAgentThreadWorkspace",
+          tags: [OPENAPI_TAGS.agentThreads.name],
+          security: SIXB_CSRF_SECURITY_REQUIREMENT,
         },
       }
     )

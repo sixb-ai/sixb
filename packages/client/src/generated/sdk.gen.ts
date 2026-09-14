@@ -325,6 +325,9 @@ import type {
   ReauthorizeConnectorConnectionData,
   ReauthorizeConnectorConnectionErrors,
   ReauthorizeConnectorConnectionResponses,
+  RecreateAgentThreadWorkspaceData,
+  RecreateAgentThreadWorkspaceErrors,
+  RecreateAgentThreadWorkspaceResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -2217,6 +2220,26 @@ export const getAgentThread = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<GetAgentThreadResponses, GetAgentThreadErrors, ThrowOnError>({
     url: "/api/agent-threads/{threadId}",
     ...options,
+  })
+
+/**
+ * Explicitly recreate an unavailable or uncertain workspace without deleting its previous state
+ */
+export const recreateAgentThreadWorkspace = <ThrowOnError extends boolean = false>(
+  options: Options<RecreateAgentThreadWorkspaceData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RecreateAgentThreadWorkspaceResponses,
+    RecreateAgentThreadWorkspaceErrors,
+    ThrowOnError
+  >({
+    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    url: "/api/agent-threads/{threadId}/workspace/recreate",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
   })
 
 /**

@@ -15,6 +15,42 @@ export interface AgentThreadWorkspace {
   readonly params: Readonly<Record<string, JsonValue>>
 }
 
+/** Worker-owned state, independent from the immutable application binding. */
+export interface AgentWorkspaceState {
+  readonly generation: string
+  readonly status: "new" | "busy" | "ready" | "blocked" | "unavailable"
+  readonly sourceFingerprint?: string
+  readonly initialized: boolean
+  /** Never expires automatically: a delayed provider operation must not reach a successor. */
+  readonly owner?: { readonly runId: string; readonly executionToken: string }
+}
+
+export type TransitionAgentWorkspaceInput = {
+  readonly projectId: string
+  readonly id: string
+} & (
+  | {
+      readonly action: "acquire"
+      readonly runId: string
+      readonly executionToken: string
+      readonly generation: string
+      readonly sourceFingerprint: string
+    }
+  | {
+      readonly action: "settle"
+      readonly runId: string
+      readonly executionToken: string
+      readonly generation: string
+      readonly status: "ready" | "blocked" | "unavailable"
+      readonly initialized: boolean
+    }
+  | {
+      readonly action: "recreate"
+      readonly expectedGeneration: string
+      readonly generation: string
+    }
+)
+
 export interface AgentThreadRecord {
   readonly id: string
   readonly projectId: string
@@ -22,6 +58,7 @@ export interface AgentThreadRecord {
   readonly ownerPrincipal: Principal
   readonly title?: string
   readonly workspace?: AgentThreadWorkspace
+  readonly workspaceState?: AgentWorkspaceState
   readonly status: AgentThreadStatus
   /** Single-flight anchor: the id of the one run currently allowed to write, or `null` when idle. */
   readonly activeRunId: string | null
@@ -426,6 +463,8 @@ export interface CreateAgentContextCheckpointInput {
 // ── Store ───────────────────────────────────────────────────────────────────────────────────────
 
 export interface AgentThreadStore {
+  /** Atomic run-fenced transition, or explicit idle-thread recreation. */
+  transitionWorkspace(input: TransitionAgentWorkspaceInput): Promise<AgentWorkspaceState>
   create(input: CreateAgentThreadInput): Promise<AgentThreadRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentThreadRecord | null>
   list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult>
