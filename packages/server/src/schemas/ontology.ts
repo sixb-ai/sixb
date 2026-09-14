@@ -64,6 +64,19 @@ export const ObjectTypeSchema = z.object({
       title: z.string().optional(),
       defaultText: z.array(z.string()).optional(),
       exact: z.array(z.string()).optional(),
+      vectors: z
+        .record(
+          z.string(),
+          z.object({
+            source: z.array(z.string()),
+            model: z.object({
+              providerId: z.string(),
+              modelId: z.string(),
+              dimensions: z.number().int().positive(),
+            }),
+          })
+        )
+        .optional(),
       vector: z
         .object({
           property: z.string(),

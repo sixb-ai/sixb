@@ -122,7 +122,8 @@ object types. Each type supplies its own fields. It does not change which fields
 | `title` | `string` | Display/title property shown in search results. Must be string-like. |
 | `defaultText` | `string[]` | Default keyword-search fields when `search("...")` is called without `fields`. |
 | `exact` | `string[]` | Exact-match fields such as external ids, emails, or invoice numbers. |
-| `vector` | `{ property, source }` | Vector search: `property` stores the embedding, `source` lists the text fields used to produce it. |
+| `vectors` | Named profiles | Derived embeddings with sources and a model; see [named vector profiles](#named-vector-profiles). |
+| `vector` (legacy) | `{ property, source }` | Vector search: `property` stores the embedding, `source` lists the text fields used to produce it. |
 
 Configure [query flags](properties.md#property-query-metadata) on each referenced property.
 Every field a profile references must carry the matching property flag:
@@ -144,6 +145,53 @@ search: {
   vector: { property: "embedding", source: ["name", "description"] },
 }
 ```
+
+## Named vector profiles
+
+`search.vectors` defines **one vector per object and named profile**, outside business properties.
+Sources must be static strings or string enums; keyword-search flags are unnecessary.
+
+```ts
+search: {
+  vectors: {
+    content: { source: ["title", "description"], model: productEmbedding },
+    context: { source: ["context"], model: productEmbedding },
+  },
+}
+```
+
+Register the same `EmbeddingModel` in `models.embedding: [productEmbedding]`; language models
+are optional. This slice provides the model contract, without a built-in provider adapter.
+
+```ts
+await sixb.objects(Product).byId("product-1").vector("content").index()
+
+const { objects } = await sixb.objects(Product)
+  .query()
+  .vector("content", queryVector, { k: 10 })
+  .list()
+// k: return at most 10 nearest objects among eligible, authorized candidates.
+// objects[i].score: cosine similarity, highest first.
+```
+
+Profile names are autocompleted. `index()` reads the sources, calls the configured model outside
+any transaction, then conditionally stores the result. A concurrent object edit or reindex rejects
+the stale result; call `index()` again to recompute. There are no automatic jobs or provider retries.
+Generate `queryVector` with the same model: numeric validation cannot establish an array's origin.
+
+| Guarantee | Behavior |
+| --- | --- |
+| Freshness | Source changes invalidate affected profiles atomically, including projections and reset. Deletion removes all profiles. Unrelated changes preserve stored vectors. |
+| Compatibility | Source order, model identity or dimension changes exclude old vectors. Model identities must represent stable embedding semantics. |
+| Object lifecycle | Reindexing changes neither the object's version nor its events. Failed commits roll back vectors and objects together. |
+| Numeric validity | Float32, 1–16,000 dimensions, finite values and nonzero norm after rounding; malformed vectors are rejected. |
+| Authorization | All sources must be readable. Candidates are authorized before ranking; ties use object type/id. |
+| Query bounds | One profile and concrete type; `where` before ranking, `limit` after (`project` in JSON IR). `k`: 1–1,000. Counts, facets and `total` describe the selected top-k. |
+
+V1 excludes pagination, traversal, expansion, subtype search, hybrid search and profile fusion.
+**Only `InMemoryStorage` supports named profiles in this slice**; PostgreSQL and SQLite reject
+these declarations at startup. Legacy `search.vector` and numeric-property queries remain
+compatible, without managed provenance or invalidation.
 
 ## extends (inheritance)
 

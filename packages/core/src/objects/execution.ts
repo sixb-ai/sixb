@@ -87,6 +87,7 @@ export interface ExecutionObjectByIdHandle<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
 > {
+  vector: ObjectByIdHandle<TObjectType, TValueTypes>["vector"]
   get: ObjectByIdHandle<TObjectType, TValueTypes>["get"]
   listLinks: ObjectByIdHandle<TObjectType, TValueTypes>["listLinks"]
   requestAction: ObjectByIdHandle<TObjectType, TValueTypes>["requestAction"]
@@ -184,6 +185,7 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
     projectId: runtime.projectId,
     broker: runtime.broker,
     ontology: runtime.ontology,
+    embeddingModels: runtime.embeddingModels,
     actionRegistry: runtime.actionRegistry,
     events: runtime.events,
     storage: runtime.storage,

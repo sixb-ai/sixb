@@ -49,6 +49,7 @@ const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
 })
 
 function serializeObject(row: {
+  score?: number
   primaryId: string
   objectTypeId: string
   properties: Record<string, unknown>
@@ -56,6 +57,7 @@ function serializeObject(row: {
   updatedAt: Date
 }) {
   return {
+    ...(row.score === undefined ? {} : { score: row.score }),
     primaryId: row.primaryId,
     objectTypeId: row.objectTypeId,
     properties: row.properties,

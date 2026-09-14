@@ -1,3 +1,4 @@
+import type { ObjectTypeSearchMetadata } from "../src"
 import {
   col,
   type DatasetDefinition,
@@ -12,6 +13,7 @@ import {
 import { restoreTrustedPrimitiveExecutionScope } from "../src/execution/durable"
 import { createTestingScope } from "../src/execution/scopes"
 import type { ExecutionScope } from "../src/execution/types"
+import type { OntologyEditOperation } from "../src/materializer"
 import {
   createOntologyMaterializer,
   type OntologyMaterializerDependencies,
@@ -85,13 +87,16 @@ const temperatureProjection = defineProjection("temperatures", Device)
 
 export function createMaterializerFixture(
   input: {
+    readonly search?: ObjectTypeSearchMetadata
     readonly dependencies?: OntologyMaterializerDependencies
     readonly storage?: InMemoryStorage
     readonly scope?: ExecutionScope
     readonly conflictResolution?: "editsWin" | "mostRecent"
   } = {}
 ) {
-  const ontology = new OntologyRegistry({ sources: [Device] })
+  const ontology = new OntologyRegistry({
+    sources: [input.search ? defineObjectType({ ...Device, search: input.search }) : Device],
+  })
   const projections = new ProjectionRegistry({
     projections: [
       input.conflictResolution === "mostRecent" ? mostRecentDeviceProjection : deviceProjection,
@@ -386,10 +391,7 @@ async function resolveFixtureExecution(
   })
 }
 
-export function atomic(
-  requestId: string,
-  operations: readonly import("../src/materializer").OntologyEditOperation[]
-) {
+export function atomic(requestId: string, operations: readonly OntologyEditOperation[]) {
   return {
     mode: "atomic",
     source: { kind: "runtime", requestId },

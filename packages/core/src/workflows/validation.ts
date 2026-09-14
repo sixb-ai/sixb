@@ -172,14 +172,14 @@ function validateWorkflowAgentStepRuntimeReferences(
   step: AgentStepDefinition,
   options: { readonly models?: ModelCatalog; readonly tools: AgentToolCatalog }
 ): void {
-  if (step.model === undefined && options.models === undefined) {
+  if (step.model === undefined && options.models?.language === undefined) {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" agent step "${step.id}" needs a model. Configure 'models.language' or pass 'model' to defineAgentStep().`
     )
   }
   if (step.model !== undefined && options.models !== undefined) {
     const ref = { provider: step.model.providerId, modelId: step.model.modelId }
-    if (options.models.language.getByRef(ref) === null) {
+    if (options.models.language?.getByRef(ref) == null) {
       throw new WorkflowDefinitionError(
         `Workflow "${workflowId}" agent step "${step.id}" uses unknown language model "${ref.provider}/${ref.modelId}". Add it to 'models.language' in createSixb().`
       )
