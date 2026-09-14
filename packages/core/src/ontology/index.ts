@@ -10,6 +10,7 @@
 
 // ── Types ───────────────────────────────────────────────────
 
+export type { EmbeddingModelDefinition, EmbeddingModelRef } from "../models/embedding-model"
 export type { DecimalValue } from "./decimal"
 export {
   compareDecimalValues,
@@ -48,6 +49,7 @@ export type {
   ObjectSchema,
   ObjectType,
   ObjectTypeSearchMetadata,
+  ObjectVectorSearchProfile,
   Ontology,
   PrimitiveSchema,
   Property,

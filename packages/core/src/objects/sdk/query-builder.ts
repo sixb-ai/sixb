@@ -93,14 +93,14 @@ class ObjectQueryBuilderImpl<
   }
 
   vector(
-    property: PropertyToken<TObjectType["id"], string>,
+    property: PropertyToken<TObjectType["id"], string> | string,
     vector: readonly number[],
     options: { k: number }
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
     return this.withQuery({
       kind: "vector",
       input: this.ir,
-      propertyId: property.id,
+      ...(typeof property === "string" ? { profile: property } : { propertyId: property.id }),
       vector,
       k: options.k,
     })

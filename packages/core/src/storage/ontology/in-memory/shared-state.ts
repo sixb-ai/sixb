@@ -12,6 +12,7 @@ import type {
 } from "../materializations"
 import type { OntologyOutboxRecord } from "../outbox"
 import type { OntologySourceRecord, StageSourceAssertion } from "../sources"
+import type { StoredObjectVector } from "../vectors"
 
 export interface InMemorySourceMaterialization extends OntologySourceRecord {
   readonly rowsByEntity: Map<string, StageSourceAssertion>
@@ -33,6 +34,7 @@ export interface InMemoryStoredLinkSlotOverride extends Omit<StoredLinkSlotOverr
 }
 
 export interface InMemoryOntologyState {
+  readonly vectors: Map<string, Map<string, StoredObjectVector>>
   readonly commitsById: Map<string, OntologyCommitRecord>
   readonly commitIdByIdempotency: Map<string, string>
   readonly commitIdByOrigin: Map<string, string>
@@ -53,6 +55,7 @@ export interface InMemoryOntologyStorageTestHooks {
 
 export function createInMemoryOntologyState(): InMemoryOntologyState {
   return {
+    vectors: new Map(),
     commitsById: new Map(),
     commitIdByIdempotency: new Map(),
     commitIdByOrigin: new Map(),

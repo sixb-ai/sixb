@@ -4,9 +4,11 @@ import type {
   MaterializationSession,
   MaterializationWorkRecord,
   OntologyMaterializationStorage,
+  OntologyStorage,
 } from "../../storage/ontology"
 import type { MaterializerContext } from "../context"
 import { sequenceMaterializationEvent } from "../effective/build-events"
+import { invalidateVectorChanges } from "../effective/vectors"
 import { throwIfAborted } from "../shared/abort"
 import { chunkBySize } from "../shared/chunking"
 import type { TimedCommitIdentity } from "../shared/identity"
@@ -46,15 +48,17 @@ export async function stageWorkBounded(
 }
 
 export async function drainStagedWork(
-  context: BatchingContext,
-  storage: OntologyMaterializationStorage,
+  context: BatchingContext & { readonly projectId: string },
+  ontologyStorage: Pick<OntologyStorage, "materializations" | "vectors">,
   session: MaterializationSession,
   signal?: AbortSignal
 ): Promise<void> {
+  const storage = ontologyStorage.materializations
   let phase: number | null = null
   let pending: MaterializationPlanItem[] = []
   const flush = async () => {
     if (pending.length === 0) return
+    await invalidateVectorChanges(context.projectId, ontologyStorage.vectors, pending, session)
     await applyItems(context, storage, session, pending, signal)
     pending = []
   }

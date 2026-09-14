@@ -404,7 +404,7 @@ async function executeTelemetryTransaction(
       ...(command.execution.actor === undefined ? {} : { actor: command.execution.actor }),
     }
   )
-  await drainStagedWork(context, storage.ontology.materializations, session)
+  await drainStagedWork(context, storage.ontology, session)
   const eventCount = await drainStagedEvents(
     context,
     storage.ontology.materializations,

@@ -19,6 +19,7 @@ import {
   validatePropertyDefinitions,
   validateQueryMetadata,
 } from "./validation"
+import { snapshotVectorProfiles } from "./vector-profiles"
 
 // ── Input types ──────────────────────────────────────────────
 
@@ -197,6 +198,13 @@ export class OntologyRegistry implements OntologyDefinitionCatalog {
     this.resolveInheritedProperties()
     validatePropertyDefinitions(this.objectTypesById, this.valueTypesById)
     validateQueryMetadata(this.objectTypesById, this.valueTypesById)
+    for (const [id, type] of this.objectTypesById) {
+      if (type.search?.vectors)
+        this.objectTypesById.set(id, {
+          ...type,
+          search: { ...type.search, vectors: snapshotVectorProfiles(type.search.vectors) },
+        })
+    }
     this.primaryByTypeId = validatePrimaryProperties(this.objectTypesById)
   }
 

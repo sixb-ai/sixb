@@ -11,6 +11,7 @@ import type { ObjectQuery } from "../query/ir"
 import type { ValidatedObjectQuery } from "../query/validate"
 
 export type ObjectQueryExecutorRow = {
+  score?: number
   primaryId: string
   objectTypeId: string
   properties: Record<string, unknown>

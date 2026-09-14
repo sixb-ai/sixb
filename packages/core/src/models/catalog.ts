@@ -4,12 +4,24 @@ import {
   type LanguageModelDefinition,
   type ModelDefinition,
 } from "./definitions"
+import { assertEmbeddingModel, type EmbeddingModel } from "./embedding-model"
 import type { LanguageModel } from "./language-model"
 
-/** Stable identity of one configured language-model binding. */
-export interface LanguageModelRef {
+/** Stable identity of a configured provider binding. */
+export interface ModelRef {
   readonly provider: string
   readonly modelId: string
+}
+
+export type LanguageModelRef = ModelRef
+
+export interface EmbeddingModelEntry extends ModelRef {
+  readonly model: EmbeddingModel
+}
+
+export interface EmbeddingModelCatalog {
+  list(): readonly EmbeddingModelEntry[]
+  getByRef(ref: ModelRef): EmbeddingModelEntry | null
 }
 
 /** The configured language models, with the project default. */
@@ -32,24 +44,30 @@ export interface LanguageModelEntry extends LanguageModelRef {
 
 /** Models a project allows Sixb to use, organized by technical model kind. */
 export interface ModelCatalog {
-  readonly language: LanguageModelCatalog
+  readonly language?: LanguageModelCatalog
+  readonly embedding: EmbeddingModelCatalog
 }
 
 export interface ModelCatalogInput {
   /** Ordered; the first entry is the project default. */
-  readonly language: readonly LanguageModel[]
+  readonly language?: readonly LanguageModel[]
+  readonly embedding?: readonly EmbeddingModel[]
 }
 
 /** Build the immutable project model catalog. Rejects invalid, duplicate, and empty catalogs. */
+export function createModelCatalog(
+  input: ModelCatalogInput & { readonly language: readonly LanguageModel[] }
+): ModelCatalog & { readonly language: LanguageModelCatalog }
+export function createModelCatalog(input: ModelCatalogInput): ModelCatalog
 export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
-  if (!Array.isArray(input?.language)) {
+  if (!input || (input.language !== undefined && !Array.isArray(input.language))) {
     throw new RuntimeError("[Sixb] 'models.language' must be an array of Sixb language models.")
   }
 
   const entries: LanguageModelEntry[] = []
   const byProvider = new Map<string, Map<string, LanguageModelEntry>>()
 
-  for (const [index, model] of input.language.entries()) {
+  for (const [index, model] of (input.language ?? []).entries()) {
     assertLanguageModel(model, index)
 
     let byModelId = byProvider.get(model.providerId)
@@ -73,20 +91,46 @@ export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
   }
 
   const [defaultEntry] = entries
-  if (defaultEntry === undefined) {
+  if (input.language !== undefined && defaultEntry === undefined) {
     throw new RuntimeError(
       "[Sixb] 'models.language' needs at least one model. Configure one or omit 'models' from createSixb()."
     )
   }
 
   const listed = Object.freeze(entries.slice())
-  const language: LanguageModelCatalog = Object.freeze({
-    default: defaultEntry,
-    list: () => listed,
-    getByRef: (ref: LanguageModelRef) => byProvider.get(ref.provider)?.get(ref.modelId) ?? null,
-  })
+  const language: LanguageModelCatalog | undefined =
+    defaultEntry === undefined
+      ? undefined
+      : Object.freeze({
+          default: defaultEntry,
+          list: () => listed,
+          getByRef: (ref: LanguageModelRef) =>
+            byProvider.get(ref.provider)?.get(ref.modelId) ?? null,
+        })
 
-  return Object.freeze({ language })
+  if (input.embedding !== undefined && !Array.isArray(input.embedding)) {
+    throw new RuntimeError("[Sixb] models.embedding must be an array of embedding models.")
+  }
+  const embeddings = [...(input.embedding ?? [])]
+  const embeddingByRef = new Map<string, EmbeddingModelEntry>()
+  for (const model of embeddings) {
+    assertEmbeddingModel(model)
+    const key = JSON.stringify([model.providerId, model.modelId])
+    if (embeddingByRef.has(key)) throw new RuntimeError(`[Sixb] Duplicate embedding model ${key}`)
+    embeddingByRef.set(
+      key,
+      Object.freeze({ provider: model.providerId, modelId: model.modelId, model })
+    )
+  }
+  if (!language && embeddings.length === 0)
+    throw new RuntimeError("[Sixb] Configure at least one language or embedding model.")
+  const listedEmbeddings = Object.freeze([...embeddingByRef.values()])
+  const embedding: EmbeddingModelCatalog = Object.freeze({
+    list: () => listedEmbeddings,
+    getByRef: (ref: ModelRef) =>
+      embeddingByRef.get(JSON.stringify([ref.provider, ref.modelId])) ?? null,
+  })
+  return Object.freeze({ language, embedding })
 }
 
 function assertLanguageModel(model: unknown, index: number): asserts model is LanguageModel {

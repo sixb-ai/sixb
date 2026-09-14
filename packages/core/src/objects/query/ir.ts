@@ -78,7 +78,12 @@ export interface ObjectQueryVector {
   kind: "vector"
   input: ObjectQuery
   vector: readonly number[]
-  propertyId: string
+  /** @deprecated Legacy numeric property queries. Prefer a named profile. */
+  propertyId?: string
+  profile?: string
+  /** Populated by canonical validation, never trusted from the wire. */
+  configuration?: string
+  source?: readonly string[]
   k: number
 }
 

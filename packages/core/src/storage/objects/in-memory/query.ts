@@ -7,6 +7,7 @@ import {
   compareQueryScalarValues,
   queryScalarValuesEqual,
 } from "../../../objects/query/scalar-values"
+import { vectorSources } from "../../../objects/vectors/profile"
 import type { LinkBatchKey } from "../keys"
 import {
   compareObjectLinkCursors,
@@ -134,15 +135,50 @@ export function evaluateObjectQuery(
     case "vector": {
       const input = evaluateObjectQuery(query.input, source)
       const scoredEntries = input.entries.flatMap((entry) => {
-        const score = vectorSimilarity(entry.row.properties[query.propertyId], query.vector)
-        return score === null ? [] : [{ ...entry, score: entry.score + score }]
+        const stored =
+          query.profile === undefined ? undefined : source.getVector?.(entry.row, query.profile)
+        if (
+          query.profile !== undefined &&
+          (!stored ||
+            !query.configuration ||
+            stored.configuration !== query.configuration ||
+            vectorSources(stored.source, entry.row.properties).sourceFingerprint !==
+              stored.sourceFingerprint)
+        )
+          return []
+        const score = vectorSimilarity(
+          query.profile === undefined
+            ? entry.row.properties[query.propertyId ?? ""]
+            : stored?.values,
+          query.vector
+        )
+        return score === null
+          ? []
+          : [
+              {
+                ...entry,
+                score:
+                  entry.score +
+                  (query.profile === undefined ? score : Math.max(-1, Math.min(1, score))),
+              },
+            ]
       })
-      scoredEntries.sort(compareEntriesByRelevance)
+      scoredEntries.sort(
+        query.profile === undefined
+          ? compareEntriesByRelevance
+          : (a, b) =>
+              b.score - a.score ||
+              compareStrings(a.row.objectTypeId, b.row.objectTypeId) ||
+              compareStrings(a.row.primaryId, b.row.primaryId)
+      )
       const limit = Math.max(0, query.k)
       return {
         entries: scoredEntries.slice(0, limit),
-        total: scoredEntries.length,
-        hasMore: limit < scoredEntries.length,
+        total:
+          query.profile === undefined
+            ? scoredEntries.length
+            : Math.min(limit, scoredEntries.length),
+        hasMore: query.profile === undefined && limit < scoredEntries.length,
       }
     }
     case "traverse": {

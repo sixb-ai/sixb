@@ -75,3 +75,4 @@ export {
   telemetryPointSortKey,
   telemetrySeriesKey,
 } from "./refs"
+export type { ObjectVectorWrite, PreparedObjectVector } from "./vectors"
