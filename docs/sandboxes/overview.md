@@ -17,6 +17,7 @@ passed once to `createSixb`. A **`Sandbox`** is one isolated environment that ru
 ```ts
 interface SandboxFactory {
   create(options?: CreateSandboxOptions): Promise<Sandbox>
+  resume?(name: string, options?: ResumeSandboxOptions): Promise<Sandbox>
 }
 
 interface Sandbox {
@@ -44,20 +45,20 @@ and run context, and `runCommand(...)` per command. It calls `destroy()` on tear
 
 ### Optional filesystem persistence
 
-Providers may expose `factory.persistence`, a `SandboxPersistence` capability exported from
-`@sixb/core/sandboxes`. Currently only Vercel implements it. Callers must check the capability;
-absence must not silently fall back to an ephemeral sandbox.
+Persistence is requested at creation with `persistence: { name }`. Providers supporting it expose
+`factory.resume`; currently only Vercel does. Unsupported providers reject persistence before
+provisioning, never silently falling back to an ephemeral sandbox.
 
 ```ts
-if (!factory.persistence) {
+if (!factory.resume) {
   throw new Error("This task requires persistent sandbox support.")
 }
 
-const first = await factory.persistence.create("project-thread-workspace")
+const first = await factory.create({ persistence: { name: "project-thread-workspace" } })
 await first.writeFiles([{ path: "draft.txt", contents: "Uncommitted work" }])
 await first.stop() // Resolves only after the provider confirms preservation.
 
-const next = await factory.persistence.resume("project-thread-workspace")
+const next = await factory.resume("project-thread-workspace")
 await next.runCommand("cat", ["draft.txt"])
 await next.stop()
 ```
@@ -69,7 +70,8 @@ durable file store. Handles must not automatically boot another VM while running
 
 The caller owns namespacing and exclusive lifecycle access. This API is not a distributed lock:
 serialize the whole operation, not just individual calls. Runtime options (`env`, `network`,
-`workingDirectory`, command timeout) must be supplied on each acquisition. Persisted files are
+`workingDirectory`, command timeout) must be supplied on each acquisition. `ResumeSandboxOptions`
+accepts only these session options, not `persistence` or creation settings. Persisted files are
 untrusted and never establish execution authority. `destroy()` is an explicit permanent deletion
 requiring exclusive ownership of the name, not routine teardown after a persistent run.
 

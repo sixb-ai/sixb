@@ -1,12 +1,12 @@
 import { posix } from "node:path"
 import {
   type CommandResult,
-  type CreateSandboxOptions,
   type RunCommandOptions,
   type Sandbox,
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
+  type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
 
@@ -50,7 +50,7 @@ export interface VercelSandboxClient {
   delete(opts?: { readonly signal?: AbortSignal }): Promise<void>
 }
 
-export interface VercelSandboxOptions extends CreateSandboxOptions {
+export interface VercelSandboxOptions extends SandboxSessionOptions {
   readonly id?: string
   readonly client: VercelSandboxClient
 }

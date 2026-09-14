@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto"
 import {
   type CreateSandboxOptions,
+  type ResumeSandboxOptions,
   type Sandbox,
   SandboxError,
   type SandboxFactory,
   type SandboxNetworkPolicy,
+  type SandboxSessionOptions,
 } from "@sixb/core"
-import type { SandboxPersistence } from "@sixb/core/sandboxes"
 import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { toVercelNetworkPolicy } from "./network"
 import {
@@ -71,8 +72,6 @@ export interface VercelSandboxFactoryOptions {
   readonly sessionTimeoutMs?: number
   /** Timeout used only for provider bootstrap commands, such as creating a custom cwd. */
   readonly setupTimeoutMs?: number
-  /** Persist/snapshot the sandbox when stopped. Defaults to false for Sixb's per-run model. */
-  readonly persistent?: boolean
   readonly snapshotExpiration?: number
   readonly keepLastSnapshots?: VercelSnapshotRetentionPolicy
   readonly tags?: Readonly<Record<string, string>>
@@ -98,80 +97,36 @@ const DEFAULT_SETUP_TIMEOUT_MS = 30_000
 
 /** Pluggable factory for Vercel Sandbox-backed Sixb sandboxes. */
 export class VercelSandboxFactory implements SandboxFactory {
-  readonly persistence: SandboxPersistence
-
   constructor(
     private readonly defaults: VercelSandboxFactoryOptions = {},
     private readonly createRemote: VercelCreateSandbox = createVercelSandbox,
-    persistentRemote: VercelPersistenceOperations = vercelPersistenceOperations
+    private readonly persistentRemote: VercelPersistenceOperations = vercelPersistenceOperations
   ) {
-    const runtimeOptions = (options: CreateSandboxOptions): CreateSandboxOptions => ({
-      ...options,
-      env: { ...defaults.env, ...options.env },
-      timeout: options.timeout ?? defaults.timeout,
-      network: options.network ?? defaults.network ?? { mode: "none" },
-    })
-    this.persistence = {
-      create: async (name, options = {}) => {
-        assertPersistentName(name)
-        validateSourceOptions(defaults)
-        const resolved = runtimeOptions(options)
-        // Validate before provisioning; persistent VM defaults contain no run env or authority.
-        toVercelNetworkPolicy(resolved.network ?? { mode: "none" })
-        const params = buildCreateParams({
-          defaults: { ...defaults, persistent: true },
-          env: {},
-          network: { mode: "none" },
-          name,
-        })
-        let client: VercelPersistentClient | undefined
-        try {
-          client = await persistentRemote.create(params)
-          const sandbox = await bindPersistentSandbox(client, resolved)
-          if (options.workingDirectory !== undefined) {
-            const result = await sandbox.runCommand("mkdir", ["-p", sandbox.workingDirectory], {
-              cwd: "/",
-              timeout: defaults.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
-            })
-            if (result.exitCode !== 0) {
-              throw new SandboxError("[Sandbox] Vercel persistent working directory setup failed.")
-            }
-          }
-          return sandbox
-        } catch (error) {
-          // A failed/uncertain request must never delete a name that another attempt may own.
-          await stopFailedPersistentSession(client)
-          throw persistentSandboxError(error, "create")
-        }
-      },
-      resume: async (name, options = {}) => {
-        assertPersistentName(name)
-        const resolved = runtimeOptions(options)
-        toVercelNetworkPolicy(resolved.network ?? { mode: "none" })
-        const params = { ...resolveCredentials(defaults.credentials), name }
-        let client: VercelPersistentClient | undefined
-        try {
-          const existing = await persistentRemote.get({ ...params, resume: false })
-          assertStoppedPersistent(existing)
-          client = await persistentRemote.get({ ...params, resume: true })
-          return await bindPersistentSandbox(client, resolved)
-        } catch (error) {
-          await stopFailedPersistentSession(client)
-          throw persistentSandboxError(error, "resume")
-        }
-      },
-    }
+    assertNoLegacyPersistence(defaults)
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    assertNoLegacyPersistence(this.defaults)
+    assertNoLegacyPersistence(options)
     validateSourceOptions(this.defaults)
-    const env = { ...(this.defaults.env ?? {}), ...(options.env ?? {}) }
-    const network = options.network ?? this.defaults.network ?? { mode: "none" }
+    const resolved = this.runtimeOptions(options)
+    if (options.persistence !== undefined) {
+      if (
+        options.persistence === null ||
+        typeof options.persistence !== "object" ||
+        Object.keys(options.persistence).some((key) => key !== "name")
+      ) {
+        throw new SandboxError("[Sandbox] persistence must contain only a sandbox name.")
+      }
+      return this.createPersistent(options.persistence.name, resolved)
+    }
+    const { env = {}, network = { mode: "none" } } = resolved
     const params = buildCreateParams({
       defaults: this.defaults,
       env,
       network,
       name: `${this.defaults.namePrefix ?? DEFAULT_NAME_PREFIX}${randomUUID()}`,
+      persistent: false,
     })
 
     let client: VercelSandboxClient | undefined
@@ -197,6 +152,83 @@ export class VercelSandboxFactory implements SandboxFactory {
       throw new SandboxError(`[Sandbox] vercel create failed: ${errorMessage(error)}`)
     }
   }
+
+  async resume(name: string, options: ResumeSandboxOptions = {}): Promise<Sandbox> {
+    assertNoLegacyPersistence(this.defaults)
+    assertNoLegacyPersistence(options)
+    if (
+      Object.keys(options).some(
+        (key) => !["workingDirectory", "env", "timeout", "network"].includes(key)
+      )
+    ) {
+      throw new SandboxError(
+        "[Sandbox] resume accepts only workingDirectory, env, timeout and network; pass the existing name separately."
+      )
+    }
+    assertPersistentName(name)
+    const resolved = this.runtimeOptions(options)
+    toVercelNetworkPolicy(resolved.network ?? { mode: "none" })
+    const params = { ...resolveCredentials(this.defaults.credentials), name }
+    let client: VercelPersistentClient | undefined
+    try {
+      const existing = await this.persistentRemote.get({ ...params, resume: false })
+      assertStoppedPersistent(existing)
+      client = await this.persistentRemote.get({ ...params, resume: true })
+      return await bindPersistentSandbox(client, resolved)
+    } catch (error) {
+      await stopFailedPersistentSession(client)
+      throw persistentSandboxError(error, "resume")
+    }
+  }
+
+  private runtimeOptions(options: SandboxSessionOptions): SandboxSessionOptions {
+    return {
+      workingDirectory: options.workingDirectory,
+      env: { ...this.defaults.env, ...options.env },
+      timeout: options.timeout ?? this.defaults.timeout,
+      network: options.network ?? this.defaults.network ?? { mode: "none" },
+    }
+  }
+
+  private async createPersistent(name: string, options: SandboxSessionOptions): Promise<Sandbox> {
+    assertPersistentName(name)
+    // Persistent VM defaults contain no run env or authority.
+    toVercelNetworkPolicy(options.network ?? { mode: "none" })
+    const params = buildCreateParams({
+      defaults: this.defaults,
+      env: {},
+      network: { mode: "none" },
+      name,
+      persistent: true,
+    })
+    let client: VercelPersistentClient | undefined
+    try {
+      client = await this.persistentRemote.create(params)
+      const sandbox = await bindPersistentSandbox(client, options)
+      if (options.workingDirectory !== undefined) {
+        const result = await sandbox.runCommand("mkdir", ["-p", sandbox.workingDirectory], {
+          cwd: "/",
+          timeout: this.defaults.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
+        })
+        if (result.exitCode !== 0) {
+          throw new SandboxError("[Sandbox] Vercel persistent working directory setup failed.")
+        }
+      }
+      return sandbox
+    } catch (error) {
+      // A failed/uncertain request must never delete a name that another attempt may own.
+      await stopFailedPersistentSession(client)
+      throw persistentSandboxError(error, "create")
+    }
+  }
+}
+
+function assertNoLegacyPersistence(options: object): void {
+  if ("persistent" in options) {
+    throw new SandboxError(
+      "[Sandbox] persistent is no longer supported. Use create({ persistence: { name } }) or omit it for an ephemeral sandbox."
+    )
+  }
 }
 
 async function stopFailedPersistentSession(
@@ -217,6 +249,7 @@ function buildCreateParams(input: {
   readonly env: Readonly<Record<string, string>>
   readonly network: SandboxNetworkPolicy
   readonly name: string
+  readonly persistent: boolean
 }): VercelCreateSandboxParams {
   const { defaults } = input
   const credentials = resolveCredentials(defaults.credentials)
@@ -224,7 +257,7 @@ function buildCreateParams(input: {
     name: input.name,
     env: input.env,
     networkPolicy: toVercelNetworkPolicy(input.network),
-    persistent: defaults.persistent ?? false,
+    persistent: input.persistent,
     ...(defaults.ports !== undefined ? { ports: [...defaults.ports] } : {}),
     ...(defaults.sessionTimeoutMs !== undefined ? { timeout: defaults.sessionTimeoutMs } : {}),
     ...(defaults.resources !== undefined ? { resources: defaults.resources } : {}),
