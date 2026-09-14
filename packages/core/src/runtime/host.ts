@@ -241,6 +241,7 @@ export class SixbHost<
     })
 
     this.hostContext = {
+      embeddingModels: definitions.models?.embedding,
       projectId: this.projectId,
       broker: this.broker,
       ontology: definitions.ontology,

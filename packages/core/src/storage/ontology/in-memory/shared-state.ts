@@ -19,6 +19,8 @@ import type {
   StoredSourceLinkAssertion,
 } from "../sources"
 
+import type { StoredObjectVector } from "../vectors"
+
 export interface InMemorySourceRoot {
   readonly root: ProjectionEntityRef
   readonly stagingOrdinal: number
@@ -27,6 +29,7 @@ export interface InMemorySourceRoot {
   active: boolean
   retiredAt: string | null
 }
+
 
 export interface InMemorySourceMaterialization extends OntologySourceRecord {
   readonly roots: Map<string, InMemorySourceRoot>
@@ -49,6 +52,7 @@ export interface InMemoryStoredLinkSlotOverride extends Omit<StoredLinkSlotOverr
 }
 
 export interface InMemoryOntologyState {
+  readonly vectors: Map<string, Map<string, StoredObjectVector>>
   readonly commitsById: Map<string, OntologyCommitRecord>
   readonly commitIdByIdempotency: Map<string, string>
   readonly commitIdByOrigin: Map<string, string>
@@ -73,6 +77,7 @@ export interface InMemoryOntologyStorageTestHooks {
 
 export function createInMemoryOntologyState(): InMemoryOntologyState {
   return {
+    vectors: new Map(),
     commitsById: new Map(),
     commitIdByIdempotency: new Map(),
     commitIdByOrigin: new Map(),

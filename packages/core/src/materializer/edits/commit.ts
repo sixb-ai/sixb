@@ -34,6 +34,7 @@ import { compileEditExecutionUnits, type EditExecutionUnit } from "./execution-u
 import { loadEditWorkingState } from "./load-state"
 import { applyEditOperation, type EditUndoJournal, undoEditJournal } from "./operations"
 import { stageEditPlan } from "./plan"
+import { commitVectorWrites } from "./vectors"
 import type { EditWorkingState } from "./working-state"
 
 type NormalizedEditCommit = ReturnType<typeof normalizeOntologyEditCommit>
@@ -182,7 +183,8 @@ async function executeEditTransaction(
     workingState,
     editPlanContext(command)
   )
-  await drainStagedWork(context, storage.ontology.materializations, session)
+  await drainStagedWork(context, storage.ontology, session)
+  await commitVectorWrites(context, storage, command.input, command.identity.commitId, session)
   const eventCount = await drainStagedEvents(
     context,
     storage.ontology.materializations,
@@ -234,6 +236,9 @@ function buildEditCommit(
       kind: "edit",
       mode: command.input.mode,
       operationCount: command.input.operations.length,
+      ...(command.input.mode === "atomic" && command.input.vectorWrites?.length
+        ? { vectorWriteCount: command.input.vectorWrites.length }
+        : {}),
     },
     committedAt: command.identity.committedAt,
   }

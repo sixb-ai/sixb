@@ -3,6 +3,7 @@
  * Created via `sixb.objects(MyType).byId("id-1")`, it provides link/unlink and
  * per-property telemetry appenders with compile-time unit and value type safety.
  */
+
 import type { ActionDefinition } from "../../actions"
 import type { ObjectLink, ObjectRef, ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
@@ -16,6 +17,7 @@ import {
 import type { ExecutionObjectContext, ResolvedLinkContext } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
 import { deleteObject, restoreObject } from "../object"
+import { createObjectVectorHandle } from "../vectors/handle"
 import { createTelemetryChannel } from "./telemetry-channel"
 
 type ObjectRefInput = ObjectRef
@@ -26,6 +28,7 @@ export function createObjectByIdHandle<
   TValueTypes extends readonly ValueType[],
 >(ctx: ExecutionObjectContext, primaryId: string): ObjectByIdHandle<TObjectType, TValueTypes> {
   const objectHandle = {
+    vector: (profileName: string) => createObjectVectorHandle(ctx, primaryId, profileName),
     get: async () => {
       const row = await ctx.objectReader.getByPrimaryId({
         objectTypeId: ctx.objectType.id,

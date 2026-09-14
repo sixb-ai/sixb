@@ -15,6 +15,7 @@ import type {
   Schema,
   ValueType,
 } from "../ontology/types"
+import { snapshotVectorProfiles } from "../ontology/vector-profiles"
 import type { CompiledSelectedObjectReadScope } from "../storage/objects/types"
 
 /** Public ontology operations that may cross an execution-bound authorization boundary. */
@@ -418,7 +419,18 @@ function projectSearch(
     search.vector.source.every((propertyId) => visiblePropertyIds.has(propertyId))
       ? { property: search.vector.property, source: [...search.vector.source] }
       : undefined
+  const vectors =
+    search.vectors === undefined
+      ? undefined
+      : snapshotVectorProfiles(
+          Object.fromEntries(
+            Object.entries(search.vectors).filter(([, profile]) =>
+              profile.source.every((id) => visiblePropertyIds.has(id))
+            )
+          )
+        )
   const projected: ObjectTypeSearchMetadata = {
+    ...(vectors === undefined || Object.keys(vectors).length === 0 ? {} : { vectors }),
     ...(title === undefined ? {} : { title }),
     ...(defaultText === undefined ? {} : { defaultText }),
     ...(exact === undefined ? {} : { exact }),

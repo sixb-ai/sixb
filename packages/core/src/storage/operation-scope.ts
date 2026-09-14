@@ -230,6 +230,7 @@ export function createOntologyOperationScope<T extends OntologyStorage>(
     sources: createOperationScopedFacade(target.sources, scope),
     materializations: createOperationScopedFacade(target.materializations, scope),
     outbox: createOperationScopedFacade(target.outbox, scope),
+    ...(target.vectors ? { vectors: createOperationScopedFacade(target.vectors, scope) } : {}),
   }) as T
 }
 

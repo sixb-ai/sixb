@@ -9,6 +9,7 @@
  * This file defines the value-shape side of that model.
  */
 
+import type { EmbeddingModelRef } from "../models/embedding-model"
 import type { QuantitativeTypeId } from "./units"
 
 /**
@@ -202,7 +203,15 @@ export interface PropertyQueryMetadata {
  * Search profiles decide which fields a global or type-scoped search uses.
  * Primary ids remain exact-matchable even if omitted here.
  */
+export interface ObjectVectorSearchProfile {
+  /** Ordered text sources. Sixb prepares their input deterministically. */
+  readonly source: readonly string[]
+  readonly model: EmbeddingModelRef
+}
+
 export interface ObjectTypeSearchMetadata {
+  /** Independent named representations; each query targets exactly one profile. */
+  readonly vectors?: Readonly<Record<string, ObjectVectorSearchProfile>>
   /** Display/title property used in search results. */
   title?: string
   /** Default keyword-search fields for this object type. */

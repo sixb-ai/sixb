@@ -1,3 +1,4 @@
+import { hasVectorProfile } from "../../../objects/vectors/query"
 import {
   assertObjectReadFacetCount,
   assertObjectReadOutputWithinLimit,
@@ -74,7 +75,10 @@ export function createInMemorySelectedReader(
       const universe = resolveSelectedReadUniverse(source, plan, limits)
       const result = evaluateObjectQuery(input.query, universe)
       return visible({
-        objects: result.entries.map((entry) => structuredClone(entry.row)),
+        objects: result.entries.map((entry) => ({
+          ...structuredClone(entry.row),
+          ...(hasVectorProfile(input.query) ? { score: entry.score } : {}),
+        })),
         hasMore: result.hasMore,
         nextPageToken: result.nextPageToken,
         ...(input.includeTotal === false ? {} : { total: result.total }),

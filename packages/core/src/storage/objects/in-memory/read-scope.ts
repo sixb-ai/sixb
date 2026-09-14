@@ -137,15 +137,16 @@ export function resolveSelectedReadUniverse(
     links.set(key, redactLinkRow(selected.row, selected.propertyIds))
   }
 
-  return createReadUniverse(source.projectId, objects, links, objectProperties)
+  return createReadUniverse(source, objects, links, objectProperties)
 }
 
 function createReadUniverse(
-  projectId: string,
+  source: InMemoryReadSource,
   objects: ReadonlyMap<string, ObjectRow>,
   links: ReadonlyMap<string, ObjectLinkRow>,
   objectProperties: ReadonlyMap<string, ReadonlySet<string>>
 ): InMemoryReadUniverse {
+  const projectId = source.projectId
   const linksBySource = new Map<string, ObjectLinkRow[]>()
   for (const link of links.values()) {
     const key = sourceLinkBucketKey(link.projectId, link.sourceTypeId, link.sourceId)
@@ -159,6 +160,12 @@ function createReadUniverse(
     links,
     linksBySource,
     objectProperties,
+    getVector: (ref, profile) => {
+      const key = rowIdentityKeyParts(ref.objectTypeId, ref.primaryId)
+      if (!objects.has(key)) return undefined
+      const value = source.getVector?.(ref, profile)
+      return value?.source.every((id) => objectProperties.get(key)?.has(id)) ? value : undefined
+    },
     objectsOfType: (objectTypeId) =>
       [...objects.values()].filter((row) => row.objectTypeId === objectTypeId),
     getObject: (objectTypeId, primaryId) =>

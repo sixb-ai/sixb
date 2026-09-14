@@ -27,6 +27,7 @@ export type {
   ObjectTypeSearchMetadata,
   ObjectTypeWithPropertyTokens,
   ObjectTypeWithTokens,
+  ObjectVectorSearchProfile,
   Ontology,
   OntologyDefinitionCatalog,
   OntologyRegistryOptions,
@@ -922,6 +923,10 @@ export type {
   ObjectQueryLinksResult,
   ObjectsRuntime,
 } from "./objects/execution"
+export type {
+  ObjectVectorHandle,
+  VectorProfileName,
+} from "./objects/vectors/types"
 export type { PipelineRunsRuntime, PipelinesRuntime } from "./pipelines/execution"
 export type {
   ProjectionRunsRuntime,
@@ -1084,11 +1089,19 @@ export type {
 // ── Models ──────────────────────────────────────────────────
 
 export type {
+  EmbeddingModel,
+  EmbeddingModelCatalog,
+  EmbeddingModelDefinition,
+  EmbeddingModelEntry,
+  EmbeddingModelRef,
+  EmbeddingModelRequest,
+  EmbeddingModelResult,
   LanguageModelCatalog,
   LanguageModelEntry,
   LanguageModelRef,
   ModelCatalog,
   ModelCatalogInput,
+  ModelRef,
 } from "./models"
 export type {
   InferLanguageModelOutput,

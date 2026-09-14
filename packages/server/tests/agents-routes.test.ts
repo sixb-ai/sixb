@@ -42,7 +42,7 @@ const model = {
   stream: async () => {
     throw new Error("Must not invoke the route test model")
   },
-} satisfies ModelCatalogInput["language"][number]
+} satisfies NonNullable<ModelCatalogInput["language"]>[number]
 
 const FAILURE: SixbFailure<AgentRunFailureCode> = {
   code: "internal.unexpected",

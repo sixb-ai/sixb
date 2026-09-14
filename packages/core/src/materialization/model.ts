@@ -3,6 +3,7 @@ import type { EventOrigin } from "../events/envelope"
 import type { PropertyChange, PropertyChangeMap } from "../events/property-changes"
 import type { JsonValue } from "../json"
 import type { ProjectionProtocolIdentity, ProjectionRunFailureCode } from "../projections/types"
+import type { ObjectVectorWrite } from "./vectors"
 
 export type { ProjectionProtocolIdentity } from "../projections/types"
 
@@ -125,6 +126,7 @@ export type OntologyEditCommit =
       readonly source:
         | { readonly kind: "action"; readonly actionId: string; readonly runId: string }
         | { readonly kind: "runtime"; readonly requestId: string }
+      readonly vectorWrites?: readonly ObjectVectorWrite[]
       readonly expectedObjects: readonly ExpectedObjectRevision[]
       readonly expectedLinks: readonly ExpectedLinkRevision[]
       readonly expectedLinkScopes: readonly ExpectedLinkScopeRevision[]
