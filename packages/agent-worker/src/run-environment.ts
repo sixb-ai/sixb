@@ -324,7 +324,12 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       attachmentContext,
       tools,
       prepareStep: mediaBridge.prepareStep,
-      systemPrompt: renderAgentSystemPrompt({ mode, instructions: plan.instructions, skills }),
+      systemPrompt: renderAgentSystemPrompt({
+        mode,
+        instructions: plan.instructions,
+        skills,
+        workspace: input.workspace?.promptContext,
+      }),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
       streamSink: context.streamSink,

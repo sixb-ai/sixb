@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test"
-import { SandboxError, SandboxStateUnavailableError } from "@sixb/core/sandboxes"
+import {
+  SandboxError,
+  type SandboxRequestCredential,
+  SandboxStateUnavailableError,
+} from "@sixb/core/sandboxes"
 import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import type { VercelPersistenceOperations } from "../src/vercel-persistence"
 import { VercelSandboxFactory } from "../src/vercel-sandbox-factory"
@@ -311,5 +315,71 @@ describe("Vercel named persistence", () => {
       })
     ).rejects.toThrow()
     expect(f.requests).toHaveLength(0)
+  })
+
+  test("credentials use pinned session policy updates, never persistent defaults or guest files", async () => {
+    // Regression proof: omit transforms from withRequestCredentials; the wire assertion fails.
+    const f = fixture()
+    const options = {
+      network: {
+        mode: "restricted" as const,
+        allow: [{ name: "git", origin: "https://github.com" }],
+      },
+    }
+    const sandbox = await f.factory.persistence.create("workspace-1", options)
+    const credentials: SandboxRequestCredential[] = [
+      {
+        origin: "https://github.com",
+        path: "/acme/repo.git/git-upload-pack",
+        method: "POST",
+        headers: { Authorization: "Basic opaque-secret" },
+      },
+    ]
+    await sandbox.setRequestCredentials!(credentials)
+    const injection = f.requests.at(-1)!
+    expect(injection.path.split("?")[0]).toBe("/v2/sandboxes/sessions/session-1/network-policy")
+    expect(JSON.stringify(injection.body)).toContain("opaque-secret")
+    expect(JSON.stringify(injection.body)).toContain("/acme/repo.git/git-upload-pack")
+    expect(JSON.stringify(injection.body)).toContain("POST")
+    expect(
+      JSON.stringify(f.requests.find((r) => r.path.split("?")[0] === "/v2/sandboxes")?.body)
+    ).not.toContain("opaque-secret")
+    await sandbox.setRequestCredentials!([])
+    expect(JSON.stringify(f.requests.at(-1)?.body)).not.toContain("opaque-secret")
+    await sandbox.stop()
+    const resumed = await f.factory.persistence.resume("workspace-1", options)
+    expect(JSON.stringify(f.requests.at(-1)?.body)).not.toContain("opaque-secret")
+    await expect(sandbox.setRequestCredentials!(credentials)).rejects.toThrow()
+    await resumed.setRequestCredentials!([
+      { ...credentials[0]!, headers: { Authorization: "Basic fresh-secret" } },
+    ])
+    expect(f.requests.at(-1)?.path.split("?")[0]).toBe(
+      "/v2/sandboxes/sessions/session-2/network-policy"
+    )
+    expect(JSON.stringify(f.requests.at(-1)?.body)).toContain("fresh-secret")
+    expect(
+      f.requests
+        .filter((r) => JSON.stringify(r.body).includes("secret"))
+        .every(
+          (r) => r.path.includes("/sessions/") && r.path.split("?")[0]?.endsWith("/network-policy")
+        )
+    ).toBe(true)
+    await resumed.stop()
+  })
+
+  test("credential injection failures do not expose provider request details", async () => {
+    const f = fixture()
+    const sandbox = await f.factory.persistence.create("workspace-1", { network: { mode: "all" } })
+    f.failNetwork()
+    await expect(
+      sandbox.setRequestCredentials!([
+        {
+          origin: "https://github.com",
+          path: "/acme/repo.git/info/refs",
+          method: "GET",
+          headers: { Authorization: "Basic private-token" },
+        },
+      ])
+    ).rejects.toThrow("[Sandbox] Vercel credential injection update failed.")
   })
 })

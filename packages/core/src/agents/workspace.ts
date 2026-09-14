@@ -3,7 +3,7 @@ import { OntologyValidationError } from "../ontology/errors"
 import type { OntologyRegistry } from "../ontology/registry"
 import { assertValidSchema } from "../ontology/validation/definition"
 import type { Sixb } from "../runtime/sixb"
-import type { SandboxNetworkPolicy } from "../sandboxes/sandbox"
+import type { SandboxNetworkPolicy, SandboxRequestCredential } from "../sandboxes/sandbox"
 import type { InferParams, ParamsConfig } from "../shared/params/types"
 import { coerceParamsToTyped, normalizeParams } from "../shared/params/validation"
 import type { AgentThreadWorkspace } from "../storage/agents/types"
@@ -32,9 +32,27 @@ export interface AgentWorkspaceResolveContext<TParams = Record<string, unknown>>
   readonly sixb: Sixb
 }
 
+/** Per-run repository access. Kept host-side, never stored with a thread or recipe. */
+export interface AgentWorkspaceCredentials {
+  readonly requests: readonly SandboxRequestCredential[]
+  readonly expiresAt: Date
+  revoke(): Promise<void>
+}
+
+/** Repository-specific authentication supplied by an integration, not a sandbox provider.
+ * authorize must grant source.access (read by default), or reject.
+ */
+export interface AgentWorkspaceAuth {
+  authorize(input: {
+    readonly source: ResolvedAgentWorkspace["source"]
+    readonly signal: AbortSignal
+  }): Promise<AgentWorkspaceCredentials>
+}
+
 // The recipe both declares and consumes this schema: keep it invariant instead of asking
 // TypeScript to compare the recursive ontology inference through callback variance.
 export interface AgentWorkspaceConfig<in out TParams extends ParamsConfig = ParamsConfig> {
+  readonly auth?: AgentWorkspaceAuth
   readonly params: TParams
   readonly resolve: (
     context: AgentWorkspaceResolveContext<InferParams<NoInfer<TParams>>>
@@ -43,6 +61,7 @@ export interface AgentWorkspaceConfig<in out TParams extends ParamsConfig = Para
 
 /** Registered project recipe; only thread params cross the durable boundary. */
 export interface AgentWorkspaceDefinition {
+  readonly auth?: AgentWorkspaceAuth
   readonly params: ParamsConfig
   readonly resolve: (context: AgentWorkspaceResolveContext) => Promise<ResolvedAgentWorkspace>
 }
@@ -59,9 +78,12 @@ export function createAgentWorkspaceDefinition<TParams extends ParamsConfig>(
     throw new AgentDefinitionError("[Sixb] agentWorkspace requires params and a resolve function.")
   }
   for (const key of Object.keys(config)) {
-    if (key !== "params" && key !== "resolve") {
+    if (key !== "params" && key !== "resolve" && key !== "auth") {
       throw new AgentDefinitionError("[Sixb] Unknown agentWorkspace configuration field.")
     }
+  }
+  if (config.auth !== undefined && typeof config.auth?.authorize !== "function") {
+    throw new AgentDefinitionError("[Sixb] agentWorkspace.auth requires an authorize function.")
   }
   const invalid = (path: string) =>
     new AgentDefinitionError(
@@ -98,9 +120,11 @@ export function createAgentWorkspaceDefinition<TParams extends ParamsConfig>(
   // Capture the function too: later mutation of application config must not change this host.
   // Erase inference only after capturing its schema; every invocation validates and coerces below.
   const resolve = config.resolve as AgentWorkspaceConfig["resolve"]
+  const authorize = config.auth?.authorize.bind(config.auth)
   deepFreeze(params)
   return Object.freeze({
     params,
+    ...(authorize ? { auth: Object.freeze({ authorize }) } : {}),
     resolve: async ({ params: input, sixb }: AgentWorkspaceResolveContext) => {
       const binding = normalizeAgentWorkspaceBinding({ params }, { params: input }, ontology)
       const typed = coerceParamsToTyped(params, binding.params, ontology.getValueTypesById())

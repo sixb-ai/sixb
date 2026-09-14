@@ -599,6 +599,7 @@ export type {
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
   SandboxPersistence,
+  SandboxRequestCredential,
   SandboxStatus,
 } from "./sandboxes"
 export {
@@ -1066,7 +1067,9 @@ export {
   requestAgentRun,
 } from "./agents"
 export type {
+  AgentWorkspaceAuth,
   AgentWorkspaceConfig,
+  AgentWorkspaceCredentials,
   AgentWorkspaceDefinition,
   AgentWorkspaceResolveContext,
   ResolvedAgentWorkspace,

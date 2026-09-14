@@ -9,13 +9,16 @@ import type {
   ConversationAgentRunRecord,
 } from "@sixb/core/storage"
 import { waitForAbort } from "./abort"
+import type { AgentWorkspacePromptContext } from "./agent-prompt"
 import { AgentExecutionLostError } from "./errors"
 import type { AgentExecutionContext } from "./types"
+import { WorkspaceAuthSession } from "./workspace-auth"
 import { workspaceNetwork } from "./workspace-network"
 
 const OPERATION_TIMEOUT_MS = 120_000
 
 export interface AgentWorkspaceLifecycle {
+  readonly promptContext: AgentWorkspacePromptContext
   readonly sandbox: Sandbox
   readonly env: Readonly<Record<string, string>>
   save(): Promise<void>
@@ -33,6 +36,7 @@ export async function openAgentWorkspace(input: {
   readonly thread: AgentThreadRecord
   readonly run: ConversationAgentRunRecord
   readonly signal: AbortSignal
+  readonly onAuthFailure: (error: Error) => void
 }): Promise<AgentWorkspaceLifecycle> {
   const { context, thread, run, signal } = input
   const persistence = context.sandboxes.persistence
@@ -51,13 +55,19 @@ export async function openAgentWorkspace(input: {
     )
   )
   signal.throwIfAborted()
-  // Only credential-free HTTPS repositories are supported before the Git auth slice.
+  // Credentials are delivered separately, never embedded in the Git URL.
   let url: URL
   try {
     url = new URL(recipe.source.url)
   } catch {
     throw workspaceError("source URL is invalid.")
   }
+  if (
+    recipe.source.access !== undefined &&
+    recipe.source.access !== "read" &&
+    recipe.source.access !== "write"
+  )
+    throw workspaceError("source access must be read or write.")
   if (
     recipe.source.type !== "git" ||
     url.protocol !== "https:" ||
@@ -154,6 +164,7 @@ export async function openAgentWorkspace(input: {
     .update(JSON.stringify([context.id, thread.id, generation]))
     .digest("hex")}`
   let sandbox: Sandbox | undefined
+  let auth: WorkspaceAuthSession | undefined
   let initialized = state.initialized
   try {
     await assertOwner()
@@ -166,6 +177,17 @@ export async function openAgentWorkspace(input: {
     sandbox = repositorySandbox(acquired)
     await assertOwner()
     signal.throwIfAborted()
+    if (input.definition.auth) {
+      auth = new WorkspaceAuthSession({
+        auth: input.definition.auth,
+        source: recipe.source,
+        sandbox: acquired,
+        signal,
+        assertOwner,
+        onFailure: input.onAuthFailure,
+      })
+      await auth.start()
+    }
     if (!initialized) {
       await checkedCommand(acquired, "git", ["clone", "--", url.href, "repository"], { signal })
       if (recipe.source.revision) {
@@ -183,6 +205,11 @@ export async function openAgentWorkspace(input: {
     await assertOwner()
     signal.throwIfAborted()
   } catch (error) {
+    try {
+      await auth?.close()
+    } catch {
+      console.error("[SixbAgentWorker] Workspace authentication cleanup failed during acquisition.")
+    }
     // Never destroy persistent state. A lost/uncertain acquisition is quarantined, not retried.
     try {
       await assertOwner()
@@ -251,6 +278,14 @@ export async function openAgentWorkspace(input: {
   }
   return {
     sandbox: guarded,
+    promptContext: {
+      workingDirectory: guarded.workingDirectory,
+      source: {
+        type: recipe.source.type,
+        url: url.href,
+        ...(auth ? { authenticatedAccess: recipe.source.access ?? "read" } : {}),
+      },
+    },
     env: recipe.env ?? {},
     save() {
       if (saving) return saving
@@ -260,6 +295,7 @@ export async function openAgentWorkspace(input: {
         try {
           await bounded(Promise.allSettled([...pending]))
           await assertOwner()
+          await auth?.close()
           if (uncertainOperation) throw workspaceError("has an unconfirmed sandbox operation.")
           await cleanRunFiles(session)
           await assertOwner()
@@ -267,6 +303,11 @@ export async function openAgentWorkspace(input: {
           await bounded(session.stop())
           await transition("ready", true)
         } catch (error) {
+          try {
+            await auth?.close()
+          } catch {
+            // close is memoized and the workspace remains quarantined below.
+          }
           try {
             await assertOwner()
             // Even failed cleanup must close the owned VM's network/process lifetime. Its
