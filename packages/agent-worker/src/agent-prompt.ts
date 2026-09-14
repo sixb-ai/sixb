@@ -78,6 +78,7 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
         : undefined
     ),
     promptSection("agent_instructions", input.instructions),
+    promptSection("workspace", input.workspace && renderWorkspaceContext(input.workspace)),
     promptSection(
       "sixb_mode_rules",
       input.mode === "conversation"
@@ -149,4 +150,33 @@ function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSk
 function promptSection(tag: string, body: string | undefined): string {
   if (!body?.trim()) return ""
   return `<${tag}>\n${body.trim()}\n</${tag}>`
+}
+
+function renderWorkspaceContext(workspace: AgentWorkspacePromptContext): string {
+  return [
+    `Working directory: ${quoteWorkspaceValue(workspace.workingDirectory)}`,
+    "Files persist between runs in this conversation, subject to workspace retention.",
+    ...renderWorkspaceSource(workspace.source),
+  ].join("\n")
+}
+
+function renderWorkspaceSource(source: AgentWorkspacePromptContext["source"]): string[] {
+  switch (source.type) {
+    case "git":
+      return [
+        `Source (git): ${quoteWorkspaceValue(source.url)}`,
+        ...(source.authenticatedAccess
+          ? [
+              "Git authentication is managed automatically for this repository; use Git normally without retrieving credentials.",
+              `Authenticated access: ${source.authenticatedAccess === "write" ? "read and write" : "read"}.`,
+            ]
+          : []),
+        "Do not commit or push unless the user requests it.",
+      ]
+  }
+}
+
+// Quote dynamic values as data and prevent them from introducing prompt section tags.
+function quoteWorkspaceValue(value: string): string {
+  return JSON.stringify(value).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")
 }

@@ -177,6 +177,14 @@ new VercelSandboxFactory({
 })
 ```
 
+## Credential injection
+
+Persistent sessions support `sandbox.setRequestCredentials()`: replace host-side Authorization
+injection for exact HTTPS paths and GET/POST methods, or pass `[]` to remove it. Injection never
+widens the egress allowlist, changes persistent defaults or writes secrets inside the VM.
+The worker manages workspace token issuance, renewal and revocation; stop removes network access
+before saving. This capability does not guarantee revocation after a worker crash.
+
 ## Tests
 
 ```bash
