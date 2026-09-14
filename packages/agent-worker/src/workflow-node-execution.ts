@@ -533,6 +533,8 @@ async function finishWorkflowAgentNodeFailed(input: {
             workflowRunId: input.nodeRun.workflowRunId,
             nodeId: input.nodeRun.nodeId,
             nodeRunId: input.nodeRun.id,
+            failurePhase: input.failurePhase,
+            modelId: input.modelId,
             child: { type: "agent", agentStepId: input.agentStepId },
           })
       : createSixbError(

@@ -23,6 +23,7 @@ import {
   ModelProviderError,
   type ModelReasoningCapabilities,
   type ModelReportedCost,
+  type ModelResponseFormat,
   type ModelToolOutput,
   type ModelUsage,
   modelReasoningSupportIssue,
@@ -32,7 +33,7 @@ import {
 } from "@sixb/core/models"
 import { withAutomaticPromptCaching } from "./provider-caching"
 import { decodeServerSentEvents } from "./sse"
-import { gatewayOutputSchema } from "./structured-output"
+import { isStrictGatewaySchema } from "./structured-output"
 
 type ValueSource<T> = T | (() => T)
 
@@ -551,15 +552,8 @@ class VercelGatewayLanguageModel implements LanguageModel {
         )
       }
     }
-    const nativeOutputSchema =
-      request.responseFormat !== undefined && (await this.supportsNativeStructuredOutput())
-        ? gatewayOutputSchema(request.responseFormat.schema)
-        : undefined
-    if (request.responseFormat !== undefined && nativeOutputSchema === undefined) {
-      throw new UnsupportedModelFeatureError(
-        `[SixbVercelGateway] Structured output requires native support for model '${this.modelId}' and the supplied schema. Choose a supported model and schema; JSON-tool fallback is not supported.`
-      )
-    }
+    const responseFormat = request.responseFormat
+    if (responseFormat) await this.validateResponseFormat(responseFormat)
     const tools: JsonObject[] = [
       ...(this.options.providerTools ?? []),
       ...request.tools.map((tool) => ({
@@ -567,7 +561,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
         name: tool.name,
         description: tool.description,
         parameters: tool.inputSchema,
-        strict: gatewayOutputSchema(tool.inputSchema) !== undefined,
+        strict: isStrictGatewaySchema(tool.inputSchema),
       })),
     ]
     const providerOptions = withAutomaticPromptCaching(
@@ -594,17 +588,17 @@ class VercelGatewayLanguageModel implements LanguageModel {
           this.definition.capabilities.reasoning,
           this.modelId
         ) ?? {}),
-        ...(nativeOutputSchema === undefined || request.responseFormat === undefined
+        ...(responseFormat === undefined
           ? {}
           : {
               text: {
                 format: {
                   type: "json_schema",
-                  name: request.responseFormat.name,
-                  ...(request.responseFormat.description === undefined
+                  name: responseFormat.name,
+                  ...(responseFormat.description === undefined
                     ? {}
-                    : { description: request.responseFormat.description }),
-                  schema: nativeOutputSchema,
+                    : { description: responseFormat.description }),
+                  schema: responseFormat.schema,
                   strict: true,
                 },
               },
@@ -613,16 +607,31 @@ class VercelGatewayLanguageModel implements LanguageModel {
     }
   }
 
-  private async supportsNativeStructuredOutput(): Promise<boolean> {
-    const declared = this.definition.capabilities.nativeStructuredOutput
-    if (declared !== undefined) return declared
-    try {
-      return (
-        !this.metadataResolved &&
-        (await this.catalog.get(this.modelId))?.capabilities.nativeStructuredOutput === true
+  async validateResponseFormat(format: ModelResponseFormat): Promise<void> {
+    if (!isStrictGatewaySchema(format.schema)) {
+      throw new UnsupportedModelFeatureError(
+        `[SixbVercelGateway] Output schema for '${this.modelId}' does not satisfy strict Responses object rules. Use valid JSON Schema types, require every property, and set additionalProperties to false on every object.`,
+        { reason: "unsupported-schema" }
       )
-    } catch {
-      return false
+    }
+    if ((await this.structuredOutputCapability()) === false) {
+      throw new UnsupportedModelFeatureError(
+        `[SixbVercelGateway] Structured output is explicitly unsupported for model '${this.modelId}'. Choose a supported model.`,
+        { reason: "unsupported-model" }
+      )
+    }
+    // Gateway's response_format metadata is incomplete. Unknown support must not become false
+    // (or true): send the schema and let the endpoint respond; the model loop validates output.
+  }
+
+  private async structuredOutputCapability(): Promise<boolean | undefined> {
+    const declared = this.definition.capabilities.nativeStructuredOutput
+    if (declared !== undefined || this.metadataResolved) return declared
+    try {
+      return (await this.catalog.get(this.modelId))?.capabilities.nativeStructuredOutput
+    } catch (error) {
+      if (!(error instanceof ModelCatalogUnavailableError)) throw error
+      return undefined
     }
   }
 
