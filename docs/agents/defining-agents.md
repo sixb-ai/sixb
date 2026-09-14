@@ -82,32 +82,32 @@ Provider definitions supply capabilities, context limits, and supported reasonin
 runtime accepts named reasoning levels or an exact `{ budgetTokens }` budget when supported;
 the composer offers the named levels. Unknown capabilities are not treated as unsupported.
 
-## Workspace configuration (foundation)
+## Workspace configuration
 
-`agentWorkspace` declares one project recipe. It does not enable a workspace on every thread.
-It requires a sandbox factory exposing `resume()` for persistent creation and resume.
-
-**This release stores thread bindings only. Workspace runs and retries are rejected until the
-persistent execution lifecycle is available. Existing threads without a workspace are unchanged.**
+`agentWorkspace` configures persistent checkouts for [opt-in threads](./running-and-streaming.md#workspace-bindings).
+It requires a sandbox factory with persistence support. Other threads, workflows and subagents
+remain ephemeral. This example assumes an application-defined `Client` with a `repositoryUrl`:
 
 ```ts
-import { createSixb, optional, param } from "@sixb/core"
+import { createSixb, param } from "@sixb/core"
 
 const host = await createSixb({
   // ...ontology, models, storage, broker, queues, persistent sandbox factory
   agentWorkspace: {
     params: {
       clientId: param("string"),
-      branch: optional(param("string")),
     },
     resolve: async ({ params, sixb }) => {
-      // Application-owned helper: check access using the current execution's SDK.
-      const client = await requireRepositoryAccess(sixb, params.clientId)
+      const client = await sixb.objects(Client).get(params.clientId)
+      if (!client?.properties.repositoryUrl) throw new Error("Client repository unavailable")
       return {
         source: {
           type: "git",
-          url: client.repositoryUrl,
-          revision: params.branch ?? client.defaultBranch,
+          url: client.properties.repositoryUrl,
+        },
+        network: {
+          mode: "restricted",
+          allow: [{ name: "npm", origin: "https://registry.npmjs.org" }],
         },
         setup: ["bun install"],
       }
@@ -116,17 +116,16 @@ const host = await createSixb({
 })
 ```
 
-Parameters use the same `param()` / `optional()` builders as Actions, including nullable values,
-enums and object references. The schema and resolver are captured when the host is created.
-Only validated JSON parameters are stored; dates are restored to `Date` when resolving.
-Object references validate shape and type, not access: the resolver must check current authority.
-
-Thread creation never invokes the resolver or provisions a sandbox. Initialization, repository
-identity checks and snapshot recovery belong to the subsequent execution lifecycle.
-The recipe may declare guest-readable `env`; never use it for Git credentials.
-Git credential strategies are not supported in this foundation.
-
-See [thread workspace bindings](./running-and-streaming.md#workspace-bindings).
+- `params` uses the Action parameter builders and validation. Object references do not grant access.
+- `resolve` runs before each acquisition, not at thread creation, with the current execution's
+  scoped SDK. Your resolver must enforce any repository-access rules.
+- `source` currently supports credential-free HTTPS Git only. Its URL and initial `revision`
+  must remain unchanged on resume; the agent may switch branches. No automatic fetch, commit or push.
+- `setup` runs once on initialization. `env` is refreshed each run and is guest-readable:
+  never put Git credentials in it.
+- `network` uses `SandboxNetworkPolicy`, reapplied each run. The API and repository are always
+  allowed; omitted/`none` adds nothing, `restricted` adds named HTTP(S) origins, and `all` opens
+  Internet access. Include registry/redirect destinations; provider enforcement may be hostname-level.
 
 ## Instructions and tools
 

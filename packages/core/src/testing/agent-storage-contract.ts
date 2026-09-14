@@ -291,6 +291,123 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
   }
 
   describe(label, () => {
+    test("fences workspace ownership across reclamation and explicit recreation", async () => {
+      // Regression proof: remove the busy-state or owner-token checks in transitionAgentWorkspace.
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput({ workspace: { params: {} } }))
+        const input = runInput({ execution: execution("first", new Date("2099-01-01")) })
+        await createTestAgentExecution(fixture, {
+          projectId,
+          runId: input.id,
+          executionId: input.executionId,
+          authority: "inherited",
+        })
+        await storage.runs.create(input)
+        await storage.runs.start(input)
+        const acquire = {
+          projectId,
+          id: "thr_1",
+          action: "acquire" as const,
+          runId: input.id,
+          executionToken: "first",
+          generation: "generation-1",
+          sourceFingerprint: "a".repeat(64),
+        }
+        const attempts = await Promise.allSettled([
+          storage.threads.transitionWorkspace(acquire),
+          storage.threads.transitionWorkspace(acquire),
+        ])
+        expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1)
+        expect(
+          (await storage.threads.getById({ projectId, id: "thr_1" }))?.workspaceState
+        ).toMatchObject({ status: "busy", initialized: false })
+        await expectAgentError(storage.threads.transitionWorkspace(acquire), "invalid_state")
+        await storage.runs.reclaim({
+          projectId,
+          id: input.id,
+          execution: execution("second", new Date("2099-01-01")),
+        })
+        await expectAgentError(
+          storage.threads.transitionWorkspace({
+            ...acquire,
+            executionToken: "second",
+          }),
+          "invalid_state"
+        )
+        await expectAgentError(
+          storage.threads.transitionWorkspace({
+            ...acquire,
+            action: "settle",
+            status: "ready",
+            initialized: true,
+          }),
+          "execution_lost"
+        )
+        const recreate = {
+          projectId,
+          id: "thr_1",
+          action: "recreate" as const,
+          expectedGeneration: "generation-1",
+          generation: "generation-2",
+        }
+        await expectAgentError(storage.threads.transitionWorkspace(recreate), "invalid_state")
+        await storage.runs.finish({
+          projectId,
+          id: input.id,
+          executionToken: "second",
+          status: "failed",
+        })
+        expect(await storage.threads.transitionWorkspace(recreate)).toEqual({
+          generation: "generation-2",
+          status: "new",
+          initialized: false,
+        })
+        await expectAgentError(storage.threads.transitionWorkspace(recreate), "invalid_state")
+      })
+    })
+
+    test("resumes only confirmed workspace state with the pinned source", async () => {
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput({ workspace: { params: {} } }))
+        const input = runInput({ execution: execution("owner", new Date("2099-01-01")) })
+        await createTestAgentExecution(fixture, {
+          projectId,
+          runId: input.id,
+          executionId: input.executionId,
+          authority: "inherited",
+        })
+        await storage.runs.create(input)
+        await storage.runs.start(input)
+        const acquire = {
+          projectId,
+          id: "thr_1",
+          action: "acquire" as const,
+          runId: input.id,
+          executionToken: "owner",
+          generation: "generation",
+          sourceFingerprint: "b".repeat(64),
+        }
+        await storage.threads.transitionWorkspace(acquire)
+        await storage.threads.transitionWorkspace({
+          ...acquire,
+          action: "settle",
+          status: "ready",
+          initialized: true,
+        })
+        await expectAgentError(
+          storage.threads.transitionWorkspace({
+            ...acquire,
+            sourceFingerprint: "c".repeat(64),
+          }),
+          "invalid_state"
+        )
+        expect(await storage.threads.transitionWorkspace(acquire)).toMatchObject({
+          status: "busy",
+          initialized: true,
+        })
+      })
+    })
+
     test("snapshots workspace bindings without accepting runtime state or credentials", async () => {
       // Regression proof: remove snapshotAgentThreadWorkspace from a provider's thread create.
       await withStorage(async (storage) => {

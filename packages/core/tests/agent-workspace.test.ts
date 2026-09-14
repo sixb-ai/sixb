@@ -169,17 +169,38 @@ describe("Agent workspace binding", () => {
     expect((await sixb.agent.threads.getById(thread.id))?.workspace).toEqual(thread.workspace)
   })
 
-  test("denies workspace runs and retries before modifying messages or dispatching jobs", async () => {
+  test("admits fresh workspaces but denies runs and retries after uncertain work", async () => {
     // Regression proof: remove assertWorkspaceExecutionAvailable in requestAgentRun/retryAgentRun.
     const { host, sixb, storage } = setup(recipe())
     const thread = await sixb.agent.threads.create({ workspace: { params: { clientId: "acme" } } })
+    const admitted = await sixb.agent.runs.request({ threadId: thread.id, text: "Do some work" })
+    await storage.agents.runs.start({
+      projectId: host.id,
+      id: admitted.run.id,
+      execution: { token: "owner", queueLeaseExpiresAt: new Date("2099-01-01") },
+    })
+    await storage.agents.threads.transitionWorkspace({
+      projectId: host.id,
+      id: thread.id,
+      action: "acquire",
+      runId: admitted.run.id,
+      executionToken: "owner",
+      generation: "test-generation",
+      sourceFingerprint: "a".repeat(64),
+    })
+    await storage.agents.runs.finish({
+      projectId: host.id,
+      id: admitted.run.id,
+      executionToken: "owner",
+      status: "failed",
+    })
     await expect(
-      sixb.agent.runs.request({ threadId: thread.id, text: "Do some work" })
+      sixb.agent.runs.request({ threadId: thread.id, text: "Try again" })
     ).rejects.toMatchObject({ code: "workspace_execution_unavailable" })
     expect(
       (await storage.agents.messages.list({ projectId: host.id, threadId: thread.id })).messages
-    ).toHaveLength(0)
-    expect((await sixb.agent.runs.listForThread(thread.id))?.runs).toHaveLength(0)
+    ).toHaveLength(1)
+    expect((await sixb.agent.runs.listForThread(thread.id))?.runs).toHaveLength(1)
     const executionId = await createTestAgentExecution(storage, {
       projectId: host.id,
       runId: "failed",
@@ -198,7 +219,13 @@ describe("Agent workspace binding", () => {
     await expect(sixb.agent.runs.retry("failed")).rejects.toMatchObject({
       code: "workspace_execution_unavailable",
     })
-    expect((await sixb.agent.runs.listForThread(thread.id))?.runs).toHaveLength(1)
+    expect((await sixb.agent.runs.listForThread(thread.id))?.runs).toHaveLength(2)
+    const visible = await sixb.agent.threads.getById(thread.id)
+    expect(visible?.workspaceState).not.toHaveProperty("owner")
+    const recreated = await sixb.agent.threads.recreateWorkspace(thread.id, {
+      expectedGeneration: "test-generation",
+    })
+    expect(recreated.workspaceState?.status).toBe("new")
   })
 
   test("keeps bindings private to the thread owner", async () => {
