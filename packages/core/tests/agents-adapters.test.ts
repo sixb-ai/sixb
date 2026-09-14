@@ -126,7 +126,8 @@ describe("toModelMessages", () => {
     ])
   })
 
-  test("projects assistant file parts as caller-provided text context", () => {
+  // Regression check: restore the assistant fileText branch in adapters.ts; this must fail.
+  test("keeps attachment metadata out of assistant-authored history", () => {
     expect(
       toModelMessages(
         [
@@ -147,12 +148,25 @@ describe("toModelMessages", () => {
     ).toEqual([
       {
         role: "assistant",
-        content: [
-          { type: "text", text: "I created the report." },
-          { type: "text", text: "Generated file: invoice.pdf" },
-        ],
+        content: [{ type: "text", text: "I created the report." }],
       },
     ])
+  })
+
+  // Regression check: remove the empty-content guard in adapters.ts; this must fail.
+  test("omits file-only assistant blocks while preserving adjacent text", () => {
+    expect(
+      toModelMessages([
+        sixbMessage("assistant", [{ type: "file", fileRef }]),
+        sixbMessage("assistant", [
+          { type: "file", fileRef },
+          { type: "step-start" },
+          { type: "text", text: "Done." },
+          { type: "step-start" },
+          { type: "file", fileRef },
+        ]),
+      ])
+    ).toEqual([{ role: "assistant", content: [{ type: "text", text: "Done." }] }])
   })
 
   test("joins system text into a single string", () => {
