@@ -72,6 +72,16 @@ export interface SandboxNetworkTarget {
   readonly origin: string
 }
 
+/** Host-only credentials injected outside the guest into one exact HTTPS request target.
+ * This selects authenticated requests, not the sandbox's general egress allowlist.
+ */
+export interface SandboxRequestCredential {
+  readonly origin: string
+  readonly path: string
+  readonly method: "GET" | "POST"
+  readonly headers: { readonly Authorization: string }
+}
+
 /** Current execution defaults, supplied on both creation and resume, never recovered from files. */
 export interface SandboxSessionOptions {
   readonly workingDirectory?: string
@@ -97,6 +107,14 @@ export interface Sandbox {
   readonly provider: string
   readonly status: SandboxStatus
   readonly workingDirectory: string
+
+  /** Optional secure injection capability. Replaces all credentials on this session only.
+   * An empty list removes injection. Secrets must never enter guest files, env or snapshots.
+   * Must not resume a stopped session or change defaults inherited by future sessions.
+   */
+  readonly setRequestCredentials?: (
+    credentials: readonly SandboxRequestCredential[]
+  ) => Promise<void>
 
   runCommand(
     command: string,

@@ -594,6 +594,7 @@ export type {
   SandboxFileRecord,
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
+  SandboxRequestCredential,
   SandboxSessionOptions,
   SandboxStatus,
 } from "./sandboxes"
@@ -1059,7 +1060,9 @@ export {
   MAX_AGENT_CONTEXT_ENTRIES,
 } from "./agents"
 export type {
+  AgentWorkspaceAuth,
   AgentWorkspaceConfig,
+  AgentWorkspaceCredentials,
   AgentWorkspaceDefinition,
   AgentWorkspaceResolveContext,
   ResolvedAgentWorkspace,

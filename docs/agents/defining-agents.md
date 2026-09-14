@@ -90,10 +90,15 @@ remain ephemeral. This example assumes an application-defined `Client` with a `r
 
 ```ts
 import { createSixb, param } from "@sixb/core"
+import { githubApp } from "@sixb/connector-github/auth"
 
 const host = await createSixb({
   // ...ontology, models, storage, broker, queues, persistent sandbox factory
   agentWorkspace: {
+    auth: githubApp({
+      appId: process.env.GITHUB_APP_ID!,
+      privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+    }),
     params: {
       clientId: param("string"),
     },
@@ -117,15 +122,22 @@ const host = await createSixb({
 ```
 
 - `params` uses the Action parameter builders and validation. Object references do not grant access.
+- Each run's system prompt describes the prepared workspace, persistence and managed Git access
+  when configured, without credentials. No additional agent instructions are needed.
 - `resolve` runs before each acquisition, not at thread creation, with the current execution's
   scoped SDK. Your resolver must enforce any repository-access rules.
-- `source` currently supports credential-free HTTPS Git only. Its URL and initial `revision`
+- `source` uses HTTPS Git URLs without embedded credentials. Its URL and initial `revision`
   must remain unchanged on resume; the agent may switch branches. No automatic fetch, commit or push.
 - `setup` runs once on initialization. `env` is refreshed each run and is guest-readable:
   never put Git credentials in it.
 - `network` uses `SandboxNetworkPolicy`, reapplied each run. The API and repository are always
   allowed; omitted/`none` adds nothing, `restricted` adds named HTTP(S) origins, and `all` opens
   Internet access. Include registry/redirect destinations; provider enforcement may be hostname-level.
+- `auth` is optional for public repositories. `githubApp()` supports private GitHub.com repositories
+  with `source.access: "read"` (default) or `"write"`. Install the App on the repository with the
+  corresponding Contents permission. The sandbox must support secure credential injection (Vercel).
+  Tokens stay outside the VM, renew before expiry, and are revoked on normal completion.
+  After a worker crash, access may remain until session shutdown, revocation or token expiry.
 
 ## Instructions and tools
 

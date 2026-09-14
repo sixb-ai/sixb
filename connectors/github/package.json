@@ -23,6 +23,12 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./auth": {
+      "types": "./dist/auth.d.ts",
+      "bun": "./src/auth.ts",
+      "import": "./dist/auth.js",
+      "default": "./dist/auth.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "bun": "./src/index.ts",
