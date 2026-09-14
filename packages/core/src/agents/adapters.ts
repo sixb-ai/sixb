@@ -49,7 +49,7 @@ export interface ToModelMessagesOptions<TMessage extends AgentMessage = AgentMes
     | ((input: AgentFileDataResolverInput<TMessage>) => URL | AgentFileDataProjection | undefined)
     | undefined
   /**
-   * Convert a stored file reference into model-readable text context. This is appended before any
+   * Convert a user file reference into model-readable text context. This is appended before any
    * file data part so metadata, truncation notes, and sandbox/API access hints stay visible even for
    * models that cannot consume inline files.
    */
@@ -62,11 +62,11 @@ export interface ToModelMessagesOptions<TMessage extends AgentMessage = AgentMes
 
 /**
  * Project durable messages into Sixb model messages. Assistant parts are grouped
- * into blocks at each `step-start`; each block yields one `assistant` message plus, for any
+ * into blocks at each `step-start`; each nonempty block yields one `assistant` message plus, for any
  * non-provider-executed tool calls, one `tool` message. Provider-executed tool results stay inline
  * in the assistant message. Without a tool registry, a string output maps to `text` and anything
  * else to `json`; this is the documented fidelity scope (a tool's custom `toModelOutput` is not
- * reproduced).
+ * reproduced). Assistant file attachments are not projected as assistant-authored text.
  */
 export function toModelMessages<TMessage extends AgentMessage>(
   messages: readonly TMessage[],
@@ -177,11 +177,6 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
           text: part.text,
           ...(part.providerMetadata === undefined ? {} : { providerData: part.providerMetadata }),
         })
-      } else if (part.type === "file") {
-        const fileContext = options.fileText?.({ message, part, partIndex })
-        if (fileContext) {
-          content.push({ type: "text", text: fileContext })
-        }
       } else if (part.type === "tool-call") {
         content.push(toolCallModelPart(part))
         if (part.providerExecuted === true) {
@@ -197,7 +192,7 @@ function appendAssistantModelMessages<TMessage extends AgentMessage>(
         })
       }
     }
-    result.push({ role: "assistant", content })
+    if (content.length > 0) result.push({ role: "assistant", content })
 
     if (toolResults.length > 0) {
       result.push({ role: "tool", content: toolResults })
