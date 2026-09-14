@@ -118,7 +118,7 @@ export function WebSources({ sources }: { sources: readonly WebSource[] }) {
   )
 }
 
-function SourceFavicon({ url }: { url: string }) {
+export function SourceFavicon({ url }: { url: string }) {
   const [loaded, setLoaded] = useState(false)
   const [failed, setFailed] = useState(false)
   return (

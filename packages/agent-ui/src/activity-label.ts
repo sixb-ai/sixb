@@ -7,6 +7,7 @@ import {
 } from "./bash/interpret"
 import type { NormalizedPart, NormalizedTool } from "./parts"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./read/interpret"
+import { webFetchUrl } from "./utils/webFetch"
 
 /** A short, present-tense label for the newest visible step in a live work group. */
 export function latestWorkLabel(parts: readonly NormalizedPart[]): string {
@@ -21,6 +22,12 @@ export function latestWorkLabel(parts: readonly NormalizedPart[]): string {
 }
 
 function toolProgressLabel(tool: NormalizedTool): string {
+  if (tool.toolName === "web_fetch") {
+    const domain = webFetchUrl(tool.input)?.hostname.replace(/^www\./, "") ?? "web page"
+    if (tool.state === "output-error") return `Could not read ${domain}`
+    if (tool.state === "output-available") return `Reviewing ${domain}`
+    return `Reading ${domain}`
+  }
   if (tool.toolName === "web_search") {
     if (tool.state === "output-error") return "Continuing after a web search failed"
     if (tool.state === "output-available") return "Reviewing web results"
