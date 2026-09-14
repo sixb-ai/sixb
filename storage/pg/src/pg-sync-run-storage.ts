@@ -1,5 +1,6 @@
 import type { JsonValue } from "@sixb/core"
 import { parseSixbFailure, serializeSixbFailure } from "@sixb/core/internal/errors"
+import { canRequeueSyncRunAfterEnqueueFailure } from "@sixb/core/internal/storage"
 import { assertSyncRunExecution } from "@sixb/core/internal/sync-run-storage-provider"
 import type {
   ExecutionStorage,
@@ -13,11 +14,7 @@ import type {
   SyncRunRecord,
   SyncRunStorage,
 } from "@sixb/core/storage"
-import {
-  canRequeueSyncRunAfterEnqueueFailure,
-  SYNC_RUN_FAILURE_CODES,
-  SyncRunError,
-} from "@sixb/core/storage"
+import { SYNC_RUN_FAILURE_CODES, SyncRunError } from "@sixb/core/storage"
 import { queryLatestRunsByOwnerId } from "./latest-run-query"
 import type { SqlParameter } from "./pg-client"
 import { appendRunListFilters, hasEmptyStatuses, queryRunList } from "./run-list-query"

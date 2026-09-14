@@ -1,6 +1,6 @@
 import type { JsonValue } from "@sixb/core"
 import { isObjectActionDefinition } from "@sixb/core"
-import { recordEdits } from "@sixb/core/actions/worker"
+import { recordEdits } from "@sixb/core/internal/action-edits"
 import type { ActionEditCommitResult, ActionReadRecorder } from "@sixb/core/internal/actions"
 import { commitActionEdits } from "@sixb/core/internal/actions"
 import type { ActionRunRecord } from "@sixb/core/storage"

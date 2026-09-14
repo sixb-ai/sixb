@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
-import { aggregateAiModelCallUsage, normalizeAiModelCallUsage } from "../src/storage"
+import { aggregateAiModelCallUsage } from "../src/storage"
+import { normalizeAiModelCallUsage } from "../src/storage/ai-usage/usage"
 
 describe("AI model-call usage vocabulary", () => {
   test("normalizes a complete provider report without double-counting details", () => {

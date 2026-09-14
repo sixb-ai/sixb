@@ -3,7 +3,7 @@ import {
   type AgentContextEntryInput,
   type AgentContextPart,
   normalizeAgentContextEntries,
-} from "./context"
+} from "./context/entries"
 import { AgentRequestError } from "./errors"
 
 /** Resolve the exact context parts that will be persisted with the triggering user message. */

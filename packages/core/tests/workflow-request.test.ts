@@ -4,7 +4,6 @@ import {
   defineObjectType,
   defineWorkflow,
   defineWorkflowStep,
-  emptyGrantIndex,
   prop,
   type Queues,
   ref,
@@ -12,6 +11,7 @@ import {
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "../src"
+import { emptyGrantIndex } from "../src/authorization"
 import { flushSixbErrors } from "../src/error-reporting/internal"
 import { WorkflowRunError } from "../src/storage"
 import { createTestSixb } from "../src/testing"

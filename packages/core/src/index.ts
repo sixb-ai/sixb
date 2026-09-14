@@ -55,7 +55,6 @@ export {
   prop,
   ref,
   stringEnum,
-  validateSchemaOrRefValue,
   valueTypeRef,
 } from "./ontology"
 
@@ -127,9 +126,6 @@ export {
   isObjectActionDefinition,
   optional,
   param,
-  requestAction,
-  requestActionAndWait,
-  waitForActionRun,
 } from "./actions"
 /**
  * `ctx.edits()` rejects an invalid batch with this, so it crosses a public boundary and users need
@@ -336,24 +332,26 @@ export {
 
 // ── Logging ─────────────────────────────────────────────────
 
+export type { ConsoleLoggerOptions } from "./logging/console-logger"
+export { ConsoleLogger, noopLogger, noopLoggerProvider } from "./logging/console-logger"
 export type {
-  ConsoleLoggerOptions,
+  LoggingService,
+  LogsObservabilityOptions,
+  ObservabilityOptions,
+} from "./logging/service"
+export type {
   LogContext,
   LogEntry,
   LogFields,
   Logger,
   LoggerProvider,
-  LoggingService,
   LogLevel,
   LogRecord,
   LogRunRef,
-  LogsObservabilityOptions,
-  ObservabilityOptions,
   SixbRunKind,
   StoredLogLine,
-} from "./logging"
+} from "./logging/types"
 export {
-  ConsoleLogger,
   isLevelEnabled,
   isLogLevel,
   isLogRecord,
@@ -361,10 +359,8 @@ export {
   isStoredLogLine,
   LOG_LEVELS,
   logLevelsAtOrAbove,
-  noopLogger,
-  noopLoggerProvider,
   SIXB_RUN_KINDS,
-} from "./logging"
+} from "./logging/types"
 
 // ── Predicates ─────────────────────────────────────────────
 
@@ -426,7 +422,6 @@ export type { AuthorizationContext, GrantIndex, GrantKind } from "./authorizatio
 export {
   AuthorizationError,
   canAccessApplication,
-  emptyGrantIndex,
   isAllowed,
   isApplicationAccessControlled,
   resolveAuthorizationContext,
@@ -724,7 +719,7 @@ export type {
   SyncRunRequestResult,
   SyncTargetBuilder,
 } from "./syncs"
-export { defineSync, requestSyncRun } from "./syncs"
+export { defineSync } from "./syncs"
 
 // ── Schedules ───────────────────────────────────────────────
 
@@ -784,7 +779,6 @@ export {
   isPipelineDefinition,
   isPipelineStepDefinition,
   PipelineError,
-  requestPipelineRun,
 } from "./pipelines"
 
 // ── Workflows ───────────────────────────────────────────────
@@ -850,7 +844,6 @@ export {
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
-  requestWorkflowRun,
   WorkflowDefinitionError,
   WorkflowValidationError,
 } from "./workflows"
@@ -1062,7 +1055,6 @@ export {
   MAX_AGENT_APP_STATE_ENTRY_BYTES,
   MAX_AGENT_APP_STATE_TOTAL_BYTES,
   MAX_AGENT_CONTEXT_ENTRIES,
-  requestAgentRun,
 } from "./agents"
 export type { AgentThreadRecord, ListAgentThreadsResult } from "./storage/agents"
 

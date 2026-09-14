@@ -7,7 +7,6 @@ import type {
   TelemetryProjectionDefinition,
 } from "@sixb/core"
 import {
-  emptyGrantIndex,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -15,6 +14,7 @@ import {
   InMemoryStorage,
   SixbHost,
 } from "@sixb/core"
+import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import type {
   ListLatestProjectionRunsInput,

@@ -1,5 +1,5 @@
 import { stableJsonStringify } from "../json"
-import type { AgentContextPart } from "./context"
+import type { AgentContextPart } from "./context/entries"
 
 /** Project persisted context into one deterministic, escaped data block for the model. */
 export function serializeAgentContextForModel(

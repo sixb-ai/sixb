@@ -1,7 +1,7 @@
-import type { JsonValue } from "../json"
-import { cloneJsonValue, getInvalidJsonValueReason, stableJsonStringify } from "../json"
-import type { ObjectRef } from "../ontology/refs"
-import { AgentRequestError } from "./errors"
+import type { JsonValue } from "../../json"
+import { cloneJsonValue, getInvalidJsonValueReason, stableJsonStringify } from "../../json"
+import type { ObjectRef } from "../../ontology/refs"
+import { AgentRequestError } from "../errors"
 
 export type AgentContextInput =
   | { readonly kind: "object"; readonly ref: ObjectRef }

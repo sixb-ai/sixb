@@ -7,12 +7,8 @@ import {
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
-import {
-  createFileUploadId,
-  createUploadExpiresAt,
-  type FileUploadSession,
-  FileUploadSessionError,
-} from "@sixb/core/storage"
+import { createFileUploadId, createUploadExpiresAt } from "@sixb/core/internal/storage"
+import { type FileUploadSession, FileUploadSessionError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"

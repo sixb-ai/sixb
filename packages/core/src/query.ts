@@ -40,7 +40,6 @@ export type {
   ObjectQueryTraverse,
   ObjectQueryVector,
 } from "./objects/query/ir"
-export { normalizeObjectQuery } from "./objects/query/normalize"
 export { createObjectQueryBuilder } from "./objects/sdk/query-builder"
 export type {
   ObjectQueryExecutor,

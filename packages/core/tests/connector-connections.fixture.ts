@@ -3,9 +3,9 @@ import {
   type AuthorizationContext,
   type ConnectorOAuthCredentials,
   defineConnector,
-  emptyGrantIndex,
   type SixbErrorCode,
 } from "../src"
+import { emptyGrantIndex } from "../src/authorization"
 import type {
   ConnectorConnectionCommandContext,
   ConnectorConnectionProcess,

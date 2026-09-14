@@ -2,12 +2,14 @@ import type { OntologySource } from "@sixb/core"
 import {
   AGENT_ACTIVITY_STREAM_ID,
   type AgentRunActivityEvent,
-  agentActivityStreamDefinition,
-  agentRunStreamDefinition,
-  agentRunStreamId,
   isAgentRunActivityEvent,
 } from "@sixb/core/agents/streams"
 import { BrokerCursorExpiredError, type BrokerRecord } from "@sixb/core/broker"
+import {
+  agentActivityStreamDefinition,
+  agentRunStreamDefinition,
+  agentRunStreamId,
+} from "@sixb/core/internal/agents/streams"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { z } from "zod"

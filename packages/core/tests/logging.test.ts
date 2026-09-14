@@ -2,23 +2,20 @@ import { describe, expect, spyOn, test } from "bun:test"
 import { InMemoryBroker } from "../src/broker"
 import type { JsonValue } from "../src/json"
 import {
-  ConsoleLogger,
   isLevelEnabled,
   isLogRecord,
   isStoredLogLine,
   LOG_LEVELS,
-  LOGS_STREAM,
   type LogEntry,
   type LoggerProvider,
-  LoggingService,
   type LogLevel,
   type LogRecord,
   logLevelsAtOrAbove,
-  noopLoggerProvider,
-  resolveLoggingService,
   SIXB_RUN_KINDS,
 } from "../src/logging"
+import { ConsoleLogger, noopLoggerProvider } from "../src/logging/console-logger"
 import { type RunLogCaptureOptions, RunLogSession } from "../src/logging/run-logger"
+import { LoggingService, resolveLoggingService } from "../src/logging/service"
 import {
   DEFAULT_LOG_BATCH_MAX_BYTES,
   DEFAULT_LOG_BATCH_MAX_DELAY_MS,
@@ -26,6 +23,7 @@ import {
   DEFAULT_LOG_MAX_BUFFERED_BYTES,
   DEFAULT_MAX_LINES_PER_EXECUTION,
   DEFAULT_MAX_LOG_RECORD_BYTES,
+  LOGS_STREAM,
 } from "../src/logging/stream"
 
 const PROJECT = "logging-tests"

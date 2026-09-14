@@ -21,7 +21,6 @@ import {
   defineConnector,
   defineGroup,
   defineWorkflow,
-  emptyGrantIndex,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -36,7 +35,7 @@ import {
   SixbHost,
   type Storage,
 } from "@sixb/core"
-import { type AgentRunStreamEvent, agentRunStreamId } from "@sixb/core/agents/streams"
+import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
   createAgentRunExecutionToken,
@@ -45,6 +44,8 @@ import {
   ensureManagedAgentExecutionIdentity,
   publishAgentRunCancel,
 } from "@sixb/core/internal/agents"
+import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
+import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
