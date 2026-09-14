@@ -1,20 +1,38 @@
 import type { JsonObject, JsonValue } from "@sixb/core/models"
 
-/** Return the original schema only when it satisfies strict Responses API object rules. */
-export function gatewayOutputSchema(schema: JsonObject): JsonObject | undefined {
-  return strictSchema(schema, true) ? schema : undefined
+/** Check local strict-object rules; the routed provider may impose additional restrictions. */
+export function isStrictGatewaySchema(schema: JsonObject): boolean {
+  return strictSchema(schema, true)
 }
 
 function strictSchema(schema: JsonObject, root = false): boolean {
+  const types = Array.isArray(schema.type) ? schema.type : [schema.type]
+  if (schema.type !== undefined) {
+    if (
+      types.length === 0 ||
+      new Set(types).size !== types.length ||
+      !types.every(
+        (type) =>
+          typeof type === "string" &&
+          ["object", "array", "string", "number", "integer", "boolean", "null"].includes(type)
+      )
+    )
+      return false
+  }
   if (typeof schema.$ref === "string") return !root
 
-  const objectSchema = schema.type === "object" || isObject(schema.properties)
-  if (root && !objectSchema) return false
+  const objectSchema = types.includes("object") || isObject(schema.properties)
+  if (root && (!objectSchema || (schema.type !== undefined && schema.type !== "object")))
+    return false
   if (objectSchema) {
     if (!isObject(schema.properties) || schema.additionalProperties !== false) return false
     const propertyNames = Object.keys(schema.properties)
     const required = Array.isArray(schema.required) ? schema.required : undefined
-    if (!required || propertyNames.some((name) => !required.includes(name))) {
+    if (
+      !required ||
+      required.length !== propertyNames.length ||
+      propertyNames.some((name) => !required.includes(name))
+    ) {
       return false
     }
     if (!Object.values(schema.properties).every(strictDefinition)) return false
@@ -23,7 +41,12 @@ function strictSchema(schema: JsonObject, root = false): boolean {
   for (const key of ["anyOf", "oneOf", "allOf"] as const) {
     const definitions = schema[key]
     if (definitions !== undefined) {
-      if (!Array.isArray(definitions) || !definitions.every(strictDefinition)) return false
+      if (
+        !Array.isArray(definitions) ||
+        definitions.length === 0 ||
+        !definitions.every(strictDefinition)
+      )
+        return false
     }
   }
   for (const key of ["definitions", "$defs"] as const) {

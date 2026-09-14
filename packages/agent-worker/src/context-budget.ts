@@ -68,6 +68,9 @@ export async function prepareAgentModel(selection: AgentModelSelection): Promise
       modelId: model.modelId,
       definition: defineLanguageModel({ ...definition, maxOutputTokens }),
       costEstimator: model.costEstimator,
+      ...(model.validateResponseFormat === undefined
+        ? {}
+        : { validateResponseFormat: model.validateResponseFormat.bind(model) }),
       stream: (request: Parameters<LanguageModel["stream"]>[0]) =>
         model.stream({
           ...request,

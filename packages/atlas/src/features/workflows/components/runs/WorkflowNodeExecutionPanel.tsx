@@ -32,6 +32,11 @@ export function WorkflowNodeExecutionPanel({
             Execution failed
           </p>
           <SixbFailureSummary failure={node.error} className="text-sm" />
+          {node.error.details ? (
+            <div className="mt-3">
+              <StructuredValue value={node.error.details} variant="debug" />
+            </div>
+          ) : null}
         </div>
       ) : null}
 
