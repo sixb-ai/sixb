@@ -1,19 +1,55 @@
-import { snapshotAgentThreadWorkspace } from "@sixb/core/internal/agent-run-storage-provider"
+import {
+  snapshotAgentThreadWorkspace,
+  transitionAgentWorkspace,
+} from "@sixb/core/internal/agent-run-storage-provider"
 import {
   AgentStorageError,
   type AgentThreadRecord,
   type AgentThreadStore,
+  type AgentWorkspaceState,
   type CreateAgentThreadInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
+  type TransitionAgentWorkspaceInput,
 } from "@sixb/core/storage"
 import type { SqlParameter } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
-import type { PgStoreClient } from "../transactions"
-import { type AgentThreadRow, queryAgentList, rowToThreadRecord } from "./rows"
+import { type PgStoreClient, runPgTransaction } from "../transactions"
+import {
+  type AgentRunRow,
+  type AgentThreadRow,
+  queryAgentList,
+  rowToRunRecord,
+  rowToThreadRecord,
+} from "./rows"
 
 export class PgAgentThreadStore implements AgentThreadStore {
   constructor(private readonly sql: PgStoreClient) {}
+
+  async transitionWorkspace(input: TransitionAgentWorkspaceInput): Promise<AgentWorkspaceState> {
+    return runPgTransaction(this.sql, async (tx) => {
+      // Same lock order as run finalization: run, then thread.
+      const runs =
+        input.action === "recreate"
+          ? []
+          : await tx<AgentRunRow[]>`
+        SELECT * FROM agent_runs WHERE project_id = ${input.projectId} AND id = ${input.runId}
+        FOR UPDATE
+      `
+      const [thread] = await tx<AgentThreadRow[]>`
+        SELECT * FROM agent_threads WHERE project_id = ${input.projectId} AND id = ${input.id}
+        FOR UPDATE
+      `
+      const state = transitionAgentWorkspace(
+        thread ? rowToThreadRecord(thread) : null,
+        runs[0] ? rowToRunRecord(runs[0]) : null,
+        input
+      )
+      await tx`UPDATE agent_threads SET workspace_state = ${JSON.stringify(state)}::text::jsonb
+        WHERE project_id = ${input.projectId} AND id = ${input.id}`
+      return state
+    })
+  }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
     const workspace =

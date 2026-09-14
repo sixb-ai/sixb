@@ -89,6 +89,9 @@ import shareGrantsSql from "./migrations/035-share-grants.sql" with { type: "tex
 import agentThreadWorkspacesSql from "./migrations/036-agent-thread-workspaces.sql" with {
   type: "text",
 }
+import agentWorkspaceLifecycleSql from "./migrations/037-agent-workspace-lifecycle.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -378,6 +381,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("034-device-authorizations", deviceAuthorizationsSql),
     pgSql("035-share-grants", shareGrantsSql),
     pgSql("036-agent-thread-workspaces", agentThreadWorkspacesSql),
+    pgSql("037-agent-workspace-lifecycle", agentWorkspaceLifecycleSql),
   ],
 })
 

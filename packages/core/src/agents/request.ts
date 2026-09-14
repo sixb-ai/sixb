@@ -256,10 +256,10 @@ export async function retryAgentRun(
 }
 
 function assertWorkspaceExecutionAvailable(thread: AgentThreadRecord): void {
-  if (thread.workspace !== undefined) {
+  if (thread.workspaceState && !["new", "ready"].includes(thread.workspaceState.status)) {
     throw new AgentRequestError(
       "workspace_execution_unavailable",
-      "[Sixb] Persistent workspace execution is not available in this release. The thread binding has been preserved."
+      "[Sixb] Workspace recovery is required before another run. Reload the thread and explicitly recreate it to start fresh."
     )
   }
 }

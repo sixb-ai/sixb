@@ -55,6 +55,7 @@ import type {
   AgentWorkerStorage,
 } from "./types"
 import { enqueueWorkflowAgentNodeResume, executeWorkflowAgentNode } from "./workflow-node-execution"
+import { type AgentWorkspaceLifecycle, openAgentWorkspace } from "./workspace"
 
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 8
@@ -236,6 +237,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       )
     }
     let environment: AgentExecutionEnvironment | null = null
+    let workspace: AgentWorkspaceLifecycle | undefined
     let runtime: AgentTurnRuntime | null = null
     let stopOwnershipProjection: (() => void) | undefined
     // Watch for a user cancel (an out-of-band `/cancel` publishes to the run's control stream). Its
@@ -269,12 +271,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         projectId: context.id,
         id: run.threadId,
       })
-      if (thread?.workspace !== undefined) {
-        throw createSixbError(
-          "agent.execution_failed",
-          "[SixbAgentWorker] Persistent workspace execution is not available in this release."
-        )
-      }
 
       const configuredPlan = resolveAgentExecutionPlan({
         spec: run.spec,
@@ -305,11 +301,27 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           security: this.host.definitions.security,
         }),
       })
+      if (thread?.workspace) {
+        runtime = createAgentTurnRuntime({
+          context: executionContext,
+          run,
+          signal: turnSignal,
+          requestedBy: durableExecution.requestedBy,
+        })
+        workspace = await openAgentWorkspace({
+          context: executionContext,
+          sixb: executionContext.sixb,
+          definition: this.host.definitions.agentWorkspace,
+          thread,
+          run,
+          signal: runtime.signal,
+        })
+      }
       const preparedModel = await prepareAgentModel(configuredPlan)
       const plan = Object.freeze({ ...configuredPlan, model: preparedModel.model })
 
       await context.streamSink.publishStarted(run)
-      runtime = createAgentTurnRuntime({
+      runtime ??= createAgentTurnRuntime({
         context: executionContext,
         run,
         signal: turnSignal,
@@ -324,10 +336,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         runtime,
       })
       environment = await createConversationAgentEnvironment({
+        workspace,
         context: executionContext,
         plan,
         run,
-        signal: turnSignal,
+        signal: runtime.signal,
         messages: prepared.threadContext.retainedMessages,
         skills: prepared.skills,
         onDetachedTeardown: (teardown) => this.trackTeardown(teardown),
@@ -342,7 +355,9 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         threadContext: prepared.threadContext,
       })
       await this.cancelActiveSubagents(completed.id, "The parent Agent run has finished.")
-    } catch (error) {
+    } catch (caughtError) {
+      let error = caughtError
+      let workspaceSaveFailed = false
       // Queue ownership or the durable execution token was lost. Touch nothing; the current
       // delivery will reconcile the run.
       if (
@@ -357,9 +372,19 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       if (error instanceof AgentFinalizationError) {
         throw error
       }
+      if (workspace) {
+        try {
+          await workspace.save()
+        } catch (saveError) {
+          if (saveError instanceof AgentExecutionLostError) return
+          error = saveError
+          workspaceSaveFailed = true
+        }
+      }
       // Preparation has no model/tool effects yet; preserve the existing bounded dependency retry.
       if (
         runtime === null &&
+        workspace === undefined &&
         !turnSignal.aborted &&
         shouldRetryAgentPreparation(error, job.attempt)
       ) {
@@ -370,6 +395,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       // is redelivered rather than acked with the thread left silently locked. A user cancel is
       // detected off its own signal so it records `cancelled` however the aborted stream surfaced.
       const aborted =
+        !workspaceSaveFailed &&
         !(error instanceof AgentUsageRecordingError) &&
         (signal.aborted || cancel.signal.aborted || isAbortError(error))
       const finalized = await this.recordFate(
