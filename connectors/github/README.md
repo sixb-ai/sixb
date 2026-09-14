@@ -35,6 +35,17 @@ repository and issue APIs. Organization people APIs require `Members: read`. Pub
 and public organization membership can be queried without that organization permission, but private
 membership visibility depends on the authenticated user's organization access.
 
+## Workspace authentication
+
+`@sixb/connector-github/auth` provides `githubApp({ appId, privateKey })` for
+`agentWorkspace.auth`. It is separate from the token-based REST connector; no connector
+registration is required. See [workspace configuration](../../docs/agents/defining-agents.md#workspace-configuration).
+
+The App must be installed on the selected GitHub.com repository with Contents read/write
+permission. Each run receives a repository-scoped installation token, injected outside the VM
+only for Git fetch/push endpoints. SSH, Git LFS and cross-repository submodule credentials are not
+provided. Private keys remain host-side; the App does not replace your application's access checks.
+
 ## Client API
 
 ```ts

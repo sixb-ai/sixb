@@ -42,6 +42,29 @@ const recipe = (): AgentWorkspaceConfig => ({
 })
 
 describe("Agent workspace binding", () => {
+  test("captures host-side auth without persisting or invoking it at thread creation", async () => {
+    let calls = 0
+    const auth = {
+      authorize: async () => {
+        calls++
+        return forbidden()
+      },
+    }
+    const { host, sixb } = setup({ params: {}, resolve: forbidden, auth })
+    const thread = await sixb.agent.threads.create({ workspace: { params: {} } })
+    expect(calls).toBe(0)
+    expect(thread.workspace).toEqual({ params: {} })
+    auth.authorize = async () => {
+      throw new Error("replacement")
+    }
+    await expect(
+      host.definitions.agentWorkspace!.auth!.authorize({
+        source: { type: "git", url: "https://github.com/acme/repo.git" },
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow("Must not create a sandbox")
+    expect(calls).toBe(1)
+  })
   test.each([
     undefined,
     { create: forbidden },
