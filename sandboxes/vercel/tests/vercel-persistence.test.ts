@@ -373,7 +373,8 @@ describe("Vercel named persistence", () => {
         allow: [{ name: "git", origin: "https://github.com" }],
       },
     }
-    const sandbox = await f.factory.persistence.create("workspace-1", options)
+    const sandbox = await f.factory.create({ ...options, persistence: { name: "workspace-1" } })
+    const initialPolicy = f.requests.at(-1)!.body
     const credentials: SandboxRequestCredential[] = [
       {
         origin: "https://github.com",
@@ -392,11 +393,14 @@ describe("Vercel named persistence", () => {
       JSON.stringify(f.requests.find((r) => r.path.split("?")[0] === "/v2/sandboxes")?.body)
     ).not.toContain("opaque-secret")
     await sandbox.setRequestCredentials!([])
-    expect(JSON.stringify(f.requests.at(-1)?.body)).not.toContain("opaque-secret")
+    expect(f.requests.at(-1)?.body).toEqual(initialPolicy)
     await sandbox.stop()
-    const resumed = await f.factory.persistence.resume("workspace-1", options)
-    expect(JSON.stringify(f.requests.at(-1)?.body)).not.toContain("opaque-secret")
+    const resumed = await f.factory.resume("workspace-1", options)
+    expect(f.requests.at(-1)?.body).toEqual(initialPolicy)
+    const requestCount = f.requests.length
     await expect(sandbox.setRequestCredentials!(credentials)).rejects.toThrow()
+    // Regression proof: remove the wrapper's running-state guard; the stale handle sends a request.
+    expect(f.requests).toHaveLength(requestCount)
     await resumed.setRequestCredentials!([
       { ...credentials[0]!, headers: { Authorization: "Basic fresh-secret" } },
     ])
@@ -416,7 +420,10 @@ describe("Vercel named persistence", () => {
 
   test("credential injection failures do not expose provider request details", async () => {
     const f = fixture()
-    const sandbox = await f.factory.persistence.create("workspace-1", { network: { mode: "all" } })
+    const sandbox = await f.factory.create({
+      persistence: { name: "workspace-1" },
+      network: { mode: "all" },
+    })
     f.failNetwork()
     await expect(
       sandbox.setRequestCredentials!([
