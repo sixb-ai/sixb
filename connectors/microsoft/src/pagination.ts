@@ -19,7 +19,8 @@ export function page<T extends { readonly id: string }>(value: unknown): GraphPa
 export async function* allPages<T extends { readonly id: string }>(
   http: MicrosoftHttp,
   initial: string,
-  options?: RequestOptions
+  options?: RequestOptions,
+  headers?: HeadersInit
 ): AsyncIterable<T> {
   let url: string | undefined = initial
   const visited = new Set<string>()
@@ -28,7 +29,7 @@ export async function* allPages<T extends { readonly id: string }>(
     if (visited.has(canonical))
       throw new MicrosoftProtocolError("Graph pagination repeated a nextLink.")
     visited.add(canonical)
-    const result: GraphPage<T> = page(await http.json(url, { signal: options?.signal }))
+    const result: GraphPage<T> = page(await http.json(url, { signal: options?.signal, headers }))
     yield* result.value
     url = result["@odata.nextLink"]
   }

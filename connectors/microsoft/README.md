@@ -1,7 +1,7 @@
 # @sixb/connector-microsoft
 
 Typed Microsoft Graph v1.0 connector for Sixb. Covers SharePoint Online sites, document libraries,
-files, folders, Outlook mail and incremental synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
+files, folders, Outlook mail, calendars and incremental synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
 `@azure/msal-node` for application authentication. Targets the global Microsoft 365 cloud.
 
 ## Quick start
@@ -355,6 +355,133 @@ apply). It skips when credentials are missing.
 bun --filter @sixb/connector-microsoft test:e2e
 ```
 
+## Outlook calendars
+
+`client.calendar` uses the existing application authentication and explicit mailbox ID/UPN.
+Assign **Application Calendars.ReadWrite** through Exchange Application RBAC to the approved
+mailboxes. Do not also grant an unrestricted Entra `Calendars.ReadWrite` permission: the grants
+are additive. Calendar invitations and responses use the calendar permission; `Mail.Send` is
+only needed for the separate mail API. No interactive sign-in or new app registration is needed.
+
+```ts
+const { calendar } = client
+const primary = await calendar.calendars.getDefault("organizer@contoso.com")
+const work = await calendar.calendars.create("organizer@contoso.com", "Project work")
+
+const appointment = await calendar.events.create("organizer@contoso.com", {
+  subject: "Project review",
+  start: { dateTime: "2026-11-02T09:00:00", timeZone: "Eastern Standard Time" },
+  end: { dateTime: "2026-11-02T10:00:00", timeZone: "Eastern Standard Time" },
+  transactionId: crypto.randomUUID(), // Persist and reuse for this logical creation.
+}, { calendarId: work.id })
+
+for await (const event of calendar.view.listAll("organizer@contoso.com", {
+  calendarId: work.id,
+  startDateTime: "2026-11-01T00:00:00-04:00",
+  endDateTime: "2026-12-01T00:00:00-05:00",
+  timeZone: "Eastern Standard Time",
+})) {
+  console.log(event.id, event.subject, event.start)
+}
+```
+
+| Surface | Operations |
+| --- | --- |
+| `calendar.calendars` | `list`, `listAll`, `get`, `getDefault`, `create`, `update`, `delete` |
+| `calendar.events` | `list`, `listAll`, `get`, `create`, `update`, `delete`, `instances`, `allInstances` |
+| Meeting actions | `events.accept`, `tentativelyAccept`, `decline`, `forward`, `cancel` |
+| `calendar.view` | `list`, `listAll`, `delta.list`, `delta.pages` |
+| `calendar.attachments` | `list`, `listAll`, `get`, `downloadResponse`, `download`, `upload`, `delete`, `createSession`, `resume`, `cancel` |
+| Availability | `calendar.getSchedule` |
+
+### Events, meetings and dates
+
+- Event lists contain single events and recurrence masters. Use `view` for occurrences and
+  exceptions in a period, or `events.instances` for one series. Pass an occurrence ID to edit or
+  cancel that instance; pass the master ID to change the series. Graph enforces recurrence boundaries.
+- Writes use local `dateTime` plus `timeZone`, preserved without machine-timezone conversion.
+  Use a timezone supported by the mailbox (for example `Eastern Standard Time`). Range queries
+  require explicit UTC/offset timestamps; `timeZone` controls response rendering, not range boundaries.
+- An all-day write with `isAllDay: true` must include start/end at midnight in the same zone,
+  with the end on the following day (or later for multiple days). DST days need not last 24 hours.
+  Server validation still applies to partial updates and mailbox-specific timezone rules.
+- Creating an event with attendees **sends invitations**; there is no mail-style draft/send step.
+  Updates can notify attendees. Deleting an organizer's meeting sends cancellations; `cancel`
+  is organizer-only and supports a custom comment. RSVP defaults to sending a response unless
+  `sendResponse: false`; a new time proposal on decline/tentative acceptance requires a response.
+- Add `isOnlineMeeting: true` and `onlineMeetingProvider: "teamsForBusiness"` to create a Teams
+  meeting when the calendar's `allowedOnlineMeetingProviders` and tenant licensing allow it.
+  Read `onlineMeeting.joinUrl`. Before replacing a meeting body, retrieve it and preserve its
+  existing Teams HTML. The connector performs no hidden read/merge and offers no concurrency guarantee.
+- Event IDs use `IdType="ImmutableId"` on reads, writes and continuation requests. Container
+  calendar IDs are already stable. An `iCalUId` identifies the meeting across calendars; it is
+  not a Graph event ID and differs between recurring occurrences.
+- Mutations are never automatically replayed. Persist a `transactionId` for event creation;
+  reuse it when reconciling an uncertain result. `MicrosoftCalendarMutationError.outcomeUnknown`
+  marks an interrupted HTTP mutation, including creates/updates/deletes and meeting actions.
+  HTTP errors retain `MicrosoftApiError`. A `202` action result means accepted, not delivery.
+
+Calendar attachments reuse the Outlook upload protocol described above, targeting event IDs.
+After adding an attachment, the organizer can update the event to distribute it to attendees;
+`upload` does not issue that additional update. `MicrosoftCalendarUploadError` preserves the
+acknowledged session and `completionUnknown`. Apply the same resume, credential-handling and
+shared/delegated-mailbox large-upload limitations as for mail.
+
+`getSchedule` returns availability and individual `error` records keyed by `scheduleId`; do not
+interpret an error as free time. It accepts up to 20 entities (including distribution-list members)
+and a period shorter than 62 days. The connector validates explicit input counts and same-zone
+local ranges; Graph validates expanded lists and actual zoned intervals. It is a read-only POST
+and follows the transport's conservative no-POST-retry policy. `findMeetingTimes` does not support
+application authentication and is not exposed.
+
+### Calendar delta
+
+Graph v1.0 documents delta for **the primary calendar over a fixed time range**. It does not
+provide the beta calendar-list or secondary-calendar delta APIs on this surface. Use paginated
+`view` reads for secondary calendars; a changed time range requires a new initial delta round.
+
+```ts
+for await (const page of client.calendar.view.delta.pages("organizer@contoso.com", {
+  startDateTime: "2026-11-01T00:00:00Z",
+  endDateTime: "2026-12-01T00:00:00Z",
+  timeZone: "Eastern Standard Time",
+  pageSize: 100,
+})) {
+  // Apply this page before persisting its nextLink (resume) or deltaLink (completed round).
+  // Store the cursor with tenant, mailbox, fixed range and response timezone.
+}
+// Resume using { cursor: savedUrl, timeZone: savedTimeZone }; never edit the opaque URL.
+```
+
+Delta does not accept `select`, `expand`, `filter`, `orderBy`, `search`, `top` or `calendarId`.
+Pagination retains headers and follows empty pages. `@removed` is preserved and can refer to
+changes outside the tracked period: it is not proof that the event was deleted from the mailbox.
+Expired checkpoints surface as Graph errors; starting over and reconciling the local view are
+caller responsibilities. This connector does not store checkpoints or run background synchronization.
+
+Microsoft 365 group calendars, calendar sharing permissions, calendar groups, reminder actions,
+standalone Teams meeting APIs and webhooks are outside this surface.
+
+### Calendar live verification
+
+Unit tests mock Graph. The E2E explicitly writes test calendars/events and **sends an invitation,
+an acceptance and a cancellation** between two dedicated test accounts. It deletes its own
+calendars/events afterward; Outlook can retain the associated notification emails.
+
+Run `MICROSOFT_CALENDAR_E2E=1 bun test ./connectors/microsoft/tests/calendar.e2e.ts` with:
+
+- `MICROSOFT_TENANT_ID`, `MICROSOFT_CLIENT_ID`, `MICROSOFT_CLIENT_SECRET`.
+- `MICROSOFT_CALENDAR_TEST_MAILBOX`: a dedicated organizer mailbox within the RBAC scope.
+- `MICROSOFT_CALENDAR_TEST_ATTENDEE`: a different, consenting test mailbox within the scope.
+- `MICROSOFT_CALENDAR_DENIED_MAILBOX`: an existing mailbox outside the scope (must return 403).
+- Optional `MICROSOFT_CALENDAR_TEST_TEAMS=1`: also verify a Teams join link on a licensed organizer.
+
+The test covers secondary-calendar CRUD, a recurrence exception, all-day events, binary small/large
+attachments, primary-calendar delta, availability and the organizer's received acceptance. It
+requires an Exchange Online tenant; passing mocked tests does not establish live compatibility.
+If cleanup fails after a network interruption, use the unique `sixb-calendar-e2e-...` subject/name
+reported by the test to remove remaining test data.
+
 ## Microsoft API references
 
 - [App-only authentication](https://learn.microsoft.com/en-us/graph/auth-v2-service)
@@ -385,3 +512,14 @@ bun --filter @sixb/connector-microsoft test:e2e
 - [Message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0)
 - [Folder delta](https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0)
 - [Outlook throttling](https://learn.microsoft.com/en-us/graph/throttling-limits#outlook-service-limits)
+
+- [Calendar resource](https://learn.microsoft.com/en-us/graph/api/resources/calendar?view=graph-rest-1.0)
+- [Create event](https://learn.microsoft.com/en-us/graph/api/user-post-events?view=graph-rest-1.0)
+- [Update event and meeting notifications](https://learn.microsoft.com/en-us/graph/api/event-update?view=graph-rest-1.0)
+- [Calendar views](https://learn.microsoft.com/en-us/graph/api/calendar-list-calendarview?view=graph-rest-1.0)
+- [Calendar delta](https://learn.microsoft.com/en-us/graph/api/event-delta?view=graph-rest-1.0)
+- [Meeting cancellation](https://learn.microsoft.com/en-us/graph/api/event-cancel?view=graph-rest-1.0)
+- [Meeting responses](https://learn.microsoft.com/en-us/graph/api/event-tentativelyaccept?view=graph-rest-1.0)
+- [Teams calendar events](https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings)
+- [Event attachments](https://learn.microsoft.com/en-us/graph/api/event-post-attachments?view=graph-rest-1.0)
+- [Free/busy limits](https://learn.microsoft.com/en-us/graph/outlook-get-free-busy-schedule)
