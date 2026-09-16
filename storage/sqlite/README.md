@@ -45,8 +45,31 @@ Named `search.vectors` profiles persist outside object properties as float32 blo
 provenance. Writes and invalidation share the object's materialization transaction; stale model
 results fail explicitly instead of overwriting newer vectors. No extension is needed to persist.
 
-Search is not available yet: vector queries fail explicitly. Existing numeric arrays are not
-promoted to managed profiles. Search support and its extension setup will follow separately.
+Search uses the bundled `sqlite-vec` 0.1.9 extension, loaded on the query connection when needed.
+On macOS, install an extension-capable SQLite (`brew install sqlite`) and select its library
+**before opening any database**:
+
+```ts
+import { Database } from "bun:sqlite"
+
+Database.setCustomSQLite("/opt/homebrew/opt/sqlite/lib/libsqlite3.dylib")
+```
+
+Use the actual library path on your machine; the selection applies to the process. Linux and
+Windows do not need this macOS setup. Unsupported native platforms fail with a diagnostic.
+
+```ts
+const result = await sixb.objects(Product).query()
+  .vector("content", queryVector, { k: 10 }).list()
+```
+
+Exact cosine search uses normalized vectors and applies filters and source permissions before
+ranking. It rejects more than 10,000 eligible vectors or 16 million coordinates per search.
+SQLite reads remain synchronous: these bounds limit scoring work, not wall-clock time;
+`busy_timeout` only bounds lock waits. Existing numeric arrays are not promoted to profiles.
+
+Run vector integration tests with `bun run test:e2e`. On macOS, set `SIXB_TEST_SQLITE_LIBRARY`
+to the SQLite library path; tests use a separate process for library selection.
 
 ## Transactions
 

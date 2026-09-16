@@ -5,6 +5,7 @@ import type {
   ObjectVectorState,
   OntologyVectorStorage,
 } from "@sixb/core/storage"
+import { encodeSqliteVector } from "../vector-encoding"
 import type { SqliteRootOperation } from "./shared"
 
 interface VectorMetadataRow {
@@ -52,10 +53,8 @@ export class SqliteOntologyVectorStorage implements OntologyVectorStorage {
   async write(input: Parameters<OntologyVectorStorage["write"]>[0]): Promise<void> {
     const { value } = input
     this.assertSession(input.session, input.projectId, value.lastCommitId)
-    // The Materializer validates float32 values. Store a portable little-endian representation.
-    const embedding = new Uint8Array(value.values.length * 4)
-    const view = new DataView(embedding.buffer)
-    for (let i = 0; i < value.values.length; i++) view.setFloat32(i * 4, value.values[i]!, true)
+    // The Materializer validates and normalizes float32 values before this boundary.
+    const embedding = encodeSqliteVector(value.values)
     const changes =
       input.expectedCommitId === null
         ? this.db

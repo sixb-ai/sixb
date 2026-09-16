@@ -138,10 +138,10 @@ const expandableQuery: ObjectQuery = {
   expansions: [{ linkId: "hasDevice", direction: "outgoing", cardinality: "many", limit: 50 }],
 }
 
-test("vector remains an unsupported query node", () => {
+test("rejects vector queries without a validated named profile", () => {
   expect(() =>
     compileObjectQuery("project-a", { kind: "vector" } as unknown as ObjectQuery)
-  ).toThrow("does not support query node 'vector'")
+  ).toThrow("A validated named vector profile is required.")
   // expand is now supported and compiles without throwing.
   expect(() => compileObjectQuery("project-a", expandableQuery)).not.toThrow()
 })

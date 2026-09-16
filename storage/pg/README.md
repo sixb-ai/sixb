@@ -52,8 +52,22 @@ Generation runs outside the transaction. The subsequent write checks object and 
 source changes invalidate affected profiles atomically, including projection updates. Reindexing
 leaves the business object's version and events unchanged.
 
-**Vector search is not enabled yet.** PostgreSQL currently supports persistence and invalidation;
-query support with pgvector follows separately. Regeneration remains explicit via `index()`.
+Search requires pgvector installed in the `public` schema by the database administrator:
+
+```sql
+CREATE EXTENSION vector WITH SCHEMA public;
+```
+
+```ts
+const result = await sixb.objects(Product).query()
+  .vector("content", queryVector, { k: 10 }).list()
+```
+
+The exact cosine search applies filters and source-property permissions before ranking.
+Sixb normalizes stored and query vectors to unit length. At most 10,000 eligible vectors and
+16 million coordinates may be scored per search; larger queries fail explicitly. Configure
+`statementTimeoutMillis` to bound SQL execution time. Regeneration remains explicit via `index()`.
+Tested with pgvector 0.8.1; no approximate index is created.
 
 ## Pooling and timeouts
 

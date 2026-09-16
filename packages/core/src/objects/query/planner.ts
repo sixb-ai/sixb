@@ -176,7 +176,11 @@ function collectNodeProviderIssues(
   capabilities: ObjectQueryCapabilities,
   issues: ObjectQueryPlanningIssue[]
 ): void {
-  if (capabilities.nodes?.[query.kind] !== true) {
+  const supported =
+    query.kind === "vector" && query.profile !== undefined
+      ? capabilities.features?.vectorProfiles === true
+      : capabilities.nodes?.[query.kind] === true
+  if (!supported) {
     addIssue(
       issues,
       path,

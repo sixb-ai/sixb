@@ -111,7 +111,8 @@ describe("PostgreSQL vector storage", () => {
       await f.handle.index()
       const [row] =
         await f.sql`SELECT embedding::double precision[] AS embedding, pg_typeof(embedding)::text AS type FROM object_vectors`
-      expect(row?.embedding).toEqual([Math.fround(0.1), Math.fround(0.2), Math.fround(0.3)])
+      expect(Math.hypot(...row!.embedding)).toBeCloseTo(1, 6)
+      expect(row!.embedding[1] / row!.embedding[0]).toBeCloseTo(2, 6)
       expect(row?.type).toBe("real[]")
       expect(await f.sql`SELECT 1 FROM pg_extension WHERE extname = 'vector'`).toHaveLength(0)
       const states = await f.states()
@@ -462,7 +463,7 @@ describe("PostgreSQL vector storage", () => {
     }
   })
 
-  test("the database rejects malformed arrays and vector queries remain disabled", async () => {
+  test("the database rejects malformed arrays and search diagnoses missing pgvector", async () => {
     const f = await fixture()
     try {
       await f.seed()
@@ -479,9 +480,9 @@ describe("PostgreSQL vector storage", () => {
           f.sql.unsafe("UPDATE object_vectors SET embedding = '{{1,2},{3,4}}'::real[]")
         )
       ).rejects.toThrow()
-      await expect(
-        f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()
-      ).rejects.toThrow()
+      await expect(f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()).rejects.toThrow(
+        "requires pgvector installed"
+      )
     } finally {
       await f.close()
     }
