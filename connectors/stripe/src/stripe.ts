@@ -14,7 +14,7 @@ export type StripeConnector = ConnectorAdapter<"stripe", StripeClient>
 /**
  * Stripe Billing connector backed by Stripe's official Node SDK.
  *
- * The connected client exposes customers, subscriptions, invoices, payment intents,
+ * The connected client exposes customers, subscriptions, invoices, invoice payments, payment intents,
  * charges, refunds, and snapshot events.
  */
 export function stripe(options: StripeConnectorOptions): StripeConnector {

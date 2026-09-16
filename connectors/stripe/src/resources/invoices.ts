@@ -22,8 +22,51 @@ export type StripeInvoiceMarkUncollectibleParams = Stripe.InvoiceMarkUncollectib
 export type StripeInvoicePayParams = Stripe.InvoicePayParams
 export type StripeInvoiceSendParams = Stripe.InvoiceSendInvoiceParams
 export type StripeInvoiceVoidParams = Stripe.InvoiceVoidInvoiceParams
+export type StripeInvoiceLineItem = Stripe.InvoiceLineItem
+export type StripeInvoiceListLineItemsParams = Stripe.InvoiceListLineItemsParams
+export type StripeInvoiceUpdateLineItemParams = Stripe.InvoiceUpdateLineItemParams
+export type StripeInvoiceAddLinesParams = Stripe.InvoiceAddLinesParams
+export type StripeInvoiceUpdateLinesParams = Stripe.InvoiceUpdateLinesParams
+export type StripeInvoiceRemoveLinesParams = Stripe.InvoiceRemoveLinesParams
 
 export interface InvoicesResource {
+  /** `GET /v1/invoices/{id}/lines` — the complete paginated collection. */
+  listLineItems(
+    id: string,
+    params?: StripeInvoiceListLineItemsParams,
+    options?: StripeRequestOptions
+  ): StripeListPromise<StripeInvoiceLineItem>
+  /** Auto-paginated iterator over `GET /v1/invoices/{id}/lines`. */
+  listAllLineItems(
+    id: string,
+    params?: StripeInvoiceListLineItemsParams,
+    options?: StripeRequestOptions
+  ): AsyncIterable<StripeInvoiceLineItem>
+  /** `POST /v1/invoices/{id}/lines/{lineId}` — before finalization only. */
+  updateLineItem(
+    id: string,
+    lineId: string,
+    params?: StripeInvoiceUpdateLineItemParams,
+    options?: StripeRequestOptions
+  ): Promise<StripeResponse<StripeInvoiceLineItem>>
+  /** `POST /v1/invoices/{id}/add_lines` — draft invoices only. */
+  addLines(
+    id: string,
+    params: StripeInvoiceAddLinesParams,
+    options?: StripeRequestOptions
+  ): Promise<StripeResponse<StripeInvoice>>
+  /** `POST /v1/invoices/{id}/update_lines` — draft invoices only. */
+  updateLines(
+    id: string,
+    params: StripeInvoiceUpdateLinesParams,
+    options?: StripeRequestOptions
+  ): Promise<StripeResponse<StripeInvoice>>
+  /** `POST /v1/invoices/{id}/remove_lines` — explicit delete or unassign per line. */
+  removeLines(
+    id: string,
+    params: StripeInvoiceRemoveLinesParams,
+    options?: StripeRequestOptions
+  ): Promise<StripeResponse<StripeInvoice>>
   /** `POST /v1/invoices` — creates a draft invoice. */
   create(
     params?: StripeInvoiceCreateParams,
@@ -112,6 +155,31 @@ export interface InvoicesResource {
 
 export function createInvoicesResource(sdk: Stripe): InvoicesResource {
   return {
+    listLineItems(id, params, options) {
+      assertCursorOptions(params)
+      return sdk.invoices.listLineItems(stripeId(id, "invoice id"), params, options)
+    },
+    listAllLineItems(id, params, options) {
+      assertCursorOptions(params)
+      return sdk.invoices.listLineItems(stripeId(id, "invoice id"), params, options)
+    },
+    updateLineItem(id, lineId, params, options) {
+      return sdk.invoices.updateLineItem(
+        stripeId(id, "invoice id"),
+        stripeId(lineId, "invoice line item id"),
+        params,
+        options
+      )
+    },
+    addLines(id, params, options) {
+      return sdk.invoices.addLines(stripeId(id, "invoice id"), params, options)
+    },
+    updateLines(id, params, options) {
+      return sdk.invoices.updateLines(stripeId(id, "invoice id"), params, options)
+    },
+    removeLines(id, params, options) {
+      return sdk.invoices.removeLines(stripeId(id, "invoice id"), params, options)
+    },
     create(params, options) {
       return sdk.invoices.create(params, options)
     },

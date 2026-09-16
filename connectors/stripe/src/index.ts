@@ -25,20 +25,32 @@ export type {
   StripeEventRetrieveParams,
 } from "./resources/events"
 export type {
+  InvoicePaymentsResource,
+  StripeInvoicePayment,
+  StripeInvoicePaymentListParams,
+  StripeInvoicePaymentRetrieveParams,
+} from "./resources/invoice-payments"
+export type {
   InvoicesResource,
   StripeDeletedInvoice,
   StripeInvoice,
+  StripeInvoiceAddLinesParams,
   StripeInvoiceAttachPaymentParams,
   StripeInvoiceCreateParams,
   StripeInvoiceCreatePreviewParams,
   StripeInvoiceDeleteParams,
   StripeInvoiceFinalizeParams,
+  StripeInvoiceLineItem,
+  StripeInvoiceListLineItemsParams,
   StripeInvoiceListParams,
   StripeInvoiceMarkUncollectibleParams,
   StripeInvoicePayParams,
+  StripeInvoiceRemoveLinesParams,
   StripeInvoiceRetrieveParams,
   StripeInvoiceSearchParams,
   StripeInvoiceSendParams,
+  StripeInvoiceUpdateLineItemParams,
+  StripeInvoiceUpdateLinesParams,
   StripeInvoiceUpdateParams,
   StripeInvoiceVoidParams,
 } from "./resources/invoices"

@@ -1,6 +1,7 @@
 # @sixb/connector-stripe
 
-Typed Stripe Billing and Payments connector for Sixb. It covers Customers, Subscriptions, Invoices,
+Typed Stripe Billing and Payments connector for Sixb. It covers Customers, Subscriptions, Invoices
+(including line items), Invoice Payments,
 Payment Intents, Charges, Refunds, and v1 snapshot Events, with optional verified webhook delivery. Each resource lives in an
 independent module so another Stripe surface can be added without growing a monolithic client.
 
@@ -166,6 +167,69 @@ Retrieving an already deleted customer returns Stripe's reduced `StripeDeletedCu
 `delete` applies only to eligible draft invoices. Use `void` for a finalized invoice; voiding is
 irreversible and preserves the accounting record. A preview is ephemeral and does not appear in
 invoice lists.
+
+### Invoice line items
+
+The `lines` collection embedded in an invoice may contain only the first page. Use the dedicated
+list methods to retrieve all lines; these are distinct from Stripe's standalone Invoice Items API.
+
+| Client method | Stripe endpoint |
+| --- | --- |
+| `billing.invoices.listLineItems(id, params?, options?)` | `GET /v1/invoices/:id/lines` |
+| `billing.invoices.listAllLineItems(id, params?, options?)` | Auto-pagination over the line-item endpoint |
+| `billing.invoices.updateLineItem(id, lineId, params?, options?)` | `POST /v1/invoices/:id/lines/:lineId` |
+| `billing.invoices.addLines(id, params, options?)` | `POST /v1/invoices/:id/add_lines` |
+| `billing.invoices.updateLines(id, params, options?)` | `POST /v1/invoices/:id/update_lines` |
+| `billing.invoices.removeLines(id, params, options?)` | `POST /v1/invoices/:id/remove_lines` |
+
+```ts
+for await (const line of billing.invoices.listAllLineItems("in_123", { limit: 100 })) {
+  // Reconcile every line, including those omitted from the embedded collection.
+}
+
+await billing.invoices.removeLines(
+  "in_123",
+  { lines: [{ id: "il_123", behavior: "unassign" }] },
+  { idempotencyKey: "invoice:in_123:unassign:il_123" }
+)
+```
+
+`updateLineItem` returns the updated `StripeInvoiceLineItem` and is available before finalization.
+The bulk methods return the updated `StripeInvoice` and require a draft invoice. Stripe validates
+these state-dependent rules when processing the request. Each bulk call is sent as one request,
+without automatically splitting or changing its lines.
+
+For `removeLines`, each line requires an explicit `behavior`: `unassign` makes the item available
+for reassignment; `delete` permanently deletes it. Amounts may be negative for credits.
+
+## Invoice Payments
+
+Invoice Payments describe the allocation of a payment to an invoice. The embedded `payments`
+collection, when expanded, can be incomplete; use these methods for full pagination.
+
+| Client method | Stripe endpoint |
+| --- | --- |
+| `billing.invoicePayments.get(id, params?, options?)` | `GET /v1/invoice_payments/:id` |
+| `billing.invoicePayments.list(params?, options?)` | `GET /v1/invoice_payments` |
+| `billing.invoicePayments.listAll(params?, options?)` | Auto-pagination over the list endpoint |
+
+```ts
+for await (const payment of billing.invoicePayments.listAll({
+  invoice: "in_123",
+  status: "paid",
+  limit: 100,
+})) {
+  // amount_paid is the amount allocated to this invoice.
+}
+```
+
+The invoice filter is optional. The SDK's types also expose creation-date, status, payment and
+expansion filters. `amount_paid` is nullable until the payment is paid, and can differ from
+`amount_requested`. Preserve `payment.type`: it may identify a PaymentIntent, Charge, or
+PaymentRecord. Expanded relations retain their official SDK object types.
+
+This resource is read-only. Use the existing `invoices.attachPayment` to attach a payment.
+The verified event webhook already supports `invoice_payment.paid` snapshot events.
 
 ## Payment Intents
 

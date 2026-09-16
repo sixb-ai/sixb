@@ -18,6 +18,7 @@ describe("stripe connector", () => {
       "customers",
       "subscriptions",
       "invoices",
+      "invoicePayments",
       "paymentIntents",
       "charges",
       "refunds",
