@@ -90,6 +90,9 @@ import deviceAuthorizationsSql from "./migrations/034-device-authorizations.sql"
 }
 import shareGrantsSql from "./migrations/035-share-grants.sql" with { type: "text" }
 import shareSessionsSql from "./migrations/036-share-sessions.sql" with { type: "text" }
+import agentThreadWorkspacesSql from "./migrations/037-agent-thread-workspaces.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -181,6 +184,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("034-device-authorizations", deviceAuthorizationsSql),
     sqliteSql("035-share-grants", shareGrantsSql),
     sqliteSql("036-share-sessions", shareSessionsSql),
+    sqliteSql("037-agent-thread-workspaces", agentThreadWorkspacesSql),
   ],
 })
 

@@ -8,6 +8,8 @@
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentToolDefinition } from "../agents"
+import { AgentDefinitionError } from "../agents/errors"
+import { type AgentWorkspaceConfig, createAgentWorkspaceDefinition } from "../agents/workspace"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -68,6 +70,7 @@ import type {
   RoleDefinition,
   SecurityDefinitionCatalog,
 } from "../security"
+import type { InferParams, ParamsConfig } from "../shared/params/types"
 import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
@@ -84,7 +87,10 @@ import { createBoundSixb, type Sixb, type SixbDependencies } from "./sixb"
 import { StorageReadiness } from "./storage-readiness"
 import type { OntologySource, SixbHostContext, SixbRuntimeContext } from "./types"
 
-export interface SixbHostOptions<TOntologySources extends readonly OntologySource[]> {
+export interface SixbHostOptions<
+  TOntologySources extends readonly OntologySource[],
+  TParams extends ParamsConfig = ParamsConfig,
+> {
   id?: string
   ontology: TOntologySources
   broker: Broker
@@ -93,6 +99,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory
+  agentWorkspace?: AgentWorkspaceConfig<TParams>
   /** Optional process-level output provider. Omit for broker-only logging. */
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
@@ -126,6 +133,7 @@ export interface SixbHostOptions<TOntologySources extends readonly OntologySourc
 
 export class SixbHost<
   TOntologySources extends readonly OntologySource[] = readonly OntologySource[],
+  TParams extends ParamsConfig = ParamsConfig,
 > {
   readonly projectId: string
   private readonly webhookRegistry: WebhookRegistry
@@ -149,7 +157,7 @@ export class SixbHost<
   readonly scheduler: SchedulerController
   readonly auth: AuthRuntime
 
-  constructor(options: SixbHostOptions<TOntologySources>) {
+  constructor(options: SixbHostOptions<TOntologySources, TParams>) {
     const errorReporter = attachSixbErrorReporter(this, options.onError)
     this.projectId = options.id ?? "default"
     this.broker = options.broker
@@ -174,7 +182,22 @@ export class SixbHost<
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
 
     const definitions = resolveDefinitions(options)
-    this.definitions = definitions
+    if (options.agentWorkspace !== undefined && typeof options.sandboxes?.resume !== "function") {
+      throw new AgentDefinitionError(
+        "[Sixb] agentWorkspace requires a sandbox provider with persistence support."
+      )
+    }
+    this.definitions = Object.freeze({
+      ...definitions,
+      ...(options.agentWorkspace === undefined
+        ? {}
+        : {
+            agentWorkspace: createAgentWorkspaceDefinition<TParams>(
+              options.agentWorkspace,
+              definitions.ontology
+            ),
+          }),
+    })
     registerProjectionRegistry(this, definitions.projections)
 
     this.auth = new AuthRuntime({
@@ -245,7 +268,7 @@ export class SixbHost<
   }
 
   /** Bind an existing opaque scope. This method never creates or escalates authority. */
-  withScope(scope: ExecutionScope): Sixb<TOntologySources> {
+  withScope(scope: ExecutionScope): Sixb<TOntologySources, InferParams<TParams>> {
     const capturedScope = captureExecutionScope(scope)
     const authorization = resolveExecutionScopeAuthorization(this.projectId, capturedScope)
     if (authorization.type === "unrestricted" && authorization.ref.type === "kernel") {
@@ -271,7 +294,7 @@ export class SixbHost<
         notifyCommittedFacts: () => this.committedFacts.notify(),
       })
     )
-    return createBoundSixb<TOntologySources>(
+    return createBoundSixb<TOntologySources, InferParams<TParams>>(
       runtime,
       this.sixbDependencies(),
       capturedScope.execution

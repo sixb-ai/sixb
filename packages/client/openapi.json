@@ -27771,6 +27771,39 @@
                           "title": {
                             "type": "string"
                           },
+                          "workspace": {
+                            "type": "object",
+                            "properties": {
+                              "params": {
+                                "type": "object",
+                                "additionalProperties": {
+                                  "description": "Any JSON-compatible value.",
+                                  "nullable": true,
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "number"
+                                    },
+                                    {
+                                      "type": "boolean"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    {
+                                      "type": "object",
+                                      "additionalProperties": true
+                                    }
+                                  ]
+                                }
+                              }
+                            },
+                            "required": ["params"],
+                            "additionalProperties": false
+                          },
                           "status": {
                             "type": "string",
                             "enum": ["active", "archived"]
@@ -27877,6 +27910,39 @@
                   "threadId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "workspace": {
+                    "type": "object",
+                    "properties": {
+                      "params": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "description": "Any JSON-compatible value.",
+                          "nullable": true,
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": ["params"],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -27893,6 +27959,39 @@
                   "threadId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "workspace": {
+                    "type": "object",
+                    "properties": {
+                      "params": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "description": "Any JSON-compatible value.",
+                          "nullable": true,
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": ["params"],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -27909,6 +28008,39 @@
                   "threadId": {
                     "type": "string",
                     "minLength": 1
+                  },
+                  "workspace": {
+                    "type": "object",
+                    "properties": {
+                      "params": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "description": "Any JSON-compatible value.",
+                          "nullable": true,
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "number"
+                            },
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "array",
+                              "items": {}
+                            },
+                            {
+                              "type": "object",
+                              "additionalProperties": true
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "required": ["params"],
+                    "additionalProperties": false
                   }
                 },
                 "additionalProperties": false
@@ -27950,6 +28082,39 @@
                         },
                         "title": {
                           "type": "string"
+                        },
+                        "workspace": {
+                          "type": "object",
+                          "properties": {
+                            "params": {
+                              "type": "object",
+                              "additionalProperties": {
+                                "description": "Any JSON-compatible value.",
+                                "nullable": true,
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "number"
+                                  },
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "array",
+                                    "items": {}
+                                  },
+                                  {
+                                    "type": "object",
+                                    "additionalProperties": true
+                                  }
+                                ]
+                              }
+                            }
+                          },
+                          "required": ["params"],
+                          "additionalProperties": false
                         },
                         "status": {
                           "type": "string",
@@ -28109,6 +28274,39 @@
                     },
                     "title": {
                       "type": "string"
+                    },
+                    "workspace": {
+                      "type": "object",
+                      "properties": {
+                        "params": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "description": "Any JSON-compatible value.",
+                            "nullable": true,
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "boolean"
+                              },
+                              {
+                                "type": "array",
+                                "items": {}
+                              },
+                              {
+                                "type": "object",
+                                "additionalProperties": true
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "required": ["params"],
+                      "additionalProperties": false
                     },
                     "status": {
                       "type": "string",

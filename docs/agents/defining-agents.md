@@ -82,6 +82,52 @@ Provider definitions supply capabilities, context limits, and supported reasonin
 runtime accepts named reasoning levels or an exact `{ budgetTokens }` budget when supported;
 the composer offers the named levels. Unknown capabilities are not treated as unsupported.
 
+## Workspace configuration (foundation)
+
+`agentWorkspace` declares one project recipe. It does not enable a workspace on every thread.
+It requires a sandbox factory exposing `resume()` for persistent creation and resume.
+
+**This release stores thread bindings only. Workspace runs and retries are rejected until the
+persistent execution lifecycle is available. Existing threads without a workspace are unchanged.**
+
+```ts
+import { createSixb, optional, param } from "@sixb/core"
+
+const host = await createSixb({
+  // ...ontology, models, storage, broker, queues, persistent sandbox factory
+  agentWorkspace: {
+    params: {
+      clientId: param("string"),
+      branch: optional(param("string")),
+    },
+    resolve: async ({ params, sixb }) => {
+      // Application-owned helper: check access using the current execution's SDK.
+      const client = await requireRepositoryAccess(sixb, params.clientId)
+      return {
+        source: {
+          type: "git",
+          url: client.repositoryUrl,
+          revision: params.branch ?? client.defaultBranch,
+        },
+        setup: ["bun install"],
+      }
+    },
+  },
+})
+```
+
+Parameters use the same `param()` / `optional()` builders as Actions, including nullable values,
+enums and object references. The schema and resolver are captured when the host is created.
+Only validated JSON parameters are stored; dates are restored to `Date` when resolving.
+Object references validate shape and type, not access: the resolver must check current authority.
+
+Thread creation never invokes the resolver or provisions a sandbox. Initialization, repository
+identity checks and snapshot recovery belong to the subsequent execution lifecycle.
+The recipe may declare guest-readable `env`; never use it for Git credentials.
+Git credential strategies are not supported in this foundation.
+
+See [thread workspace bindings](./running-and-streaming.md#workspace-bindings).
+
 ## Instructions and tools
 
 Sixb owns the conversational baseline prompt and sandbox guidance. Put domain-specific procedures

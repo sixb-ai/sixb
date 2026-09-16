@@ -2,6 +2,7 @@ import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions"
 import type { AgentToolDefinition } from "../agents"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
+import type { AgentWorkspaceConfig } from "../agents/workspace"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap"
@@ -21,6 +22,7 @@ import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
 import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
+import type { ParamsConfig } from "../shared/params/types"
 import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
@@ -29,7 +31,7 @@ import { RuntimeError } from "./errors"
 import { SixbHost } from "./host"
 import type { OntologySource } from "./types"
 
-export interface CreateSixbOptions {
+export interface CreateSixbOptions<TParams extends ParamsConfig = ParamsConfig> {
   id?: string
   broker: Broker
   storage: Storage
@@ -37,6 +39,7 @@ export interface CreateSixbOptions {
   blobStorage: BlobStorage
   queues: Queues
   sandboxes?: SandboxFactory
+  agentWorkspace?: AgentWorkspaceConfig<TParams>
   /** Optional process-level output provider. Omit for broker-only logging. */
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
@@ -79,9 +82,9 @@ export interface CreateSixbOptions {
  * `rules/`, `workflows/`, `shares/`, and `security/{groups,roles,policies}/`
  * relative to `projectRoot`.
  */
-export async function createSixb(
-  options: CreateSixbOptions
-): Promise<SixbHost<readonly OntologySource[]>> {
+export async function createSixb<const TParams extends ParamsConfig = ParamsConfig>(
+  options: CreateSixbOptions<TParams>
+): Promise<SixbHost<readonly OntologySource[], TParams>> {
   assertNoAgentDefinitions(options)
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
 
@@ -99,7 +102,7 @@ export async function createSixb(
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
   // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
   // used to *replace* discovery instead, silently and undocumented.
-  return new SixbHost<readonly OntologySource[]>({
+  return new SixbHost<readonly OntologySource[], TParams>({
     id: options.id,
     ontology: allSources,
     broker: options.broker,
@@ -108,6 +111,7 @@ export async function createSixb(
     blobStorage: options.blobStorage,
     queues: options.queues,
     sandboxes: options.sandboxes,
+    agentWorkspace: options.agentWorkspace,
     logger: options.logger,
     observability: options.observability,
     onError: options.onError,
