@@ -1,5 +1,4 @@
 {
-  "openapi": "3.0.3",
   "info": {
     "title": "Sixb API",
     "description": "Ontology-first digital twins runtime API",
@@ -1031,6 +1030,7 @@
       "description": "Scoped shared-access grant lifecycle"
     }
   ],
+  "openapi": "3.0.3",
   "paths": {
     "/api/auth/device-authorizations": {
       "post": {
@@ -26196,6 +26196,10 @@
                           "type": "string",
                           "enum": ["multipart"]
                         },
+                        "partReceipt": {
+                          "type": "string",
+                          "enum": ["etag", "none"]
+                        },
                         "uploadId": {
                           "type": "string"
                         },
@@ -26208,7 +26212,13 @@
                           "type": "string"
                         }
                       },
-                      "required": ["strategy", "uploadId", "partSizeBytes", "expiresAt"],
+                      "required": [
+                        "strategy",
+                        "partReceipt",
+                        "uploadId",
+                        "partSizeBytes",
+                        "expiresAt"
+                      ],
                       "additionalProperties": false
                     }
                   ]
@@ -26541,10 +26551,11 @@
                           "minimum": 0
                         },
                         "etag": {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1
                         }
                       },
-                      "required": ["partNumber", "etag"],
+                      "required": ["partNumber"],
                       "additionalProperties": false
                     }
                   }
@@ -26575,10 +26586,11 @@
                           "minimum": 0
                         },
                         "etag": {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1
                         }
                       },
-                      "required": ["partNumber", "etag"],
+                      "required": ["partNumber"],
                       "additionalProperties": false
                     }
                   }
@@ -26609,10 +26621,11 @@
                           "minimum": 0
                         },
                         "etag": {
-                          "type": "string"
+                          "type": "string",
+                          "minLength": 1
                         }
                       },
-                      "required": ["partNumber", "etag"],
+                      "required": ["partNumber"],
                       "additionalProperties": false
                     }
                   }

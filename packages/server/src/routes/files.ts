@@ -467,6 +467,7 @@ function fileUploadResponse(session: FileUploadSession) {
       strategy: "multipart",
       uploadId: session.id,
       partSizeBytes: session.providerUpload.partSizeBytes,
+      partReceipt: session.providerUpload.partReceipt ?? "etag",
       expiresAt: session.providerUpload.expiresAt.toISOString(),
     }
   }
@@ -534,7 +535,7 @@ async function completeProviderUpload(input: {
   readonly session: FileUploadSession
   readonly expectedDigest?: BlobDigest
   readonly expectedSizeBytes?: number
-  readonly parts: readonly { readonly partNumber: number; readonly etag: string }[] | undefined
+  readonly parts: readonly { readonly partNumber: number; readonly etag?: string }[] | undefined
   readonly blobStorage: SixbHostView["blobStorage"]
 }): Promise<FileRef> {
   const { blobStorage, session } = input
