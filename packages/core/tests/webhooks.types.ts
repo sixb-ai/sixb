@@ -51,3 +51,23 @@ defineWebhook("unknown")
 
 // @ts-expect-error typed JSON webhooks require a runtime parser argument
 defineWebhook("type-only").post().json<{ name: string }>()
+
+defineWebhook("managed")
+  .post()
+  .json(schema)
+  .verify((context) => {
+    // @ts-expect-error verification cannot resolve managed connections
+    context.connections
+  })
+  .handle<{ read(): Promise<void> }>(async (context) => {
+    const _name: string = context.body.name
+    for (const target of await context.connections.forAccount(context.body.name)) {
+      const _account: string = target.connection.account.id
+      await (await target.client()).read()
+      // @ts-expect-error client type is preserved through connection lookup
+      ;(await target.client()).missing()
+    }
+    const _request: Request = context.request
+    // @ts-expect-error parsed payload shape is inferred
+    context.body.missing
+  })
