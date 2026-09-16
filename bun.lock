@@ -302,6 +302,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/quickbooks": {
+      "name": "@sixb/connector-quickbooks",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/rest": {
       "name": "@sixb/connector-rest",
       "version": "0.1.2",
@@ -1515,6 +1530,8 @@
     "@sixb/connector-pennylane": ["@sixb/connector-pennylane@workspace:connectors/pennylane"],
 
     "@sixb/connector-pipedrive": ["@sixb/connector-pipedrive@workspace:connectors/pipedrive"],
+
+    "@sixb/connector-quickbooks": ["@sixb/connector-quickbooks@workspace:connectors/quickbooks"],
 
     "@sixb/connector-rest": ["@sixb/connector-rest@workspace:connectors/rest"],
 

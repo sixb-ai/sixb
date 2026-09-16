@@ -40,6 +40,7 @@
       "@sixb/connector-pandadoc": ["./connectors/pandadoc/src/index.ts"],
       "@sixb/connector-pennylane": ["./connectors/pennylane/src/index.ts"],
       "@sixb/connector-pipedrive": ["./connectors/pipedrive/src/index.ts"],
+      "@sixb/connector-quickbooks": ["./connectors/quickbooks/src/index.ts"],
       "@sixb/connector-rest": ["./connectors/rest/src/index.ts"],
       "@sixb/connector-sftp": ["./connectors/sftp/src/index.ts"],
       "@sixb/connector-sql": ["./connectors/sql/src/index.ts"],
