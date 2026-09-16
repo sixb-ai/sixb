@@ -169,23 +169,41 @@ function uploadedId(response: Response): string {
     )
   return match[1].replace(/''/g, "'")
 }
-export function attachmentsResource(http: MicrosoftHttp): MailAttachmentsResource {
+export function attachmentsResource(
+  http: MicrosoftHttp,
+  target?: {
+    readonly path: (mailbox: string, id: string) => string
+    readonly uploadError: new (
+      session: MailAttachmentSession,
+      cause: unknown,
+      completionUnknown: boolean
+    ) => Error
+  }
+): MailAttachmentsResource {
+  const itemAttachmentsPath = target
+    ? (mailbox: string, id: string) => `${target.path(mailbox, id)}/attachments`
+    : attachmentsPath
+  const UploadError = target?.uploadError ?? MicrosoftMailUploadError
   const attachments: MailAttachmentsResource = {
     async list(mailbox, messageId, options) {
       return page(
-        await http.json(`${attachmentsPath(mailbox, messageId)}${mailQuery(options)}`, {
+        await http.json(`${itemAttachmentsPath(mailbox, messageId)}${mailQuery(options)}`, {
           signal: options?.signal,
           headers: mailHeaders(),
         })
       )
     },
     listAll(mailbox, messageId, options) {
-      return mailPages(http, `${attachmentsPath(mailbox, messageId)}${mailQuery(options)}`, options)
+      return mailPages(
+        http,
+        `${itemAttachmentsPath(mailbox, messageId)}${mailQuery(options)}`,
+        options
+      )
     },
     async get(mailbox, messageId, id, options) {
       return resource<MailAttachment>(
         await http.json(
-          `${attachmentsPath(mailbox, messageId)}/${segment(id, "attachmentId")}${mailQuery(options)}`,
+          `${itemAttachmentsPath(mailbox, messageId)}/${segment(id, "attachmentId")}${mailQuery(options)}`,
           { signal: options?.signal, headers: mailHeaders() }
         )
       )
@@ -193,7 +211,7 @@ export function attachmentsResource(http: MicrosoftHttp): MailAttachmentsResourc
     downloadResponse(mailbox, messageId, id, options) {
       return mailBytes(
         http,
-        `${attachmentsPath(mailbox, messageId)}/${segment(id, "attachmentId")}/$value`,
+        `${itemAttachmentsPath(mailbox, messageId)}/${segment(id, "attachmentId")}/$value`,
         options
       )
     },
@@ -205,13 +223,13 @@ export function attachmentsResource(http: MicrosoftHttp): MailAttachmentsResourc
     async delete(mailbox, messageId, id, options) {
       await checkEmpty(
         await http.request(
-          `${attachmentsPath(mailbox, messageId)}/${segment(id, "attachmentId")}`,
+          `${itemAttachmentsPath(mailbox, messageId)}/${segment(id, "attachmentId")}`,
           { method: "DELETE", signal: options?.signal, headers: mailHeaders() }
         )
       )
     },
     async upload(mailbox, messageId, name, content, options) {
-      const path = attachmentsPath(mailbox, messageId)
+      const path = itemAttachmentsPath(mailbox, messageId)
       const info = metadata(name, options)
       const data = file(content)
       if (data.size > MAX_SIZE)
@@ -241,7 +259,7 @@ export function attachmentsResource(http: MicrosoftHttp): MailAttachmentsResourc
       )
     },
     async createSession(mailbox, messageId, name, size, options) {
-      const path = attachmentsPath(mailbox, messageId)
+      const path = itemAttachmentsPath(mailbox, messageId)
       const info = metadata(name, options)
       if (!Number.isSafeInteger(size) || size < SMALL_LIMIT || size > MAX_SIZE)
         throw new MicrosoftConfigurationError(
@@ -299,7 +317,7 @@ export function attachmentsResource(http: MicrosoftHttp): MailAttachmentsResourc
             throw new MicrosoftProtocolError("Outlook attachment acknowledgement did not advance.")
         }
       } catch (cause) {
-        throw new MicrosoftMailUploadError(current, cause, completionUnknown)
+        throw new UploadError(current, cause, completionUnknown)
       }
     },
     async cancel(session, options) {

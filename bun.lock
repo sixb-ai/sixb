@@ -227,7 +227,7 @@
     },
     "connectors/microsoft": {
       "name": "@sixb/connector-microsoft",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@azure/msal-node": "^6.0.0",
         "@sixb/connector-rest": "workspace:^",
