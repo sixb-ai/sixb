@@ -295,8 +295,56 @@ folder membership across independent streams. Invalid/expired delta state is pro
 Reads honor REST retry policies and Retry-After. Pace work per mailbox: Outlook allows four
 concurrent requests per application/mailbox, and minDelayMs only spaces starts, not in-flight
 concurrency. Sequential per-mailbox processing is a safe default; coordinate across workers.
-The connector does not install background polling, subscriptions or a persistent sync store.
+The connector does not install background polling, automatic subscriptions or a persistent sync store.
 Calendar/Teams operations, rules, mailbox settings and MIME composition are outside this surface.
+
+### Mail webhooks
+
+Configure a callback on your connector. Mail notifications require application mail-read access.
+
+```ts
+export default defineConnector("microsoft", microsoft({
+  auth: { tenantId, clientId, clientSecret },
+  webhookSecret: process.env.MICROSOFT_WEBHOOK_SECRET!, // 1–128 characters
+  async onEvent({ event }) {
+    // Your durable queue: map event.subscriptionId to its mailbox and enqueue work.
+    await enqueueMailWork(event)
+  },
+}))
+```
+
+Sixb hosts `/api/webhooks/microsoft/events` and handles validation and secret verification.
+Once the endpoint is reachable over public HTTPS, register it with Microsoft:
+
+```ts
+const subscription = await client.mail.subscribe("operations@contoso.com", {
+  changeTypes: ["created", "updated", "deleted"],
+  notificationUrl: "https://your-app.com/api/webhooks/microsoft/events",
+  // lifecycleNotificationUrl defaults to notificationUrl.
+  // folderId: "inbox", // Omit to watch the whole mailbox.
+  expirationDateTime: new Date(Date.now() + 3 * 86_400_000).toISOString(),
+})
+
+// Save the ID, returned expiry and mailbox. Renew from a Sixb schedule before expiry.
+await client.subscriptions.renew(
+  subscription.id, new Date(Date.now() + 3 * 86_400_000).toISOString()
+)
+
+// When no longer needed:
+await client.subscriptions.delete(subscription.id)
+```
+
+| Event | Queued work |
+| --- | --- |
+| `kind: "change"` | Run delta for the mailbox's tracked folders |
+| `kind: "lifecycle"`, `lifecycleEvent: "missed"` | Catch up with delta |
+| `kind: "lifecycle"`, `lifecycleEvent: "subscriptionRemoved"` | Recreate the subscription, then catch up |
+| `kind: "lifecycle"`, `lifecycleEvent: "reauthorizationRequired"` | Renew, which also reauthorizes |
+
+- `onEvent` also receives `sixb`, `logger` and lazy `client()`.
+- Await durable enqueue within **3 seconds**; Sixb returns `202` on success or `500` on failure.
+- Events can repeat or be missed. Queue idempotently and run periodic delta syncs.
+- Subscriptions expire within about seven days. Keep separate renew/reauthorize calls 10 minutes apart.
 
 ### Mail verification
 
@@ -316,6 +364,18 @@ cleanup. Ordinary tests send no mail; the live suite skips unless explicitly ena
 bun test ./connectors/microsoft/tests/mail.e2e.ts
 ```
 
+Test subscriptions against a running endpoint using the same tenant/client credentials:
+
+```bash
+export MICROSOFT_MAIL_TEST_MAILBOX="operations@contoso.com"
+export MICROSOFT_TEST_NOTIFICATION_URL="https://your-app.com/api/webhooks/microsoft/events"
+export MICROSOFT_WEBHOOK_SECRET="your-endpoint-secret"
+# Optional: MICROSOFT_TEST_MAIL_FOLDER_ID (defaults to inbox).
+bun test ./connectors/microsoft/tests/subscriptions.e2e.ts
+```
+
+Creates, validates, renews and deletes a test subscription. Skips when configuration is missing.
+
 ## API surface and limits
 
 - `sites`: `get`, `getByUrl`, `listDrives`, `listAllDrives`.
@@ -323,6 +383,8 @@ bun test ./connectors/microsoft/tests/mail.e2e.ts
   `downloadResponse`, `createFolder`, `rename`, `move`, `delete`.
 - `drives.uploads`: `upload`, `createSession`, `getStatus`, `resume`, `cancel`.
 - `drives.delta`: `list`, `pages`.
+- `mail.subscribe(mailbox, options)`: subscribe to mailbox or folder message changes.
+- `subscriptions`: `list`, `listAll`, `get`, `renew`, `delete`, `reauthorize`.
 
 Collection responses retain Graph's `value` and annotations. Select/expand options preserve wire
 properties; projections include `id` so item identity remains available. Wire types cover the
@@ -333,7 +395,7 @@ Microsoft Graph cannot directly move files between libraries; `move` stays in on
 also rejects replacing sensitivity-labelled file content with app-only authentication; Microsoft
 requires delegated access for that operation. Retention rules and other SharePoint policies still
 apply. Sovereign clouds, on-premises SharePoint, permission provisioning, cross-drive copy jobs,
-webhooks and Office document-content editing are outside this package's current surface.
+SharePoint webhooks and Office document-content editing are outside this package's current surface.
 
 ## Verification
 
@@ -523,3 +585,5 @@ reported by the test to remove remaining test data.
 - [Teams calendar events](https://learn.microsoft.com/en-us/graph/outlook-calendar-online-meetings)
 - [Event attachments](https://learn.microsoft.com/en-us/graph/api/event-post-attachments?view=graph-rest-1.0)
 - [Free/busy limits](https://learn.microsoft.com/en-us/graph/outlook-get-free-busy-schedule)
+- [Webhook delivery](https://learn.microsoft.com/en-us/graph/change-notifications-delivery-webhooks)
+- [Subscription lifecycle](https://learn.microsoft.com/en-us/graph/change-notifications-lifecycle-events)
