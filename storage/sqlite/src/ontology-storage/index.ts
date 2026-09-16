@@ -7,10 +7,13 @@ import { SqliteOntologyOutboxStorage } from "./outbox"
 import type { SqliteRootOperation } from "./shared"
 import { SqliteOntologySourceStorage } from "./sources"
 
+import { SqliteOntologyVectorStorage } from "./vectors"
+
 export class SqliteOntologyStorage implements OntologyStorage {
   readonly commits: SqliteOntologyCommitStorage
   readonly sources: SqliteOntologySourceStorage
   readonly materializations: SqliteOntologyMaterializationStorage
+  readonly vectors: SqliteOntologyVectorStorage
   readonly outbox: SqliteOntologyOutboxStorage
 
   constructor(input: {
@@ -23,6 +26,12 @@ export class SqliteOntologyStorage implements OntologyStorage {
     this.materializations = new SqliteOntologyMaterializationStorage(
       input.db,
       input.transactionContext
+    )
+    this.vectors = new SqliteOntologyVectorStorage(
+      input.db,
+      input.runRootOperation,
+      (session, projectId, commitId) =>
+        this.materializations.assertVectorSession(session, projectId, commitId)
     )
     this.outbox = new SqliteOntologyOutboxStorage(input.db, input.runRootOperation)
   }

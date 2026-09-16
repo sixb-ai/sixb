@@ -39,6 +39,22 @@ applied step fails startup instead of silently rewriting migration history. Befo
 breaking migration may still require recreating the database. `dropSchema()` exists for exactly
 that, and for test teardown — it deletes every Sixb table and the schema itself.
 
+## Vector profiles
+
+Named `search.vectors` profiles persist by default after the standard migrations. Embeddings
+and provenance live in `object_vectors`, using native `real[]` values; pgvector is not required.
+
+```ts
+await sixb.objects(Product).byId("product-1").vector("content").index()
+```
+
+Generation runs outside the transaction. The subsequent write checks object and vector revisions;
+source changes invalidate affected profiles atomically, including projection updates. Reindexing
+leaves the business object's version and events unchanged.
+
+**Vector search is not enabled yet.** PostgreSQL currently supports persistence and invalidation;
+query support with pgvector follows separately. Regeneration remains explicit via `index()`.
+
 ## Pooling and timeouts
 
 | Option | Default | Why you would set it |

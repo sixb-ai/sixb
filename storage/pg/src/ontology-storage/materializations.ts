@@ -9,6 +9,7 @@ import {
   linkRefSortKey,
   linkScopeSortKey,
   MaterializationConflictError,
+  MaterializationValidationError,
   objectRefKey,
   objectRefSortKey,
   telemetryPointKey,
@@ -97,6 +98,18 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
   ) {
     this.sessions = new PgMaterializationSessions(sql, context)
     this.writer = new PgMaterializationWriter(sql)
+  }
+
+  assertVectorSession(session: MaterializationSession, projectId: string, commitId?: string): void {
+    const active = this.sessions.require(session)
+    if (
+      active.header.commit.projectId !== projectId ||
+      (commitId !== undefined && active.header.commit.id !== commitId)
+    ) {
+      throw new MaterializationValidationError(
+        "Vector mutation does not belong to this materialization session."
+      )
+    }
   }
 
   async begin(input: MaterializationPlanHeader): Promise<MaterializationSession> {
