@@ -1,5 +1,6 @@
 import type { Database } from "bun:sqlite"
-import type { ObjectQuery } from "@sixb/core"
+import { type ObjectQuery, ObjectQueryExecutionError } from "@sixb/core"
+import { hasVectorProfile } from "@sixb/core/internal/query"
 import type {
   CountObjectsInput,
   CountObjectsResult,
@@ -24,6 +25,7 @@ import {
   type CompiledObjectQuery,
   compileObjectQuery,
   type SqliteObjectQuerySource,
+  type SqliteValue,
 } from "./query-compiler"
 import type { SqliteSelectedObjectReadSource } from "./read-scope"
 import {
@@ -34,6 +36,7 @@ import {
   rowToLink,
   rowToObject,
 } from "./rows"
+import { ensureSqliteVectorSearch } from "./vector-extension"
 
 /** Synchronous SQL reads over one explicit source; transaction and budget ownership stay outside. */
 export class SqliteObjectReader {
@@ -42,7 +45,25 @@ export class SqliteObjectReader {
     private readonly source: SqliteObjectQuerySource | SqliteSelectedObjectReadSource
   ) {}
 
+  private assertVectorSearch(
+    params: QueryObjectsInput | CountObjectsInput | ExistsObjectsInput | FacetObjectsInput
+  ): void {
+    if (!hasVectorProfile(params.query)) return
+    const compiled = compileObjectQuery(params.projectId, params.query, { source: this.source })
+    if (!compiled.vectorProbe) return
+    ensureSqliteVectorSearch(this.db)
+    const probe = compiled.vectorProbe
+    const row = this.db.query<{ total: number }, SqliteValue[]>(probe.sql).get(...probe.args)
+    if (Number(row?.total ?? 0) > probe.limit) {
+      throw new ObjectQueryExecutionError(
+        "vector_work_limit_exceeded",
+        `Exact vector search supports at most ${probe.limit} eligible vectors at this dimension. Narrow the query filters.`
+      )
+    }
+  }
+
   queryObjects(params: QueryObjectsInput): QueryObjectsResult {
+    this.assertVectorSearch(params)
     const source = this.source
     const compiled = compileObjectQuery(params.projectId, params.query, {
       includeTotal: params.includeTotal,
@@ -67,6 +88,7 @@ export class SqliteObjectReader {
   }
 
   countObjects(params: CountObjectsInput): CountObjectsResult {
+    this.assertVectorSearch(params)
     const source = this.source
     return {
       count: readTotal(
@@ -79,6 +101,7 @@ export class SqliteObjectReader {
   }
 
   existsObjects(params: ExistsObjectsInput): ExistsObjectsResult {
+    this.assertVectorSearch(params)
     const source = this.source
     const compiled = compileObjectQuery(params.projectId, existsProbeQuery(params.query), {
       source,
@@ -87,6 +110,7 @@ export class SqliteObjectReader {
   }
 
   facetObjects(params: FacetObjectsInput): FacetObjectsResult {
+    this.assertVectorSearch(params)
     const source = this.source
     const compiled = compileObjectQuery(params.projectId, stripOuterRowShape(params.query), {
       source,

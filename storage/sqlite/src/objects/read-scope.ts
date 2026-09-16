@@ -44,6 +44,9 @@ export function compileSqliteSelectedObjectReadSource(
     wrapQuery: (query: CompiledObjectQuery): CompiledObjectQuery => ({
       ...query,
       ...wrapStatement(query.sql, query.args),
+      vectorProbe: query.vectorProbe
+        ? { ...query.vectorProbe, ...wrapStatement(query.vectorProbe.sql, query.vectorProbe.args) }
+        : undefined,
       totalSql: `${compiled.sql}\n${query.totalSql}`,
       totalArgs: [...compiled.args, ...query.totalArgs],
       ...(query.hasMoreProbe

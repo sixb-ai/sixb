@@ -152,8 +152,8 @@ export function evaluateObjectQuery(
       scoredEntries.sort(
         (a, b) =>
           b.score - a.score ||
-          compareStrings(a.row.objectTypeId, b.row.objectTypeId) ||
-          compareStrings(a.row.primaryId, b.row.primaryId)
+          Buffer.compare(Buffer.from(a.row.objectTypeId), Buffer.from(b.row.objectTypeId)) ||
+          Buffer.compare(Buffer.from(a.row.primaryId), Buffer.from(b.row.primaryId))
       )
       const limit = Math.max(0, query.k)
       return {

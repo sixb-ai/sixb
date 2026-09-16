@@ -23,7 +23,10 @@ export function rowToObject(row: ObjectDatabaseRow): ObjectRow {
 // base columns map as usual; `_expand` (a `jsonb_build_object`) is revived into
 // the runtime link shape the core executor's fallback also produces.
 export function queryRowToObject(row: ObjectQueryDatabaseRow): ObjectRow {
-  const base = rowToObject(row)
+  const base = {
+    ...rowToObject(row),
+    ...(row._vector_score === undefined ? {} : { score: row._vector_score }),
+  }
   const links = reviveExpandedLinks(row._expand)
   return links ? { ...base, links } : base
 }
@@ -109,6 +112,7 @@ export interface ObjectDatabaseRow {
 }
 
 export interface ObjectQueryDatabaseRow extends ObjectDatabaseRow {
+  _vector_score?: number
   _cursor_properties?: unknown
   /** `jsonb_build_object(linkId, value, ...)` from an `expand` pushdown; absent otherwise. */
   _expand?: unknown

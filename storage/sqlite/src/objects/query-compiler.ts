@@ -6,8 +6,15 @@ import {
   type ObjectQuerySetOperation,
   type ObjectQuerySortField,
 } from "@sixb/core"
+import {
+  hasVectorProfile,
+  isVectorProfileQuery,
+  normalizeVector,
+  vectorSearchCandidateLimit,
+} from "@sixb/core/internal/query"
+import { encodeSqliteVector } from "../vector-encoding"
 
-export type SqliteValue = string | number | bigint | boolean | null
+export type SqliteValue = string | number | bigint | boolean | null | Uint8Array
 
 export interface SqliteObjectQueryPageRow {
   object_type_id: string
@@ -17,6 +24,7 @@ export interface SqliteObjectQueryPageRow {
 }
 
 export interface CompiledObjectQuery {
+  vectorProbe?: { sql: string; args: SqliteValue[]; limit: number }
   sql: string
   args: SqliteValue[]
   totalSql: string
@@ -59,7 +67,8 @@ type CompiledOrderField =
     }
   | {
       kind: "column"
-      column: "object_type_id" | "primary_id"
+      column: "object_type_id" | "primary_id" | "_vector_score"
+      binary?: boolean
       direction: "asc" | "desc"
     }
 
@@ -86,6 +95,12 @@ export function compileObjectQuery(
   query: ObjectQuery,
   options: { includeTotal?: boolean; source?: SqliteObjectQuerySource } = {}
 ): CompiledObjectQuery {
+  if (hasVectorProfile(query) && !isVectorProfileQuery(query)) {
+    throw new ObjectQueryExecutionError(
+      "unsupported_vector_composition",
+      "Vector search supports one profile with filters before ranking and limit/project after."
+    )
+  }
   const source = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
   const ctx: CompileContext = { probeLimit: options.includeTotal === false, source }
   return source.wrapQuery(compileObjectQueryInternal(projectId, query, ctx))
@@ -95,6 +110,7 @@ export function compileObjectQuery(
 export interface SqliteObjectQuerySource {
   readonly objectsTable: string
   readonly linksTable: string
+  readonly objectPropertyPermissionsTable?: string
   /** Wrap a terminal SELECT without its own WITH clause; the selected source owns the only WITH. */
   wrapStatement(
     sql: string,
@@ -160,7 +176,73 @@ function compileObjectQueryInternal(
     case "expand":
       return compileExpand(projectId, query.input, query.expansions, ctx)
     case "vector":
-      throw new Error(`[Sixb] SQLite object storage does not support query node '${query.kind}'`)
+      return compileVector(projectId, query, ctx)
+  }
+}
+
+function compileVector(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "vector" }>,
+  ctx: CompileContext
+): CompiledObjectQuery {
+  if (
+    !isVectorProfileQuery(query) ||
+    !query.configuration ||
+    !Number.isSafeInteger(query.k) ||
+    query.k < 1 ||
+    query.k > 1000 ||
+    query.vector.length < 1 ||
+    query.vector.length > 16000
+  ) {
+    throw new ObjectQueryExecutionError(
+      "invalid_vector_query",
+      "A validated named vector profile is required."
+    )
+  }
+  const input = compileObjectQueryInternal(projectId, query.input, exactContext(ctx))
+  const permissions = ctx.source.objectPropertyPermissionsTable
+  const authorized = permissions
+    ? `AND NOT EXISTS (
+    SELECT 1 FROM json_each(vectors.source) AS required
+    WHERE NOT EXISTS (
+      SELECT 1 FROM ${permissions} AS permission
+      WHERE permission.project_id = vectors.project_id
+        AND permission.object_type_id = vectors.object_type_id
+        AND permission.primary_id = vectors.primary_id
+        AND permission.property_id = required.value
+    )
+  )`
+    : ""
+  const candidates = `FROM (${input.sql}) AS input
+    JOIN object_vectors AS vectors ON vectors.project_id = input.project_id
+      AND vectors.object_type_id = input.object_type_id AND vectors.primary_id = input.primary_id
+    WHERE vectors.profile = ? AND vectors.configuration = ?
+      AND length(vectors.embedding) / 4 = ? ${authorized}`
+  const candidateArgs = [...input.args, query.profile!, query.configuration, query.vector.length]
+  // Bound distance work, not just returned rows. Exceeding the envelope fails before ranking.
+  const limit = vectorSearchCandidateLimit(query.vector.length)
+  const values = normalizeVector(query.vector, query.vector.length)
+  const order = compileOrder([
+    { kind: "column", column: "_vector_score", direction: "desc" },
+    ...identityOrderFields().map((field) => ({ ...field, binary: true })),
+  ])
+  const sql = `SELECT * FROM (SELECT input.*, max(-1, min(1, 1 - vec_distance_cosine(vectors.embedding, ?))) AS _vector_score
+    ${candidates}) AS ranked ORDER BY ${order.sql} LIMIT ?`
+  const args = [encodeSqliteVector(values), ...candidateArgs, query.k]
+  return {
+    sql,
+    args,
+    totalSql: `SELECT COUNT(*) AS total FROM (${sql}) AS ranked`,
+    totalArgs: args,
+    order,
+    vectorProbe: {
+      sql: `SELECT COUNT(*) AS total FROM (SELECT 1 ${candidates} LIMIT ?) AS candidates`,
+      args: [...candidateArgs, limit + 1],
+      limit,
+    },
+    hasMore: () => false,
+    trimRows: identityRows,
+    nextPageToken: () => undefined,
   }
 }
 
@@ -274,6 +356,7 @@ function compileWhere(
       WHERE ${predicate.sql}
     `,
     totalArgs: [...input.args, ...predicate.args],
+    vectorProbe: input.vectorProbe,
     order: input.order,
     hasMore: () => false,
     trimRows: identityRows,
@@ -324,7 +407,7 @@ function compileSort(
         input.created_at,
         input.updated_at,
         input.version,
-        input.last_commit_id
+        input.last_commit_id${input.vectorProbe ? ", input._vector_score" : ""}
       FROM (${input.sql}) AS input
       ORDER BY ${order.sql}
     `,
@@ -362,6 +445,7 @@ function compileLimit(
       FROM (${input.sql}) AS input
     `,
     totalArgs: input.args,
+    vectorProbe: input.vectorProbe,
     order: input.order,
     hasMore: (rowCount, total) =>
       total === undefined ? ctx.probeLimit && rowCount > limit : limit < total,
@@ -399,6 +483,7 @@ function compilePage(
       FROM (${input.sql}) AS input
     `,
     totalArgs: input.args,
+    vectorProbe: input.vectorProbe,
     order: input.order,
     hasMore: (rowCount) => rowCount > pageSize,
     trimRows: (rows) => rows.slice(0, pageSize),
@@ -507,6 +592,7 @@ function compileExpand(
     args: [...expand.args, ...input.args, ...inputOrder.args],
     totalSql: input.totalSql,
     totalArgs: input.totalArgs,
+    vectorProbe: input.vectorProbe,
     order: input.order,
     hasMoreProbe: input.hasMoreProbe,
     hasMore: input.hasMore,
@@ -760,13 +846,14 @@ function compileProject(
         input.created_at,
         input.updated_at,
         input.version,
-        input.last_commit_id
+        input.last_commit_id${input.vectorProbe ? ", input._vector_score" : ""}
       FROM (${input.sql}) AS input
       ORDER BY ${inputOrder.sql}
     `,
     args: [...projection.args, ...input.args, ...inputOrder.args],
     totalSql: input.totalSql,
     totalArgs: input.totalArgs,
+    vectorProbe: input.vectorProbe,
     order: outputOrder,
     hasMoreProbe: input.hasMoreProbe,
     hasMore: input.hasMore,
@@ -1026,7 +1113,9 @@ function compileOrder(
 
   for (const field of fields) {
     if (field.kind === "column") {
-      clauses.push(`${columnExpression(field.column, qualifier)} ${field.direction.toUpperCase()}`)
+      clauses.push(
+        `${columnExpression(field.column, qualifier)}${field.binary ? " COLLATE BINARY" : ""} ${field.direction.toUpperCase()}`
+      )
       continue
     }
 
@@ -1238,7 +1327,10 @@ function orderFieldKey(field: CompiledOrderField): string {
     : `property:${field.propertyId}:${field.direction}`
 }
 
-function columnExpression(column: "object_type_id" | "primary_id", qualifier?: string): string {
+function columnExpression(
+  column: "object_type_id" | "primary_id" | "_vector_score",
+  qualifier?: string
+): string {
   return qualifier ? `${qualifier}.${column}` : column
 }
 

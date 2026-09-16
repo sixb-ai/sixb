@@ -1,4 +1,5 @@
 import type { Database } from "bun:sqlite"
+import { hasVectorProfile } from "@sixb/core/internal/query"
 import type {
   CompiledSelectedObjectReadScope,
   CountObjectsInput,
@@ -25,6 +26,7 @@ import { installFreshSqliteSchema } from "../migrations"
 import {
   closeSqliteStoreConnection,
   openSqliteStoreConnection,
+  runDeferredReadTransaction,
   type SqliteStoreConnection,
 } from "../transactions"
 import { DEFAULT_OBJECT_QUERY_SOURCE } from "./query-compiler"
@@ -49,6 +51,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     refs: true,
     filter: true,
     text: true,
+    vector: true,
     sort: true,
     limit: true,
     page: true,
@@ -101,7 +104,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     "SQLite object query pushdown supports start/refs/filter/text/sort/limit/page/traverse/set/project/expand over JSON properties and object links.",
     "expand hydrates linked objects in-database (top-N per parent via row_number() + json_group_array); core resolves each expansion's cardinality before pushdown, and a mixed/unresolved one stays on the fallback.",
     "Ordered decimal predicates and sorting use the bounded core fallback because SQLite has no native exact decimal type; canonical decimal equality remains pushdown-safe.",
-    "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
+    "Relevance sorting and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
   ],
 }
 
@@ -139,18 +142,26 @@ export class SqliteObjectStorage implements ObjectStorage {
   }
 
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
+    if (hasVectorProfile(params.query))
+      return runDeferredReadTransaction(this.db, () => this.reader.queryObjects(params))
     return this.reader.queryObjects(params)
   }
 
   async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    if (hasVectorProfile(params.query))
+      return runDeferredReadTransaction(this.db, () => this.reader.countObjects(params))
     return this.reader.countObjects(params)
   }
 
   async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
+    if (hasVectorProfile(params.query))
+      return runDeferredReadTransaction(this.db, () => this.reader.existsObjects(params))
     return this.reader.existsObjects(params)
   }
 
   async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
+    if (hasVectorProfile(params.query))
+      return runDeferredReadTransaction(this.db, () => this.reader.facetObjects(params))
     return this.reader.facetObjects(params)
   }
 

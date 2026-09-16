@@ -137,9 +137,9 @@ describe("SQLite vector storage", () => {
         row.embedding.byteOffset,
         row.embedding.byteLength
       )
-      expect([0, 4, 8].map((offset) => view.getFloat32(offset, true))).toEqual(
-        [0.1, 0.2, 0.3].map(Math.fround)
-      )
+      const values = [0, 4, 8].map((offset) => view.getFloat32(offset, true))
+      expect(Math.hypot(...values)).toBeCloseTo(1, 6)
+      expect(values[1]! / values[0]!).toBeCloseTo(2, 6)
       const states = await f.states()
       expect(states).toHaveLength(1)
       expect(states[0]).not.toHaveProperty("values")
@@ -465,7 +465,7 @@ describe("SQLite vector storage", () => {
     }
   })
 
-  test("malformed model outputs never replace vectors; search remains disabled", async () => {
+  test("malformed model outputs never replace vectors", async () => {
     const f = await fixture()
     try {
       await f.seed()
@@ -479,9 +479,6 @@ describe("SQLite vector storage", () => {
       for (const blob of [new Uint8Array(), new Uint8Array(3), new Uint8Array(64004)]) {
         expect(() => f.db.query("UPDATE object_vectors SET embedding = ?").run(blob)).toThrow()
       }
-      await expect(
-        f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()
-      ).rejects.toThrow()
     } finally {
       await f.close()
     }
