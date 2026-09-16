@@ -56,6 +56,9 @@
       "path": "connectors/pennylane/tsconfig.build.json"
     },
     {
+      "path": "connectors/quickbooks/tsconfig.build.json"
+    },
+    {
       "path": "connectors/rest/tsconfig.build.json"
     },
     {
