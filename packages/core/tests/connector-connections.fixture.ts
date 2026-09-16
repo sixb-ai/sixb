@@ -2,6 +2,7 @@ import { expect } from "bun:test"
 import {
   type AuthorizationContext,
   type ConnectorAccountCandidate,
+  type ConnectorOAuth2Authentication,
   type ConnectorOAuthCredentials,
   defineConnector,
   type OAuthConnectorCodeExchangeInput,
@@ -52,6 +53,7 @@ export type HarnessOptions = Pick<
   readonly systemRuntimeClock?: boolean
   readonly systemStorageClock?: boolean
   readonly callbackParameters?: readonly string[]
+  readonly pkce?: ConnectorOAuth2Authentication["pkce"]
   readonly exchange?: (
     input: OAuthConnectorCodeExchangeInput
   ) => ConnectorOAuthCredentials | Promise<ConnectorOAuthCredentials>
@@ -79,7 +81,7 @@ export function createHarness(options: HarnessOptions = {}) {
   let revokeGate: Promise<void> | undefined
   let connectGate: Promise<void> | undefined
   let providerRevoked = false
-  const exchangedVerifiers: string[] = []
+  const exchangedVerifiers: (string | undefined)[] = []
   const refreshInputs: ConnectorOAuthCredentials[] = []
   const connectionSignals: AbortSignal[] = []
 
@@ -87,13 +89,16 @@ export function createHarness(options: HarnessOptions = {}) {
     type: "fake-oauth",
     authentication: {
       type: "oauth2",
+      pkce: options.pkce,
       callbackParameters: options.callbackParameters,
       async authorizationUrl(_context, input) {
         await authorizationUrlGate
         const url = new URL("https://provider.test/oauth/authorize")
         url.searchParams.set("state", input.state)
-        url.searchParams.set("code_challenge", input.codeChallenge)
-        url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
+        if (input.codeChallenge !== undefined && input.codeChallengeMethod !== undefined) {
+          url.searchParams.set("code_challenge", input.codeChallenge)
+          url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
+        }
         return url
       },
       async exchangeCode(_context, input) {

@@ -382,6 +382,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("037-execution-requester-groups", executionRequesterGroupsSql),
     pgSql("038-outbox-publication-order", outboxPublicationOrderSql),
     pgSql("039-projection-source-roots", projectionSourceRootsSql),
+    pgSql("040-connector-optional-pkce", connectorOptionalPkceSql),
   ],
 })
 
@@ -399,5 +400,9 @@ import executionRequesterGroupsSql from "./migrations/037-execution-requester-gr
   type: "text",
 }
 import outboxPublicationOrderSql from "./migrations/038-outbox-publication-order.sql" with {
+  type: "text",
+}
+
+import connectorOptionalPkceSql from "./migrations/040-connector-optional-pkce.sql" with {
   type: "text",
 }

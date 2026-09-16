@@ -116,14 +116,9 @@ can link to the exported `LINKEDIN_PERMITTED_SERVICES_URL` constant for that man
 
 ### LinkedIn PKCE compatibility
 
-Sixb currently requires every managed OAuth adapter to preserve its `state`, `code_challenge`, and
-`code_challenge_method=S256` parameters. LinkedIn documents PKCE only for a separate native flow
-that requires loopback callback URLs, while Sixb uses a server-owned HTTPS callback and LinkedIn's
-confidential web flow. The connector preserves the core-provided PKCE parameters on the standard
-authorization URL so the adapter passes core validation, but it does not send the undocumented
-`code_verifier` to LinkedIn's confidential token endpoint. Consequently, the LinkedIn flow relies
-on Sixb's one-use state and HttpOnly browser binding, the exact HTTPS redirect URI, and the
-application secret until the core can make PKCE capability provider-specific.
+LinkedIn documents PKCE for its native flow, not the confidential web flow used here. The adapter
+sets `pkce: "disabled"` and sends no PKCE parameters. Sixb still enforces one-use state, HttpOnly
+browser binding, and redirect validation; LinkedIn authenticates code exchange with the app secret.
 
 ## Options
 

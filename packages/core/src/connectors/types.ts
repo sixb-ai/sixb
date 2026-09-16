@@ -82,13 +82,15 @@ export interface OAuthConnectorAuthorizationContext extends ConnectorContext {
 
 export interface OAuthConnectorAuthorizationUrlInput {
   readonly state: string
-  readonly codeChallenge: string
-  readonly codeChallengeMethod: "S256"
+  /** Present only when the adapter enables PKCE (S256 by default). */
+  readonly codeChallenge?: string
+  readonly codeChallengeMethod?: "S256"
 }
 
 export interface OAuthConnectorCodeExchangeInput {
   readonly code: string
-  readonly codeVerifier: string
+  /** Present only when this authorization attempt used PKCE. */
+  readonly codeVerifier?: string
   /** Allowlisted callback values. Untrusted until the adapter validates them with the provider. */
   readonly callbackParameters?: Readonly<Record<string, string>>
 }
@@ -118,6 +120,8 @@ export interface ConnectorTokenSource {
  */
 export interface ConnectorOAuth2Authentication {
   readonly type: "oauth2"
+  /** Defaults to S256. Disable only for providers whose flow does not support PKCE. */
+  readonly pkce?: "S256" | "disabled"
   /** Additional callback parameter names accepted by exchangeCode; framework OAuth fields are reserved. */
   readonly callbackParameters?: readonly string[]
   authorizationUrl(

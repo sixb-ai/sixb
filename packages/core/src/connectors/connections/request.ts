@@ -34,6 +34,7 @@ import type {
 import { runBoundedConnectorProviderOperation } from "./provider-operation"
 import {
   assertAuthorizationUrlParameters,
+  connectorPkceEnabled,
   hashSecret,
   nonblank,
   normalizedHttpUrl,
@@ -66,7 +67,7 @@ export interface CompleteNewConnectorAuthorizationInput {
   readonly definition: OAuthConnectorDefinition
   readonly principal: AuthorizablePrincipal
   readonly code: string
-  readonly codeVerifier: string
+  readonly codeVerifier?: string
   readonly redirectUri: string
   readonly callbackParameters?: Readonly<Record<string, string>>
   /** Called immediately after the encrypted grant is durable, before account discovery. */
@@ -185,8 +186,13 @@ export class ConnectorAuthorizationRequestHandler {
 
     const attemptId = `cat_${randomUUID()}`
     const state = `${attemptId}.${randomBytes(32).toString("base64url")}`
-    const codeVerifier = randomBytes(32).toString("base64url")
-    const codeChallenge = createHash("sha256").update(codeVerifier).digest("base64url")
+    const codeVerifier = connectorPkceEnabled(definition.adapter.authentication.pkce)
+      ? randomBytes(32).toString("base64url")
+      : undefined
+    const codeChallenge =
+      codeVerifier === undefined
+        ? undefined
+        : createHash("sha256").update(codeVerifier).digest("base64url")
     let authorizationUrlInput: string | URL
     try {
       authorizationUrlInput = await runBoundedConnectorProviderOperation(
@@ -202,7 +208,12 @@ export class ConnectorAuthorizationRequestHandler {
               redirectUri,
               signal,
             },
-            { state, codeChallenge, codeChallengeMethod: "S256" }
+            {
+              state,
+              ...(codeChallenge === undefined
+                ? {}
+                : { codeChallenge, codeChallengeMethod: "S256" }),
+            }
           ),
         () =>
           createConnectorCodedError(
@@ -224,15 +235,15 @@ export class ConnectorAuthorizationRequestHandler {
       "connector.adapter_invalid"
     )
     assertAuthorizationUrlParameters(authorizationUrl, { state, codeChallenge })
-    const codeVerifierEnvelope = await this.credentialProtector.seal(
-      textEncoder.encode(codeVerifier),
-      {
-        projectId: this.projectId,
-        connectorId: definition.id,
-        recordId: attemptId,
-        purpose: "pkce-verifier",
-      }
-    )
+    const codeVerifierEnvelope =
+      codeVerifier === undefined
+        ? undefined
+        : await this.credentialProtector.seal(textEncoder.encode(codeVerifier), {
+            projectId: this.projectId,
+            connectorId: definition.id,
+            recordId: attemptId,
+            purpose: "pkce-verifier",
+          })
 
     return {
       definition,
@@ -247,7 +258,7 @@ export class ConnectorAuthorizationRequestHandler {
         slot: input.slot,
         initiatedByExecutionId: command.execution.id,
         stateHash: hashSecret(state),
-        codeVerifier: codeVerifierEnvelope,
+        ...(codeVerifierEnvelope === undefined ? {} : { codeVerifier: codeVerifierEnvelope }),
         redirectUri,
         ...(reauthorization === undefined
           ? {}
@@ -301,19 +312,29 @@ export class ConnectorAuthorizationRequestHandler {
       authorization: ConnectorAuthorizationRecord
     ) => Promise<void>
   }): Promise<ConnectorAuthorizationRecord> {
-    const verifierBytes = await this.credentialProtector.open(input.attempt.codeVerifier, {
-      projectId: this.projectId,
-      connectorId: input.definition.id,
-      recordId: input.attempt.id,
-      purpose: "pkce-verifier",
-    })
+    const enabled = connectorPkceEnabled(input.definition.adapter.authentication.pkce)
+    if (enabled !== (input.attempt.codeVerifier !== undefined)) {
+      throw createConnectorCodedError(
+        "connector.authorization_invalid",
+        "OAuth connector PKCE configuration changed; restart authorization."
+      )
+    }
+    const verifierBytes =
+      input.attempt.codeVerifier === undefined
+        ? undefined
+        : await this.credentialProtector.open(input.attempt.codeVerifier, {
+            projectId: this.projectId,
+            connectorId: input.definition.id,
+            recordId: input.attempt.id,
+            purpose: "pkce-verifier",
+          })
     return this.completeGrant({
       ...input,
       callbackParameters: selectCallbackParameters(
         input.definition.adapter.authentication.callbackParameters,
         input.callbackParameters
       ),
-      codeVerifier: textDecoder.decode(verifierBytes),
+      ...(verifierBytes === undefined ? {} : { codeVerifier: textDecoder.decode(verifierBytes) }),
     })
   }
 
@@ -409,7 +430,7 @@ export class ConnectorAuthorizationRequestHandler {
     readonly attempt: ConnectorAuthorizationAttemptRecord
     readonly principal: AuthorizablePrincipal
     readonly code: string
-    readonly codeVerifier: string
+    readonly codeVerifier?: string
     readonly redirectUri: string
     readonly callbackParameters: Readonly<Record<string, string>>
     readonly onAuthorizationPersisted?: (

@@ -26,6 +26,7 @@ afterEach(() => {
 describe("TikTok OAuth", () => {
   test("builds the organic account-holder URL with its exact trailing-slash redirect", () => {
     const adapter = organicAdapter()
+    expect(adapter.authentication.pkce).toBe("disabled")
     const url = new URL(
       adapter.authentication.authorizationUrl(authorizationContext, authorizationInput).toString()
     )
@@ -36,8 +37,8 @@ describe("TikTok OAuth", () => {
       "https://api.example.com/auth/connectors/callback/"
     )
     expect(url.searchParams.get("state")).toBe("signed-state")
-    expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge")
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256")
+    expect(url.searchParams.has("code_challenge")).toBe(false)
+    expect(url.searchParams.has("code_challenge_method")).toBe(false)
     expect(url.searchParams.get("disable_auto_auth")).toBe("1")
   })
 
@@ -100,6 +101,7 @@ describe("TikTok OAuth", () => {
     })
 
     const adapter = adsAdapter()
+    expect(adapter.authentication.pkce).toBe("disabled")
     const url = new URL(
       adapter.authentication.authorizationUrl(authorizationContext, authorizationInput).toString()
     )
@@ -112,6 +114,8 @@ describe("TikTok OAuth", () => {
     expect(url.searchParams.get("app_id")).toBe("app-id")
     expect(url.searchParams.get("redirect_uri")).toBe(authorizationContext.redirectUri)
     expect(url.searchParams.get("scope")).toBe("ads.read")
+    expect(url.searchParams.has("code_challenge")).toBe(false)
+    expect(url.searchParams.has("code_challenge_method")).toBe(false)
     expect(credentials).toEqual({
       accessToken: "ads-token",
       tokenType: "Bearer",

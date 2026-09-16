@@ -186,6 +186,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("036-share-sessions", shareSessionsSql),
     sqliteSql("037-execution-requester-groups", executionRequesterGroupsSql),
     sqliteSql("038-projection-source-roots", projectionSourceRootsSql),
+    sqliteSql("039-connector-optional-pkce", connectorOptionalPkceSql),
   ],
 })
 
@@ -403,5 +404,9 @@ function rollbackQuietly(db: Database): void {
 }
 
 import executionRequesterGroupsSql from "./migrations/037-execution-requester-groups.sql" with {
+  type: "text",
+}
+
+import connectorOptionalPkceSql from "./migrations/039-connector-optional-pkce.sql" with {
   type: "text",
 }
