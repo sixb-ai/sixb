@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto"
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
@@ -29,6 +30,13 @@ import type { AgentDescriptor } from "./types"
 import { type AgentWorkspaceDefinition, normalizeAgentWorkspaceBinding } from "./workspace"
 
 export type ExecutionAgentRequestInput = Omit<RequestAgentRunInput, "principal">
+
+/** Execution ownership tokens never leave the storage/worker boundary. */
+function publicThread(thread: AgentThreadRecord): AgentThreadRecord {
+  if (!thread.workspaceState) return thread
+  const { generation, status, initialized } = thread.workspaceState
+  return { ...thread, workspaceState: { generation, status, initialized } }
+}
 export type ListExecutionAgentThreadsInput = Omit<
   ListAgentThreadsInput,
   "projectId" | "ownerPrincipal"
@@ -44,6 +52,11 @@ export type CreateExecutionAgentThreadInput<
 
 export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
   {
+    /** Start fresh after an uncertain/expired workspace; never deletes the old generation. */
+    recreateWorkspace(
+      threadId: string,
+      input: { readonly expectedGeneration: string }
+    ): Promise<AgentThreadRecord>
     create(input: CreateExecutionAgentThreadInput<TParams>): Promise<AgentThreadRecord>
     getById(threadId: string): Promise<AgentThreadRecord | null>
     list(input?: ListExecutionAgentThreadsInput): Promise<ListAgentThreadsResult>
@@ -105,7 +118,7 @@ export function createAgentRuntime<
     if (!thread || !allowed()) return null
     return authority.type === "principal" && !principalsEqual(principal, thread.ownerPrincipal)
       ? null
-      : thread
+      : publicThread(thread)
   }
 
   const getAgent = (): AgentDescriptor | null => {
@@ -138,6 +151,25 @@ export function createAgentRuntime<
   return {
     get: getAgent,
     threads: {
+      recreateWorkspace: async (threadId, input) => {
+        const thread = await getVisibleThreadRecord(threadId)
+        if (!thread)
+          throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
+        const storage = runtime.storage.agents
+        if (!storage)
+          throw new AgentRequestError(
+            "storage_unavailable",
+            "[Sixb] Agent storage is not configured."
+          )
+        const workspaceState = await storage.threads.transitionWorkspace({
+          projectId: runtime.projectId,
+          id: threadId,
+          action: "recreate",
+          expectedGeneration: input.expectedGeneration,
+          generation: randomUUID(),
+        })
+        return publicThread({ ...thread, workspaceState })
+      },
       create: async (input) => {
         assertNoAgentSelector(input)
         const agent = getAgent()
@@ -171,11 +203,12 @@ export function createAgentRuntime<
         }
         const storage = runtime.storage.agents
         if (!storage || !allowed()) return { threads: [], hasMore: false, total: 0 }
-        return storage.threads.list({
+        const result = await storage.threads.list({
           ...input,
           projectId: runtime.projectId,
           ownerPrincipal: authority.type === "principal" ? principal : undefined,
         })
+        return { ...result, threads: result.threads.map(publicThread) }
       },
     },
     runs: {

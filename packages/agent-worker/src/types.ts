@@ -61,7 +61,7 @@ export interface AgentWorkerHost extends AgentExecutionHost {
   readonly queues: Queues
   readonly definitions: Pick<
     SixbDefinitions,
-    "workflows" | "ontology" | "security" | "models" | "tools"
+    "workflows" | "ontology" | "security" | "models" | "tools" | "agentWorkspace"
   >
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string
@@ -96,6 +96,8 @@ export interface AgentExecutionContext extends AgentWorkerContext {
 }
 
 export interface AgentTurnContext {
+  /** Persistent environments must confirm cleanup/save before any terminal write. */
+  readonly beforeFinalize?: () => Promise<void>
   readonly id: string
   readonly authorPrincipal?: AuthorizablePrincipal
   readonly storage: AgentWorkerStorage

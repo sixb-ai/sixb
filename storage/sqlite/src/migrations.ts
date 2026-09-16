@@ -93,6 +93,9 @@ import shareSessionsSql from "./migrations/036-share-sessions.sql" with { type: 
 import agentThreadWorkspacesSql from "./migrations/037-agent-thread-workspaces.sql" with {
   type: "text",
 }
+import agentWorkspaceLifecycleSql from "./migrations/038-agent-workspace-lifecycle.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -185,6 +188,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("035-share-grants", shareGrantsSql),
     sqliteSql("036-share-sessions", shareSessionsSql),
     sqliteSql("037-agent-thread-workspaces", agentThreadWorkspacesSql),
+    sqliteSql("038-agent-workspace-lifecycle", agentWorkspaceLifecycleSql),
   ],
 })
 

@@ -9,6 +9,7 @@ import {
   type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentThreadRecord,
+  type AgentWorkspaceState,
   type ConversationAgentRunSpec,
   coerceAgentRunFinishReason,
   type SubagentRunResult,
@@ -25,6 +26,7 @@ export interface AgentThreadRow {
   owner_principal_id: string
   title: string | null
   workspace: string | null
+  workspace_state: string | null
   status: AgentThreadRecord["status"]
   active_run_id: string | null
   last_message_at: string | null
@@ -99,6 +101,11 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
     projectId: row.project_id,
     ownerPrincipal: { type: row.owner_principal_type, id: row.owner_principal_id },
     title: row.title ?? undefined,
+    ...(row.workspace_state == null
+      ? {}
+      : {
+          workspaceState: JSON.parse(row.workspace_state) as AgentWorkspaceState,
+        }),
     ...(row.workspace == null
       ? {}
       : { workspace: snapshotAgentThreadWorkspace(JSON.parse(row.workspace)) }),

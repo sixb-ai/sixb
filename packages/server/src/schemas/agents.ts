@@ -98,6 +98,13 @@ export const CreateAgentThreadBodySchema = z
   .strict()
 
 export const AgentThreadSchema = z.object({
+  workspaceState: z
+    .object({
+      generation: z.string(),
+      status: z.enum(["new", "busy", "ready", "blocked", "unavailable"]),
+      initialized: z.boolean(),
+    })
+    .optional(),
   id: z.string(),
   projectId: z.string(),
   ownerPrincipal: AgentPrincipalSchema,
