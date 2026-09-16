@@ -21,7 +21,10 @@ export function rowToObject(row: DatabaseRow): ObjectRow {
 
 /** Decode an expanded query row with the same shape as Core link hydration. */
 export function queryRowToObject(row: ObjectQueryDatabaseRow): ObjectRow {
-  const base = rowToObject(row)
+  const base = {
+    ...rowToObject(row),
+    ...(row._vector_score === undefined ? {} : { score: row._vector_score }),
+  }
   const links = reviveExpandedLinks(parseExpandColumn(row._expand))
   return links ? { ...base, links } : base
 }
@@ -104,6 +107,7 @@ export interface DatabaseRow {
 }
 
 export interface ObjectQueryDatabaseRow extends DatabaseRow {
+  _vector_score?: number
   _cursor_properties?: string
   /** `json_object(linkId, value, ...)` serialized text from an `expand` pushdown; absent otherwise. */
   _expand?: string | null

@@ -15,6 +15,7 @@ export function vectorConfiguration(profile: ObjectVectorSearchProfile): string 
     dimensions: profile.model.definition.dimensions,
     metric: "cosine",
     precision: "float32",
+    normalization: "l2-v1",
   })
 }
 
@@ -35,7 +36,7 @@ export function vectorSources(
   return { text, sourceFingerprint: sha256Canonical(text) }
 }
 
-/** The stored representation matches pgvector's float32 values from the first slice. */
+/** Unit-length float32 representation keeps native cosine arithmetic within range. */
 export function normalizeVector(values: readonly number[], dimensions: number): readonly number[] {
   if (!Array.isArray(values) || values.length !== dimensions) {
     throw new MaterializationValidationError(`Vector dimension mismatch; expected ${dimensions}`)
@@ -53,5 +54,11 @@ export function normalizeVector(values: readonly number[], dimensions: number): 
   if (!normalized.some((value) => value !== 0)) {
     throw new MaterializationValidationError("Cosine search requires a nonzero vector.")
   }
-  return Object.freeze(normalized)
+  const norm = Math.hypot(...normalized)
+  return Object.freeze(normalized.map((value) => Math.fround(value / norm)))
+}
+
+/** V1 envelope for exact SQL scoring; exceeding it must fail rather than truncate candidates. */
+export function vectorSearchCandidateLimit(dimensions: number): number {
+  return Math.min(10000, Math.floor(16000000 / dimensions))
 }

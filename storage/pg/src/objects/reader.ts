@@ -1,4 +1,5 @@
-import type { ObjectQuery } from "@sixb/core"
+import { type ObjectQuery, ObjectQueryExecutionError } from "@sixb/core"
+import { hasVectorProfile } from "@sixb/core/internal/query"
 import type {
   CountObjectsInput,
   CountObjectsResult,
@@ -51,7 +52,35 @@ export class PgObjectReader {
     private readonly source: PgObjectQuerySource | PgSelectedObjectReadSource
   ) {}
 
+  private async assertVectorSearch(
+    params: QueryObjectsInput | CountObjectsInput | ExistsObjectsInput | FacetObjectsInput
+  ): Promise<void> {
+    if (!hasVectorProfile(params.query)) return
+    const compiled = compilePgObjectQuery(params.projectId, params.query, { source: this.source })
+    if (!compiled.vectorProbe) return
+    const extensions = await this.sql.unsafe<{ ready: boolean }[]>(
+      "SELECT EXISTS (SELECT 1 FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace WHERE e.extname = 'vector' AND n.nspname = 'public') AS ready"
+    )
+    if (!extensions[0]?.ready)
+      throw new ObjectQueryExecutionError(
+        "vector_extension_missing",
+        "PostgreSQL vector search requires pgvector installed in schema public (CREATE EXTENSION vector WITH SCHEMA public)."
+      )
+    const probe = compiled.vectorProbe
+    const [row] = await this.sql.unsafe<{ total: string | number }[]>(
+      probe.sql,
+      probe.args as SqlParameter[]
+    )
+    if (Number(row?.total ?? 0) > probe.limit) {
+      throw new ObjectQueryExecutionError(
+        "vector_work_limit_exceeded",
+        `Exact vector search supports at most ${probe.limit} eligible vectors at this dimension. Narrow the query filters.`
+      )
+    }
+  }
+
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
+    await this.assertVectorSearch(params)
     const sql = this.sql
     const source = this.source
     const compiled = compilePgObjectQuery(params.projectId, params.query, {
@@ -85,6 +114,7 @@ export class PgObjectReader {
   }
 
   async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    await this.assertVectorSearch(params)
     const sql = this.sql
     const source = this.source
     const compiled = compilePgObjectCountQuery(params.projectId, stripOuterRowShape(params.query), {
@@ -98,6 +128,7 @@ export class PgObjectReader {
   }
 
   async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
+    await this.assertVectorSearch(params)
     const sql = this.sql
     const source = this.source
     const compiled = compilePgObjectExistsQuery(
@@ -110,6 +141,7 @@ export class PgObjectReader {
   }
 
   async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
+    await this.assertVectorSearch(params)
     const sql = this.sql
     const source = this.source
     const facets: ObjectFacetResult[] = []

@@ -10,6 +10,7 @@ import {
   normalizeObjectQuery,
   type ObjectQuery,
   ObjectQueryPlanningError,
+  planObjectQuery,
   validateObjectQuery,
 } from "../objects/query"
 import { defineObjectType, link, OntologyRegistry, prop, stringEnum } from "../ontology"
@@ -1169,9 +1170,8 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
       })
     })
 
-    test("executes or rejects vector search according to provider capabilities", async () => {
-      await withStorage(async ({ objects: storage, fixture }) => {
-        await seedObjectQueryContractData(fixture)
+    test("plans or rejects vector search according to provider capabilities", async () => {
+      await withStorage(async ({ objects: storage }) => {
         // Keep generic fixture writes usable by providers without vector persistence.
         const ontology = new OntologyRegistry({
           sources: [
@@ -1206,17 +1206,18 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
           input: { kind: "start", objectTypeId: Room.id },
         }
 
+        // Native vector execution is covered by the dedicated vector-search suite.
+        const validated = validateObjectQuery(query, { ontology })
+        const plan = planObjectQuery(validated.query, {
+          capabilities: storage.queryCapabilities(),
+          hasQueryObjects: typeof storage.queryObjects === "function",
+        })
         if (storage.queryCapabilities().nodes?.vector === true) {
-          const result = await executeObjectQuery({ projectId, query }, { ontology, storage })
-          expect(result.plan.mode).toBe("pushdown")
-          expect(ids(result)).toEqual([]) // Business arrays are not indexed vector profiles.
-          return
+          expect(plan.mode).toBe("pushdown")
+        } else {
+          expect(plan.mode).toBe("rejected")
+          expect(plan.issues.map((issue) => issue.code)).toContain("query_node_not_supported")
         }
-
-        await expectPlanningIssue(
-          executeObjectQuery({ projectId, query }, { ontology, storage }),
-          "query_node_not_supported"
-        )
       })
     })
 

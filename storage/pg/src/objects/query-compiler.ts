@@ -7,6 +7,12 @@ import {
   type ObjectQuerySortField,
   type QueryScalarKind,
 } from "@sixb/core"
+import {
+  hasVectorProfile,
+  isVectorProfileQuery,
+  normalizeVector,
+  vectorSearchCandidateLimit,
+} from "@sixb/core/internal/query"
 
 export interface PgObjectQueryPageRow {
   object_type_id: string
@@ -16,6 +22,7 @@ export interface PgObjectQueryPageRow {
 }
 
 export interface CompiledPgObjectQuery {
+  vectorProbe?: { sql: string; args: unknown[]; limit: number }
   sql: string
   args: unknown[]
   totalSql: string
@@ -74,7 +81,8 @@ type CompiledOrderField =
     }
   | {
       kind: "column"
-      column: "object_type_id" | "primary_id"
+      column: "object_type_id" | "primary_id" | "_vector_score"
+      binary?: boolean
       direction: "asc" | "desc"
     }
 
@@ -99,6 +107,12 @@ export function compilePgObjectQuery(
   query: ObjectQuery,
   options: { includeTotal?: boolean; source?: PgObjectQuerySource } = {}
 ): CompiledPgObjectQuery {
+  if (hasVectorProfile(query) && !isVectorProfileQuery(query)) {
+    throw new ObjectQueryExecutionError(
+      "unsupported_vector_composition",
+      "Vector search supports one profile with filters before ranking and limit/project after."
+    )
+  }
   const source = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
   const compiled = source.wrapQuery(
     compileObjectQueryInternal(projectId, query, {
@@ -110,6 +124,9 @@ export function compilePgObjectQuery(
     ...compiled,
     sql: numberPlaceholders(compiled.sql),
     totalSql: numberPlaceholders(compiled.totalSql),
+    vectorProbe: compiled.vectorProbe
+      ? { ...compiled.vectorProbe, sql: numberPlaceholders(compiled.vectorProbe.sql) }
+      : undefined,
     hasMoreProbe: compiled.hasMoreProbe
       ? {
           ...compiled.hasMoreProbe,
@@ -123,6 +140,7 @@ export function compilePgObjectQuery(
 export interface PgObjectQuerySource {
   readonly objectsTable: string
   readonly linksTable: string
+  readonly objectPropertyPermissionsTable?: string
   /** Wrap a terminal SELECT without its own WITH clause; the selected source owns the only WITH. */
   wrapStatement(
     sql: string,
@@ -263,9 +281,73 @@ function compileObjectQueryInternal(
     case "expand":
       return compileExpand(projectId, query.input, query.expansions, ctx)
     case "vector":
-      throw new Error(
-        `[SixbPg] PostgreSQL object storage does not support query node '${query.kind}'`
-      )
+      return compileVector(projectId, query, ctx)
+  }
+}
+
+function compileVector(
+  projectId: string,
+  query: Extract<ObjectQuery, { kind: "vector" }>,
+  ctx: CompileContext
+): CompiledPgObjectQuery {
+  if (
+    !isVectorProfileQuery(query) ||
+    !query.configuration ||
+    !Number.isSafeInteger(query.k) ||
+    query.k < 1 ||
+    query.k > 1000 ||
+    query.vector.length < 1 ||
+    query.vector.length > 16000
+  ) {
+    throw new ObjectQueryExecutionError(
+      "invalid_vector_query",
+      "A validated named vector profile is required."
+    )
+  }
+  const input = compileObjectQueryInternal(projectId, query.input, exactContext(ctx))
+  const permissions = ctx.source.objectPropertyPermissionsTable
+  const authorized = permissions
+    ? `AND NOT EXISTS (
+    SELECT 1 FROM unnest(vectors.source) AS required(property_id)
+    WHERE NOT EXISTS (
+      SELECT 1 FROM ${permissions} AS permission
+      WHERE permission.project_id = vectors.project_id
+        AND permission.object_type_id = vectors.object_type_id
+        AND permission.primary_id = vectors.primary_id
+        AND permission.property_id = required.property_id
+    )
+  )`
+    : ""
+  const candidates = `FROM (${input.sql}) AS input
+    JOIN object_vectors AS vectors ON vectors.project_id = input.project_id
+      AND vectors.object_type_id = input.object_type_id AND vectors.primary_id = input.primary_id
+    WHERE vectors.profile = ? AND vectors.configuration = ?
+      AND cardinality(vectors.embedding) = ? ${authorized}`
+  const candidateArgs = [...input.args, query.profile!, query.configuration, query.vector.length]
+  // Bound distance work, not just returned rows. Exceeding the envelope fails before ranking.
+  const limit = vectorSearchCandidateLimit(query.vector.length)
+  const values = normalizeVector(query.vector, query.vector.length)
+  const order = compileOrder([
+    { kind: "column", column: "_vector_score", direction: "desc" },
+    ...identityOrderFields().map((field) => ({ ...field, binary: true })),
+  ])
+  const sql = `SELECT * FROM (SELECT input.*, 1 - (vectors.embedding::public.vector OPERATOR(public.<=>) ?::public.vector) AS _vector_score
+    ${candidates}) AS ranked ORDER BY ${order.sql} LIMIT ?`
+  const args = [JSON.stringify(values), ...candidateArgs, query.k]
+  return {
+    sql,
+    args,
+    totalSql: `SELECT COUNT(*)::bigint AS total FROM (${sql}) AS ranked`,
+    totalArgs: args,
+    order,
+    vectorProbe: {
+      sql: `SELECT COUNT(*)::bigint AS total FROM (SELECT 1 ${candidates} LIMIT ?) AS candidates`,
+      args: [...candidateArgs, limit + 1],
+      limit,
+    },
+    hasMore: () => false,
+    trimRows: identityRows,
+    nextPageToken: () => undefined,
   }
 }
 
@@ -377,6 +459,7 @@ function compileWhere(
       WHERE ${predicate.sql}
     `,
     totalArgs: [...input.args, ...predicate.args],
+    vectorProbe: input.vectorProbe,
     order: input.order,
     hasMore: () => false,
     trimRows: identityRows,
@@ -424,7 +507,7 @@ function compileSort(
         input.created_at,
         input.updated_at,
         input.version,
-        input.last_commit_id
+        input.last_commit_id${input.vectorProbe ? ", input._vector_score" : ""}
       FROM (${input.sql}) AS input
       ORDER BY ${order.sql}
     `,
@@ -462,6 +545,7 @@ function compileLimit(
       FROM (${input.sql}) AS input
     `,
     totalArgs: input.args,
+    vectorProbe: input.vectorProbe,
     order: input.order,
     hasMore: (rowCount, total) =>
       total === undefined ? ctx.probeLimit && rowCount > limit : limit < total,
@@ -499,6 +583,7 @@ function compilePage(
       FROM (${input.sql}) AS input
     `,
     totalArgs: input.args,
+    vectorProbe: input.vectorProbe,
     order: input.order,
     hasMore: (rowCount) => rowCount > pageSize,
     trimRows: (rows) => rows.slice(0, pageSize),
@@ -607,6 +692,7 @@ function compileExpand(
     args: [...expand.args, ...input.args, ...inputOrder.args],
     totalSql: input.totalSql,
     totalArgs: input.totalArgs,
+    vectorProbe: input.vectorProbe,
     order: input.order,
     hasMoreProbe: input.hasMoreProbe,
     hasMore: input.hasMore,
@@ -849,13 +935,14 @@ function compileProject(
         input.created_at,
         input.updated_at,
         input.version,
-        input.last_commit_id
+        input.last_commit_id${input.vectorProbe ? ", input._vector_score" : ""}
       FROM (${input.sql}) AS input
       ORDER BY ${inputOrder.sql}
     `,
     args: [...projection.args, ...input.args, ...inputOrder.args],
     totalSql: input.totalSql,
     totalArgs: input.totalArgs,
+    vectorProbe: input.vectorProbe,
     order: outputOrder,
     hasMoreProbe: input.hasMoreProbe,
     hasMore: input.hasMore,
@@ -909,9 +996,7 @@ function compileAggregateSource(
     case "page":
       return compileRowQueryAggregateSource(projectId, query, source)
     case "vector":
-      throw new Error(
-        `[SixbPg] PostgreSQL object storage does not support query node '${query.kind}'`
-      )
+      return compileRowQueryAggregateSource(projectId, query, source)
   }
 }
 
@@ -1416,7 +1501,9 @@ function compileOrder(
 
   for (const field of fields) {
     if (field.kind === "column") {
-      clauses.push(`${columnExpression(field.column, qualifier)} ${field.direction.toUpperCase()}`)
+      clauses.push(
+        `${columnExpression(field.column, qualifier)}${field.binary ? ' COLLATE "C"' : ""} ${field.direction.toUpperCase()}`
+      )
       continue
     }
 
@@ -1637,7 +1724,10 @@ function compiledPropertyValueExpression(
     : jsonValueExpression(propertyColumn)
 }
 
-function columnExpression(column: "object_type_id" | "primary_id", qualifier?: string): string {
+function columnExpression(
+  column: "object_type_id" | "primary_id" | "_vector_score",
+  qualifier?: string
+): string {
   return qualifier ? `${qualifier}.${column}` : column
 }
 
