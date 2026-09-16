@@ -62,7 +62,7 @@ describe("create-sixb packed artifacts", () => {
     const cliManifest = await readPackageManifest(join(layoutRoot, "node_modules", "@sixb", "cli"))
 
     expect(createManifest.dependencies).toBeUndefined()
-    expect(cliManifest.dependencies?.["create-sixb"]).toBe("^0.1.2")
+    expect(cliManifest.dependencies?.["create-sixb"]).toBe("^0.1.3")
     expect(cliManifest.dependencies?.["@sixb/cli-core"]).toBe("^0.1.4")
   })
 
