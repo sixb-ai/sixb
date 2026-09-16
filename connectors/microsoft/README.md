@@ -1,7 +1,7 @@
 # @sixb/connector-microsoft
 
 Typed Microsoft Graph v1.0 connector for Sixb. Covers SharePoint Online sites, document libraries,
-files, folders and incremental synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
+files, folders, Outlook mail and incremental synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
 `@azure/msal-node` for application authentication. Targets the global Microsoft 365 cloud.
 
 ## Quick start
@@ -190,6 +190,132 @@ For changes-only initialization, use `delta.list(driveId, { token: "latest" })`.
 `410` is exposed as `MicrosoftApiError` with `code` and `location`: it requires an explicit full
 resynchronization and local-state reconciliation, not an automatic checkpoint reset.
 
+## Outlook mail
+
+The `mail` surface uses the same authentication configuration. Each method takes a mailbox Entra
+user ID or UPN explicitly; app-only calls use `/users/{id-or-UPN}`, never `/me`. No directory-wide
+user lookup or SharePoint permission is required for mail operations.
+
+For Microsoft 365 application access, an Exchange administrator assigns `Application Mail.ReadWrite`
+and, for sending, `Application Mail.Send`, restricted to the approved mailboxes using
+[Exchange Application RBAC](https://learn.microsoft.com/en-us/exchange/permissions-exo/application-rbac).
+Do not also grant unscoped Entra mail permissions: those grants are additive and bypass the mailbox
+restriction. RBAC permissions need not appear as token roles; the connector lets Exchange authorize
+each request. Permission propagation may take 30 minutes to two hours.
+
+```ts
+const mailbox = "operations@contoso.com"
+const draft = await client.mail.messages.createDraft(mailbox, {
+  subject: "Proposal",
+  body: { contentType: "text", content: "Please find the proposal attached." },
+  toRecipients: [{ emailAddress: { address: "recipient@example.com" } }],
+})
+await client.mail.attachments.upload(mailbox, draft.id, "proposal.pdf", Bun.file("./proposal.pdf"))
+const submission = await client.mail.messages.send(mailbox, draft.id)
+// submission.status === "accepted": this does not establish delivery.
+```
+
+| Surface | Operations |
+| --- | --- |
+| `mail.messages` | `list`, `listAll`, `listInFolder`, `listAllInFolder`, `get`, `getMime`, `update`, `createDraft`, `updateDraft`, `createReply`, `createReplyAll`, `createForward`, `send`, `sendMail`, `move`, `copy`, `delete` |
+| `mail.folders` | `list`, `listAll`, `get`, `listChildren`, `listAllChildren`, `create`, `rename`, `delete` |
+| `mail.attachments` | `list`, `listAll`, `get`, `downloadResponse`, `download`, `upload`, `delete`, `createSession`, `resume`, `cancel` |
+| `mail.messages.delta` | `list`, `pages` per mailbox and folder |
+| `mail.folders.delta` | `list`, `pages` per mailbox |
+
+`folders.listAll` paginates the top-level collection; use `listAllChildren` to traverse subfolders.
+Set `includeHiddenFolders: true` when hidden folders are required. `messages.listAll` covers the
+mailbox message collection; `listAllInFolder` limits the collection to one folder.
+
+### Message identity, reads and writes
+
+All mail Graph requests, including continuation pages, carry `Prefer: IdType="ImmutableId"`. IDs
+are case-sensitive and stable across moves within the same mailbox. Persist the tenant, mailbox
+and message ID together. Copies have their own IDs; archive-mailbox moves and export/reimport can
+change identity. In-place archive mailboxes are outside the Outlook mail API.
+
+Use `select` for projections; `id` is always retained. Include `internetMessageHeaders` explicitly
+when needed. `bodyContentType: "text"` requests text; otherwise Graph owns the returned body format.
+`getMime` and `downloadResponse` return streaming responses: consume or cancel their bodies.
+`hasAttachments` does not include inline-only attachments; list attachments when those are needed.
+Attachment types distinguish files, attached Outlook items and cloud references. `/$value` returns
+bytes/MIME for the first two; cloud reference downloads expose Graph's `405` rather than silently
+following an unrelated URL.
+
+`filter`, `search` and `orderBy` use Graph expressions. Search is a bounded provider search, not an
+exhaustive synchronization API, and cannot be combined with filter/orderBy here. Graph may reject
+unsupported filter/sort combinations with `InefficientFilter`; the connector preserves that error.
+
+`update` accepts message metadata (read state, categories, flags, importance). `updateDraft` also
+accepts subject, body and recipients; Graph enforces which fields can change on a draft. There is
+no preliminary read that could introduce a false concurrency guarantee. No mail `ifMatch` contract
+is advertised. `createReply`, `createReplyAll` and `createForward` create drafts for later review or
+sending. For a forward, supply `toRecipients`. Use `move(..., "deleteditems")` for an explicit move
+to trash; `delete` delegates to Graph DELETE and is subject to Exchange retention rules.
+
+`send` and `sendMail` return `{ status: "accepted", requestId? }` after a `202` response. They never
+claim delivery or invent a message ID. A draft's immutable ID can locate its eventual Sent Items
+copy. `MicrosoftMailSubmissionError.outcomeUnknown` flags an interrupted HTTP submission. Reconcile
+the draft/Sent Items before retrying; absence immediately after sending is not proof of failure.
+All mutations are single-attempt, including after 401/429/5xx. There is no exactly-once send guarantee.
+
+### File attachments and interrupted uploads
+
+Files below 3 MiB use base64 JSON; 3–150 MiB files use Outlook sessions with sequential 3.125 MiB
+fragments. Exchange message limits can be lower than the attachment API maximum. Inline files
+require `isInline: true` and a `contentId` matching the message body's `cid:` reference. Uploads
+accept `Blob` (including `Bun.file`), `Uint8Array` or `ArrayBuffer`; unknown-length streams are not
+supported. The returned `{ id }` can be used with the attachment methods. Large uploads obtain it
+from Outlook's final Location header; this URL is parsed, never fetched with Graph credentials.
+
+`MicrosoftMailUploadError` retains the last acknowledged session and its offsets. `resume` sends
+the same complete file from that position; `cancel` discards the session. PUTs are not implicitly
+replayed. If the last acknowledgement was lost, the saved offset may be stale and Outlook can
+reject a resumed fragment. If `completionUnknown` is true, inspect the draft's attachments before
+starting another upload. The connector does not invent an undocumented status endpoint or create
+a replacement session automatically. Session URLs are credentials: store securely and do not log
+whole sessions or upload errors. Microsoft documents a known issue with large uploads to shared
+or delegated mailboxes; validate that scenario on the target tenant before relying on it.
+
+### Mail delta
+
+Use `mail.messages.delta.pages(mailbox, folderId, options)` for initial enumeration and subsequent
+changes. Persist a cursor separately for each folder. `mail.folders.delta.pages(mailbox, options)`
+tracks folder hierarchy changes. Process every page, including empty ones, before advancing its
+checkpoint. Persist data changes and checkpoints consistently in application-owned storage.
+
+Message delta supports select/top/expand, changeType, a receivedDateTime ge/gt filter and
+`receivedDateTime desc` ordering. Folder delta exposes select and the pageSize header. Cursors
+remain opaque; new query options cannot be added to a saved cursor. Retain the same projection
+context and body preference when resuming. Do not reinterpret `@removed` as mailbox-wide deletion:
+a message may simply have moved out of the tracked folder. Apply updates idempotently and reconcile
+folder membership across independent streams. Invalid/expired delta state is propagated (including
+410); a full resync must be an explicit application decision.
+
+Reads honor REST retry policies and Retry-After. Pace work per mailbox: Outlook allows four
+concurrent requests per application/mailbox, and minDelayMs only spaces starts, not in-flight
+concurrency. Sequential per-mailbox processing is a safe default; coordinate across workers.
+The connector does not install background polling, subscriptions or a persistent sync store.
+Calendar/Teams operations, rules, mailbox settings and MIME composition are outside this surface.
+
+### Mail verification
+
+```bash
+bun test connectors/microsoft/tests/mail.test.ts connectors/microsoft/tests/mail-attachments.test.ts
+```
+
+The opt-in live test requires `MICROSOFT_MAIL_E2E=1`, `MICROSOFT_TENANT_ID`, `MICROSOFT_CLIENT_ID`,
+`MICROSOFT_CLIENT_SECRET`, `MICROSOFT_MAIL_TEST_MAILBOX` (ID/UPN), and
+`MICROSOFT_MAIL_DENIED_MAILBOX` (an existing mailbox outside the application scope). It creates
+unique test drafts/folders, transfers small/large binary files, verifies immutable IDs after moving,
+checks delta and cleans up. Set `MICROSOFT_MAIL_TEST_RECIPIENT` only to a consenting test address
+to also send a test email. Accepted sent messages remain for delivery verification and manual
+cleanup. Ordinary tests send no mail; the live suite skips unless explicitly enabled.
+
+```bash
+bun test ./connectors/microsoft/tests/mail.e2e.ts
+```
+
 ## API surface and limits
 
 - `sites`: `get`, `getByUrl`, `listDrives`, `listAllDrives`.
@@ -245,3 +371,17 @@ bun --filter @sixb/connector-microsoft test:e2e
 - [Move](https://learn.microsoft.com/en-us/graph/api/driveitem-move?view=graph-rest-1.0)
 - [Delete](https://learn.microsoft.com/en-us/graph/api/driveitem-delete?view=graph-rest-1.0)
 - [Delta synchronization](https://learn.microsoft.com/en-us/graph/api/driveitem-delta?view=graph-rest-1.0)
+
+- [Outlook mail overview](https://learn.microsoft.com/en-us/graph/api/resources/mail-api-overview?view=graph-rest-1.0)
+- [Message listing](https://learn.microsoft.com/en-us/graph/api/user-list-messages?view=graph-rest-1.0)
+- [Message updates](https://learn.microsoft.com/en-us/graph/api/message-update?view=graph-rest-1.0)
+- [Draft replies](https://learn.microsoft.com/en-us/graph/api/message-createreply?view=graph-rest-1.0)
+- [Draft forwards](https://learn.microsoft.com/en-us/graph/api/message-createforward?view=graph-rest-1.0)
+- [Send mail](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0)
+- [Immutable IDs](https://learn.microsoft.com/en-us/graph/outlook-immutable-id)
+- [Mail folders](https://learn.microsoft.com/en-us/graph/api/user-list-mailfolders?view=graph-rest-1.0)
+- [Mail attachments](https://learn.microsoft.com/en-us/graph/api/attachment-get?view=graph-rest-1.0)
+- [Outlook large attachments](https://learn.microsoft.com/en-us/graph/outlook-large-attachments)
+- [Message delta](https://learn.microsoft.com/en-us/graph/api/message-delta?view=graph-rest-1.0)
+- [Folder delta](https://learn.microsoft.com/en-us/graph/api/mailfolder-delta?view=graph-rest-1.0)
+- [Outlook throttling](https://learn.microsoft.com/en-us/graph/throttling-limits#outlook-service-limits)
