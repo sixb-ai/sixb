@@ -1,8 +1,10 @@
 import { expect } from "bun:test"
 import {
   type AuthorizationContext,
+  type ConnectorAccountCandidate,
   type ConnectorOAuthCredentials,
   defineConnector,
+  type OAuthConnectorCodeExchangeInput,
   type SixbErrorCode,
 } from "../src"
 import { emptyGrantIndex } from "../src/authorization"
@@ -49,6 +51,16 @@ export type HarnessOptions = Pick<
 > & {
   readonly systemRuntimeClock?: boolean
   readonly systemStorageClock?: boolean
+  readonly callbackParameters?: readonly string[]
+  readonly exchange?: (
+    input: OAuthConnectorCodeExchangeInput
+  ) => ConnectorOAuthCredentials | Promise<ConnectorOAuthCredentials>
+  readonly refresh?: (
+    credentials: ConnectorOAuthCredentials
+  ) => ConnectorOAuthCredentials | Promise<ConnectorOAuthCredentials>
+  readonly discover?: (
+    credentials: ConnectorOAuthCredentials
+  ) => readonly ConnectorAccountCandidate[] | Promise<readonly ConnectorAccountCandidate[]>
 }
 
 export function createHarness(options: HarnessOptions = {}) {
@@ -75,6 +87,7 @@ export function createHarness(options: HarnessOptions = {}) {
     type: "fake-oauth",
     authentication: {
       type: "oauth2",
+      callbackParameters: options.callbackParameters,
       async authorizationUrl(_context, input) {
         await authorizationUrlGate
         const url = new URL("https://provider.test/oauth/authorize")
@@ -87,6 +100,7 @@ export function createHarness(options: HarnessOptions = {}) {
         await exchangeGate
         exchangedVerifiers.push(input.codeVerifier)
         exchangeCount += 1
+        if (options.exchange) return options.exchange(input)
         return {
           accessToken: `access-secret-${exchangeCount}`,
           refreshToken: `refresh-secret-${exchangeCount}`,
@@ -100,6 +114,7 @@ export function createHarness(options: HarnessOptions = {}) {
         refreshInputs.push(structuredClone(credentials))
         await refreshGate
         if (refreshError) throw refreshError
+        if (options.refresh) return options.refresh(credentials)
         if (omitRefreshMetadata) {
           return {
             accessToken: `rotated-access-${refreshCount}`,
@@ -123,8 +138,9 @@ export function createHarness(options: HarnessOptions = {}) {
         if (revokeAfterEffectError) throw revokeAfterEffectError
       },
     },
-    async discoverAccounts() {
+    async discoverAccounts(_context, credentials) {
       await discoverGate
+      if (options.discover) return options.discover(credentials)
       return [
         { id: "account-a", label: "Account A" },
         { id: "account-b", label: "Account B" },

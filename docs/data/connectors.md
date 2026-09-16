@@ -181,6 +181,46 @@ in the Sync definition. See [OAuth connector fan-out](./syncs.md#oauth-connector
 > **Current scope.** OAuth-backed webhook routing remains rejected until its connection admission
 > contract is defined.
 
+### Provider callback parameters and authorization context
+
+Declare the extra callback parameters your provider returns. Store grant-specific data in
+`authorizationContext` for account discovery, refresh, and revocation.
+
+```ts
+authentication: {
+  type: "oauth2",
+  callbackParameters: ["tenant"],
+  // Other OAuth methods as above.
+  async exchangeCode(context, input) {
+    const tenant = input.callbackParameters?.tenant
+    if (!tenant) throw new Error("[Acme] OAuth callback is missing its tenant.")
+
+    const credentials = await exchangeAcmeCode(context, input)
+    return {
+      ...credentials,
+      authorizationContext: { tenant },
+    }
+  },
+},
+async discoverAccounts(context, credentials) {
+  const tenant = credentials.authorizationContext?.tenant
+  if (typeof tenant !== "string") throw new Error("[Acme] Missing tenant context.")
+
+  // Verify access with the provider before offering the account.
+  const account = await getAcmeTenant(credentials, tenant, { signal: context.signal })
+  return [{ id: account.id, label: account.name }]
+},
+```
+
+Sixb forwards only declared parameters and rejects duplicate values. The adapter validates required
+values; OAuth fields such as `state`, `code`, and `error` remain framework-owned.
+
+Context must be a JSON object. Sixb encrypts it with the tokens and keeps it out of public connection
+views. It survives restarts.
+
+- **Refresh:** omit context to preserve it, return an object to replace it, or `{}` to clear it.
+- **Reauthorization:** uses fresh context and verifies that existing connected accounts remain available.
+
 ## Protect OAuth credentials
 
 When at least one OAuth connector uses durable connector storage, Sixb encrypts its tokens at rest.

@@ -39,6 +39,8 @@ import {
   normalizedHttpUrl,
   parseAttemptId,
   positiveDuration,
+  selectCallbackParameters,
+  validateCallbackParameterNames,
 } from "./validation"
 import { assertConnectorConnectionSelector, connectorConnectionView } from "./views"
 
@@ -66,6 +68,7 @@ export interface CompleteNewConnectorAuthorizationInput {
   readonly code: string
   readonly codeVerifier: string
   readonly redirectUri: string
+  readonly callbackParameters?: Readonly<Record<string, string>>
   /** Called immediately after the encrypted grant is durable, before account discovery. */
   readonly onAuthorizationPersisted?: (authorization: ConnectorAuthorizationRecord) => Promise<void>
 }
@@ -172,6 +175,7 @@ export class ConnectorAuthorizationRequestHandler {
     const definition = this.resolveDefinition(nonblank(connectorId, "connector id"))
     const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
     assertConnectorConnectionSelector(input)
+    validateCallbackParameterNames(definition.adapter.authentication.callbackParameters)
     const redirectUri = normalizedHttpUrl(input.redirectUri, "OAuth callback URL")
     const reauthorization = await this.prepareReauthorization(
       definition,
@@ -275,6 +279,7 @@ export class ConnectorAuthorizationRequestHandler {
       principal: actor.principal,
       code,
       redirectUri,
+      callbackParameters: input.callbackParameters,
     })
 
     return {
@@ -291,6 +296,7 @@ export class ConnectorAuthorizationRequestHandler {
     readonly principal: AuthorizablePrincipal
     readonly code: string
     readonly redirectUri: string
+    readonly callbackParameters?: Readonly<Record<string, string | readonly string[]>>
     readonly onAuthorizationPersisted?: (
       authorization: ConnectorAuthorizationRecord
     ) => Promise<void>
@@ -303,6 +309,10 @@ export class ConnectorAuthorizationRequestHandler {
     })
     return this.completeGrant({
       ...input,
+      callbackParameters: selectCallbackParameters(
+        input.definition.adapter.authentication.callbackParameters,
+        input.callbackParameters
+      ),
       codeVerifier: textDecoder.decode(verifierBytes),
     })
   }
@@ -401,6 +411,7 @@ export class ConnectorAuthorizationRequestHandler {
     readonly code: string
     readonly codeVerifier: string
     readonly redirectUri: string
+    readonly callbackParameters: Readonly<Record<string, string>>
     readonly onAuthorizationPersisted?: (
       authorization: ConnectorAuthorizationRecord
     ) => Promise<void>
@@ -411,6 +422,7 @@ export class ConnectorAuthorizationRequestHandler {
         principal: input.principal,
         code: input.code,
         codeVerifier: input.codeVerifier,
+        callbackParameters: input.callbackParameters,
         redirectUri: input.redirectUri,
         ...(input.onAuthorizationPersisted === undefined
           ? {}
@@ -433,6 +445,7 @@ export class ConnectorAuthorizationRequestHandler {
       principal: input.principal,
       code: input.code,
       codeVerifier: input.codeVerifier,
+      callbackParameters: input.callbackParameters,
       redirectUri: input.redirectUri,
     })
   }

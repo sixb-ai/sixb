@@ -46,6 +46,8 @@ export interface CompleteConnectorAuthorizationInput {
   readonly state: string
   readonly code: string
   readonly redirectUri: string
+  /** Raw provider callback values; duplicate values are rejected for allowlisted parameters. */
+  readonly callbackParameters?: Readonly<Record<string, string | readonly string[]>>
 }
 
 export type CompleteConnectorConnectionRunInput =
@@ -54,6 +56,7 @@ export type CompleteConnectorConnectionRunInput =
       readonly code: string
       readonly redirectUri: string
       readonly callbackBinding: string
+      readonly callbackParameters?: Readonly<Record<string, string | readonly string[]>>
     }
   | {
       readonly state: string
