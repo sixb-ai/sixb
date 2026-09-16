@@ -160,7 +160,8 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
       input.definition,
       input.code,
       input.codeVerifier,
-      input.redirectUri
+      input.redirectUri,
+      input.callbackParameters
     )
     const credentialsEnvelope = await this.credentials.seal(
       input.definition.id,
@@ -482,7 +483,11 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
           const credentials = validateCredentials(
             await input.definition.adapter.authentication.exchangeCode(
               this.authorizationAdapterContext(input.definition.id, input.redirectUri, signal),
-              { code: input.code, codeVerifier: input.codeVerifier }
+              {
+                code: input.code,
+                codeVerifier: input.codeVerifier,
+                callbackParameters: input.callbackParameters,
+              }
             )
           )
           assertCredentialMutationOperationActive(signal)
@@ -545,14 +550,15 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
     definition: OAuthConnectorDefinition,
     code: string,
     codeVerifier: string,
-    redirectUri: string
+    redirectUri: string,
+    callbackParameters: Readonly<Record<string, string>> | undefined
   ): Promise<ConnectorOAuthCredentials> {
     try {
       return validateCredentials(
         await this.mutations.withBoundedProviderSignal((signal) =>
           definition.adapter.authentication.exchangeCode(
             this.authorizationAdapterContext(definition.id, redirectUri, signal),
-            { code, codeVerifier }
+            { code, codeVerifier, callbackParameters }
           )
         )
       )
