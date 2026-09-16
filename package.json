@@ -1,7 +1,7 @@
 {
   "name": "sixb",
   "private": true,
-  "packageManager": "bun@1.4.0",
+  "packageManager": "bun@1.4.2",
   "workspaces": [
     "apps/*",
     "auth/*",
@@ -49,12 +49,12 @@
     "ui:add": "bun --filter @sixb/ui shadcn:add"
   },
   "overrides": {
-    "@types/bun": "1.4.0"
+    "@types/bun": "1.4.2"
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.6",
     "@types/bun": "latest",
-    "bun": "1.4.0",
+    "bun": "1.4.2",
     "typescript": "^5.7.0"
   }
 }

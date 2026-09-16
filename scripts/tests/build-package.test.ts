@@ -13,7 +13,7 @@ import { join } from "node:path"
  * either way; that is the control, and it is why the block is not incidental setup.
  *
  * Each test names the line to delete to watch it fail. One of them needs Bun 1.3.14 or newer
- * (`.bun-version` is currently 1.4.0) to reach its trigger at all; the other fails on every tested
+ * (`.bun-version` is currently 1.4.2) to reach its trigger at all; the other fails on every tested
  * version. That difference is the reason the release gate asserts on the artifact and does not
  * rely on these tests alone.
  */

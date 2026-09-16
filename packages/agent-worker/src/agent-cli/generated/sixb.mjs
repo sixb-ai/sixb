@@ -1389,8 +1389,8 @@ async function doctor(args, mode) {
     return writeText("Usage: sixb doctor");
   if (args.length !== 0)
     fail("doctor accepts no arguments.");
-  const project2 = asRecord2(await createInstanceApiClient(mode).get("/api/project"));
-  if (typeof project2.id !== "string" || project2.id.length === 0) {
+  const project = asRecord2(await createInstanceApiClient(mode).get("/api/project"));
+  if (typeof project.id !== "string" || project.id.length === 0) {
     throw new CliError({ code: "invalid_api_response", message: "The Sixb API returned an invalid project." }, EXIT_API);
   }
   const report = {
@@ -1398,7 +1398,7 @@ async function doctor(args, mode) {
     profile: AGENT_RUNTIME_PROFILE,
     cli: { version: INSTANCE_CLI_VERSION },
     javascript: javascriptRuntime(),
-    project: { id: project2.id }
+    project: { id: project.id }
   };
   writeJson(report);
 }

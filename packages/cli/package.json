@@ -1,6 +1,6 @@
 {
   "name": "@sixb/cli",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Command-line interface for Sixb projects",
   "keywords": [
     "sixb",
@@ -55,7 +55,7 @@
   },
   "license": "MIT",
   "engines": {
-    "bun": ">=1.4.0"
+    "bun": ">=1.4.2"
   },
   "publishConfig": {
     "access": "public"
