@@ -36,6 +36,7 @@ interface OpenApiOperation {
 }
 
 interface OpenApiDocument {
+  readonly openapi: string
   readonly components?: {
     readonly securitySchemes?: Record<string, unknown>
   }
@@ -70,6 +71,9 @@ async function fetchDocsJsonWithoutWarnings(app: ReturnType<typeof createDocsApi
     const response = await app.fetch(new Request("http://localhost/docs/json"))
     expect(response.status).toBe(200)
     const spec = (await response.json()) as OpenApiDocument
+    // Remove openapiVersion in server.ts to reproduce with @elysiajs/openapi 1.4.16:
+    // a 3.1 document makes the SDK generator discard our 3.0 nullable fields.
+    expect(spec.openapi).toBe("3.0.3")
     expect(warnings.filter((warning) => warning.includes("Recursive reference detected"))).toEqual(
       []
     )

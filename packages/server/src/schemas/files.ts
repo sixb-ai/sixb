@@ -46,6 +46,7 @@ export const DirectPutFileUploadSchema = z.object({
 
 export const MultipartFileUploadSchema = z.object({
   strategy: z.literal("multipart"),
+  partReceipt: z.enum(["etag", "none"]),
   uploadId: z.string(),
   partSizeBytes: z.number().int().positive(),
   expiresAt: z.string(),
@@ -67,7 +68,7 @@ export const SignedFileUploadPartSchema = z.object({
 
 export const FileUploadPartSchema = z.object({
   partNumber: z.number().int().positive(),
-  etag: z.string(),
+  etag: z.string().min(1).optional(),
 })
 
 export const CompleteFileUploadBodySchema = z.object({

@@ -24,8 +24,47 @@ import {
   type SignedBlobUploadPart,
 } from "@sixb/core/blob-storage/server"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "../src/routes/files"
+import { FileUploadPartSchema } from "../src/schemas/files"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
+
+test("multipart parts allow an optional nonempty ETag", () => {
+  expect(FileUploadPartSchema.safeParse({ partNumber: 1, etag: '"part"' }).success).toBe(true)
+  expect(FileUploadPartSchema.safeParse({ partNumber: 1 }).success).toBe(true)
+  expect(FileUploadPartSchema.safeParse({ partNumber: 1, etag: "" }).success).toBe(false)
+})
+
+test.each([
+  "etag",
+  "none",
+  undefined,
+] as const)("multipart session exposes receipt policy %s", async (partReceipt) => {
+  class MultipartStorage extends TestDirectBlobStorage {
+    override async createUpload(input: CreateBlobUploadInput): Promise<BlobUploadSession> {
+      return {
+        strategy: "multipart",
+        uploadId: input.uploadId,
+        stagingKey: `staging/${input.uploadId}`,
+        providerUploadId: input.uploadId,
+        partSizeBytes: 8,
+        expiresAt: input.expiresAt,
+        ...(partReceipt === undefined ? {} : { partReceipt }),
+      }
+    }
+  }
+  const { app } = createFilesApi(new MultipartStorage())
+  const response = await app.fetch(
+    jsonRequest("/api/files/uploads", {
+      sizeBytes: 3,
+      digest: computeBlobDigest(new TextEncoder().encode("abc")),
+    })
+  )
+  expect(response.status).toBe(201)
+  expect(await response.json()).toMatchObject({
+    strategy: "multipart",
+    partReceipt: partReceipt ?? "etag",
+  })
+})
 
 const Document = defineObjectType({
   id: "document",

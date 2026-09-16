@@ -8823,6 +8823,7 @@ export type CreateFileUploadResponses = {
       }
     | {
         strategy: "multipart"
+        partReceipt: "etag" | "none"
         uploadId: string
         partSizeBytes: number
         expiresAt: string
@@ -8943,7 +8944,7 @@ export type CompleteFileUploadData = {
     digest?: string
     parts?: Array<{
       partNumber: number
-      etag: string
+      etag?: string
     }>
   }
   path: {
