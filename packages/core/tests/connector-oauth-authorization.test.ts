@@ -97,6 +97,7 @@ describe("connector OAuth lifecycle", () => {
 
     const completed = await started.complete()
     const verifier = harness.exchangedVerifiers[0]
+    if (!verifier) throw new Error("Expected a PKCE verifier.")
     expect(challenge).toBe(createHash("sha256").update(verifier).digest("base64url"))
     expect(completed.accounts.map((account) => account.id)).toEqual(["account-a", "account-b"])
 

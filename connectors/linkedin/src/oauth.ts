@@ -26,6 +26,7 @@ export function createLinkedinOAuth(options: LinkedinOAuthOptions) {
   const scopes = normalizeScopes(options.scopes)
 
   return {
+    pkce: "disabled",
     authorizationUrl(
       context: OAuthConnectorAuthorizationContext,
       input: OAuthConnectorAuthorizationUrlInput
@@ -37,11 +38,6 @@ export function createLinkedinOAuth(options: LinkedinOAuthOptions) {
       url.searchParams.set("state", input.state)
       url.searchParams.set("scope", scopes.join(" "))
 
-      // Sixb currently requires these parameters for every managed OAuth adapter. LinkedIn's
-      // confidential web flow does not document PKCE and its native PKCE flow only accepts
-      // loopback redirects, so the verifier is deliberately not sent during the token exchange.
-      url.searchParams.set("code_challenge", input.codeChallenge)
-      url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
       return url
     },
 

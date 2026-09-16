@@ -106,8 +106,10 @@ export const socialConnector = defineConnector("social", {
       const url = new URL("https://social.example/oauth/authorize")
       url.searchParams.set("redirect_uri", context.redirectUri)
       url.searchParams.set("state", state)
-      url.searchParams.set("code_challenge", codeChallenge)
-      url.searchParams.set("code_challenge_method", codeChallengeMethod)
+      if (codeChallenge !== undefined && codeChallengeMethod !== undefined) {
+        url.searchParams.set("code_challenge", codeChallenge)
+        url.searchParams.set("code_challenge_method", codeChallengeMethod)
+      }
       return url
     },
     exchangeCode(context, input) {
@@ -180,6 +182,21 @@ in the Sync definition. See [OAuth connector fan-out](./syncs.md#oauth-connector
 
 > **Current scope.** OAuth-backed webhook routing remains rejected until its connection admission
 > contract is defined.
+
+### PKCE
+
+PKCE defaults to S256. Disable it explicitly for providers whose OAuth flow does not support it:
+
+```ts
+authentication: {
+  type: "oauth2",
+  pkce: "disabled",
+  // authorizationUrl, exchangeCode, refresh, and revoke as above.
+},
+```
+
+When disabled, Sixb omits the challenge and verifier. State, browser binding, redirect validation,
+and replay protection still apply. Changing the mode requires restarting any in-flight authorization.
 
 ### Provider callback parameters and authorization context
 

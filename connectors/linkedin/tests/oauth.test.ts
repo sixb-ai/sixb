@@ -21,6 +21,7 @@ const AUTHORIZATION_CONTEXT = {
 describe("linkedin managed OAuth", () => {
   test("builds the confidential web authorization URL with framework state", () => {
     const connector = linkedin(DEFAULT_OPTIONS)
+    expect(connector.authentication.pkce).toBe("disabled")
     const authorizationUrl = connector.authentication.authorizationUrl(AUTHORIZATION_CONTEXT, {
       state: "attempt.signed-state",
       codeChallenge: "pkce-challenge",
@@ -34,8 +35,8 @@ describe("linkedin managed OAuth", () => {
     expect(url.searchParams.get("redirect_uri")).toBe(AUTHORIZATION_CONTEXT.redirectUri)
     expect(url.searchParams.get("state")).toBe("attempt.signed-state")
     expect(url.searchParams.get("scope")).toBe("r_ads")
-    expect(url.searchParams.get("code_challenge")).toBe("pkce-challenge")
-    expect(url.searchParams.get("code_challenge_method")).toBe("S256")
+    expect(url.searchParams.has("code_challenge")).toBe(false)
+    expect(url.searchParams.has("code_challenge_method")).toBe(false)
   })
 
   test("exchanges an authorization code without sending the native-only PKCE verifier", async () => {

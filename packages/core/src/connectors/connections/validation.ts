@@ -257,19 +257,32 @@ export function normalizedHttpUrl(
 
 export function assertAuthorizationUrlParameters(
   authorizationUrl: string,
-  expected: { readonly state: string; readonly codeChallenge: string }
+  expected: { readonly state: string; readonly codeChallenge?: string }
 ): void {
   const parameters = new URL(authorizationUrl).searchParams
   if (
     !sameSingleParameter(parameters, "state", expected.state) ||
-    !sameSingleParameter(parameters, "code_challenge", expected.codeChallenge) ||
-    !sameSingleParameter(parameters, "code_challenge_method", "S256")
+    (expected.codeChallenge === undefined
+      ? parameters.has("code_challenge") || parameters.has("code_challenge_method")
+      : !sameSingleParameter(parameters, "code_challenge", expected.codeChallenge) ||
+        !sameSingleParameter(parameters, "code_challenge_method", "S256"))
   ) {
     throw createConnectorCodedError(
       "connector.adapter_invalid",
-      "OAuth connector authorization URL must preserve the framework-provided state and PKCE S256 parameters."
+      expected.codeChallenge === undefined
+        ? "OAuth connector authorization URL must preserve the framework-provided state and omit disabled PKCE parameters."
+        : "OAuth connector authorization URL must preserve the framework-provided state and PKCE S256 parameters."
     )
   }
+}
+
+export function connectorPkceEnabled(pkce: "S256" | "disabled" | undefined): boolean {
+  if (pkce === undefined || pkce === "S256") return true
+  if (pkce === "disabled") return false
+  throw createConnectorCodedError(
+    "connector.adapter_invalid",
+    "OAuth connector PKCE must be S256 or disabled."
+  )
 }
 
 const reservedCallbackParameters = new Set([

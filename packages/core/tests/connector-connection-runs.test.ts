@@ -14,8 +14,11 @@ import {
 const returnTo = "https://app.test/settings/connectors"
 
 describe("connector connection runs", () => {
-  test("keeps protocol secrets in a separate one-shot attempt", async () => {
-    const harness = createHarness()
+  test.each([
+    undefined,
+    "disabled",
+  ] as const)("keeps protocol secrets in a separate one-shot attempt (PKCE %s)", async (pkce) => {
+    const harness = createHarness({ pkce })
     const command = managementCommand()
     const started = await harness.process.startConnectionRun(command, harness.connector.id, {
       owner: projectOwner,

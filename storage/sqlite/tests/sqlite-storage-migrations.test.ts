@@ -294,6 +294,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 38,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "039-connector-optional-pkce",
+    status: "applied",
+    version: 39,
+  },
 ]
 
 afterEach(async () => {

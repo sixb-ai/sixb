@@ -485,7 +485,7 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
               this.authorizationAdapterContext(input.definition.id, input.redirectUri, signal),
               {
                 code: input.code,
-                codeVerifier: input.codeVerifier,
+                ...(input.codeVerifier === undefined ? {} : { codeVerifier: input.codeVerifier }),
                 callbackParameters: input.callbackParameters,
               }
             )
@@ -549,7 +549,7 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
   private async exchangeAuthorizationCode(
     definition: OAuthConnectorDefinition,
     code: string,
-    codeVerifier: string,
+    codeVerifier: string | undefined,
     redirectUri: string,
     callbackParameters: Readonly<Record<string, string>> | undefined
   ): Promise<ConnectorOAuthCredentials> {
@@ -558,7 +558,7 @@ export class DefaultConnectorAuthorizationLifecycle implements ConnectorAuthoriz
         await this.mutations.withBoundedProviderSignal((signal) =>
           definition.adapter.authentication.exchangeCode(
             this.authorizationAdapterContext(definition.id, redirectUri, signal),
-            { code, codeVerifier, callbackParameters }
+            { code, ...(codeVerifier === undefined ? {} : { codeVerifier }), callbackParameters }
           )
         )
       )
