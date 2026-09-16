@@ -207,6 +207,7 @@ export class ConnectorConnectionRunService {
         attempt,
         principal,
         code: nonblank(input.code, "OAuth authorization code", "connector.authorization_invalid"),
+        callbackParameters: input.callbackParameters,
         redirectUri,
         onAuthorizationPersisted: async (persisted) => {
           authorizationId = persisted.id

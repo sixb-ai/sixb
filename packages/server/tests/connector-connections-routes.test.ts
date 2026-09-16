@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type ConnectorOAuthCredentials,
   can,
   defineConnector,
   defineGroup,
@@ -21,11 +22,14 @@ let revokeError: Error | undefined
 let discoverError: Error | undefined
 let revokeCount = 0
 let exchangeCount = 0
+let exchangedCallbackParameters: Readonly<Record<string, string>> | undefined
+let discoveredContext: ConnectorOAuthCredentials["authorizationContext"]
 
 const connector = defineConnector("crm", {
   type: "test-oauth",
   authentication: {
     type: "oauth2",
+    callbackParameters: ["tenant"],
     authorizationUrl(context, input) {
       const url = new URL("https://provider.test/oauth/authorize")
       url.searchParams.set("state", input.state)
@@ -36,9 +40,11 @@ const connector = defineConnector("crm", {
     },
     exchangeCode(_context, input) {
       exchangeCount += 1
+      exchangedCallbackParameters = input.callbackParameters
       return {
         accessToken: `access-${input.code}`,
         refreshToken: "refresh-secret",
+        authorizationContext: { tenant: input.callbackParameters?.tenant ?? "default-tenant" },
       }
     },
     refresh(_context, credentials) {
@@ -49,7 +55,8 @@ const connector = defineConnector("crm", {
       if (revokeError) throw revokeError
     },
   },
-  discoverAccounts() {
+  discoverAccounts(_context, credentials) {
+    discoveredContext = credentials.authorizationContext
     if (discoverError) throw discoverError
     return [
       { id: "account-a", label: "Account A" },
@@ -79,6 +86,8 @@ async function createHarness() {
   discoverError = undefined
   revokeCount = 0
   exchangeCount = 0
+  exchangedCallbackParameters = undefined
+  discoveredContext = undefined
   const storage = new InMemoryStorage()
   const host = new SixbHost<readonly OntologySource[]>({
     id: "test-project",
@@ -207,11 +216,15 @@ async function completeRunAtProvider(
   harness: Awaited<ReturnType<typeof createHarness>>,
   state: string,
   callbackCookie: string,
-  code = "authorization-code"
+  code = "authorization-code",
+  callbackParameters: Readonly<Record<string, string>> = {}
 ) {
   const callbackUrl = new URL("http://localhost/auth/connectors/callback")
   callbackUrl.searchParams.set("state", state)
   callbackUrl.searchParams.set("code", code)
+  for (const [name, value] of Object.entries(callbackParameters)) {
+    callbackUrl.searchParams.set(name, value)
+  }
   return harness.app.handle(
     new Request(callbackUrl, { redirect: "manual", headers: { cookie: callbackCookie } })
   )
@@ -244,6 +257,85 @@ async function connectAccount(
 }
 
 describe("connector connection Headless API", () => {
+  test.each(["state", "code"])("rejects repeated framework callback field %s", async (name) => {
+    const harness = await createHarness()
+    const started = await startRun(harness)
+    const callbackUrl = new URL("http://localhost/auth/connectors/callback")
+    callbackUrl.searchParams.set("state", started.state)
+    callbackUrl.searchParams.set("code", "authorization-code")
+    callbackUrl.searchParams.append(name, callbackUrl.searchParams.get(name)!)
+    const response = await harness.app.handle(
+      new Request(callbackUrl, {
+        headers: { cookie: started.callbackCookie },
+      })
+    )
+    expect(response.status).toBe(400)
+    expect(harness.exchangeCount()).toBe(0)
+  })
+
+  test("passes allowlisted callback context through browser-bound authorization without leaking it", async () => {
+    // Regression check: remove callbackParameters forwarding in the callback route or runs.ts.
+    // Discovery then receives default-tenant instead of the provider's tenant.
+    const harness = await createHarness()
+    const started = await startRun(harness)
+    const callbackUrl = new URL("http://localhost/auth/connectors/callback")
+    callbackUrl.searchParams.set("state", started.state)
+    callbackUrl.searchParams.set("code", "authorization-code")
+    callbackUrl.searchParams.set("tenant", "private-tenant")
+    callbackUrl.searchParams.append("ignored", "one")
+    callbackUrl.searchParams.append("ignored", "two")
+    const request = (cookie: string) =>
+      new Request(callbackUrl, {
+        redirect: "manual",
+        headers: { cookie },
+      })
+    expect((await harness.app.handle(request("unrelated=value"))).status).toBe(400)
+    expect(harness.exchangeCount()).toBe(0)
+    const callback = await harness.app.handle(request(started.callbackCookie))
+    expect(callback.status).toBe(302)
+    expect(exchangedCallbackParameters).toEqual({ tenant: "private-tenant" })
+    expect(discoveredContext).toEqual({ tenant: "private-tenant" })
+    expect(callback.headers.get("location")).not.toContain("private-tenant")
+    const run = await harness.app.handle(
+      new Request(`http://api.localhost/api/connectors/crm/connection-runs/${started.runId}`, {
+        headers: harness.session.readHeaders,
+      })
+    )
+    expect(run.status).toBe(200)
+    const body = await run.text()
+    expect(JSON.parse(body)).toMatchObject({ status: "waiting", waitingFor: "account_selection" })
+    expect(body).not.toContain("private-tenant")
+    expect(body).not.toContain("authorizationContext")
+  })
+
+  test("rejects duplicate allowlisted callback parameters before contacting the provider", async () => {
+    // Regression check: replacing getAll with get in the callback route makes this exchange a code.
+    const harness = await createHarness()
+    const started = await startRun(harness)
+    const callbackUrl = new URL("http://localhost/auth/connectors/callback")
+    callbackUrl.searchParams.set("state", started.state)
+    callbackUrl.searchParams.set("code", "authorization-code")
+    callbackUrl.searchParams.append("tenant", "one")
+    callbackUrl.searchParams.append("tenant", "two")
+    const callback = await harness.app.handle(
+      new Request(callbackUrl, {
+        redirect: "manual",
+        headers: { cookie: started.callbackCookie },
+      })
+    )
+    expect(callback.status).toBe(302)
+    expect(harness.exchangeCount()).toBe(0)
+    const run = await harness.app.handle(
+      new Request(`http://api.localhost/api/connectors/crm/connection-runs/${started.runId}`, {
+        headers: harness.session.readHeaders,
+      })
+    )
+    expect(await run.json()).toMatchObject({
+      status: "failed",
+      error: { code: "connector.authorization_invalid" },
+    })
+  })
+
   test("accepts TikTok's auth_code on a callback URI ending in a slash", async () => {
     const harness = await createHarness()
     const started = await startRun(harness)
@@ -605,7 +697,8 @@ describe("connector connection Headless API", () => {
       harness,
       state,
       callbackCookie,
-      "reauthorization-code"
+      "reauthorization-code",
+      { tenant: "reauthorized-tenant" }
     )
     expect(callback.status).toBe(302)
 
@@ -621,6 +714,8 @@ describe("connector connection Headless API", () => {
       status: "succeeded",
       connections: [{ id: connected.connectionId, status: "connected" }],
     })
+    expect(exchangedCallbackParameters).toEqual({ tenant: "reauthorized-tenant" })
+    expect(discoveredContext).toEqual({ tenant: "reauthorized-tenant" })
   })
 
   test("revokes an authorization after its last durable connection is disconnected", async () => {
