@@ -9,6 +9,8 @@ export type {
   WebhookBodyFormat,
   WebhookBodyParser,
   WebhookBodySchema,
+  WebhookConnection,
+  WebhookConnections,
   WebhookDefinition,
   WebhookHandlerContext,
   WebhookHandlerResult,

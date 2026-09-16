@@ -1,4 +1,4 @@
-import type { StaticConnectorDefinition } from "../connectors/types"
+import type { ConnectorConnectionMetadata, ConnectorDefinition } from "../connectors/types"
 import type { Logger } from "../logging"
 import type { OntologySource, Sixb } from "../runtime"
 
@@ -49,7 +49,7 @@ export interface WebhookMetadata {
 
 /** Pre-admission input. It intentionally has no execution SDK or run-scoped logger. */
 export interface WebhookVerifyContext {
-  readonly connector: StaticConnectorDefinition
+  readonly connector: ConnectorDefinition
   readonly webhook: WebhookMetadata
   readonly request: Request
   readonly rawBody: Uint8Array
@@ -60,7 +60,9 @@ export interface WebhookHandlerContext<TBody, TClient> extends WebhookVerifyCont
   readonly sixb: Sixb<readonly OntologySource[]>
   readonly logger: Logger
   readonly body: TBody
-  /** Lazily resolve the connector client only when the handler needs it. */
+  /** Resolve selected managed connections for an external account in this connector. */
+  readonly connections: WebhookConnections<TClient>
+  /** Resolve a static connector's client. For OAuth, use connections.forAccount(). */
   client(): Promise<TClient>
 }
 
@@ -93,9 +95,20 @@ export type WebhookHandlerResult = WebhookResponse | void
 export interface RegisteredWebhook<
   TBody = unknown,
   TClient = unknown,
-  TConnector extends StaticConnectorDefinition = StaticConnectorDefinition,
+  TConnector extends ConnectorDefinition = ConnectorDefinition,
 > {
   readonly connector: TConnector
   readonly webhook: WebhookDefinition<TBody, TClient>
   readonly route: string
+}
+
+export interface WebhookConnection<TClient = unknown> {
+  readonly connection: ConnectorConnectionMetadata
+  /** First call rechecks the connection and creates its client; later calls reuse that client. */
+  client(): Promise<TClient>
+}
+
+export interface WebhookConnections<TClient = unknown> {
+  /** Returns all matching selected connections; an unknown account returns an empty array. */
+  forAccount(accountId: string): Promise<readonly WebhookConnection<TClient>[]>
 }

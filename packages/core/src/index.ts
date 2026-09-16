@@ -679,6 +679,8 @@ export type {
   WebhookBodyFormat,
   WebhookBodyParser,
   WebhookBodySchema,
+  WebhookConnection,
+  WebhookConnections,
   WebhookConnectorClient,
   WebhookDefinition,
   WebhookHandlerContext,

@@ -146,7 +146,7 @@ export interface ConnectorOAuth2Authentication {
 export interface OAuthConnectorAdapter<TType extends string = string, TClient = unknown> {
   readonly type: TType
   readonly authentication: ConnectorOAuth2Authentication
-  readonly webhooks?: undefined
+  readonly webhooks?: readonly WebhookDefinition<unknown, TClient>[]
   discoverAccounts(
     context: ConnectorContext,
     credentials: ConnectorOAuthCredentials
