@@ -377,6 +377,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("035-share-grants", shareGrantsSql),
     pgSql("036-share-sessions", shareSessionsSql),
     pgSql("037-execution-requester-groups", executionRequesterGroupsSql),
+    pgSql("038-connector-optional-pkce", connectorOptionalPkceSql),
   ],
 })
 
@@ -391,5 +392,8 @@ interface PostgresMigrationRow {
 }
 
 import executionRequesterGroupsSql from "./migrations/037-execution-requester-groups.sql" with {
+  type: "text",
+}
+import connectorOptionalPkceSql from "./migrations/038-connector-optional-pkce.sql" with {
   type: "text",
 }

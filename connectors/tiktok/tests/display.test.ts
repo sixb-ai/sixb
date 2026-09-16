@@ -25,6 +25,7 @@ afterEach(() => {
 
 describe("TikTok Display OAuth", () => {
   test("builds the documented Login Kit Web authorization URL", async () => {
+    expect(displayAdapter().authentication.pkce).toBe("disabled")
     const url = new URL(
       await displayAdapter().authentication.authorizationUrl(
         authorizationContext,

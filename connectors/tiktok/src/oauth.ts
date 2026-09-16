@@ -51,6 +51,7 @@ function createOrganicAuthentication(
 ): ConnectorOAuth2Authentication {
   return {
     type: "oauth2",
+    pkce: "disabled",
     authorizationUrl(context, input) {
       const url = new URL(options.authorizationUrl)
       if (url.protocol !== "https:") {
@@ -58,7 +59,6 @@ function createOrganicAuthentication(
       }
       url.searchParams.set("redirect_uri", organicRedirectUri(context.redirectUri))
       url.searchParams.set("state", input.state)
-      addFrameworkPkce(url, input.codeChallenge, input.codeChallengeMethod)
       if (options.disableAutoAuth) url.searchParams.set("disable_auto_auth", "1")
       return url
     },
@@ -114,13 +114,13 @@ function createMarketingAuthentication(
 ): ConnectorOAuth2Authentication {
   return {
     type: "oauth2",
+    pkce: "disabled",
     authorizationUrl(context, input) {
       const url = new URL(MARKETING_AUTHORIZATION_URL)
       url.searchParams.set("app_id", options.appId)
       url.searchParams.set("state", input.state)
       url.searchParams.set("redirect_uri", context.redirectUri)
       if (options.scope) url.searchParams.set("scope", options.scope)
-      addFrameworkPkce(url, input.codeChallenge, input.codeChallengeMethod)
       return url
     },
     async exchangeCode(context, input) {
@@ -158,13 +158,6 @@ function createMarketingAuthentication(
       )
     },
   }
-}
-
-function addFrameworkPkce(url: URL, challenge: string, method: "S256"): void {
-  // TikTok does not document PKCE for either Business API flow. Sixb still requires a challenge
-  // on the authorization request; the verifier is deliberately not sent to TikTok's token APIs.
-  url.searchParams.set("code_challenge", challenge)
-  url.searchParams.set("code_challenge_method", method)
 }
 
 function organicCredentials(data: unknown): ConnectorOAuthCredentials {

@@ -33,8 +33,10 @@ const connector = defineConnector("crm", {
     authorizationUrl(context, input) {
       const url = new URL("https://provider.test/oauth/authorize")
       url.searchParams.set("state", input.state)
-      url.searchParams.set("code_challenge", input.codeChallenge)
-      url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
+      if (input.codeChallenge !== undefined && input.codeChallengeMethod !== undefined) {
+        url.searchParams.set("code_challenge", input.codeChallenge)
+        url.searchParams.set("code_challenge_method", input.codeChallengeMethod)
+      }
       url.searchParams.set("redirect_uri", context.redirectUri)
       return url
     },

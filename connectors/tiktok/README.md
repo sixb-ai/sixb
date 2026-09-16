@@ -53,9 +53,8 @@ For Business Organic, copy the complete account-holder authorization URL from th
 portal. Register Sixb's callback URL with a trailing slash; this flow requires an exact HTTPS
 redirect URI ending in `/`. Marketing uses a long-lived, non-refreshable access token.
 
-Login Kit Web does not use PKCE; TikTok documents it only for mobile and desktop. The two Business
-flows retain Sixb's framework challenge on the authorization request without sending an
-undocumented verifier. Sixb's one-use state and callback browser binding remain enforced.
+All three adapters set `pkce: "disabled"` for their documented server-side flows and send no PKCE
+parameters. Sixb's one-use state, callback browser binding, and redirect validation remain enforced.
 
 ## Client API
 

@@ -63,7 +63,9 @@ export class DurableConnectorConnectionRuns extends ConnectorConnectionOperation
         slot: input.slot,
         initiatedByExecutionId: input.initiatedByExecutionId,
         stateHash: input.stateHash,
-        codeVerifier: structuredClone(input.codeVerifier),
+        ...(input.codeVerifier === undefined
+          ? {}
+          : { codeVerifier: structuredClone(input.codeVerifier) }),
         redirectUri: input.redirectUri,
         ...(input.connectionRunId === undefined ? {} : { connectionRunId: input.connectionRunId }),
         ...(input.returnTo === undefined ? {} : { returnTo: input.returnTo }),
