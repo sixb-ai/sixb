@@ -87,6 +87,8 @@ export interface DirectPutBlobUploadSession {
 
 export interface MultipartBlobUploadSession {
   readonly strategy: "multipart"
+  /** Required upload-response receipt. Omission defaults to "etag" for compatibility. */
+  readonly partReceipt?: "etag" | "none"
   readonly uploadId: string
   readonly partSizeBytes: number
   readonly expiresAt: Date
@@ -114,7 +116,8 @@ export interface SignedBlobUploadPart {
 
 export interface BlobUploadPart {
   readonly partNumber: number
-  readonly etag: string
+  /** Required when the multipart session's partReceipt is "etag" or omitted. */
+  readonly etag?: string
 }
 
 export interface CompleteBlobUploadInput {

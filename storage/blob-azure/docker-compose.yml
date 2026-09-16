@@ -1,0 +1,17 @@
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:3.37.0
+    command: azurite-blob --blobHost 0.0.0.0 --silent
+    environment:
+      AZURITE_ACCOUNTS: "sixbtest:MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY="
+    ports:
+      - "127.0.0.1:49010:10000"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "require('http').get('http://127.0.0.1:10000/', r => process.exit(r.statusCode ? 0 : 1)).on('error', () => process.exit(1))"
+      interval: 1s
+      timeout: 5s
+      retries: 30
