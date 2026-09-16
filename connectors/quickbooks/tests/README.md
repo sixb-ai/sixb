@@ -54,10 +54,31 @@ Set `WEBHOOK_VERIFIER_TOKEN`, `QUICKBOOKS_WEBHOOK_BODY` (raw-body file path), an
 Do not reserialize JSON before verification. Replay is not a public delivery/latency test; actual
 Intuit deliveries require a separately running endpoint configured in the development portal.
 
+Public write API mode is a separate lifecycle test:
+
+```sh
+QUICKBOOKS_LIVE=writes QUICKBOOKS_JOURNAL=.local/qb-writes-unique.json bun --env-file=.env.test test ./connectors/quickbooks/tests/sandbox.e2e.ts
+```
+
+It creates a disposable customer and vendor, updates and deactivates/reactivates both, verifies
+request-ID create deduplication and a stale customer revision, and creates/updates/sends/voids/deletes
+an invoice. It exercises both explicit-recipient and stored-BillEmail sending. The default recipient
+is the reserved `sixb-invoice-test@example.com`; set `QUICKBOOKS_SEND_TO` to a mailbox you control
+for manual inbox verification. API success checks `EmailStatus`/`DeliveryInfo`, not inbox receipt.
+Cleanup attempts each resource independently, deletes the invoice, and leaves both contacts inactive.
+The exclusive journal records request IDs before operations and returned entity IDs for recovery;
+inspect it after any interruption. This mode uses only public connector methods for writes.
+
 The recorded local verification in the package README describes additional live CDC, transaction,
 and webhook experiments. It is evidence of that run, not a guarantee about every company or locale.
 
-On 2026-09-16 all maintained modes were explicitly executed successfully: exhaustive reads
+On 2026-09-16 the initial three modes were explicitly executed successfully: exhaustive reads
 (245 records, 747 assertions), mutations with cleanup (24 assertions), and replay of a freshly
 captured Intuit payload with its original signature (2 assertions). Each mode ran separately;
 the other two modes intentionally skipped in each invocation.
+
+The public `writes` mode subsequently passed against the sandbox (23 assertions, ~13 seconds),
+including both send variants. The journal confirmed invoice deletion and both contacts inactive.
+Deterministic coverage includes the hard no-retry gate under custom policies, HTTP/transport
+failures, malformed responses, payload validation and provider wire contracts. Removing the gate
+was verified to fail the regression test by observing three POSTs instead of one.
