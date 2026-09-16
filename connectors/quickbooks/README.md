@@ -3,6 +3,7 @@
 QuickBooks Online Accounting API connector for Sixb. Managed OAuth, verified company discovery,
 CompanyInfo, Preferences, customers, vendors, ledger accounts, items, terms, invoices, payments,
 credit memos, bills, bill payments, and vendor credits are implemented as reads.
+Customers, vendors, and invoices also support typed writes, including invoice sending.
 Typed CDC reads and verified CloudEvents webhook handlers support incremental syncs.
 
 ## Register
@@ -96,6 +97,68 @@ classification without including provider response bodies or credentials in thei
 
 Accounting failures throw `QuickBooksApiError` with `status`, `requestId` (`intuit_tid`),
 `faultType`, and provider `errors` (`code`, `Message`, `Detail`, `element`).
+
+## Create and update customers, vendors, and invoices
+
+| Resource | Write methods |
+| --- | --- |
+| `customers`, `vendors` | `create(input, options?)`, `update(input, options?)`, `deactivate(revision, options?)`, `reactivate(revision, options?)` |
+| `invoices` | `create(input, options?)`, `update(input, options?)`, `delete(revision, options?)`, `void(revision, options?)`, `send(id, options?)` |
+
+```ts
+const customer = await qb.customers.create({
+  DisplayName: "Acme",
+  PrimaryEmailAddr: { Address: "billing@acme.example" },
+})
+if (!customer.SyncToken) throw new Error("Missing customer revision")
+await qb.customers.update({
+  Id: customer.Id,
+  SyncToken: customer.SyncToken,
+  PrimaryPhone: { FreeFormNumber: "555-0100" },
+})
+
+const invoice = await qb.invoices.create({
+  CustomerRef: { value: customer.Id },
+  Line: [{
+    Amount: 100,
+    DetailType: "SalesItemLineDetail",
+    SalesItemLineDetail: { ItemRef: { value: "3" }, Qty: 1, UnitPrice: 100 },
+  }],
+})
+const sent = await qb.invoices.send(invoice.Id, { sendTo: "billing@acme.example" })
+console.log(sent.EmailStatus, sent.DeliveryInfo)
+```
+
+- Input types expose writable fields separately from read models. Contact creation requires
+  `DisplayName`; invoice creation requires `CustomerRef` and nonempty `Line`. Intuit validates
+  company-specific accounting, tax, currency, and reference constraints.
+- `update` always sends `sparse: true`. Supply the current `Id` and `SyncToken`; omitted fields
+  are preserved. The connector never reads and overwrites a revision automatically. Intuit's
+  stale-object error (`5010`) is surfaced for the application to reconcile.
+- Invoice line updates follow Intuit's line-ID semantics. Read the invoice first, retain IDs on
+  existing lines, and supply the intended line collection. A new line has no `Id`.
+- Customers/vendors are deactivated, not deleted. Activation methods send only the revision,
+  `Active`, and `sparse`. Invoices can be deleted (returns `{ Id, status: "Deleted" }`) or voided
+  (returns the retained invoice with zero amounts). Intuit may require unlinking transactions first.
+- `send` POSTs to `/invoice/{id}/send` using `application/octet-stream`. `sendTo` is optional;
+  omit it to use the invoice's `BillEmail.Address`. An explicit recipient can update that address.
+  Sending returns the provider invoice, including `EmailStatus`/`DeliveryInfo`, rather than proof
+  of inbox delivery. Some company preferences can also cause invoices to be emailed on creation.
+
+### Write retries and recovery
+
+Every write sends an Intuit `requestid`. Pass `{ requestId: "persisted-operation-key" }` (1–50
+characters) to retain control of recovery, or let the connector generate a UUID for that call.
+Persist the key and exact operation/payload before sending when recovery is required. Reuse a key
+only for that same operation and payload in the same company, according to Intuit's deduplication
+contract; a new key represents a new request. See [Intuit's request-ID contract](https://help.developer.intuit.com/s/article/What-is-RequestId-and-its-usage).
+
+Writes have **no automatic retries**, including `401` replay and custom REST retry policies.
+Managed tokens are still acquired before each request. Provider failures retain the normal
+`QuickBooksApiError` details and add `writeRequestId` (distinct from the `intuit_tid` trace ID).
+Lost or unusable responses throw `QuickBooksWriteError` with `writeRequestId` and `cause`.
+An error does not establish that the write failed: reconcile an ambiguous outcome before retrying,
+especially invoice sends. No new request ID is silently generated for a retry.
 
 ## API baseline
 
@@ -340,8 +403,9 @@ and [Term field definitions](https://static.developer.intuit.com/sdkdocs/qbv3doc
 See [tests/README.md](tests/README.md) in the repository for deterministic integration coverage and
 opt-in sandbox commands. `bun run test:e2e` skips live tests unless `QUICKBOOKS_LIVE` selects a mode.
 
-The initial connector is read-only. Reports (including aging), PDFs, attachments, writes, and
-additional transaction resources are follow-ups. Tax, inventory, multicurrency, and custom-field
+Writes currently cover customers, vendors, and invoices. Reports (including aging), PDFs,
+attachments, writes to other resources, and additional transaction resources are follow-ups.
+Tax, inventory, multicurrency, and custom-field
 availability depend on the company's locale, subscription, and preferences; returned values are
 preserved without inventing defaults or deriving accounting totals.
 
@@ -362,7 +426,11 @@ Customer creation/updates and transaction creation/updates/deletions were verifi
 and CDC; transaction ID/date filters and deletion query absence also passed. This covered the
 previously empty VendorCredit resource. Customer deactivation passed direct reads and active/inactive
 filters, with the CDC caveat above. Test transactions were deleted and test customers left inactive.
-These writes used a local test harness; the connector's public API remains read-only.
+Those initial writes used a local test harness. The maintained `writes` E2E mode exercises the
+public customer/vendor lifecycle and invoice create/update/send/void/delete methods.
+That mode passed in the sandbox on 2026-09-16: create deduplication, stale-revision rejection,
+contact activation cycles, both invoice send variants, and void/delete cleanup (23 assertions).
+Sending used a reserved example address and verified Intuit's response, not mailbox delivery.
 Live Intuit webhook tests through an ngrok HTTPS endpoint received 12 signed CloudEvents deliveries:
 customer creation/updates (including deactivation), plus invoice, bill and vendor-credit
 creation/updates/deletions. The connector verifier and parser accepted each complete payload,

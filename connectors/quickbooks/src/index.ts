@@ -1,4 +1,4 @@
-export { QuickBooksApiError } from "./errors"
+export { QuickBooksApiError, QuickBooksWriteError } from "./errors"
 export type { QuickBooksConnector } from "./quickbooks"
 export { quickbooks } from "./quickbooks"
 export type { QuickBooksAccountsResource } from "./resources/accounts"
@@ -20,6 +20,7 @@ export type * from "./types/cdc"
 export type * from "./types/entities"
 export type * from "./types/query"
 export type * from "./types/transactions"
+export type * from "./types/writes"
 export type {
   QuickBooksCloudEvent,
   QuickBooksEventContext,

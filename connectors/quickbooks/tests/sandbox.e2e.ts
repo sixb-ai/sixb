@@ -1,12 +1,17 @@
 import { expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { readFile, writeFile } from "node:fs/promises"
-import { quickbooks, quickbooksEventsWebhook } from "../src"
+import {
+  QuickBooksApiError,
+  type QuickBooksRevision,
+  quickbooks,
+  quickbooksEventsWebhook,
+} from "../src"
 
 // Deliberately separate from normal unit tests and from each other: reads never imply writes.
 const mode = process.env.QUICKBOOKS_LIVE
-if (mode && !["read", "mutate", "webhook"].includes(mode)) {
-  throw new Error("[QuickBooksLive] QUICKBOOKS_LIVE must be read, mutate, or webhook.")
+if (mode && !["read", "mutate", "webhook", "writes"].includes(mode)) {
+  throw new Error("[QuickBooksLive] QUICKBOOKS_LIVE must be read, mutate, webhook, or writes.")
 }
 function required(name: string) {
   const value = process.env[name]
@@ -350,4 +355,178 @@ test.skipIf(mode !== "webhook")(
     await hook.verify?.(context as Parameters<NonNullable<typeof hook.verify>>[0])
     expect(hook.body.parse(JSON.parse(new TextDecoder().decode(rawBody))).length).toBeGreaterThan(0)
   }
+)
+
+test.skipIf(mode !== "writes")(
+  "public customer/vendor writes and invoice create/update/send/void/delete with cleanup",
+  async () => {
+    const { qb } = await connect()
+    const journalPath = required("QUICKBOOKS_JOURNAL")
+    // A reserved example domain tests Intuit's send response, not inbox delivery.
+    const sendTo = process.env.QUICKBOOKS_SEND_TO ?? "sixb-invoice-test@example.com"
+    const tag = `SixbWrite-${crypto.randomUUID()}`
+    const journal: {
+      tag: string
+      operations: { operation: string; requestId: string; id?: string }[]
+      customer?: string
+      vendor?: string
+      invoice?: string
+      invoiceDeleted?: boolean
+      customerInactive?: boolean
+      vendorInactive?: boolean
+    } = { tag, operations: [] }
+    await writeFile(journalPath, JSON.stringify(journal), { flag: "wx", mode: 0o600 })
+    const save = () => writeFile(journalPath, JSON.stringify(journal), { mode: 0o600 })
+    async function operation<T extends { Id: string }>(
+      name: string,
+      run: (options: { requestId: string }) => Promise<T>,
+      requestId = crypto.randomUUID()
+    ) {
+      const entry = { operation: name, requestId, id: undefined as string | undefined }
+      journal.operations.push(entry)
+      await save()
+      const result = await run({ requestId })
+      entry.id = result.Id
+      await save()
+      return result
+    }
+    function revision(row: { Id: string; SyncToken?: string }): QuickBooksRevision {
+      if (!row.SyncToken) throw new Error("[QuickBooksLive] Missing SyncToken")
+      return { Id: row.Id, SyncToken: row.SyncToken }
+    }
+    const failures: unknown[] = []
+    try {
+      const createKey = crypto.randomUUID()
+      const customer = await operation(
+        "customer.create",
+        (o) => qb.customers.create({ DisplayName: tag }, o),
+        createKey
+      )
+      journal.customer = customer.Id
+      await save()
+      const replay = await operation(
+        "customer.create replay",
+        (o) => qb.customers.create({ DisplayName: tag }, o),
+        createKey
+      )
+      expect(replay.Id).toBe(customer.Id)
+      const updated = await operation("customer.update", (o) =>
+        qb.customers.update({ ...revision(customer), CompanyName: "Sixb sandbox test" }, o)
+      )
+      expect((await qb.customers.get(customer.Id)).CompanyName).toBe("Sixb sandbox test")
+      expect(updated.DisplayName).toBe(tag)
+      const stale = await operation("customer.stale update", (o) =>
+        qb.customers.update({ ...revision(customer), CompanyName: "Must not win" }, o)
+      ).catch((error: unknown) => error)
+      expect(stale).toBeInstanceOf(QuickBooksApiError)
+      expect(stale).toHaveProperty("errors.0.code", "5010")
+      const inactive = await operation("customer.deactivate", (o) =>
+        qb.customers.deactivate(revision(updated), o)
+      )
+      expect(inactive.Active).toBe(false)
+      expect(
+        (
+          await operation("customer.reactivate", (o) =>
+            qb.customers.reactivate(revision(inactive), o)
+          )
+        ).Active
+      ).toBe(true)
+
+      let vendor = await operation("vendor.create", (o) =>
+        qb.vendors.create({ DisplayName: `${tag}-vendor` }, o)
+      )
+      journal.vendor = vendor.Id
+      await save()
+      vendor = await operation("vendor.update", (o) =>
+        qb.vendors.update({ ...revision(vendor), AcctNum: "sixb-test" }, o)
+      )
+      expect((await qb.vendors.get(vendor.Id)).AcctNum).toBe("sixb-test")
+      vendor = await operation("vendor.deactivate", (o) =>
+        qb.vendors.deactivate(revision(vendor), o)
+      )
+      expect(vendor.Active).toBe(false)
+      vendor = await operation("vendor.reactivate", (o) =>
+        qb.vendors.reactivate(revision(vendor), o)
+      )
+      expect(vendor.Active).toBe(true)
+
+      const items = []
+      for await (const item of qb.items.listAll()) items.push(item)
+      const item = items.find((i) => i.Type === "Service" && i.IncomeAccountRef)
+      if (!item) throw new Error("[QuickBooksLive] Sandbox needs a service item")
+      let invoice = await operation("invoice.create", (o) =>
+        qb.invoices.create(
+          {
+            CustomerRef: { value: customer.Id },
+            PrivateNote: tag,
+            Line: [
+              {
+                Amount: 1.23,
+                DetailType: "SalesItemLineDetail",
+                SalesItemLineDetail: { ItemRef: { value: item.Id }, Qty: 1, UnitPrice: 1.23 },
+              },
+            ],
+          },
+          o
+        )
+      )
+      journal.invoice = invoice.Id
+      await save()
+      expect((await qb.invoices.get(invoice.Id)).TotalAmt).toBe(1.23)
+      invoice = await operation("invoice.update", (o) =>
+        qb.invoices.update({ ...revision(invoice), PrivateNote: `${tag}-updated` }, o)
+      )
+      expect(invoice.PrivateNote).toBe(`${tag}-updated`)
+      expect(invoice.TotalAmt).toBe(1.23)
+      invoice = await operation("invoice.send explicit", (o) =>
+        qb.invoices.send(invoice.Id, { ...o, sendTo })
+      )
+      expect(invoice.EmailStatus).toBe("EmailSent")
+      expect(invoice.BillEmail?.Address).toBe(sendTo)
+      expect(invoice.DeliveryInfo?.DeliveryTime).toBeTruthy()
+      invoice = await operation("invoice.send BillEmail", (o) => qb.invoices.send(invoice.Id, o))
+      expect(invoice.EmailStatus).toBe("EmailSent")
+      invoice = await operation("invoice.void", (o) => qb.invoices.void(revision(invoice), o))
+      expect(invoice.TotalAmt).toBe(0)
+      expect((await qb.invoices.get(invoice.Id)).Balance).toBe(0)
+    } catch (error) {
+      failures.push(error)
+    } finally {
+      // Attempt every cleanup even if another cleanup fails. The journal retains recovery IDs.
+      if (journal.invoice) {
+        try {
+          const row = await qb.invoices.get(journal.invoice)
+          const deleted = await operation("invoice.delete", (o) =>
+            qb.invoices.delete(revision(row), o)
+          )
+          expect(deleted.status).toBe("Deleted")
+          journal.invoiceDeleted = true
+          await save()
+          expect((await qb.invoices.list({ ids: [row.Id] })).items).toHaveLength(0)
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+      for (const entity of ["customer", "vendor"] as const) {
+        const id = journal[entity]
+        if (!id) continue
+        try {
+          const resource = entity === "customer" ? qb.customers : qb.vendors
+          const row = await resource.get(id)
+          await operation(`${entity}.cleanup`, (o) => resource.deactivate(revision(row), o))
+          expect((await resource.get(id)).Active).toBe(false)
+          journal[entity === "customer" ? "customerInactive" : "vendorInactive"] = true
+          await save()
+        } catch (error) {
+          failures.push(error)
+        }
+      }
+    }
+    if (failures.length)
+      throw new AggregateError(
+        failures,
+        "[QuickBooksLive] Write lifecycle failed; inspect cleanup journal"
+      )
+  },
+  5 * 60_000
 )
