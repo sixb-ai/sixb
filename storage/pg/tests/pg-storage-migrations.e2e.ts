@@ -223,6 +223,7 @@ describe("Postgres storage migrations", () => {
             "039-projection-source-roots",
             "040-connector-optional-pkce",
             "041-agent-thread-workspaces",
+            "042-vector-profiles",
           ],
         },
       ])
@@ -513,6 +514,13 @@ describe("Postgres storage migrations", () => {
           id: "041-agent-thread-workspaces",
           status: "applied",
           version: 41,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "042-vector-profiles",
+          status: "applied",
+          version: 42,
         },
       ])
     })
@@ -2272,6 +2280,13 @@ describe("Postgres storage migrations", () => {
           id: "041-agent-thread-workspaces",
           status: "applied",
           version: 41,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "042-vector-profiles",
+          status: "applied",
+          version: 42,
         },
       ])
     } finally {
