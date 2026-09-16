@@ -1,5 +1,6 @@
 import type { RestRetryPolicy } from "@sixb/connector-rest"
 import type { MicrosoftAuthOptions } from "../auth/types"
+import type { MicrosoftEventHandler } from "./webhooks"
 
 export interface MicrosoftConnectorOptions {
   readonly auth: MicrosoftAuthOptions
@@ -8,6 +9,10 @@ export interface MicrosoftConnectorOptions {
   readonly minDelayMs?: number
   /** Read retries only. Mutations are never automatically replayed. */
   readonly retry?: RestRetryPolicy
+  /** Shared Graph clientState, at most 128 characters. Required for subscriptions and onEvent. */
+  readonly webhookSecret?: string
+  /** Runs inside Sixb's webhook execution. Persist/enqueue work before returning. */
+  readonly onEvent?: MicrosoftEventHandler
 }
 
 export interface RequestOptions {
