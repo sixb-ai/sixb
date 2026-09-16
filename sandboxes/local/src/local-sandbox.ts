@@ -4,13 +4,13 @@ import { tmpdir } from "node:os"
 import { dirname, join, resolve, sep } from "node:path"
 import {
   type CommandResult,
-  type CreateSandboxOptions,
   type RunCommandOptions,
   type Sandbox,
   type SandboxFileRecord,
   SandboxIsolationUnavailableError,
   type SandboxNetworkPolicy,
   SandboxNotRunningError,
+  type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
 import { exec } from "@sixb/core/sandboxes"
@@ -26,7 +26,7 @@ import { warnIfRestrictedDowngraded } from "./isolation/network"
 import { buildNoneArgv } from "./isolation/none"
 import { buildSeatbeltArgv, buildSeatbeltProfile } from "./isolation/seatbelt"
 
-export interface LocalSandboxOptions extends CreateSandboxOptions {
+export interface LocalSandboxOptions extends SandboxSessionOptions {
   readonly id?: string
   readonly isolation?: LocalIsolation
   readonly readOnlyPaths?: readonly string[]
