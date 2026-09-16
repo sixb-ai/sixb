@@ -29,8 +29,8 @@ export const sixb = createSixb({
 })
 ```
 
-That is all the Sixb code you need. The agent worker will create one Vercel sandbox per agent run,
-write the run context into it, execute its sandbox tools, and delete the sandbox on teardown.
+By default, the worker creates one sandbox per run and deletes it on teardown. Conversations with
+[workspace bindings](../agents/running-and-streaming.md#workspace-bindings) retain their checkout instead.
 
 ## Required: a Vercel project
 
@@ -83,8 +83,8 @@ The provider rejects restricted gateway origins that are clearly unreachable or 
 
 ## Network policy
 
-Sixb's agent worker creates sandboxes with restricted egress to the Sixb API gateway. The Vercel
-provider maps Sixb policies to Vercel's firewall:
+Ephemeral runs restrict egress to the Sixb API gateway. Workspaces also allow the repository and
+explicitly configured access. Vercel maps Sixb policies to its firewall:
 
 | Sixb policy | Vercel behavior |
 | --- | --- |

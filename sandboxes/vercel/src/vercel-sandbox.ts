@@ -6,6 +6,7 @@ import {
   SandboxError,
   type SandboxFileRecord,
   SandboxNotRunningError,
+  type SandboxRequestCredential,
   type SandboxSessionOptions,
   type SandboxStatus,
 } from "@sixb/core"
@@ -34,6 +35,9 @@ export interface VercelCommandClient {
 }
 
 export interface VercelSandboxClient {
+  readonly setRequestCredentials?: (
+    credentials: readonly SandboxRequestCredential[]
+  ) => Promise<void>
   readonly name: string
   readonly cwd?: string
   readonly status?: string
@@ -57,6 +61,7 @@ export interface VercelSandboxOptions extends SandboxSessionOptions {
 
 /** Sandbox wrapper around a Vercel Sandbox SDK instance. */
 export class VercelSandbox implements Sandbox {
+  readonly setRequestCredentials?: Sandbox["setRequestCredentials"]
   readonly id: string
   readonly provider = "vercel"
   readonly workingDirectory: string
@@ -77,6 +82,18 @@ export class VercelSandbox implements Sandbox {
     )
     this.sandboxEnv = options.env ?? {}
     this.defaultTimeoutMs = options.timeout
+    if (options.client.setRequestCredentials) {
+      const setCredentials = options.client.setRequestCredentials.bind(options.client)
+      this.setRequestCredentials = async (credentials) => {
+        this.assertRunning("update request credentials")
+        try {
+          await setCredentials(credentials)
+        } catch {
+          // SDK request errors can include the injected headers.
+          throw new SandboxError("[Sandbox] Vercel credential injection update failed.")
+        }
+      }
+    }
   }
 
   get status(): SandboxStatus {

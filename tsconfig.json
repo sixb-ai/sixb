@@ -30,6 +30,7 @@
       "@sixb/connector-exa": ["./connectors/exa/src/index.ts"],
       "@sixb/connector-exa/agent-tools": ["./connectors/exa/src/agent-tools.ts"],
       "@sixb/connector-github": ["./connectors/github/src/index.ts"],
+      "@sixb/connector-github/auth": ["./connectors/github/src/auth.ts"],
       "@sixb/connector-google": ["./connectors/google/src/index.ts"],
       "@sixb/connector-imap": ["./connectors/imap/src/index.ts"],
       "@sixb/connector-linkedin": ["./connectors/linkedin/src/index.ts"],

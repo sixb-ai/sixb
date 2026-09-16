@@ -17,6 +17,7 @@ export type {
   SandboxFileRecord,
   SandboxNetworkPolicy,
   SandboxNetworkTarget,
+  SandboxRequestCredential,
   SandboxSessionOptions,
   SandboxStatus,
 } from "./sandbox"

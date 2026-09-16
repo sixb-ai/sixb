@@ -11,6 +11,7 @@ import {
   type AgentToolDefinition,
   type AgentToolResult,
   type AgentToolRunInfo,
+  type AgentWorkspaceAuth,
   type AgentWorkspaceConfig,
   type BlobStorage,
   type Broker,
@@ -295,11 +296,15 @@ function webFetchThenAnswerModel(
   })
 }
 
-function answerModel(captureTools?: (names: readonly string[]) => void): WorkerTestModel {
+function answerModel(
+  captureTools?: (names: readonly string[]) => void,
+  captureSystem?: (system: string | undefined) => void
+): WorkerTestModel {
   return new WorkerTestModel({
     modelId: "mock-model",
     stream: async (options) => {
       captureTools?.((options.tools ?? []).map((tool) => tool.name))
+      captureSystem?.(options.messages.find((message) => message.role === "system")?.content)
       return stream([
         { type: "stream-start", warnings: [] },
         { type: "text-start", id: "answer" },
@@ -2028,9 +2033,40 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("saves a persistent workspace before finalizing and resumes without rerunning setup", async () => {
+  test.each([
+    false,
+    true,
+  ])("saves a persistent workspace before finalizing and resumes without rerunning setup (auth=%s)", async (withAuth) => {
     // Regression proof: remove beforeFinalize in runAgentTurn; the stop count fails on the first run.
-    const sandbox = new RecordingSandbox("persistent")
+    const authEvents: string[] = []
+    let grants = 0
+    const sandbox = Object.assign(new RecordingSandbox("persistent"), {
+      setRequestCredentials: async (
+        credentials: readonly { headers: Readonly<Record<string, string>> }[]
+      ) => {
+        authEvents.push(credentials.length ? "inject" : "clear")
+      },
+    })
+    const auth: AgentWorkspaceAuth = {
+      authorize: async () => {
+        grants++
+        authEvents.push("issue")
+        return {
+          expiresAt: new Date(Date.now() + 3_600_000),
+          requests: [
+            {
+              origin: "https://example.com",
+              path: "/repository.git/info/refs",
+              method: "GET",
+              headers: { Authorization: "workspace-secret" },
+            },
+          ],
+          revoke: async () => {
+            authEvents.push("revoke")
+          },
+        }
+      },
+    }
     let creates = 0
     let resumes = 0
     let resolutions = 0
@@ -2058,9 +2094,12 @@ describe("AgentWorker", () => {
         return sandbox
       },
     }
-    const host = buildSixb(answerModel(), new InMemoryBroker(), factory, {
+    const prompts: string[] = []
+    const model = answerModel(undefined, (system) => prompts.push(system ?? ""))
+    const host = buildSixb(model, new InMemoryBroker(), factory, {
       agentWorkspace: {
         params: {},
+        ...(withAuth ? { auth } : {}),
         resolve: async () => {
           resolutions++
           return {
@@ -2087,6 +2126,7 @@ describe("AgentWorker", () => {
       })
       expect(current?.activeRunId).not.toBeNull()
       expect(current?.workspaceState?.status).toBe("busy")
+      if (withAuth) expect(authEvents.slice(-2)).toEqual(["clear", "revoke"])
       await stopSession()
     })
     try {
@@ -2110,6 +2150,30 @@ describe("AgentWorker", () => {
       expect(creates).toBe(1)
       expect(resumes).toBe(1)
       expect(resolutions).toBe(2)
+      expect(grants).toBe(withAuth ? 2 : 0)
+      // Regression proof: omit workspace in renderAgentSystemPrompt's call; these fail.
+      expect(prompts).toHaveLength(2)
+      for (const prompt of prompts) {
+        expect(prompt).toContain("<workspace>")
+        expect(prompt).toContain(`${sandbox.workingDirectory}/repository`)
+        expect(prompt).toContain(sourceUrl)
+        expect(prompt).not.toContain("workspace-secret")
+        if (withAuth) expect(prompt).toContain("Authenticated access: read.")
+        else expect(prompt).not.toContain("Authenticated access:")
+      }
+      expect(JSON.stringify(sandbox.commands)).not.toContain("workspace-secret")
+      expect(JSON.stringify(sandbox.writtenFiles)).not.toContain("workspace-secret")
+      if (withAuth)
+        expect(authEvents).toEqual([
+          "issue",
+          "inject",
+          "clear",
+          "revoke",
+          "issue",
+          "inject",
+          "clear",
+          "revoke",
+        ])
       // Regression proof: omit recipe.network on acquisition; the first assertion fails.
       expect(policies[0]).toMatchObject({
         mode: "restricted",
@@ -2164,13 +2228,16 @@ describe("AgentWorker", () => {
   test.each([
     "snapshot",
     "cleanup",
+    "credential-revocation",
   ] as const)("blocks the workspace after %s failure", async (failure) => {
-    const sandbox = new RecordingSandbox("save-failure")
+    const sandbox = Object.assign(new RecordingSandbox("save-failure"), {
+      setRequestCredentials: async () => {},
+    })
     if (failure === "snapshot") {
       sandbox.stop = async () => {
         throw new Error("snapshot failed")
       }
-    } else {
+    } else if (failure === "cleanup") {
       const runCommand = sandbox.runCommand.bind(sandbox)
       let cleanups = 0
       sandbox.runCommand = async (command, args = [], options) => {
@@ -2193,6 +2260,26 @@ describe("AgentWorker", () => {
       {
         agentWorkspace: {
           params: {},
+          ...(failure === "credential-revocation"
+            ? {
+                auth: {
+                  authorize: async () => ({
+                    requests: [
+                      {
+                        origin: "https://example.com",
+                        path: "/repository.git/info/refs",
+                        method: "GET" as const,
+                        headers: { Authorization: "private" },
+                      },
+                    ],
+                    expiresAt: new Date(Date.now() + 3_600_000),
+                    revoke: async () => {
+                      throw new Error("provider secret must not escape")
+                    },
+                  }),
+                },
+              }
+            : {}),
           resolve: () => ({
             source: { type: "git", url: "https://example.com/repository.git" },
           }),
@@ -2216,7 +2303,7 @@ describe("AgentWorker", () => {
         requestAgent(host, { threadId: thread.id, text: "Again" })
       ).rejects.toMatchObject({ code: "workspace_execution_unavailable" })
       expect(sandbox.destroyed).toBe(false)
-      if (failure === "cleanup") expect(sandbox.status).toBe("stopped")
+      if (failure !== "snapshot") expect(sandbox.status).toBe("stopped")
     } finally {
       await worker.stop()
       completion.restore()

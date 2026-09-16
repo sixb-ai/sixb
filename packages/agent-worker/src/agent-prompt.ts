@@ -60,6 +60,17 @@ export interface RenderAgentSystemPromptInput {
   readonly mode: AgentExecutionMode
   readonly instructions?: string
   readonly skills: readonly AgentSkill[]
+  readonly workspace?: AgentWorkspacePromptContext
+}
+
+/** Non-secret facts about the workspace successfully prepared for this run. */
+export interface AgentWorkspacePromptContext {
+  readonly workingDirectory: string
+  readonly source: {
+    readonly type: "git"
+    readonly url: string
+    readonly authenticatedAccess?: "read" | "write"
+  }
 }
 
 export interface RenderWorkflowOutputFinalizerPromptInput {
@@ -71,6 +82,7 @@ export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): st
   return [
     promptSection("sixb_runtime_context", renderRuntimeContext(input.mode, input.skills)),
     promptSection("agent_instructions", input.instructions),
+    promptSection("workspace", input.workspace && renderWorkspaceContext(input.workspace)),
     promptSection(
       "sixb_mode_rules",
       input.mode === "conversation"
@@ -142,4 +154,33 @@ function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSk
 function promptSection(tag: string, body: string | undefined): string {
   if (!body?.trim()) return ""
   return `<${tag}>\n${body.trim()}\n</${tag}>`
+}
+
+function renderWorkspaceContext(workspace: AgentWorkspacePromptContext): string {
+  return [
+    `Working directory: ${quoteWorkspaceValue(workspace.workingDirectory)}`,
+    "Files persist between runs in this conversation, subject to workspace retention.",
+    ...renderWorkspaceSource(workspace.source),
+  ].join("\n")
+}
+
+function renderWorkspaceSource(source: AgentWorkspacePromptContext["source"]): string[] {
+  switch (source.type) {
+    case "git":
+      return [
+        `Source (git): ${quoteWorkspaceValue(source.url)}`,
+        ...(source.authenticatedAccess
+          ? [
+              "Git authentication is managed automatically for this repository; use Git normally without retrieving credentials.",
+              `Authenticated access: ${source.authenticatedAccess === "write" ? "read and write" : "read"}.`,
+            ]
+          : []),
+        "Do not commit or push unless the user requests it.",
+      ]
+  }
+}
+
+// Quote dynamic values as data and prevent them from introducing prompt section tags.
+function quoteWorkspaceValue(value: string): string {
+  return JSON.stringify(value).replaceAll("<", "\\u003c").replaceAll(">", "\\u003e")
 }

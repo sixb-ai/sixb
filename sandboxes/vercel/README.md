@@ -87,8 +87,8 @@ resume. Retention alone does not enable persistence.
 
 ## Gateway and network policy
 
-The agent worker creates sandboxes with a restricted network policy that allows only the Sixb API
-gateway. This provider maps Sixb policies to Vercel's firewall:
+Ephemeral runs restrict egress to the Sixb API gateway. Workspaces also allow the repository and
+explicitly configured access. This provider maps Sixb policies to Vercel's firewall:
 
 | Sixb policy | Vercel policy |
 | --- | --- |
@@ -175,6 +175,14 @@ new VercelSandboxFactory({
   resources: { vcpus: 2 },
 })
 ```
+
+## Credential injection
+
+Persistent sessions support `sandbox.setRequestCredentials()`: replace host-side Authorization
+injection for exact HTTPS paths and GET/POST methods, or pass `[]` to remove it. Injection never
+widens the egress allowlist, changes persistent defaults or writes secrets inside the VM.
+The worker manages workspace token issuance, renewal and revocation; stop removes network access
+before saving. This capability does not guarantee revocation after a worker crash.
 
 ## Tests
 

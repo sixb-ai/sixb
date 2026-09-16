@@ -194,7 +194,7 @@ read each provider page for what it actually enforces.
 
 ## How agents use a sandbox
 
-You rarely call `runCommand` yourself. The agent worker does it:
+You rarely call `runCommand` yourself. For ephemeral runs, the agent worker:
 
 1. When a run starts, the worker calls `factory.create(...)` with a **restricted** network policy
    whose only allowed origin is the sixb API gateway. The agent can reach the gateway and nothing
@@ -205,9 +205,10 @@ You rarely call `runCommand` yourself. The agent worker does it:
    `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
 4. On run teardown the worker calls `destroy()`.
 
-Because egress is locked to the gateway, the agent's only way to read or write app data is through
-that gateway — there is no open internet. See
-[Agent tools and the gateway](../agents/tools-and-gateway.md) for what the gateway exposes.
+Workspace-bound conversations instead prepare their checkout before the model starts and save it
+before finalization. Their network policy includes the gateway, repository and any explicitly
+configured access. See [workspace configuration](../agents/defining-agents.md#workspace-configuration)
+and [the gateway](../agents/tools-and-gateway.md).
 
 ## Choosing a provider
 
