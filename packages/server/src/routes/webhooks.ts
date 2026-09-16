@@ -2,11 +2,11 @@ import { createHash, randomUUID } from "node:crypto"
 import type {
   ConnectorAdapter,
   ConnectorClient,
+  ConnectorDefinition,
   Logger,
   RegisteredWebhook,
   SixbFailure,
   SixbHostView,
-  StaticConnectorDefinition,
   WebhookDefinition,
   WebhookMetadata,
   WebhookResponse,
@@ -14,7 +14,12 @@ import type {
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { captureSixbFailure, createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
-import { type AdmitWebhookRunResult, admitWebhookRun } from "@sixb/core/internal/webhooks"
+import {
+  type AdmitWebhookRunResult,
+  admitWebhookRun,
+  createWebhookConnections,
+  isStaticConnectorDefinition,
+} from "@sixb/core/internal/webhooks"
 import type { WebhookRunFailureCode } from "@sixb/core/storage"
 import { WEBHOOK_RUN_FAILURE_CODES, WebhookRunError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -231,6 +236,7 @@ async function executeWebhookHandler(
       body: prepared.body,
       logger,
       client: createClientResolver(execution.sixb, connector),
+      connections: createWebhookConnections(execution.sixb.connector, connector),
     })
   } catch (error) {
     const failed = createWebhookRunFailure({
@@ -383,10 +389,16 @@ function parseWebhookBody(webhook: WebhookDefinition, rawBody: Uint8Array): unkn
 
 function createClientResolver(
   sixb: ReturnType<typeof bindDurablePrimitiveExecution>["sixb"],
-  connector: StaticConnectorDefinition
+  connector: ConnectorDefinition
 ): () => Promise<ConnectorClient<ConnectorAdapter>> {
   let clientPromise: Promise<ConnectorClient<ConnectorAdapter>> | null = null
   return () => {
+    if (!isStaticConnectorDefinition(connector)) {
+      throw createSixbError(
+        "connector.configuration_invalid",
+        "[SixbServer] OAuth webhook clients require connections.forAccount(accountId), then target.client()."
+      )
+    }
     clientPromise ??= sixb.connector(connector)
     return clientPromise
   }

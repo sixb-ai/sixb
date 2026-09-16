@@ -52,12 +52,6 @@ export function defineConnector<TId extends string, TAdapter extends AnyConnecto
         "OAuth connector adapters must define oauth2 authentication and implement authorizationUrl, exchangeCode, refresh, and discoverAccounts."
       )
     }
-    if (adapter.webhooks !== undefined) {
-      throw createConnectorCodedError(
-        "connector.configuration_invalid",
-        "OAuth connector adapters cannot register webhooks until connection routing is defined."
-      )
-    }
   }
 
   return {

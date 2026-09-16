@@ -19,7 +19,6 @@ import type { BlobStorage } from "../blob-storage"
 import type { Broker } from "../broker"
 import { registerConnectorConnectionCallbackProcess } from "../connectors/connections/capability"
 import { createConnectorCredentialProtectorFromKey } from "../connectors/credentials"
-import { createConnectorCodedError } from "../connectors/errors"
 import { ConnectorService } from "../connectors/service"
 import {
   type ConnectorConnectionOptions,
@@ -185,7 +184,6 @@ export class SixbHost<
     })
     validateAuthStrategySecurityReferences(this.auth.getStrategy(), definitions.security)
     const connectors = definitions.connectors.list()
-    assertConnectorConnectionSurfaces(connectors)
     const hasOAuthConnectors = connectors.some(isOAuthConnectorDefinition)
     const credentialProtector =
       hasOAuthConnectors && options.connectorConnections?.encryptionKey !== undefined
@@ -382,18 +380,6 @@ function assertWebhookRunStorage(
     if (Array.isArray(webhooks) && webhooks.length > 0) {
       throw new WebhookValidationError(
         "[Sixb] Webhooks require storage.webhookRuns to be configured."
-      )
-    }
-  }
-}
-
-function assertConnectorConnectionSurfaces(connectors: readonly ConnectorDefinition[]): void {
-  for (const connector of connectors) {
-    if (!isOAuthConnectorDefinition(connector)) continue
-    if (connector.adapter.webhooks !== undefined) {
-      throw createConnectorCodedError(
-        "connector.configuration_invalid",
-        `OAuth connector '${connector.id}' cannot register webhooks until connection routing is defined.`
       )
     }
   }

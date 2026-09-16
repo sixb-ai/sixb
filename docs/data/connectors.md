@@ -180,8 +180,37 @@ Syncs automatically read every connected account for an OAuth connector. The han
 non-secret connection metadata through `context.connection`; no connection selector is required
 in the Sync definition. See [OAuth connector fan-out](./syncs.md#oauth-connector-fan-out).
 
-> **Current scope.** OAuth-backed webhook routing remains rejected until its connection admission
-> contract is defined.
+### Managed OAuth webhooks
+
+OAuth adapters use the same webhook builder. Resolve managed clients inside the handler with
+`connections.forAccount(accountId)`:
+
+```ts
+webhooks: [
+  defineWebhook("events")
+    .post()
+    .json(providerBatchSchema)
+    .verify(verifyProviderSignature)
+    .handle<ProviderClient>(async ({ body, connections }) => {
+      for (const event of body) {
+        for (const target of await connections.forAccount(event.accountId)) {
+          await onChange({ event, connection: target.connection, client: target.client })
+        }
+      }
+      return { status: 200 }
+    }),
+],
+```
+
+The handler receives the complete parsed payload and controls the response. Account lookup returns
+all matching selected connections in this project and connector, or an empty array when none match.
+The first `target.client()` call checks that the connection is still active for that account and
+creates the client. Subsequent calls on that target reuse it. The top-level `client()` is for static
+connectors; OAuth requires an account lookup.
+
+Use the existing `.idempotencyKey(...)` when the provider supplies a stable delivery identity.
+Deduplication applies to the complete request. A failed batch can repeat earlier effects on retry,
+so make handler writes idempotent.
 
 ### PKCE
 
