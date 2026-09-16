@@ -100,6 +100,8 @@ import agentThreadWorkspacesSql from "./migrations/041-agent-thread-workspaces.s
   type: "text",
 }
 
+import vectorProfilesSql from "./migrations/042-vector-profiles.sql" with { type: "text" }
+
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
     adapter_id TEXT NOT NULL,
@@ -195,6 +197,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("039-connector-optional-pkce", connectorOptionalPkceSql),
     sqliteSql("040-outbox-publication-order", outboxPublicationOrderSql),
     sqliteSql("041-agent-thread-workspaces", agentThreadWorkspacesSql),
+    sqliteSql("042-vector-profiles", vectorProfilesSql),
   ],
 })
 

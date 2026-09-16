@@ -93,6 +93,7 @@ import projectionSourceRootsSql from "./migrations/039-projection-source-roots.s
 import agentThreadWorkspacesSql from "./migrations/041-agent-thread-workspaces.sql" with {
   type: "text",
 }
+import vectorProfilesSql from "./migrations/042-vector-profiles.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -387,6 +388,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("039-projection-source-roots", projectionSourceRootsSql),
     pgSql("040-connector-optional-pkce", connectorOptionalPkceSql),
     pgSql("041-agent-thread-workspaces", agentThreadWorkspacesSql),
+    pgSql("042-vector-profiles", vectorProfilesSql),
   ],
 })
 

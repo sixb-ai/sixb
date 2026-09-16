@@ -6,12 +6,14 @@ import { PgOntologyMaterializationStorage } from "./materializations"
 import { PgOntologyOutboxStorage } from "./outbox"
 import type { PgRootOperation } from "./shared"
 import { PgOntologySourceStorage } from "./sources"
+import { PgOntologyVectorStorage } from "./vectors"
 
 export class PgOntologyStorage implements OntologyStorage {
   readonly commits: PgOntologyCommitStorage
   readonly sources: PgOntologySourceStorage
   readonly materializations: PgOntologyMaterializationStorage
   readonly outbox: PgOntologyOutboxStorage
+  readonly vectors: PgOntologyVectorStorage
 
   constructor(input: {
     readonly sql: SQLClient
@@ -25,6 +27,12 @@ export class PgOntologyStorage implements OntologyStorage {
       input.transactionContext
     )
     this.outbox = new PgOntologyOutboxStorage(input.runRootOperation)
+    this.vectors = new PgOntologyVectorStorage(
+      input.sql,
+      input.runRootOperation,
+      (session, projectId, commitId) =>
+        this.materializations.assertVectorSession(session, projectId, commitId)
+    )
   }
 
   deactivateSessions(): void {
