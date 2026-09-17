@@ -37,7 +37,7 @@ for (const protocol of ["responses", "chat", "messages"] as const) {
       })
       try {
         const transport = new FoundryTransport({
-          endpoint: origin.url.origin,
+          endpoint: `${origin.url.origin}/api/projects/test`,
           apiKey: "private-key",
         })
         const result = await transport

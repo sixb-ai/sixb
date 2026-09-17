@@ -26,14 +26,12 @@ export interface CatalogModel {
 
 /** Provider-scoped models.dev snapshot. Construction and offline reads never perform I/O. */
 export class RemoteModelsDevCatalog {
-  readonly enabled: boolean
   private snapshot: readonly CatalogModel[] = []
   private loadedAt = 0
   private pending?: Promise<readonly CatalogModel[]>
   private readonly options: AzureAIFoundryCatalogOptions
-  constructor(options?: AzureAIFoundryCatalogOptions | false) {
-    this.enabled = options !== false
-    this.options = { ...(options || {}) }
+  constructor(options: AzureAIFoundryCatalogOptions = {}) {
+    this.options = { ...options }
     for (const [key, value] of Object.entries({
       ttlMs: this.options.ttlMs,
       timeoutMs: this.options.timeoutMs,
@@ -47,8 +45,7 @@ export class RemoteModelsDevCatalog {
   invalidate() {
     this.loadedAt = 0
   }
-  async get(name: string | undefined, offline = false): Promise<CatalogModel | undefined> {
-    if (!this.enabled || !name) return undefined
+  async get(name: string, offline = false): Promise<CatalogModel | undefined> {
     const models = offline ? this.snapshot : await this.load()
     // Azure deployment names preserve publisher casing; models.dev IDs are lowercase.
     // Only a unique exact case-insensitive ID match is accepted, never fuzzy name matching.

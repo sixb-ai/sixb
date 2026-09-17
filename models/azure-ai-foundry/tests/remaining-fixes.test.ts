@@ -111,7 +111,7 @@ test.each([
   const secret = "sentinel-credential-739"
   const custom = "sentinel-custom-482"
   const provider = createAzureAIFoundry({
-    endpoint: "https://example.test",
+    endpoint: "https://example.test/api/projects/test",
     apiKey: secret,
     headers: { "x-custom-credential": custom },
     maxRetries: 0,
@@ -153,14 +153,14 @@ test("redaction follows refreshed credentials and isolates concurrent streams", 
   let tokens = 0
   const attempts = new Map<string, number>()
   const p = createAzureAIFoundry({
-    endpoint: "https://example.test",
-    tokenProvider: () => `refresh-secret-${++tokens}`,
+    endpoint: "https://example.test/api/projects/test",
+    apiKey: () => `refresh-secret-${++tokens}`,
     maxRetries: 1,
     fetch: async (_url, init) => {
       const model = JSON.parse(String(init?.body)).model as string
       const attempt = (attempts.get(model) ?? 0) + 1
       attempts.set(model, attempt)
-      const token = new Headers(init?.headers).get("authorization")!.slice(7)
+      const token = new Headers(init?.headers).get("api-key")!
       if (attempt === 1)
         return Response.json(
           { error: { message: token } },
@@ -197,7 +197,7 @@ test("redaction follows refreshed credentials and isolates concurrent streams", 
       expect(attempts.get(name)).toBe(2)
     })
   )
-  expect(tokens).toBe(4)
+  expect(tokens).toBe(5)
 })
 
 // Removal proof: remove discovery's request-scoped sanitization; the nested
@@ -206,20 +206,18 @@ test.each(["http", "network", "body"])("redacts discovery %s diagnostics", async
   const token = "discovery-sentinel-token"
   const provider = createDiscoveredProvider({
     endpoint: "https://example.test/api/projects/test",
-    tokenProvider: () => token,
-    discovery: {
-      fetch: async () => {
-        if (kind === "network") throw new Error(`fetch failed ${token}`)
-        if (kind === "body")
-          return new Response(
-            new ReadableStream({
-              start(c) {
-                c.error(new Error(`read failed ${token}`))
-              },
-            })
-          )
-        return new Response(null, { status: 401, headers: { "request-id": token } })
-      },
+    apiKey: () => token,
+    fetch: async () => {
+      if (kind === "network") throw new Error(`fetch failed ${token}`)
+      if (kind === "body")
+        return new Response(
+          new ReadableStream({
+            start(c) {
+              c.error(new Error(`read failed ${token}`))
+            },
+          })
+        )
+      return new Response(null, { status: 401, headers: { "request-id": token } })
     },
   })
   let caught: unknown

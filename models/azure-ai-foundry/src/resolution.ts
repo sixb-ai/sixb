@@ -18,36 +18,21 @@ export function resolveModel(input: {
   modelId: string
   protocol?: FoundryProtocol
   options: AzureAIFoundryModelOptions & ChatRequestOptions & MessagesRequestOptions
-  supplied?: LanguageModelDefinition
   deployment?: AzureAIFoundryDeployment
   discoveredAt?: string
   catalogModel?: CatalogModel
 }) {
   const { deployment, options } = input
-  const metadata: AzureAIFoundryModelMetadata = {
-    ...(deployment
-      ? {
-          publisher: deployment.modelPublisher,
-          modelName: deployment.modelName,
-          modelVersion: deployment.modelVersion,
-          sku: deployment.sku.name,
-          deployment,
-          discoveredAt: input.discoveredAt,
-        }
-      : {}),
-    ...options.metadata,
-  }
-  for (const key of ["modelName", "modelVersion", "publisher", "sku"] as const) {
-    const actual =
-      deployment &&
-      (key === "publisher"
-        ? deployment.modelPublisher
-        : key === "sku"
-          ? deployment.sku.name
-          : deployment[key])
-    if (options.metadata?.[key] !== undefined && deployment && options.metadata[key] !== actual)
-      throw new TypeError(`${PREFIX} Explicit ${key} conflicts with deployment discovery.`)
-  }
+  const metadata: AzureAIFoundryModelMetadata = deployment
+    ? {
+        publisher: deployment.modelPublisher,
+        modelName: deployment.modelName,
+        modelVersion: deployment.modelVersion,
+        sku: deployment.sku.name,
+        deployment,
+        discoveredAt: input.discoveredAt,
+      }
+    : {}
   const entry = input.catalogModel
   const protocol =
     input.protocol ??
@@ -58,6 +43,10 @@ export function resolveModel(input: {
           deployment?.capabilities.chat_completion === "true"
         ? "chat"
         : "responses")
+  if (protocol === "messages" && deployment?.connectionName)
+    throw new UnsupportedModelFeatureError(
+      `${PREFIX} Native Messages cannot route a deployment from a project connection; use the owning resource's project URL and API key.`
+    )
   const flag =
     deployment?.capabilities[protocol === "chat" ? "chatCompletion" : protocol] ??
     (protocol === "chat" ? deployment?.capabilities.chat_completion : undefined)
@@ -67,20 +56,27 @@ export function resolveModel(input: {
     )
   const definition = defineLanguageModel({
     ...entry?.definition,
-    ...input.supplied,
     ...options.definition,
     kind: "language",
     providerId: input.providerId,
     modelId: input.modelId,
     capabilities: {
       ...entry?.definition.capabilities,
-      ...input.supplied?.capabilities,
       ...options.definition?.capabilities,
     },
   })
   return {
     protocol,
-    definition: effectiveDefinition(definition, protocol, options),
+    // Until Azure verifies the deployment, limits are not executable metadata.
+    // In particular, Sixb treats advertised context limits as ready for offline resolution.
+    definition: deployment
+      ? effectiveDefinition(definition, protocol, options)
+      : defineLanguageModel({
+          kind: "language",
+          providerId: input.providerId,
+          modelId: input.modelId,
+          capabilities: {},
+        }),
     metadata: Object.freeze({
       ...metadata,
       ...(entry

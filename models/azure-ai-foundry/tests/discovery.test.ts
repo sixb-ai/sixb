@@ -5,8 +5,14 @@ import {
   ModelCatalogUnavailableError,
   ModelProviderError,
 } from "@sixb/core/models"
-import { type AzureAIFoundryDiscoveryOptions, createAzureAIFoundry } from "./provider-fixture"
+import { type AzureAIFoundryDiscoveryOptions, createAzureAIFoundry } from "../src"
 
+const create = createAzureAIFoundry
+const providerFixture = (options: Parameters<typeof create>[0]) =>
+  create({
+    ...options,
+    catalog: { fetch: async () => Response.json({ azure: { models: {} } }) },
+  })
 const endpoint = "https://resource.services.ai.azure.com/api/projects/example"
 
 function deployment(
@@ -51,9 +57,9 @@ function answer(): Response {
 // Live project deployments report chat_completion rather than ARM's chatCompletion.
 // Regression proof: remove the chat_completion alias in profile/catalog selection; the list is empty.
 test("recognizes live project Chat capability spelling without changing raw metadata", async () => {
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
     fetch: async () => page([deployment("live-chat", { chat_completion: "true" })]),
   })
@@ -68,9 +74,9 @@ test("recognizes live project Chat capability spelling without changing raw meta
 })
 
 test("rejects contradictory Chat capability aliases", async () => {
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
     fetch: async () =>
       page([deployment("conflict", { chat_completion: "true", chatCompletion: "false" })]),
@@ -78,32 +84,27 @@ test("rejects contradictory Chat capability aliases", async () => {
   await expect(provider.catalog.deployments()).rejects.toThrow("contradictory")
 })
 
-test("coalesces paginated discovery, refreshes tokens, and separates discovery from inference auth", async () => {
+test("coalesces paginated discovery and shares refreshed API keys and headers with inference", async () => {
   const urls: string[] = []
   let tokens = 0
   let body: JsonObject | undefined
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    apiKey: "inference-key",
-    headers: { "x-inference": "only" },
-    discovery: {
-      tokenProvider: async () => `token-${++tokens}`,
-      headers: { "x-discovery": "only" },
-    },
+    apiKey: async () => `token-${++tokens}`,
+    headers: { "x-custom": "shared" },
     fetch: async (url, init) => {
       urls.push(String(url))
       const headers = new Headers(init?.headers)
       if (String(url).endsWith("/responses")) {
-        expect(headers.get("api-key")).toBe("inference-key")
+        expect(headers.get("api-key")).toBe(`token-${tokens}`)
         expect(headers.has("authorization")).toBe(false)
-        expect(headers.get("x-inference")).toBe("only")
+        expect(headers.get("x-custom")).toBe("shared")
         body = JSON.parse(String(init?.body))
         return answer()
       }
-      expect(headers.get("authorization")).toBe(`Bearer token-${tokens}`)
-      expect(headers.has("api-key")).toBe(false)
-      expect(headers.has("x-inference")).toBe(false)
-      expect(headers.get("x-discovery")).toBe("only")
+      expect(headers.get("api-key")).toBe(`token-${tokens}`)
+      expect(headers.has("authorization")).toBe(false)
+      expect(headers.get("x-custom")).toBe("shared")
       expect(init?.redirect).toBe("error")
       return new URL(String(url)).searchParams.has("page")
         ? page([deployment("secondary")])
@@ -160,20 +161,10 @@ test("pins online/offline snapshots and preserves explicit configuration through
   let maximum = "8192"
   let calls = 0
   let captured: JsonObject | undefined
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
-    models: [
-      {
-        kind: "language",
-        providerId: "azure-ai-foundry",
-        modelId: "production",
-        contextWindow: 2000,
-        maxOutputTokens: 100,
-        capabilities: { localTools: true, nativeStructuredOutput: true },
-      },
-    ],
     fetch: async (url, init) => {
       if (String(url).endsWith("/responses")) {
         captured = JSON.parse(String(init?.body))
@@ -192,7 +183,11 @@ test("pins online/offline snapshots and preserves explicit configuration through
       ])
     },
   })
-  const definition = { maxOutputTokens: 80, capabilities: { localTools: false } }
+  const definition = {
+    contextWindow: 2000,
+    maxOutputTokens: 80,
+    capabilities: { localTools: false, nativeStructuredOutput: true },
+  }
   const options = {
     definition,
     request: { temperature: 0.2 },
@@ -205,9 +200,8 @@ test("pins online/offline snapshots and preserves explicit configuration through
     },
   }
   const original = provider("production", options)
-  const offlineBefore = await original.resolve({ offline: true })
+  await expect(original.resolve({ offline: true })).rejects.toThrow("not found")
   expect(calls).toBe(0)
-  expect(offlineBefore.metadata.publisher).toBeUndefined()
   definition.maxOutputTokens = 999
   definition.capabilities.localTools = true
   options.request.temperature = 0.9
@@ -218,7 +212,6 @@ test("pins online/offline snapshots and preserves explicit configuration through
     maxOutputTokens: 80,
     capabilities: { localTools: false, nativeStructuredOutput: true },
   })
-  expect(await offlineBefore.resolve()).toBe(offlineBefore)
   expect(await first.resolve()).toBe(first)
   for await (const _event of (await first.stream(request())).events) {
     /* consume */
@@ -253,9 +246,9 @@ test("expires the cache and coalesces concurrent get/list calls after expiry", a
   let now = Date.now()
   const clock = spyOn(Date, "now").mockImplementation(() => now)
   try {
-    const provider = createAzureAIFoundry({
+    const provider = providerFixture({
       endpoint,
-      tokenProvider: () => "token",
+      apiKey: () => "token",
       discovery: { ttlMs: 100 },
       fetch: async () => {
         calls++
@@ -279,9 +272,9 @@ test("expires the cache and coalesces concurrent get/list calls after expiry", a
 })
 
 test("retains unknown capability strings without inferring Responses, tools or strict schemas", async () => {
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
     fetch: async () =>
       page([
@@ -312,10 +305,10 @@ test("retains unknown capability strings without inferring Responses, tools or s
 
 test("keeps overlapping deployment names isolated by provider/project and rejects connection ambiguity", async () => {
   const providers = ["first", "second"].map((name) =>
-    createAzureAIFoundry({
+    providerFixture({
       endpoint: `${endpoint}-${name}`,
       providerId: name,
-      tokenProvider: () => "token",
+      apiKey: () => "token",
       discovery: {},
       fetch: async () => page([{ ...deployment(), modelName: name }]),
     })
@@ -327,9 +320,9 @@ test("keeps overlapping deployment names isolated by provider/project and reject
     ["first", "production", "first"],
     ["second", "production", "second"],
   ])
-  const ambiguous = createAzureAIFoundry({
+  const ambiguous = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
     fetch: async () =>
       page([deployment(), { ...deployment(), connectionName: "another-resource" }]),
@@ -338,7 +331,7 @@ test("keeps overlapping deployment names isolated by provider/project and reject
 })
 
 // Regression proof: remove the same-project check in pageUrl. This follows the hostile
-// continuation with a Bearer token instead of rejecting it before the second request.
+// continuation with an API key instead of rejecting it before the second request.
 test.each([
   "https://other.example/api/projects/example/deployments?page=2",
   "/api/projects/other/deployments?page=2",
@@ -349,9 +342,9 @@ test.each([
   "?page=2#fragment",
 ])("rejects unsafe pagination target %s before sending credentials", async (nextLink) => {
   let calls = 0
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
     fetch: async () => {
       calls++
@@ -369,9 +362,9 @@ const bounds: [AzureAIFoundryDiscoveryOptions, string][] = [
 ]
 test.each(bounds)("bounds discovery (%j)", async (discovery, message) => {
   let calls = 0
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery,
     fetch: async () => page([deployment(String(++calls))], `?page=${calls + 1}`),
   })
@@ -381,9 +374,9 @@ test.each(bounds)("bounds discovery (%j)", async (discovery, message) => {
 
 test("detects repeated nextLink URLs and publishes no partial snapshot", async () => {
   let calls = 0
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
     fetch: async () => {
       calls++
@@ -392,18 +385,16 @@ test("detects repeated nextLink URLs and publishes no partial snapshot", async (
   })
   await expect(provider.catalog.list()).rejects.toThrow("repeated a page")
   expect(calls).toBe(1)
-  expect(
-    (await provider("production").resolve({ offline: true })).metadata.deployment
-  ).toBeUndefined()
+  await expect(provider("production").resolve({ offline: true })).rejects.toThrow("not found")
 })
 
 test("applies the byte budget across pages and keeps the previous snapshot after a partial refresh", async () => {
   const first = { value: [deployment("new-first")], nextLink: "?page=2" }
   const byteLimit = Buffer.byteLength(JSON.stringify(first)) + 10
   let refreshing = false
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: { maxResponseBytes: byteLimit },
     fetch: async (url) => {
       if (!refreshing) return page([deployment("original")])
@@ -418,9 +409,7 @@ test("applies the byte budget across pages and keeps the previous snapshot after
   expect((await provider("original").resolve({ offline: true })).metadata.modelName).toBe(
     "publisher-model"
   )
-  expect(
-    (await provider("new-first").resolve({ offline: true })).metadata.deployment
-  ).toBeUndefined()
+  await expect(provider("new-first").resolve({ offline: true })).rejects.toThrow("not found")
 })
 
 test("cancels a late response from a transport that ignored the discovery deadline", async () => {
@@ -431,9 +420,9 @@ test("cancels a late response from a transport that ignored the discovery deadli
   const cancelled = new Promise<void>((resolve) => {
     confirmCancellation = resolve
   })
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: { timeoutMs: 20 },
     fetch: () =>
       new Promise<Response>((resolve) => {
@@ -468,9 +457,9 @@ const malformed: JsonObject[] = [
 test.each(
   malformed
 )("rejects malformed metadata without treating it as an outage (%j)", async (override) => {
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
     fetch: async () => page([{ ...deployment(), ...override }]),
   })
@@ -480,9 +469,9 @@ test.each(
 test("classifies transport/access failures, retries later, and retains the last complete offline snapshot", async () => {
   let mode = "ok"
   let calls = 0
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: () => "token",
+    apiKey: () => "token",
     discovery: {},
     fetch: async () => {
       calls++
@@ -532,9 +521,9 @@ test.each([
 ])("bounds a stalled %s with one discovery deadline", async (stage) => {
   let cancelled = false
   let signal: AbortSignal | undefined
-  const provider = createAzureAIFoundry({
+  const provider = providerFixture({
     endpoint,
-    tokenProvider: (current) => {
+    apiKey: (current) => {
       signal = current
       return stage === "credential" ? new Promise<string>(() => {}) : "token"
     },
@@ -555,31 +544,12 @@ test.each([
   if (stage === "body") expect(cancelled).toBe(true)
 })
 
-test("leaves key-only/offline configurations usable and validates discovery prerequisites", async () => {
-  expect(() => createAzureAIFoundry({ endpoint, apiKey: "key", discovery: {} })).toThrow(
-    "inference API key is insufficient"
-  )
+test("requires project URLs and validates discovery bounds", () => {
   expect(() =>
-    createAzureAIFoundry({
-      endpoint: "https://resource.openai.azure.com",
-      tokenProvider: () => "token",
-      discovery: {},
-    })
-  ).toThrow("project inference endpoint")
+    providerFixture({ endpoint: "https://resource.openai.azure.com", apiKey: "key" })
+  ).toThrow("project URL")
   for (const discovery of [{ maxPages: 0 }, { ttlMs: -1 }, { timeoutMs: Number.NaN }])
-    expect(() =>
-      createAzureAIFoundry({ endpoint, tokenProvider: () => "token", discovery })
-    ).toThrow("positive safe integer")
-  const offline = createAzureAIFoundry({
-    endpoint,
-    apiKey: "key",
-    fetch: async () => {
-      throw new Error("must not fetch")
-    },
-  })
-  expect(await offline.catalog.list()).toEqual([])
-  expect(await offline.catalog.refresh()).toEqual([])
-  expect(await offline.catalog.deployments()).toEqual([])
-  const model = offline("production")
-  expect(await model.resolve()).toBe(model)
+    expect(() => providerFixture({ endpoint, apiKey: "key", discovery })).toThrow(
+      "positive safe integer"
+    )
 })

@@ -8,7 +8,7 @@ import { type AzureAIFoundryProvider, createAzureAIFoundry } from "../src"
 // Exercises multiple tools, optional multiple images, durable history and strict JSON
 // on discovered bindings. Fixture tests remain responsible for deterministic failures.
 const env = process.env
-const enabled = env.SIXB_FOUNDRY_E2E === "1" && env.SIXB_FOUNDRY_E2E_ENTRA === "1"
+const enabled = env.SIXB_FOUNDRY_E2E === "1"
 const names = [
   env.AZURE_FOUNDRY_GLM_53_DEPLOYMENT,
   env.AZURE_FOUNDRY_KIMI_K3_DEPLOYMENT,
@@ -24,23 +24,9 @@ let outputTokens = 0
 
 beforeAll(async () => {
   if (!enabled || !env.AZURE_FOUNDRY_PROJECT_ENDPOINT || !names.length) return
-  const child = Bun.spawn(
-    ["az", "account", "get-access-token", "--resource", "https://ai.azure.com", "-o", "json"],
-    { stdout: "pipe", stderr: "pipe" }
-  )
-  const timer = setTimeout(() => child.kill(), 30000)
-  let token: string
-  try {
-    const result = JSON.parse(await new Response(child.stdout).text())
-    expect(await child.exited).toBe(0)
-    expect(typeof result.accessToken).toBe("string")
-    token = result.accessToken
-  } finally {
-    clearTimeout(timer)
-  }
   provider = createAzureAIFoundry({
     endpoint: env.AZURE_FOUNDRY_PROJECT_ENDPOINT,
-    tokenProvider: () => token,
+    apiKey: env.AZURE_FOUNDRY_API_KEY!,
     maxRetries: 0,
     fetch: async (url, init) => {
       if (init?.method === "POST") {

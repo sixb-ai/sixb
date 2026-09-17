@@ -60,7 +60,6 @@ export function responsesRequest(
   request: LanguageModelRequest,
   definition: LanguageModelDefinition,
   options: RequestOptions,
-  project: boolean,
   scope: string
 ): JsonObject {
   const max = prepareRequest(request, definition, options, scope)
@@ -76,7 +75,7 @@ export function responsesRequest(
     return {
       ...item,
       ...(content ? { content } : {}),
-      ...(project && item.role !== undefined ? { type: "message" } : {}),
+      ...(item.role !== undefined ? { type: "message" } : {}),
     }
   })
   const caps = definition.capabilities

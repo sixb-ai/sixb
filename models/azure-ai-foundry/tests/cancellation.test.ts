@@ -13,7 +13,7 @@ test.each([
   const cancelled = Promise.withResolvers<unknown>()
   let calls = 0
   const transport = new FoundryTransport({
-    endpoint: "https://example.test",
+    endpoint: "https://example.test/api/projects/test",
     apiKey: "key",
     fetch: () => {
       calls++
@@ -55,7 +55,7 @@ test("cancellation does not await an uncooperative HTTP error body's cleanup", a
   const cleanup = Promise.withResolvers<void>()
   const controller = new AbortController()
   const transport = new FoundryTransport({
-    endpoint: "https://example.test",
+    endpoint: "https://example.test/api/projects/test",
     apiKey: "key",
     fetch: async () =>
       new Response(

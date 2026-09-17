@@ -1,8 +1,43 @@
 import { expect, test } from "bun:test"
 import { ModelCatalogUnavailableError } from "@sixb/core/models"
-import { createAzureAIFoundry } from "../src"
+import { type AzureAIFoundryOptions, createAzureAIFoundry as create } from "../src"
 
-const endpoint = "https://resource.services.ai.azure.com"
+const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
+const fixtureNames = [
+  "production",
+  "deployment",
+  "missing",
+  "FW-GLM-5.3",
+  "fw-glm-5.2-fast",
+  "FW-Future-19.7-Flash",
+  "FW-GLM-5.2-Fast",
+  "FW-GLM-5.2",
+  "FW-GLM-Latest",
+  "FW-GLM-5.4",
+  "GLM-5.2-Fast",
+  "FW-GLM-5.2-Flash",
+]
+function createAzureAIFoundry(options: AzureAIFoundryOptions) {
+  return create({
+    ...options,
+    fetch: async (url, init) => {
+      if (String(url).includes("/deployments?"))
+        return Response.json({
+          value: fixtureNames.map((name) => ({
+            type: "ModelDeployment",
+            name,
+            modelName: ["production", "deployment"].includes(name) ? "New-Model" : name,
+            modelVersion: "anything",
+            modelPublisher: "Fixture",
+            sku: { name: "GlobalStandard" },
+            capabilities: { responses: "true" },
+          })),
+        })
+      if (!options.fetch) throw new Error("Unexpected inference")
+      return options.fetch(url, init)
+    },
+  })
+}
 const record = (cost = 2, tools = true) => ({
   id: "new-model",
   modalities: { input: ["text", "image"], output: ["text"] },
@@ -15,7 +50,6 @@ const record = (cost = 2, tools = true) => ({
   cost: { input: cost, output: 4, cache_read: 0.1 },
 })
 const page = (value = record()) => Response.json({ azure: { models: { "new-model": value } } })
-const hint = { metadata: { modelName: "New-Model", modelVersion: "anything" } }
 const usage = { inputTokens: 10, uncachedInputTokens: 10, cacheReadInputTokens: 0, outputTokens: 2 }
 
 // Regression proof: remove the FW fallback in RemoteModelsDevCatalog.get; these bindings lose
@@ -56,7 +90,7 @@ test("resolves Fireworks naming conventions with Azure transport and pinned refe
     "fw-glm-5.2-fast",
     "FW-Future-19.7-Flash",
   ].entries()) {
-    const binding = provider("production", { metadata: { modelName } })
+    const binding = provider(modelName)
     const model = await binding.resolve()
     expect(model.protocol).toBe("chat")
     expect(model.metadata.catalog).toMatchObject({
@@ -65,7 +99,7 @@ test("resolves Fireworks naming conventions with Azure transport and pinned refe
       pricing: "reference",
     })
     expect(model.definition).toMatchObject({
-      modelId: "production",
+      modelId: modelName,
       contextWindow: 100000,
       capabilities: { localTools: true, reasoning: { efforts: ["low", "high"] } },
     })
@@ -80,10 +114,10 @@ test("resolves Fireworks naming conventions with Azure transport and pinned refe
       maxOutputTokens: 16,
       signal: AbortSignal.timeout(1000),
     })
-    expect(body).toMatchObject({ model: "production", reasoning_effort: "high" })
+    expect(body).toMatchObject({ model: modelName, reasoning_effort: "high" })
   }
   expect(calls).toBe(1)
-  const binding = provider("production", { metadata: { modelName: "FW-GLM-5.3" } })
+  const binding = provider("FW-GLM-5.3")
   const original = await binding.resolve()
   cost = 3
   await provider.catalog.refresh()
@@ -117,9 +151,7 @@ test("Fireworks fallback preserves Azure authority and rejects ambiguous, moving
         }),
     },
   })
-  const azure = await provider("deployment", {
-    metadata: { modelName: "FW-GLM-5.2-Fast" },
-  }).resolve()
+  const azure = await provider("FW-GLM-5.2-Fast").resolve()
   expect(azure.metadata.catalog?.provider).toBe("azure")
   expect(azure.definition.capabilities.localTools).toBe(false)
   for (const modelName of [
@@ -130,7 +162,7 @@ test("Fireworks fallback preserves Azure authority and rejects ambiguous, moving
     "GLM-5.2-Fast",
     "FW-GLM-5.2-Flash",
   ]) {
-    const model = await provider("deployment", { metadata: { modelName } }).resolve()
+    const model = await provider(modelName).resolve()
     expect(model.metadata.catalog).toBeUndefined()
     expect(model.costEstimator.estimate({ usage }).status).toBe("unpriceable")
   }
@@ -152,7 +184,7 @@ test("models.dev supplies an unfamiliar model's capabilities, protocol, controls
       },
     },
   })
-  const binding = provider("production", hint)
+  const binding = provider("production")
   expect(calls).toBe(0)
   const [one, two] = await Promise.all([binding.resolve(), binding.resolve()])
   expect(calls).toBe(1)
@@ -186,7 +218,7 @@ test("refresh updates capabilities and prices together while existing models rem
     apiKey: "key",
     catalog: { fetch: async () => page(record(cost, cost === 2)) },
   })
-  const binding = provider("production", hint)
+  const binding = provider("production")
   const original = await binding.resolve()
   cost = 3
   await provider.catalog.refresh()
@@ -215,7 +247,7 @@ test("expires/coalesces lookups, preserves offline snapshots on outages and reje
       },
     },
   })
-  const binding = provider("production", hint)
+  const binding = provider("production")
   await binding.resolve()
   await Promise.all([binding.resolve(), binding.resolve()])
   expect(calls).toBe(2)
@@ -227,7 +259,7 @@ test("expires/coalesces lookups, preserves offline snapshots on outages and reje
     apiKey: "key",
     catalog: { fetch: async () => Response.json({ azure: {} }) },
   })
-  await expect(malformed("production", hint).resolve()).rejects.toThrow("azure.models")
+  await expect(malformed("production").resolve()).rejects.toThrow("azure.models")
 })
 
 test("honors explicit overrides, unknown identities, false capabilities and unsupported pricing dimensions", async () => {
@@ -237,10 +269,9 @@ test("honors explicit overrides, unknown identities, false capabilities and unsu
     apiKey: "key",
     catalog: { fetch: async () => Response.json({ azure: { models: { "new-model": raw } } }) },
   })
-  const model = await provider("deployment", hint).resolve()
+  const model = await provider("deployment").resolve()
   expect(model.costEstimator.estimate({ usage }).status).toBe("unpriceable")
   const override = await provider("deployment", {
-    ...hint,
     definition: { capabilities: { localTools: false } },
     rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "2" },
   }).resolve()
@@ -248,16 +279,13 @@ test("honors explicit overrides, unknown identities, false capabilities and unsu
   expect(override.costEstimator.estimate({ usage })).toMatchObject({
     money: { amountNanos: "14000" },
   })
-  expect(
-    (await provider("missing", { metadata: { modelName: "missing" } }).resolve()).definition
-      .capabilities
-  ).toEqual({})
+  expect((await provider("missing").resolve()).definition.capabilities).toEqual({})
 })
 
 test("deployment discovery supplies identity and routing, never overrides models.dev capabilities or limits", async () => {
-  const provider = createAzureAIFoundry({
-    endpoint: `${endpoint}/api/projects/test`,
-    tokenProvider: () => "token",
+  const provider = create({
+    endpoint,
+    apiKey: () => "token",
     fetch: async () =>
       Response.json({
         value: [
@@ -296,7 +324,7 @@ test("derives Messages thinking controls from metadata, not model names", async 
     },
     catalog: { fetch: async () => Response.json({ azure: { models: { "new-model": raw } } }) },
   })
-  const model = await provider("production", hint).resolve()
+  const model = await provider("production").resolve()
   expect(model.protocol).toBe("messages")
   await model.stream({
     callId: "test",
@@ -319,7 +347,7 @@ test("bounds fetch and body waits independently of transport cancellation suppor
       apiKey: "key",
       catalog: { timeoutMs: 10, fetch },
     })
-    await expect(provider("deployment", hint).resolve()).rejects.toBeInstanceOf(
+    await expect(provider("deployment").resolve()).rejects.toBeInstanceOf(
       ModelCatalogUnavailableError
     )
   }
