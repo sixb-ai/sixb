@@ -1,5 +1,6 @@
 import { type AuthorizationContext, assertAuthorized } from "../../authorization"
 import type { RuntimeAuthorization } from "../../execution/types"
+import type { EmbeddingModelCatalog } from "../../models/catalog"
 import type { OntologyRegistry } from "../../ontology"
 import type {
   CountObjectsResult,
@@ -17,6 +18,7 @@ import type {
   QueryObjectsResult,
 } from "../../storage"
 import { linkBatchKey, MAX_OBJECT_READ_FACETS, objectBatchKey } from "../../storage"
+import { resolveVectorSearchText } from "../vectors/resolve-query"
 import {
   ObjectQueryExecutionError,
   ObjectQueryPlanningError,
@@ -50,6 +52,7 @@ export interface QueryExecutorOptions
     | "hasFacetObjects"
   > {
   ontology: OntologyRegistry
+  embeddingModels?: EmbeddingModelCatalog
   storage: ObjectReadStorage
   maxLimit?: number
   maxPageSize?: number
@@ -68,6 +71,7 @@ export interface QueryExecutorOptions
 }
 
 export interface ExecuteObjectQueryInput {
+  signal?: AbortSignal
   projectId: string
   query: ObjectQuery
   includeTotal?: boolean
@@ -179,7 +183,12 @@ export async function executeObjectQuery(
     }
     const result = await options.storage.queryObjects({
       projectId: input.projectId,
-      query: plan.query,
+      query: await resolveVectorSearchText(
+        plan.query,
+        options.ontology,
+        options.embeddingModels,
+        input.signal
+      ),
       includeTotal: input.includeTotal,
     })
     return { ...result, plan }
@@ -244,7 +253,7 @@ export async function countObjects(
     }
     const result = await options.storage.countObjects({
       projectId: input.projectId,
-      query: plan.query,
+      query: await resolveVectorSearchText(plan.query, options.ontology, options.embeddingModels),
     })
     return { ...result, plan }
   }
@@ -305,7 +314,7 @@ export async function existsObjects(
     }
     const result = await options.storage.existsObjects({
       projectId: input.projectId,
-      query: plan.query,
+      query: await resolveVectorSearchText(plan.query, options.ontology, options.embeddingModels),
     })
     return { ...result, plan }
   }
@@ -367,7 +376,7 @@ export async function facetObjects(
     }
     const result = await options.storage.facetObjects({
       projectId: input.projectId,
-      query: plan.query,
+      query: await resolveVectorSearchText(plan.query, options.ontology, options.embeddingModels),
       facets,
     })
     return { ...result, plan }

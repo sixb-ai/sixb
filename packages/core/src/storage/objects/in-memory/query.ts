@@ -134,6 +134,9 @@ export function evaluateObjectQuery(
       return completeEvaluation(scoredEntries)
     }
     case "vector": {
+      if (typeof query.vector === "string")
+        throw new Error("[Sixb] Vector search text must be embedded before storage execution.")
+      const vector = query.vector
       const input = evaluateObjectQuery(query.input, source)
       const scoredEntries = input.entries.flatMap((entry) => {
         const stored =
@@ -151,7 +154,7 @@ export function evaluateObjectQuery(
           query.profile === undefined
             ? entry.row.properties[query.propertyId ?? ""]
             : stored?.values,
-          query.vector
+          vector
         )
         return score === null
           ? []

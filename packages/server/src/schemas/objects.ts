@@ -186,114 +186,104 @@ export const ObjectExpansionSchema: z.ZodType<unknown> = z.lazy(() =>
 )
 
 export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
-  z
-    .discriminatedUnion("kind", [
-      z
-        .object({
-          kind: z.literal("start"),
-          objectTypeId: z.string().min(1),
-          includeSubtypes: z.boolean().optional(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("refs"),
-          refs: z.array(
-            z
-              .object({
-                objectTypeId: z.string().min(1),
-                primaryId: z.string().min(1),
-              })
-              .strict()
-          ),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("filter"),
-          input: ObjectQuerySchema,
-          predicate: ObjectQueryPredicateSchema,
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("text"),
-          input: ObjectQuerySchema,
-          query: z.string(),
-          fields: z.array(z.string().min(1)).optional(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("vector"),
-          input: ObjectQuerySchema,
-          vector: z.array(z.number().finite()),
-          profile: z.string().min(1).optional(),
-          propertyId: z.string().min(1).optional(),
-          k: z.number().int().positive(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("traverse"),
-          input: ObjectQuerySchema,
-          linkId: z.string().min(1),
-          direction: z.enum(["outgoing", "incoming"]),
-          sourceObjectTypeId: z.string().min(1).optional(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("set"),
-          op: z.enum(["union", "intersect", "subtract"]),
-          inputs: z.array(ObjectQuerySchema),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("sort"),
-          input: ObjectQuerySchema,
-          fields: z.array(ObjectQuerySortFieldSchema),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("limit"),
-          input: ObjectQuerySchema,
-          limit: z.number().int().nonnegative(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("page"),
-          input: ObjectQuerySchema,
-          pageSize: z.number().int().positive(),
-          pageToken: z.string().optional(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("project"),
-          input: ObjectQuerySchema,
-          properties: z.array(z.string().min(1)).optional(),
-        })
-        .strict(),
-      z
-        .object({
-          kind: z.literal("expand"),
-          input: ObjectQuerySchema,
-          expansions: z.array(ObjectExpansionSchema),
-        })
-        .strict(),
-    ])
-    .refine(
-      (query) =>
-        query.kind !== "vector" ||
-        (query.profile !== undefined) !== (query.propertyId !== undefined),
-      {
-        message: "A vector query requires exactly one of profile or propertyId.",
-      }
-    )
+  z.discriminatedUnion("kind", [
+    z
+      .object({
+        kind: z.literal("start"),
+        objectTypeId: z.string().min(1),
+        includeSubtypes: z.boolean().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("refs"),
+        refs: z.array(
+          z
+            .object({
+              objectTypeId: z.string().min(1),
+              primaryId: z.string().min(1),
+            })
+            .strict()
+        ),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("filter"),
+        input: ObjectQuerySchema,
+        predicate: ObjectQueryPredicateSchema,
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("text"),
+        input: ObjectQuerySchema,
+        query: z.string(),
+        fields: z.array(z.string().min(1)).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("vector"),
+        input: ObjectQuerySchema,
+        vector: z.string().min(1).max(8000),
+        profile: z.string().min(1),
+        k: z.number().int().positive(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("traverse"),
+        input: ObjectQuerySchema,
+        linkId: z.string().min(1),
+        direction: z.enum(["outgoing", "incoming"]),
+        sourceObjectTypeId: z.string().min(1).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("set"),
+        op: z.enum(["union", "intersect", "subtract"]),
+        inputs: z.array(ObjectQuerySchema),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("sort"),
+        input: ObjectQuerySchema,
+        fields: z.array(ObjectQuerySortFieldSchema),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("limit"),
+        input: ObjectQuerySchema,
+        limit: z.number().int().nonnegative(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("page"),
+        input: ObjectQuerySchema,
+        pageSize: z.number().int().positive(),
+        pageToken: z.string().optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("project"),
+        input: ObjectQuerySchema,
+        properties: z.array(z.string().min(1)).optional(),
+      })
+      .strict(),
+    z
+      .object({
+        kind: z.literal("expand"),
+        input: ObjectQuerySchema,
+        expansions: z.array(ObjectExpansionSchema),
+      })
+      .strict(),
+  ])
 )
 
 export const ObjectQueryRequestSchema = z
@@ -686,24 +676,12 @@ export const ObjectQueryOpenApiSchemas = {
       },
       {
         type: "object",
-        required: ["kind", "input", "vector", "propertyId", "k"],
-        additionalProperties: false,
-        properties: {
-          kind: { type: "string", enum: ["vector"] },
-          input: objectQueryRef,
-          vector: { type: "array", items: { type: "number" } },
-          propertyId: { type: "string", minLength: 1 },
-          k: { type: "integer", minimum: 1 },
-        },
-      },
-      {
-        type: "object",
         required: ["kind", "input", "vector", "profile", "k"],
         additionalProperties: false,
         properties: {
           kind: { type: "string", enum: ["vector"] },
           input: objectQueryRef,
-          vector: { type: "array", items: { type: "number" } },
+          vector: { type: "string", minLength: 1, maxLength: 8000 },
           profile: { type: "string", minLength: 1 },
           k: { type: "integer", minimum: 1 },
         },
