@@ -104,6 +104,8 @@ export class FoundryTransport {
       const response = await abortable(async () => {
         const result = await (this.options.fetch ?? fetch)(url, {
           method: "POST",
+          // Redirects can forward API keys and prompt bodies to another origin.
+          redirect: "error",
           headers,
           body,
           signal,
