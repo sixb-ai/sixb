@@ -333,7 +333,8 @@ describe("SqliteObjectStorage selected reader invariants", () => {
     const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-selected-snapshot-"))
     const databasePath = join(directory, "scope.sqlite")
     const setup = new Database(databasePath)
-    installFreshSqliteSchema(setup)
+    // Commit the fixture schema once instead of syncing every migration statement to disk.
+    setup.transaction(() => installFreshSqliteSchema(setup))()
     setup.run("PRAGMA journal_mode = WAL")
     setup.close()
 
