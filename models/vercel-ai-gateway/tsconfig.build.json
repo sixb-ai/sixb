@@ -12,6 +12,9 @@
   "include": ["src/**/*"],
   "references": [
     {
+      "path": "../protocols/tsconfig.build.json"
+    },
+    {
       "path": "../../packages/core/tsconfig.build.json"
     }
   ]

@@ -10,12 +10,5 @@
     "tsBuildInfoFile": "./.tsbuild/tsconfig.build.tsbuildinfo"
   },
   "include": ["src/**/*"],
-  "references": [
-    {
-      "path": "../protocols/tsconfig.build.json"
-    },
-    {
-      "path": "../../packages/core/tsconfig.build.json"
-    }
-  ]
+  "references": [{ "path": "../../packages/core/tsconfig.build.json" }]
 }

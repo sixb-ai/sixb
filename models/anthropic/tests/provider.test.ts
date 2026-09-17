@@ -10,7 +10,6 @@ import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/mod
 import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
 import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
 import { anthropic, createAnthropic } from "../src"
-import { decodeServerSentEvents } from "../src/sse"
 import { anthropicOutputSchema } from "../src/structured-output"
 
 function request(overrides: Partial<LanguageModelRequest> = {}): LanguageModelRequest {
@@ -1410,35 +1409,6 @@ describe("Anthropic provider", () => {
       error: { name: "ModelProviderError", code: "overloaded_error" },
     })
     expect(anthropic.providerId).toBe("anthropic")
-  })
-
-  test("decodes arbitrary SSE chunks and aborts a blocked reader", async () => {
-    const text = ': ping\r\nevent: custom\r\ndata: {"one":\r\ndata: 1}\r\n\r\n'
-    const bytes = new TextEncoder().encode(text)
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (const byte of bytes) controller.enqueue(Uint8Array.of(byte))
-        controller.close()
-      },
-    })
-    const events = []
-    for await (const event of decodeServerSentEvents(stream, new AbortController().signal)) {
-      events.push(event)
-    }
-    expect(events).toEqual([{ event: "custom", data: '{"one":\n1}' }])
-
-    let cancelled = false
-    const blocked = new ReadableStream<Uint8Array>({
-      cancel() {
-        cancelled = true
-      },
-    })
-    const controller = new AbortController()
-    const iterator = decodeServerSentEvents(blocked, controller.signal)[Symbol.asyncIterator]()
-    const pending = iterator.next()
-    controller.abort()
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
-    expect(cancelled).toBe(true)
   })
 })
 

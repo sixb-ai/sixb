@@ -533,6 +533,30 @@
       "version": "0.1.2",
       "dependencies": {
         "@sixb/core": "workspace:^",
+        "@sixb/model-protocols": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
+    "models/azure-ai-foundry": {
+      "name": "@sixb/azure-ai-foundry",
+      "version": "0.1.1",
+      "dependencies": {
+        "@sixb/core": "workspace:^",
+        "@sixb/model-protocols": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+    },
+    "models/protocols": {
+      "name": "@sixb/model-protocols",
+      "version": "0.1.1",
+      "dependencies": {
+        "@sixb/core": "workspace:^",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -544,6 +568,7 @@
       "version": "0.1.2",
       "dependencies": {
         "@sixb/core": "workspace:^",
+        "@sixb/model-protocols": "workspace:*",
       },
       "devDependencies": {
         "@types/bun": "latest",
@@ -1546,6 +1571,8 @@
 
     "@sixb/auth-oidc": ["@sixb/auth-oidc@workspace:auth/oidc"],
 
+    "@sixb/azure-ai-foundry": ["@sixb/azure-ai-foundry@workspace:models/azure-ai-foundry"],
+
     "@sixb/blob-azure": ["@sixb/blob-azure@workspace:storage/blob-azure"],
 
     "@sixb/blob-local": ["@sixb/blob-local@workspace:storage/blob-local"],
@@ -1623,6 +1650,8 @@
     "@sixb/lake-local": ["@sixb/lake-local@workspace:storage/lake-local"],
 
     "@sixb/logger-pino": ["@sixb/logger-pino@workspace:loggers/pino"],
+
+    "@sixb/model-protocols": ["@sixb/model-protocols@workspace:models/protocols"],
 
     "@sixb/orchestrator": ["@sixb/orchestrator@workspace:packages/orchestrator"],
 
