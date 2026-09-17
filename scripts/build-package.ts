@@ -278,6 +278,7 @@ function collectSourceTargets(target: ExportTarget | undefined, sourceTargets: S
   }
 
   collectSourceTargets(target.bun, sourceTargets)
+  collectSourceTargets(target.browser, sourceTargets)
 }
 
 function isBuildableSource(target: string): boolean {
