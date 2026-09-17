@@ -94,9 +94,12 @@ class ObjectQueryBuilderImpl<
 
   vector(
     profile: string,
-    vector: readonly number[],
+    vector: string,
     options: { k: number }
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+    if (typeof profile !== "string" || typeof vector !== "string") {
+      throw new Error("[Sixb] Vector search requires a named profile and search text")
+    }
     return this.withQuery({
       kind: "vector",
       input: this.ir,
@@ -227,9 +230,11 @@ class ObjectQueryBuilderImpl<
   async list(): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
   async list(options: {
     includeTotal: false
+    signal?: AbortSignal
   }): Promise<ListResultWithoutTotal<TwinObject<TObjectType, TValueTypes>>>
   async list(options: {
     includeTotal?: true
+    signal?: AbortSignal
   }): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
   async list(
     options?: ObjectQueryListOptions
@@ -239,6 +244,7 @@ class ObjectQueryBuilderImpl<
   > {
     const result = await this.params.executor.list(this.ir, {
       includeTotal: options?.includeTotal,
+      signal: options?.signal,
     })
     const objects = result.objects.map(
       (row) => row as unknown as TwinObject<TObjectType, TValueTypes>

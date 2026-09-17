@@ -270,6 +270,7 @@ export class SixbHost<
       scope: capturedScope,
       ontology: this.hostContext.ontology,
       objectStorage: this.storage.objects,
+      embeddingModels: this.hostContext.embeddingModels,
     })
 
     const runtime: SixbRuntimeContext = {

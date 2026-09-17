@@ -149,14 +149,14 @@ search: {
 ```
 
 Register the same `EmbeddingModel` in `models.embedding: [productEmbedding]`; language models
-are optional. This slice provides the model contract, without a built-in provider adapter.
+are optional. Vercel Gateway provides `gateway.embedding(modelId, { dimensions })`.
 
 ```ts
 await sixb.objects(Product).byId("product-1").vector("content").index()
 
 const { objects } = await sixb.objects(Product)
   .query()
-  .vector("content", queryVector, { k: 10 })
+  .vector("content", "lightweight running shoes", { k: 10 })
   .list()
 // k: return at most 10 nearest objects among eligible, authorized candidates.
 // objects[i].score: cosine similarity, highest first.
@@ -165,7 +165,12 @@ const { objects } = await sixb.objects(Product)
 Profile names are autocompleted. `index()` reads the sources, calls the configured model outside
 any transaction, then conditionally stores the result. A concurrent object edit or reindex rejects
 the stale result; call `index()` again to recompute. There are no automatic jobs or provider retries.
-Generate `queryVector` with the same model: numeric validation cannot establish an array's origin.
+The same query works with `objects(Product)` from `@sixb/client/query`: text is embedded on the
+server with the profile's registered model, after validation and authorization. Each terminal
+execution makes one embedding call; `validate()` and `explain()` make none. Query embeddings are
+not stored. Text must be nonempty and at most 8,000 characters. The model receives a 30-second
+abort signal; `.list({ signal })` also forwards caller cancellation. Providers must honor it.
+Search accepts text only. Numeric vectors are generated internally with the profile's model.
 
 | Guarantee | Behavior |
 | --- | --- |

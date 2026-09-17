@@ -186,6 +186,7 @@ function compileVector(
   ctx: CompileContext
 ): CompiledObjectQuery {
   if (
+    typeof query.vector === "string" ||
     !isVectorProfileQuery(query) ||
     !query.configuration ||
     !Number.isSafeInteger(query.k) ||
@@ -201,21 +202,25 @@ function compileVector(
   }
   const input = compileObjectQueryInternal(projectId, query.input, exactContext(ctx))
   const permissions = ctx.source.objectPropertyPermissionsTable
+  const permissionJoin = permissions
+    ? `CROSS JOIN (
+      SELECT project_id, object_type_id, primary_id, json_group_array(property_id) AS property_ids
+      FROM ${permissions}
+      GROUP BY project_id, object_type_id, primary_id
+    ) AS vector_permissions ON vector_permissions.project_id = vectors.project_id
+      AND vector_permissions.object_type_id = vectors.object_type_id
+      AND vector_permissions.primary_id = vectors.primary_id`
+    : ""
   const authorized = permissions
     ? `AND NOT EXISTS (
     SELECT 1 FROM json_each(vectors.source) AS required
-    WHERE NOT EXISTS (
-      SELECT 1 FROM ${permissions} AS permission
-      WHERE permission.project_id = vectors.project_id
-        AND permission.object_type_id = vectors.object_type_id
-        AND permission.primary_id = vectors.primary_id
-        AND permission.property_id = required.value
-    )
+    WHERE required.value NOT IN (SELECT value FROM json_each(vector_permissions.property_ids))
   )`
     : ""
   const candidates = `FROM (${input.sql}) AS input
-    JOIN object_vectors AS vectors ON vectors.project_id = input.project_id
+    CROSS JOIN object_vectors AS vectors ON vectors.project_id = input.project_id
       AND vectors.object_type_id = input.object_type_id AND vectors.primary_id = input.primary_id
+    ${permissionJoin}
     WHERE vectors.profile = ? AND vectors.configuration = ?
       AND length(vectors.embedding) / 4 = ? ${authorized}`
   const candidateArgs = [...input.args, query.profile!, query.configuration, query.vector.length]
@@ -232,8 +237,9 @@ function compileVector(
   return {
     sql,
     args,
-    totalSql: `SELECT COUNT(*) AS total FROM (${sql}) AS ranked`,
-    totalArgs: args,
+    // Top-k cardinality depends on eligibility, not distances or ranking.
+    totalSql: `SELECT COUNT(*) AS total FROM (SELECT 1 ${candidates} LIMIT ?) AS eligible`,
+    totalArgs: [...candidateArgs, query.k],
     order,
     vectorProbe: {
       sql: `SELECT COUNT(*) AS total FROM (SELECT 1 ${candidates} LIMIT ?) AS candidates`,

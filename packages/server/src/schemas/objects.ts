@@ -229,7 +229,7 @@ export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
       .object({
         kind: z.literal("vector"),
         input: ObjectQuerySchema,
-        vector: z.array(z.number().finite()),
+        vector: z.string().min(1).max(8000),
         profile: z.string().min(1),
         k: z.number().int().positive(),
       })
@@ -687,7 +687,7 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
         properties: {
           kind: { type: "string", enum: ["vector"] },
           input: objectQueryRef,
-          vector: { type: "array", items: { type: "number" } },
+          vector: { type: "string", minLength: 1, maxLength: 8000 },
           profile: { type: "string", minLength: 1 },
           k: { type: "integer", minimum: 1 },
         },

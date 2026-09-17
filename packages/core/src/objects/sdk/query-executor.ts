@@ -48,7 +48,7 @@ export type ObjectQueryExecutorFacetRequest = {
 export interface ObjectQueryExecutor {
   list(
     query: ObjectQuery,
-    options?: { includeTotal?: boolean }
+    options?: { includeTotal?: boolean; signal?: AbortSignal }
   ): Promise<ObjectQueryExecutorListResult>
   count(query: ObjectQuery): Promise<number>
   exists(query: ObjectQuery): Promise<boolean>

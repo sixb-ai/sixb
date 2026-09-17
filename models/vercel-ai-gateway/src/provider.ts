@@ -2,6 +2,7 @@ import {
   assertJsonObject,
   defineLanguageModel,
   defineModelRateCard,
+  type EmbeddingModel,
   estimateModelReservation,
   isJsonObject,
   isModelReasoning,
@@ -26,6 +27,7 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { responsesEvents, responsesInput, responsesUsage } from "@sixb/model-protocols/responses"
+import { createGatewayEmbedding, type VercelGatewayEmbeddingOptions } from "./embedding"
 import { withAutomaticPromptCaching } from "./provider-caching"
 import { isStrictGatewaySchema } from "./structured-output"
 
@@ -69,6 +71,7 @@ export interface VercelGateway extends LanguageModelProvider {
   (modelId: string, options?: VercelGatewayModelOptions): LanguageModel
   readonly providerId: typeof PROVIDER_ID
   readonly catalog: VercelGatewayCatalog
+  embedding(modelId: string, options: VercelGatewayEmbeddingOptions): EmbeddingModel
 }
 
 export function createVercelGateway(options: VercelGatewayOptions = {}): VercelGateway {
@@ -100,6 +103,25 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
   return Object.assign(model, {
     providerId: PROVIDER_ID as typeof PROVIDER_ID,
     catalog,
+    embedding: (modelId: string, embeddingOptions: VercelGatewayEmbeddingOptions) =>
+      createGatewayEmbedding(modelId, embeddingOptions, async (input, dimensions) => {
+        const response = await (transport.fetch ?? fetch)(`${transport.baseUrl}/embeddings`, {
+          method: "POST",
+          headers: {
+            ...gatewayHeaders(transport, "application/json"),
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({
+            model: modelId,
+            input: input.texts,
+            dimensions,
+            encoding_format: "float",
+          }),
+          signal: input.signal,
+        })
+        if (!response.ok) throw await providerHttpError(response, PROVIDER_ID, modelId)
+        return response.json()
+      }),
   })
 }
 
@@ -125,11 +147,6 @@ function configuredModelDefinitions(
   }
   return configured
 }
-
-/** Shared zero-configuration gateway with the callable provider DX used across Sixb models. */
-export const vercelGateway = createVercelGateway({
-  apiKey: () => process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN,
-})
 
 class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
   private readonly rateCards = new Map<string, LanguageModelRateCard>()
@@ -879,3 +896,9 @@ function assertNonnegativeInteger(value: number | undefined, field: string): voi
     throw new TypeError(`[SixbVercelGateway] ${field} must be a nonnegative integer.`)
   }
 }
+
+// Initialize after the classes used by createVercelGateway, including in bundled ESM.
+/** Shared zero-configuration gateway with the callable provider DX used across Sixb models. */
+export const vercelGateway = createVercelGateway({
+  apiKey: () => process.env.AI_GATEWAY_API_KEY ?? process.env.VERCEL_OIDC_TOKEN,
+})

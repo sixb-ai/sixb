@@ -18,6 +18,7 @@ export interface PgSelectedObjectReadSource extends PgObjectQuerySource {
  *
  * The complete compiled scope is serialized once. Every statement receives that one JSONB
  * document and the bound project id, keeping the parameter count constant as selections grow.
+ * Group property grants after resolving paths so redaction reads only each object's own grants.
  */
 export function compilePgSelectedObjectReadSource(
   projectId: string,
@@ -180,32 +181,29 @@ function compileSelectedReadScopeCte(scopeJson: string, projectId: string): Comp
         SELECT DISTINCT project_id, object_type_id, primary_id
         FROM _sixb_scope_reachable
       ),
+      _sixb_scope_object_grants AS (
+        SELECT reachable.project_id, reachable.object_type_id, reachable.primary_id,
+          array_agg(DISTINCT selected_property.value) FILTER (WHERE selected_property.value IS NOT NULL) AS property_ids
+        FROM _sixb_scope_reachable AS reachable
+        LEFT JOIN _sixb_scope_object_selections AS selection
+          ON selection.node_id = reachable.node_id
+         AND selection.object_type_id = reachable.object_type_id
+        LEFT JOIN LATERAL jsonb_array_elements_text(selection.property_ids) AS selected_property(value) ON true
+        GROUP BY reachable.project_id, reachable.object_type_id, reachable.primary_id
+      ),
       _sixb_scope_objects AS (
-        SELECT
-          stored.project_id,
-          stored.object_type_id,
-          stored.primary_id,
-          COALESCE(
-            (
-              SELECT jsonb_object_agg(property.key, property.value)
-              FROM jsonb_each(stored.properties) AS property(key, value)
-              JOIN _sixb_scope_object_permissions AS permission
-                ON permission.project_id = stored.project_id
-               AND permission.object_type_id = stored.object_type_id
-               AND permission.primary_id = stored.primary_id
-               AND permission.property_id = property.key
-            ),
-            '{}'::jsonb
-          ) AS properties,
-          stored.created_at,
-          stored.updated_at,
-          stored.version,
-          stored.last_commit_id
-        FROM objects AS stored
-        JOIN _sixb_scope_object_ids AS visible
-          ON visible.project_id = stored.project_id
-         AND visible.object_type_id = stored.object_type_id
-         AND visible.primary_id = stored.primary_id
+        SELECT stored.project_id, stored.object_type_id, stored.primary_id,
+          COALESCE((
+            SELECT jsonb_object_agg(property.key, property.value)
+            FROM jsonb_each(stored.properties) AS property(key, value)
+            WHERE property.key = ANY(grants.property_ids)
+          ), '{}'::jsonb) AS properties,
+          stored.created_at, stored.updated_at, stored.version, stored.last_commit_id
+        FROM _sixb_scope_object_grants AS grants
+        JOIN objects AS stored
+          ON stored.project_id = grants.project_id
+         AND stored.object_type_id = grants.object_type_id
+         AND stored.primary_id = grants.primary_id
       ),
       _sixb_scope_reached_links(
         project_id,

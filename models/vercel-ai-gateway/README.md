@@ -78,3 +78,22 @@ per prepared binding. Supply `models` to `createVercelGateway` to override catal
 
 Sixb records Gateway-reported costs, usage, routing, and request IDs. Local cost estimates are
 retained separately when available; calls without reliable pricing are marked unpriceable.
+
+## Embedding models
+
+```ts
+const contentEmbedding = vercelGateway.embedding("openai/text-embedding-3-small", {
+  dimensions: 1536,
+})
+
+// Register in models.embedding and reference the same model in search.vectors.
+const { vectors } = await contentEmbedding.embed({ texts: ["A search phrase"] })
+```
+
+Embedding calls reuse the gateway's base URL, credentials, headers and fetch implementation.
+They use the OpenAI-compatible `/embeddings` endpoint, request float output and validate dimensions,
+finite nonzero values and one unique response index per input. Results follow input order.
+An empty batch returns no vectors without a request; empty texts are rejected. Pass `signal` to
+cancel a call. Embedding calls do not retry implicitly; the language-model retry options do not
+apply. Models must support the requested dimensions. Embedding usage is not recorded in Sixb's
+language-model usage ledger.

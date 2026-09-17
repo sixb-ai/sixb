@@ -90,18 +90,25 @@ describe("objects().query()", () => {
     )
     const result = await objects(VectorProject, { client })
       .query()
-      .vector("content", [1, 0], { k: 5 })
+      .vector("content", "search", { k: 5 })
       .list()
     expect(calls[0]?.body).toEqual({
       query: {
         kind: "vector",
         input: { kind: "start", objectTypeId: "Project" },
         profile: "content",
-        vector: [1, 0],
+        vector: "search",
         k: 5,
       },
     })
     expect(result.objects[0]?.score).toBe(0.75)
+    await objects(VectorProject, { client })
+      .query()
+      .vector("content", "find a dashboard", { k: 5 })
+      .list()
+    expect(calls[1]?.body).toMatchObject({
+      query: { profile: "content", vector: "find a dashboard" },
+    })
   })
 
   test("list() posts the normalized IR and revives row dates", async () => {

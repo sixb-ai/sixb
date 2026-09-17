@@ -176,7 +176,7 @@ export type ObjectQuery =
   | {
       kind: "vector"
       input: ObjectQuery
-      vector: Array<number>
+      vector: string
       profile: string
       k: number
     }

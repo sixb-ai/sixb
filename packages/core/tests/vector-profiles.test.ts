@@ -2,6 +2,9 @@ import { describe, expect, mock, test } from "bun:test"
 import type { ObjectQuery } from "../src"
 import { defineObjectType, type EmbeddingModel, OntologyRegistry, prop } from "../src"
 import { emptyGrantIndex } from "../src/authorization"
+import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
+import { createDelegatedRequestScope } from "../src/execution/scopes"
+import { createModelCatalog } from "../src/models/catalog"
 import { executeObjectQuery } from "../src/objects/query"
 import { createSelectedObjectQueryAdmission } from "../src/objects/query/selected-read-admission"
 import { validateObjectQueryWithAdmission } from "../src/objects/query/validate"
@@ -82,6 +85,132 @@ async function index(
 }
 
 describe("named vector profiles", () => {
+  test("delegated text search requires all sources and ranks only selected objects", async () => {
+    const f = fixture()
+    await seed(f)
+    await seed(f, "b")
+    await index(f)
+    await index(f, "b", "content", [0, 1, 0])
+    f.embed.mockClear()
+    const reader = (propertyIds: string[]) =>
+      createAuthorizedObjectReader({
+        scope: createDelegatedRequestScope({
+          projectId: f.sixb.execution.projectId,
+          requestId: "text-search",
+          correlationId: "text-search",
+          objectRead: {
+            selection: {
+              kind: "selected",
+              roots: [
+                {
+                  anchor: { objectTypeId: Product.id, primaryId: "b" },
+                  node: { objects: [{ objectTypeId: Product.id, propertyIds }], links: [] },
+                },
+              ],
+            },
+            limits: { maxTraversalFacts: 100, maxOutputJsonBytes: 100000 },
+          },
+        }),
+        ontology: new OntologyRegistry({ sources: [Product] }),
+        objectStorage: f.storage.objects,
+        embeddingModels: createModelCatalog({ embedding: [{ ...model, embed: f.embed }] })
+          .embedding,
+      })
+    const query = f.objects.query().vector("content", "search", { k: 1 }).ir
+    await expect(reader(["id", "title"]).executeQuery({ query })).rejects.toThrow()
+    expect(f.embed).not.toHaveBeenCalled()
+    const result = await reader(["id", "title", "description"]).executeQuery({ query })
+    expect(result.objects).toMatchObject([{ primaryId: "b", score: 0 }])
+    expect(f.embed).toHaveBeenCalledTimes(1)
+  })
+
+  test("text search embeds once per terminal, does not write vectors", async () => {
+    const f = fixture()
+    await seed(f)
+    await index(f)
+    f.embed.mockClear()
+    const before = getInMemoryOntologyStorageTestingAdapter(f.storage.ontology).snapshot()
+    const query = f.objects.query().vector("content", "search phrase", { k: 1 })
+    query.validate()
+    query.explain()
+    expect(f.embed).not.toHaveBeenCalled()
+    expect((await query.list()).objects[0]?.score).toBe(1)
+    expect(f.embed.mock.calls[0]?.[0].texts).toEqual(["search phrase"])
+    expect(await query.count()).toBe(1)
+    expect(await query.exists()).toBe(true)
+    expect(f.embed).toHaveBeenCalledTimes(3)
+    expect(query.ir).toMatchObject({ vector: "search phrase" })
+    expect(getInMemoryOntologyStorageTestingAdapter(f.storage.ontology).snapshot()).toEqual(before)
+  })
+
+  test("raw authored queries reject numeric vectors before execution", async () => {
+    const f = fixture()
+    await seed(f)
+    await index(f)
+    f.embed.mockClear()
+    // Regression proof: removing the authored-query guard makes this numeric query succeed.
+    const query = {
+      kind: "vector" as const,
+      input: { kind: "start" as const, objectTypeId: Product.id },
+      profile: "content",
+      vector: [1, 0, 0],
+      k: 1,
+    }
+    await expect(f.sixb.objects.executeQuery({ query })).rejects.toThrow("search text")
+    await expect(
+      f.sixb.objects.executeQuery({ query: { kind: "limit", input: query, limit: 1 } })
+    ).rejects.toThrow("search text")
+    expect(f.embed).not.toHaveBeenCalled()
+  })
+
+  test("invalid text, unsupported composition and cancellation do not call the model", async () => {
+    const f = fixture()
+    for (const text of ["   ", "x".repeat(8001)]) {
+      await expect(f.objects.query().vector("content", text, { k: 1 }).list()).rejects.toThrow()
+    }
+    await expect(f.objects.query().vector("content", "search", { k: 0 }).list()).rejects.toThrow()
+    await expect(
+      f.objects.query().vector("content", "search", { k: 1 }).page({ pageSize: 1 }).list()
+    ).rejects.toThrow()
+    await expect(
+      f.objects.query().vector("content", "search", { k: 1 }).list({ signal: AbortSignal.abort() })
+    ).rejects.toThrow()
+    expect(f.embed).not.toHaveBeenCalled()
+  })
+
+  test("malformed search embeddings fail without a retry or a stored write", async () => {
+    const f = fixture()
+    for (const vectors of [[], [[0, 0, 0]], [[1, 0]], [[NaN, 0, 1]]]) {
+      f.embed.mockResolvedValueOnce({ vectors })
+      await expect(f.objects.query().vector("content", "search", { k: 1 }).list()).rejects.toThrow()
+    }
+    expect(f.embed).toHaveBeenCalledTimes(4)
+  })
+
+  test("denied text search does not send text to the model", async () => {
+    // Regression proof: removing assertQueryViewable before resolution invokes this spy.
+    const f = fixture()
+    const denied = createTestSixb(
+      {
+        ...createTestRuntimeDeps(),
+        ontology: [Product],
+        models: { embedding: [{ ...model, embed: f.embed }] },
+      },
+      {
+        authorization: {
+          principal: { type: "user", id: "denied" },
+          groupIds: [],
+          roleIds: [],
+          grants: emptyGrantIndex(),
+        },
+      }
+    )
+    await expect(
+      denied.objects(Product).query().vector("content", "private search", { k: 1 }).list()
+    ).rejects.toThrow()
+    expect(f.embed).not.toHaveBeenCalled()
+  })
+
   test("index uses the configured model, independent profiles and stable scores", async () => {
     const f = fixture()
     const before = await seed(f)
@@ -90,7 +219,7 @@ describe("named vector profiles", () => {
     await index(f, "b", "content", [0, 1, 0])
     await index(f, "a", "context", [0, 0, 1])
     expect(input.text).toBe('[["title","Title"],["description","Description"]]')
-    const ranked = await f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()
+    const ranked = await f.objects.query().vector("content", "search", { k: 1 }).list()
     expect(ranked.objects.map((o) => o.primaryId)).toEqual(["a"])
     expect(ranked.objects[0]?.score).toBe(1)
     expect(ranked.total).toBe(1)
@@ -98,7 +227,7 @@ describe("named vector profiles", () => {
     const after = await f.objects.byId("a").get()
     expect(after).toEqual(before)
     expect(
-      (await f.objects.query().vector("context", [1, 0, 0], { k: 2 }).list()).objects
+      (await f.objects.query().vector("context", "search", { k: 2 }).list()).objects
     ).toHaveLength(1)
   })
 
@@ -133,19 +262,19 @@ describe("named vector profiles", () => {
     await index(f, "a", "context")
     await f.objects.upsert({ properties: { id: "a", status: "paused" } })
     expect(
-      (await f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()).objects
+      (await f.objects.query().vector("content", "search", { k: 1 }).list()).objects
     ).toHaveLength(1)
     await f.objects.upsert({ properties: { id: "a", title: "Changed" } })
     expect(
-      (await f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()).objects
+      (await f.objects.query().vector("content", "search", { k: 1 }).list()).objects
     ).toHaveLength(0)
     expect(
-      (await f.objects.query().vector("context", [1, 0, 0], { k: 1 }).list()).objects
+      (await f.objects.query().vector("context", "search", { k: 1 }).list()).objects
     ).toHaveLength(1)
     await f.objects.byId("a").delete()
     await seed(f)
     expect(
-      (await f.objects.query().vector("context", [1, 0, 0], { k: 1 }).list()).objects
+      (await f.objects.query().vector("context", "search", { k: 1 }).list()).objects
     ).toHaveLength(0)
   })
 
@@ -159,13 +288,13 @@ describe("named vector profiles", () => {
     const result = await f.objects
       .query()
       .where((p) => p.p.status.eq("active"))
-      .vector("content", [1, 0, 0], { k: 1 })
+      .vector("content", "search", { k: 1 })
       .list()
     expect(result.objects.map((o) => o.primaryId)).toEqual(["b"])
     await expect(
       f.objects
         .query()
-        .vector("content", [1, 0, 0], { k: 1 })
+        .vector("content", "search", { k: 1 })
         .where((p) => p.p.status.eq("active"))
         .list()
     ).rejects.toThrow()
@@ -176,16 +305,16 @@ describe("named vector profiles", () => {
     await seed(f)
     await index(f)
     await expect(
-      f.objects.query().vector("content", [1, 0, 0], { k: 1 }).page({ pageSize: 1 }).list()
+      f.objects.query().vector("content", "search", { k: 1 }).page({ pageSize: 1 }).list()
     ).rejects.toThrow()
     await expect(
-      f.objects.query().vector("content", [1, 0, 0], { k: 1001 }).list()
+      f.objects.query().vector("content", "search", { k: 1001 }).list()
     ).rejects.toThrow()
     await expect(
       f.objects
         .query()
-        .vector("content", [1, 0, 0], { k: 1 })
-        .vector("context", [1, 0, 0], { k: 1 })
+        .vector("content", "search", { k: 1 })
+        .vector("context", "search", { k: 1 })
         .list()
     ).rejects.toThrow()
   })
@@ -255,7 +384,7 @@ describe("named vector profiles", () => {
       await expect(handle.index()).rejects.toThrow()
     }
     expect(
-      (await f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()).objects[0]?.score
+      (await f.objects.query().vector("content", "search", { k: 1 }).list()).objects[0]?.score
     ).toBe(1)
   })
 
@@ -281,7 +410,7 @@ describe("named vector profiles", () => {
     }
     expect(f.embed).toHaveBeenCalledTimes(4)
     expect(
-      (await f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()).objects[0]?.score
+      (await f.objects.query().vector("content", "search", { k: 1 }).list()).objects[0]?.score
     ).toBe(1)
   })
 
@@ -338,7 +467,7 @@ describe("named vector profiles", () => {
     expect(hooks.snapshot()).toEqual(snapshot)
     hooks.setTestHooks({})
     expect(
-      (await f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()).objects[0]?.score
+      (await f.objects.query().vector("content", "search", { k: 1 }).list()).objects[0]?.score
     ).toBe(1)
   })
 
@@ -430,13 +559,13 @@ describe("named vector profiles", () => {
       queues: f.queues,
     })
     expect(
-      (await sixb.objects(next).query().vector("content", [1, 0, 0], { k: 1 }).list()).objects
+      (await sixb.objects(next).query().vector("content", "search", { k: 1 }).list()).objects
     ).toHaveLength(0)
     expect<unknown>(await sixb.objects(next).byId("a").get()).toEqual(before)
     const handle = sixb.objects(next).byId("a").vector("content")
     await handle.index()
     expect(
-      (await sixb.objects(next).query().vector("content", [1, 0, 0], { k: 1 }).list()).objects
+      (await sixb.objects(next).query().vector("content", "search", { k: 1 }).list()).objects
     ).toHaveLength(1)
   })
 
@@ -475,8 +604,7 @@ describe("named vector profiles", () => {
     const vector = object.vector("content")
     const write = () => vector.index()
     const matches = async () =>
-      (await sixb.objects(type).query().vector("content", [1, 0, 0], { k: 1 }).list()).objects
-        .length
+      (await sixb.objects(type).query().vector("content", "search", { k: 1 }).list()).objects.length
     await f.materializer.projections.replace(
       replacement("v1", "2026-01-01T00:00:00.000Z", [sourceEntry("one", "Alpha")])
     )

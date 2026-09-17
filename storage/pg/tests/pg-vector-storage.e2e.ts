@@ -481,7 +481,7 @@ describe("PostgreSQL vector storage", () => {
           f.sql.unsafe("UPDATE object_vectors SET embedding = '{{1,2},{3,4}}'::real[]")
         )
       ).rejects.toThrow()
-      await expect(f.objects.query().vector("content", [1, 0, 0], { k: 1 }).list()).rejects.toThrow(
+      await expect(f.objects.query().vector("content", "search", { k: 1 }).list()).rejects.toThrow(
         "requires pgvector installed"
       )
     } finally {
