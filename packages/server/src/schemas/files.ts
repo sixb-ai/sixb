@@ -77,6 +77,12 @@ export const CompleteFileUploadBodySchema = z.object({
 })
 
 export const FileContentQuerySchema = z.object({
+  audience: z
+    .enum(["atlas", "app"])
+    .optional()
+    .describe(
+      "Session audience for file navigation without Origin; must match Origin when present"
+    ),
   path: z.string().min(1),
   disposition: z.enum(["inline", "attachment"]).optional(),
   v: z.string().optional().describe("Client cache key; the route still resolves the current file"),

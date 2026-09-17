@@ -6953,6 +6953,10 @@ export type GetWorkflowRunFileContentData = {
     runId: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -7005,6 +7009,10 @@ export type HeadWorkflowRunFileContentData = {
     runId: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -7055,6 +7063,10 @@ export type GetWorkflowNodeRunFileContentData = {
     nodeKey: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -7108,6 +7120,10 @@ export type HeadWorkflowNodeRunFileContentData = {
     nodeKey: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -8405,6 +8421,10 @@ export type GetObjectFileContentData = {
     objectId: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -8453,6 +8473,10 @@ export type HeadObjectFileContentData = {
     objectId: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -9315,6 +9339,10 @@ export type GetActionRunFileContentData = {
     runId: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -9367,6 +9395,10 @@ export type HeadActionRunFileContentData = {
     runId: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -10139,6 +10171,10 @@ export type GetAgentMessageFileContentData = {
     messageId: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
@@ -10192,6 +10228,10 @@ export type HeadAgentMessageFileContentData = {
     messageId: string
   }
   query: {
+    /**
+     * Session audience for file navigation without Origin; must match Origin when present
+     */
+    audience?: "atlas" | "app"
     path: string
     disposition?: "inline" | "attachment"
     /**
