@@ -1,13 +1,7 @@
 {
-  "name": "@sixb/anthropic",
-  "version": "0.1.2",
-  "description": "Anthropic model provider for Sixb",
-  "keywords": [
-    "sixb",
-    "models",
-    "anthropic",
-    "claude"
-  ],
+  "name": "@sixb/azure-ai-foundry",
+  "version": "0.1.1",
+  "description": "Azure AI Foundry model provider for Sixb",
   "homepage": "https://sixb.ai",
   "bugs": {
     "url": "https://github.com/sixb-ai/sixb/issues"
@@ -15,7 +9,7 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sixb-ai/sixb.git",
-    "directory": "models/anthropic"
+    "directory": "models/azure-ai-foundry"
   },
   "author": "Sixb contributors",
   "type": "module",
@@ -33,7 +27,7 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun test ./tests/provider.e2e.ts",
+    "test:e2e": "bun test ./tests/*.e2e.ts",
     "prepack": "bun run build"
   },
   "dependencies": {

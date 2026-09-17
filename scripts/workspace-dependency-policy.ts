@@ -72,6 +72,11 @@ export function expectedWorkspaceDependency(
 ): WorkspaceDependencyExpectation {
   const name = packageName(packageInfo)
 
+  // Protocol implementations are internal and released with their provider consumers.
+  if (dependency === "@sixb/model-protocols") {
+    return { field: "dependencies", protocol: exactWorkspaceProtocol }
+  }
+
   if (name === "@sixb/cli") {
     return {
       field: "dependencies",

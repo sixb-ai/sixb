@@ -10,25 +10,19 @@ import {
   type LanguageModelDefinitionCatalog,
   type LanguageModelProvider,
   type LanguageModelRequest,
-  type LanguageModelStreamEvent,
   MODEL_REASONING_EFFORTS,
   type ModelCapabilities,
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
-  type ModelFinishReason,
-  type ModelMessage,
   ModelProviderError,
   type ModelReasoningCapabilities,
   type ModelReasoningEffort,
-  type ModelToolOutput,
-  type ModelUsage,
   modelReasoningSupportIssue,
-  type ProviderData,
   rateModelCall,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
+import { messagesEvents, messagesInput } from "@sixb/model-protocols/messages"
 import { anthropicMaxOutputTokens, anthropicRateCard } from "./model-details"
-import { decodeServerSentEvents } from "./sse"
 import { anthropicOutputSchema } from "./structured-output"
 
 type ValueSource<T> = T | (() => T)
@@ -389,7 +383,12 @@ class AnthropicLanguageModel implements LanguageModel {
       )
     }
     return {
-      events: this.responseEvents(response.body, request.signal, requestId ?? undefined),
+      events: messagesEvents(response.body, request.signal, {
+        providerId: this.providerId,
+        modelId: this.modelId,
+        requestId: requestId ?? undefined,
+        errorPrefix: "[SixbAnthropic]",
+      }),
     }
   }
 
@@ -414,7 +413,7 @@ class AnthropicLanguageModel implements LanguageModel {
         )
       }
     }
-    const mapped = messagesToAnthropic(request.messages, this.providerId)
+    const mapped = messagesInput(request.messages, this.providerId, "[SixbAnthropic]")
     const nativeOutputSchema =
       request.responseFormat !== undefined && (await this.supportsNativeStructuredOutput())
         ? anthropicOutputSchema(request.responseFormat.schema)
@@ -505,407 +504,6 @@ class AnthropicLanguageModel implements LanguageModel {
       return false
     }
   }
-
-  private async *responseEvents(
-    body: ReadableStream<Uint8Array>,
-    signal: AbortSignal,
-    requestId?: string
-  ): AsyncIterable<LanguageModelStreamEvent> {
-    const state = new MessageState(this.providerId, this.modelId, requestId)
-    for await (const event of decodeServerSentEvents(body, signal)) {
-      let value: unknown
-      try {
-        value = JSON.parse(event.data)
-      } catch (error) {
-        throw new ModelProviderError(
-          "[SixbAnthropic] Provider emitted invalid SSE JSON.",
-          this.providerId,
-          this.modelId,
-          {
-            cause: error,
-            ...(requestId === undefined ? {} : { requestId }),
-          }
-        )
-      }
-      assertJsonObject(value, "Anthropic SSE data")
-      for (const normalized of state.accept(event.event ?? string(value.type), value)) {
-        yield normalized
-      }
-    }
-    if (!state.finished) {
-      throw new ModelProviderError(
-        "[SixbAnthropic] Provider stream ended without a terminal message event.",
-        this.providerId,
-        this.modelId,
-        requestId === undefined ? undefined : { requestId }
-      )
-    }
-  }
-}
-
-interface ContentBlockState {
-  readonly id: string
-  readonly type: string
-  readonly raw: JsonObject
-  toolInput: string
-}
-
-class MessageState {
-  private readonly blocks = new Map<number, ContentBlockState>()
-  private usage: JsonObject = {}
-  private stopReason = ""
-  private started = false
-  finished = false
-
-  constructor(
-    private readonly providerId: string,
-    private readonly modelId: string,
-    private readonly requestId?: string
-  ) {}
-
-  accept(eventName: string, value: JsonObject): readonly LanguageModelStreamEvent[] {
-    const type = string(value.type) || eventName
-    if (type === "message_start") return this.startMessage(value)
-    if (type === "ping") return []
-    if (type === "error") {
-      this.finished = true
-      const error = object(value.error)
-      return [
-        {
-          type: "error",
-          error: new ModelProviderError(
-            `[SixbAnthropic] ${string(error?.message) || "Provider response failed."}`,
-            this.providerId,
-            this.modelId,
-            {
-              ...(string(error?.type) ? { code: string(error?.type) } : {}),
-              ...(this.requestId === undefined ? {} : { requestId: this.requestId }),
-            }
-          ),
-        },
-      ]
-    }
-    if (!this.started) throw this.protocolError(`Received '${type}' before message_start.`)
-    if (type === "content_block_start") return this.startBlock(value)
-    if (type === "content_block_delta") return this.deltaBlock(value)
-    if (type === "content_block_stop") return this.stopBlock(value)
-    if (type === "message_delta") {
-      const delta = object(value.delta)
-      this.stopReason = string(delta?.stop_reason) || this.stopReason
-      this.usage = mergeJson(this.usage, object(value.usage))
-      return []
-    }
-    if (type === "message_stop") {
-      if (this.blocks.size > 0)
-        throw this.protocolError("Message stopped with open content blocks.")
-      this.finished = true
-      return [
-        {
-          type: "finish",
-          finishReason: finishReason(this.stopReason),
-          ...(this.stopReason ? { rawFinishReason: this.stopReason } : {}),
-          usage: normalizeUsage(this.usage),
-        },
-      ]
-    }
-    // Anthropic may add event types without a version bump. Unknown events are ignored safely.
-    return []
-  }
-
-  private startMessage(value: JsonObject): readonly LanguageModelStreamEvent[] {
-    if (this.started) throw this.protocolError("Received duplicate message_start.")
-    this.started = true
-    const message = object(value.message)
-    this.usage = mergeJson(this.usage, object(message?.usage))
-    const id = string(message?.id)
-    const modelId = string(message?.model)
-    return [
-      { type: "stream-start" },
-      ...(id || modelId || this.requestId
-        ? [
-            {
-              type: "response-metadata" as const,
-              providerIds: {
-                ...(id ? { responseId: id } : {}),
-                ...(this.requestId ? { requestId: this.requestId } : {}),
-              },
-              ...(id ? { id } : {}),
-              ...(modelId ? { modelId } : {}),
-            },
-          ]
-        : []),
-    ]
-  }
-
-  private startBlock(value: JsonObject): readonly LanguageModelStreamEvent[] {
-    const index = requiredIndex(value.index, "content block")
-    if (this.blocks.has(index)) throw this.protocolError(`Duplicate content block ${index}.`)
-    const raw = object(value.content_block)
-    const type = string(raw?.type)
-    if (!raw || !type) throw this.protocolError(`Content block ${index} is missing its type.`)
-    const id = `content:${index}`
-    const block: ContentBlockState = {
-      id,
-      type,
-      raw: { ...raw },
-      toolInput: "",
-    }
-    this.blocks.set(index, block)
-    if (type === "text") {
-      const text = string(raw.text)
-      return [
-        { type: "text-start", id },
-        ...(text ? [{ type: "text-delta" as const, id, delta: text }] : []),
-      ]
-    }
-    if (type === "thinking") {
-      const thinking = string(raw.thinking)
-      return [
-        { type: "reasoning-start", id },
-        ...(thinking ? [{ type: "reasoning-delta" as const, id, delta: thinking }] : []),
-      ]
-    }
-    if (type === "tool_use") {
-      const callId = string(raw.id)
-      const name = string(raw.name)
-      if (!callId || !name) throw this.protocolError(`Tool block ${index} is missing id or name.`)
-      return [{ type: "tool-input-start", id: callId, toolName: name }]
-    }
-    return []
-  }
-
-  private deltaBlock(value: JsonObject): readonly LanguageModelStreamEvent[] {
-    const index = requiredIndex(value.index, "content block delta")
-    const block = this.blocks.get(index)
-    if (!block) throw this.protocolError(`Delta references unopened content block ${index}.`)
-    const delta = object(value.delta)
-    const type = string(delta?.type)
-    if (type === "text_delta" && block.type === "text") {
-      const text = string(delta?.text)
-      block.raw.text = string(block.raw.text) + text
-      return [{ type: "text-delta", id: block.id, delta: text }]
-    }
-    if (type === "thinking_delta" && block.type === "thinking") {
-      const thinking = string(delta?.thinking)
-      block.raw.thinking = string(block.raw.thinking) + thinking
-      return [{ type: "reasoning-delta", id: block.id, delta: thinking }]
-    }
-    if (type === "signature_delta" && block.type === "thinking") {
-      block.raw.signature = string(delta?.signature)
-      return []
-    }
-    if (type === "input_json_delta" && ["tool_use", "server_tool_use"].includes(block.type)) {
-      const partial = string(delta?.partial_json)
-      block.toolInput += partial
-      return block.type === "tool_use"
-        ? [{ type: "tool-input-delta", id: string(block.raw.id), delta: partial }]
-        : []
-    }
-    if (type === "citations_delta" && block.type === "text") {
-      const citation = delta?.citation
-      if (citation !== undefined) {
-        const citations = Array.isArray(block.raw.citations) ? block.raw.citations : []
-        block.raw.citations = [...citations, citation]
-      }
-    }
-    return []
-  }
-
-  private stopBlock(value: JsonObject): readonly LanguageModelStreamEvent[] {
-    const index = requiredIndex(value.index, "content block stop")
-    const block = this.blocks.get(index)
-    if (!block) throw this.protocolError(`Stop references unopened content block ${index}.`)
-    this.blocks.delete(index)
-    if (block.type === "text") {
-      return [
-        { type: "text-end", id: block.id, providerData: blockData(this.providerId, block.raw) },
-      ]
-    }
-    if (block.type === "thinking") {
-      return [
-        {
-          type: "reasoning-end",
-          id: block.id,
-          providerData: blockData(this.providerId, block.raw),
-        },
-      ]
-    }
-    if (block.type === "tool_use") {
-      const hadToolDelta = block.toolInput.length > 0
-      if (!hadToolDelta) {
-        block.toolInput = JSON.stringify(block.raw.input ?? {})
-      }
-      try {
-        const input: unknown = JSON.parse(block.toolInput)
-        if (isJsonObject(input)) block.raw.input = input
-      } catch {
-        // The core loop reports the malformed tool input with the original streamed text.
-      }
-      return [
-        ...(hadToolDelta
-          ? []
-          : [
-              {
-                type: "tool-input-delta" as const,
-                id: string(block.raw.id),
-                delta: block.toolInput,
-              },
-            ]),
-        {
-          type: "tool-input-end",
-          id: string(block.raw.id),
-          providerData: blockData(this.providerId, block.raw),
-        },
-      ]
-    }
-    if (block.type === "server_tool_use" && block.toolInput) {
-      try {
-        const input: unknown = JSON.parse(block.toolInput)
-        if (isJsonObject(input)) block.raw.input = input
-      } catch {
-        // Preserve the original block even if a future provider tool streams a different shape.
-      }
-    }
-    return [{ type: "provider-state", providerId: this.providerId, data: { block: block.raw } }]
-  }
-
-  private protocolError(message: string): ModelProviderError {
-    return new ModelProviderError(`[SixbAnthropic] ${message}`, this.providerId, this.modelId, {
-      ...(this.requestId === undefined ? {} : { requestId: this.requestId }),
-    })
-  }
-}
-
-function messagesToAnthropic(
-  messages: readonly ModelMessage[],
-  providerId: string
-): { readonly system: JsonObject[]; readonly messages: JsonObject[] } {
-  const system: JsonObject[] = []
-  const mapped: JsonObject[] = []
-  for (const message of messages) {
-    if (message.role === "system") {
-      system.push(
-        providerBlock(message.providerData, providerId) ?? { type: "text", text: message.content }
-      )
-      continue
-    }
-    if (message.role === "user") {
-      mapped.push({
-        role: "user",
-        content: message.content.map((part) => userBlock(part, providerId)),
-      })
-      continue
-    }
-    if (message.role === "tool") {
-      mapped.push({
-        role: "user",
-        content: message.content.map(
-          (part) =>
-            providerBlock(part.providerData, providerId) ?? {
-              type: "tool_result",
-              tool_use_id: part.toolCallId,
-              content: toolOutputText(part.output),
-              ...(part.output.type === "error-text" || part.output.type === "error-json"
-                ? { is_error: true }
-                : {}),
-            }
-        ),
-      })
-      continue
-    }
-    const content: JsonObject[] = []
-    for (const part of message.content) {
-      if (part.type === "provider-state") {
-        if (part.providerId === providerId) {
-          const block = object(part.data)?.block
-          if (isJsonObject(block)) content.push(block)
-        }
-        continue
-      }
-      const raw = providerBlock(part.providerData, providerId)
-      if (raw) {
-        content.push(raw)
-      } else if (part.type === "text") {
-        content.push({ type: "text", text: part.text })
-      } else if (part.type === "tool-call") {
-        content.push({
-          type: "tool_use",
-          id: part.toolCallId,
-          name: part.toolName,
-          input: part.input,
-        })
-      } else if (part.type === "tool-result" && part.providerExecuted) {
-        content.push({
-          type: "tool_result",
-          tool_use_id: part.toolCallId,
-          content: toolOutputText(part.output),
-        })
-      }
-      // Reasoning from another provider is not portable and must not be synthesized as thinking.
-    }
-    if (content.length > 0) mapped.push({ role: "assistant", content })
-  }
-  return { system, messages: coalesceRoles(mapped) }
-}
-
-function coalesceRoles(messages: readonly JsonObject[]): JsonObject[] {
-  const result: JsonObject[] = []
-  for (const message of messages) {
-    const previous = result.at(-1)
-    if (
-      previous?.role === message.role &&
-      Array.isArray(previous.content) &&
-      Array.isArray(message.content)
-    ) {
-      previous.content = [...previous.content, ...message.content]
-    } else {
-      result.push(message)
-    }
-  }
-  return result
-}
-
-function userBlock(
-  part: Extract<ModelMessage, { role: "user" }>["content"][number],
-  providerId: string
-): JsonObject {
-  const raw = providerBlock(part.providerData, providerId)
-  if (raw) return raw
-  if (part.type === "text") return { type: "text", text: part.text }
-  if ((ANTHROPIC_IMAGE_MEDIA_TYPES as readonly string[]).includes(part.mediaType)) {
-    return { type: "image", source: mediaSource(part.data, part.mediaType) }
-  }
-  if (part.mediaType === "application/pdf") {
-    return { type: "document", source: mediaSource(part.data, part.mediaType) }
-  }
-  throw new TypeError(`[SixbAnthropic] Unsupported file media type '${part.mediaType}'.`)
-}
-
-function mediaSource(data: URL, mediaType: string): JsonObject {
-  if (data.protocol !== "data:") return { type: "url", url: data.toString() }
-  const match = /^data:([^;,]+);base64,(.*)$/s.exec(data.toString())
-  if (!match) throw new TypeError("[SixbAnthropic] File data URLs must use base64 encoding.")
-  const [, encodedMediaType = "", encodedData = ""] = match
-  if (encodedMediaType !== mediaType) {
-    throw new TypeError(
-      `[SixbAnthropic] File data URL media type '${encodedMediaType}' does not match '${mediaType}'.`
-    )
-  }
-  return { type: "base64", media_type: mediaType, data: encodedData }
-}
-
-function providerBlock(data: ProviderData | undefined, providerId: string): JsonObject | undefined {
-  return object(object(data?.[providerId])?.block)
-}
-
-function blockData(providerId: string, block: JsonObject): ProviderData {
-  return { [providerId]: { block } }
-}
-
-function toolOutputText(output: ModelToolOutput): string {
-  return output.type === "text" || output.type === "error-text"
-    ? output.value
-    : JSON.stringify(output.value)
 }
 
 function anthropicReasoningRequest(
@@ -955,68 +553,6 @@ function anthropicReasoningRequest(
     )
   }
   return { thinking: { type: "enabled", budget_tokens: reasoning.budgetTokens } }
-}
-
-function normalizeUsage(raw: JsonObject): ModelUsage {
-  const uncached = integer(raw.input_tokens)
-  const cacheReadRaw = integer(raw.cache_read_input_tokens)
-  const cacheWriteRaw = integer(raw.cache_creation_input_tokens)
-  const cacheCreation = object(raw.cache_creation)
-  const cacheWrite5mRaw = integer(cacheCreation?.ephemeral_5m_input_tokens)
-  const cacheWrite1hRaw = integer(cacheCreation?.ephemeral_1h_input_tokens)
-  const cacheRead = cacheReadRaw ?? (uncached === undefined ? undefined : 0)
-  const cacheWrite =
-    cacheWriteRaw ??
-    (cacheWrite5mRaw === undefined && cacheWrite1hRaw === undefined
-      ? uncached === undefined
-        ? undefined
-        : 0
-      : (cacheWrite5mRaw ?? 0) + (cacheWrite1hRaw ?? 0))
-  const hasExactCacheWriteBreakdown =
-    cacheWrite5mRaw !== undefined || cacheWrite1hRaw !== undefined || cacheWrite === 0
-  const cacheWrite5m = hasExactCacheWriteBreakdown ? (cacheWrite5mRaw ?? 0) : undefined
-  const cacheWrite1h = hasExactCacheWriteBreakdown ? (cacheWrite1hRaw ?? 0) : undefined
-  const outputTokens = integer(raw.output_tokens)
-  const reasoning = integer(object(raw.output_tokens_details)?.thinking_tokens)
-  const inputTokens =
-    uncached === undefined && cacheRead === undefined && cacheWrite === undefined
-      ? undefined
-      : (uncached ?? 0) + (cacheRead ?? 0) + (cacheWrite ?? 0)
-  return {
-    ...(inputTokens === undefined ? {} : { inputTokens }),
-    ...(outputTokens === undefined ? {} : { outputTokens }),
-    ...(uncached === undefined ? {} : { uncachedInputTokens: uncached }),
-    ...(cacheRead === undefined ? {} : { cacheReadInputTokens: cacheRead }),
-    ...(cacheWrite === undefined ? {} : { cacheWriteInputTokens: cacheWrite }),
-    ...(cacheWrite5m === undefined ? {} : { cacheWrite5mInputTokens: cacheWrite5m }),
-    ...(cacheWrite1h === undefined ? {} : { cacheWrite1hInputTokens: cacheWrite1h }),
-    ...(outputTokens === undefined
-      ? {}
-      : { textOutputTokens: Math.max(0, outputTokens - (reasoning ?? 0)) }),
-    ...(reasoning === undefined ? {} : { reasoningOutputTokens: reasoning }),
-    raw,
-  }
-}
-
-function finishReason(reason: string): ModelFinishReason {
-  if (reason === "end_turn" || reason === "stop_sequence") return "stop"
-  if (reason === "max_tokens" || reason === "model_context_window_exceeded") return "length"
-  if (reason === "tool_use") return "tool-calls"
-  if (reason === "pause_turn") return "pause"
-  if (reason === "refusal") return "content-filter"
-  return reason ? "other" : "unknown"
-}
-
-function mergeJson(previous: JsonObject, next: JsonObject | undefined): JsonObject {
-  if (!next) return previous
-  const merged: JsonObject = { ...previous }
-  for (const [key, value] of Object.entries(next)) {
-    if (value === null) continue
-    const priorObject = object(merged[key])
-    const nextObject = object(value)
-    merged[key] = priorObject && nextObject ? mergeJson(priorObject, nextObject) : value
-  }
-  return merged
 }
 
 async function providerHttpError(
@@ -1142,12 +678,6 @@ function anthropicReasoningCapabilities(
     ...(efforts.length === 0 ? {} : { efforts }),
     ...(supportsManualBudget ? { budgetTokens: { min: 1_024 } } : {}),
   }
-}
-
-function requiredIndex(value: unknown, label: string): number {
-  const index = integer(value)
-  if (index === undefined) throw new TypeError(`[SixbAnthropic] ${label} index is invalid.`)
-  return index
 }
 
 function date(value: string): string {

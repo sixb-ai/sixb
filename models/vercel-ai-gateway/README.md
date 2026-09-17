@@ -4,6 +4,9 @@ Use [Vercel AI Gateway](https://vercel.com/docs/ai-gateway) models in Sixb.
 
 ## Quick start
 
+Responses serialization and stream/replay handling use Sixb's internal `@sixb/model-protocols`
+package. Gateway owns authentication, catalog metadata, request/caching policy, routing, and pricing.
+
 ```ts
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
 
