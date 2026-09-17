@@ -335,8 +335,12 @@ function partitionInputUsage(usage: ModelUsage, rateCard: LanguageModelRateCard)
     ...(rateCard.cacheReadInput === undefined ? {} : { cacheRead }),
     ...(hasSpecificWrites
       ? {
-          cacheWrite5m: usage.cacheWrite5mInputTokens ?? 0,
-          cacheWrite1h: usage.cacheWrite1hInputTokens ?? 0,
+          ...(rateCard.cacheWriteInput5m !== undefined || rateCard.cacheWriteInput !== undefined
+            ? { cacheWrite5m: usage.cacheWrite5mInputTokens ?? 0 }
+            : {}),
+          ...(rateCard.cacheWriteInput1h !== undefined || rateCard.cacheWriteInput !== undefined
+            ? { cacheWrite1h: usage.cacheWrite1hInputTokens ?? 0 }
+            : {}),
         }
       : rateCard.cacheWriteInput === undefined
         ? {}

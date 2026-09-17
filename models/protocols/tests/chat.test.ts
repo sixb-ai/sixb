@@ -165,6 +165,32 @@ test("assembles interleaved tool arguments and fragmented names using stable ind
   })
 })
 
+// Captured Foundry Chat artifact: a separate '\"\"' delta after a complete object.
+// Regression proof: remove the terminator guard in chat/stream.ts. The first cases
+// emit invalid concatenated JSON. Real empty values and other corrupt input stay intact.
+test.each([
+  [["{}", '""'], "{}"],
+  [['{"nested":{}}', '""'], '{"nested":{}}'],
+  [['{"value":', '""', "}"], '{"value":""}'],
+  [["[]", '""'], '[]""'],
+  [["{}", '"unexpected"'], '{}"unexpected"'],
+  [['{"broken":', '""'], '{"broken":""'],
+] as const)("only ignores empty-string terminators after complete objects (%j)", async (deltas, input) => {
+  const result = await events([
+    chunk({
+      tool_calls: [
+        { index: 0, id: "t", type: "function", function: { name: "lookup", arguments: "" } },
+      ],
+    }),
+    ...deltas.map((arguments_) =>
+      chunk({ tool_calls: [{ index: 0, function: { arguments: arguments_ } }] })
+    ),
+    chunk({}, "tool_calls"),
+    "[DONE]",
+  ])
+  expect(result.find((event) => event.type === "tool-call")).toMatchObject({ input })
+})
+
 test.each([
   "length",
   "content_filter",
