@@ -69,6 +69,31 @@ Cleanup attempts each resource independently, deletes the invoice, and leaves bo
 The exclusive journal records request IDs before operations and returned entity IDs for recovery;
 inspect it after any interruption. This mode uses only public connector methods for writes.
 
+Remaining resource writes have a separate suite:
+
+```sh
+QUICKBOOKS_LIVE=remaining-writes QUICKBOOKS_JOURNAL=.local/qb-final-unique bun --env-file=.env.test test ./connectors/quickbooks/tests/remaining-writes.e2e.ts
+```
+
+It runs three bounded tests:
+- Receivables/payables: payment application/unapplication and receipts, credit memo update/send,
+  bill and vendor-credit updates, check and card bill payments, voids and deletions.
+- Reference maintenance: an account; service, non-inventory and inventory items; day-count and
+  date-driven terms. Exercises updates, activation and cleanup. Inventory adjustments use zero cost
+  and return quantity to zero. Category wire contracts are deterministic-only because the provider
+  does not expose category deactivation; the live suite does not leave a permanent test category.
+- Company settings: temporarily changes the company name and report basis, then restores them.
+  Preference updates send only the report basis with `sparse: true`; the test compares all preference
+  settings after restoration. Original settings and request IDs are journalled before mutation so
+  an interrupted run can be reconciled. Sales-form preference writes are excluded after live
+  testing exposed provider-side clearing of the default customer message.
+
+The journal prefix produces `.transactions.json`, `.references.json`, and `.settings.json` files;
+none may already exist. Cleanup executes in reverse dependency order and attempts every registered
+cleanup even if another fails. Transactions are deleted; reference records remain inactive.
+Run against an otherwise idle sandbox. `QUICKBOOKS_SEND_TO` has the same meaning as in `writes` mode;
+successful API receipt sending does not establish inbox delivery.
+
 The recorded local verification in the package README describes additional live CDC, transaction,
 and webhook experiments. It is evidence of that run, not a guarantee about every company or locale.
 
@@ -82,3 +107,9 @@ including both send variants. The journal confirmed invoice deletion and both co
 Deterministic coverage includes the hard no-retry gate under custom policies, HTTP/transport
 failures, malformed responses, payload validation and provider wire contracts. Removing the gate
 was verified to fail the regression test by observing three POSTs instead of one.
+
+The final `remaining-writes` suite passed on 2026-09-17 UTC (three tests, 72 assertions, ~54 seconds).
+All final-suite cleanup markers were complete. Earlier diagnostic runs exposed an inventory income
+account subtype requirement, a required due-date rule on term edits, HTTP 200 preference faults,
+and the sales-form preference limitation documented in the package README. The Term and Preferences
+guards were each removed temporarily and the regression test failed before they were restored.

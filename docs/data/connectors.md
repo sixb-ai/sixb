@@ -503,7 +503,7 @@ to `defineConnector`, and most ship a matching webhook helper for the [Webhooks]
 | `@sixb/connector-pandadoc` | `pandadoc(...)` | PandaDoc documents and e-signatures | `pandaDocEventsWebhook` |
 | `@sixb/connector-companycam` | `companycam(...)` | CompanyCam jobsite photos | `companyCamEventsWebhook` |
 | `@sixb/connector-pennylane` | `pennylane(...)` | Pennylane quotes, products, customers | — |
-| `@sixb/connector-quickbooks` | `quickbooks(...)` | QuickBooks Online reads, customer/vendor/invoice writes, and CDC (managed OAuth) | Verified CloudEvents |
+| `@sixb/connector-quickbooks` | `quickbooks(...)` | QuickBooks Online accounting reads/writes, receipt sending, and CDC (managed OAuth) | Verified CloudEvents |
 | `@sixb/connector-mercury` | `mercury(...)` | Mercury banking, transactions, invoicing | `mercuryEventsWebhook` |
 | `@sixb/connector-ace-iot` | `aceIot(...)` | ACE IoT sites, BACnet points, gateways, timeseries | — |
 | `@sixb/connector-unipile` | `unipile(...)` | Unipile messaging and LinkedIn outreach | `unipileEventsWebhook` |

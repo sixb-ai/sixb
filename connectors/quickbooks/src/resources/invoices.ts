@@ -11,6 +11,7 @@ import type {
 } from "../types/writes"
 import { nonEmpty } from "../validation"
 import { createInput, type QuickBooksWriteHttp, revision, writeEntity } from "../write"
+import { salesLines } from "../write-validation"
 
 export interface QuickBooksInvoicesResource {
   create(
@@ -38,13 +39,13 @@ export function createInvoicesResource(http: QuickBooksWriteHttp): QuickBooksInv
     async create(input, options) {
       createInput(input)
       nonEmpty(input.CustomerRef?.value, "CustomerRef.value")
-      validateLines(input.Line)
+      salesLines(input.Line)
       return writeEntity(http, "Invoice", "invoice", input, options)
     },
     async update(input, options) {
       const identity = revision(input)
       if (input.CustomerRef !== undefined) nonEmpty(input.CustomerRef.value, "CustomerRef.value")
-      if (input.Line !== undefined) validateLines(input.Line)
+      if (input.Line !== undefined) salesLines(input.Line)
       return writeEntity(
         http,
         "Invoice",
@@ -78,16 +79,4 @@ export function createInvoicesResource(http: QuickBooksWriteHttp): QuickBooksInv
     listAll: (options) => listAll(resource.list, options),
   }
   return resource
-}
-
-function validateLines(lines: QuickBooksInvoiceCreate["Line"]) {
-  if (!Array.isArray(lines) || lines.length === 0)
-    throw new Error("[SixbQuickBooks] Line must be a non-empty array.")
-  for (const line of lines) {
-    if (line.DetailType === "SalesItemLineDetail") {
-      nonEmpty(line.SalesItemLineDetail?.ItemRef?.value, "Line.SalesItemLineDetail.ItemRef.value")
-      if (!Number.isFinite(line.Amount))
-        throw new Error("[SixbQuickBooks] Sales item Line.Amount must be finite.")
-    }
-  }
 }
