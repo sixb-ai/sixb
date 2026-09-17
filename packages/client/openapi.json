@@ -20770,6 +20770,16 @@
             }
           },
           {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
+            }
+          },
+          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -20860,6 +20870,16 @@
             "schema": {
               "type": "string",
               "minLength": 1
+            }
+          },
+          {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {
@@ -20983,6 +21003,16 @@
             }
           },
           {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
+            }
+          },
+          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -21082,6 +21112,16 @@
             "schema": {
               "type": "string",
               "minLength": 1
+            }
+          },
+          {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {
@@ -25087,6 +25127,16 @@
             }
           },
           {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
+            }
+          },
+          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -25178,6 +25228,16 @@
             "schema": {
               "type": "string",
               "minLength": 1
+            }
+          },
+          {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {
@@ -27669,6 +27729,16 @@
             }
           },
           {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
+            }
+          },
+          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -27759,6 +27829,16 @@
             "schema": {
               "type": "string",
               "minLength": 1
+            }
+          },
+          {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {
@@ -30204,6 +30284,16 @@
             }
           },
           {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
+            }
+          },
+          {
             "name": "path",
             "in": "query",
             "required": true,
@@ -30302,6 +30392,16 @@
             "schema": {
               "type": "string",
               "minLength": 1
+            }
+          },
+          {
+            "name": "audience",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": ["atlas", "app"],
+              "description": "Session audience for file navigation without Origin; must match Origin when present"
             }
           },
           {

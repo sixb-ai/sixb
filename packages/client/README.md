@@ -89,6 +89,32 @@ URL. Unchanged references keep the same URL; content and metadata edits change i
 Use `disposition: "attachment"` for downloads. The version query is a cache key, not
 a historical-file selector; the server still resolves and authorizes the current property.
 
+For separate app/API origins, select the app session explicitly for previews and downloads:
+
+```tsx
+const url = objectFileContentUrl({
+  objectTypeId: "DocumentAttachment",
+  objectId: attachment.primaryId,
+  pathSegments: ["file"],
+  fileRef: attachment.properties.file,
+  audience: "app",
+  disposition: "inline", // use "attachment" for a download link
+})
+return <iframe title="Preview" src={url} />
+```
+
+Configure the client base URL to the API and map the app origin to `audience: "app"`
+in the server's `browser.allowedOrigins`. The URL selects that audience's existing
+session cookie; it contains no credentials and grants no additional access. Without
+`audience`, requests without `Origin` still use `browser.apiOriginAudience` (default
+`"atlas"`). When `Origin` is present, it must agree with the selected audience.
+Object/file authorization, streaming, byte ranges, and conditional requests still apply.
+
+The browser must send the API's session cookie. Sixb uses `SameSite=Strict`, so direct
+embedding supports same-site HTTPS origins such as `app.example.com` and
+`api.example.com`; unrelated sites require a same-site API deployment/proxy. This
+option does not bypass cookie restrictions or attach SDK authorization headers.
+
 ### React Query hooks
 
 ```tsx
