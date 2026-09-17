@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  type AuthSessionAudience,
   can,
   defineGroup,
   defineObjectType,
@@ -96,17 +97,21 @@ async function createObjectFileApi(options: { readonly auth?: boolean } = {}) {
   }
 }
 
-async function seedSession(storage: InMemoryStorage, groupIds: readonly string[]) {
-  const credential = createSessionCredential("ses_file_viewer")
+async function seedSession(
+  storage: InMemoryStorage,
+  groupIds: readonly string[],
+  audience: AuthSessionAudience = "atlas"
+) {
+  const credential = createSessionCredential(`ses_file_viewer_${audience}`)
   await storage.auth.users.create({
-    id: "usr_file_viewer",
+    id: `usr_file_viewer_${audience}`,
     projectId: "test-project",
-    email: "viewer@example.com",
+    email: `${audience}@example.com`,
   })
   for (const groupId of groupIds) {
     await storage.auth.groupMemberships.upsert({
       projectId: "test-project",
-      userId: "usr_file_viewer",
+      userId: `usr_file_viewer_${audience}`,
       groupId,
       source: "manual",
     })
@@ -114,15 +119,15 @@ async function seedSession(storage: InMemoryStorage, groupIds: readonly string[]
   await storage.auth.sessions.create({
     id: credential.sessionId,
     projectId: "test-project",
-    userId: "usr_file_viewer",
+    userId: `usr_file_viewer_${audience}`,
     strategyId: "test",
-    audience: "atlas",
+    audience,
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-06-30T12:00:00.000Z"),
     expiresAt: new Date("2099-06-30T12:00:00.000Z"),
   })
 
-  return { cookie: `sixb_session=${credential.cookieValue}` }
+  return { cookie: `sixb_session${audience === "app" ? "_app" : ""}=${credential.cookieValue}` }
 }
 
 function contentRequest(
@@ -136,6 +141,128 @@ function contentRequest(
 }
 
 describe("object file content routes", () => {
+  // Regression for #606: remove resolveFileNavigationAudience from browser-origin.ts;
+  // the app-only GET/HEAD requests below must fail with 401 instead of streaming bytes.
+  test("selects only the requested session for file navigation without Origin", async () => {
+    const { app, storage } = await createObjectFileApi({ auth: true })
+    const appSession = await seedSession(storage, ["document-viewers"], "app")
+    const atlasSession = await seedSession(storage, [], "atlas")
+    const path = "/api/objects/document/doc-1/files/content?path=/properties/pdf"
+    for (const method of ["GET", "HEAD"]) {
+      for (const disposition of ["inline", "attachment"]) {
+        for (const cookie of [appSession.cookie, `${appSession.cookie}; ${atlasSession.cookie}`]) {
+          const response = await app.fetch(
+            contentRequest(`${path}&audience=app&disposition=${disposition}`, {
+              method,
+              headers: { cookie, range: "bytes=0-3" },
+            })
+          )
+          expect(response.status).toBe(206)
+          expect(response.headers.get("content-range")).toBe("bytes 0-3/9")
+          expect(response.headers.get("content-disposition")).toContain(disposition)
+          expect(await response.text()).toBe(method === "HEAD" ? "" : "%PDF")
+        }
+        for (const cookie of ["", atlasSession.cookie]) {
+          const response = await app.fetch(
+            contentRequest(`${path}&audience=app&disposition=${disposition}`, {
+              method,
+              headers: { cookie },
+            })
+          )
+          expect(response.status).toBe(401)
+        }
+      }
+    }
+    expect((await app.fetch(contentRequest(path, { headers: appSession }))).status).toBe(401)
+    expect(
+      (
+        await app.fetch(
+          contentRequest(`${path}&audience=atlas`, {
+            headers: appSession,
+          })
+        )
+      ).status
+    ).toBe(401)
+    // Both-session browsers must use the selected identity's grants, with no fallback.
+    expect(
+      (
+        await app.fetch(
+          contentRequest(`${path}&audience=atlas`, {
+            headers: { cookie: `${appSession.cookie}; ${atlasSession.cookie}` },
+          })
+        )
+      ).status
+    ).toBe(404)
+    for (const target of [
+      "/api/objects/invoice/inv-1/files/content?path=/properties/pdf",
+      "/api/objects/document/doc-1/files/content?path=/properties/missing",
+    ]) {
+      expect(
+        (
+          await app.fetch(
+            contentRequest(`${target}&audience=app`, {
+              headers: { ...appSession, "if-none-match": "*" },
+            })
+          )
+        ).status
+      ).toBe(404)
+    }
+  })
+
+  test("keeps Origin authoritative and rejects malformed file audiences", async () => {
+    const { app, storage } = await createObjectFileApi({ auth: true })
+    const session = await seedSession(storage, ["document-viewers"], "app")
+    const path = "/api/objects/document/doc-1/files/content?path=/properties/pdf"
+    for (const suffix of ["&audience=app", ""]) {
+      expect(
+        (
+          await app.fetch(
+            contentRequest(`${path}${suffix}`, {
+              headers: { ...session, origin: "http://app.localhost" },
+            })
+          )
+        ).status
+      ).toBe(200)
+    }
+    for (const origin of [
+      "http://atlas.localhost",
+      "http://api.localhost",
+      "https://evil.test",
+      "null",
+    ]) {
+      expect(
+        (
+          await app.fetch(
+            contentRequest(`${path}&audience=app`, {
+              headers: { ...session, origin },
+            })
+          )
+        ).status
+      ).toBe(403)
+    }
+    for (const query of ["audience=", "audience=unknown", "audience=app&audience=atlas"]) {
+      expect([403, 422]).toContain(
+        (
+          await app.fetch(
+            contentRequest(`${path}&${query}`, {
+              headers: session,
+            })
+          )
+        ).status
+      )
+    }
+    // A file selector cannot change authentication for unrelated API reads.
+    expect(
+      (
+        await app.fetch(
+          contentRequest("/api/objects/document/doc-1?audience=app", {
+            headers: session,
+          })
+        )
+      ).status
+    ).toBe(401)
+  })
+
   // Regression for #527: restoring the immutable cache policy or removing conditional
   // handling in src/files/content.ts must make these cache tests fail.
   test("revalidates cached content against the current property", async () => {
@@ -388,6 +515,17 @@ describe("object file content routes", () => {
     )
     expect(allowed.status).toBe(200)
     expect(await allowed.text()).toBe("%PDF test")
+
+    const explicitAtlas = await app.fetch(
+      contentRequest(
+        "/api/objects/document/doc-1/files/content?path=/properties/pdf&audience=atlas",
+        {
+          headers: viewer,
+        }
+      )
+    )
+    expect(explicitAtlas.status).toBe(200)
+    expect(await explicitAtlas.text()).toBe("%PDF test")
 
     const forbidden = await app.fetch(
       contentRequest("/api/objects/invoice/inv-1/files/content?path=/properties/pdf", {

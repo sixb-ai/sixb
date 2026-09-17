@@ -37,6 +37,16 @@ Each configured audience identifies the browser application for exactly one orig
 origins are shown as invitation destinations and participate in `can.access(applications.atlas)` or
 `can.access(applications.app)` authorization.
 
+File-content `GET`/`HEAD` routes accept `?audience=app` or `?audience=atlas` for
+browser navigations that omit `Origin`. Use `objectFileContentUrl({ ..., audience: "app" })`
+in a separate app. The audience must be configured in `allowedOrigins` or be the
+`apiOriginAudience`; an explicit `Origin` must match it. The server authenticates only
+the selected audience and still checks application and resource access. Omitting the
+selector preserves the API audience default (`atlas`). This selector applies only to
+file-content reads, including object, action/workflow run, and agent message files.
+It does not change authentication for other routes. API cookies must reach the request;
+with Sixb's `SameSite=Strict` cookies, use same-site app/API origins for embedding.
+
 ## API Routes
 
 ### REST Endpoints
