@@ -34,6 +34,21 @@ function serializeSearch(
     title: search.title,
     defaultText: search.defaultText ? [...search.defaultText] : undefined,
     exact: search.exact ? [...search.exact] : undefined,
+    vectors: search.vectors
+      ? Object.fromEntries(
+          Object.entries(search.vectors).map(([name, profile]) => [
+            name,
+            {
+              source: [...profile.source],
+              model: {
+                providerId: profile.model.providerId,
+                modelId: profile.model.modelId,
+                dimensions: profile.model.definition.dimensions,
+              },
+            },
+          ])
+        )
+      : undefined,
     vector: search.vector
       ? {
           property: search.vector.property,

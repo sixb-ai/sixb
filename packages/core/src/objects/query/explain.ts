@@ -119,8 +119,13 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
       return {
         path,
         kind: query.kind,
-        summary: `vector ${query.propertyId} k=${query.k}`,
-        details: { propertyId: query.propertyId, dimensions: query.vector.length, k: query.k },
+        summary: `vector ${query.profile === undefined ? `property ${query.propertyId}` : `profile ${query.profile}`} k=${query.k}`,
+        details: {
+          profile: query.profile,
+          propertyId: query.propertyId,
+          dimensions: query.vector.length,
+          k: query.k,
+        },
         children: [buildExplainNode(query.input, `${path}.input`)],
       }
     case "traverse":

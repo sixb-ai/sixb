@@ -70,6 +70,26 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   })
 
   const models = options.models === undefined ? undefined : createModelCatalog(options.models)
+  for (const type of ontology.listObjectTypes()) {
+    for (const [name, profile] of Object.entries(type.search?.vectors ?? {})) {
+      const registered = models?.embedding.getByRef({
+        provider: profile.model.providerId,
+        modelId: profile.model.modelId,
+      })
+      if (
+        !registered ||
+        registered.model.definition.dimensions !== profile.model.definition.dimensions
+      ) {
+        throw new Error(
+          "[Sixb] Vector profile " +
+            type.id +
+            "." +
+            name +
+            " requires its model in models.embedding with matching dimensions."
+        )
+      }
+    }
+  }
   const tools = createAgentToolCatalog(options.tools)
   const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])
 
@@ -147,7 +167,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     workflowIds: new Set(workflowsById.keys()),
     syncIds: new Set(syncsById.keys()),
     pipelineIds: new Set(pipelinesById.keys()),
-    agentAvailable: models !== undefined,
+    agentAvailable: models?.language !== undefined,
     connectorIds: new Set(connectorsById.keys()),
     shareIds: new Set(sharesById.keys()),
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),

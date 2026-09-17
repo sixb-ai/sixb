@@ -42,6 +42,9 @@
         "required": ["primaryId", "objectTypeId", "properties", "createdAt", "updatedAt"],
         "additionalProperties": false,
         "properties": {
+          "score": {
+            "type": "number"
+          },
           "primaryId": {
             "type": "string"
           },
@@ -519,6 +522,34 @@
                 }
               },
               "propertyId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "k": {
+                "type": "integer",
+                "minimum": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "vector", "profile", "k"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["vector"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "vector": {
+                "type": "array",
+                "items": {
+                  "type": "number"
+                }
+              },
+              "profile": {
                 "type": "string",
                 "minLength": 1
               },
@@ -23832,6 +23863,40 @@
                               "type": "string"
                             }
                           },
+                          "vectors": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "source": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string"
+                                  }
+                                },
+                                "model": {
+                                  "type": "object",
+                                  "properties": {
+                                    "providerId": {
+                                      "type": "string"
+                                    },
+                                    "modelId": {
+                                      "type": "string"
+                                    },
+                                    "dimensions": {
+                                      "type": "integer",
+                                      "exclusiveMinimum": true,
+                                      "minimum": 0
+                                    }
+                                  },
+                                  "required": ["providerId", "modelId", "dimensions"],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "required": ["source", "model"],
+                              "additionalProperties": false
+                            }
+                          },
                           "vector": {
                             "type": "object",
                             "properties": {
@@ -24144,6 +24209,40 @@
                           "type": "array",
                           "items": {
                             "type": "string"
+                          }
+                        },
+                        "vectors": {
+                          "type": "object",
+                          "additionalProperties": {
+                            "type": "object",
+                            "properties": {
+                              "source": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string"
+                                }
+                              },
+                              "model": {
+                                "type": "object",
+                                "properties": {
+                                  "providerId": {
+                                    "type": "string"
+                                  },
+                                  "modelId": {
+                                    "type": "string"
+                                  },
+                                  "dimensions": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": true,
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": ["providerId", "modelId", "dimensions"],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["source", "model"],
+                            "additionalProperties": false
                           }
                         },
                         "vector": {
@@ -24572,6 +24671,9 @@
                       "items": {
                         "type": "object",
                         "properties": {
+                          "score": {
+                            "type": "number"
+                          },
                           "primaryId": {
                             "type": "string"
                           },
@@ -25251,6 +25353,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "score": {
+                      "type": "number"
+                    },
                     "primaryId": {
                       "type": "string"
                     },
@@ -25377,6 +25482,9 @@
                 "schema": {
                   "type": "object",
                   "properties": {
+                    "score": {
+                      "type": "number"
+                    },
                     "primaryId": {
                       "type": "string"
                     },

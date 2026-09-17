@@ -269,6 +269,8 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
   })
 
   if (input.mode === "continue") {
+    if ("vectorWrites" in input)
+      throw new MaterializationValidationError("Vector writes require an atomic commit.")
     return Object.freeze({
       mode: "continue",
       source: Object.freeze({
@@ -293,12 +295,21 @@ export function normalizeOntologyEditCommit(input: OntologyEditCommit): Ontology
           kind: "runtime" as const,
           requestId: normalizeNonblank(input.source.requestId, "Runtime request id"),
         })
+  if (input.vectorWrites?.length && (operations.length || input.source.kind !== "runtime")) {
+    throw new MaterializationValidationError(
+      "Vector writes require a dedicated atomic runtime commit."
+    )
+  }
+  if (input.vectorWrites !== undefined) assertJsonValue(input.vectorWrites, "Vector writes")
   const expectedObjects = input.expectedObjects.map(normalizeExpectedObject)
   const expectedLinks = input.expectedLinks.map(normalizeExpectedLink)
   const expectedLinkScopes = input.expectedLinkScopes.map(normalizeExpectedLinkScope)
 
   return Object.freeze({
     mode: "atomic",
+    ...(input.vectorWrites === undefined
+      ? {}
+      : { vectorWrites: structuredClone(input.vectorWrites) }),
     source,
     operations: Object.freeze(operations),
     expectedObjects: deduplicateExpectations(

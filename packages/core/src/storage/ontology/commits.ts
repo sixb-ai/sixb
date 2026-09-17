@@ -68,6 +68,7 @@ export interface EditOntologyCommitIntent {
   readonly kind: "edit"
   readonly mode: "atomic" | "continue"
   readonly operationCount: number
+  readonly vectorWriteCount?: number
 }
 
 export interface ProjectionOntologyCommitIntent {

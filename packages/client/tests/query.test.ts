@@ -59,6 +59,51 @@ const row = {
 }
 
 describe("objects().query()", () => {
+  test("named vector profiles survive the HTTP client with their score", async () => {
+    const VectorProject = defineObjectType({
+      ...Project,
+      search: {
+        vectors: {
+          content: {
+            source: ["name"],
+            model: {
+              providerId: "test",
+              modelId: "vector",
+              definition: {
+                kind: "embedding",
+                providerId: "test",
+                modelId: "vector",
+                dimensions: 2,
+              },
+            },
+          },
+        },
+      },
+    })
+    const { client, calls } = createTestClient(() =>
+      Response.json({
+        objects: [{ ...row, score: 0.75 }],
+        total: 1,
+        hasMore: false,
+        plan: emptyPlan,
+      })
+    )
+    const result = await objects(VectorProject, { client })
+      .query()
+      .vector("content", [1, 0], { k: 5 })
+      .list()
+    expect(calls[0]?.body).toEqual({
+      query: {
+        kind: "vector",
+        input: { kind: "start", objectTypeId: "Project" },
+        profile: "content",
+        vector: [1, 0],
+        k: 5,
+      },
+    })
+    expect(result.objects[0]?.score).toBe(0.75)
+  })
+
   test("list() posts the normalized IR and revives row dates", async () => {
     const { client, calls } = createTestClient(() =>
       Response.json({ objects: [row], hasMore: false, total: 1, plan: emptyPlan })

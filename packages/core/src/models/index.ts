@@ -1,6 +1,8 @@
 export type { JsonObject, JsonPrimitive, JsonValue } from "../json"
 export { assertJsonObject, assertJsonValue, isJsonObject, isJsonValue } from "../json"
 export type {
+  EmbeddingModelCatalog,
+  EmbeddingModelEntry,
   LanguageModelCatalog,
   LanguageModelDefinitionCatalog,
   LanguageModelEntry,
@@ -8,6 +10,7 @@ export type {
   ModelCatalog,
   ModelCatalogInput,
   ModelDefinitionCatalog,
+  ModelRef,
 } from "./catalog"
 export { createModelCatalog } from "./catalog"
 export type {
@@ -16,6 +19,13 @@ export type {
   ModelKind,
 } from "./definitions"
 export { defineLanguageModel } from "./definitions"
+export type {
+  EmbeddingModel,
+  EmbeddingModelDefinition,
+  EmbeddingModelRef,
+  EmbeddingModelRequest,
+  EmbeddingModelResult,
+} from "./embedding-model"
 export {
   ModelCatalogUnavailableError,
   ModelProviderError,

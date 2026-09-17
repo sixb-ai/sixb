@@ -49,6 +49,16 @@ export function createMaterializerContext(input: {
       "Materializer Ontology does not match the Ontology pinned by its projection registry."
     )
   }
+  if (
+    !input.storage.ontology.vectors &&
+    input.ontology
+      .listObjectTypes()
+      .some((type) => Object.keys(type.search?.vectors ?? {}).length > 0)
+  ) {
+    throw new MaterializationValidationError(
+      "Storage does not support transactional vector profiles."
+    )
+  }
   const dependencies = input.dependencies ?? {}
   const maxSerializationRetries = dependencies.maxSerializationRetries ?? 2
   if (!Number.isSafeInteger(maxSerializationRetries) || maxSerializationRetries < 0) {

@@ -9,6 +9,7 @@ export type ErrorResponse = {
 }
 
 export type ObjectQueryObject = {
+  score?: number
   primaryId: string
   objectTypeId: string
   properties: {
@@ -177,6 +178,13 @@ export type ObjectQuery =
       input: ObjectQuery
       vector: Array<number>
       propertyId: string
+      k: number
+    }
+  | {
+      kind: "vector"
+      input: ObjectQuery
+      vector: Array<number>
+      profile: string
       k: number
     }
   | {
@@ -7973,6 +7981,16 @@ export type ListObjectTypesResponses = {
       title?: string
       defaultText?: Array<string>
       exact?: Array<string>
+      vectors?: {
+        [key: string]: {
+          source: Array<string>
+          model: {
+            providerId: string
+            modelId: string
+            dimensions: number
+          }
+        }
+      }
       vector?: {
         property: string
         source: Array<string>
@@ -8080,6 +8098,16 @@ export type GetObjectTypeResponses = {
       title?: string
       defaultText?: Array<string>
       exact?: Array<string>
+      vectors?: {
+        [key: string]: {
+          source: Array<string>
+          model: {
+            providerId: string
+            modelId: string
+            dimensions: number
+          }
+        }
+      }
       vector?: {
         property: string
         source: Array<string>
@@ -8218,6 +8246,7 @@ export type ListObjectsResponses = {
    */
   200: {
     objects: Array<{
+      score?: number
       primaryId: string
       objectTypeId: string
       properties: {
@@ -8518,6 +8547,7 @@ export type GetObjectResponses = {
    * Response for status 200
    */
   200: {
+    score?: number
     primaryId: string
     objectTypeId: string
     properties: {
@@ -8572,6 +8602,7 @@ export type UpsertObjectResponses = {
    * Response for status 200
    */
   200: {
+    score?: number
     primaryId: string
     objectTypeId: string
     properties: {

@@ -814,6 +814,19 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     return { commit: structuredClone(record) }
   }
 
+  /** @internal Share the existing transaction/session fence with derived vector writes. */
+  assertVectorSession(session: MaterializationSession, projectId: string, commitId?: string): void {
+    const active = this.requireSession(session)
+    if (
+      active.header.commit.projectId !== projectId ||
+      (commitId !== undefined && active.header.commit.id !== commitId)
+    ) {
+      throw new MaterializationValidationError(
+        "Vector mutation does not belong to this materialization session."
+      )
+    }
+  }
+
   private requireSession(session: MaterializationSession): SessionState {
     const value = this.sessions.get(session.providerToken)
     if (

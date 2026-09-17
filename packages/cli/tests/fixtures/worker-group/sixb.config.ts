@@ -190,7 +190,7 @@ export const sixb = new SixbHost({
         stream: async () => {
           throw new Error("Unused fixture model")
         },
-      } satisfies ModelCatalogInput["language"][number],
+      } satisfies NonNullable<ModelCatalogInput["language"]>[number],
     ],
   },
   sandboxes,

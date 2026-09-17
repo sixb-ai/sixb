@@ -102,7 +102,7 @@ export function createAgentRuntime(
 
   const getAgent = (): AgentDescriptor | null => {
     if (authority.type === "denied" || authority.type === "delegated") return null
-    const model = models?.language.default
+    const model = models?.language?.default
     if (!model || !allowed()) return null
     return {
       name: "Sixb",

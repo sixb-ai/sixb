@@ -180,6 +180,44 @@ describe("language generation", () => {
     ).toBe("Hello")
   })
 
+  test("embedding-only catalogs reject language generation before inference", async () => {
+    const { model, requests } = fakeModel()
+    const host = new SixbHost({
+      id: "embedding-only",
+      ontology: [],
+      ...createTestRuntimeDeps(),
+      models: {
+        embedding: [
+          {
+            providerId: "test",
+            modelId: "embedding",
+            definition: {
+              kind: "embedding",
+              providerId: "test",
+              modelId: "embedding",
+              dimensions: 2,
+            },
+            async embed({ texts }) {
+              return { vectors: texts.map(() => [1, 0]) }
+            },
+          },
+        ],
+      },
+    })
+    const sixb = bindRequestExecution(host, {
+      request: new Request("http://localhost/generate"),
+      authorization: { type: "disabled" },
+    })
+    // Regression proof: remove the optional language access in model selection.
+    await expect(sixb.models.language.generate({ prompt: "Hi" })).rejects.toThrow(
+      "Configure models.language"
+    )
+    await expect(sixb.models.language.generate({ prompt: "Hi", model })).rejects.toThrow(
+      "not configured"
+    )
+    expect(requests).toHaveLength(0)
+  })
+
   test("rejects missing models, unknown overrides, and conflicting inputs before inference", async () => {
     const known = fakeModel()
     const unknown = fakeModel({ modelId: "unknown" })

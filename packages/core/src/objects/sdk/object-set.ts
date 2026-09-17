@@ -73,6 +73,7 @@ export function createObjectSet<
   })
 
   const resolvedCtx: ExecutionObjectContext = {
+    embeddingModels: params.embeddingModels,
     projectId,
     broker,
     ontology,

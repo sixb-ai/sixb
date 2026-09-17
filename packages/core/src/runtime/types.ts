@@ -16,6 +16,7 @@ import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events"
 import type { RuntimeAuthorization } from "../execution"
 import type { AuthorizedObjectReader } from "../execution/authorized-object-reader"
+import type { EmbeddingModelCatalog } from "../models"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -28,6 +29,7 @@ import type {
   ObjectQuerySortDirection,
   ValidatedObjectQuery,
 } from "../objects/query"
+import type { ObjectVectorHandle, VectorProfileName } from "../objects/vectors/types"
 import type { ObjectLinkTargetType, ObjectRef, ObjectType, Property, ValueType } from "../ontology"
 import type {
   InferObjectProperties,
@@ -49,6 +51,7 @@ import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
  * registered runtime authority.
  */
 export interface SixbHostContext {
+  readonly embeddingModels?: EmbeddingModelCatalog
   readonly projectId: string
   readonly broker: Broker
   readonly ontology: OntologyRegistry
@@ -716,7 +719,9 @@ export type ObjectQueryRow<
   TValueTypes extends readonly ValueType[],
   TLinks,
 > = TObjectType extends ObjectTypeWithPropertyTokens
-  ? ExpandedRowForSource<TObjectType, TValueTypes, ExpansionLinksForSource<TLinks, TObjectType>>
+  ? ExpandedRowForSource<TObjectType, TValueTypes, ExpansionLinksForSource<TLinks, TObjectType>> & {
+      score?: number
+    }
   : never
 
 /**
@@ -846,7 +851,7 @@ export interface ObjectQueryBuilder<
 
   /** Search a vector property at the current object type. */
   vector(
-    property: ObjectSetQueryPropertyToken<TObjectType>,
+    property: ObjectSetQueryPropertyToken<TObjectType> | VectorProfileName<TObjectType>,
     vector: readonly number[],
     options: { k: number }
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
@@ -969,6 +974,7 @@ export interface ObjectByIdHandle<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TValueTypes extends readonly ValueType[],
 > {
+  vector(profile: VectorProfileName<TObjectType>): ObjectVectorHandle
   /** Get the object at this id, or null if it doesn't exist. */
   get(): Promise<TwinObject<TObjectType, TValueTypes> | null>
 

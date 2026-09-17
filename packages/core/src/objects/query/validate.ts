@@ -9,6 +9,8 @@ import type {
 import { normalizeDecimalValue } from "../../ontology"
 import { formatUnknownObjectTypeMessage } from "../../ontology/errors"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
+import { MAX_VECTOR_K, normalizeVector, vectorConfiguration } from "../vectors/profile"
+import { hasVectorProfile, isVectorProfileQuery } from "../vectors/query"
 import { ObjectQueryValidationError } from "./errors"
 import type {
   ObjectExpansion,
@@ -18,6 +20,7 @@ import type {
   ObjectQueryResultShape,
   ObjectQuerySetOperation,
   ObjectQuerySortField,
+  ObjectQueryVector,
   QueryScalarKind,
 } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
@@ -172,6 +175,7 @@ export function validateObjectQueryWithAdmission(
 ): AdmittedObjectQuery {
   const normalized = options.normalize === false ? query : normalizeObjectQuery(query)
   const ctx = createValidationContext(options, admission)
+  validateVectorComposition(query, ctx)
   const validation = validateQueryNode(normalized, "$", ctx)
 
   if (ctx.issues.length > 0) {
@@ -194,6 +198,7 @@ export function collectObjectQueryValidationIssues(
 ): readonly ObjectQueryValidationIssue[] {
   const normalized = options.normalize === false ? query : normalizeObjectQuery(query)
   const ctx = createValidationContext(options, NOOP_QUERY_ADMISSION)
+  validateVectorComposition(query, ctx)
   validateQueryNode(normalized, "$", ctx)
   return ctx.issues
 }
@@ -203,6 +208,16 @@ export function resolveObjectQueryResultShape(
   options: ObjectQueryValidationOptions
 ): ObjectQueryResultShape {
   return validateObjectQuery(query, options).result
+}
+
+function validateVectorComposition(query: ObjectQuery, ctx: QueryValidationContext): void {
+  if (hasVectorProfile(query) && !isVectorProfileQuery(query))
+    ctx.issues.push({
+      path: "$",
+      code: "vector.composition",
+      message:
+        "Vector profiles support one top-k over one concrete type, with filters before ranking and optional limit/project after it.",
+    })
 }
 
 function createValidationContext(
@@ -312,9 +327,22 @@ function dispatchQueryNode(
     }
     case "vector": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
+      if (query.profile !== undefined) {
+        return {
+          result: input.result,
+          query: validateVectorProfileQuery(
+            { ...query, input: input.query },
+            input.result,
+            input.admissionState,
+            path,
+            ctx
+          ),
+          admissionState: input.admissionState,
+        }
+      }
       validateVectorQuery(
         query.vector,
-        query.propertyId,
+        query.propertyId ?? "",
         query.k,
         input.result,
         input.admissionState,
@@ -843,6 +871,61 @@ function validateTextQuery(
   }
 
   return fieldsByObjectType ? { fieldsByObjectType } : {}
+}
+
+function validateVectorProfileQuery(
+  query: ObjectQueryVector,
+  shape: ObjectQueryResultShape,
+  state: ObjectQueryAdmissionState,
+  path: string,
+  ctx: QueryValidationContext
+): ObjectQueryVector {
+  const types = getObjectTypesForResult(shape, ctx)
+  if (
+    types.length !== 1 ||
+    query.propertyId !== undefined ||
+    !Number.isSafeInteger(query.k) ||
+    query.k < 1 ||
+    query.k > MAX_VECTOR_K
+  ) {
+    addIssue(
+      ctx,
+      path,
+      "invalid_vector_profile_query",
+      `Vector search requires one type, one profile and k between 1 and ${MAX_VECTOR_K}`
+    )
+    return query
+  }
+  let input = query.input
+  while (input.kind === "filter") input = input.input
+  if (input.kind !== "start" || input.includeSubtypes)
+    addIssue(
+      ctx,
+      path,
+      "unsupported_vector_composition",
+      "Vector profile input must be a type with optional filters."
+    )
+  const objectType = types[0]!
+  const profile =
+    query.profile === undefined ? undefined : objectType.search?.vectors?.[query.profile]
+  if (!profile) {
+    addIssue(ctx, path, "unknown_vector_profile", `Unknown vector profile: ${query.profile}`)
+    return query
+  }
+  for (const propertyId of profile.source)
+    admitProperty(ctx, { state, propertyId, objectTypeId: objectType.id, use: "vector", path })
+  let values = query.vector
+  try {
+    values = normalizeVector(values, profile.model.definition.dimensions)
+  } catch (error) {
+    addIssue(ctx, path, "invalid_vector", error instanceof Error ? error.message : "Invalid vector")
+  }
+  return {
+    ...query,
+    vector: values,
+    source: [...profile.source],
+    configuration: vectorConfiguration(profile),
+  }
 }
 
 function validateVectorQuery(

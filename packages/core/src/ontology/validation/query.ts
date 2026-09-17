@@ -1,3 +1,4 @@
+import { assertEmbeddingModelRef } from "../../models/embedding-model"
 import type { ObjectType, Property, Schema, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
 
@@ -116,6 +117,27 @@ function validateObjectSearchMetadata(
   const search = objectType.search
   if (!search) return
 
+  for (const [name, profile] of Object.entries(search.vectors ?? {})) {
+    if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(name))
+      throw new OntologyValidationError(`[Sixb] Invalid vector profile name ${name}`)
+    assertEmbeddingModelRef(profile.model)
+    if (
+      !Array.isArray(profile.source) ||
+      profile.source.length === 0 ||
+      new Set(profile.source).size !== profile.source.length
+    ) {
+      throw new OntologyValidationError(
+        `[Sixb] Vector profile ${name} requires unique, nonempty source fields.`
+      )
+    }
+    for (const id of profile.source) {
+      const property = requireObjectProperty(typeId, objectType, id, `search.vectors.${name}`)
+      assertStaticSearchProfileProperty(typeId, property, `search.vectors.${name}`)
+      if (!isTextSearchableSchema(resolveQueryableSchema(property, typeId, valueTypesById))) {
+        throw new OntologyValidationError(`[Sixb] Vector source must be text: ${typeId}.${id}`)
+      }
+    }
+  }
   const primaryPropertyId = objectType.properties.find((property) => property.primary)?.id
 
   if (search.title) {
