@@ -34,6 +34,30 @@ query builder from `@sixb/client/query`, run action buttons with
 > by the CLI. Your ontology, datasets, workflows, and the rest stay in their own
 > top-level directories.
 
+## Public environment variables
+
+Prefix variables intended for browser use with `SIXB_PUBLIC_`:
+
+```dotenv
+SIXB_PUBLIC_GOOGLE_MAPS_API_KEY=your-browser-key
+```
+
+Read them through the app accessor, including at module scope:
+
+```ts
+import { publicEnv } from "@sixb/app"
+
+const key = publicEnv.SIXB_PUBLIC_GOOGLE_MAPS_API_KEY // string | undefined
+```
+
+Values are strings; missing variables return `undefined`. Only `SIXB_PUBLIC_*` variables are
+available. Outside the browser, `publicEnv` is empty.
+
+Works with `sixb dev` and `sixb app`. Restart the app server after changing values; no rebuild
+is required.
+
+**Public values are visible to users.** Never use `SIXB_PUBLIC_` for backend credentials or secrets.
+
 ## File-based routing
 
 Put your app in `app/`. Each `page.tsx` (or `page.ts`) becomes a route.
