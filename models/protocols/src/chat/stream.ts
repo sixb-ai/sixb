@@ -219,6 +219,10 @@ export async function* chatEvents(
               const value = fn[key]
               if (value === undefined || value === null) continue
               if (typeof value !== "string") throw error(`Chat tool ${key} must be a string.`)
+              // Some Chat backends append an empty-string terminator after an already
+              // complete object. It adds no arguments; don't turn {} into invalid {}"".
+              // Empty strings inside an unfinished object remain ordinary JSON deltas.
+              if (key === "arguments" && value === '""' && completeObject(tool.arguments)) continue
               tool[key] += value
               buffered += value.length
               if (buffered > 8 * 1024 * 1024)
@@ -236,6 +240,14 @@ export async function* chatEvents(
     }
   }
   throw error("Chat stream ended without [DONE].")
+}
+
+function completeObject(input: string): boolean {
+  try {
+    return object(JSON.parse(input)) !== undefined
+  } catch {
+    return false
+  }
 }
 
 function finishReason(reason: string): ModelFinishReason {

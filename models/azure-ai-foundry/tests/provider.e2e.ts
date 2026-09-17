@@ -546,6 +546,7 @@ live.skipIf(!deepseekReasoning)(
       definition: { capabilities: { localTools: true, reasoning: { efforts: ["low"] } } },
       metadata: { publisher: "DeepSeek", modelName: "DeepSeek-V4-Pro" },
       reasoningReplay: "tool-continuation",
+      profile: "deepseek",
     })
     let executions = 0
     const result = await runModelLoop({

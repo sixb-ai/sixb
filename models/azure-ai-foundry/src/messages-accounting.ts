@@ -1,13 +1,11 @@
-import {
-  defineModelRateCard,
-  estimateModelReservation,
-  type JsonObject,
-  type LanguageModelRateCard,
-  type ModelCostEstimator,
-  type ModelUsage,
-  rateModelCall,
+import type {
+  JsonObject,
+  LanguageModelRateCard,
+  ModelCostEstimator,
+  ModelUsage,
 } from "@sixb/core/models"
-import { object } from "./util"
+import { tokenEstimator } from "./accounting"
+import { counter, object } from "./util"
 
 /** Native Messages counters are additive; absent cache/thinking counters stay unknown. */
 export function foundryMessagesUsage(raw: JsonObject): ModelUsage {
@@ -44,27 +42,19 @@ export function foundryMessagesUsage(raw: JsonObject): ModelUsage {
 export function foundryMessagesEstimator(
   card: LanguageModelRateCard | undefined,
   request: JsonObject | undefined,
-  modelName?: string
+  modelName?: string,
+  modelVersion?: string,
+  aliases?: readonly string[]
 ): ModelCostEstimator {
-  const rateCard = card && defineModelRateCard(card)
-  const fixed = Object.keys(request ?? {}).every((key) =>
-    ["temperature", "top_p", "top_k", "metadata", "stop_sequences", "cache_control"].includes(key)
+  return tokenEstimator(
+    card,
+    request,
+    ["temperature", "top_p", "top_k", "metadata", "stop_sequences", "cache_control"],
+    tokenMeters,
+    modelName,
+    modelVersion,
+    aliases ?? (modelName ? [modelName] : undefined)
   )
-  return {
-    estimateReservation: (tokens) =>
-      fixed ? estimateModelReservation({ ...tokens, rateCard }) : undefined,
-    estimate: ({ usage, responseModelId, route }) => {
-      const actual = route?.modelId ?? responseModelId
-      // Foundry's Claude version 1/2 describes hosting, not a publisher response-model suffix.
-      if (!fixed || !tokenMeters(usage.raw) || (modelName && actual && actual !== modelName))
-        return { status: "unpriceable", reason: "missing-rate-card" }
-      return rateModelCall({ usage, rateCard })
-    },
-  }
-}
-
-function counter(value: unknown): number | undefined {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined
 }
 
 function tokenMeters(raw: JsonObject | undefined): boolean {

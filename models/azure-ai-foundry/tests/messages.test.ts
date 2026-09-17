@@ -7,9 +7,9 @@ import type {
   ModelMessage,
 } from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
-import { createAzureAIFoundry } from "../src"
 import { foundryMessagesEstimator, foundryMessagesUsage } from "../src/messages-accounting"
 import { messagesOutputSchema } from "../src/messages-schema"
+import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com"
 const schema: JsonObject = {
@@ -319,19 +319,17 @@ test("maps manual and adaptive thinking using declared model metadata", async ()
   await expect(
     model.stream(request({ reasoning: { budgetTokens: 1024 }, maxOutputTokens: 1024 }))
   ).rejects.toThrow("below maxOutputTokens")
-  await expect(model.stream(request({ reasoning: "xhigh" }))).rejects.toThrow(
-    "does not support effort"
-  )
+  await collect((await model.stream(request({ reasoning: "xhigh" }))).events)
   const future = provider.messages("future", { definition, thinkingMode: "adaptive" })
   await collect((await future.stream(request({ reasoning: "high" }))).events)
   await expect(
-    provider.messages("future", { definition }).stream(request({ reasoning: "high" }))
-  ).rejects.toThrow("adaptive-thinking")
+    provider
+      .messages("future", { definition, thinkingMode: "manual" })
+      .stream(request({ reasoning: "high" }))
+  ).rejects.toThrow("reasoning effort 'high' is not supported")
 })
 
-// Regression proof: remove the ADAPTIVE && !MANUAL check in reasoningRequest. An Opus 4.8
-// request then sends an unsupported manual budget even though the explicit capability allows it.
-test("enforces known model/hosting/auth restrictions even with optimistic explicit capabilities", async () => {
+test("explicit thinking mode restricts manual budgets without model-name rules", async () => {
   const provider = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
@@ -341,30 +339,11 @@ test("enforces known model/hosting/auth restrictions even with optimistic explic
   })
   const opus = provider.messages("production", {
     definition,
+    thinkingMode: "adaptive",
     metadata: { publisher: "Anthropic", modelName: "claude-opus-4-8", modelVersion: "2" },
   })
   await expect(opus.stream(request({ reasoning: { budgetTokens: 1024 } }))).rejects.toThrow(
-    "only supports adaptive"
-  )
-  const fable = provider.messages("production", {
-    definition,
-    metadata: { modelName: "claude-fable-5", modelVersion: "1" },
-  })
-  await expect(fable.stream(request({ reasoning: "none" }))).rejects.toThrow("cannot disable")
-  await expect(fable.stream(request({ reasoning: "max" }))).rejects.toThrow(
-    "does not support effort"
-  )
-  expect(() =>
-    provider.messages("production", { metadata: { modelName: "claude-mythos-5" } })
-  ).toThrow("Entra")
-  expect(() =>
-    provider.messages("production", { metadata: { ...metadata, modelVersion: "2" } })
-  ).toThrow("only for Anthropic-hosted")
-  expect(() =>
-    provider.messages("production", { metadata: { ...metadata, hosting: "azure" } })
-  ).toThrow("conflicts")
-  expect(() => provider.messages("production", { metadata: { publisher: "OpenAI" } })).toThrow(
-    "Anthropic deployment"
+    "reasoning token budgets are not supported"
   )
   expect(
     createAzureAIFoundry({ endpoint, tokenProvider: () => "token" }).messages("production", {

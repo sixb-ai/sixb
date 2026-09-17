@@ -1,11 +1,11 @@
 import {
-  defineLanguageModel,
   type LanguageModelDefinition,
   type LanguageModelDefinitionCatalog,
   ModelCatalogUnavailableError,
   ModelProviderError,
-  UnsupportedModelFeatureError,
 } from "@sixb/core/models"
+import { RequestDiagnostics } from "./diagnostics"
+import type { FoundryProtocol } from "./transport"
 import { abortable, requestId, type TransportOptions } from "./transport"
 import { object, PREFIX, positiveInteger } from "./util"
 
@@ -42,13 +42,13 @@ export interface AzureAIFoundryDeployment {
 export interface AzureAIFoundryCatalog extends LanguageModelDefinitionCatalog {
   get(
     name: string,
-    options?: { readonly protocol?: "responses" | "chat" }
+    options?: { readonly protocol?: FoundryProtocol }
   ): Promise<LanguageModelDefinition | undefined>
   list(options?: {
-    readonly protocol?: "responses" | "chat"
+    readonly protocol?: FoundryProtocol
   }): Promise<readonly LanguageModelDefinition[]>
   refresh(options?: {
-    readonly protocol?: "responses" | "chat"
+    readonly protocol?: FoundryProtocol
   }): Promise<readonly LanguageModelDefinition[]>
   /** All discovered ModelDeployment records, including non-Responses offerings. */
   deployments(): Promise<readonly AzureAIFoundryDeployment[]>
@@ -61,7 +61,7 @@ interface Snapshot {
 }
 
 export interface ResolvedDeployment {
-  readonly definition?: LanguageModelDefinition
+  readonly catalogModel?: import("./catalog").CatalogModel
   readonly deployment?: AzureAIFoundryDeployment
   readonly discoveredAt?: string
 }
@@ -78,7 +78,7 @@ interface DiscoverySettings {
   readonly maxResponseBytes: number
 }
 
-export class FoundryCatalog implements AzureAIFoundryCatalog {
+export class FoundryDeployments {
   private readonly settings?: DiscoverySettings
   private cached?: Snapshot
   private expiresAt = 0
@@ -86,7 +86,6 @@ export class FoundryCatalog implements AzureAIFoundryCatalog {
 
   constructor(
     private readonly providerId: string,
-    private readonly supplied: ReadonlyMap<string, LanguageModelDefinition>,
     baseUrl: string,
     transport: TransportOptions,
     discovery?: AzureAIFoundryDiscoveryOptions
@@ -126,87 +125,19 @@ export class FoundryCatalog implements AzureAIFoundryCatalog {
     return this.settings !== undefined
   }
 
-  localDefinition(name: string): LanguageModelDefinition | undefined {
-    return this.supplied.get(name)
+  async list(refresh = false): Promise<readonly AzureAIFoundryDeployment[]> {
+    return this.settings ? (await this.load(refresh)).records : Object.freeze([])
   }
 
-  async get(
-    name: string,
-    options?: { readonly protocol?: "responses" | "chat" }
-  ): Promise<LanguageModelDefinition | undefined> {
-    return (await this.list(options)).find((definition) => definition.modelId === name)
-  }
-
-  async list(options?: {
-    readonly protocol?: "responses" | "chat"
-  }): Promise<readonly LanguageModelDefinition[]> {
-    return this.definitions(this.settings ? await this.load() : undefined, options?.protocol)
-  }
-
-  async refresh(options?: {
-    readonly protocol?: "responses" | "chat"
-  }): Promise<readonly LanguageModelDefinition[]> {
-    return this.definitions(this.settings ? await this.load(true) : undefined, options?.protocol)
-  }
-
-  async deployments(): Promise<readonly AzureAIFoundryDeployment[]> {
-    return this.settings ? (await this.load()).records : Object.freeze([])
-  }
-
-  async resolveDefinition(
-    name: string,
-    offline: boolean,
-    protocol: "responses" | "messages" | "chat" = "responses"
-  ): Promise<ResolvedDeployment> {
+  async resolve(name: string, offline: boolean): Promise<ResolvedDeployment> {
     const snapshot = offline || !this.settings ? this.cached : await this.load()
     const deployment = snapshot?.byName.get(name)
-    if (
-      deployment &&
-      flag(deployment, protocol === "chat" ? "chatCompletion" : "responses") === false
-    ) {
-      throw new UnsupportedModelFeatureError(
-        `${PREFIX} Deployment '${name}' reports that ${protocol === "chat" ? "Chat" : "Responses"} is unsupported.`
-      )
-    }
+    if (snapshot && !offline && !deployment)
+      throw this.invalid(`Deployment '${name}' was not found in this project.`)
     return {
-      definition: this.definition(name, deployment),
       deployment,
       ...(deployment && snapshot ? { discoveredAt: snapshot.fetchedAt } : {}),
     }
-  }
-
-  private definitions(
-    snapshot?: Snapshot,
-    protocol: "responses" | "chat" = "responses"
-  ): readonly LanguageModelDefinition[] {
-    const result = new Map<string, LanguageModelDefinition>()
-    for (const deployment of snapshot?.records ?? []) {
-      // Each protocol needs its own affirmative support; keep other offerings in deployments().
-      if (flag(deployment, protocol === "chat" ? "chatCompletion" : "responses") === true)
-        result.set(deployment.name, this.definition(deployment.name, deployment)!)
-    }
-    for (const name of this.supplied.keys())
-      result.set(name, this.definition(name, snapshot?.byName.get(name))!)
-    return Object.freeze([...result.values()])
-  }
-
-  private definition(
-    name: string,
-    deployment?: AzureAIFoundryDeployment
-  ): LanguageModelDefinition | undefined {
-    const supplied = this.supplied.get(name)
-    if (!deployment) return supplied
-    const contextWindow = limit(deployment, "maxContextToken")
-    const maxOutputTokens = limit(deployment, "maxOutputToken")
-    return defineLanguageModel({
-      kind: "language",
-      providerId: this.providerId,
-      modelId: name,
-      capabilities: {},
-      ...(contextWindow === undefined ? {} : { contextWindow }),
-      ...(maxOutputTokens === undefined ? {} : { maxOutputTokens }),
-      ...supplied,
-    })
   }
 
   private load(refresh = false): Promise<Snapshot> {
@@ -231,6 +162,7 @@ export class FoundryCatalog implements AzureAIFoundryCatalog {
 
   private async fetchSnapshot(): Promise<Snapshot> {
     const settings = this.settings!
+    const diagnostics = new RequestDiagnostics()
     const controller = new AbortController()
     const timer = setTimeout(
       () => controller.abort(new DOMException("Discovery timed out", "TimeoutError")),
@@ -250,7 +182,7 @@ export class FoundryCatalog implements AzureAIFoundryCatalog {
         if (seen.size >= settings.maxPages)
           throw this.invalid("Deployment pagination exceeded maxPages.")
         seen.add(pageUrl)
-        const response = await this.fetchPage(pageUrl, settings, signal)
+        const response = await this.fetchPage(pageUrl, settings, signal, diagnostics)
         const text = await this.readPage(response, budget, signal)
         let value: unknown
         try {
@@ -285,6 +217,12 @@ export class FoundryCatalog implements AzureAIFoundryCatalog {
         url = typeof page.nextLink === "string" ? this.pageUrl(page.nextLink, pageUrl) : undefined
       }
       return { records: Object.freeze(records), byName, fetchedAt: new Date().toISOString() }
+    } catch (error) {
+      if (error instanceof ModelCatalogUnavailableError)
+        throw new ModelCatalogUnavailableError(diagnostics.text(error.message), {
+          cause: diagnostics.failure(error.cause),
+        })
+      throw diagnostics.failure(error)
     } finally {
       clearTimeout(timer)
     }
@@ -319,7 +257,8 @@ export class FoundryCatalog implements AzureAIFoundryCatalog {
   private async fetchPage(
     url: string,
     settings: DiscoverySettings,
-    signal: AbortSignal
+    signal: AbortSignal,
+    diagnostics: RequestDiagnostics
   ): Promise<Response> {
     let token: string
     let suppliedHeaders: Readonly<Record<string, string>> | undefined
@@ -327,6 +266,7 @@ export class FoundryCatalog implements AzureAIFoundryCatalog {
       token = await abortable(() => settings.tokenProvider(signal), signal)
       if (typeof token !== "string" || !token.trim())
         throw new TypeError("Discovery token is empty.")
+      diagnostics.add(token)
       const source = settings.headers
       suppliedHeaders =
         typeof source === "function" ? await abortable(() => source(signal), signal) : source
@@ -334,6 +274,7 @@ export class FoundryCatalog implements AzureAIFoundryCatalog {
       throw this.unavailable(cause)
     }
     const headers = new Headers(suppliedHeaders)
+    for (const value of headers.values()) diagnostics.add(value)
     for (const reserved of ["authorization", "api-key", "x-api-key"]) {
       if (headers.has(reserved))
         throw new TypeError(
@@ -481,16 +422,4 @@ function deploymentRecord(
       ...(typeof sku.tier === "string" ? { tier: sku.tier } : {}),
     }),
   })
-}
-
-function flag(record: AzureAIFoundryDeployment, key: string): boolean | undefined {
-  const value =
-    record.capabilities[key] ??
-    (key === "chatCompletion" ? record.capabilities.chat_completion : undefined)
-  return value === undefined ? undefined : value === "true"
-}
-
-function limit(record: AzureAIFoundryDeployment, key: string): number | undefined {
-  const value = record.capabilities[key]
-  return value === undefined ? undefined : Number(value)
 }

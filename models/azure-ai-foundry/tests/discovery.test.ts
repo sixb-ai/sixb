@@ -5,7 +5,7 @@ import {
   ModelCatalogUnavailableError,
   ModelProviderError,
 } from "@sixb/core/models"
-import { type AzureAIFoundryDiscoveryOptions, createAzureAIFoundry } from "../src"
+import { type AzureAIFoundryDiscoveryOptions, createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/example"
 
@@ -49,7 +49,7 @@ function answer(): Response {
 }
 
 // Live project deployments report chat_completion rather than ARM's chatCompletion.
-// Regression proof: remove the alias lookup in discovery.ts flag(); the Chat list is empty.
+// Regression proof: remove the chat_completion alias in profile/catalog selection; the list is empty.
 test("recognizes live project Chat capability spelling without changing raw metadata", async () => {
   const provider = createAzureAIFoundry({
     endpoint,
@@ -60,7 +60,8 @@ test("recognizes live project Chat capability spelling without changing raw meta
   expect((await provider.catalog.list({ protocol: "chat" })).map((model) => model.modelId)).toEqual(
     ["live-chat"]
   )
-  expect(await provider.catalog.list()).toEqual([])
+  expect((await provider.catalog.list()).map((model) => model.modelId)).toEqual(["live-chat"])
+  expect(await provider.catalog.list({ protocol: "responses" })).toEqual([])
   expect((await provider.catalog.deployments())[0]?.capabilities).toEqual({
     chat_completion: "true",
   })
@@ -125,8 +126,6 @@ test("coalesces paginated discovery, refreshes tokens, and separates discovery f
   expect(tokens).toBe(2)
   expect(model.definition).toMatchObject({
     modelId: "production",
-    contextWindow: 128000,
-    maxOutputTokens: 8192,
     capabilities: {},
   })
   expect(model.metadata).toMatchObject({
@@ -148,7 +147,8 @@ test("coalesces paginated discovery, refreshes tokens, and separates discovery f
   for await (const _event of (await model.stream(request())).events) {
     /* consume */
   }
-  expect(body).toMatchObject({ model: "production", max_output_tokens: 8192 })
+  expect(body).toMatchObject({ model: "production" })
+  expect(body?.max_output_tokens).toBeUndefined()
   expect((await provider.catalog.get("secondary"))?.modelId).toBe("secondary")
   expect(urls).toHaveLength(3)
 })
@@ -296,7 +296,7 @@ test("retains unknown capability strings without inferring Responses, tools or s
         { type: "FutureDeployment", name: "future" },
       ]),
   })
-  const definitions = await provider.catalog.list()
+  const definitions = await provider.catalog.list({ protocol: "responses" })
   expect(definitions.map((entry) => entry.modelId)).toEqual(["yes"])
   expect(definitions[0]?.capabilities).toEqual({})
   expect(await provider.catalog.deployments()).toHaveLength(3)
@@ -304,7 +304,8 @@ test("retains unknown capability strings without inferring Responses, tools or s
     "future-value"
   )
   expect((await provider("unknown").resolve()).metadata.modelName).toBe("publisher-model")
-  await expect(provider("no").resolve()).rejects.toMatchObject({
+  expect((await provider("no").resolve()).protocol).toBe("chat")
+  await expect(provider.responses("no").resolve()).rejects.toMatchObject({
     name: "UnsupportedModelFeatureError",
   })
 })
@@ -509,8 +510,8 @@ test("classifies transport/access failures, retries later, and retains the last 
     mode = failure
     await expect(provider.catalog.refresh()).rejects.toBeInstanceOf(ModelCatalogUnavailableError)
     const before = calls
-    expect((await provider("production").resolve({ offline: true })).definition.contextWindow).toBe(
-      128000
+    expect((await provider("production").resolve({ offline: true })).metadata.modelName).toBe(
+      "publisher-model"
     )
     expect(calls).toBe(before)
     await expect(provider.catalog.list()).rejects.toBeInstanceOf(ModelCatalogUnavailableError)

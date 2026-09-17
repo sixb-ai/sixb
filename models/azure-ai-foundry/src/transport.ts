@@ -1,4 +1,5 @@
 import { ModelProviderError } from "@sixb/core/models"
+import { RequestDiagnostics } from "./diagnostics"
 import { object, PREFIX, positiveInteger } from "./util"
 
 export type ValueSource<T> = T | ((signal: AbortSignal) => T | Promise<T>)
@@ -16,6 +17,7 @@ export interface TransportOptions {
 }
 
 export class FoundryTransport {
+  private readonly diagnostics = new WeakMap<Response, RequestDiagnostics>()
   readonly baseUrl: string
   readonly project: boolean
   private readonly options: TransportOptions
@@ -69,9 +71,11 @@ export class FoundryTransport {
     protocol: FoundryProtocol = "responses"
   ): Promise<Response> {
     const url = this.url(protocol)
+    const diagnostics = new RequestDiagnostics()
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted()
       const headers = new Headers(await resolve(this.options.headers, signal))
+      for (const value of headers.values()) diagnostics.add(value)
       for (const reserved of ["authorization", "api-key", "x-api-key"]) {
         if (headers.has(reserved))
           throw new TypeError(
@@ -83,6 +87,7 @@ export class FoundryTransport {
         : await resolve(this.options.apiKey ?? (() => process.env.AZURE_AI_FOUNDRY_API_KEY), signal)
       if (typeof token !== "string" || !token.trim())
         throw new TypeError(`${PREFIX} An API key or Entra token is required.`)
+      diagnostics.add(token)
       headers.set(
         this.options.tokenProvider
           ? "authorization"
@@ -96,20 +101,48 @@ export class FoundryTransport {
       if (protocol === "messages") headers.set("anthropic-version", "2023-06-01")
       signal.throwIfAborted()
       // Ambiguous network failures and accepted streams are never automatically replayed.
-      const response = await (this.options.fetch ?? fetch)(url, {
-        method: "POST",
-        headers,
-        body,
-        signal,
+      const response = await abortable(async () => {
+        const result = await (this.options.fetch ?? fetch)(url, {
+          method: "POST",
+          headers,
+          body,
+          signal,
+        })
+        // An injected fetch can finish after the caller has already cancelled.
+        if (signal.aborted) void result.body?.cancel(signal.reason).catch(() => {})
+        return result
+      }, signal).catch((error: unknown) => {
+        if (signal.aborted) throw signal.reason
+        throw diagnostics.failure(error)
       })
+      this.diagnostics.set(response, diagnostics)
+      if (signal.aborted) {
+        void response.body?.cancel(signal.reason).catch(() => {})
+        signal.throwIfAborted()
+      }
       if (response.ok) return response
-      const error = await httpError(response, providerId, modelId, signal)
+      const error = this.redactError(
+        response,
+        await httpError(response, providerId, modelId, signal)
+      )
       if (!error.retryable || attempt >= (this.options.maxRetries ?? 2)) throw error
       await wait(
         Math.min(error.retryAfterMs ?? 250 * 2 ** attempt, this.options.maxRetryDelayMs ?? 60_000),
         signal
       )
     }
+  }
+
+  redactText(response: Response, value: string | undefined): string | undefined {
+    return value === undefined ? undefined : (this.diagnostics.get(response)?.text(value) ?? value)
+  }
+
+  redactError(response: Response, error: ModelProviderError): ModelProviderError {
+    return this.diagnostics.get(response)!.providerError(error)
+  }
+
+  redactFailure(response: Response, error: unknown): unknown {
+    return this.diagnostics.get(response)!.failure(error)
   }
 
   get entra(): boolean {
@@ -149,7 +182,10 @@ async function resolve<T>(
 export function abortable<T>(operation: () => T | Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     signal.throwIfAborted()
-    const abort = () => reject(signal.reason)
+    const abort = () => {
+      signal.removeEventListener("abort", abort)
+      reject(signal.reason)
+    }
     signal.addEventListener("abort", abort, { once: true })
     Promise.resolve()
       .then(() => {
@@ -180,7 +216,7 @@ async function httpError(
     try {
       while (length < 8_192) {
         signal.throwIfAborted()
-        const { value, done } = await reader.read()
+        const { value, done } = await abortable(() => reader.read(), signal)
         if (done) break
         const part = value.subarray(0, 8_192 - length)
         chunks.push(part)
@@ -195,7 +231,7 @@ async function httpError(
       // Arbitrary/partial error bodies stay private; the HTTP status remains actionable.
     } finally {
       signal.removeEventListener("abort", cancel)
-      await reader.cancel().catch(() => {})
+      void reader.cancel().catch(() => {})
       reader.releaseLock()
     }
   }
