@@ -77,7 +77,8 @@ export interface ObjectQueryText {
 export interface ObjectQueryVector {
   kind: "vector"
   input: ObjectQuery
-  vector: readonly number[]
+  /** Text is embedded by the server using the named profile's model before storage execution. */
+  vector: readonly number[] | string
   /** @deprecated Legacy numeric property queries. Prefer a named profile. */
   propertyId?: string
   profile?: string

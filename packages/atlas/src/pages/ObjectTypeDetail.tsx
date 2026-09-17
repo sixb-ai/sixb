@@ -26,7 +26,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router-dom"
 import { BackNav, LetterAvatar, LoadingState } from "../components/common"
 import { humanizeIdentifier } from "../lib/labels"
 
-const TAB_VALUES = ["properties", "links", "actions", "projections"] as const
+const TAB_VALUES = ["properties", "vectors", "links", "actions", "projections"] as const
 type TabValue = (typeof TAB_VALUES)[number]
 const DEFAULT_TAB: TabValue = "properties"
 
@@ -132,6 +132,7 @@ export function ObjectTypeDetail({
 
   const staticProps = objectType.properties.filter((p) => p.mode !== "telemetry")
   const telemetryProps = objectType.properties.filter((p) => p.mode === "telemetry")
+  const vectorProfiles = Object.entries(objectType.search?.vectors ?? {})
   const displayTitle = humanizeIdentifier(objectType.name || objectType.id)
 
   return (
@@ -215,6 +216,10 @@ export function ObjectTypeDetail({
                 Properties
                 <Count value={objectType.properties.length} />
               </TabsTrigger>
+              <TabsTrigger value="vectors">
+                Vectors
+                <Count value={vectorProfiles.length} />
+              </TabsTrigger>
               <TabsTrigger value="links">
                 Links
                 <Count value={objectType.links.length} />
@@ -248,6 +253,52 @@ export function ObjectTypeDetail({
           {objectType.properties.length === 0 ? (
             <EmptySection text="No properties defined." />
           ) : null}
+        </TabsContent>
+
+        <TabsContent value="vectors" className="space-y-3 pt-4">
+          {vectorProfiles.length === 0 ? (
+            <EmptySection text="No vector profiles defined." />
+          ) : (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Each profile combines its source properties into one embedding per object.
+              </p>
+              {vectorProfiles.map(([name, profile]) => (
+                <Card key={name} className="min-w-0 space-y-4 p-4">
+                  <h3 className="break-all font-mono text-sm font-medium text-foreground">
+                    {name}
+                  </h3>
+                  <div className="space-y-1.5">
+                    <SectionLabel>Source properties · in order</SectionLabel>
+                    <ol className="flex flex-wrap gap-2">
+                      {profile.source.map((propertyId, index) => (
+                        <li key={propertyId} className="min-w-0 max-w-full">
+                          <Badge variant="outline" className="max-w-full whitespace-normal">
+                            <span className="mr-1 text-muted-foreground">{index + 1}.</span>
+                            <span className="break-all font-mono text-xs">{propertyId}</span>
+                          </Badge>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                  <dl className="grid gap-4 text-xs sm:grid-cols-[1fr_2fr_auto]">
+                    <div className="min-w-0 space-y-1">
+                      <dt className="text-muted-foreground">Provider</dt>
+                      <dd className="break-all font-mono">{profile.model.providerId}</dd>
+                    </div>
+                    <div className="min-w-0 space-y-1">
+                      <dt className="text-muted-foreground">Model</dt>
+                      <dd className="break-all font-mono">{profile.model.modelId}</dd>
+                    </div>
+                    <div className="space-y-1">
+                      <dt className="text-muted-foreground">Dimensions</dt>
+                      <dd className="tabular-nums">{profile.model.dimensions}</dd>
+                    </div>
+                  </dl>
+                </Card>
+              ))}
+            </>
+          )}
         </TabsContent>
 
         {/* Links */}

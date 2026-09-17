@@ -916,7 +916,13 @@ function validateVectorProfileQuery(
     admitProperty(ctx, { state, propertyId, objectTypeId: objectType.id, use: "vector", path })
   let values = query.vector
   try {
-    values = normalizeVector(values, profile.model.definition.dimensions)
+    if (typeof values === "string") {
+      if (!values.trim() || values.length > 8000) {
+        throw new Error("Vector search text must be nonempty and at most 8000 characters.")
+      }
+    } else {
+      values = normalizeVector(values, profile.model.definition.dimensions)
+    }
   } catch (error) {
     addIssue(ctx, path, "invalid_vector", error instanceof Error ? error.message : "Invalid vector")
   }
@@ -929,7 +935,7 @@ function validateVectorProfileQuery(
 }
 
 function validateVectorQuery(
-  vector: readonly number[],
+  vector: readonly number[] | string,
   propertyId: string,
   k: number,
   shape: ObjectQueryResultShape,
@@ -937,6 +943,10 @@ function validateVectorQuery(
   path: string,
   ctx: QueryValidationContext
 ): void {
+  if (typeof vector === "string") {
+    addIssue(ctx, path, "invalid_vector", "Text vector search requires a named profile.")
+    return
+  }
   if (!Number.isInteger(k) || k <= 0) {
     addIssue(ctx, path, "invalid_vector_k", "Vector query k must be a positive integer")
   }

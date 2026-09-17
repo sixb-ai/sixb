@@ -108,8 +108,8 @@ Every field a profile references must carry the matching property flag:
 Search profiles can only reference **static** properties — telemetry properties (such as
 `Project.progress`) are not object-query indexed and will fail validation here.
 
-For new embeddings, use [named vector profiles](#named-vector-profiles). The legacy
-`search.vector` stores numeric arrays in business properties and does not manage their freshness.
+Use [named vector profiles](#named-vector-profiles) for vector search. The legacy `search.vector`
+metadata remains readable, but SDK and HTTP search no longer accept numeric-property queries.
 
 ## How Metadata Drives Queries
 
@@ -120,7 +120,7 @@ For new embeddings, use [named vector profiles](#named-vector-profiles). The leg
 | `search("acme")` | `search.defaultText` fields with `searchable` + `text` |
 | `search("acme", { fields: [Customer.p.company] })` | `company`: `searchable` + `text` |
 | `facets([{ property: Invoice.p.status, limit }])` | `status`: `searchable` + `facet` (exact-matchable) |
-| vector search | embedding field: `searchable` + `vector`, plus `search.vector.property` |
+| vector search | named `search.vectors` profile with text sources and an embedding model |
 
 Missing or mismatched metadata is caught when you call `validate()` — it reports unknown
 properties, wrong value types, missing query flags, invalid text fields, and unsupported
@@ -149,14 +149,14 @@ search: {
 ```
 
 Register the same `EmbeddingModel` in `models.embedding: [productEmbedding]`; language models
-are optional. This slice provides the model contract, without a built-in provider adapter.
+are optional. Vercel Gateway provides `gateway.embedding(modelId, { dimensions })`.
 
 ```ts
 await sixb.objects(Product).byId("product-1").vector("content").index()
 
 const { objects } = await sixb.objects(Product)
   .query()
-  .vector("content", queryVector, { k: 10 })
+  .vector("content", "lightweight running shoes", { k: 10 })
   .list()
 // k: return at most 10 nearest objects among eligible, authorized candidates.
 // objects[i].score: cosine similarity, highest first.
@@ -165,7 +165,12 @@ const { objects } = await sixb.objects(Product)
 Profile names are autocompleted. `index()` reads the sources, calls the configured model outside
 any transaction, then conditionally stores the result. A concurrent object edit or reindex rejects
 the stale result; call `index()` again to recompute. There are no automatic jobs or provider retries.
-Generate `queryVector` with the same model: numeric validation cannot establish an array's origin.
+The same query works with `objects(Product)` from `@sixb/client/query`: text is embedded on the
+server with the profile's registered model, after validation and authorization. Each terminal
+execution makes one embedding call; `validate()` and `explain()` make none. Query embeddings are
+not stored. Text must be nonempty and at most 8,000 characters. The model receives a 30-second
+abort signal; `.list({ signal })` also forwards caller cancellation. Providers must honor it.
+Search accepts text only. Numeric vectors are generated internally with the profile's model.
 
 | Guarantee | Behavior |
 | --- | --- |

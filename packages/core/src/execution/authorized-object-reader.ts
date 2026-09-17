@@ -1,6 +1,7 @@
 import { assertAuthorized, isAllowed } from "../authorization"
 import { AuthorizationError } from "../authorization/errors"
 import type { AuthorizationContext } from "../authorization/types"
+import type { EmbeddingModelCatalog } from "../models/catalog"
 import {
   type AuthorizedOntologySelection,
   type AuthorizedOntologyView,
@@ -84,6 +85,7 @@ class AuthorizedObjectReaderImpl {
   readonly #authority: ResolvedExecutionAuthority
   readonly #runtime: RuntimeReadAuthorization
   readonly #ontology: OntologyRegistry
+  readonly #embeddingModels?: EmbeddingModelCatalog
   #ontologyView?: AuthorizedOntologyView
   readonly #storage: ObjectReadStorage
   readonly #delegatedObjectTypeIds?: ReadonlySet<string>
@@ -95,6 +97,7 @@ class AuthorizedObjectReaderImpl {
     input: {
       readonly scope: ExecutionScope
       readonly ontology: OntologyRegistry
+      readonly embeddingModels?: EmbeddingModelCatalog
       readonly storage: ObjectReadStorage
       readonly authority: ResolvedExecutionAuthority
     }
@@ -106,6 +109,7 @@ class AuthorizedObjectReaderImpl {
     this.#authorization = input.scope.authorization
     this.#authority = input.authority
     this.#ontology = input.ontology
+    this.#embeddingModels = input.embeddingModels
     this.#storage = input.storage
     this.#delegatedObjectTypeIds =
       input.authority.type === "delegated"
@@ -316,6 +320,7 @@ class AuthorizedObjectReaderImpl {
           query: executionQuery,
           ...(includeTotal === undefined ? {} : { includeTotal }),
           projectId: this.#runtime.projectId,
+          signal: input.signal,
         },
         this.#queryExecutorOptions()
       )
@@ -459,10 +464,15 @@ class AuthorizedObjectReaderImpl {
       // The selected storage instance is the private execution capability. Passing the delegated
       // runtime token into the generic executor would either reject this admitted query or tempt a
       // forgeable bypass flag; neither is needed at this nominal boundary.
-      return { ontology: this.#ontology, storage: this.#storage }
+      return {
+        ontology: this.#ontology,
+        storage: this.#storage,
+        embeddingModels: this.#embeddingModels,
+      }
     }
     return {
       ontology: this.#ontology,
+      embeddingModels: this.#embeddingModels,
       storage: this.#storage,
       runtimeAuthorization: this.#runtime.runtimeAuthorization,
       ...(this.#runtime.authorization === undefined
@@ -546,6 +556,7 @@ export type AuthorizedObjectReader = AuthorizedObjectReaderImpl
 export function createAuthorizedObjectReader(input: {
   readonly scope: ExecutionScope
   readonly ontology: OntologyRegistry
+  readonly embeddingModels?: EmbeddingModelCatalog
   readonly objectStorage: ObjectStorage
 }): AuthorizedObjectReader {
   const scope = captureExecutionScope(input.scope)
@@ -555,6 +566,7 @@ export function createAuthorizedObjectReader(input: {
   const reader = new AuthorizedObjectReaderImpl(readerConstructionKey, {
     scope,
     ontology: input.ontology,
+    embeddingModels: input.embeddingModels,
     storage,
     authority,
   })
@@ -681,7 +693,30 @@ function snapshotFacetRequests(facets: readonly ObjectFacetRequest[]): ObjectFac
 /** Capture one serializable query before either authorization or execution sees it. */
 function snapshotAuthoredQuery(query: ObjectQuery): ObjectQuery {
   try {
-    return structuredClone(query)
+    const snapshot = structuredClone(query)
+    const pending = [snapshot]
+    const seen = new Set<ObjectQuery>()
+    for (const node of pending) {
+      if (seen.has(node)) continue
+      seen.add(node)
+      if (
+        node.kind === "vector" &&
+        (typeof node.vector !== "string" ||
+          typeof node.profile !== "string" ||
+          node.propertyId !== undefined)
+      ) {
+        throw new ObjectQueryValidationError([
+          {
+            path: "$",
+            code: "invalid_vector_search_input",
+            message: "Vector search requires a named profile and search text",
+          },
+        ])
+      }
+      if ("input" in node) pending.push(node.input)
+      if (node.kind === "set") pending.push(...node.inputs)
+    }
+    return snapshot
   } catch (error) {
     if (error instanceof ObjectQueryValidationError) throw error
     throw new ObjectQueryValidationError([

@@ -410,6 +410,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           const result = await requireRequestSixb(context).objects.executeQuery({
             query: parsed.query,
             includeTotal: parsed.includeTotal,
+            signal: context.request.signal,
           })
 
           return {

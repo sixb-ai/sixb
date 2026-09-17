@@ -505,34 +505,6 @@
           },
           {
             "type": "object",
-            "required": ["kind", "input", "vector", "propertyId", "k"],
-            "additionalProperties": false,
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["vector"]
-              },
-              "input": {
-                "$ref": "#/components/schemas/ObjectQuery"
-              },
-              "vector": {
-                "type": "array",
-                "items": {
-                  "type": "number"
-                }
-              },
-              "propertyId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "k": {
-                "type": "integer",
-                "minimum": 1
-              }
-            }
-          },
-          {
-            "type": "object",
             "required": ["kind", "input", "vector", "profile", "k"],
             "additionalProperties": false,
             "properties": {
@@ -544,10 +516,9 @@
                 "$ref": "#/components/schemas/ObjectQuery"
               },
               "vector": {
-                "type": "array",
-                "items": {
-                  "type": "number"
-                }
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 8000
               },
               "profile": {
                 "type": "string",

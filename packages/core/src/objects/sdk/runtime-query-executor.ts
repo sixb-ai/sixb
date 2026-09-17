@@ -19,9 +19,13 @@ export function createRuntimeQueryExecutor(params: {
   const { ontology, objectReader } = params
 
   return {
-    async list(query: ObjectQuery, options?: { includeTotal?: boolean }) {
+    async list(query: ObjectQuery, options?: { includeTotal?: boolean; signal?: AbortSignal }) {
       try {
-        return await objectReader.executeQuery({ query, includeTotal: options?.includeTotal })
+        return await objectReader.executeQuery({
+          query,
+          includeTotal: options?.includeTotal,
+          signal: options?.signal,
+        })
       } catch (error) {
         if (error instanceof ObjectQueryPlanningError) {
           throw addSdkPlanningHints(error)
