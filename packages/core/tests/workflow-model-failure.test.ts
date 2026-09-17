@@ -57,7 +57,10 @@ test.each([
   const durable = toSixbFailure(wrapped, { at: new Date("2026-09-14T00:00:00Z") })
   expect(durable).toMatchObject({
     code: "workflow.node_failed",
-    message: "Workflow node execution failed.",
+    message:
+      source === "provider"
+        ? "Workflow node execution failed. Upstream request returned HTTP 400."
+        : "Workflow node execution failed.",
     details: {
       failurePhase: "structured-finalizer",
       modelId: "model",
