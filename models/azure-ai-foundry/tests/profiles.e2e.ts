@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test"
+import { resolveLanguageModel } from "@sixb/core/internal/model-execution"
 import type { LanguageModelStreamEvent } from "@sixb/core/models"
 import { createAzureAIFoundry } from "../src"
 import { object } from "../src/util"
@@ -6,43 +7,97 @@ import { object } from "../src/util"
 // Opt-in, maximum eight billable attempts / 4,096 requested output tokens, no retries.
 // Verifies credentials + deployment + resource region, with no caller-supplied model facts/rates.
 const env = process.env
-const names = [
-  env.AZURE_FOUNDRY_GLM_53_DEPLOYMENT,
-  env.AZURE_FOUNDRY_KIMI_K3_DEPLOYMENT,
-  env.AZURE_FOUNDRY_DEEPSEEK_V4_FLASH_DEPLOYMENT,
-  env.AZURE_FOUNDRY_FAST_DEPLOYMENT,
-  env.AZURE_FOUNDRY_OPENAI_DEPLOYMENT,
-  env.AZURE_FOUNDRY_DEEPSEEK_DEPLOYMENT,
-  env.AZURE_FOUNDRY_DEEPSEEK_REASONING_DEPLOYMENT,
-  env.AZURE_FOUNDRY_GLM_DEPLOYMENT,
-].filter((name): name is string => Boolean(name))
+// These environment variables designate specific model fixtures, not arbitrary deployments.
+const fixtures = [
+  {
+    name: env.AZURE_FOUNDRY_GLM_53_DEPLOYMENT,
+    model: "FW-GLM-5.3",
+    provider: "fireworks-ai",
+    id: "accounts/fireworks/models/glm-5p3",
+    tools: true,
+    reasoning: true,
+    images: false,
+  },
+  {
+    name: env.AZURE_FOUNDRY_KIMI_K3_DEPLOYMENT,
+    model: "FW-Kimi-K3",
+    provider: "fireworks-ai",
+    id: "accounts/fireworks/models/kimi-k3",
+    tools: true,
+    reasoning: true,
+    images: true,
+  },
+  {
+    name: env.AZURE_FOUNDRY_DEEPSEEK_V4_FLASH_DEPLOYMENT,
+    model: "FW-DeepSeek-V4-Flash-0731",
+    provider: "fireworks-ai",
+    id: "accounts/fireworks/models/deepseek-v4-flash-0731",
+    tools: true,
+    reasoning: true,
+    images: false,
+  },
+  {
+    name: env.AZURE_FOUNDRY_FAST_DEPLOYMENT,
+    model: "gpt-4.1-mini",
+    provider: "azure",
+    id: "gpt-4.1-mini",
+    tools: true,
+    reasoning: false,
+    images: true,
+  },
+  {
+    name: env.AZURE_FOUNDRY_OPENAI_DEPLOYMENT,
+    model: "gpt-5-mini",
+    provider: "azure",
+    id: "gpt-5-mini",
+    tools: true,
+    reasoning: true,
+    images: true,
+  },
+  {
+    name: env.AZURE_FOUNDRY_DEEPSEEK_DEPLOYMENT,
+    model: "DeepSeek-V3.2",
+    provider: "azure",
+    id: "deepseek-v3.2",
+    tools: true,
+    reasoning: true,
+    images: false,
+  },
+  {
+    name: env.AZURE_FOUNDRY_DEEPSEEK_REASONING_DEPLOYMENT,
+    model: "DeepSeek-V4-Pro",
+    provider: "azure",
+    id: "deepseek-v4-pro",
+    tools: false,
+    reasoning: true,
+    images: false,
+  },
+  {
+    name: env.AZURE_FOUNDRY_GLM_DEPLOYMENT,
+    model: "FW-GLM-5.2-Fast",
+    provider: "fireworks-ai",
+    id: "accounts/fireworks/routers/glm-5p2-fast",
+    tools: true,
+    reasoning: true,
+    images: false,
+  },
+].flatMap((fixture) => (fixture.name ? [{ ...fixture, name: fixture.name }] : []))
+// Regression proof: return undefined from RemoteModelsDevCatalog.get(). These checks
+// must fail before inference; unknown-model behavior has separate deterministic coverage.
+
 test.skipIf(
   env.SIXB_FOUNDRY_E2E !== "1" ||
-    env.SIXB_FOUNDRY_E2E_ENTRA !== "1" ||
+    !env.AZURE_FOUNDRY_API_KEY ||
     !env.AZURE_FOUNDRY_PROJECT_ENDPOINT ||
-    !names.length
+    !fixtures.length
 )(
   "resolves live deployment identities, selects protocols and automatically prices supported usage",
   async () => {
-    const child = Bun.spawn(
-      ["az", "account", "get-access-token", "--resource", "https://ai.azure.com", "-o", "json"],
-      { stdout: "pipe", stderr: "pipe" }
-    )
-    const timer = setTimeout(() => child.kill(), 30000)
-    let token: string
-    try {
-      const result = JSON.parse(await new Response(child.stdout).text())
-      expect(await child.exited).toBe(0)
-      expect(typeof result.accessToken).toBe("string")
-      token = result.accessToken
-    } finally {
-      clearTimeout(timer)
-    }
     let attempts = 0
     let outputAllowance = 0
     const provider = createAzureAIFoundry({
       endpoint: env.AZURE_FOUNDRY_PROJECT_ENDPOINT!,
-      tokenProvider: () => token,
+      apiKey: env.AZURE_FOUNDRY_API_KEY!,
       maxRetries: 0,
       fetch: async (url, init) => {
         if (init?.method === "POST") {
@@ -59,13 +114,41 @@ test.skipIf(
     let inputTokens = 0
     let outputTokens = 0
     const errors: Error[] = []
-    for (const name of names) {
+    for (const fixture of fixtures) {
+      const { name } = fixture
       if (attempts) await Bun.sleep(13500)
       try {
-        const model = await provider(name).resolve()
+        const binding = provider(name)
+        const executable = await resolveLanguageModel(binding)
+        const model = await binding.resolve({ offline: true })
+        expect(executable.definition).toEqual(model.definition)
+        expect(model.metadata).toMatchObject({
+          modelName: fixture.model,
+          deployment: { name },
+          catalog: { provider: fixture.provider, modelId: fixture.id, pricing: "reference" },
+        })
+        expect(model.protocol).toBe("chat")
+        expect(model.definition.contextWindow).toBeGreaterThan(0)
+        expect(model.definition.maxOutputTokens).toBeGreaterThan(0)
+        expect(model.definition.capabilities.localTools).toBe(fixture.tools)
+        expect(Boolean(model.definition.capabilities.reasoning)).toBe(fixture.reasoning)
+        expect(model.definition.capabilities.inputMediaTypes?.includes("image/png")).toBe(
+          fixture.images
+        )
+        // Prove reference rates exist even if the live response has an unknown usage meter.
+        expect(
+          model.costEstimator.estimate({
+            usage: {
+              inputTokens: 10,
+              uncachedInputTokens: 10,
+              cacheReadInputTokens: 0,
+              outputTokens: 2,
+            },
+            responseModelId: fixture.model,
+          })
+        ).toMatchObject({ status: "rated" })
         const reasoning = model.definition.capabilities.reasoning
         const effort = reasoning ? reasoning.efforts?.[0] : undefined
-        if (model.metadata.catalog) expect(model.definition.contextWindow).toBeGreaterThan(0)
         const events: LanguageModelStreamEvent[] = []
         const request = {
           callId: `profile-live-${crypto.randomUUID()}`,
@@ -80,7 +163,7 @@ test.skipIf(
           signal: AbortSignal.timeout(60000),
           ...(effort ? { reasoning: effort } : {}),
         }
-        for await (const event of (await model.stream(request)).events) {
+        for await (const event of (await executable.stream(request)).events) {
           if (event.type === "error") throw event.error
           events.push(event)
         }
@@ -105,20 +188,19 @@ test.skipIf(
         const nullAudio = object(finish.usage.raw?.prompt_tokens_details)?.audio_tokens === null
         if (nullAudio)
           expect(cost).toMatchObject({ status: "unpriceable", reason: "missing-rate-card" })
-        else if (model.metadata.catalog) expect(cost.status).toBe("rated")
-        else expect(cost.status).toBe("unpriceable")
+        else expect(cost.status).toBe("rated")
         inputTokens += finish.usage.inputTokens ?? 0
         outputTokens += finish.usage.outputTokens ?? 0
       } catch (error) {
         errors.push(new Error(`${name}: ${error instanceof Error ? error.message : String(error)}`))
       }
     }
-    expect(attempts).toBe(names.length)
     console.info(
       "[FoundryProfileLive]",
       JSON.stringify({ attempts, outputAllowance, inputTokens, outputTokens })
     )
     if (errors.length) throw new AggregateError(errors, "Foundry live model checks failed")
+    expect(attempts).toBe(fixtures.length)
   },
   660000
 )

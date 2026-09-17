@@ -1,53 +1,41 @@
 # @sixb/azure-ai-foundry
 
-Azure AI Foundry models for Sixb. Discover deployments from Azure and model capabilities,
-limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
+Azure AI Foundry models for Sixb. A project URL and API key resolve Azure deployments into
+model capabilities, limits, reasoning controls, and reference prices from [models.dev](https://models.dev).
 
 ## Install
 
 ```sh
-bun add @sixb/azure-ai-foundry @azure/identity
+bun add @sixb/azure-ai-foundry
 ```
 
 ## Connect
 
-### Microsoft Entra — automatic deployment discovery
-
 ```ts
-import { DefaultAzureCredential } from "@azure/identity"
 import { createAzureAIFoundry } from "@sixb/azure-ai-foundry"
 
-const credential = new DefaultAzureCredential()
 const foundry = createAzureAIFoundry({
   endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project",
-  tokenProvider: async (signal) => {
-    const { token } = await credential.getToken("https://ai.azure.com/.default", {
-      abortSignal: signal,
-    })
-    return token
-  },
+  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
 })
 
 const model = foundry("production") // Your Azure deployment name.
 ```
 
-### API key — supply the underlying model ID
+The full project URL and API key are required. The provider uses the same key to fetch project
+deployments and call inference. Keys may be strings or synchronous/asynchronous functions;
+functions receive an abort signal and are evaluated for each Azure HTTP attempt.
 
-API keys cannot discover deployment aliases. Azure Identity is optional for this setup.
+Model resolution always follows this sequence:
 
-```ts
-import { createAzureAIFoundry } from "@sixb/azure-ai-foundry"
+1. Find the deployment in the Azure project and read its model name, version, and publisher.
+2. Look up the underlying model in models.dev.
+3. Build the Sixb model definition and cost estimator, intersecting capabilities with adapter support.
+4. Call Azure using the deployment name.
 
-const foundry = createAzureAIFoundry({
-  endpoint: "https://my-resource.services.ai.azure.com",
-  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
-})
-
-const model = foundry("production", {
-  metadata: { modelName: "gpt-4.1-mini" }, // Underlying model, not deployment alias.
-  maxOutputTokens: 4096,
-})
-```
+Construction is network-free. `resolve()` returns a pinned model for worker admission and
+execution. A direct `stream()` resolves and pins the handle before inference. Discovery failures
+and missing deployments stop resolution; they never fall back to guessing the model identity.
 
 ## Stream a response
 
@@ -68,9 +56,7 @@ for await (const event of events) {
 }
 ```
 
-Construction is network-free. The first `stream()` resolves and pins the model's configuration.
-
-## Discover and refresh
+## Inspect and refresh
 
 ```ts
 const deployments = await foundry.catalog.deployments()
@@ -90,33 +76,28 @@ const cached = await model.resolve({ offline: true })
 
 | Behavior | Rule |
 | --- | --- |
-| Catalog listings | Project deployments and configured definitions |
-| Azure matching | Exact model ID, then a unique case-insensitive match |
+| Catalog listings | Supported project deployments |
+| Azure matching | Unique case-insensitive model ID match |
 | `FW-` fallback | Unique normalized match in the models.dev Fireworks catalog |
 | Fireworks normalization | Removes namespace/`FW-`; normalizes casing and numeric `5p3` → `5.3` |
-| Variants | Preserves variant/date suffixes; excludes `*-latest`; rejects ambiguity |
-| Missing metadata | Stays unknown; explicit overrides are available |
+| Variants | Preserves variant/date suffixes; excludes moving Fireworks `*-latest` aliases; rejects ambiguity |
+| Missing catalog metadata | Stays unknown; explicit capability and pricing overrides are available |
 | Refresh | Updates future resolutions; existing resolved models stay pinned |
-| Offline resolution | Uses cached metadata without network requests |
+| Offline resolution | Requires a cached deployment; performs no network requests |
 
-## Choose a protocol
+## Protocols and controls
 
 ```ts
 foundry("production")           // Catalog protocol → deployment flags → Responses.
 foundry.responses("production")
 foundry.chat("production")
-
-// Native Messages requires a resource endpoint.
-const resource = createAzureAIFoundry({
-  endpoint: "https://my-resource.services.ai.azure.com",
-  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
-})
-resource.messages("claude-production", {
-  metadata: { modelName: "your-models-dev-azure-id" },
-})
+foundry.messages("claude-production")
 ```
 
-Features require both model capability and adapter support. Unsupported controls fail locally.
+Responses and Chat use the project inference URL. Native Messages uses the owning resource's
+`/anthropic/v1/messages` URL, derived from the project URL. A Messages deployment from a project
+connection is rejected because the owning resource cannot be inferred from that record; configure
+the provider with that resource's own project URL and API key.
 
 | Feature | Responses | Chat | Messages |
 | --- | --- | --- | --- |
@@ -125,31 +106,25 @@ Features require both model capability and adapter support. Unsupported controls
 | PDFs | Inline | — | URL / inline |
 | Named reasoning efforts | Supported | Supported | Adaptive thinking |
 | Exact reasoning budgets | — | — | Manual thinking |
-| Project endpoint | Supported | Supported | — |
 
-| Setting | Behavior |
-| --- | --- |
-| Responses replay | Full history, `store: false`, encrypted reasoning |
-| Replay scope | Endpoint, deployment, and protocol must match |
-| Chat compatibility | Explicit `profile`; reasoning replay uses `reasoningReplay: "tool-continuation"` |
-| Messages thinking | `thinkingMode` selects manual/adaptive behavior; manual budgets start at 1024 tokens and stay below the output ceiling |
-| Inline media | 20 MiB default aggregate limit; configure `maxInputFileBytes` |
-| Unsupported features | Provider-native tools, audio/video, worker native-PDF projection |
-| Context limits | Discovered metadata; direct calls rely on Azure for input/context enforcement |
+Features require both model capability and adapter support. Unsupported controls fail locally.
+Responses use full-history replay with `store: false` and encrypted reasoning. Replay is scoped to
+the endpoint, deployment, and protocol. Chat compatibility is selected with `profile`;
+DeepSeek reasoning replay uses `reasoningReplay: "tool-continuation"`.
+
+Messages `thinkingMode` selects manual or adaptive thinking. Manual budgets start at 1024 tokens
+and must stay below the output ceiling. Inline media has a 20 MiB aggregate default limit,
+configurable with `maxInputFileBytes`. Provider-native tools, audio/video, and worker native-PDF
+projection are unsupported. Direct calls rely on Azure for input/context enforcement.
 
 ## Override capabilities and prices
 
-Supply missing model facts or your effective Azure rates. Capabilities remain bounded by adapter support.
+Overrides supplement discovered model facts; deployment discovery remains mandatory. A new
+binding exposes only its definition's identity until resolution. Limits and capabilities,
+including explicit overrides, become available on the resolved model (or after direct streaming).
 
 ```ts
-const explicit = createAzureAIFoundry({
-  endpoint: "https://my-resource.services.ai.azure.com",
-  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
-  catalog: false,
-  discovery: false,
-})
-
-const model = explicit.chat("production", {
+const model = foundry.chat("production", {
   definition: {
     contextWindow: 128_000,
     maxOutputTokens: 4096,
@@ -166,11 +141,12 @@ const model = explicit.chat("production", {
 ```
 
 Use either `rateCard` or `costEstimator`. Explicit definitions and prices override catalog defaults.
+Model identity always comes from Azure.
 
 ## Usage and cost
 
-> Catalog prices are reference estimates, not Azure invoice prices. Fireworks fallback uses
-> direct-Fireworks reference prices. Supply your own rates for effective Azure pricing.
+Catalog prices are reference estimates, not Azure invoice prices. Fireworks fallback uses
+direct-Fireworks reference prices. Supply your own rates for effective Azure pricing.
 
 | Accounting | Behavior |
 | --- | --- |
@@ -193,10 +169,9 @@ Use either `rateCard` or `costEstimator`. Explicit definitions and prices overri
 | `catalog.ttlMs` / `catalog.timeoutMs` | One hour / 10 seconds |
 | `discovery.ttlMs` / `discovery.timeoutMs` | One hour / 5 seconds |
 | Discovery bounds | 100 pages, 10,000 records, 4 MiB |
-| Public catalog bound | 32 MiB; receives no Azure credentials or inference headers |
-| Custom transport | `fetch`, `headers`; independent overrides in `catalog` and `discovery` |
-| Credentials | Resolved on each HTTP attempt |
-| Retries | Transient HTTP failures; no replay after stream acceptance or ambiguous network failure |
+| Public catalog bound | 32 MiB; receives no Azure credentials or custom headers |
+| Custom transport | `fetch`, `headers` shared by discovery and inference; `catalog.fetch` for the public catalog |
+| Retries | Transient inference HTTP failures; no replay after stream acceptance or ambiguous network failure |
 | Cancellation | Bounds waits; early stream return cancels and releases the reader |
 | Diagnostics | Redacts acquired credentials/custom header values; preserves status, codes and retry timing |
 
@@ -205,14 +180,14 @@ Use either `rateCard` or `costEstimator`. Explicit definitions and prices overri
 From the repository root:
 
 ```sh
-bun test models/azure-ai-foundry/tests/
+bun test ./models/azure-ai-foundry/tests/*.test.ts
 ```
 
-Live tests require credentials and deployments configured in the test files. They are billable;
-run one suite at a time.
+Live tests require a project URL, API key, and deployment names configured in the test files.
+They are billable; run one suite at a time.
 
 ```sh
-SIXB_FOUNDRY_E2E=1 SIXB_FOUNDRY_E2E_ENTRA=1 \
+SIXB_FOUNDRY_E2E=1 \
   bun --env-file=.env.test --env-file=.local/drafts/foundry-live.env \
   test ./models/azure-ai-foundry/tests/profiles.e2e.ts
 ```
@@ -221,5 +196,6 @@ SIXB_FOUNDRY_E2E=1 SIXB_FOUNDRY_E2E_ENTRA=1 \
 | --- | --- | --- |
 | `profiles.e2e.ts` | Discovered deployment profiles | 8 / 4,096 |
 | `contracts.e2e.ts` | Tools, images, durable replay, strict JSON and accounting | 16 / 16,384 |
+| `provider.e2e.ts` | Protocol controls, tools, media, cancellation and errors | 40 / 16,000 |
 
-Native Claude live verification remains quota-blocked; fixture coverage includes all three protocols.
+Native Messages has fixture coverage; live verification requires a deployed Claude model.

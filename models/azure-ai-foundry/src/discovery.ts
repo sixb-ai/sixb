@@ -6,14 +6,10 @@ import {
 } from "@sixb/core/models"
 import { RequestDiagnostics } from "./diagnostics"
 import type { FoundryProtocol } from "./transport"
-import { abortable, requestId, type TransportOptions } from "./transport"
+import { abortable, type FoundryTransport, requestId } from "./transport"
 import { object, PREFIX, positiveInteger } from "./util"
 
 export interface AzureAIFoundryDiscoveryOptions {
-  /** Defaults to the inference tokenProvider. Inference API keys are never used for discovery. */
-  readonly tokenProvider?: TransportOptions["tokenProvider"]
-  readonly headers?: TransportOptions["headers"]
-  readonly fetch?: TransportOptions["fetch"]
   readonly ttlMs?: number
   /** Deadline for credentials, all pages, and body reads together. Default: 5,000 ms. */
   readonly timeoutMs?: number
@@ -61,16 +57,12 @@ interface Snapshot {
 }
 
 export interface ResolvedDeployment {
-  readonly catalogModel?: import("./catalog").CatalogModel
-  readonly deployment?: AzureAIFoundryDeployment
-  readonly discoveredAt?: string
+  readonly deployment: AzureAIFoundryDeployment
+  readonly discoveredAt: string
 }
 
 interface DiscoverySettings {
   readonly url: string
-  readonly tokenProvider: NonNullable<TransportOptions["tokenProvider"]>
-  readonly headers: TransportOptions["headers"]
-  readonly fetch: NonNullable<TransportOptions["fetch"]>
   readonly ttlMs: number
   readonly timeoutMs: number
   readonly maxPages: number
@@ -79,26 +71,16 @@ interface DiscoverySettings {
 }
 
 export class FoundryDeployments {
-  private readonly settings?: DiscoverySettings
+  private readonly settings: DiscoverySettings
   private cached?: Snapshot
   private expiresAt = 0
   private pending?: Promise<Snapshot>
 
   constructor(
     private readonly providerId: string,
-    baseUrl: string,
-    transport: TransportOptions,
-    discovery?: AzureAIFoundryDiscoveryOptions
+    private readonly transport: FoundryTransport,
+    discovery: AzureAIFoundryDiscoveryOptions = {}
   ) {
-    if (discovery === undefined) return
-    if (!/^\/api\/projects\/[^/]+\/openai\/v1$/.test(new URL(baseUrl).pathname)) {
-      throw new TypeError(`${PREFIX} Project discovery requires a project inference endpoint.`)
-    }
-    const tokenProvider = discovery.tokenProvider ?? transport.tokenProvider
-    if (!tokenProvider)
-      throw new TypeError(
-        `${PREFIX} Project discovery requires discovery.tokenProvider or tokenProvider; an inference API key is insufficient.`
-      )
     for (const key of [
       "ttlMs",
       "timeoutMs",
@@ -108,11 +90,7 @@ export class FoundryDeployments {
     ] as const)
       positiveInteger(discovery[key], `discovery.${key}`)
     this.settings = {
-      url: `${baseUrl.slice(0, -10)}/deployments?api-version=v1`,
-      tokenProvider,
-      headers:
-        typeof discovery.headers === "function" ? discovery.headers : { ...discovery.headers },
-      fetch: discovery.fetch ?? transport.fetch ?? fetch,
+      url: `${transport.projectUrl}/deployments?api-version=v1`,
       ttlMs: discovery.ttlMs ?? 60 * 60 * 1_000,
       timeoutMs: discovery.timeoutMs ?? 5_000,
       maxPages: discovery.maxPages ?? 100,
@@ -121,22 +99,20 @@ export class FoundryDeployments {
     }
   }
 
-  get enabled(): boolean {
-    return this.settings !== undefined
-  }
-
   async list(refresh = false): Promise<readonly AzureAIFoundryDeployment[]> {
-    return this.settings ? (await this.load(refresh)).records : Object.freeze([])
+    return (await this.load(refresh)).records
   }
 
   async resolve(name: string, offline: boolean): Promise<ResolvedDeployment> {
-    const snapshot = offline || !this.settings ? this.cached : await this.load()
+    const snapshot = offline ? this.cached : await this.load()
     const deployment = snapshot?.byName.get(name)
-    if (snapshot && !offline && !deployment)
-      throw this.invalid(`Deployment '${name}' was not found in this project.`)
+    if (!snapshot || !deployment)
+      throw this.invalid(
+        `Deployment '${name}' was not found in ${offline ? "cached project deployments; resolve online first" : "this project"}.`
+      )
     return {
       deployment,
-      ...(deployment && snapshot ? { discoveredAt: snapshot.fetchedAt } : {}),
+      discoveredAt: snapshot.fetchedAt,
     }
   }
 
@@ -146,7 +122,7 @@ export class FoundryDeployments {
     this.pending = this.fetchSnapshot()
       .then((snapshot) => {
         this.cached = snapshot
-        this.expiresAt = Date.now() + this.settings!.ttlMs
+        this.expiresAt = Date.now() + this.settings.ttlMs
         return snapshot
       })
       .catch((error: unknown) => {
@@ -161,7 +137,7 @@ export class FoundryDeployments {
   }
 
   private async fetchSnapshot(): Promise<Snapshot> {
-    const settings = this.settings!
+    const settings = this.settings
     const diagnostics = new RequestDiagnostics()
     const controller = new AbortController()
     const timer = setTimeout(
@@ -182,7 +158,7 @@ export class FoundryDeployments {
         if (seen.size >= settings.maxPages)
           throw this.invalid("Deployment pagination exceeded maxPages.")
         seen.add(pageUrl)
-        const response = await this.fetchPage(pageUrl, settings, signal, diagnostics)
+        const response = await this.fetchPage(pageUrl, signal, diagnostics)
         const text = await this.readPage(response, budget, signal)
         let value: unknown
         try {
@@ -256,37 +232,20 @@ export class FoundryDeployments {
 
   private async fetchPage(
     url: string,
-    settings: DiscoverySettings,
     signal: AbortSignal,
     diagnostics: RequestDiagnostics
   ): Promise<Response> {
-    let token: string
-    let suppliedHeaders: Readonly<Record<string, string>> | undefined
+    let headers: Headers
     try {
-      token = await abortable(() => settings.tokenProvider(signal), signal)
-      if (typeof token !== "string" || !token.trim())
-        throw new TypeError("Discovery token is empty.")
-      diagnostics.add(token)
-      const source = settings.headers
-      suppliedHeaders =
-        typeof source === "function" ? await abortable(() => source(signal), signal) : source
+      headers = await this.transport.headers(signal, diagnostics)
     } catch (cause) {
       throw this.unavailable(cause)
     }
-    const headers = new Headers(suppliedHeaders)
-    for (const value of headers.values()) diagnostics.add(value)
-    for (const reserved of ["authorization", "api-key", "x-api-key"]) {
-      if (headers.has(reserved))
-        throw new TypeError(
-          `${PREFIX} Configure discovery.tokenProvider instead of authentication headers.`
-        )
-    }
-    headers.set("authorization", `Bearer ${token}`)
     headers.set("accept", "application/json")
     let response: Response
     try {
       response = await abortable(async () => {
-        const result = await settings.fetch(url, { headers, signal, redirect: "error" })
+        const result = await this.transport.fetch(url, { headers, signal, redirect: "error" })
         if (signal.aborted) void result.body?.cancel().catch(() => {})
         return result
       }, signal)

@@ -16,39 +16,51 @@ const definition = {
 }
 const provider = () =>
   createAzureAIFoundry({
-    endpoint: "https://example.test",
+    endpoint: "https://example.test/api/projects/test",
     apiKey: "test",
-    catalog: false,
-    discovery: false,
-    fetch: async () => {
-      throw new Error("Unexpected inference")
-    },
+    fetch: async () =>
+      Response.json({
+        value: [
+          {
+            type: "ModelDeployment",
+            name: "deployment",
+            modelName: "future",
+            modelVersion: "1",
+            modelPublisher: "partner",
+            capabilities: {},
+            sku: { name: "GlobalStandard" },
+          },
+        ],
+      }),
+    catalog: { fetch: async () => Response.json({ azure: { models: {} } }) },
   })
 
 // Regression proof: remove effective capability intersection in resolveModel. The
 // Chat binding again advertises budgets/PDFs it cannot serialize (observed on Kimi).
-test("effective capabilities reflect protocol limits even with explicit definitions", () => {
+test("effective capabilities reflect protocol limits even with explicit definitions", async () => {
   const p = provider()
-  const chat = p.chat("deployment", { definition }).definition.capabilities
+  const chat = (await p.chat("deployment", { definition }).resolve()).definition.capabilities
   expect(chat.reasoning).toEqual({ canDisable: true, efforts: ["minimal", "low", "high"] })
   expect(chat.inputMediaTypes).toEqual(["image/png", "image/jpeg", "image/webp", "image/gif"])
-  const responses = p.responses("deployment", { definition }).definition.capabilities
+  const responses = (await p.responses("deployment", { definition }).resolve()).definition
+    .capabilities
   expect(responses.reasoning).toEqual(chat.reasoning)
   expect(responses.inputMediaTypes).toContain("application/pdf")
-  const deepseek = p.chat("deployment", { definition, profile: "deepseek" })
+  const deepseek = await p.chat("deployment", { definition, profile: "deepseek" }).resolve()
   expect(deepseek.definition.capabilities.nativeStructuredOutput).toBe(false)
-  const manual = p.messages("deployment", { definition, thinkingMode: "manual" }).definition
-    .capabilities
+  const manual = (await p.messages("deployment", { definition, thinkingMode: "manual" }).resolve())
+    .definition.capabilities
   expect(manual.reasoning).toEqual({ canDisable: true, budgetTokens: { min: 1024, max: 4095 } })
-  const adaptive = p.messages("deployment", { definition, thinkingMode: "adaptive" }).definition
-    .capabilities
+  const adaptive = (
+    await p.messages("deployment", { definition, thinkingMode: "adaptive" }).resolve()
+  ).definition.capabilities
   expect(adaptive.reasoning).toEqual({ canDisable: true, efforts: ["low", "high"] })
 })
 
 test("catalog listing and binding resolution agree on protocol capability intersection", async () => {
   const p = createAzureAIFoundry({
     endpoint: "https://example.test/api/projects/test",
-    tokenProvider: () => "test",
+    apiKey: () => "test",
     fetch: async () =>
       Response.json({
         value: [

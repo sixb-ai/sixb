@@ -2,10 +2,11 @@ import { expect, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type { JsonObject, LanguageModelRequest, LanguageModelStreamEvent } from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
+import { createAzureAIFoundry as create } from "../src"
 import { foundryChatEstimator, foundryChatUsage } from "../src/chat-accounting"
 import { createAzureAIFoundry } from "./provider-fixture"
 
-const endpoint = "https://resource.services.ai.azure.com"
+const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
 const schema: JsonObject = {
   type: "object",
   properties: { answer: { type: "string" } },
@@ -166,18 +167,14 @@ test("completes parameterless tools when Chat appends an empty-string terminator
 
 test.each([
   "",
-  "/openai/v1",
-  "/api/projects/example",
-  "/api/projects/example/openai/v1",
+  "/",
 ])("sends Chat to the canonical resource/project endpoint (%s)", async (suffix) => {
   let captured: JsonObject | undefined
   const provider = createAzureAIFoundry({
     endpoint: endpoint + suffix,
     apiKey: "key",
     fetch: async (url, init) => {
-      expect(String(url)).toBe(
-        `${endpoint}${suffix.replace(/\/openai\/v1$/, "")}/openai/v1/chat/completions`
-      )
+      expect(String(url)).toBe(`${endpoint}/openai/v1/chat/completions`)
       const headers = new Headers(init?.headers)
       expect(headers.get("api-key")).toBe("key")
       expect(headers.has("anthropic-version")).toBe(false)
@@ -188,7 +185,7 @@ test.each([
   const model = provider.chat("production", { definition, maxOutputTokens: 200 })
   expect(model.protocol).toBe("chat")
   expect(provider("production").protocol).toBe("responses")
-  expect(await model.resolve({ offline: true })).toBe(model)
+  await expect(model.resolve({ offline: true })).rejects.toThrow("not found")
   const events = await collect((await model.stream(request({ maxOutputTokens: 100 }))).events)
   expect(captured).toEqual({
     model: "production",
@@ -208,10 +205,10 @@ test("refreshes Chat credentials on each retry and surfaces Azure HTTP errors", 
   let tokens = 0
   const model = createAzureAIFoundry({
     endpoint,
-    tokenProvider: async () => `token-${++tokens}`,
+    apiKey: async () => `token-${++tokens}`,
     fetch: async (_url, init) => {
-      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer token-${tokens}`)
-      return tokens === 1
+      expect(new Headers(init?.headers).get("api-key")).toBe(`token-${tokens}`)
+      return tokens === 2
         ? Response.json(
             { error: { code: "rate_limit", message: "busy" } },
             { status: 429, headers: { "retry-after-ms": "0" } }
@@ -220,7 +217,7 @@ test("refreshes Chat credentials on each retry and surfaces Azure HTTP errors", 
     },
   }).chat("deployment")
   await collect((await model.stream(request())).events)
-  expect(tokens).toBe(2)
+  expect(tokens).toBe(3)
   const bad = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
@@ -274,12 +271,13 @@ test("pins Chat options and supports explicit legacy limits, developer instructi
   expect(events.at(-1)).toMatchObject({ type: "finish", usage: {} })
 })
 
-test("uses separate discovery eligibility for Chat and keeps resolved models pinned", async () => {
+test("uses deployment protocol eligibility and keeps resolved models pinned", async () => {
   let calls = 0
   let limit = "100"
-  const provider = createAzureAIFoundry({
-    endpoint: `${endpoint}/api/projects/example`,
-    tokenProvider: () => "token",
+  const provider = create({
+    catalog: { fetch: async () => Response.json({ azure: { models: {} } }) },
+    endpoint,
+    apiKey: () => "token",
     discovery: {},
     fetch: async () => {
       calls++
@@ -362,6 +360,8 @@ test("requires explicit capabilities and preserves strict schemas without enabli
     response_format: { type: "json_schema", json_schema: { name: "answer", schema, strict: true } },
     tools: [{ type: "function", function: { name: "answer", parameters: schema, strict: true } }],
   })
+  provider.chat("unknown")
+  await provider.catalog.refresh()
   const loose: JsonObject = { type: "object", properties: { x: { type: "number", minimum: 0 } } }
   await collect(
     (await model.stream(request({ tools: [{ ...tools[0]!, inputSchema: loose }] }))).events
@@ -399,7 +399,7 @@ test("uses explicit capabilities rather than model-name heuristics", async () =>
   })
   const model = provider.chat("friendly-name", {
     definition,
-    metadata: { publisher: "OpenAI", modelName: "gpt-5.6-sol" },
+    identity: { publisher: "OpenAI", modelName: "gpt-5.6-sol" },
   })
   const tools = [{ name: "check", description: "Check", inputSchema: schema }]
   for (const reasoning of [undefined, "provider-default", "high"] as const)
@@ -407,6 +407,8 @@ test("uses explicit capabilities rather than model-name heuristics", async () =>
   await collect((await model.stream(request({ tools, reasoning: "none" }))).events)
   expect(body).toMatchObject({ reasoning_effort: "none" })
   // Deployment names are not model identities.
+  provider.chat("gpt-5.6-sol", { definition })
+  await provider.catalog.refresh()
   await collect(
     (await provider.chat("gpt-5.6-sol", { definition }).stream(request({ tools }))).events
   )
@@ -425,7 +427,7 @@ test("keeps DeepSeek effort levels explicit and does not equate JSON mode with s
   const model = provider.chat("production", {
     definition,
     profile: "deepseek",
-    metadata: { publisher: "DeepSeek", modelName: "DeepSeek-V4-Pro" },
+    identity: { publisher: "DeepSeek", modelName: "DeepSeek-V4-Pro" },
   })
   const tools = [{ name: "check", description: "Check", inputSchema: schema }]
   await collect((await model.stream(request({ reasoning: "high", tools }))).events)
@@ -439,11 +441,17 @@ test("keeps DeepSeek effort levels explicit and does not equate JSON mode with s
   await expect(
     model.stream(request({ responseFormat: { type: "json", name: "answer", schema } }))
   ).rejects.toThrow("DeepSeek JSON mode")
+  provider.chat("r1", {
+    definition: { capabilities: { reasoning: {} } },
+    identity: { modelName: "DeepSeek-R1-0528" },
+  })
+  provider.chat("unknown", { definition })
+  await provider.catalog.refresh()
   await expect(
     provider
       .chat("r1", {
         definition: { capabilities: { reasoning: {} } },
-        metadata: { modelName: "DeepSeek-R1-0528" },
+        identity: { modelName: "DeepSeek-R1-0528" },
       })
       .stream(request({ reasoning: "high" }))
   ).rejects.toThrow("not supported")
@@ -469,7 +477,9 @@ test.each([
   "store",
 ])("owns Chat request field %s", (key) => {
   expect(() =>
-    createAzureAIFoundry({ endpoint }).chat("deployment", { request: { [key]: true } })
+    createAzureAIFoundry({ endpoint, apiKey: "key" }).chat("deployment", {
+      request: { [key]: true },
+    })
   ).toThrow("owned by the adapter")
 })
 
@@ -586,6 +596,8 @@ test("runs local tools and preserves explicitly enabled DeepSeek continuation th
     ).events
   )
   expect(JSON.stringify(bodies[4]?.messages)).not.toContain("reasoning_content")
+  provider.chat("other", options)
+  await provider.catalog.refresh()
   await expect(
     provider.chat("other", options).stream(request({ messages: history }))
   ).rejects.toThrow("different endpoint")
@@ -652,9 +664,14 @@ test.each([
         mode === "invalid" ? '{"answer":123}' : '{"answer":"yes"}',
         mode === "truncated" ? "length" : mode === "filtered" ? "content_filter" : "stop"
       ),
-  }).chat("deployment", { definition, rateCard, metadata: { publisher: "OpenAI" } })
+  }).chat("deployment", {
+    definition,
+    rateCard,
+    identity: { publisher: "OpenAI", modelName: "publisher-model" },
+  })
+  const resolved = await model.resolve()
   const result = runModelLoop({
-    model,
+    model: resolved,
     messages: request().messages,
     signal: request().signal,
     maxSteps: 1,

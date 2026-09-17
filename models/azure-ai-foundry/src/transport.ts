@@ -7,9 +7,7 @@ export type FoundryProtocol = "responses" | "messages" | "chat"
 
 export interface TransportOptions {
   readonly endpoint: string
-  readonly apiKey?: ValueSource<string | undefined>
-  /** Supply an Entra access token (without 'Bearer '); called on every HTTP attempt. */
-  readonly tokenProvider?: (signal: AbortSignal) => string | Promise<string>
+  readonly apiKey: ValueSource<string | undefined>
   readonly headers?: ValueSource<Readonly<Record<string, string>>>
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
   readonly maxRetries?: number
@@ -19,12 +17,12 @@ export interface TransportOptions {
 export class FoundryTransport {
   private readonly diagnostics = new WeakMap<Response, RequestDiagnostics>()
   readonly baseUrl: string
-  readonly project: boolean
+  readonly projectUrl: string
   private readonly options: TransportOptions
 
   constructor(options: TransportOptions) {
     if (!URL.canParse(options.endpoint))
-      throw new TypeError(`${PREFIX} endpoint must be a valid resource/project URL.`)
+      throw new TypeError(`${PREFIX} endpoint must be a valid project URL.`)
     const url = new URL(options.endpoint)
     if (
       !["https:", "http:"].includes(url.protocol) ||
@@ -34,22 +32,21 @@ export class FoundryTransport {
       url.hash
     ) {
       throw new TypeError(
-        `${PREFIX} endpoint must be an HTTP(S) resource/project URL without credentials, query, or fragment.`
+        `${PREFIX} endpoint must be an HTTP(S) project URL without credentials, query, or fragment.`
       )
     }
-    let path = url.pathname.replace(/\/+$/, "")
-    if (path === "/anthropic" || path === "/anthropic/v1") path = ""
-    if (path.endsWith("/openai/v1")) path = path.slice(0, -10)
-    this.project = /^\/api\/projects\/[^/]+$/.test(path)
-    if (path !== "" && !this.project) {
+    const path = url.pathname.replace(/\/+$/, "")
+    if (!/^\/api\/projects\/[^/]+$/.test(path))
       throw new TypeError(
-        `${PREFIX} endpoint must be a resource root (optionally /anthropic or /anthropic/v1) or /api/projects/<project>, optionally ending in /openai/v1.`
+        `${PREFIX} endpoint must be a Foundry project URL: https://<resource>.services.ai.azure.com/api/projects/<project>.`
       )
-    }
-    this.baseUrl = `${url.origin}${path}/openai/v1`
-    if (options.apiKey !== undefined && options.tokenProvider !== undefined) {
-      throw new TypeError(`${PREFIX} Configure either apiKey or tokenProvider, not both.`)
-    }
+    this.projectUrl = `${url.origin}${path}`
+    this.baseUrl = `${this.projectUrl}/openai/v1`
+    if (
+      typeof options.apiKey !== "function" &&
+      (typeof options.apiKey !== "string" || !options.apiKey.trim())
+    )
+      throw new TypeError(`${PREFIX} apiKey is required.`)
     if (
       options.maxRetries !== undefined &&
       (!Number.isSafeInteger(options.maxRetries) || options.maxRetries < 0)
@@ -74,27 +71,10 @@ export class FoundryTransport {
     const diagnostics = new RequestDiagnostics()
     for (let attempt = 0; ; attempt++) {
       signal.throwIfAborted()
-      const headers = new Headers(await resolve(this.options.headers, signal))
-      for (const value of headers.values()) diagnostics.add(value)
-      for (const reserved of ["authorization", "api-key", "x-api-key"]) {
-        if (headers.has(reserved))
-          throw new TypeError(
-            `${PREFIX} Use apiKey/tokenProvider instead of '${reserved}' headers.`
-          )
-      }
-      const token = this.options.tokenProvider
-        ? await resolve(this.options.tokenProvider, signal)
-        : await resolve(this.options.apiKey ?? (() => process.env.AZURE_AI_FOUNDRY_API_KEY), signal)
-      if (typeof token !== "string" || !token.trim())
-        throw new TypeError(`${PREFIX} An API key or Entra token is required.`)
-      diagnostics.add(token)
-      headers.set(
-        this.options.tokenProvider
-          ? "authorization"
-          : protocol === "messages"
-            ? "x-api-key"
-            : "api-key",
-        this.options.tokenProvider ? `Bearer ${token}` : token
+      const headers = await this.headers(
+        signal,
+        diagnostics,
+        protocol === "messages" ? "x-api-key" : "api-key"
       )
       headers.set("content-type", "application/json")
       headers.set("accept", "text/event-stream")
@@ -102,7 +82,7 @@ export class FoundryTransport {
       signal.throwIfAborted()
       // Ambiguous network failures and accepted streams are never automatically replayed.
       const response = await abortable(async () => {
-        const result = await (this.options.fetch ?? fetch)(url, {
+        const result = await this.fetch(url, {
           method: "POST",
           // Redirects can forward API keys and prompt bodies to another origin.
           redirect: "error",
@@ -147,17 +127,31 @@ export class FoundryTransport {
     return this.diagnostics.get(response)!.failure(error)
   }
 
-  get entra(): boolean {
-    return this.options.tokenProvider !== undefined
+  async headers(
+    signal: AbortSignal,
+    diagnostics: RequestDiagnostics,
+    keyHeader: "api-key" | "x-api-key" = "api-key"
+  ): Promise<Headers> {
+    const headers = new Headers(await resolve(this.options.headers, signal))
+    for (const value of headers.values()) diagnostics.add(value)
+    for (const reserved of ["authorization", "api-key", "x-api-key"])
+      if (headers.has(reserved))
+        throw new TypeError(`${PREFIX} Use apiKey instead of '${reserved}' headers.`)
+    const key = await resolve(this.options.apiKey, signal)
+    if (typeof key !== "string" || !key.trim())
+      throw new TypeError(`${PREFIX} apiKey must resolve to a nonempty string.`)
+    diagnostics.add(key)
+    headers.set(keyHeader, key)
+    return headers
+  }
+
+  fetch(url: string, init: RequestInit): Promise<Response> {
+    return (this.options.fetch ?? fetch)(url, init)
   }
 
   url(protocol: FoundryProtocol): string {
     if (protocol === "responses") return `${this.baseUrl}/responses`
     if (protocol === "chat") return `${this.baseUrl}/chat/completions`
-    if (this.project)
-      throw new TypeError(
-        `${PREFIX} Native Messages requires a resource endpoint; a project endpoint cannot identify the connected Claude resource. Configure a separate resource provider.`
-      )
     return `${new URL(this.baseUrl).origin}/anthropic/v1/messages`
   }
 }

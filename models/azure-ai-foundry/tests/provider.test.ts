@@ -10,7 +10,7 @@ import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/mod
 import { foundryEstimator, foundryUsage } from "../src/accounting"
 import { createAzureAIFoundry } from "./provider-fixture"
 
-const endpoint = "https://resource.services.ai.azure.com"
+const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
 const definition = {
   maxOutputTokens: 100,
   capabilities: {
@@ -111,12 +111,7 @@ async function collect(
   return result
 }
 
-test.each([
-  "",
-  "/openai/v1/",
-  "/api/projects/example",
-  "/api/projects/example/openai/v1/",
-])("maps endpoint %s and keeps deployment identity", async (path) => {
+test.each(["", "/"])("maps endpoint %s and keeps deployment identity", async (path) => {
   let url: unknown
   let body: JsonObject | undefined
   let headers: Headers | undefined
@@ -133,14 +128,14 @@ test.each([
   })
   const model = provider.responses("deployment", {
     definition,
-    metadata: { publisher: "OpenAI", modelName: "gpt-example", modelVersion: "1" },
+    identity: { publisher: "OpenAI", modelName: "gpt-example", modelVersion: "1" },
     maxOutputTokens: 80,
   })
   const events = await collect(
     (await model.stream(request({ maxOutputTokens: 20, reasoning: "high" }))).events
   )
-  const project = path.includes("projects")
-  expect(url).toBe(`${endpoint}${project ? "/api/projects/example" : ""}/openai/v1/responses`)
+  const project = true
+  expect(url).toBe(`${endpoint}/openai/v1/responses`)
   expect(body).toMatchObject({
     model: "deployment",
     stream: true,
@@ -151,6 +146,7 @@ test.each([
   })
   expect(body?.input).toEqual([
     {
+      type: "message",
       role: "user",
       ...(project ? { type: "message" } : {}),
       content: [{ type: "input_text", text: "Hello" }],
@@ -175,9 +171,9 @@ test("refreshes async credentials on every retry and preserves throttling diagno
   let tokens = 0
   const provider = createAzureAIFoundry({
     endpoint,
-    tokenProvider: async () => `token-${++tokens}`,
+    apiKey: async () => `token-${++tokens}`,
     fetch: async (_url, init) => {
-      auth.push(new Headers(init?.headers).get("authorization"))
+      auth.push(new Headers(init?.headers).get("api-key"))
       return auth.length === 1
         ? Response.json(
             { error: { code: "TooManyRequests", message: "slow down" } },
@@ -188,10 +184,7 @@ test("refreshes async credentials on every retry and preserves throttling diagno
   })
   await collect((await provider("deployment").stream(request())).events)
   await collect((await provider("deployment").stream(request())).events)
-  expect(auth).toEqual(["Bearer token-1", "Bearer token-2", "Bearer token-3"])
-  expect(() =>
-    createAzureAIFoundry({ endpoint, apiKey: "key", tokenProvider: () => "token" })
-  ).toThrow("either apiKey or tokenProvider")
+  expect(auth).toEqual(["token-2", "token-3", "token-4"])
   const failing = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
@@ -215,8 +208,7 @@ test("cancels pending credentials before fetch and cancels retry waits", async (
   let called = false
   const model = createAzureAIFoundry({
     endpoint,
-    tokenProvider: (signal) => {
-      expect(signal).toBe(abort.signal)
+    apiKey: () => {
       abort.abort(new Error("cancel credentials"))
       return new Promise<string>(() => {})
     },
@@ -241,7 +233,7 @@ test("cancels pending credentials before fetch and cancels retry waits", async (
   await expect(retry.stream(request({ signal: retryAbort.signal }))).rejects.toThrow("cancel retry")
 })
 
-test("pins inline definitions, request options and rate cards without catalog I/O", async () => {
+test("pins overrides after required deployment resolution", async () => {
   const supplied = {
     ...definition,
     kind: "language" as const,
@@ -253,19 +245,18 @@ test("pins inline definitions, request options and rate cards without catalog I/
   const provider = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
-    models: [supplied],
     fetch: async (_url, init) => {
       body = JSON.parse(String(init?.body))
       return completed()
     },
   })
-  const model = provider("deployment", { request: native, rateCard })
+  const model = provider("deployment", { definition: supplied, request: native, rateCard })
   supplied.maxOutputTokens = 999
   native.temperature = 1
   expect(await provider.catalog.list()).toHaveLength(1)
   expect(await provider.catalog.get("unknown")).toBeUndefined()
-  expect(await model.resolve({ offline: true })).toBe(model)
-  expect(await model.resolve()).toBe(model)
+  expect((await model.resolve({ offline: true })).metadata.deployment?.name).toBe("deployment")
+  expect((await model.resolve()).definition.maxOutputTokens).toBe(100)
   expect(Object.isFrozen(model.definition.capabilities)).toBe(true)
   await collect((await model.stream(request({ maxOutputTokens: 500 }))).events)
   expect(body).toMatchObject({ max_output_tokens: 100, temperature: 0.2 })
@@ -350,6 +341,7 @@ test("sends bounded inline PDFs and images, rejecting mismatches and unsupported
   await collect((await model.stream(file("data:application/pdf;base64,JVBERi0="))).events)
   expect(body?.input).toEqual([
     {
+      type: "message",
       role: "user",
       content: [
         {
@@ -391,7 +383,7 @@ test("runs tools and replays encrypted reasoning/phase after durable history ser
     arguments: "{}",
   }
   const provider = createAzureAIFoundry({
-    endpoint: `${endpoint}/api/projects/test`,
+    endpoint,
     apiKey: "key",
     fetch: async (_url, init) => {
       bodies.push(JSON.parse(String(init?.body)))
@@ -459,11 +451,13 @@ test("runs tools and replays encrypted reasoning/phase after durable history ser
   ])
   await collect((await model.stream(request({ messages: history }))).events)
   expect(bodies[2]?.input).toContainEqual(reasoning)
+  provider("other", { definition })
+  await provider.catalog.refresh()
   await expect(
     provider("other", { definition }).stream(request({ messages: history }))
   ).rejects.toThrow("different endpoint, deployment, or protocol")
   const otherResource = createAzureAIFoundry({
-    endpoint: "https://other.openai.azure.com",
+    endpoint: "https://other.openai.azure.com/api/projects/test",
     apiKey: "key",
   })("deployment", { definition })
   await expect(otherResource.stream(request({ messages: history }))).rejects.toThrow(
@@ -475,7 +469,7 @@ test("runs tools and replays encrypted reasoning/phase after durable history ser
 test("preserves unknown usage, non-OpenAI reasoning counters, explicit prices and custom estimates", async () => {
   const provider = createAzureAIFoundry({ endpoint, apiKey: "key", fetch: async () => completed() })
   const openai = provider("deployment", {
-    metadata: { publisher: "OpenAI", modelName: "gpt-example", modelVersion: "1" },
+    identity: { publisher: "OpenAI", modelName: "gpt-example", modelVersion: "1" },
     rateCard,
   })
   const event = (await collect((await openai.stream(request())).events)).at(-1)
@@ -495,6 +489,7 @@ test("preserves unknown usage, non-OpenAI reasoning counters, explicit prices an
     openai.costEstimator?.estimate({ usage: event.usage, responseModelId: "different" })
   ).toMatchObject({ status: "unpriceable" })
   const partner = provider("partner", { rateCard })
+  await provider.catalog.refresh()
   const partnerEvent = (await collect((await partner.stream(request())).events)).at(-1)
   if (partnerEvent?.type !== "finish") throw new Error("missing finish")
   expect(partnerEvent.usage.reasoningOutputTokens).toBe(2)
@@ -567,7 +562,7 @@ test.each([
   "tools",
 ])("rejects adapter-owned request field %s", (key) => {
   expect(() =>
-    createAzureAIFoundry({ endpoint })("deployment", { request: { [key]: true } })
+    createAzureAIFoundry({ endpoint, apiKey: "key" })("deployment", { request: { [key]: true } })
   ).toThrow("owned by the adapter")
 })
 
@@ -578,7 +573,7 @@ test.each([
   "file:///resource",
   "https://host/path",
 ])("rejects ambiguous endpoint %s", (endpoint) => {
-  expect(() => createAzureAIFoundry({ endpoint })).toThrow()
+  expect(() => createAzureAIFoundry({ endpoint, apiKey: "key" })).toThrow()
 })
 
 test("bounds retries, sanitizes non-JSON HTTP errors and never retries accepted streams", async () => {
@@ -729,7 +724,7 @@ test("does not normalize the documented non-OpenAI zero reasoning counter into a
         output_tokens: 5,
         output_tokens_details: { reasoning_tokens: 0 },
       }),
-  })("deepseek-prod", { metadata: { publisher: "DeepSeek" } })
+  })("deepseek-prod", { identity: { publisher: "DeepSeek" } })
   const events = await collect((await model.stream(request())).events)
   expect(events.at(-1)).toMatchObject({
     usage: {

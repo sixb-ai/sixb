@@ -1,6 +1,5 @@
 import {
   assertJsonObject,
-  defineLanguageModel,
   type JsonObject,
   type LanguageModel,
   type LanguageModelDefinition,
@@ -17,7 +16,11 @@ import { chatEvents } from "@sixb/model-protocols/chat"
 import { messagesEvents } from "@sixb/model-protocols/messages"
 import { responsesEvents } from "@sixb/model-protocols/responses"
 import { foundryEstimator, foundryUsage } from "./accounting"
-import { type AzureAIFoundryCatalogOptions, RemoteModelsDevCatalog } from "./catalog"
+import {
+  type AzureAIFoundryCatalogOptions,
+  type CatalogModel,
+  RemoteModelsDevCatalog,
+} from "./catalog"
 import { foundryChatEstimator, foundryChatUsage } from "./chat-accounting"
 import { type ChatRequestOptions, foundryChatRequest, validateChatOptions } from "./chat-request"
 import {
@@ -45,13 +48,12 @@ import {
 import { object, PREFIX } from "./util"
 
 export interface AzureAIFoundryOptions extends TransportOptions {
-  /** Lazy public model/price discovery. Set false for fully explicit bindings. */
-  readonly catalog?: AzureAIFoundryCatalogOptions | false
+  /** Public model capabilities and reference pricing from models.dev. */
+  readonly catalog?: AzureAIFoundryCatalogOptions
   /** Namespace bindings from different resources/projects in a single Sixb catalog. */
   readonly providerId?: string
-  readonly models?: readonly LanguageModelDefinition[]
-  /** Automatic for Entra project endpoints. Set false for explicitly configured/offline bindings. */
-  readonly discovery?: AzureAIFoundryDiscoveryOptions | false
+  /** Required project deployment lookup: cache lifetime and request bounds. */
+  readonly discovery?: AzureAIFoundryDiscoveryOptions
 }
 
 export interface AzureAIFoundryModelMetadata {
@@ -65,18 +67,12 @@ export interface AzureAIFoundryModelMetadata {
     readonly source: string
     readonly pricing: "reference"
   }
-  /** Optional hosting identity; does not select capabilities or reference prices. */
-  readonly hosting?: "azure" | "anthropic"
   readonly deployment?: AzureAIFoundryDeployment
   readonly discoveredAt?: string
 }
 
 export interface AzureAIFoundryModelOptions extends RequestOptions {
   readonly definition?: Omit<LanguageModelDefinition, "kind" | "providerId" | "modelId">
-  readonly metadata?: Pick<
-    AzureAIFoundryModelMetadata,
-    "publisher" | "modelName" | "modelVersion" | "hosting" | "sku"
-  >
   readonly rateCard?: LanguageModelRateCard
   readonly costEstimator?: ModelCostEstimator
   /** Default: preserve positive reports; trust zero only for OpenAI. "unknown" omits all reasoning counts. */
@@ -85,14 +81,12 @@ export interface AzureAIFoundryModelOptions extends RequestOptions {
 
 export interface AzureAIFoundryMessagesOptions extends MessagesRequestOptions {
   readonly definition?: AzureAIFoundryModelOptions["definition"]
-  readonly metadata?: AzureAIFoundryModelOptions["metadata"]
   readonly rateCard?: LanguageModelRateCard
   readonly costEstimator?: ModelCostEstimator
 }
 
 export interface AzureAIFoundryChatOptions extends ChatRequestOptions {
   readonly definition?: AzureAIFoundryModelOptions["definition"]
-  readonly metadata?: AzureAIFoundryModelOptions["metadata"]
   readonly rateCard?: LanguageModelRateCard
   readonly costEstimator?: ModelCostEstimator
   readonly reasoningUsage?: "reported" | "unknown"
@@ -124,23 +118,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
   const transport = new FoundryTransport(options)
   const providerId = options.providerId ?? "azure-ai-foundry"
   if (!providerId.trim()) throw new TypeError(`${PREFIX} providerId must not be empty.`)
-  const definitions = new Map<string, LanguageModelDefinition>()
-  for (const input of options.models ?? []) {
-    const definition = defineLanguageModel(input)
-    if (definition.providerId !== providerId)
-      throw new TypeError(`${PREFIX} Supplied definitions must use providerId '${providerId}'.`)
-    if (definitions.has(definition.modelId))
-      throw new TypeError(`${PREFIX} Duplicate deployment '${definition.modelId}'.`)
-    definitions.set(definition.modelId, definition)
-  }
-  const deployments = new FoundryDeployments(
-    providerId,
-    transport.baseUrl,
-    options,
-    options.discovery === false
-      ? undefined
-      : (options.discovery ?? (transport.project && options.tokenProvider ? {} : undefined))
-  )
+  const deployments = new FoundryDeployments(providerId, transport, options.discovery)
   const modelCatalog = new RemoteModelsDevCatalog(options.catalog)
   const model = <P extends FoundryProtocol = FoundryProtocol>(
     protocol: P | undefined,
@@ -158,8 +136,6 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
       providerId,
       deploymentName,
       modelOptions,
-      {},
-      definitions.get(deploymentName),
       modelCatalog
     )
   }
@@ -172,24 +148,21 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
   const list = async (protocol?: FoundryProtocol, refresh = false) => {
     if (refresh) modelCatalog.invalidate()
     const records = await deployments.list(refresh)
-    const names = new Set([...records.map((d) => d.name), ...definitions.keys()])
     const results: LanguageModelDefinition[] = []
-    for (const name of names) {
-      const deployment = records.find((d) => d.name === name)
+    for (const deployment of records) {
+      const name = deployment.name
       try {
         const profile = resolveModel({
           providerId,
           modelId: name,
           protocol,
           options: {},
-          supplied: definitions.get(name),
           deployment,
-          catalogModel: await modelCatalog.get(deployment?.modelName),
+          catalogModel: await modelCatalog.get(deployment.modelName),
         })
-        const flags = deployment?.capabilities
+        const flags = deployment.capabilities
         const supported =
           profile.metadata.catalog ||
-          definitions.has(name) ||
           (profile.protocol === "responses"
             ? flags?.responses === "true"
             : profile.protocol === "chat"
@@ -241,10 +214,8 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
     readonly providerId: string,
     readonly modelId: string,
     options: AzureAIFoundryModelOptions & MessagesRequestOptions & ChatRequestOptions,
-    resolution: ResolvedDeployment,
-    private readonly supplied?: LanguageModelDefinition,
-    private readonly modelCatalog?: RemoteModelsDevCatalog,
-    private readonly resolved = false
+    private readonly modelCatalog: RemoteModelsDevCatalog,
+    private readonly resolution?: ResolvedDeployment & { readonly catalogModel?: CatalogModel }
   ) {
     if (options.request !== undefined)
       assertJsonObject(options.request, `${PREFIX} request options`)
@@ -255,32 +226,20 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       !["reported", "unknown"].includes(options.reasoningUsage)
     )
       throw new TypeError(`${PREFIX} Invalid reasoningUsage.`)
-    const explicitMetadata = { ...options.metadata }
-    for (const value of Object.values(explicitMetadata)) {
-      if (typeof value !== "string" || !value.trim())
-        throw new TypeError(`${PREFIX} Metadata values must be nonempty strings.`)
-    }
     this.profile = resolveModel({
       providerId,
       modelId,
       protocol: requestedProtocol,
       options,
-      supplied,
-      ...resolution,
+      ...this.resolution,
     })
     const protocol = this.profile.protocol
-    transport.url(protocol)
     if (protocol === "messages") validateMessagesOptions(options)
     else if (protocol === "chat") validateChatOptions(options)
     else validateOptions(options)
-    if (
-      this.metadata.hosting !== undefined &&
-      !["azure", "anthropic"].includes(this.metadata.hosting)
-    )
-      throw new TypeError(`${PREFIX} Invalid hosting; use azure or anthropic.`)
     const { costEstimator, ...serializable } = options
     this.options = {
-      ...structuredClone({ ...serializable, metadata: explicitMetadata }),
+      ...structuredClone(serializable),
       ...(costEstimator ? { costEstimator } : {}),
     }
     this.scope = JSON.stringify([
@@ -312,12 +271,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
   }
 
   async resolve(options?: { readonly offline?: boolean }): Promise<FoundryModel<Protocol>> {
-    if (
-      this.resolved ||
-      (!this.deployments.enabled &&
-        (!this.modelCatalog?.enabled || !this.options.metadata?.modelName))
-    )
-      return this
+    if (this.resolution) return this
     const resolution = await this.deployments.resolve(this.modelId, options?.offline === true)
     return new FoundryModel(
       this.requestedProtocol,
@@ -326,25 +280,20 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       this.providerId,
       this.modelId,
       this.options,
+      this.modelCatalog,
       {
         ...resolution,
-        catalogModel: await this.modelCatalog?.get(
-          resolution.deployment?.modelName ?? this.options.metadata?.modelName,
+        catalogModel: await this.modelCatalog.get(
+          resolution.deployment.modelName,
           options?.offline
         ),
-      },
-      this.supplied,
-      this.modelCatalog,
-      true
+      }
     )
   }
 
   async stream(request: LanguageModelRequest): Promise<LanguageModelStream> {
     request.signal.throwIfAborted()
-    if (
-      !this.resolved &&
-      (this.deployments.enabled || (this.modelCatalog?.enabled && this.options.metadata?.modelName))
-    ) {
+    if (!this.resolution) {
       // A direct-stream handle pins its first execution too. Workers use resolve() before admission.
       this.#pendingExecution ??= this.resolve()
         .then((model) => {
@@ -363,13 +312,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
         ? foundryMessagesRequest(request, this.definition, this.options, this.scope)
         : this.protocol === "chat"
           ? foundryChatRequest(request, this.definition, this.options, this.scope)
-          : responsesRequest(
-              request,
-              this.definition,
-              this.options,
-              this.transport.project,
-              this.scope
-            )
+          : responsesRequest(request, this.definition, this.options, this.scope)
     const response = await this.transport.post(
       JSON.stringify(body),
       request.signal,
