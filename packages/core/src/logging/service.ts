@@ -213,7 +213,7 @@ export class LoggingService {
         const lines = records.map(hydrateLogRecord)
         if (lines.length === 0) return
         try {
-          handler(lines)
+          return handler(lines)
         } catch {
           // Subscriber failures never break broker delivery.
         }

@@ -364,6 +364,39 @@ describe("sixb.workflows.request", () => {
 })
 
 describe("automatic workflow dispatch", () => {
+  // Revert automatic publication recovery in run-dispatch.ts: replay leaves no job.
+  test.each([
+    false,
+    true,
+  ])("recovers queued publication (reply lost after enqueue: %s)", async (accepted) => {
+    const { host } = createSixb()
+    const dispatcher = new WorkflowRunDispatcher(host)
+    const enqueue = host.queues.workflows.enqueue.bind(host.queues.workflows)
+    let attempts = 0
+    host.queues.workflows.enqueue = async (params) => {
+      if (++attempts === 1) {
+        if (accepted) await enqueue(params)
+        throw new Error("queue unavailable")
+      }
+      return enqueue(params)
+    }
+    const input = {
+      workflowId: draftInvoice.id,
+      runId: "retry-publication",
+      input: validInput(),
+      scheduleId: "daily",
+      source: { type: "event" as const, eventId: "event-retry" },
+      correlationId: "retry",
+    }
+    await expect(dispatcher.dispatch(input)).rejects.toThrow("queue unavailable")
+    const before = await host.storage.workflowRuns!.getById({ projectId: host.id, id: input.runId })
+    await dispatcher.dispatch(input)
+    await dispatcher.dispatch(input)
+    const after = await host.storage.workflowRuns!.getById({ projectId: host.id, id: input.runId })
+    expect(before?.executionId).toBe(after?.executionId)
+    expect(after?.status).toBe("queued")
+    expect(await claimAll(host)).toHaveLength(1)
+  })
   test("persists an honest root execution before publishing the queue job", async () => {
     const { host } = createSixb()
     const dispatcher = new WorkflowRunDispatcher(host)

@@ -1,6 +1,7 @@
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import { BrokerCursorExpiredError, BrokerError } from "./errors"
 import { createStreamRetentionResolver } from "./retention"
+import { waitForSubscriber } from "./subscriber"
 import type {
   Broker,
   BrokerPage,
@@ -36,7 +37,10 @@ interface Subscription {
   readonly streamId: string
   readonly names?: readonly string[]
   readonly keys?: readonly string[]
-  readonly handler: (records: readonly BrokerRecord[]) => void
+  readonly handler: (records: readonly BrokerRecord[]) => unknown
+  cursor: string
+  pumping: boolean
+  readonly controller: AbortController
 }
 
 export interface InMemoryBrokerOptions {
@@ -101,7 +105,7 @@ export class InMemoryBroker implements Broker {
     storedStream.retainedBytes += stored.reduce((total, record) => total + record.byteSize, 0)
     this.applyRetention(storedStream)
     const records = stored.map(toBrokerRecord)
-    this.notify(params.projectId, params.streamId, stored)
+    this.notify(params.projectId, params.streamId)
     return records
   }
 
@@ -184,7 +188,7 @@ export class InMemoryBroker implements Broker {
       names?: readonly string[]
       keys?: readonly string[]
     },
-    handler: (records: readonly BrokerRecord[]) => void
+    handler: (records: readonly BrokerRecord[]) => unknown
   ): Promise<() => void> {
     assertProjectId(params.projectId)
     assertStreamId(params.streamId)
@@ -199,27 +203,31 @@ export class InMemoryBroker implements Broker {
     this.applyRetention(storedStream)
     this.assertCursorInRetainedRange(storedStream, params.afterCursor)
 
+    const startMode = params.afterCursor !== undefined ? undefined : (params.from ?? "latest")
     const subscription: Subscription = {
       projectId: params.projectId,
       streamId: params.streamId,
       names: params.names,
       keys: params.keys,
       handler,
+      cursor:
+        params.afterCursor ??
+        (startMode === "earliest"
+          ? BigInt(storedStream.records[0]?.cursor ?? storedStream.nextSequence) - 1n
+          : storedStream.nextSequence - 1n
+        ).toString(),
+      pumping: false,
+      controller: new AbortController(),
     }
     this.subscriptions.add(subscription)
 
-    const startMode = params.afterCursor !== undefined ? undefined : (params.from ?? "latest")
     if (params.afterCursor !== undefined || startMode === "earliest") {
-      const initial = this.readForward(storedStream.records, {
-        afterCursor: params.afterCursor,
-        names: params.names,
-        keys: params.keys,
-      }).records
-      this.deliver(subscription, initial)
+      this.deliver(subscription)
     }
 
     return () => {
       this.subscriptions.delete(subscription)
+      subscription.controller.abort()
     }
   }
 
@@ -346,30 +354,50 @@ export class InMemoryBroker implements Broker {
     }
   }
 
-  private notify(projectId: string, streamId: string, records: readonly StoredRecord[]): void {
+  private notify(projectId: string, streamId: string): void {
     for (const subscription of this.subscriptions) {
       if (subscription.projectId !== projectId || subscription.streamId !== streamId) {
         continue
       }
-      this.deliver(
-        subscription,
-        this.readForward(records, {
-          names: subscription.names,
-          keys: subscription.keys,
-        }).records
-      )
+      this.deliver(subscription)
     }
   }
 
-  private deliver(subscription: Subscription, records: readonly BrokerRecord[]): void {
-    if (records.length === 0) {
-      return
-    }
+  private deliver(subscription: Subscription): void {
+    if (subscription.pumping) return
+    subscription.pumping = true
+    // Only the retained stream holds the backlog, never a second queue of cloned batches.
+    void this.pump(subscription).catch((error) => {
+      this.subscriptions.delete(subscription)
+      subscription.controller.abort()
+      console.error("[InMemoryBroker] Subscription stopped:", error)
+    })
+  }
 
-    try {
-      subscription.handler(records)
-    } catch {
-      // Broker subscriptions are live fan-out; handler failures should not break publishers.
+  private async pump(subscription: Subscription): Promise<void> {
+    while (this.subscriptions.has(subscription)) {
+      const stream = this.getEnsuredStream(subscription.projectId, subscription.streamId)
+      this.applyRetention(stream)
+      this.assertCursorInRetainedRange(stream, subscription.cursor)
+      const page = this.readForward(stream.records, {
+        afterCursor: subscription.cursor,
+        names: subscription.names,
+        keys: subscription.keys,
+        limit: 100,
+      })
+      if (page.records.length === 0) {
+        subscription.cursor = page.cursor ?? subscription.cursor
+        // Clear synchronously: an append must not miss the wake-up between return and finally.
+        subscription.pumping = false
+        return
+      }
+      try {
+        await waitForSubscriber(subscription.handler(page.records), subscription.controller.signal)
+      } catch {
+        // Preserve observer error isolation, including rejected async callbacks.
+      }
+      if (!this.subscriptions.has(subscription)) return
+      subscription.cursor = page.cursor ?? subscription.cursor
     }
   }
 

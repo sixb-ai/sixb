@@ -93,7 +93,10 @@ export class SyncRunDispatcher implements SyncRunDispatchPort {
 /** Persist a Sync execution and queued run before publishing its queue job. */
 export async function dispatchSyncRun(input: DispatchSyncRunInput): Promise<SyncRunRequestResult> {
   const runId = createSyncRunId(input.runId)
-  const persisted = await persistSyncRun(input, runId)
+  let persisted = await persistSyncRun(input, runId)
+  if (!persisted.publish && input.validateExistingRun && persisted.run.status === "queued") {
+    persisted = await reuseSyncRun(input, persisted.run)
+  }
   if (!persisted.publish) return existingSyncRunResult(persisted.run)
   return publishSyncRun(input, persisted)
 }
@@ -151,6 +154,15 @@ async function reuseSyncRun(
 ): Promise<PersistedSyncRun> {
   assertExistingRunMatchesRequest(existing, input)
   await input.validateExistingRun?.(existing, input.storage)
+  if (input.validateExistingRun && existing.status === "queued") {
+    const execution = await input.storage.executions.getById({
+      projectId: input.projectId,
+      id: existing.executionId,
+    })
+    if (!execution)
+      throw new SyncRunError(`[Sixb] Execution '${existing.executionId}' was not found.`)
+    return { publish: true, run: existing, execution, queuedAt: existing.queuedAt, created: false }
+  }
   if (
     existing.status !== "failed" ||
     existing.error?.code !== "queue.enqueue_failed" ||
@@ -200,6 +212,9 @@ async function publishSyncRun(
         },
       ],
     })
+    if (!job || job.id !== persisted.run.id) {
+      throw new SyncRunError(`[Sixb] Queue did not acknowledge Sync run '${persisted.run.id}'.`)
+    }
     return {
       syncId: persisted.run.syncId,
       runId: persisted.run.id,
@@ -208,6 +223,9 @@ async function publishSyncRun(
       created: persisted.created,
     }
   } catch (error) {
+    // Automatic consumers retain the batch and retry. Keep uncertain delivery queued:
+    // a lost reply does not prove that the queue rejected the job.
+    if (input.validateExistingRun) throw error
     const failedAt = new Date()
     const failure = toEnqueueFailure(error, persisted.run, failedAt)
     const failed = await requireSyncRunStorage(input.storage).finish({

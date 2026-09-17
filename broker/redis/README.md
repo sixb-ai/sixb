@@ -116,7 +116,13 @@ new records. Use `from: "earliest"` or `afterCursor` for retained replay.
 Subscription clients are disposable and do not reconnect in place. An
 application-level watchdog also bounds each `XREAD BLOCK` call. If a read stalls
 or its connection fails, the broker replaces that client and resumes from the
-last observed cursor.
+last delivered cursor. The next read waits for the subscriber's returned promise to settle.
+Return that promise rather than starting detached background work to apply backpressure.
+`subscribeBatchSize` bounds records per read, not bytes or total process memory.
+
+Handler failures are isolated, not retried by the broker. Reliable consumers retry inside their
+callback before returning. Unsubscribe stops reads but cannot cancel application work already in
+flight; its owner must cancel or drain it. Cursors are process-local, not durable acknowledgements.
 
 ### Retention
 

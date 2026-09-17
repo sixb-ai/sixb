@@ -14,6 +14,41 @@ const stream: EnsuredStream = {
   },
 }
 
+// Removing the awaited handler in RedisSubscriptionPump makes this read twice while blocked.
+test("does not read ahead of an async handler and can stop while it is blocked", async () => {
+  let reads = 0
+  let delivered = false
+  const client = fakeClient(async () => {
+    reads += 1
+    if (reads > 1) return new Promise(() => {})
+    return [
+      [
+        stream.keys.streamKey,
+        [[`${reads}-0`, ["body", encodeRecord({ payload: reads }, new Date().toISOString())]]],
+      ],
+    ]
+  })
+  const pump = new RedisSubscriptionPump({
+    connectionManager: { createSubscriptionClient: async () => client, closeClient: () => {} },
+    client,
+    stream,
+    batchSize: 1,
+    blockMs: 1,
+    handler: () => {
+      delivered = true
+      return new Promise<void>(() => {})
+    },
+  })
+  try {
+    pump.start("0-0")
+    await waitUntil(() => delivered, 250)
+    expect(reads).toBe(1)
+  } finally {
+    pump.stop()
+    await withTimeout(pump.drain(), 250)
+  }
+})
+
 test("replaces a client when the XREAD watchdog expires", async () => {
   const errors = spyOn(console, "error").mockImplementation(() => undefined)
   const closedClients = new Set<RedisBrokerClient>()
