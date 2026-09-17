@@ -899,7 +899,13 @@ function validateVectorProfileQuery(
     admitProperty(ctx, { state, propertyId, objectTypeId: objectType.id, use: "vector", path })
   let values = query.vector
   try {
-    values = normalizeVector(values, profile.model.definition.dimensions)
+    if (typeof values === "string") {
+      if (!values.trim() || values.length > 8000) {
+        throw new Error("Vector search text must be nonempty and at most 8000 characters.")
+      }
+    } else {
+      values = normalizeVector(values, profile.model.definition.dimensions)
+    }
   } catch (error) {
     addIssue(ctx, path, "invalid_vector", error instanceof Error ? error.message : "Invalid vector")
   }

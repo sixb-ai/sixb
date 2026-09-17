@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test"
-import { defineObjectType, type EmbeddingModel, prop } from "../src"
+import { defineObjectType, type EmbeddingModel, OntologyRegistry, prop } from "../src"
 import type { JsonValue } from "../src/json"
+import { validateObjectQuery } from "../src/objects/query"
 import { compileSelectedObjectReadScope, linkBatchKey } from "../src/storage"
 import { InMemoryStorage } from "../src/storage/in-memory"
 import {
@@ -107,7 +108,16 @@ describe("InMemoryObjectStorage selected read behavior", () => {
     })
     const result = await reader.queryObjects?.({
       projectId,
-      query: sixb.objects(Proposal).query().vector("content", [1, 0], { k: 1 }).validate().query,
+      query: validateObjectQuery(
+        {
+          kind: "vector",
+          input: { kind: "start", objectTypeId: Proposal.id },
+          profile: "content",
+          vector: [1, 0],
+          k: 1,
+        },
+        { ontology: new OntologyRegistry({ sources: [Proposal] }) }
+      ).query,
     })
 
     expect(result?.objects.map((row) => row.primaryId)).toEqual(["visible"])

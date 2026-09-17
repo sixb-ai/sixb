@@ -53,7 +53,7 @@ test("HTTP publishes named profile metadata and preserves cosine scores", async 
     kind: "vector",
     input: { kind: "start", objectTypeId: Product.id },
     profile: "content",
-    vector: [1, 0],
+    vector: "search",
     k: 1,
   }
   const response = await app.fetch(
@@ -80,15 +80,16 @@ test("HTTP publishes named profile metadata and preserves cosine scores", async 
   expect(text).toContain('"dimensions":2')
 })
 
-test("wire vector queries require a named profile and reject internal stamps", () => {
+test("wire vector queries require text and a profile and reject internal stamps", () => {
   const query = {
     kind: "vector",
     input: { kind: "start", objectTypeId: Product.id },
     profile: "content",
-    vector: [1, 0],
+    vector: "search",
     k: 1,
   }
   expect(ObjectQuerySchema.safeParse(query).success).toBe(true)
+  expect(ObjectQuerySchema.safeParse({ ...query, vector: [1, 0] }).success).toBe(false)
   expect(ObjectQuerySchema.safeParse({ ...query, propertyId: "raw" }).success).toBe(false)
   expect(ObjectQuerySchema.safeParse({ ...query, configuration: "forged" }).success).toBe(false)
   expect(ObjectQuerySchema.safeParse({ ...query, profile: undefined }).success).toBe(false)

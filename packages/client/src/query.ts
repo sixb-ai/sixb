@@ -75,10 +75,11 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
   const callOptions = { client, responseStyle: "fields", throwOnError: false } as const
 
   return {
-    async list(query: ObjectQuery, options?: { includeTotal?: boolean }) {
+    async list(query: ObjectQuery, options?: { includeTotal?: boolean; signal?: AbortSignal }) {
       const { data, error } = await queryObjects({
         ...callOptions,
         body: { query: toWireQuery(query), includeTotal: options?.includeTotal },
+        signal: options?.signal,
       })
       if (error || !data) throw toSixbQueryError(error)
       return {

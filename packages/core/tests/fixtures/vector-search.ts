@@ -17,11 +17,13 @@ export async function verifyVectorSearch(
     async embed({ texts }) {
       return {
         vectors: texts.map((text) =>
-          text.includes("North")
-            ? [1e20, 0, 0]
-            : text.includes("South")
-              ? [-1e-30, 0, 0]
-              : [0, 1, 0]
+          text === "tiny query"
+            ? [1e-30, 0, 0]
+            : text.includes("North")
+              ? [1e20, 0, 0]
+              : text.includes("South")
+                ? [-1e-30, 0, 0]
+                : [0, 1, 0]
         ),
       }
     },
@@ -54,7 +56,7 @@ export async function verifyVectorSearch(
     await objects.upsert({ properties: { id: id!, title: title!, status: status! } })
     await objects.byId(id!).vector("content").index()
   }
-  const result = await objects.query().vector("content", [1e-30, 0, 0], { k: 4 }).list()
+  const result = await objects.query().vector("content", "tiny query", { k: 4 }).list()
   assert.deepEqual(
     result.objects.map((o) => o.primaryId),
     ["a", "d", "b", "c"]
@@ -66,15 +68,15 @@ export async function verifyVectorSearch(
   const filtered = await objects
     .query()
     .where((p) => p.p.status.eq("visible"))
-    .vector("content", [1, 0, 0], { k: 2 })
+    .vector("content", "North", { k: 2 })
     .list()
   assert.deepEqual(
     filtered.objects.map((o) => o.primaryId),
     ["d", "b"]
   )
-  assert.equal(await objects.query().vector("content", [1, 0, 0], { k: 2 }).count(), 2)
-  assert.equal(await objects.query().vector("content", [1, 0, 0], { k: 2 }).exists(), true)
-  const limited = await objects.query().vector("content", [1, 0, 0], { k: 3 }).limit(1).list()
+  assert.equal(await objects.query().vector("content", "North", { k: 2 }).count(), 2)
+  assert.equal(await objects.query().vector("content", "North", { k: 2 }).exists(), true)
+  const limited = await objects.query().vector("content", "North", { k: 3 }).limit(1).list()
   assert.deepEqual(
     limited.objects.map((o) => o.primaryId),
     ["a"]
@@ -146,14 +148,14 @@ export async function verifyVectorSearch(
   )
   await objects.upsert({ properties: { id: "a", title: "Changed" } })
   assert.deepEqual(
-    (await objects.query().vector("content", [1, 0, 0], { k: 1 }).list()).objects.map(
+    (await objects.query().vector("content", "North", { k: 1 }).list()).objects.map(
       (o) => o.primaryId
     ),
     ["d"]
   )
   const facets = await objects
     .query()
-    .vector("content", [1, 0, 0], { k: 2 })
+    .vector("content", "North", { k: 2 })
     .facets([{ property: Product.p.status, limit: 10 }])
   assert.equal(
     facets[0]!.buckets.reduce((sum, bucket) => sum + bucket.count, 0),
@@ -162,7 +164,7 @@ export async function verifyVectorSearch(
   await assert.rejects(() =>
     objects
       .query()
-      .vector("content", [1, 0, 0], { k: 1 })
+      .vector("content", "North", { k: 1 })
       .where((p) => p.p.status.eq("visible"))
       .list()
   )
@@ -175,7 +177,7 @@ export async function verifyVectorSearch(
       await objects
         .query()
         .where((p) => p.p.status.eq("tie"))
-        .vector("content", [1, 0, 0], { k: 4 })
+        .vector("content", "North", { k: 4 })
         .list()
     ).objects.map((o) => o.primaryId),
     ["A", "a-2", "\uE000", "𐀀"]
@@ -184,7 +186,7 @@ export async function verifyVectorSearch(
     await fill()
     // Regression proof: disable the vectorProbe count check; this assertion must fail.
     await assert.rejects(
-      () => objects.query().vector("content", [1, 0, 0], { k: 1 }).list(),
+      () => objects.query().vector("content", "North", { k: 1 }).list(),
       /vector.*limit|at most/i
     )
   }

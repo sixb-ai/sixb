@@ -39,7 +39,11 @@ function normalizeNode(query: ObjectQuery): ObjectQuery {
           : undefined,
       }
     case "vector":
-      return { ...query, input: normalizeObjectQuery(query.input), vector: [...query.vector] }
+      return {
+        ...query,
+        input: normalizeObjectQuery(query.input),
+        vector: typeof query.vector === "string" ? query.vector : [...query.vector],
+      }
     case "traverse":
       return { ...query, input: normalizeObjectQuery(query.input) }
     case "set":

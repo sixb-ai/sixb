@@ -432,6 +432,7 @@ export type ListResultWithoutTotal<T> = {
 }
 
 export type ObjectQueryListOptions = {
+  signal?: AbortSignal
   includeTotal?: boolean
 }
 
@@ -849,10 +850,10 @@ export interface ObjectQueryBuilder<
     options?: { fields?: readonly ObjectSetQueryPropertyToken<TObjectType>[] }
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
 
-  /** Search a named vector profile at the current object type. */
+  /** Search a profile; text is embedded server-side with its configured model. */
   vector(
     profile: VectorProfileName<TObjectType>,
-    vector: readonly number[],
+    vector: string,
     options: { k: number }
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
 
@@ -946,9 +947,11 @@ export interface ObjectQueryBuilder<
   list(): Promise<ListResult<ObjectQueryRow<TObjectType, TValueTypes, TLinks>>>
   list(options: {
     includeTotal: false
+    signal?: AbortSignal
   }): Promise<ListResultWithoutTotal<ObjectQueryRow<TObjectType, TValueTypes, TLinks>>>
   list(options: {
     includeTotal?: true
+    signal?: AbortSignal
   }): Promise<ListResult<ObjectQueryRow<TObjectType, TValueTypes, TLinks>>>
   list(
     options?: ObjectQueryListOptions

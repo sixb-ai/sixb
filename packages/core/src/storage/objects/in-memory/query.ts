@@ -133,6 +133,9 @@ export function evaluateObjectQuery(
       return completeEvaluation(scoredEntries)
     }
     case "vector": {
+      if (typeof query.vector === "string")
+        throw new Error("[Sixb] Vector search text must be embedded before storage execution.")
+      const vector = query.vector
       const input = evaluateObjectQuery(query.input, source)
       const scoredEntries = input.entries.flatMap((entry) => {
         const stored = source.getVector?.(entry.row, query.profile)
@@ -144,7 +147,7 @@ export function evaluateObjectQuery(
             stored.sourceFingerprint
         )
           return []
-        const score = vectorSimilarity(stored.values, query.vector)
+        const score = vectorSimilarity(stored.values, vector)
         return score === null
           ? []
           : [{ ...entry, score: entry.score + Math.max(-1, Math.min(1, score)) }]

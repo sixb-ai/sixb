@@ -19,6 +19,9 @@ export interface SqliteSelectedObjectReadSource extends SqliteObjectQuerySource 
  *
  * The complete compiled scope is serialized once. Every statement receives that one JSON document
  * and the bound project id, keeping the host-parameter count constant as selections grow.
+ * CROSS JOIN keeps authorized parents/grants before indexed edge/object lookups, even when
+ * statistics would otherwise make SQLite rescan all grants for every stored object.
+ * Property grants are grouped only after path-sensitive reachability has been resolved.
  */
 export function compileSqliteSelectedObjectReadSource(
   projectId: string,
@@ -143,16 +146,16 @@ function compileSelectedReadScopeCte(scopeJson: string, projectId: string): Comp
 
         SELECT edge.project_id, selection.node_id, edge.target_type_id, edge.target_id
         FROM _sixb_scope_reachable AS parent
-        JOIN _sixb_scope_link_selections AS selection
+        CROSS JOIN _sixb_scope_link_selections AS selection
           ON selection.parent_node_id = parent.node_id
          AND selection.source_object_type_id = parent.object_type_id
-        JOIN links AS edge
+        CROSS JOIN links AS edge
           ON edge.project_id = parent.project_id
          AND edge.source_type_id = parent.object_type_id
          AND edge.source_id = parent.primary_id
          AND edge.link_id = selection.link_id
          AND edge.target_type_id = selection.target_object_type_id
-        JOIN objects AS target
+        CROSS JOIN objects AS target
           ON target.project_id = edge.project_id
          AND target.object_type_id = edge.target_type_id
          AND target.primary_id = edge.target_id
@@ -173,32 +176,29 @@ function compileSelectedReadScopeCte(scopeJson: string, projectId: string): Comp
         SELECT DISTINCT project_id, object_type_id, primary_id
         FROM _sixb_scope_reachable
       ),
+      _sixb_scope_object_grants AS (
+        SELECT reachable.project_id, reachable.object_type_id, reachable.primary_id,
+          json_group_array(DISTINCT selected_property.value) FILTER (WHERE selected_property.value IS NOT NULL) AS property_ids
+        FROM _sixb_scope_reachable AS reachable
+        LEFT JOIN _sixb_scope_object_selections AS selection
+          ON selection.node_id = reachable.node_id
+         AND selection.object_type_id = reachable.object_type_id
+        LEFT JOIN json_each(selection.property_ids) AS selected_property ON true
+        GROUP BY reachable.project_id, reachable.object_type_id, reachable.primary_id
+      ),
       _sixb_scope_objects AS (
-        SELECT
-          stored.project_id,
-          stored.object_type_id,
-          stored.primary_id,
-          COALESCE(
-            (
-              SELECT json_group_object(property.key, ${sqliteJsonEachValue("property")})
-              FROM json_each(stored.properties) AS property
-              JOIN _sixb_scope_object_permissions AS permission
-                ON permission.project_id = stored.project_id
-               AND permission.object_type_id = stored.object_type_id
-               AND permission.primary_id = stored.primary_id
-               AND permission.property_id = property.key
-            ),
-            json('{}')
-          ) AS properties,
-          stored.created_at,
-          stored.updated_at,
-          stored.version,
-          stored.last_commit_id
-        FROM objects AS stored
-        JOIN _sixb_scope_object_ids AS visible
-          ON visible.project_id = stored.project_id
-         AND visible.object_type_id = stored.object_type_id
-         AND visible.primary_id = stored.primary_id
+        SELECT stored.project_id, stored.object_type_id, stored.primary_id,
+          COALESCE((
+            SELECT json_group_object(property.key, ${sqliteJsonEachValue("property")})
+            FROM json_each(stored.properties) AS property
+            WHERE property.key IN (SELECT value FROM json_each(grants.property_ids))
+          ), json('{}')) AS properties,
+          stored.created_at, stored.updated_at, stored.version, stored.last_commit_id
+        FROM _sixb_scope_object_grants AS grants
+        CROSS JOIN objects AS stored
+          ON stored.project_id = grants.project_id
+         AND stored.object_type_id = grants.object_type_id
+         AND stored.primary_id = grants.primary_id
       ),
       _sixb_scope_reached_links(
         project_id,
@@ -224,16 +224,16 @@ function compileSelectedReadScopeCte(scopeJson: string, projectId: string): Comp
           edge.target_id,
           selection.property_ids
         FROM _sixb_scope_reachable AS parent
-        JOIN _sixb_scope_link_selections AS selection
+        CROSS JOIN _sixb_scope_link_selections AS selection
           ON selection.parent_node_id = parent.node_id
          AND selection.source_object_type_id = parent.object_type_id
-        JOIN links AS edge
+        CROSS JOIN links AS edge
           ON edge.project_id = parent.project_id
          AND edge.source_type_id = parent.object_type_id
          AND edge.source_id = parent.primary_id
          AND edge.link_id = selection.link_id
          AND edge.target_type_id = selection.target_object_type_id
-        JOIN objects AS target
+        CROSS JOIN objects AS target
           ON target.project_id = edge.project_id
          AND target.object_type_id = edge.target_type_id
          AND target.primary_id = edge.target_id
