@@ -11,6 +11,7 @@ import {
   type BrokerStreamDefinition,
   type BrokerStreamRetention,
   createStreamRetentionResolver,
+  waitForSubscriber,
 } from "@sixb/core/broker"
 import { NatsConnectionManager } from "./connection"
 import { NatsBrokerError } from "./errors"
@@ -306,7 +307,7 @@ export class NatsBroker implements Broker {
       names?: readonly string[]
       keys?: readonly string[]
     },
-    handler: (records: readonly BrokerRecord[]) => void
+    handler: (records: readonly BrokerRecord[]) => unknown
   ): Promise<() => void> {
     this.assertOpen()
     validateProjectId(params.projectId)
@@ -314,6 +315,7 @@ export class NatsBroker implements Broker {
     assertCursor(params.afterCursor)
 
     let stopped = false
+    const controller = new AbortController()
     const streamName = await this.requireStreamName(params.projectId, params.streamId)
 
     // A cursor JetStream has already discarded would silently start the consumer at the oldest
@@ -335,7 +337,8 @@ export class NatsBroker implements Broker {
       live: true,
     })
     const consumer = await js.consumers.get(streamName, consumerOptions)
-    const messages = await consumer.consume()
+    // Bound the client's prefetch too: awaiting the handler alone is insufficient.
+    const messages = await consumer.consume({ max_messages: 100, threshold_messages: 1 })
     const pump = (async () => {
       try {
         for await (const msg of messages) {
@@ -357,7 +360,7 @@ export class NatsBroker implements Broker {
           }
 
           try {
-            handler([record])
+            await waitForSubscriber(handler([record]), controller.signal)
           } catch {
             // Handler failures are swallowed per the Broker subscribe contract.
           }
@@ -377,6 +380,7 @@ export class NatsBroker implements Broker {
           return
         }
         stopped = true
+        controller.abort()
         messages?.stop()
       },
       drain: async () => {

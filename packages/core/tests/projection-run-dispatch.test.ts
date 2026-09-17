@@ -218,7 +218,10 @@ describe("ProjectionRunDispatcher", () => {
     expect(claimed?.job.payload).toEqual({ runId: result.runId })
   })
 
-  test("reuses one execution when queue publication is retried", async () => {
+  test.each([
+    false,
+    true,
+  ])("recovers Projection publication (reply lost after enqueue: %s)", async (accepted) => {
     const reports: SixbErrorContext[] = []
     const { host, lakeStorage, queues, storage } = createDependencies(
       deviceProjection,
@@ -229,53 +232,32 @@ describe("ProjectionRunDispatcher", () => {
     let attempts = 0
     queues.projections.enqueue = async (input) => {
       attempts += 1
-      if (attempts === 1) throw new Error("queue unavailable")
+      if (attempts === 1) {
+        if (accepted) await enqueue(input)
+        throw new Error("queue unavailable")
+      }
       return enqueue(input)
     }
     const dispatcher = new ProjectionRunDispatcher(host)
 
     await expect(dispatcher.dispatch(dispatchInput(version))).rejects.toThrow("queue unavailable")
-    const failed = (await storage.projectionRuns.list({ projectId: host.id })).runs[0]
-    if (!failed?.error) throw new Error("Expected the enqueue failure to be persisted.")
-    expect(failed).toMatchObject({
-      status: "failed",
-      attempt: 0,
-      error: {
-        code: "queue.enqueue_failed",
-        message: "The job could not be enqueued.",
-        retryable: true,
-        details: {
-          projectionId: deviceProjection.id,
-          projectionKind: "object",
-          runId: failed?.id,
-          phase: "enqueue",
-        },
-      },
-    })
-    expect(reports).toEqual([
-      {
-        type: "run.failed",
-        notificationId: `project:${host.id}:run:projection:${failed.id}:failed:${failed.error.at}`,
-        projectId: host.id,
-        occurredAt: failed.error.at,
-        runKind: "projection",
-        run: {
-          runId: failed!.id,
-          projectionId: deviceProjection.id,
-          projectionKind: "object",
-        },
-        failure: failed.error,
-      },
-    ])
+    const pending = (await storage.projectionRuns.list({ projectId: host.id })).runs[0]
+    expect(pending).toMatchObject({ status: "queued", attempt: 0 })
+    expect(pending?.error).toBeUndefined()
+    expect(reports).toEqual([])
 
     const retried = await dispatcher.dispatch(dispatchInput(version))
     const replayed = await dispatcher.dispatch(dispatchInput(version))
     const run = await storage.projectionRuns.getById({ projectId: host.id, id: retried.runId })
     expect(retried).toMatchObject({ created: false, jobId: retried.runId })
     expect(replayed).toMatchObject({ created: false })
-    expect(replayed.jobId).toBeUndefined()
-    expect(run).toMatchObject({ executionId: failed?.executionId, status: "queued", attempt: 0 })
-    expect(attempts).toBe(2)
+    expect(replayed.jobId).toBe(retried.runId)
+    expect(run).toMatchObject({ executionId: pending?.executionId, status: "queued", attempt: 0 })
+    // A queued run may have survived a crash before enqueue. Reconfirm its stable job id.
+    expect(attempts).toBe(3)
+    expect(
+      await queues.projections.claim({ projectId: host.id, workerId: "test", limit: 10 })
+    ).toHaveLength(1)
   })
 
   test("creates a distinct run when the registered Projection semantics change", async () => {

@@ -31,6 +31,64 @@ const step = definePipelineStep("clean-orders")
 const pipeline = definePipeline("pipeline-orders").then(step)
 
 describe("Sync and Pipeline durable dispatch", () => {
+  // Revert queued-run republication / keep-queued handling to lose or terminalize the accepted job.
+  test.each([
+    false,
+    true,
+  ])("automatic Sync/Pipeline delivery recovers uncertain enqueue (%s)", async (accepted) => {
+    const storage = new InMemoryStorage()
+    const queues = new InMemoryQueues()
+    const dependencies = {
+      id: "test",
+      storage,
+      queues,
+      definitions: {
+        syncs: createDefinitionCatalog(new Map([[sync.id, sync]])),
+        pipelines: createDefinitionCatalog(new Map([[pipeline.id, pipeline]])),
+      },
+    }
+    const source = { type: "event" as const, eventId: "event" }
+    const inputs = { source, correlationId: "correlation" }
+    const syncDispatcher = new SyncRunDispatcher(dependencies)
+    const pipelineDispatcher = new PipelineRunDispatcher(dependencies)
+    function failFirst<TInput, TResult>(enqueue: (input: TInput) => Promise<TResult>) {
+      let first = true
+      return async (input: TInput): Promise<TResult> => {
+        if (first) {
+          first = false
+          if (accepted) await enqueue(input)
+          throw new Error("queue unavailable")
+        }
+        return enqueue(input)
+      }
+    }
+    queues.syncRuns.enqueue = failFirst(queues.syncRuns.enqueue.bind(queues.syncRuns))
+    queues.pipelines.enqueue = failFirst(queues.pipelines.enqueue.bind(queues.pipelines))
+    const cases = [
+      {
+        queue: queues.syncRuns,
+        dispatch: () => syncDispatcher.dispatch({ ...inputs, syncId: sync.id, runId: "sync" }),
+        read: () => storage.syncRuns.getById({ projectId: "test", id: "sync" }),
+      },
+      {
+        queue: queues.pipelines,
+        dispatch: () =>
+          pipelineDispatcher.dispatch({ ...inputs, pipelineId: pipeline.id, runId: "pipeline" }),
+        read: () => storage.pipelineRuns.getById({ projectId: "test", id: "pipeline" }),
+      },
+    ]
+    for (const entry of cases) {
+      await expect(entry.dispatch()).rejects.toThrow("queue unavailable")
+      const before = await entry.read()
+      expect(before?.status).toBe("queued")
+      await entry.dispatch()
+      await entry.dispatch()
+      expect((await entry.read())?.executionId).toBe(before?.executionId)
+      expect(
+        await entry.queue.claim({ projectId: "test", workerId: "test", limit: 10 })
+      ).toHaveLength(1)
+    }
+  })
   test("requeues a Sync enqueue failure with the same run and execution identities", async () => {
     const storage = new InMemoryStorage()
     const queues = new InMemoryQueues()
@@ -195,7 +253,7 @@ describe("Sync and Pipeline durable dispatch", () => {
 
     expect(
       await storage.syncRuns.getById({ projectId: "project-1", id: "sync-run-provenance" })
-    ).toMatchObject({ status: "failed", error: { code: "queue.enqueue_failed" } })
+    ).toMatchObject({ status: "queued" })
     expect(await queues.syncRuns.claim({ projectId: "project-1", workerId: "worker-1" })).toEqual(
       []
     )
@@ -239,7 +297,7 @@ describe("Sync and Pipeline durable dispatch", () => {
         projectId: "project-1",
         id: "pipeline-run-provenance",
       })
-    ).toMatchObject({ status: "failed", error: { code: "queue.enqueue_failed" } })
+    ).toMatchObject({ status: "queued" })
     expect(await queues.pipelines.claim({ projectId: "project-1", workerId: "worker-1" })).toEqual(
       []
     )

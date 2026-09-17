@@ -57,6 +57,8 @@ interface DispatchWorkflowRunInput {
   readonly source?: WorkflowRunSource
   readonly metadata?: Readonly<Record<string, string>>
   readonly queueJobId?: string
+  /** Automatic callers own publication retries; validate provenance before any replay effect. */
+  readonly validateExistingRun?: (run: WorkflowRunRecord) => Promise<void>
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
 }
 
@@ -88,7 +90,7 @@ export class WorkflowRunDispatcher implements WorkflowRunDispatchPort {
       throw new WorkflowValidationError(`[Sixb] Unknown workflow '${input.workflowId}'`)
     }
 
-    const result = await dispatchWorkflowRun({
+    return dispatchWorkflowRun({
       errorReporterHost: this.dependencies,
       projectId: this.dependencies.id,
       workflow,
@@ -106,6 +108,7 @@ export class WorkflowRunDispatcher implements WorkflowRunDispatchPort {
       },
       metadata: input.metadata,
       queueJobId: input.runId,
+      validateExistingRun: (run) => assertAutomaticExecutionIdentity(this.dependencies, input, run),
       createExecution: async (executionId, runId) =>
         createPrimitiveExecutionRecord({
           id: executionId,
@@ -118,10 +121,6 @@ export class WorkflowRunDispatcher implements WorkflowRunDispatchPort {
           },
         }),
     })
-    if (!result.created) {
-      await assertAutomaticExecutionIdentity(this.dependencies, input, result.runId)
-    }
-    return result
   }
 }
 
@@ -131,7 +130,15 @@ export async function dispatchWorkflowRun(
 ): Promise<WorkflowRunRequestResult> {
   const request = prepareWorkflowRun(input)
   const persisted = await persistWorkflowRun(input, request)
-  if (!persisted.created) return existingWorkflowRunResult(persisted.run)
+  if (!persisted.created) {
+    await input.validateExistingRun?.(persisted.run)
+    if (input.validateExistingRun && persisted.run.status === "queued") {
+      // A queued run is also the recoverable intent when publication never completed.
+      // Reuse the provider job identity, including after a successful but unacknowledged enqueue.
+      await enqueueWorkflowRun(input, persisted.run)
+    }
+    return existingWorkflowRunResult(persisted.run)
+  }
   return publishWorkflowRun(input, persisted)
 }
 
@@ -213,20 +220,11 @@ async function publishWorkflowRun(
 ): Promise<WorkflowRunRequestResult> {
   let job: Awaited<ReturnType<Queues["workflows"]["enqueue"]>>[number] | undefined
   try {
-    const jobs = await input.queue.enqueue({
-      projectId: input.projectId,
-      jobs: [
-        {
-          ...(input.queueJobId === undefined ? {} : { id: input.queueJobId }),
-          type: "workflow.run.requested",
-          payload: { runId: persisted.run.id },
-          ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
-        },
-      ],
-    })
-    job = jobs[0]
+    job = await enqueueWorkflowRun(input, persisted.run)
   } catch (error) {
-    await failWorkflowRunPublication(input, persisted.run, error)
+    // Automatic dispatch retries the same run. Do not turn an uncertain enqueue into
+    // a terminal business failure: the queue may have accepted it before losing the reply.
+    if (!input.validateExistingRun) await failWorkflowRunPublication(input, persisted.run, error)
     throw error
   }
 
@@ -256,6 +254,27 @@ async function publishWorkflowRun(
     jobId: job?.id,
     created: true,
   }
+}
+
+async function enqueueWorkflowRun(
+  input: DispatchWorkflowRunInput,
+  run: WorkflowRunRecord
+): Promise<Awaited<ReturnType<Queues["workflows"]["enqueue"]>>[number]> {
+  const [job] = await input.queue.enqueue({
+    projectId: input.projectId,
+    jobs: [
+      {
+        ...(input.queueJobId === undefined ? {} : { id: input.queueJobId }),
+        type: "workflow.run.requested",
+        payload: { runId: run.id },
+        ...(input.metadata === undefined ? {} : { metadata: input.metadata }),
+      },
+    ],
+  })
+  if (!job || (input.queueJobId !== undefined && job.id !== input.queueJobId)) {
+    throw new WorkflowRunError(`[Sixb] Queue did not acknowledge workflow run '${run.id}'.`)
+  }
+  return job
 }
 
 async function failWorkflowRunPublication(
@@ -326,18 +345,12 @@ function assertAutomaticDispatchInput(input: AutomaticWorkflowRunDispatchInput):
 async function assertAutomaticExecutionIdentity(
   dependencies: WorkflowRunDispatcherDependencies,
   input: AutomaticWorkflowRunDispatchInput,
-  runId: string
+  run: WorkflowRunRecord
 ): Promise<void> {
-  const run = await dependencies.storage.workflowRuns?.getById({
+  const execution = await dependencies.storage.executions.getById({
     projectId: dependencies.id,
-    id: runId,
+    id: run.executionId,
   })
-  const execution = run
-    ? await dependencies.storage.executions.getById({
-        projectId: dependencies.id,
-        id: run.executionId,
-      })
-    : null
   if (
     !execution ||
     execution.source.type !== input.source.type ||
@@ -346,7 +359,7 @@ async function assertAutomaticExecutionIdentity(
     execution.requestedBy !== undefined
   ) {
     throw new WorkflowValidationError(
-      `[Sixb] Workflow run '${runId}' already exists with different automatic provenance.`
+      `[Sixb] Workflow run '${run.id}' already exists with different automatic provenance.`
     )
   }
 }

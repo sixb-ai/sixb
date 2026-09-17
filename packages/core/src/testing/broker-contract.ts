@@ -446,6 +446,101 @@ export function runBrokerContractSuite<TBroker extends Broker>(
     })
 
     describe("subscribe", () => {
+      // Removing awaited provider delivery makes the second callback enter before release.
+      test("awaits async handlers without blocking publishers or other subscribers", async () => {
+        await withBroker(async (broker) => {
+          await broker.ensureStream({ projectId: "project-a", stream: eventsStream })
+          let release!: () => void
+          const blocked = new Promise<void>((resolve) => {
+            release = resolve
+          })
+          const received: string[] = []
+          const observer: string[] = []
+          const unsubscribe = await broker.subscribe(
+            { projectId: "project-a", streamId: eventsStream.id },
+            async (records) => {
+              received.push(...records.map((record) => String(record.payload)))
+              await blocked
+            }
+          )
+          const observe = await broker.subscribe(
+            { projectId: "project-a", streamId: eventsStream.id },
+            (records) => {
+              observer.push(...records.map((record) => String(record.payload)))
+            }
+          )
+          const wait = (predicate: () => boolean) =>
+            waitUntil(predicate, {
+              timeoutMs: subscriptionDeliveryTimeoutMs,
+              intervalMs: subscriptionPollIntervalMs,
+              message: "Async broker subscription did not progress",
+            })
+          try {
+            if (subscriptionSetupMs > 0) await Bun.sleep(subscriptionSetupMs)
+            await broker.append({
+              projectId: "project-a",
+              streamId: eventsStream.id,
+              records: [{ payload: "one" }],
+            })
+            await wait(() => received.length === 1)
+            await broker.append({
+              projectId: "project-a",
+              streamId: eventsStream.id,
+              records: [{ payload: "two" }],
+            })
+            await wait(() => observer.length === 2)
+            await Bun.sleep(30)
+            expect(received).toEqual(["one"])
+            release()
+            await wait(() => received.length === 2)
+            expect(received).toEqual(["one", "two"])
+          } finally {
+            release()
+            unsubscribe()
+            observe()
+          }
+        })
+      })
+
+      test("isolates rejected async handlers and permits appending from a handler", async () => {
+        await withBroker(async (broker) => {
+          await broker.ensureStream({ projectId: "project-a", stream: eventsStream })
+          const received: string[] = []
+          const unsubscribe = await broker.subscribe(
+            { projectId: "project-a", streamId: eventsStream.id },
+            async (records) => {
+              for (const record of records) {
+                received.push(String(record.payload))
+                if (record.payload === "one") {
+                  await broker.append({
+                    projectId: "project-a",
+                    streamId: eventsStream.id,
+                    records: [{ payload: "two" }],
+                  })
+                  throw new Error("observer failure")
+                }
+              }
+            }
+          )
+          try {
+            if (subscriptionSetupMs > 0) await Bun.sleep(subscriptionSetupMs)
+            await broker.append({
+              projectId: "project-a",
+              streamId: eventsStream.id,
+              records: [{ payload: "one" }],
+            })
+            await waitUntil(() => received.length === 2, {
+              timeoutMs: subscriptionDeliveryTimeoutMs,
+              intervalMs: subscriptionPollIntervalMs,
+              message: "Rejected async observer blocked later delivery",
+            })
+            expect(received).toEqual(["one", "two"])
+          } finally {
+            unsubscribe()
+          }
+        })
+      })
+
       test("requires streams to be ensured before subscribing", async () => {
         await withBroker(async (broker) => {
           await expect(

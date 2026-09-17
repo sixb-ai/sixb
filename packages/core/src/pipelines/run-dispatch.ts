@@ -101,7 +101,10 @@ export async function dispatchPipelineRun(
   input: DispatchPipelineRunInput
 ): Promise<PipelineRunRequestResult> {
   const runId = createPipelineRunId(input.runId)
-  const persisted = await persistPipelineRun(input, runId)
+  let persisted = await persistPipelineRun(input, runId)
+  if (!persisted.publish && input.validateExistingRun && persisted.run.status === "queued") {
+    persisted = await reusePipelineRun(input, persisted.run)
+  }
   if (!persisted.publish) return existingPipelineRunResult(persisted.run)
   return publishPipelineRun(input, persisted)
 }
@@ -155,6 +158,15 @@ async function reusePipelineRun(
 ): Promise<PersistedPipelineRun> {
   assertExistingRunMatchesRequest(existing, input)
   await input.validateExistingRun?.(existing, input.storage)
+  if (input.validateExistingRun && existing.status === "queued") {
+    const execution = await input.storage.executions.getById({
+      projectId: input.projectId,
+      id: existing.executionId,
+    })
+    if (!execution)
+      throw new PipelineRunError(`[Sixb] Execution '${existing.executionId}' was not found.`)
+    return { publish: true, run: existing, execution, queuedAt: existing.queuedAt, created: false }
+  }
   if (
     existing.status !== "failed" ||
     existing.error?.code !== "queue.enqueue_failed" ||
@@ -200,6 +212,11 @@ async function publishPipelineRun(
         },
       ],
     })
+    if (!job || job.id !== persisted.run.id) {
+      throw new PipelineRunError(
+        `[Sixb] Queue did not acknowledge Pipeline run '${persisted.run.id}'.`
+      )
+    }
     return {
       pipelineId: persisted.run.pipelineId,
       runId: persisted.run.id,
@@ -208,6 +225,9 @@ async function publishPipelineRun(
       created: persisted.created,
     }
   } catch (error) {
+    // Automatic consumers retain the batch and retry. Keep uncertain delivery queued:
+    // a lost reply does not prove that the queue rejected the job.
+    if (input.validateExistingRun) throw error
     const failedAt = new Date()
     const failure = toEnqueueFailure(error, persisted.run, failedAt)
     const failed = await requirePipelineRunStorage(input.storage).finish({

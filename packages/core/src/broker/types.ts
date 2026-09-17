@@ -105,6 +105,17 @@ export interface Broker {
    * range rather than silently advancing to the first retained record, so a
    * resuming subscriber learns the gap exists instead of mistaking a truncated
    * stream for a complete one.
+   *
+   * A returned handler promise is awaited before the next delivery. Providers
+   * bound read-ahead instead of accumulating pending handler calls. Return the
+   * processing promise to apply backpressure; detached work cannot be bounded.
+   * Handler errors remain isolated from publishers and other subscribers; they
+   * are not a negative acknowledgement. Reliable consumers must retry within
+   * their handler before returning. No progress survives a process restart.
+   *
+   * Unsubscribe stops further delivery, not an already running callback. Its
+   * owner must cancel/drain that work; provider close must not wait indefinitely
+   * for an uncooperative handler. Return values other than promises are ignored.
    */
   subscribe(
     params: {
@@ -115,7 +126,7 @@ export interface Broker {
       names?: readonly string[]
       keys?: readonly string[]
     },
-    handler: (records: readonly BrokerRecord[]) => void
+    handler: (records: readonly BrokerRecord[]) => unknown
   ): Promise<() => void>
 
   /**
