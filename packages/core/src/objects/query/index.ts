@@ -1,3 +1,5 @@
+export { normalizeVector, vectorSearchCandidateLimit } from "../vectors/profile"
+export { hasVectorProfile, isVectorProfileQuery } from "../vectors/query"
 export type { ObjectQueryPlanningIssue } from "./errors"
 export {
   ObjectQueryExecutionError,

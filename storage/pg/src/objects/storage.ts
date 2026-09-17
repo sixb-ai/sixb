@@ -1,3 +1,4 @@
+import { hasVectorProfile } from "@sixb/core/internal/query"
 import type {
   CompiledSelectedObjectReadScope,
   CountObjectsInput,
@@ -21,7 +22,7 @@ import type {
   QueryObjectsResult,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
-import type { PgStoreClient } from "../transactions"
+import { type PgStoreClient, runPgRepeatableReadTransaction } from "../transactions"
 import { DEFAULT_OBJECT_QUERY_SOURCE } from "./query-compiler"
 import { assertLinkQueryLimit, PgObjectReader } from "./reader"
 import {
@@ -38,6 +39,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   countObjects: true,
   existsObjects: true,
   facetObjects: true,
+  features: { vectorProfiles: true },
   nodes: {
     start: true,
     refs: true,
@@ -95,7 +97,7 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     "PostgreSQL object query pushdown supports start/refs/filter/text/sort/limit/page/traverse/set/project/expand over JSONB properties and object links.",
     "expand hydrates linked objects in-database (top-N per parent via LATERAL + jsonb_agg); core resolves each expansion's cardinality before pushdown, and a mixed/unresolved one stays on the fallback.",
     "Exact decimal predicates, ordering, and keyset pagination use PostgreSQL numeric casts.",
-    "Relevance sorting, vector search, and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
+    "Relevance sorting and unresolved start.includeSubtypes remain planner fallback or rejection cases.",
   ],
 }
 
@@ -120,18 +122,34 @@ export class PgObjectStorage implements ObjectStorage {
   }
 
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
+    if (hasVectorProfile(params.query))
+      return runPgRepeatableReadTransaction(this.sql, (tx) =>
+        new PgObjectReader(tx, DEFAULT_OBJECT_QUERY_SOURCE).queryObjects(params)
+      )
     return this.reader.queryObjects(params)
   }
 
   async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    if (hasVectorProfile(params.query))
+      return runPgRepeatableReadTransaction(this.sql, (tx) =>
+        new PgObjectReader(tx, DEFAULT_OBJECT_QUERY_SOURCE).countObjects(params)
+      )
     return this.reader.countObjects(params)
   }
 
   async existsObjects(params: ExistsObjectsInput): Promise<ExistsObjectsResult> {
+    if (hasVectorProfile(params.query))
+      return runPgRepeatableReadTransaction(this.sql, (tx) =>
+        new PgObjectReader(tx, DEFAULT_OBJECT_QUERY_SOURCE).existsObjects(params)
+      )
     return this.reader.existsObjects(params)
   }
 
   async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
+    if (hasVectorProfile(params.query))
+      return runPgRepeatableReadTransaction(this.sql, (tx) =>
+        new PgObjectReader(tx, DEFAULT_OBJECT_QUERY_SOURCE).facetObjects(params)
+      )
     return this.reader.facetObjects(params)
   }
 

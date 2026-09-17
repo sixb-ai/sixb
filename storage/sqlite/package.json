@@ -33,6 +33,7 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
+    "test:e2e": "bun test ./tests/*.e2e.ts",
     "prepack": "bun run build"
   },
   "peerDependencies": {
@@ -55,5 +56,8 @@
     "src",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "dependencies": {
+    "sqlite-vec": "0.1.9"
+  }
 }

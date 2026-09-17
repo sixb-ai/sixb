@@ -172,13 +172,15 @@ Generate `queryVector` with the same model: numeric validation cannot establish 
 | Freshness | Source changes invalidate affected profiles atomically, including projections and reset. Deletion removes all profiles. Unrelated changes preserve stored vectors. |
 | Compatibility | Source order, model identity or dimension changes exclude old vectors. Model identities must represent stable embedding semantics. |
 | Object lifecycle | Reindexing changes neither the object's version nor its events. Failed commits roll back vectors and objects together. |
-| Numeric validity | Float32, 1–16,000 dimensions, finite values and nonzero norm after rounding; malformed vectors are rejected. |
+| Numeric validity | Unit-length float32, 1–16,000 dimensions, finite values and nonzero norm after rounding; malformed vectors are rejected. |
 | Authorization | All sources must be readable. Candidates are authorized before ranking; ties use object type/id. |
 | Query bounds | One profile and concrete type; `where` before ranking, `limit` after (`project` in JSON IR). `k`: 1–1,000. Counts, facets and `total` describe the selected top-k. |
 
 V1 excludes pagination, traversal, expansion, subtype search, hybrid search and profile fusion.
 **Persistence:** `InMemoryStorage`, `PostgresStorage` and `SqliteStorage` support named profiles.
 PostgreSQL uses native arrays and SQLite uses float32 blobs, without search extensions for storage.
-**Search:** currently `InMemoryStorage` only; PostgreSQL and SQLite reject vector queries until
-their search implementations land. Legacy `search.vector` and numeric-property queries remain
-compatible, without managed provenance or invalidation.
+**Search:** memory, PostgreSQL with [pgvector](../../storage/pg/README.md#vector-profiles), and
+SQLite with [sqlite-vec](../../storage/sqlite/README.md#vector-profiles). SQL search rejects more
+than 10,000 eligible vectors or 16 million coordinates; narrow filters if the bound is exceeded.
+Vectors are normalized internally for cosine comparison. Legacy numeric-property queries remain
+available where previously supported, without managed provenance or invalidation.

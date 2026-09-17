@@ -33,6 +33,7 @@ export const IN_MEMORY_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
   countObjects: true,
   existsObjects: true,
   facetObjects: true,
+  features: { vectorProfiles: true },
   nodes: {
     start: true,
     refs: true,
@@ -168,8 +169,8 @@ export function evaluateObjectQuery(
           ? compareEntriesByRelevance
           : (a, b) =>
               b.score - a.score ||
-              compareStrings(a.row.objectTypeId, b.row.objectTypeId) ||
-              compareStrings(a.row.primaryId, b.row.primaryId)
+              Buffer.compare(Buffer.from(a.row.objectTypeId), Buffer.from(b.row.objectTypeId)) ||
+              Buffer.compare(Buffer.from(a.row.primaryId), Buffer.from(b.row.primaryId))
       )
       const limit = Math.max(0, query.k)
       return {

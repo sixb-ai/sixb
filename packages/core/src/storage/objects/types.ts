@@ -192,6 +192,8 @@ export interface ObjectQueryCapabilities {
   /** Scalar operations whose semantics the provider can preserve exactly. */
   scalarOperations?: ObjectQueryScalarOperations
   features?: {
+    /** Managed vector profiles, independently of legacy numeric-property vector queries. */
+    vectorProfiles?: boolean
     /**
      * True only when the provider can expand `start.includeSubtypes` itself.
      * Storage-only providers usually cannot, because subtype expansion requires
