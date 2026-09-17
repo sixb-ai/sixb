@@ -3,7 +3,8 @@
 QuickBooks Online Accounting API connector for Sixb. Managed OAuth, verified company discovery,
 CompanyInfo, Preferences, customers, vendors, ledger accounts, items, terms, invoices, payments,
 credit memos, bills, bill payments, and vendor credits are implemented as reads.
-Customers, vendors, and invoices also support typed writes, including invoice sending.
+Typed writes cover these reference and transaction resources, including invoice, credit-memo,
+and payment-receipt sending. CompanyInfo and writable Preferences settings support updates.
 Typed CDC reads and verified CloudEvents webhook handlers support incremental syncs.
 
 ## Register
@@ -98,12 +99,20 @@ classification without including provider response bodies or credentials in thei
 Accounting failures throw `QuickBooksApiError` with `status`, `requestId` (`intuit_tid`),
 `faultType`, and provider `errors` (`code`, `Message`, `Detail`, `element`).
 
-## Create and update customers, vendors, and invoices
+## Write operations
 
 | Resource | Write methods |
 | --- | --- |
 | `customers`, `vendors` | `create(input, options?)`, `update(input, options?)`, `deactivate(revision, options?)`, `reactivate(revision, options?)` |
 | `invoices` | `create(input, options?)`, `update(input, options?)`, `delete(revision, options?)`, `void(revision, options?)`, `send(id, options?)` |
+| `payments` | `create`, `update`, `delete`, `void`, `send(id, { sendTo, requestId? })` |
+| `creditMemos` | `create`, `update`, `delete`, `send` |
+| `bills`, `vendorCredits` | `create`, `update`, `delete` |
+| `billPayments` | `create`, `update`, `delete`, `void` |
+| `accounts`, `terms` | `create`, `update`, `deactivate`, `reactivate` |
+| `items` | `create`, `update`, `deactivate`, `reactivate` (type-specific restrictions below) |
+| `companyInfo` | `update` (sparse, using the entity ID from `get()`) |
+| `preferences` | `update` (sparse; supported groups only) |
 
 ```ts
 const customer = await qb.customers.create({
@@ -132,7 +141,7 @@ console.log(sent.EmailStatus, sent.DeliveryInfo)
 - Input types expose writable fields separately from read models. Contact creation requires
   `DisplayName`; invoice creation requires `CustomerRef` and nonempty `Line`. Intuit validates
   company-specific accounting, tax, currency, and reference constraints.
-- `update` always sends `sparse: true`. Supply the current `Id` and `SyncToken`; omitted fields
+- Entity `update` methods send `sparse: true`. Supply the current `Id` and `SyncToken`; omitted fields
   are preserved. The connector never reads and overwrites a revision automatically. Intuit's
   stale-object error (`5010`) is surfaced for the application to reconcile.
 - Invoice line updates follow Intuit's line-ID semantics. Read the invoice first, retain IDs on
@@ -144,6 +153,71 @@ console.log(sent.EmailStatus, sent.DeliveryInfo)
   omit it to use the invoice's `BillEmail.Address`. An explicit recipient can update that address.
   Sending returns the provider invoice, including `EmailStatus`/`DeliveryInfo`, rather than proof
   of inbox delivery. Some company preferences can also cause invoices to be emailed on creation.
+
+### Receivables and payables
+
+```ts
+const payment = await qb.payments.create({
+  CustomerRef: { value: customer.Id },
+  TotalAmt: 100,
+  Line: [{
+    Amount: 100,
+    LinkedTxn: [{ TxnId: invoice.Id, TxnType: "Invoice" }],
+  }],
+})
+await qb.payments.send(payment.Id, { sendTo: "billing@acme.example" })
+
+const bill = await qb.bills.create({
+  VendorRef: { value: "17" },
+  Line: [{
+    Amount: 50,
+    DetailType: "AccountBasedExpenseLineDetail",
+    AccountBasedExpenseLineDetail: { AccountRef: { value: "8" } },
+  }],
+})
+await qb.billPayments.create({
+  VendorRef: { value: "17" },
+  TotalAmt: 50,
+  PayType: "Check",
+  CheckPayment: { BankAccountRef: { value: "5" } },
+  Line: [{ Amount: 50, LinkedTxn: [{ TxnId: bill.Id, TxnType: "Bill" }] }],
+})
+```
+
+These methods record accounting transactions; they do not initiate a bank transfer or card charge.
+`payments.create` can omit `Line` to record an unapplied payment. Supplying `Line` on a Payment
+update replaces **all allocations**, even with sparse updates; send `[]` to unapply them.
+BillPayment inputs distinguish `CheckPayment.BankAccountRef` from
+`CreditCardPayment.CCAccountRef` with the `PayType` discriminator.
+
+Bill, VendorCredit, CreditMemo, and BillPayment updates require their party, line, and other required
+creation fields along with the current revision. Retain existing line IDs when editing those lines.
+Sparse updates do not remove these provider requirements. Deletes return `{ Id, status: "Deleted" }`.
+Payment/BillPayment voids use `operation=update&include=void` and `sparse: true`, unlike Invoice voids.
+Linked/deposited transactions can prevent deletion or voiding; Intuit's error is returned unchanged.
+
+Credit memo sending accepts an optional `sendTo`, like invoices. Payment receipt sending requires
+an explicit `sendTo`. Both use the provider's octet-stream send endpoint and the same no-retry policy.
+
+### Reference data and company settings
+
+- Accounts require a name and account type or subtype. Provider account rules govern edits and activation.
+- Item creation supports `Service`, `NonInventory`, `Inventory`, and `Category`. Inventory inputs
+  require income/expense/asset accounts, quantity tracking, quantity, and an inventory start date.
+  Quantity adjustments require `InvStartDate` (the adjustment date) even on sparse updates.
+  Activation methods require the item `Type`; Categories cannot be deactivated through this API.
+  Bundles (`Group`) remain readable; bundle writes are not exposed.
+- Terms support day-count or date-driven due rules. Type is provider-derived; supply `DueDays` or
+  `DayOfMonthDue` on both creation and edits. Activation methods only need the revision.
+  Deactivated reference records remain in QuickBooks.
+- CompanyInfo updates use the **CompanyInfo entity ID** from `get()`, not the OAuth realm ID.
+- Preferences updates are sparse. Send only the supported groups you intend to edit; do not send
+  the entire read response. `SalesFormsPrefs` and `OtherPrefs` writes are excluded: live Intuit
+  testing found that a sales-form edit cleared `DefaultCustomerMessage` even with `sparse: true`,
+  while attempts to restore that field returned error 2010. The remaining input groups are
+  email messages, product/services, reports, accounting, vendors/purchases, and time tracking.
+  Availability still depends on company locale and subscription. Provider validation faults can
+  arrive with HTTP 200; these are still raised as `QuickBooksApiError`.
 
 ### Write retries and recovery
 
@@ -403,8 +477,8 @@ and [Term field definitions](https://static.developer.intuit.com/sdkdocs/qbv3doc
 See [tests/README.md](tests/README.md) in the repository for deterministic integration coverage and
 opt-in sandbox commands. `bun run test:e2e` skips live tests unless `QUICKBOOKS_LIVE` selects a mode.
 
-Writes currently cover customers, vendors, and invoices. Reports (including aging), PDFs,
-attachments, writes to other resources, and additional transaction resources are follow-ups.
+Writes cover the operations listed above on the current resources. Reports (including aging), PDFs,
+attachments, bundle writes, and additional transaction resources are follow-ups.
 Tax, inventory, multicurrency, and custom-field
 availability depend on the company's locale, subscription, and preferences; returned values are
 preserved without inventing defaults or deriving accounting totals.
@@ -431,6 +505,12 @@ public customer/vendor lifecycle and invoice create/update/send/void/delete meth
 That mode passed in the sandbox on 2026-09-16: create deduplication, stale-revision rejection,
 contact activation cycles, both invoice send variants, and void/delete cleanup (23 assertions).
 Sending used a reserved example address and verified Intuit's response, not mailbox delivery.
+The maintained `remaining-writes` suite subsequently passed all three tests (72 assertions):
+receivable/payable lifecycles, account/item/term maintenance including zero-cost inventory quantity
+adjustments, and company-name/report-basis updates with restoration. Payment allocations, check and
+card bill payments, payment receipts and both credit-memo send variants were exercised. The final
+suite deleted transactions, deactivated reference records, restored quantity to zero and compared
+the complete preference settings before/after restoration. Category writes remain deterministic-only.
 Live Intuit webhook tests through an ngrok HTTPS endpoint received 12 signed CloudEvents deliveries:
 customer creation/updates (including deactivation), plus invoice, bill and vendor-credit
 creation/updates/deletions. The connector verifier and parser accepted each complete payload,

@@ -17,6 +17,7 @@ import { createVendorsResource } from "./resources/vendors"
 import type { QuickBooksClient, QuickBooksCompanyInfo, QuickBooksConnectorOptions } from "./types"
 import { isRecord, nonEmpty, realmId } from "./validation"
 import { quickbooksEventsWebhook } from "./webhooks"
+import { updateEntity } from "./write"
 
 export type QuickBooksConnector = OAuthConnectorAdapter<"quickbooks", QuickBooksClient>
 
@@ -60,7 +61,13 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
       const id = realmId(context.account.id)
       const http = await createQuickBooksHttp(context, context.tokenSource, options, id, true)
       return {
-        companyInfo: { get: () => readCompany(http, id) },
+        companyInfo: {
+          get: () => readCompany(http, id),
+          async update(input, options) {
+            if (input.CompanyName !== undefined) nonEmpty(input.CompanyName, "CompanyName")
+            return updateEntity(http, "CompanyInfo", input, options)
+          },
+        },
         cdc: createCdcResource(http),
         preferences: createPreferencesResource(http),
         customers: createCustomersResource(http),
