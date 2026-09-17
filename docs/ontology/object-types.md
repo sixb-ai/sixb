@@ -135,16 +135,8 @@ Every field a profile references must carry the matching property flag:
 Search profiles can only reference **static** properties — telemetry properties (such as
 `Project.progress`) are not object-query indexed and will fail validation here.
 
-For vector search, add an embedding property (a numeric array carrying `query.vector: true`) and
-point `search.vector` at it. The `source` fields must each carry `text: true`.
-
-```ts
-search: {
-  title: "name",
-  defaultText: ["name", "description"],
-  vector: { property: "embedding", source: ["name", "description"] },
-}
-```
+For new embeddings, use [named vector profiles](#named-vector-profiles). The legacy
+`search.vector` stores numeric arrays in business properties and does not manage their freshness.
 
 ## Named vector profiles
 

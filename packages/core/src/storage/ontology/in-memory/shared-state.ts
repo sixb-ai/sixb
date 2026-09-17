@@ -18,7 +18,6 @@ import type {
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
 } from "../sources"
-
 import type { StoredObjectVector } from "../vectors"
 
 export interface InMemorySourceRoot {
@@ -29,7 +28,6 @@ export interface InMemorySourceRoot {
   active: boolean
   retiredAt: string | null
 }
-
 
 export interface InMemorySourceMaterialization extends OntologySourceRecord {
   readonly roots: Map<string, InMemorySourceRoot>
