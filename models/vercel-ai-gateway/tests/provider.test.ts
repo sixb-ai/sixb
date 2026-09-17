@@ -13,7 +13,6 @@ import { BASH_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/bash"
 import { READ_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/read"
 import { VIEW_FILE_TOOL_SPEC } from "../../../packages/agent-worker/src/tools/view-file"
 import { createVercelGateway, vercelGateway } from "../src"
-import { decodeServerSentEvents } from "../src/sse"
 import { isStrictGatewaySchema } from "../src/structured-output"
 
 function request(overrides: Partial<LanguageModelRequest> = {}): LanguageModelRequest {
@@ -1625,38 +1624,6 @@ describe("Vercel AI Gateway provider", () => {
     expect(requests).toBe(1)
     await gateway.catalog.refresh()
     expect(requests).toBe(2)
-  })
-
-  test("decodes CRLF, comments, repeated data lines, and arbitrary chunks", async () => {
-    const text = ': ping\r\nevent: custom\r\ndata: {"one":\r\ndata: 1}\r\n\r\n'
-    const bytes = new TextEncoder().encode(text)
-    const body = new ReadableStream<Uint8Array>({
-      start(controller) {
-        for (const byte of bytes) controller.enqueue(Uint8Array.of(byte))
-        controller.close()
-      },
-    })
-    const events = []
-    for await (const event of decodeServerSentEvents(body, new AbortController().signal)) {
-      events.push(event)
-    }
-    expect(events).toEqual([{ event: "custom", data: '{"one":\n1}' }])
-  })
-
-  test("cancels a blocked SSE reader when the model signal aborts", async () => {
-    let cancelled = false
-    const body = new ReadableStream<Uint8Array>({
-      cancel() {
-        cancelled = true
-      },
-    })
-    const abort = new AbortController()
-    const iterator = decodeServerSentEvents(body, abort.signal)[Symbol.asyncIterator]()
-    const pending = iterator.next()
-    abort.abort()
-
-    await expect(pending).rejects.toMatchObject({ name: "AbortError" })
-    expect(cancelled).toBe(true)
   })
 })
 

@@ -37,7 +37,8 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/core": "workspace:^"
+    "@sixb/core": "workspace:^",
+    "@sixb/model-protocols": "workspace:*"
   },
   "devDependencies": {
     "@types/bun": "latest",
