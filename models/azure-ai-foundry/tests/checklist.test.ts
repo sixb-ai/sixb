@@ -9,7 +9,7 @@ import {
 import { FoundryTransport } from "../src/transport"
 import { createAzureAIFoundry } from "./provider-fixture"
 
-const endpoint = "https://example.test"
+const endpoint = "https://example.test/api/projects/test"
 const protocols = ["responses", "chat", "messages"] as const
 type Protocol = (typeof protocols)[number]
 const request = (signal = new AbortController().signal): LanguageModelRequest => ({
@@ -255,10 +255,10 @@ test("honors Retry-After HTTP dates and retries only eligible HTTP responses", a
     endpoint,
     maxRetries: 1,
     maxRetryDelayMs: 1,
-    tokenProvider: () => `credential-${++credentials}`,
+    apiKey: () => `credential-${++credentials}`,
     fetch: async (_url, init) => {
       attempts++
-      expect(new Headers(init?.headers).get("authorization")).toBe(`Bearer credential-${attempts}`)
+      expect(new Headers(init?.headers).get("api-key")).toBe(`credential-${attempts}`)
       return attempts === 1
         ? Response.json(
             { error: { message: "busy" } },

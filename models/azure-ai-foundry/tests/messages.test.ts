@@ -11,7 +11,7 @@ import { foundryMessagesEstimator, foundryMessagesUsage } from "../src/messages-
 import { messagesOutputSchema } from "../src/messages-schema"
 import { createAzureAIFoundry } from "./provider-fixture"
 
-const endpoint = "https://resource.services.ai.azure.com"
+const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
 const schema: JsonObject = {
   type: "object",
   properties: { answer: { type: "string" } },
@@ -109,16 +109,13 @@ async function collect(
 test.each([
   "",
   "/",
-  "/anthropic",
-  "/anthropic/v1",
-  "/openai/v1",
 ])("uses native Messages endpoint and Azure key headers from %s", async (suffix) => {
   let captured: JsonObject | undefined
   const provider = createAzureAIFoundry({
     endpoint: endpoint + suffix,
     apiKey: "azure-key",
     fetch: async (url, init) => {
-      expect(String(url)).toBe(`${endpoint}/anthropic/v1/messages`)
+      expect(String(url)).toBe(`${new URL(endpoint).origin}/anthropic/v1/messages`)
       const headers = new Headers(init?.headers)
       expect(headers.get("x-api-key")).toBe("azure-key")
       expect(headers.has("api-key")).toBe(false)
@@ -128,7 +125,9 @@ test.each([
       return message()
     },
   })
-  const model = provider.messages("support-prod", { definition, metadata })
+  const model = await provider
+    .messages("support-prod", { definition, identity: metadata })
+    .resolve()
   expect(model.protocol).toBe("messages")
   expect(model.modelId).toBe("support-prod")
   expect(await model.resolve()).toBe(model)
@@ -160,28 +159,22 @@ test.each([
   })
 })
 
-test("keeps Responses defaults and rejects ambiguous project Messages bindings", () => {
+test("derives native Messages URL from the project resource", () => {
   const provider = createAzureAIFoundry({ endpoint, apiKey: "key" })
-  expect(provider("deployment").protocol).toBe("responses")
-  expect(provider.responses("deployment").protocol).toBe("responses")
-  expect(() =>
-    createAzureAIFoundry({ endpoint: `${endpoint}/api/projects/example`, apiKey: "key" }).messages(
-      "deployment"
-    )
-  ).toThrow("resource endpoint")
+  expect(provider.messages("deployment").protocol).toBe("messages")
 })
 
-test("refreshes native Entra credentials on retries and preserves native HTTP error codes", async () => {
+test("refreshes native API keys on retries and preserves native HTTP error codes", async () => {
   let attempt = 0
   const tokens: string[] = []
   const provider = createAzureAIFoundry({
     endpoint,
-    tokenProvider: async () => `token-${++attempt}`,
+    apiKey: async () => `token-${++attempt}`,
     fetch: async (_url, init) => {
       const headers = new Headers(init?.headers)
-      tokens.push(headers.get("authorization")!)
-      expect(headers.has("x-api-key")).toBe(false)
-      if (attempt === 1)
+      tokens.push(headers.get("x-api-key")!)
+      expect(headers.has("authorization")).toBe(false)
+      if (attempt === 2)
         return Response.json(
           { error: { type: "overloaded_error", message: "busy" } },
           { status: 529, headers: { "retry-after-ms": "0" } }
@@ -190,7 +183,7 @@ test("refreshes native Entra credentials on retries and preserves native HTTP er
     },
   })
   await collect((await provider.messages("deployment", { definition }).stream(request())).events)
-  expect(tokens).toEqual(["Bearer token-1", "Bearer token-2"])
+  expect(tokens).toEqual(["token-2", "token-3"])
   const broken = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
@@ -214,8 +207,7 @@ test("cancels native credential acquisition before inference", async () => {
   const controller = new AbortController()
   const model = createAzureAIFoundry({
     endpoint,
-    tokenProvider: (signal) => {
-      expect(signal).toBe(controller.signal)
+    apiKey: () => {
       controller.abort(new Error("cancelled"))
       return new Promise<string>(() => {})
     },
@@ -229,22 +221,18 @@ test("cancels native credential acquisition before inference", async () => {
 test("snapshots native configuration and merges capabilities without deriving facts from deployment names", async () => {
   let body: JsonObject | undefined
   const options = {
-    definition: { maxOutputTokens: 80, capabilities: { localTools: false } },
-    metadata: { ...metadata },
+    definition: {
+      ...definition,
+      maxOutputTokens: 80,
+      capabilities: { ...definition.capabilities, localTools: false },
+    },
+    identity: { ...metadata },
     request: { temperature: 0.2 },
     rateCard: { ...rateCard },
   }
   const provider = createAzureAIFoundry({
     endpoint,
     apiKey: "key",
-    models: [
-      {
-        kind: "language",
-        providerId: "azure-ai-foundry",
-        modelId: "claude-mythos-5",
-        ...definition,
-      },
-    ],
     fetch: async (_url, init) => {
       body = JSON.parse(String(init?.body))
       return message()
@@ -252,7 +240,7 @@ test("snapshots native configuration and merges capabilities without deriving fa
   })
   const model = provider.messages("claude-mythos-5", options)
   options.definition.maxOutputTokens = 999
-  options.metadata.modelName = "changed"
+  options.identity.modelName = "changed"
   options.request.temperature = 0.9
   options.rateCard.input = "999" as "3"
   await collect((await model.stream(request())).events)
@@ -306,7 +294,7 @@ test("maps manual and adaptive thinking using declared model metadata", async ()
       return message()
     },
   })
-  const model = provider.messages("arbitrary-deployment", { definition, metadata })
+  const model = provider.messages("arbitrary-deployment", { definition, identity: metadata })
   for (const reasoning of ["high", { budgetTokens: 1024 }, "none", "provider-default"] as const)
     await collect((await model.stream(request({ reasoning }))).events)
   expect(bodies[0]).toMatchObject({
@@ -321,6 +309,7 @@ test("maps manual and adaptive thinking using declared model metadata", async ()
   ).rejects.toThrow("below maxOutputTokens")
   await collect((await model.stream(request({ reasoning: "xhigh" }))).events)
   const future = provider.messages("future", { definition, thinkingMode: "adaptive" })
+  await provider.catalog.refresh()
   await collect((await future.stream(request({ reasoning: "high" }))).events)
   await expect(
     provider
@@ -340,14 +329,14 @@ test("explicit thinking mode restricts manual budgets without model-name rules",
   const opus = provider.messages("production", {
     definition,
     thinkingMode: "adaptive",
-    metadata: { publisher: "Anthropic", modelName: "claude-opus-4-8", modelVersion: "2" },
+    identity: { publisher: "Anthropic", modelName: "claude-opus-4-8", modelVersion: "2" },
   })
   await expect(opus.stream(request({ reasoning: { budgetTokens: 1024 } }))).rejects.toThrow(
     "reasoning token budgets are not supported"
   )
   expect(
-    createAzureAIFoundry({ endpoint, tokenProvider: () => "token" }).messages("production", {
-      metadata: { modelName: "claude-mythos-5" },
+    createAzureAIFoundry({ endpoint, apiKey: () => "token" }).messages("production", {
+      identity: { modelName: "claude-mythos-5" },
     }).protocol
   ).toBe("messages")
 })
@@ -389,7 +378,7 @@ test("sends exact Claude schemas and strict tools; optional properties need not 
       bodies.push(JSON.parse(String(init?.body)))
       return message()
     },
-  }).messages("deployment", { definition, metadata })
+  }).messages("deployment", { definition, identity: metadata })
   const optional = { ...schema, required: [] }
   const tools = [{ name: "answer", description: "Answer", inputSchema: optional }]
   await collect(
@@ -577,7 +566,7 @@ test("runs local tools with fragmented signatures, redacted thinking, and durabl
       ])
     },
   })
-  const model = provider.messages("deployment", { definition, metadata, rateCard })
+  const model = provider.messages("deployment", { definition, identity: metadata, rateCard })
   let executed = 0
   const result = await runModelLoop({
     model,
@@ -623,6 +612,8 @@ test("runs local tools with fragmented signatures, redacted thinking, and durabl
   await collect((await model.stream(request({ messages: history }))).events)
   expect(JSON.stringify(bodies[2]?.messages)).toContain("signed-thinking")
   expect(JSON.stringify(bodies[2]?.messages)).toContain("opaque")
+  provider.messages("other", { definition })
+  await provider.catalog.refresh()
   await expect(
     provider.messages("other", { definition }).stream(request({ messages: history }))
   ).rejects.toThrow("different endpoint, deployment, or protocol")
@@ -630,7 +621,10 @@ test("runs local tools with fragmented signatures, redacted thinking, and durabl
     provider.responses("deployment", { definition }).stream(request({ messages: history }))
   ).rejects.toThrow("different endpoint, deployment, or protocol")
   await expect(
-    createAzureAIFoundry({ endpoint: "https://other.services.ai.azure.com", apiKey: "key" })
+    createAzureAIFoundry({
+      endpoint: "https://other.services.ai.azure.com/api/projects/test",
+      apiKey: "key",
+    })
       .messages("deployment", { definition })
       .stream(request({ messages: history }))
   ).rejects.toThrow("different endpoint")
@@ -798,9 +792,10 @@ test("retains native usage and cost when structured output fails local validatio
     endpoint,
     apiKey: "key",
     fetch: async () => message([{ type: "text", text: '{"answer":123}' }]),
-  }).messages("deployment", { definition, rateCard, metadata })
+  }).messages("deployment", { definition, rateCard, identity: metadata })
+  const resolved = await model.resolve()
   const result = runModelLoop({
-    model,
+    model: resolved,
     messages: request().messages,
     signal: request().signal,
     maxSteps: 1,

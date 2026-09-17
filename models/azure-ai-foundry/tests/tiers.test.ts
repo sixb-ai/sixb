@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test"
-import { createAzureAIFoundry } from "../src"
 import { foundryEstimator, foundryUsage } from "../src/accounting"
 import { foundryChatEstimator, foundryChatUsage } from "../src/chat-accounting"
+import { createAzureAIFoundry } from "./provider-fixture"
 
 // Removal proof: restore flat-only rates() parsing; all valid boundary estimates
 // become unpriceable. models.dev generate.ts defines context_over_200k as a legacy
@@ -14,7 +14,8 @@ test("prices exact context boundaries and reserves the expensive tier", async ()
     context_over_200k: { input: 3, output: 4 },
   }
   const p = createAzureAIFoundry({
-    endpoint: "https://example.test",
+    endpoint: "https://example.test/api/projects/test",
+    apiKey: "key",
     catalog: {
       fetch: async () =>
         Response.json({
@@ -22,7 +23,7 @@ test("prices exact context boundaries and reserves the expensive tier", async ()
         }),
     },
   })
-  const model = await p("deployment", { metadata: { modelName: "future" } }).resolve()
+  const model = await p("deployment", { identity: { modelName: "future" } }).resolve()
   for (const [inputTokens, inputRate, outputRate] of [
     [272000, "1000000000", "2000000000"],
     [272001, "3000000000", "4000000000"],
@@ -71,7 +72,8 @@ test("sorts multiple tiers, prices caches, and rejects ambiguous or unsupported 
   ]
   for (const [index, cost] of costs.entries()) {
     const p = createAzureAIFoundry({
-      endpoint: "https://example.test",
+      endpoint: "https://example.test/api/projects/test",
+      apiKey: "key",
       catalog: {
         fetch: async () =>
           Response.json({
@@ -79,7 +81,7 @@ test("sorts multiple tiers, prices caches, and rejects ambiguous or unsupported 
           }),
       },
     })
-    const model = await p("deployment", { metadata: { modelName: "future" } }).resolve()
+    const model = await p("deployment", { identity: { modelName: "future" } }).resolve()
     const estimate = model.costEstimator.estimate({
       usage: { inputTokens: 21, uncachedInputTokens: 1, cacheReadInputTokens: 20, outputTokens: 1 },
     })
@@ -92,7 +94,8 @@ test("sorts multiple tiers, prices caches, and rejects ambiguous or unsupported 
 test("cache-write tiers and reservations stay pinned across catalog refresh", async () => {
   let high = 4
   const p = createAzureAIFoundry({
-    endpoint: "https://example.test",
+    endpoint: "https://example.test/api/projects/test",
+    apiKey: "key",
     catalog: {
       fetch: async () =>
         Response.json({
@@ -122,7 +125,7 @@ test("cache-write tiers and reservations stay pinned across catalog refresh", as
         }),
     },
   })
-  const binding = p("deployment", { metadata: { modelName: "future" } })
+  const binding = p("deployment", { identity: { modelName: "future" } })
   const original = await binding.resolve()
   high = 8
   await p.catalog.refresh()

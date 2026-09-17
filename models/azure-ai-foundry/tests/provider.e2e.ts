@@ -7,6 +7,7 @@ import type {
   LanguageModelStreamEvent,
   ModelMessage,
 } from "@sixb/core/models"
+import { prepareAgentModel } from "../../../packages/agent-worker/src/context-budget"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
 import { type AzureAIFoundryOptions, createAzureAIFoundry } from "../src"
 
@@ -14,8 +15,7 @@ import { type AzureAIFoundryOptions, createAzureAIFoundry } from "../src"
 // a deadline, no automatic retries, and the entire file has a request/output allowance.
 const env = process.env
 const enabled = env.SIXB_FOUNDRY_E2E === "1"
-const endpoint = env.AZURE_FOUNDRY_OPENAI_ENDPOINT
-const projectEndpoint = env.AZURE_FOUNDRY_PROJECT_ENDPOINT
+const endpoint = env.AZURE_FOUNDRY_PROJECT_ENDPOINT
 const apiKey = env.AZURE_FOUNDRY_API_KEY
 const fast = env.AZURE_FOUNDRY_FAST_DEPLOYMENT
 const reasoning = env.AZURE_FOUNDRY_OPENAI_DEPLOYMENT
@@ -51,9 +51,9 @@ const boundedFetch: NonNullable<AzureAIFoundryOptions["fetch"]> = async (input, 
   return fetch(input, init)
 }
 
-function provider(project = false) {
+function provider() {
   return createAzureAIFoundry({
-    endpoint: (project ? projectEndpoint : endpoint)!,
+    endpoint: endpoint!,
     apiKey,
     maxRetries: 0,
     fetch: boundedFetch,
@@ -107,27 +107,28 @@ async function collect(model: LanguageModel, input = request()) {
 }
 
 for (const protocol of ["responses", "chat"] as const) {
-  for (const project of [false, true]) {
-    live.skipIf(!fast || (project && !projectEndpoint))(
-      `${protocol}: ${project ? "project" : "resource"} text, usage, and strict JSON`,
-      async () => {
-        const model = provider(project)[protocol](fast!, {
-          definition: { capabilities },
-          metadata: { publisher: "OpenAI" },
+  live.skipIf(!fast)(
+    `${protocol}: cold worker admission with a context override, text, usage, and strict JSON`,
+    async () => {
+      const limit = protocol === "responses" ? "contextWindow" : "maxInputTokens"
+      const binding = provider()[protocol](fast!, {
+        definition: { [limit]: 64000, capabilities },
+      })
+      const { model, budget } = await prepareAgentModel({ model: binding })
+      expect(model.definition[limit]).toBe(64000)
+      expect(budget[limit === "contextWindow" ? "windowTokens" : "inputBudgetTokens"]).toBe(64000)
+      const result = await collect(
+        model,
+        request({
+          messages: messages('Return JSON with answer equal to "sixb-ok".'),
+          responseFormat: { type: "json", name: "answer", schema },
         })
-        const result = await collect(
-          model,
-          request({
-            messages: messages('Return JSON with answer equal to "sixb-ok".'),
-            responseFormat: { type: "json", name: "answer", schema },
-          })
-        )
-        expect(JSON.parse(result.text)).toEqual({ answer: "sixb-ok" })
-        expect(result.finish.finishReason).toBe("stop")
-      },
-      70_000
-    )
-  }
+      )
+      expect(JSON.parse(result.text)).toEqual({ answer: "sixb-ok" })
+      expect(result.finish.finishReason).toBe("stop")
+    },
+    70_000
+  )
 }
 
 for (const protocol of ["responses", "chat", "messages"] as const) {
@@ -194,7 +195,6 @@ live.skipIf(!reasoning)(
   async () => {
     const model = provider().responses(reasoning!, {
       definition: { capabilities: { reasoning: { efforts: ["low"] } } },
-      metadata: { publisher: "OpenAI" },
       reasoningSummary: "auto",
     })
     const prompt = messages("What is 17 times 19? Reply with the number only.")
@@ -240,7 +240,6 @@ live.skipIf(!deepseek)(
   async () => {
     const model = provider().chat(deepseek!, {
       definition: { capabilities: { localTools: true } },
-      metadata: { publisher: "DeepSeek", modelName: "DeepSeek-V3.2" },
     })
     const result = await collect(
       model,
@@ -373,7 +372,6 @@ live.skipIf(!fast)(
   "Responses: repeated prefix retains cache accounting and explicit local prices",
   async () => {
     const model = provider().responses(fast!, {
-      metadata: { publisher: "OpenAI" },
       // Synthetic rates verify the accounting path, not Azure's actual invoice.
       rateCard: {
         currency: "USD",
@@ -402,39 +400,12 @@ live.skipIf(!fast)(
   140_000
 )
 
-live.skipIf(!projectEndpoint || !fast || env.SIXB_FOUNDRY_E2E_ENTRA !== "1")(
-  "Entra: project discovery, protocol views, pinned resolution and inference",
+live.skipIf(!endpoint || !fast)(
+  "API key: project discovery, protocol views, pinned resolution and inference",
   async () => {
-    const tokenProvider = async (signal: AbortSignal) => {
-      const child = Bun.spawn(
-        ["az", "account", "get-access-token", "--resource", "https://ai.azure.com", "-o", "json"],
-        { stdout: "pipe", stderr: "pipe" }
-      )
-      const stop = () => child.kill()
-      const timer = setTimeout(stop, 15_000)
-      signal.addEventListener("abort", stop, { once: true })
-      try {
-        signal.throwIfAborted()
-        const text = await new Response(child.stdout).text()
-        if (await child.exited) throw new Error("Azure CLI could not acquire the test Entra token")
-        signal.throwIfAborted()
-        const result: unknown = JSON.parse(text)
-        if (
-          !result ||
-          typeof result !== "object" ||
-          !("accessToken" in result) ||
-          typeof result.accessToken !== "string"
-        )
-          throw new Error("Azure CLI returned no access token")
-        return result.accessToken
-      } finally {
-        clearTimeout(timer)
-        signal.removeEventListener("abort", stop)
-      }
-    }
     const foundry = createAzureAIFoundry({
-      endpoint: projectEndpoint!,
-      tokenProvider,
+      endpoint: endpoint!,
+      apiKey: apiKey!,
       maxRetries: 0,
       fetch: boundedFetch,
       discovery: { timeoutMs: 30_000 },
@@ -530,11 +501,11 @@ live.skipIf(!fast)(
 )
 
 live.skipIf(false)(
-  "missing deployment returns an actionable HTTP error",
+  "missing deployment fails during resolution before inference",
   async () => {
     await expect(
       provider().responses("sixb-nonexistent-e2e-deployment").stream(request())
-    ).rejects.toMatchObject({ name: "ModelProviderError", status: 404 })
+    ).rejects.toThrow("was not found in this project")
   },
   70_000
 )
@@ -544,7 +515,6 @@ live.skipIf(!deepseekReasoning)(
   async () => {
     const model = provider().chat(deepseekReasoning!, {
       definition: { capabilities: { localTools: true, reasoning: { efforts: ["low"] } } },
-      metadata: { publisher: "DeepSeek", modelName: "DeepSeek-V4-Pro" },
       reasoningReplay: "tool-continuation",
       profile: "deepseek",
     })
@@ -597,7 +567,6 @@ live.skipIf(!reasoning)(
   async () => {
     const model = provider().chat(reasoning!, {
       definition: { capabilities: { reasoning: { efforts: ["low"] } } },
-      metadata: { publisher: "OpenAI" },
     })
     const result = await collect(
       model,
@@ -613,18 +582,16 @@ live.skipIf(!reasoning)(
   70_000
 )
 
-for (const project of [false, true]) {
-  live.skipIf(!glm || (project && !projectEndpoint))(
-    `GLM Chat: ${project ? "project" : "resource"} text, reasoning separation and usage`,
-    async () => {
-      const result = await collect(provider(project).chat(glm!), request({ maxOutputTokens: 512 }))
-      expect(result.text).toContain("sixb-ok")
-      expect(result.finish.finishReason).toBe("stop")
-      expect(result.text).not.toContain("<think>")
-    },
-    70_000
-  )
-}
+live.skipIf(!glm)(
+  "GLM Chat: text, reasoning separation and usage",
+  async () => {
+    const result = await collect(provider().chat(glm!), request({ maxOutputTokens: 512 }))
+    expect(result.text).toContain("sixb-ok")
+    expect(result.finish.finishReason).toBe("stop")
+    expect(result.text).not.toContain("<think>")
+  },
+  70_000
+)
 
 live.skipIf(!glm)(
   "GLM Chat: explicit strict structured output",
@@ -645,11 +612,11 @@ live.skipIf(!glm)(
   70_000
 )
 
-live.skipIf(!glm || !projectEndpoint)(
+live.skipIf(!glm || !endpoint)(
   "GLM Responses: project routing without encrypted replay",
   async () => {
     const result = await collect(
-      provider(true).responses(glm!, { encryptedReasoning: false }),
+      provider().responses(glm!, { encryptedReasoning: false }),
       request({ maxOutputTokens: 512 })
     )
     expect(result.text).toContain("sixb-ok")
