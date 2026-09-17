@@ -1,3 +1,4 @@
+export type { AzureAIFoundryCatalogOptions } from "./catalog"
 export type {
   AzureAIFoundryCatalog,
   AzureAIFoundryDeployment,

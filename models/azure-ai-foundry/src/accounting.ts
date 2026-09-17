@@ -10,19 +10,30 @@ import {
 import { responsesUsage } from "@sixb/model-protocols/responses"
 import { object } from "./util"
 
-export function foundryUsage(raw: JsonObject | undefined, reliableReasoning: boolean): ModelUsage {
+export function foundryUsage(
+  raw: JsonObject | undefined,
+  reliableReasoning: boolean | undefined
+): ModelUsage {
   const usage = responsesUsage(raw)
   const { reasoningOutputTokens, ...totals } = usage
   const cached = usage.cacheReadInputTokens
   const input = usage.inputTokens
   const output = usage.outputTokens
+  const knownReasoning =
+    reasoningOutputTokens !== undefined &&
+    output !== undefined &&
+    reasoningOutputTokens <= output &&
+    (reliableReasoning === true || (reliableReasoning === undefined && reasoningOutputTokens > 0))
   return {
     ...totals,
+    ...(object(raw?.input_tokens_details)?.cache_write_tokens === 0
+      ? { cacheWriteInputTokens: 0 }
+      : {}),
     ...(input !== undefined && cached !== undefined && cached <= input && onlyTokenMeters(raw)
       ? { uncachedInputTokens: input - cached }
       : {}),
-    ...(reliableReasoning && reasoningOutputTokens !== undefined ? { reasoningOutputTokens } : {}),
-    ...(reliableReasoning &&
+    ...(knownReasoning ? { reasoningOutputTokens } : {}),
+    ...(knownReasoning &&
     reasoningOutputTokens !== undefined &&
     output !== undefined &&
     reasoningOutputTokens <= output &&
@@ -36,12 +47,31 @@ export function foundryEstimator(
   card: LanguageModelRateCard | undefined,
   request: JsonObject | undefined,
   modelName?: string,
-  modelVersion?: string
+  modelVersion?: string,
+  aliases?: readonly string[]
+): ModelCostEstimator {
+  return tokenEstimator(
+    card,
+    request,
+    ["temperature", "top_p", "metadata"],
+    onlyTokenMeters,
+    modelName,
+    modelVersion,
+    aliases
+  )
+}
+
+export function tokenEstimator(
+  card: LanguageModelRateCard | undefined,
+  request: JsonObject | undefined,
+  requestKeys: readonly string[],
+  tokenMeters: (raw: JsonObject | undefined) => boolean,
+  modelName?: string,
+  modelVersion?: string,
+  aliases?: readonly string[]
 ): ModelCostEstimator {
   const rateCard = card && defineModelRateCard(card)
-  const fixed = Object.keys(request ?? {}).every((key) =>
-    ["temperature", "top_p", "metadata"].includes(key)
-  )
+  const fixed = Object.keys(request ?? {}).every((key) => requestKeys.includes(key))
   return {
     estimateReservation: (tokens) =>
       fixed ? estimateModelReservation({ ...tokens, rateCard }) : undefined,
@@ -49,8 +79,10 @@ export function foundryEstimator(
       const actual = route?.modelId ?? responseModelId
       if (
         !fixed ||
-        !onlyTokenMeters(usage.raw) ||
-        (modelName && actual && actual !== modelName && actual !== `${modelName}-${modelVersion}`)
+        !tokenMeters(usage.raw) ||
+        (modelName &&
+          actual &&
+          !(aliases ?? [modelName, `${modelName}-${modelVersion}`]).includes(actual))
       )
         return { status: "unpriceable", reason: "missing-rate-card" }
       return rateModelCall({ usage, rateCard })

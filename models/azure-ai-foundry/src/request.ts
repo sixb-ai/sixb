@@ -63,13 +63,7 @@ export function responsesRequest(
   project: boolean,
   scope: string
 ): JsonObject {
-  positiveInteger(request.maxOutputTokens, "maxOutputTokens")
-  validateMessages(
-    request.messages,
-    definition,
-    options.maxInputFileBytes ?? 20 * 1024 * 1024,
-    scope
-  )
+  const max = prepareRequest(request, definition, options, scope)
   const input = responsesInput(request.messages, definition.providerId).map((item) => {
     if (!isJsonObject(item)) return item
     const content = Array.isArray(item.content)
@@ -109,11 +103,6 @@ export function responsesRequest(
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Reasoning summaries require a declared reasoning capability.`
     )
-  const limits = [
-    definition.maxOutputTokens,
-    options.maxOutputTokens,
-    request.maxOutputTokens,
-  ].filter((n): n is number => n !== undefined)
   const tools = request.tools.map((tool) => ({
     type: "function",
     name: tool.name,
@@ -129,7 +118,7 @@ export function responsesRequest(
     stream: true,
     store: false,
     ...(options.encryptedReasoning === false ? {} : { include: ["reasoning.encrypted_content"] }),
-    ...(limits.length ? { max_output_tokens: Math.min(...limits) } : {}),
+    ...(max === undefined ? {} : { max_output_tokens: max }),
     ...(tools.length
       ? {
           tools,
@@ -164,6 +153,29 @@ export function responsesRequest(
         }
       : {}),
   }
+}
+
+export function prepareRequest(
+  request: LanguageModelRequest,
+  definition: LanguageModelDefinition,
+  options: { readonly maxOutputTokens?: number; readonly maxInputFileBytes?: number },
+  scope: string,
+  remotePdf = false
+): number | undefined {
+  positiveInteger(request.maxOutputTokens, "maxOutputTokens")
+  validateMessages(
+    request.messages,
+    definition,
+    options.maxInputFileBytes ?? 20 * 1024 * 1024,
+    scope,
+    remotePdf
+  )
+  const limits = [
+    definition.maxOutputTokens,
+    options.maxOutputTokens,
+    request.maxOutputTokens,
+  ].filter((n): n is number => n !== undefined)
+  return limits.length ? Math.min(...limits) : undefined
 }
 
 export function validateMessages(

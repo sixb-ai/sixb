@@ -6,8 +6,7 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { chatInput } from "@sixb/model-protocols/chat"
-import type { AzureAIFoundryModelMetadata } from "./provider"
-import { validateMessages } from "./request"
+import { prepareRequest } from "./request"
 import { foundryOutputSchema } from "./structured-output"
 import { PREFIX, positiveInteger } from "./util"
 
@@ -15,7 +14,7 @@ export interface ChatRequestOptions {
   readonly maxOutputTokens?: number
   readonly maxInputFileBytes?: number
   readonly request?: JsonObject
-  /** Defaults to DeepSeek for explicit DeepSeek publisher/model metadata, otherwise OpenAI-compatible. */
+  /** Default: OpenAI-compatible. Select DeepSeek compatibility explicitly when required. */
   readonly profile?: "openai" | "deepseek"
   readonly systemRole?: "system" | "developer"
   /** Defaults to max_completion_tokens. Use max_tokens only for deployments requiring the older field. */
@@ -71,22 +70,10 @@ export function foundryChatRequest(
   request: LanguageModelRequest,
   definition: LanguageModelDefinition,
   options: ChatRequestOptions,
-  metadata: AzureAIFoundryModelMetadata,
   scope: string
 ): JsonObject {
-  positiveInteger(request.maxOutputTokens, "maxOutputTokens")
-  validateMessages(
-    request.messages,
-    definition,
-    options.maxInputFileBytes ?? 20 * 1024 * 1024,
-    scope
-  )
-  const profile =
-    options.profile ??
-    (metadata.publisher?.toLowerCase() === "deepseek" ||
-    metadata.modelName?.toLowerCase().startsWith("deepseek-")
-      ? "deepseek"
-      : "openai")
+  const max = prepareRequest(request, definition, options, scope)
+  const profile = options.profile ?? "openai"
   if (profile !== "deepseek" && options.reasoningReplay === "tool-continuation")
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Reasoning-content replay requires the DeepSeek Chat profile.`
@@ -104,21 +91,7 @@ export function foundryChatRequest(
       throw new UnsupportedModelFeatureError(
         `${PREFIX} ${issue ?? "Chat reasoning requires declared named efforts; exact budgets are unsupported"}.`
       )
-    // Do not infer Foundry effort controls from DeepSeek's direct API or another host's profile.
-    if (/^DeepSeek-R1(?:-0528)?$/i.test(metadata.modelName ?? ""))
-      throw new UnsupportedModelFeatureError(
-        `${PREFIX} DeepSeek R1 Chat effort controls are unverified; use provider-default reasoning.`
-      )
   }
-  // https://learn.microsoft.com/azure/foundry/openai/how-to/reasoning#tool-calling-with-reasoning-models
-  if (
-    request.tools.length &&
-    /^gpt-5\.6(?:-|$)/i.test(metadata.modelName ?? "") &&
-    reasoning !== "none"
-  )
-    throw new UnsupportedModelFeatureError(
-      `${PREFIX} GPT-5.6 Chat tools require reasoning: 'none'; use Responses for reasoning with tools.`
-    )
   const schema = request.responseFormat && foundryOutputSchema(request.responseFormat.schema)
   if (
     request.responseFormat &&
@@ -142,11 +115,6 @@ export function foundryChatRequest(
         : {}),
     },
   }))
-  const limits = [
-    definition.maxOutputTokens,
-    options.maxOutputTokens,
-    request.maxOutputTokens,
-  ].filter((n): n is number => n !== undefined)
   return {
     ...options.request,
     model: definition.modelId,
@@ -158,9 +126,7 @@ export function foundryChatRequest(
     }),
     stream: true,
     ...(options.includeUsage === false ? {} : { stream_options: { include_usage: true } }),
-    ...(limits.length
-      ? { [options.maxTokensParameter ?? "max_completion_tokens"]: Math.min(...limits) }
-      : {}),
+    ...(max === undefined ? {} : { [options.maxTokensParameter ?? "max_completion_tokens"]: max }),
     ...(explicitReasoning && typeof reasoning === "string" ? { reasoning_effort: reasoning } : {}),
     ...(tools.length
       ? {

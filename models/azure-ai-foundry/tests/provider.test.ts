@@ -7,8 +7,8 @@ import type {
   ModelUsage,
 } from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
-import { createAzureAIFoundry } from "../src"
 import { foundryEstimator, foundryUsage } from "../src/accounting"
+import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com"
 const definition = {
@@ -167,7 +167,7 @@ test.each([
   expect(model.definition.modelId).toBe("deployment")
   expect(model.providerId).toBe("foundry-prod")
   expect(model.metadata.modelName).toBe("gpt-example")
-  expect(provider.responses).toBe(provider)
+  expect(provider("deployment").protocol).toBe("responses")
 })
 
 test("refreshes async credentials on every retry and preserves throttling diagnostics", async () => {
@@ -497,8 +497,8 @@ test("preserves unknown usage, non-OpenAI reasoning counters, explicit prices an
   const partner = provider("partner", { rateCard })
   const partnerEvent = (await collect((await partner.stream(request())).events)).at(-1)
   if (partnerEvent?.type !== "finish") throw new Error("missing finish")
-  expect(partnerEvent.usage.reasoningOutputTokens).toBeUndefined()
-  expect(partnerEvent.usage.textOutputTokens).toBeUndefined()
+  expect(partnerEvent.usage.reasoningOutputTokens).toBe(2)
+  expect(partnerEvent.usage.textOutputTokens).toBe(3)
   expect(partnerEvent.usage.raw?.output_tokens_details).toEqual({ reasoning_tokens: 2 })
   const extraMeters: JsonObject[] = [
     { input_tokens_details: { cache_write_tokens: 2 } },

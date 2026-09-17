@@ -2,8 +2,8 @@ import { expect, test } from "bun:test"
 import { runModelLoop, toModelMessages } from "@sixb/core/internal/agents"
 import type { JsonObject, LanguageModelRequest, LanguageModelStreamEvent } from "@sixb/core/models"
 import { agentTraceFromModelSteps } from "../../../packages/agent-worker/src/model-adapters"
-import { createAzureAIFoundry } from "../src"
 import { foundryChatEstimator, foundryChatUsage } from "../src/chat-accounting"
+import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com"
 const schema: JsonObject = {
@@ -106,6 +106,63 @@ async function collect(
   for await (const event of events) result.push(event)
   return result
 }
+
+// Captured Azure DeepSeek V3.2 deltas: arguments "", "{}", then '\"\"'.
+// Regression proof: remove the shared Chat empty-string terminator guard. No tool
+// executes, and continuation replays "null" instead of an object-valued JSON string.
+test("completes parameterless tools when Chat appends an empty-string terminator", async () => {
+  let calls = 0
+  let executions = 0
+  const model = createAzureAIFoundry({
+    endpoint,
+    apiKey: "key",
+    fetch: async (_url, init) => {
+      calls++
+      if (calls === 1)
+        return sse([
+          chunk({
+            tool_calls: [
+              { index: 0, id: "t", type: "function", function: { name: "lookup", arguments: "" } },
+            ],
+          }),
+          chunk({ tool_calls: [{ index: 0, function: { arguments: "{}" } }] }),
+          chunk({ tool_calls: [{ index: 0, function: { arguments: '""' } }] }),
+          chunk({}, "tool_calls"),
+          { choices: [], usage: rawUsage },
+          "[DONE]",
+        ])
+      const body = JSON.parse(String(init?.body))
+      expect(body.messages[1].tool_calls[0].function.arguments).toBe("{}")
+      expect(body.messages[2].content).toBe("sixb-739")
+      return completed("sixb-739")
+    },
+  }).chat("deployment", { definition })
+  const result = await runModelLoop({
+    model,
+    messages: request().messages,
+    signal: AbortSignal.timeout(1000),
+    maxSteps: 2,
+    tools: [
+      {
+        name: "lookup",
+        description: "Get the code",
+        inputSchema: { type: "object", properties: {}, additionalProperties: false },
+        parseInput: (input) => {
+          expect(input).toEqual({})
+          return input
+        },
+        execute: async () => {
+          executions++
+          return "sixb-739"
+        },
+        errorText: () => "invalid input",
+      },
+    ],
+  })
+  expect(result.status).toBe("completed")
+  expect(executions).toBe(1)
+  expect(calls).toBe(2)
+})
 
 test.each([
   "",
@@ -257,9 +314,11 @@ test("uses separate discovery eligibility for Chat and keeps resolved models pin
   ])
   expect(calls).toBe(1)
   expect(catalog.map((item) => item.modelId)).toEqual(["chat-only"])
-  expect((await provider.catalog.list()).map((item) => item.modelId)).toEqual(["responses-only"])
+  expect(
+    (await provider.catalog.list({ protocol: "responses" })).map((item) => item.modelId)
+  ).toEqual(["responses-only"])
   expect(resolved.metadata.modelName).toBe("DeepSeek-V4-Pro")
-  expect(resolved.definition.maxOutputTokens).toBe(100)
+  expect(resolved.definition.maxOutputTokens).toBeUndefined()
   expect(await provider.catalog.get("chat-only", { protocol: "chat" })).toMatchObject({
     modelId: "chat-only",
   })
@@ -270,8 +329,8 @@ test("uses separate discovery eligibility for Chat and keeps resolved models pin
   limit = "200"
   await provider.catalog.refresh({ protocol: "chat" })
   expect(await resolved.resolve()).toBe(resolved)
-  expect(resolved.definition.maxOutputTokens).toBe(100)
-  expect((await original.resolve({ offline: true })).definition.maxOutputTokens).toBe(200)
+  expect(resolved.definition.maxOutputTokens).toBeUndefined()
+  expect((await original.resolve({ offline: true })).definition.maxOutputTokens).toBeUndefined()
 })
 
 test("requires explicit capabilities and preserves strict schemas without enabling parallel strict tools", async () => {
@@ -328,9 +387,7 @@ test("requires explicit capabilities and preserves strict schemas without enabli
   expect(bodies).toHaveLength(2)
 })
 
-// Regression proof: remove the GPT-5.6 tools/reasoning check. The request below then
-// reaches fetch without reasoning_effort:none instead of rejecting locally.
-test("enforces GPT-5.6 Chat reasoning/tool restrictions using model metadata", async () => {
+test("uses explicit capabilities rather than model-name heuristics", async () => {
   let body: JsonObject | undefined
   const provider = createAzureAIFoundry({
     endpoint,
@@ -346,10 +403,7 @@ test("enforces GPT-5.6 Chat reasoning/tool restrictions using model metadata", a
   })
   const tools = [{ name: "check", description: "Check", inputSchema: schema }]
   for (const reasoning of [undefined, "provider-default", "high"] as const)
-    await expect(model.stream(request({ tools, reasoning }))).rejects.toThrow(
-      "GPT-5.6 Chat tools require"
-    )
-  expect(body).toBeUndefined()
+    await collect((await model.stream(request({ tools, reasoning }))).events)
   await collect((await model.stream(request({ tools, reasoning: "none" }))).events)
   expect(body).toMatchObject({ reasoning_effort: "none" })
   // Deployment names are not model identities.
@@ -370,6 +424,7 @@ test("keeps DeepSeek effort levels explicit and does not equate JSON mode with s
   })
   const model = provider.chat("production", {
     definition,
+    profile: "deepseek",
     metadata: { publisher: "DeepSeek", modelName: "DeepSeek-V4-Pro" },
   })
   const tools = [{ name: "check", description: "Check", inputSchema: schema }]
@@ -386,9 +441,12 @@ test("keeps DeepSeek effort levels explicit and does not equate JSON mode with s
   ).rejects.toThrow("DeepSeek JSON mode")
   await expect(
     provider
-      .chat("r1", { definition, metadata: { modelName: "DeepSeek-R1-0528" } })
+      .chat("r1", {
+        definition: { capabilities: { reasoning: {} } },
+        metadata: { modelName: "DeepSeek-R1-0528" },
+      })
       .stream(request({ reasoning: "high" }))
-  ).rejects.toThrow("provider-default")
+  ).rejects.toThrow("not supported")
   await expect(
     provider.chat("unknown", { definition, reasoningReplay: "tool-continuation" }).stream(request())
   ).rejects.toThrow("DeepSeek Chat profile")
@@ -442,7 +500,7 @@ test("accepts bounded images and rejects Chat PDFs even when media capabilities 
   )
   await expect(
     model.stream(file("data:application/pdf;base64,JVBERi0=", "application/pdf"))
-  ).rejects.toThrow("image file inputs only")
+  ).rejects.toThrow("Input media 'application/pdf' is not supported")
 })
 
 // Regression proof: bypass validateMessages in foundryChatRequest. Cross-protocol and

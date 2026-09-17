@@ -7,47 +7,17 @@ import {
 } from "@sixb/core/models"
 import { messagesInput } from "@sixb/model-protocols/messages"
 import { messagesOutputSchema } from "./messages-schema"
-import type { AzureAIFoundryModelMetadata } from "./provider"
-import { validateMessages } from "./request"
+import { prepareRequest } from "./request"
 import { object, PREFIX, positiveInteger } from "./util"
 
 export interface MessagesRequestOptions {
   readonly maxOutputTokens?: number
   readonly maxInputFileBytes?: number
   readonly request?: JsonObject
-  /** Needed for named efforts on an offering absent from the documented model profiles. */
+  /** Explicitly restrict thinking serialization to adaptive or manual mode. */
   readonly thinkingMode?: "adaptive" | "manual"
 }
 
-// Foundry model names, not deployment names. Reviewed 2026-09-16 against:
-// https://learn.microsoft.com/azure/foundry/foundry-models/concepts/claude-models
-const ADAPTIVE = new Set([
-  "claude-opus-4-6",
-  "claude-opus-4-7",
-  "claude-opus-4-8",
-  "claude-opus-5",
-  "claude-sonnet-4-6",
-  "claude-sonnet-5",
-  "claude-fable-5",
-  "claude-fable-5-1",
-  "claude-mythos-preview",
-  "claude-mythos-5",
-  "claude-mythos-5-1",
-])
-const MANUAL = new Set([
-  "claude-opus-4-5",
-  "claude-sonnet-4-5",
-  "claude-haiku-4-5",
-  "claude-opus-4-6",
-  "claude-sonnet-4-6",
-  "claude-mythos-preview",
-])
-const AZURE_HOSTED = new Set([
-  "claude-opus-4-8",
-  "claude-opus-5",
-  "claude-sonnet-5",
-  "claude-haiku-4-5",
-])
 const RESERVED = new Set([
   "model",
   "messages",
@@ -88,51 +58,13 @@ export function validateMessagesOptions(options: MessagesRequestOptions): void {
   }
 }
 
-export function validateClaudeOffering(
-  metadata: AzureAIFoundryModelMetadata,
-  entra: boolean
-): void {
-  if (metadata.publisher !== undefined && metadata.publisher.toLowerCase() !== "anthropic")
-    throw new UnsupportedModelFeatureError(
-      `${PREFIX} Native Messages requires an Anthropic deployment.`
-    )
-  const model = metadata.modelName ?? ""
-  if (model.startsWith("claude-mythos-") && !entra)
-    throw new UnsupportedModelFeatureError(
-      `${PREFIX} Foundry Mythos requires Entra tokenProvider authentication.`
-    )
-  const versionHosting =
-    metadata.modelVersion === "1"
-      ? "anthropic"
-      : metadata.modelVersion === "2"
-        ? "azure"
-        : undefined
-  if (metadata.hosting && versionHosting && metadata.hosting !== versionHosting)
-    throw new TypeError(
-      `${PREFIX} Claude hosting conflicts with Foundry modelVersion (1: anthropic, 2: azure).`
-    )
-  const hosting = metadata.hosting ?? versionHosting
-  if (hosting === "azure" && (ADAPTIVE.has(model) || MANUAL.has(model)) && !AZURE_HOSTED.has(model))
-    throw new UnsupportedModelFeatureError(
-      `${PREFIX} '${model}' is documented only for Anthropic-hosted Foundry deployments.`
-    )
-}
-
 export function foundryMessagesRequest(
   request: LanguageModelRequest,
   definition: LanguageModelDefinition,
   options: MessagesRequestOptions,
-  metadata: AzureAIFoundryModelMetadata,
   scope: string
 ): JsonObject {
-  positiveInteger(request.maxOutputTokens, "maxOutputTokens")
-  validateMessages(
-    request.messages,
-    definition,
-    options.maxInputFileBytes ?? 20 * 1024 * 1024,
-    scope,
-    true
-  )
+  const max = prepareRequest(request, definition, options, scope, true)
   let conversation = false
   for (const message of request.messages) {
     if (message.role === "system" && conversation)
@@ -141,16 +73,10 @@ export function foundryMessagesRequest(
       )
     if (message.role !== "system") conversation = true
   }
-  const limits = [
-    definition.maxOutputTokens,
-    options.maxOutputTokens,
-    request.maxOutputTokens,
-  ].filter((n): n is number => n !== undefined)
-  if (!limits.length)
+  if (max === undefined)
     throw new TypeError(
       `${PREFIX} Native Messages requires maxOutputTokens in the definition, binding, or request.`
     )
-  const max = Math.min(...limits)
   const caps = definition.capabilities
   if (request.tools.length && caps.localTools !== true)
     throw new UnsupportedModelFeatureError(
@@ -161,7 +87,7 @@ export function foundryMessagesRequest(
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Messages structured output requires a declared capability and a supported closed-object Claude schema.`
     )
-  const thinking = reasoningRequest(request, definition, options, metadata.modelName ?? "", max)
+  const thinking = reasoningRequest(request, definition, options, max)
   if (
     thinking.thinking &&
     object(thinking.thinking)?.type !== "disabled" &&
@@ -204,7 +130,6 @@ function reasoningRequest(
   request: LanguageModelRequest,
   definition: LanguageModelDefinition,
   options: MessagesRequestOptions,
-  model: string,
   max: number
 ): { thinking?: JsonObject; effort?: string } {
   const reasoning = request.reasoning
@@ -216,34 +141,18 @@ function reasoningRequest(
       `${PREFIX} ${issue ?? "Configure reasoning capabilities for this deployment"}.`
     )
   if (reasoning === "none") {
-    if (model.startsWith("claude-fable-") || model.startsWith("claude-mythos-"))
-      throw new UnsupportedModelFeatureError(
-        `${PREFIX} This Claude offering cannot disable thinking.`
-      )
-    return { thinking: { type: "disabled" } }
+    return {
+      thinking: { type: "disabled" },
+    }
   }
   if (typeof reasoning === "string") {
-    if (
-      reasoning === "minimal" ||
-      options.thinkingMode === "manual" ||
-      (!ADAPTIVE.has(model) && options.thinkingMode !== "adaptive") ||
-      (MANUAL.has(model) && !ADAPTIVE.has(model))
-    )
+    if (reasoning === "minimal" || options.thinkingMode === "manual")
       throw new UnsupportedModelFeatureError(
         `${PREFIX} Named efforts require an adaptive-thinking Claude offering.`
       )
-    if (
-      (reasoning === "xhigh" && ["claude-opus-4-6", "claude-sonnet-4-6"].includes(model)) ||
-      (reasoning === "max" &&
-        (model.startsWith("claude-fable-") ||
-          (model.startsWith("claude-mythos-") && model !== "claude-mythos-preview")))
-    )
-      throw new UnsupportedModelFeatureError(
-        `${PREFIX} '${model}' does not support effort '${reasoning}'.`
-      )
     return { thinking: { type: "adaptive" }, effort: reasoning }
   }
-  if (options.thinkingMode === "adaptive" || (ADAPTIVE.has(model) && !MANUAL.has(model)))
+  if (options.thinkingMode === "adaptive")
     throw new UnsupportedModelFeatureError(
       `${PREFIX} This Claude offering only supports adaptive thinking, not manual budgets.`
     )

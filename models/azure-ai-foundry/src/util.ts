@@ -11,3 +11,6 @@ export function positiveInteger(value: number | undefined, field: string): void 
     throw new TypeError(`${PREFIX} ${field} must be a positive safe integer.`)
   }
 }
+export function counter(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined
+}
