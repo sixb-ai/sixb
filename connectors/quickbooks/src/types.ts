@@ -12,6 +12,7 @@ import type { QuickBooksPreferencesResource } from "./resources/preferences"
 import type { QuickBooksTermsResource } from "./resources/terms"
 import type { QuickBooksVendorCreditsResource } from "./resources/vendor-credits"
 import type { QuickBooksVendorsResource } from "./resources/vendors"
+import type { QuickBooksCompanyInfoUpdate, QuickBooksWriteOptions } from "./types/writes"
 import type { QuickBooksEventsWebhookOptions } from "./webhooks"
 
 export interface QuickBooksConnectorOptions {
@@ -77,6 +78,11 @@ export interface QuickBooksClient {
   readonly terms: QuickBooksTermsResource
   readonly preferences: QuickBooksPreferencesResource
   readonly companyInfo: {
+    /** Sparse update using CompanyInfo.Id, which is distinct from the realm ID. */
+    update(
+      input: QuickBooksCompanyInfoUpdate,
+      options?: QuickBooksWriteOptions
+    ): Promise<QuickBooksCompanyInfo>
     /** GET /v3/company/{realmId}/companyinfo/{realmId} */
     get(): Promise<QuickBooksCompanyInfo>
   }

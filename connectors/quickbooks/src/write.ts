@@ -1,6 +1,12 @@
 import { QuickBooksWriteError } from "./errors"
 import type { QuickBooksReadHttp } from "./query"
-import type { QuickBooksRevision, QuickBooksWriteOptions } from "./types/writes"
+import { pathId } from "./query"
+import type {
+  QuickBooksDeleteResult,
+  QuickBooksInvoiceSendOptions,
+  QuickBooksRevision,
+  QuickBooksWriteOptions,
+} from "./types/writes"
 import { isRecord, nonEmpty } from "./validation"
 
 export interface QuickBooksWriteHttp extends QuickBooksReadHttp {
@@ -16,6 +22,60 @@ export function revision(input: QuickBooksRevision): QuickBooksRevision {
 export function createInput(input: object) {
   if ("Id" in input || "SyncToken" in input || "sparse" in input)
     throw new Error("[SixbQuickBooks] Create input must not contain Id, SyncToken, or sparse.")
+}
+
+export function updateEntity<T>(
+  http: QuickBooksWriteHttp,
+  entity: string,
+  input: QuickBooksRevision,
+  options?: QuickBooksWriteOptions
+): Promise<T> {
+  const identity = revision(input)
+  return writeEntity(
+    http,
+    entity,
+    entity.toLowerCase(),
+    { ...input, ...identity, sparse: true },
+    options,
+    { id: identity.Id }
+  )
+}
+
+export function deleteEntity(
+  http: QuickBooksWriteHttp,
+  entity: string,
+  input: QuickBooksRevision,
+  options?: QuickBooksWriteOptions
+): Promise<QuickBooksDeleteResult> {
+  const identity = revision(input)
+  return writeEntity(http, entity, `${entity.toLowerCase()}?operation=delete`, identity, options, {
+    id: identity.Id,
+    deleted: true,
+  })
+}
+
+export function sendEntity<T>(
+  http: QuickBooksWriteHttp,
+  entity: string,
+  id: string,
+  options: QuickBooksInvoiceSendOptions = {}
+): Promise<T> {
+  let path = `${entity.toLowerCase()}/${pathId(id)}/send`
+  if (options.sendTo !== undefined) {
+    nonEmpty(options.sendTo, "sendTo")
+    path += `?${new URLSearchParams({ sendTo: options.sendTo })}`
+  }
+  return writeEntity(http, entity, path, undefined, options, { id }, true)
+}
+
+export function finiteAmount(value: number, name = "TotalAmt") {
+  if (!Number.isFinite(value) || value < 0)
+    throw new Error(`[SixbQuickBooks] ${name} must be a finite nonnegative number.`)
+}
+
+export function nonEmptyLines(lines: readonly unknown[]) {
+  if (!Array.isArray(lines) || lines.length === 0)
+    throw new Error("[SixbQuickBooks] Line must be a non-empty array.")
 }
 
 export async function writeEntity<T>(

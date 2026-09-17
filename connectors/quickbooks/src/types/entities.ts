@@ -155,6 +155,12 @@ export interface QuickBooksTerm extends QuickBooksEntity {
 
 /** Preference groups vary by company locale and enabled products. */
 export interface QuickBooksPreferences extends QuickBooksEntity {
+  readonly EmailMessagesPrefs?: {
+    readonly InvoiceMessage?: QuickBooksEmailMessage
+    readonly EstimateMessage?: QuickBooksEmailMessage
+    readonly SalesReceiptMessage?: QuickBooksEmailMessage
+    readonly StatementMessage?: QuickBooksEmailMessage
+  }
   readonly CurrencyPrefs?: {
     readonly MultiCurrencyEnabled?: boolean
     readonly HomeCurrency?: QuickBooksReference
@@ -167,6 +173,7 @@ export interface QuickBooksPreferences extends QuickBooksEntity {
     readonly ClassTrackingPerTxnLine?: boolean
     readonly TrackDepartments?: boolean
     readonly DepartmentTerminology?: string
+    readonly CustomerTerminology?: string
     readonly BookCloseDate?: string
   }
   readonly TaxPrefs?: {
@@ -175,6 +182,11 @@ export interface QuickBooksPreferences extends QuickBooksEntity {
     readonly PartnerTaxEnabled?: boolean
   }
   readonly SalesFormsPrefs?: {
+    readonly SalesEmailCc?: { readonly Address?: string }
+    readonly SalesEmailBcc?: { readonly Address?: string }
+    readonly AllowServiceDate?: boolean
+    readonly EmailCopyToCompany?: boolean
+    readonly AllowEstimates?: boolean
     readonly UsingProgressInvoicing?: boolean
     readonly CustomTxnNumbers?: boolean
     readonly AllowDeposit?: boolean
@@ -183,6 +195,7 @@ export interface QuickBooksPreferences extends QuickBooksEntity {
     readonly DefaultCustomerMessage?: string
     readonly DefaultTerms?: QuickBooksReference
     readonly DefaultDiscountAccount?: string
+    readonly DefaultShippingAccount?: string
     readonly AutoApplyCredit?: boolean
     readonly AutoApplyPayments?: boolean
     readonly UsingPriceLevels?: boolean
@@ -192,11 +205,16 @@ export interface QuickBooksPreferences extends QuickBooksEntity {
     readonly CustomField?: readonly { readonly CustomField?: readonly QuickBooksCustomField[] }[]
   }
   readonly VendorAndPurchasesPrefs?: {
+    readonly DefaultMarkupAccount?: QuickBooksReference
+    readonly DefaultTerms?: QuickBooksReference
+    readonly DefaultMarkup?: number
     readonly TrackingByCustomer?: boolean
     readonly BillableExpenseTracking?: boolean
     readonly POCustomField?: readonly { readonly CustomField?: readonly QuickBooksCustomField[] }[]
   }
   readonly ProductAndServicesPrefs?: {
+    readonly RevenueRecognitionEnabled?: boolean
+    readonly RecognitionFrequencyType?: "Daily" | "Weekly" | "Monthly"
     readonly ForSales?: boolean
     readonly ForPurchase?: boolean
     readonly QuantityWithPriceAndRate?: boolean
@@ -215,4 +233,9 @@ export interface QuickBooksPreferences extends QuickBooksEntity {
     readonly ShowBillRateToAll?: boolean
     readonly WorkWeekStartDate?: string
   }
+}
+
+export interface QuickBooksEmailMessage {
+  readonly Subject?: string
+  readonly Message?: string
 }

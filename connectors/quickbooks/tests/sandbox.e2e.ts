@@ -1,58 +1,11 @@
 import { expect, test } from "bun:test"
 import { createHmac } from "node:crypto"
 import { readFile, writeFile } from "node:fs/promises"
-import {
-  QuickBooksApiError,
-  type QuickBooksRevision,
-  quickbooks,
-  quickbooksEventsWebhook,
-} from "../src"
+import { QuickBooksApiError, type QuickBooksRevision, quickbooksEventsWebhook } from "../src"
+import { connect, required } from "./live"
 
 // Deliberately separate from normal unit tests and from each other: reads never imply writes.
 const mode = process.env.QUICKBOOKS_LIVE
-if (mode && !["read", "mutate", "webhook", "writes"].includes(mode)) {
-  throw new Error("[QuickBooksLive] QUICKBOOKS_LIVE must be read, mutate, webhook, or writes.")
-}
-function required(name: string) {
-  const value = process.env[name]
-  if (!value) throw new Error(`[QuickBooksLive] Set ${name}. See tests/README.md.`)
-  return value
-}
-async function connect() {
-  const token = required("QUICKBOOKS_ACCESS_TOKEN")
-  const realmId = required("QUICKBOOKS_REALM_ID")
-  const adapter = quickbooks({
-    clientId: required("CLIENT_ID"),
-    clientSecret: required("CLIENT_SECRET"),
-    environment: "sandbox",
-    timeoutMs: 20_000,
-    minDelayMs: 250,
-  })
-  const context = {
-    projectId: "live-test",
-    connectorId: "quickbooks",
-    signal: AbortSignal.timeout(15 * 60_000),
-  }
-  const [account] = await adapter.discoverAccounts(context, {
-    accessToken: token,
-    authorizationContext: { realmId },
-  })
-  if (!account) throw new Error("[QuickBooksLive] No sandbox company discovered")
-  return {
-    realmId,
-    token,
-    qb: await adapter.connect({
-      ...context,
-      connectionId: "sandbox",
-      account,
-      tokenSource: {
-        async get() {
-          return { accessToken: token, invalidate() {} }
-        },
-      },
-    }),
-  }
-}
 function sameIds(actual: readonly { Id: string }[], expected: readonly { Id: string }[]) {
   expect(new Set(actual.map((r) => r.Id)).size).toBe(actual.length)
   expect(actual.map((r) => r.Id).sort()).toEqual(expected.map((r) => r.Id).sort())
