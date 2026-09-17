@@ -11,6 +11,7 @@ export {
 } from "./createCustomApp"
 export { devReloadResponse } from "./dev-reload"
 export type { AppMetadata } from "./metadata"
+export { publicEnv } from "./public-env"
 export {
   createTailwindCssCompiler,
   type TailwindCssCompiler,

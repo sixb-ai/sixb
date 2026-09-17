@@ -21,7 +21,7 @@ import {
   generateRouteManifest,
 } from "./codegen"
 import { devReloadResponse } from "./dev-reload"
-import { renderCustomAppRuntimeScript } from "./runtime"
+import { collectPublicEnv, renderCustomAppRuntimeScript } from "./runtime"
 import { type PageRoute, routePatternKey, scanAppRoutes } from "./scanner"
 import { type CustomAppStylesheet, resolveCustomAppStylesheet } from "./styles"
 import { createTailwindCssCompiler, type TailwindCssCompiler } from "./tailwind"
@@ -332,6 +332,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     },
 
     async dev(devOptions: CustomAppDevOptions = {}) {
+      const publicEnv = collectPublicEnv()
+      const withRuntime = (html: string) =>
+        injectRuntimeConfig(html, { apiBaseUrl, audience, authEnabled, publicEnv })
       const host = devOptions.host ?? "0.0.0.0"
       const port = devOptions.port ?? 3001
       const { htmlPath, manifestPath, sharedHtmlPath, sharedMainPath } = await prepareGeneratedApp()
@@ -363,9 +366,24 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
             "/__sixb/dev-reload.js": getHeadRoute(devReloadResponse),
             [customAppManifestRoute]: manifestRoute(manifestPath),
             [privateAppShellRoute]: htmlBundleRoute(bundle),
-            ...sharedAppDevRoutes(async () => (await ensureSharedBuild()).html, apiBaseUrl),
-            "/": spaHtmlRoute(() => internalOrigin, { shellRoute: privateAppShellRoute }),
-            "/*": spaHtmlRoute(() => internalOrigin, { shellRoute: privateAppShellRoute }),
+            ...sharedAppDevRoutes(
+              async () =>
+                injectRuntimeConfig((await ensureSharedBuild()).html, {
+                  apiBaseUrl,
+                  audience: "app",
+                  authEnabled: false,
+                  publicEnv,
+                }),
+              apiBaseUrl
+            ),
+            "/": spaHtmlRoute(() => internalOrigin, {
+              shellRoute: privateAppShellRoute,
+              transformHtml: withRuntime,
+            }),
+            "/*": spaHtmlRoute(() => internalOrigin, {
+              shellRoute: privateAppShellRoute,
+              transformHtml: withRuntime,
+            }),
           },
         }) as Parameters<typeof Bun.serve>[0]
 
@@ -527,6 +545,7 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
     },
 
     async start(startOptions: CustomAppStartOptions = {}) {
+      const publicEnv = collectPublicEnv()
       const host = startOptions.host ?? "0.0.0.0"
       const port = startOptions.port ?? 3001
       const outdir = resolve(rootDir, startOptions.outdir ?? join(".sixb", "dist", "app"))
@@ -546,11 +565,13 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
         apiBaseUrl: startOptions.apiBaseUrl ?? apiBaseUrl,
         audience: startOptions.audience ?? audience,
         authEnabled: startOptions.authEnabled ?? authEnabled,
+        publicEnv,
       })
       const sharedIndexHtml = injectRuntimeConfig(await Bun.file(sharedIndexPath).text(), {
         apiBaseUrl: startOptions.apiBaseUrl ?? apiBaseUrl,
         audience: "app",
         authEnabled: false,
+        publicEnv,
       })
       const runtimeApiBaseUrl = startOptions.apiBaseUrl ?? apiBaseUrl
       const server = Bun.serve({
@@ -593,6 +614,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
           const directFile = Bun.file(resolvedPath)
           if (await directFile.exists()) {
+            if (resolvedPath === indexPath) {
+              return htmlResponse(req, indexHtml)
+            }
             return staticFileResponse(req, resolvedPath, staticAssetHeaders(url.pathname))
           }
 
@@ -602,6 +626,9 @@ export async function createCustomApp(options: CreateCustomAppOptions): Promise<
 
           const htmlFile = Bun.file(`${resolvedPath}.html`)
           if (await htmlFile.exists()) {
+            if (`${resolvedPath}.html` === indexPath) {
+              return htmlResponse(req, indexHtml)
+            }
             return fileResponse(req, htmlFile)
           }
 
@@ -887,23 +914,28 @@ function injectRuntimeConfig(
     readonly apiBaseUrl?: string
     readonly audience: AuthSessionAudience
     readonly authEnabled: boolean
+    readonly publicEnv: Record<string, string>
   }
 ): string {
-  if (!config.apiBaseUrl) {
-    return html
-  }
-
+  const existingRuntimeScript = /<script>window\.__SIXB_RUNTIME__ = (.*?);<\/script>/
+  const existingConfig = html.match(existingRuntimeScript)?.[1]
   const script = renderCustomAppRuntimeScript({
-    api: { baseUrl: config.apiBaseUrl },
     auth: { audience: config.audience, enabled: config.authEnabled },
+    ...(existingConfig ? JSON.parse(existingConfig) : {}),
+    ...(config.apiBaseUrl
+      ? {
+          api: { baseUrl: config.apiBaseUrl },
+          auth: { audience: config.audience, enabled: config.authEnabled },
+        }
+      : {}),
+    publicEnv: config.publicEnv,
   })
-  const existingRuntimeScript = /<script>window\.__SIXB_RUNTIME__ = .*?;<\/script>/
   if (existingRuntimeScript.test(html)) {
-    return html.replace(existingRuntimeScript, script)
+    return html.replace(existingRuntimeScript, () => script)
   }
 
-  if (html.includes("</head>")) {
-    return html.replace("</head>", `  ${script}\n  </head>`)
+  if (/<head\b[^>]*>/i.test(html)) {
+    return html.replace(/<head\b[^>]*>/i, (head) => `${head}\n  ${script}`)
   }
 
   return `${script}\n${html}`
@@ -1135,7 +1167,7 @@ function devServerInternalOrigin(host: string, port: number): string {
 
 function spaHtmlRoute(
   internalOrigin: () => string,
-  options: { readonly shellRoute?: string } = {}
+  options: { readonly shellRoute?: string; readonly transformHtml?: (html: string) => string } = {}
 ): BunServeRoute {
   return getHeadRoute(async (request) => {
     const publicUrl = new URL(request.url)
@@ -1180,7 +1212,7 @@ function spaHtmlRoute(
       "</head>",
       '<script src="/__sixb/dev-reload.js"></script></head>'
     )
-    return new Response(html, {
+    return new Response(options.transformHtml?.(html) ?? html, {
       status: bundleResponse.status,
       statusText: bundleResponse.statusText,
       headers: responseHeaders,

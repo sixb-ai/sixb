@@ -24,6 +24,11 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
+      "browser": {
+        "types": "./dist/browser.d.ts",
+        "bun": "./src/browser.ts",
+        "default": "./dist/browser.js"
+      },
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
@@ -80,5 +85,6 @@
     "src",
     "README.md",
     "LICENSE"
-  ]
+  ],
+  "sideEffects": false
 }

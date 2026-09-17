@@ -99,6 +99,57 @@ describe("createCustomApp.start", () => {
     }
   })
 
+  // Regression proof: replace publicEnv: config.publicEnv with publicEnv: {} in the injector.
+  // Removing the indexPath checks in the static-file branches makes the HTML aliases fail.
+  test("snapshots only public env at startup and refreshes it without rebuilding", async () => {
+    const previous = process.env.SIXB_PUBLIC_TEST_KEY
+    const secret = process.env.SIXB_PRIVATE_TEST_KEY
+    const app = await createCustomApp({ rootDir: tempRoot })
+    const original = await readFile(join(tempRoot, ".sixb/dist/app/index.html"), "utf-8")
+    try {
+      process.env.SIXB_PRIVATE_TEST_KEY = "server-only-sentinel"
+      for (const value of ['quotes" \n </script><script>alert(1)</script> $& $` ', "restarted"]) {
+        process.env.SIXB_PUBLIC_TEST_KEY = value
+        const server = await app.start({ host: "127.0.0.1", port: await getFreePort() })
+        try {
+          process.env.SIXB_PUBLIC_TEST_KEY = "changed-after-start"
+          for (const path of [
+            "/",
+            "/index",
+            "/index.html",
+            "/%69ndex.html",
+            "/shared/grant/page",
+          ]) {
+            const response = await fetch(`http://127.0.0.1:${server.port}${path}`)
+            expect(response.status).toBe(200)
+            expect(response.headers.get("cache-control")).toBe("no-store")
+            const html = await response.text()
+            const encoded = html.match(/window\.__SIXB_RUNTIME__ = (.*);<\/script>/)?.[1]
+            expect(encoded).toBeDefined()
+            const config = JSON.parse(encoded!)
+            expect(config.publicEnv.SIXB_PUBLIC_TEST_KEY).toBe(value)
+            expect(config.publicEnv.SIXB_PUBLIC_MISSING).toBeUndefined()
+            expect(html).not.toContain("server-only-sentinel")
+            expect(html).not.toContain("<script>alert(1)</script>")
+            expect(html.indexOf("window.__SIXB_RUNTIME__")).toBeLessThan(html.indexOf("<body>"))
+            const head = await fetch(`http://127.0.0.1:${server.port}${path}`, { method: "HEAD" })
+            expect(head.status).toBe(200)
+            expect(head.headers.get("cache-control")).toBe("no-store")
+            expect(await head.text()).toBe("")
+          }
+        } finally {
+          await server.stop()
+        }
+      }
+      expect(await readFile(join(tempRoot, ".sixb/dist/app/index.html"), "utf-8")).toBe(original)
+    } finally {
+      if (previous === undefined) delete process.env.SIXB_PUBLIC_TEST_KEY
+      else process.env.SIXB_PUBLIC_TEST_KEY = previous
+      if (secret === undefined) delete process.env.SIXB_PRIVATE_TEST_KEY
+      else process.env.SIXB_PRIVATE_TEST_KEY = secret
+    }
+  })
+
   test("serves the built app and injects the runtime API base URL", async () => {
     const port = await getFreePort()
     const app = await createCustomApp({ rootDir: tempRoot, audience: "app" })
@@ -361,6 +412,35 @@ describe("createCustomApp.dev", () => {
   afterEach(async () => {
     if (tempRoot) {
       await rm(tempRoot, { recursive: true, force: true })
+    }
+  })
+
+  // Regression proof: replace publicEnv: config.publicEnv with publicEnv: {} in the injector.
+  test("delivers public env before the development app entry", async () => {
+    const previous = process.env.SIXB_PUBLIC_TEST_KEY
+    process.env.SIXB_PUBLIC_TEST_KEY = "dev-runtime-sentinel"
+    const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false, agentRoutes: false })
+    let server: Awaited<ReturnType<typeof app.dev>> | undefined
+    try {
+      await writeFile(
+        join(tempRoot, "app/page.tsx"),
+        'import { publicEnv } from "@sixb/app"\nconst key = publicEnv.SIXB_PUBLIC_TEST_KEY\nexport default function Page() { return <main>{key}</main> }\n'
+      )
+      server = await app.dev({ host: "127.0.0.1", port: await getFreePort() })
+      process.env.SIXB_PUBLIC_TEST_KEY = "changed-after-start"
+      const html = await (await fetch(`http://127.0.0.1:${server.port}/`)).text()
+      const encoded = html.match(/window\.__SIXB_RUNTIME__ = (.*);<\/script>/)?.[1]
+      expect(encoded).toBeDefined()
+      expect(JSON.parse(encoded!).publicEnv.SIXB_PUBLIC_TEST_KEY).toBe("dev-runtime-sentinel")
+      expect(html.indexOf("window.__SIXB_RUNTIME__")).toBeLessThan(
+        html.indexOf('<script type="module"')
+      )
+      const generated = await readFile(join(tempRoot, ".sixb/generated/index.html"), "utf-8")
+      expect(generated).not.toContain("dev-runtime-sentinel")
+    } finally {
+      await server?.stop()
+      if (previous === undefined) delete process.env.SIXB_PUBLIC_TEST_KEY
+      else process.env.SIXB_PUBLIC_TEST_KEY = previous
     }
   })
 
