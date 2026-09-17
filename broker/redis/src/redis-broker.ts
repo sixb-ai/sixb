@@ -370,7 +370,7 @@ export class RedisBroker implements Broker {
       names?: readonly string[]
       keys?: readonly string[]
     },
-    handler: (records: readonly BrokerRecord[]) => void
+    handler: (records: readonly BrokerRecord[]) => unknown
   ): Promise<() => void> {
     this.assertOpen()
     validateProjectId(params.projectId)

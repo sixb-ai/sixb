@@ -17,7 +17,7 @@ export interface EventsRuntime {
   latestCursor(): Promise<string | undefined>
   subscribe(
     input: EventsSubscribeInput,
-    handler: (events: readonly StoredDomainEvent[]) => void
+    handler: (events: readonly StoredDomainEvent[]) => unknown
   ): Promise<() => void>
 }
 
@@ -88,7 +88,7 @@ export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime 
       }
       return runtime.events.subscribe(input, (events) => {
         const visible = visibleEvents(events)
-        if (visible.length > 0) handler(visible)
+        if (visible.length > 0) return handler(visible)
       })
     },
   }

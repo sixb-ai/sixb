@@ -79,7 +79,7 @@ export interface DomainEventLog {
   latestCursor(): Promise<string | undefined>
   subscribe(
     input: EventsSubscribeInput,
-    handler: (events: readonly StoredDomainEvent[]) => void
+    handler: (events: readonly StoredDomainEvent[]) => unknown
   ): Promise<() => void>
 }
 
@@ -251,7 +251,7 @@ export class DomainEventService implements DomainEventLog, StableEventPublisher 
 
   async subscribe(
     input: EventsSubscribeInput,
-    handler: (events: readonly StoredDomainEvent[]) => void
+    handler: (events: readonly StoredDomainEvent[]) => unknown
   ): Promise<() => void> {
     await this.ensureStream()
     return this.broker.subscribe(
@@ -269,7 +269,7 @@ export class DomainEventService implements DomainEventLog, StableEventPublisher 
         }
 
         try {
-          handler(events)
+          return handler(events)
         } catch {
           // Preserve fire-and-forget subscriber semantics.
         }

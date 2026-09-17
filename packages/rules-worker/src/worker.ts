@@ -95,7 +95,7 @@ export class RulesWorker extends Worker {
         const ontologyEvents = events.filter(isOntologyRuleEvent)
         if (ontologyEvents.length === 0) return
 
-        coordinator.enqueueLive(ontologyEvents)
+        return coordinator.enqueueLive(ontologyEvents)
       }
     )
 

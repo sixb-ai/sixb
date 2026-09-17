@@ -105,17 +105,7 @@ async function consumeLiveJobs(
   types: readonly DomainEvent["type"][],
   signal: AbortSignal
 ): Promise<void> {
-  let pending: Promise<void> = Promise.resolve()
-  const unsubscribe = await options.events.subscribe({ types }, (events) => {
-    if (signal.aborted) return
-    pending = pending
-      .then(() => dispatchDirectJobs(options, events))
-      .catch((error) => console.error("[SixbOrchestrator] Dispatch failed:", error))
-  })
-
-  await waitForAbort(signal)
-  unsubscribe()
-  await pending
+  await consumeBatches(options, { types }, (events) => dispatchDirectJobs(options, events), signal)
 }
 
 async function consumeRetainedEventSchedules(
@@ -123,61 +113,58 @@ async function consumeRetainedEventSchedules(
   eventType: DomainEvent["type"],
   signal: AbortSignal
 ): Promise<void> {
-  let retryAttempt = 0
+  await consumeBatches(
+    options,
+    { types: [eventType], from: "earliest" },
+    (events) => dispatchEventSchedules(options, events),
+    signal
+  )
+}
+
+/** Keep only the current batch in flight. The provider owns the unread backlog. */
+async function consumeBatches(
+  options: OrchestratorRuntimeOptions,
+  input: Parameters<OrchestratorRuntimeOptions["events"]["subscribe"]>[0],
+  dispatch: (events: readonly StoredDomainEvent[]) => Promise<void>,
+  signal: AbortSignal
+): Promise<void> {
+  let attempt = 0
   while (!signal.aborted) {
-    const failure = deferred<unknown>()
-    const aborted = deferred<void>()
-    const onAbort = () => aborted.resolve()
-    signal.addEventListener("abort", onAbort, { once: true })
-    if (signal.aborted) aborted.resolve()
-    let failed = false
     let pending: Promise<void> = Promise.resolve()
     let unsubscribe: (() => void) | undefined
-
     try {
-      unsubscribe = await options.events.subscribe(
-        { types: [eventType], from: "earliest" },
-        (events) => {
-          if (signal.aborted || failed) return
-          pending = pending.then(async () => {
-            await dispatchEventSchedules(options, events)
-            retryAttempt = 0
-          })
-          pending.catch((error) => {
-            if (failed) return
-            failed = true
-            failure.resolve(error)
-          })
-        }
-      )
+      unsubscribe = await options.events.subscribe(input, (events) => {
+        pending = retryBatch(dispatch, events, signal)
+        return pending
+      })
     } catch (error) {
-      signal.removeEventListener("abort", onAbort)
       if (signal.aborted) return
-      console.error(
-        `[SixbOrchestrator] Event schedule subscription failed for '${eventType}'; retrying:`,
-        error
-      )
-      await sleep(eventScheduleRetryDelay(retryAttempt), signal)
-      retryAttempt += 1
+      console.error("[SixbOrchestrator] Subscription failed; retrying:", error)
+      await sleep(eventScheduleRetryDelay(attempt++), signal)
       continue
     }
-
-    const outcome = await Promise.race([
-      aborted.promise.then(() => ({ type: "aborted" as const })),
-      failure.promise.then((error) => ({ type: "failed" as const, error })),
-    ])
-
-    signal.removeEventListener("abort", onAbort)
+    await waitForAbort(signal)
     unsubscribe()
-    await pending.catch(() => {})
-    if (outcome.type === "aborted" || signal.aborted) return
+    await pending
+    return
+  }
+}
 
-    console.error(
-      `[SixbOrchestrator] Event schedule dispatch failed for '${eventType}'; replaying retained events:`,
-      outcome.error
-    )
-    await sleep(eventScheduleRetryDelay(retryAttempt), signal)
-    retryAttempt += 1
+async function retryBatch(
+  dispatch: (events: readonly StoredDomainEvent[]) => Promise<void>,
+  events: readonly StoredDomainEvent[],
+  signal: AbortSignal
+): Promise<void> {
+  let retry = 0
+  while (!signal.aborted) {
+    try {
+      await dispatch(events)
+      return
+    } catch (error) {
+      if (signal.aborted) return
+      console.error("[SixbOrchestrator] Dispatch failed; retrying the current batch:", error)
+      await sleep(eventScheduleRetryDelay(retry++), signal)
+    }
   }
 }
 
@@ -185,6 +172,7 @@ async function dispatchDirectJobs(
   options: OrchestratorRuntimeOptions,
   events: readonly StoredDomainEvent[]
 ): Promise<void> {
+  const errors: unknown[] = []
   for (const event of events) {
     for (const key of routeKeysForEvent(event)) {
       const route = options.routes.get(key)
@@ -194,14 +182,12 @@ async function dispatchDirectJobs(
           await enqueueDirectJob(options, event, item)
         } catch (error) {
           // One direct fan-out sibling must not prevent the others from being queued.
-          console.error(
-            `[SixbOrchestrator] Enqueue failed (queue=${item.queue}, eventId=${event.id}):`,
-            error
-          )
+          errors.push(error)
         }
       }
     }
   }
+  if (errors.length > 0) throw new AggregateError(errors, "Direct event dispatch failed.")
 }
 
 async function dispatchEventSchedules(
@@ -592,15 +578,4 @@ function eventScheduleRetryDelay(attempt: number): number {
     EVENT_SCHEDULE_RETRY_INITIAL_DELAY_MS * 2 ** attempt,
     EVENT_SCHEDULE_RETRY_MAX_DELAY_MS
   )
-}
-
-function deferred<T>(): {
-  readonly promise: Promise<T>
-  readonly resolve: (value: T) => void
-} {
-  let resolve!: (value: T) => void
-  const promise = new Promise<T>((next) => {
-    resolve = next
-  })
-  return { promise, resolve }
 }
