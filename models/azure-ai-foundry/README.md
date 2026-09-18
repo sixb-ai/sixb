@@ -156,6 +156,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Reservations | Conservative highest rates; same pinned card as completed estimates |
 | Cache and reasoning | Partitions of totals; never counted twice |
 | Zero cache writes | Need no price; positive writes without rates remain unpriceable |
+| Messages cache TTLs | Catalog write rates cover five minutes only; one-hour writes need explicit rates, and reservations are unavailable when the requested TTL has no rate |
 | Missing or ambiguous usage/prices | Explicitly unpriceable; missing counters are not zero |
 | Unknown billing dimensions | Require a custom estimator |
 | Response model mismatch | Not priced using the requested model's rates |
@@ -167,6 +168,7 @@ direct-Fireworks reference prices. Supply your own rates for effective Azure pri
 | Option / behavior | Default / contract |
 | --- | --- |
 | `catalog.ttlMs` / `catalog.timeoutMs` | One hour / 10 seconds |
+| Catalog listing | One public snapshot per list/get/refresh, including with `catalog.ttlMs: 0` |
 | `discovery.ttlMs` / `discovery.timeoutMs` | One hour / 5 seconds |
 | Discovery bounds | 100 pages, 10,000 records, 4 MiB |
 | Public catalog bound | 32 MiB; receives no Azure credentials or custom headers |
