@@ -8,6 +8,26 @@ Reusable toolkit for project-specific Sixb apps. It owns custom app route scanni
 bun add @sixb/app
 ```
 
+## Public environment variables
+
+Set browser-safe values with the `SIXB_PUBLIC_` prefix:
+
+```dotenv
+SIXB_PUBLIC_GOOGLE_MAPS_API_KEY=your-browser-key
+```
+
+```ts
+import { publicEnv } from "@sixb/app"
+
+const key = publicEnv.SIXB_PUBLIC_GOOGLE_MAPS_API_KEY // string | undefined
+```
+
+Values are strings; missing keys return `undefined`. Only prefixed variables are available.
+Outside the browser, `publicEnv` is empty. With `sixb dev` and `sixb app`, restart the app server
+after changing values; no rebuild is required.
+
+Public values are visible to every user. Never use `SIXB_PUBLIC_` for backend secrets.
+
 ## How It Works
 
 The build pipeline has three stages: **scan**, **codegen**, and **build**.
