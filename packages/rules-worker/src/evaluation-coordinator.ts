@@ -30,10 +30,10 @@ export class EvaluationCoordinator {
 
   constructor(private readonly options: EvaluationCoordinatorOptions) {}
 
-  enqueueLive(events: readonly OntologyRuleEvent[]): void {
-    if (events.length === 0 || this.options.signal.aborted) return
+  enqueueLive(events: readonly OntologyRuleEvent[]): Promise<void> {
+    if (events.length === 0 || this.options.signal.aborted) return Promise.resolve()
     const eventIds = events.map((event) => event.id)
-    this.enqueue(
+    return this.enqueue(
       async () => {
         const { failures } = await evaluateRuleEvents({
           runtime: this.options.runtime,
@@ -81,9 +81,10 @@ export class EvaluationCoordinator {
     return this.tail
   }
 
-  private enqueue(run: () => Promise<void>, failure: RuleEvaluationFailure): void {
+  private enqueue(run: () => Promise<void>, failure: RuleEvaluationFailure): Promise<void> {
     this.tail = this.tail.then(run).catch((error) => {
       this.options.onError(error, failure)
     })
+    return this.tail
   }
 }

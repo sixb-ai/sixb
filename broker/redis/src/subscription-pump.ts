@@ -1,4 +1,4 @@
-import type { BrokerRecord } from "@sixb/core/broker"
+import { type BrokerRecord, waitForSubscriber } from "@sixb/core/broker"
 import type { RedisBrokerClient, RedisConnectionManager } from "./connection"
 import { RedisBrokerError } from "./errors"
 import { decodeRecord } from "./serialization"
@@ -23,7 +23,7 @@ export interface RedisSubscriptionPumpOptions {
   readonly keys?: ReadonlySet<string>
   readonly batchSize: number
   readonly blockMs: number
-  readonly handler: (records: readonly BrokerRecord[]) => void
+  readonly handler: (records: readonly BrokerRecord[]) => unknown
 }
 
 /** Owns one retained XREAD cursor and replaces its disposable client after connection failure. */
@@ -79,13 +79,14 @@ export class RedisSubscriptionPump implements ActiveSubscription {
         }
 
         const records = this.decode(entries)
-        if (records.length === 0) continue
-
         try {
-          this.options.handler(records)
+          if (records.length > 0 && !signal.aborted) {
+            await waitForSubscriber(this.options.handler(records), signal)
+          }
         } catch {
           // Handler failures are swallowed per the Broker subscribe contract.
         }
+        if (!signal.aborted) this.cursor = entries.at(-1)?.id ?? this.cursor
       }
     } finally {
       this.options.connectionManager.closeClient(this.client)
@@ -168,9 +169,6 @@ export class RedisSubscriptionPump implements ActiveSubscription {
     const records: BrokerRecord[] = []
 
     for (const entry of entries) {
-      // Advance over filtered and malformed records so neither can wedge the retained cursor.
-      this.cursor = entry.id
-
       let record: BrokerRecord
       try {
         record = decodeRecord({

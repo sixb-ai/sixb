@@ -1,7 +1,4 @@
 import { randomUUID } from "node:crypto"
-import { reportRunFailure } from "../error-reporting/capability"
-import { createSixbError, toSixbFailure } from "../errors/internal"
-import type { SixbFailure } from "../errors/types"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
 import type { DatasetProducer, LakeStorage } from "../lake-storage"
@@ -17,11 +14,7 @@ import {
 import { getProjectionRegistry } from "./capability"
 import { ProjectionValidationError } from "./errors"
 import { createProjectionRunId } from "./run-id"
-import {
-  PROJECTION_RUN_FAILURE_CODES,
-  type ProjectionDefinition,
-  type ProjectionRunFailureCode,
-} from "./types"
+import type { ProjectionDefinition } from "./types"
 
 /** Target maximum mapped points per telemetry commit; a single-property projection reads 500 rows. */
 export const PROJECTION_TELEMETRY_BATCH_SIZE = 500
@@ -106,7 +99,7 @@ export class ProjectionRunDispatcher implements ProjectionRunDispatchPort {
     const runId = createProjectionRunId(this.dependencies.id, identity)
     const projectionRuns = requireProjectionRunStorage(this.dependencies.storage)
     const existing = await projectionRuns.getById({ projectId: this.dependencies.id, id: runId })
-    const persisted = existing
+    let persisted = existing
       ? await reuseProjectionRun(this.dependencies, existing, identity)
       : await persistProjectionRun({
           dependencies: this.dependencies,
@@ -120,6 +113,9 @@ export class ProjectionRunDispatcher implements ProjectionRunDispatchPort {
           ),
         })
 
+    if (!persisted.publish && persisted.run.status === "queued") {
+      persisted = await reuseProjectionRun(this.dependencies, persisted.run, identity)
+    }
     if (!persisted.publish) return existingResult(persisted.run)
     return publishProjectionRun(this.dependencies, input.metadata, persisted)
   }
@@ -195,6 +191,9 @@ async function reuseProjectionRun(
   identity: ProjectionRunRecord["identity"]
 ): Promise<PersistedProjectionRun> {
   await assertExistingRun(dependencies.storage, existing, identity)
+  if (existing.status === "queued") {
+    return { publish: true, run: existing, queuedAt: existing.queuedAt, created: false }
+  }
   if (
     existing.status !== "failed" ||
     existing.error?.code !== "queue.enqueue_failed" ||
@@ -228,45 +227,29 @@ async function publishProjectionRun(
   metadata: Readonly<Record<string, string>> | undefined,
   persisted: Extract<PersistedProjectionRun, { readonly publish: true }>
 ): Promise<ProjectionRunDispatchResult> {
-  try {
-    const [job] = await dependencies.queues.projections.enqueue({
-      projectId: dependencies.id,
-      jobs: [
-        {
-          id: persisted.run.id,
-          type: "projection.run.requested",
-          payload: { runId: persisted.run.id },
-          ...(metadata === undefined ? {} : { metadata }),
-        },
-      ],
-    })
-    return {
-      projectionId: persisted.run.identity.projectionId,
-      runId: persisted.run.id,
-      queuedAt: persisted.queuedAt.toISOString(),
-      ...(job?.id ? { jobId: job.id } : {}),
-      created: persisted.created,
-    }
-  } catch (error) {
-    const failedAt = new Date()
-    const failure = toEnqueueFailure(error, persisted.run, failedAt)
-    const failed = await requireProjectionRunStorage(dependencies.storage).failEnqueue({
-      projectId: dependencies.id,
-      id: persisted.run.id,
-      finishedAt: failedAt,
-      error: failure,
-    })
-    reportRunFailure(dependencies, error, {
-      projectId: dependencies.id,
-      runKind: "projection",
-      run: {
-        runId: failed.id,
-        projectionId: failed.identity.projectionId,
-        projectionKind: failed.identity.projectionKind,
+  // Keep the run queued on uncertain publication; the caller retries the same identity.
+  const [job] = await dependencies.queues.projections.enqueue({
+    projectId: dependencies.id,
+    jobs: [
+      {
+        id: persisted.run.id,
+        type: "projection.run.requested",
+        payload: { runId: persisted.run.id },
+        ...(metadata === undefined ? {} : { metadata }),
       },
-      failure,
-    })
-    throw error
+    ],
+  })
+  if (!job || job.id !== persisted.run.id) {
+    throw new ProjectionRunError(
+      `[Sixb] Queue did not acknowledge Projection run '${persisted.run.id}'.`
+    )
+  }
+  return {
+    projectionId: persisted.run.identity.projectionId,
+    runId: persisted.run.id,
+    queuedAt: persisted.queuedAt.toISOString(),
+    ...(job?.id ? { jobId: job.id } : {}),
+    created: persisted.created,
   }
 }
 
@@ -477,25 +460,4 @@ function assertDispatchInput(input: ProjectionRunDispatchInput): void {
   ) {
     throw new ProjectionValidationError("[Sixb] Projection dataset version timestamp is invalid.")
   }
-}
-
-function toEnqueueFailure(
-  error: unknown,
-  run: ProjectionRunRecord,
-  at: Date
-): SixbFailure<ProjectionRunFailureCode> {
-  const enqueueError = createSixbError(
-    "queue.enqueue_failed",
-    `[Sixb] Could not enqueue Projection run '${run.id}'.`,
-    {
-      cause: error,
-      details: {
-        projectionId: run.identity.projectionId,
-        projectionKind: run.identity.projectionKind,
-        runId: run.id,
-        phase: "enqueue",
-      },
-    }
-  )
-  return toSixbFailure(enqueueError, { allowedCodes: PROJECTION_RUN_FAILURE_CODES, at })
 }

@@ -123,6 +123,15 @@ duplicate window.
 `afterCursor` when a caller needs retained replay. Multiple subscribers each
 receive every matching record independently.
 
+Returned handler promises are awaited before delivering another record. The client prefetch is
+bounded to 100 records with replenishment near exhaustion; this is a record bound, not a byte budget.
+Handler failures stay isolated and do not request redelivery. Reliable consumers must retry inside
+their callback before returning. Unsubscribe stops delivery without waiting indefinitely for an
+uncooperative callback; the callback's owner is responsible for cancellation/draining.
+
+Provider authors can use `waitForSubscriber(result, signal)` from `@sixb/core/broker` to wait for a
+callback or unsubscribe without retaining an abort listener for every completed delivery.
+
 ### Close
 
 `NatsBroker` implements optional `Broker.close()` and drains active

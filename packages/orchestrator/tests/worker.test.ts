@@ -11,10 +11,13 @@ import {
   defineWorkflow,
   defineWorkflowStep,
   events,
+  InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
+  InMemoryStorage,
   prop,
+  SixbHost,
 } from "@sixb/core"
 import {
   DomainEventService,
@@ -22,6 +25,7 @@ import {
   type StableEventEnvelope,
 } from "@sixb/core/internal/events"
 import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projections"
+import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { compileRoutes } from "../src/compile-routes"
 import { reconcileProjectionDispatch } from "../src/projection-dispatch-reconciler"
@@ -163,6 +167,72 @@ function thrownBy(run: () => unknown): unknown {
 }
 
 const workers: OrchestratorWorker[] = []
+
+// Revert the returned processing promise in consumeBatches: all retained batches enter at once.
+test("retained backpressure and queue recovery compose with the real Workflow dispatcher", async () => {
+  const broker = new InMemoryBroker()
+  const queues = new InMemoryQueues()
+  const eventRuntime = createEvents(PROJECT_ID, broker)
+  const host = new SixbHost({
+    id: PROJECT_ID,
+    ontology: [Invoice],
+    workflows: [highValueInvoiceWorkflow],
+    schedules: [highValueInvoice],
+    broker,
+    queues,
+    storage: new InMemoryStorage(),
+    lakeStorage: new InMemoryLakeStorage(),
+    blobStorage: new InMemoryBlobStorage(),
+  })
+  await eventRuntime.publishEnvelopes(
+    Array.from({ length: 300 }, (_, i) => makeInvoiceUpdatedEvent(0, 700 + i))
+  )
+  let release!: () => void
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const enqueue = queues.workflows.enqueue.bind(queues.workflows)
+  let attempts = 0
+  let acknowledged = 0
+  queues.workflows.enqueue = async (params) => {
+    if (++attempts === 1) {
+      await blocked
+      throw new Error("temporary queue failure")
+    }
+    const jobs = await enqueue(params)
+    acknowledged += jobs.length
+    return jobs
+  }
+  const subscribe = eventRuntime.subscribe.bind(eventRuntime)
+  let deliveries = 0
+  eventRuntime.subscribe = (input, handler) =>
+    subscribe(input, (batch) => {
+      deliveries += 1
+      return handler(batch)
+    })
+  try {
+    await startWorker(
+      eventRuntime,
+      queues,
+      eventWorkflowRoutes(),
+      PROJECT_ID,
+      undefined,
+      new WorkflowRunDispatcher(host)
+    )
+    await waitFor(() => attempts === 1)
+    await Bun.sleep(20)
+    expect(deliveries).toBe(1)
+    release()
+    await waitFor(() => acknowledged === 300)
+    expect(attempts).toBe(301)
+    expect(deliveries).toBe(3)
+    expect(
+      await queues.workflows.claim({ projectId: PROJECT_ID, workerId: "test", limit: 500 })
+    ).toHaveLength(300)
+  } finally {
+    release()
+  }
+})
 
 afterEach(async () => {
   for (const worker of workers) await worker.stop().catch(() => {})
@@ -763,7 +833,7 @@ describe("OrchestratorWorker", () => {
     })
   })
 
-  test("a direct enqueue failure does not drop fan-out siblings", async () => {
+  test("direct fan-out retries failed siblings without duplicating admitted jobs", async () => {
     const daily = defineSchedule("daily-fanout").cron("0 2 * * *")
     const sync = defineSync("sync-fails")
       .when(daily)
@@ -785,8 +855,11 @@ describe("OrchestratorWorker", () => {
     })
     const eventRuntime = createEvents()
     const queues = new InMemoryQueues()
-    queues.syncRuns.enqueue = async () => {
-      throw new Error("Unavailable")
+    const enqueueSync = queues.syncRuns.enqueue.bind(queues.syncRuns)
+    let attempts = 0
+    queues.syncRuns.enqueue = async (params) => {
+      if (++attempts === 1) throw new Error("Unavailable")
+      return enqueueSync(params)
     }
 
     const originalError = console.error
@@ -801,6 +874,13 @@ describe("OrchestratorWorker", () => {
         })
         return claimed.length === 1
       })
+      await waitFor(() => attempts === 2)
+      expect(
+        await queues.syncRuns.claim({ projectId: PROJECT_ID, workerId: "sync", limit: 10 })
+      ).toHaveLength(1)
+      expect(
+        await queues.pipelines.claim({ projectId: PROJECT_ID, workerId: "pipeline", limit: 10 })
+      ).toHaveLength(0)
     } finally {
       console.error = originalError
     }
