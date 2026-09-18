@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-google",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Typed Google connectors for Sixb (Workspace, Sheets, Meet, Analytics, and Google Ads)",
   "keywords": [
     "sixb",

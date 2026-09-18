@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-exa",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Exa web search and content retrieval connector with bounded agent tools for Sixb",
   "keywords": [
     "sixb",

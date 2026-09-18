@@ -63,7 +63,7 @@ describe("create-sixb packed artifacts", () => {
 
     expect(createManifest.dependencies).toBeUndefined()
     expect(cliManifest.dependencies?.["create-sixb"]).toBe("^0.1.3")
-    expect(cliManifest.dependencies?.["@sixb/cli-core"]).toBe("^0.1.4")
+    expect(cliManifest.dependencies?.["@sixb/cli-core"]).toBe("^0.1.5")
   })
 
   test("shows the bun create usage", () => {
@@ -257,8 +257,8 @@ async function assertScaffold(projectDir: string, name: string): Promise<void> {
     dependencies?: Record<string, string>
   }
   expect(packageJson.name).toBe(name)
-  expect(packageJson.dependencies?.["@sixb/cli"]).toBe("^0.1.0")
-  expect(packageJson.dependencies?.["@sixb/ducklake"]).toBe("^0.1.0")
+  expect(packageJson.dependencies?.["@sixb/cli"]).toBe("^0.1.9")
+  expect(packageJson.dependencies?.["@sixb/ducklake"]).toBe("^0.1.5")
   expect(packageJson.dependencies?.cobe).toBe("^2.0.1")
   expect(packageJson.dependencies?.["satellite.js"]).toBe("^7.1.0")
   expect(packageJson.dependencies?.["@sixb/lake-local"]).toBeUndefined()

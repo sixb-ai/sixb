@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-ace-iot",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "ACE IoT Deploy API connector for Sixb",
   "keywords": [
     "sixb",

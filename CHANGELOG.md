@@ -2,6 +2,86 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-18 — Framework 0.1.9
+
+This release includes breaking API changes, a database migration, and a new minimum Bun version.
+Review the upgrade notes before updating dependencies or deploying.
+
+### Highlights
+
+- Add direct language-model generation to execution-bound SDKs, including Actions and workflows,
+  with shared model-call accounting, recovery, and request/Action/workflow cost attribution.
+- Move requester-group snapshots to durable executions so child work inherits the admitted
+  snapshot, and expose the expanded attribution in the API, generated client, and Atlas.
+- Improve failure details and redact sensitive HTTP context in Atlas and server responses.
+- Add web search and web fetch source previews to Agent UI, preserve streamed Gateway reasoning,
+  and fix structured output when a model's capability metadata is absent.
+- Keep attachment metadata out of assistant history and share production modules between CLI
+  configuration loading and discovery.
+- Introduce the Microsoft Graph connector for SharePoint/OneDrive files, Outlook mail and delta,
+  and calendars, events, and attachments. Subscriptions and webhooks are not part of this release.
+- Add Stripe invoice line items and invoice payments, and explicit named Vercel sandbox creation
+  and resume.
+- Require Bun `1.4.2` or later throughout the published packages. Packages without source changes
+  receive a patch release to publish this runtime requirement. Update the starter's dependency
+  floors to the versions in this release.
+
+### Upgrade notes
+
+- Upgrade Bun to at least `1.4.2` on development machines, CI, and runtime hosts before installing
+  this release. The CLI enforces this minimum.
+- Upgrade core, its exact worker and storage consumers, and the CLI to `0.1.9` together. Rebuild
+  custom-app and Atlas assets with the selected package versions. Commit the resulting lockfile
+  and use frozen installs for deployment.
+- Apply PostgreSQL or SQLite migration 037. It moves `requester_group_ids` from Agent and workflow
+  runs onto executions, preserves historical snapshots, and drops the former columns. Stop old
+  runtime roles before migrating; older binaries must not use the migrated database. Rehearse on
+  a backup first. There is no database downgrade path; rolling back requires restoring the backup
+  and the matching previous runtime versions. For SQLite, migrate once before starting multiple
+  runtime roles with `--no-migrate`.
+- Code that reads requester groups from Agent or workflow run records must read the associated
+  execution's `requesterGroupIds` instead. Historical snapshots must not be reconstructed from
+  current group membership.
+- The Vercel factory no longer accepts `persistent`, including `persistent: false`. Remove the
+  option for ephemeral sandboxes. Replace persistent creation with
+  `factory.create({ persistence: { name } })` and resume stopped state with `factory.resume(name)`.
+  Pass current environment and authority on each session. `stop()` preserves persistent state;
+  `destroy()` deletes it. Local, Apple Container, and SmolVM providers reject named persistence.
+- Implementation helpers are removed from public core exports. Root-level `requestAction`,
+  `requestActionAndWait`, `waitForActionRun`, `requestAgentRun`, `requestSyncRun`,
+  `requestPipelineRun`, and `requestWorkflowRun` must be replaced with execution-bound SDK calls.
+  Root `emptyGrantIndex` and `validateSchemaOrRefValue` are also removed. Client-package request
+  helpers and methods on `sixb.objects(...)` are not removed by this export cleanup.
+- The `@sixb/core/actions/worker` and `@sixb/core/events/scope` subpaths are removed, along with
+  runtime normalization, stream production/control, and storage mutation helpers previously
+  exposed through ontology, query, logging, Agent context/streams, and storage entrypoints.
+  In particular, `validateSchemaOrRefValue` is no longer exported from `@sixb/core/ontology`.
+  Use application-owned validation or supported SDK APIs; `@sixb/core/internal/*` is reserved for
+  framework packages and is not an application migration target.
+
+### Package versions
+
+- `0.1.9`: `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/cli`, `@sixb/client`, `@sixb/core`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/server`, `@sixb/sqlite`, `@sixb/sync-worker`,
+  `@sixb/workflow-worker`.
+- `0.1.8`: `@sixb/agent-ui`, `@sixb/atlas`.
+- `0.1.7`: `@sixb/app`.
+- `0.1.5`: `@sixb/cli-core`, `@sixb/connector-google`, `@sixb/connector-linkedin`,
+  `@sixb/ducklake`.
+- `0.1.4`: `@sixb/auth-magic-link`, `@sixb/broker-redis`, `@sixb/lake-local`,
+  `@sixb/queues-bullmq`, `@sixb/sandboxes-apple-container`, `@sixb/sandboxes-local`,
+  `@sixb/sandboxes-smolvm`, `@sixb/sandboxes-vercel`.
+- `0.1.3`: `@sixb/auth-oidc`, `@sixb/broker-nats`, `@sixb/connector-mercury`,
+  `@sixb/connector-meta`, `@sixb/connector-pennylane`, `@sixb/connector-rest`, `create-sixb`.
+- `0.1.2`: `@sixb/anthropic`, `@sixb/blob-local`, `@sixb/blob-s3`, `@sixb/connector-companycam`,
+  `@sixb/connector-github`, `@sixb/connector-imap`, `@sixb/connector-pandadoc`,
+  `@sixb/connector-pipedrive`, `@sixb/connector-sftp`, `@sixb/connector-sql`,
+  `@sixb/connector-stripe`, `@sixb/connector-teamleader`, `@sixb/connector-tiktok`,
+  `@sixb/connector-unipile`, `@sixb/logger-pino`, `@sixb/ui`, `@sixb/vercel-ai-gateway`.
+- `0.1.1`: `@sixb/connector-ace-iot`, `@sixb/connector-exa`, `@sixb/connector-notion`.
+- `0.1.0`: `@sixb/connector-microsoft` (first publication).
+
 ## 2026-09-14 — Framework 0.1.8
 
 ### Highlights
