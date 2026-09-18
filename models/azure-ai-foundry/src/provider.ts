@@ -313,7 +313,13 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
         ? foundryMessagesRequest(request, this.definition, this.options, this.scope)
         : this.protocol === "chat"
           ? foundryChatRequest(request, this.definition, this.options, this.scope)
-          : responsesRequest(request, this.definition, this.options, this.scope)
+          : responsesRequest(
+              request,
+              this.definition,
+              this.options,
+              this.scope,
+              this.resolution?.deployment
+            )
     const response = await this.transport.post(
       JSON.stringify(body),
       request.signal,

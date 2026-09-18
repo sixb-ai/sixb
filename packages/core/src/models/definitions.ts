@@ -14,6 +14,10 @@ export interface ModelDefinition {
   readonly modelId: string
   readonly name?: string
   readonly description?: string
+  /** Model author for display; does not change the provider/model routing identity. */
+  readonly publisher?: { readonly id: string; readonly name: string }
+  /** Hosting service label, when the model is offered through an intermediary. */
+  readonly via?: string
   readonly family?: string
   readonly tags?: readonly string[]
   readonly releaseDate?: string
@@ -38,6 +42,17 @@ export function defineLanguageModel(definition: LanguageModelDefinition): Langua
   assertModelId(definition.modelId, "modelId")
   assertOptionalString(definition.name, "name")
   assertOptionalString(definition.description, "description")
+  assertOptionalString(definition.via, "via")
+  if (definition.via !== undefined && !definition.via.trim())
+    throw new TypeError("[Sixb] Model via must not be empty.")
+  const publisher = definition.publisher
+  if (publisher !== undefined) {
+    assertRecord(publisher, "publisher")
+    for (const [field, value] of Object.entries({ id: publisher.id, name: publisher.name })) {
+      if (typeof value !== "string" || !value.trim() || value !== value.trim())
+        throw new TypeError(`[Sixb] Model publisher.${field} must be a nonempty trimmed string.`)
+    }
+  }
   assertOptionalString(definition.family, "family")
   assertOptionalString(definition.releaseDate, "releaseDate")
   assertOptionalString(definition.knowledgeCutoff, "knowledgeCutoff")
@@ -52,6 +67,10 @@ export function defineLanguageModel(definition: LanguageModelDefinition): Langua
     modelId: definition.modelId,
     ...(definition.name === undefined ? {} : { name: definition.name }),
     ...(definition.description === undefined ? {} : { description: definition.description }),
+    ...(publisher === undefined
+      ? {}
+      : { publisher: Object.freeze({ id: publisher.id, name: publisher.name }) }),
+    ...(definition.via === undefined ? {} : { via: definition.via }),
     ...(definition.family === undefined ? {} : { family: definition.family }),
     ...(tags === undefined ? {} : { tags }),
     ...(definition.releaseDate === undefined ? {} : { releaseDate: definition.releaseDate }),

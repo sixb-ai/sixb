@@ -9,6 +9,7 @@ import type { ChatRequestOptions } from "./chat-request"
 import type { AzureAIFoundryDeployment } from "./discovery"
 import type { MessagesRequestOptions } from "./messages-request"
 import type { AzureAIFoundryModelMetadata, AzureAIFoundryModelOptions } from "./provider"
+import { azurePublisher } from "./publisher"
 import type { FoundryProtocol } from "./transport"
 import { PREFIX } from "./util"
 
@@ -34,6 +35,11 @@ export function resolveModel(input: {
       }
     : {}
   const entry = input.catalogModel
+  const deploymentPublisher = deployment && azurePublisher(deployment.modelPublisher)
+  const publisher =
+    deploymentPublisher?.id === "fireworks-ai"
+      ? (entry?.definition.publisher ?? deploymentPublisher)
+      : (deploymentPublisher ?? entry?.definition.publisher)
   const protocol =
     input.protocol ??
     entry?.protocol ??
@@ -56,6 +62,8 @@ export function resolveModel(input: {
     )
   const definition = defineLanguageModel({
     ...entry?.definition,
+    publisher,
+    via: "Azure AI Foundry",
     ...options.definition,
     kind: "language",
     providerId: input.providerId,
@@ -75,6 +83,8 @@ export function resolveModel(input: {
           kind: "language",
           providerId: input.providerId,
           modelId: input.modelId,
+          publisher: definition.publisher,
+          via: definition.via,
           capabilities: {},
         }),
     metadata: Object.freeze({
