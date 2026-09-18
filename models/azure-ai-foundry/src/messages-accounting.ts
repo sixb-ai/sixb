@@ -46,7 +46,7 @@ export function foundryMessagesEstimator(
   modelVersion?: string,
   aliases?: readonly string[]
 ): ModelCostEstimator {
-  return tokenEstimator(
+  const estimator = tokenEstimator(
     card,
     request,
     ["temperature", "top_p", "top_k", "metadata", "stop_sequences", "cache_control"],
@@ -55,6 +55,16 @@ export function foundryMessagesEstimator(
     modelVersion,
     aliases ?? (modelName ? [modelName] : undefined)
   )
+  const cache = object(request?.cache_control)
+  if (!cache) return estimator
+  const ttl = cache.ttl ?? "5m"
+  const writeRate = ttl === "1h" ? card?.cacheWriteInput1h : card?.cacheWriteInput5m
+  const unknownWriteRate = writeRate === undefined && card?.cacheWriteInput === undefined
+  return {
+    ...estimator,
+    estimateReservation: (tokens) =>
+      unknownWriteRate ? undefined : estimator.estimateReservation?.(tokens),
+  }
 }
 
 function tokenMeters(raw: JsonObject | undefined): boolean {

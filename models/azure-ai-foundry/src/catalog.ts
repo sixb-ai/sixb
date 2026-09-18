@@ -46,27 +46,33 @@ export class RemoteModelsDevCatalog {
     this.loadedAt = 0
   }
   async get(name: string, offline = false): Promise<CatalogModel | undefined> {
+    return (await this.lookup(offline))(name)
+  }
+  /** Capture one snapshot so a batch of lookups cannot expire between deployments. */
+  async lookup(offline = false): Promise<(name: string) => CatalogModel | undefined> {
     const models = offline ? this.snapshot : await this.load()
-    // Azure deployment names preserve publisher casing; models.dev IDs are lowercase.
-    // Only a unique exact case-insensitive ID match is accepted, never fuzzy name matching.
-    const matches = models.filter(
-      (m) => m.catalogProvider === "azure" && m.modelName.toLowerCase() === name.toLowerCase()
-    )
-    if (matches.length) return matches.length === 1 ? matches[0] : undefined
-    if (!/^FW-/i.test(name)) return undefined
-    const identity = normalizeFireworksVersion(name.slice(3).toLowerCase())
-    const fallback = models.filter((m) => {
-      if (m.catalogProvider !== "fireworks-ai") return false
-      const suffix = /^accounts\/fireworks\/(?:models|routers)\/([^/]+)$/.exec(
-        m.modelName.toLowerCase()
-      )?.[1]
-      return (
-        suffix !== undefined &&
-        !/(?:^|-)latest$/.test(suffix) &&
-        normalizeFireworksVersion(suffix) === identity
+    return (name) => {
+      // Azure deployment names preserve publisher casing; models.dev IDs are lowercase.
+      // Only a unique exact case-insensitive ID match is accepted, never fuzzy name matching.
+      const matches = models.filter(
+        (m) => m.catalogProvider === "azure" && m.modelName.toLowerCase() === name.toLowerCase()
       )
-    })
-    return fallback.length === 1 ? fallback[0] : undefined
+      if (matches.length) return matches.length === 1 ? matches[0] : undefined
+      if (!/^FW-/i.test(name)) return undefined
+      const identity = normalizeFireworksVersion(name.slice(3).toLowerCase())
+      const fallback = models.filter((m) => {
+        if (m.catalogProvider !== "fireworks-ai") return false
+        const suffix = /^accounts\/fireworks\/(?:models|routers)\/([^/]+)$/.exec(
+          m.modelName.toLowerCase()
+        )?.[1]
+        return (
+          suffix !== undefined &&
+          !/(?:^|-)latest$/.test(suffix) &&
+          normalizeFireworksVersion(suffix) === identity
+        )
+      })
+      return fallback.length === 1 ? fallback[0] : undefined
+    }
   }
   private load() {
     if (this.loadedAt && Date.now() - this.loadedAt < (this.options.ttlMs ?? 3600000))
@@ -140,7 +146,7 @@ export class RemoteModelsDevCatalog {
             catalogProvider,
             modelName: id,
             protocol,
-            rateCard: rates(object(raw.cost)),
+            rateCard: rates(object(raw.cost), protocol),
             definition: defineLanguageModel({
               kind: "language",
               providerId: "azure-ai-foundry",
@@ -210,7 +216,19 @@ function reasoning(
       : {}),
   }
 }
-function rates(raw: Record<string, unknown> | undefined): LanguageModelRateCard | undefined {
+function rates(
+  raw: Record<string, unknown> | undefined,
+  protocol: FoundryProtocol | undefined
+): LanguageModelRateCard | undefined {
+  const card = parseRates(raw)
+  if (protocol !== "messages" || card?.cacheWriteInput === undefined) return card
+  // models.dev's Messages cache_write is five-minute creation, including in context tiers.
+  // One-hour prices are unknown and must not fall back to this rate.
+  const { cacheWriteInput, ...rest } = card
+  return defineModelRateCard({ ...rest, cacheWriteInput5m: cacheWriteInput })
+}
+
+function parseRates(raw: Record<string, unknown> | undefined): LanguageModelRateCard | undefined {
   if (!raw || raw.tiers === undefined) return flatRates(raw)
   const { tiers, context_over_200k: legacy, ...base } = raw
   const card = flatRates(base)

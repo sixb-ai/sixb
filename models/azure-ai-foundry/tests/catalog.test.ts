@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import { ModelCatalogUnavailableError } from "@sixb/core/models"
 import { type AzureAIFoundryOptions, createAzureAIFoundry as create } from "../src"
+import { foundryMessagesUsage } from "../src/messages-accounting"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
 const fixtureNames = [
@@ -51,6 +52,124 @@ const record = (cost = 2, tools = true) => ({
 })
 const page = (value = record()) => Response.json({ azure: { models: { "new-model": value } } })
 const usage = { inputTokens: 10, uncachedInputTokens: 10, cacheReadInputTokens: 0, outputTokens: 2 }
+
+// Regression proof: restore the per-deployment catalog.get() in provider.list(); each
+// operation downloads three catalogs and the deployment definitions use different snapshots.
+test("uses one fresh catalog snapshot per list, get and refresh when caching is disabled", async () => {
+  let calls = 0
+  const names = ["one", "two", "three"]
+  const provider = create({
+    endpoint,
+    apiKey: "key",
+    fetch: async () =>
+      Response.json({
+        value: names.map((name) => ({
+          type: "ModelDeployment",
+          name,
+          modelName: "New-Model",
+          modelVersion: "1",
+          modelPublisher: "Fixture",
+          sku: { name: "GlobalStandard" },
+          capabilities: { chatCompletion: "true" },
+        })),
+      }),
+    catalog: {
+      ttlMs: 0,
+      fetch: async () => {
+        calls++
+        return page({ ...record(), limit: { context: calls * 1000, output: 8192 } })
+      },
+    },
+  })
+  for (const operation of [() => provider.catalog.list(), () => provider.catalog.refresh()]) {
+    const before = calls
+    const definitions = await operation()
+    expect(calls).toBe(before + 1)
+    expect(definitions.map((d) => d.modelId)).toEqual(names)
+    expect(definitions.map((d) => d.contextWindow)).toEqual(names.map(() => calls * 1000))
+  }
+  expect((await provider.catalog.get("two"))?.contextWindow).toBe(3000)
+  expect(calls).toBe(3)
+})
+
+// Regression proof: restore generic cacheWriteInput for Messages reference prices;
+// one-hour writes become rated. Remove the Messages reservation TTL guard and the
+// one-hour reservation uses the cheaper five-minute rate. Run with -t "Messages reference".
+test.each([
+  false,
+  true,
+])("Messages reference cache writes retain their TTL with tiers=%s", async (tiered) => {
+  const base = { input: 3, output: 15, cache_read: 0.3, cache_write: 3.75 }
+  const high = { input: 6, output: 30, cache_read: 0.6, cache_write: 7.5 }
+  const raw = {
+    ...record(),
+    provider: { npm: "@ai-sdk/anthropic" },
+    cost: {
+      ...base,
+      ...(tiered
+        ? {
+            tiers: [{ ...high, tier: { type: "context", size: 200000 } }],
+            context_over_200k: high,
+          }
+        : {}),
+    },
+  }
+  const provider = createAzureAIFoundry({
+    endpoint,
+    apiKey: "key",
+    catalog: { fetch: async () => page(raw) },
+  })
+  for (const ttl of ["5m", "1h"] as const) {
+    const model = await provider
+      .messages("production", {
+        request: { cache_control: { type: "ephemeral", ttl } },
+      })
+      .resolve()
+    const estimate = model.costEstimator.estimate({
+      usage: foundryMessagesUsage({
+        input_tokens: 0,
+        output_tokens: 0,
+        cache_read_input_tokens: 0,
+        cache_creation_input_tokens: 1000000,
+        cache_creation: {
+          ephemeral_5m_input_tokens: ttl === "5m" ? 1000000 : 0,
+          ephemeral_1h_input_tokens: ttl === "1h" ? 1000000 : 0,
+        },
+      }),
+    })
+    const reservation = model.costEstimator.estimateReservation?.({
+      inputTokens: 1000000,
+      outputTokens: 0,
+    })
+    if (ttl === "5m") {
+      const money = { currency: "USD", amountNanos: tiered ? "7500000000" : "3750000000" } as const
+      expect(estimate).toMatchObject({ status: "rated", money })
+      expect(reservation).toEqual(money)
+    } else {
+      expect(estimate).toMatchObject({
+        status: "unpriceable",
+        missingMeters: ["tokens.input.cacheWrite1h"],
+      })
+      expect(reservation).toBeUndefined()
+    }
+  }
+  const explicit = await provider
+    .messages("production", {
+      request: { cache_control: { type: "ephemeral", ttl: "1h" } },
+      rateCard: {
+        currency: "USD",
+        unit: "million-tokens",
+        input: "3",
+        output: "15",
+        cacheWriteInput5m: "3.75",
+        cacheWriteInput1h: "6",
+      },
+    })
+    .resolve()
+  expect(
+    explicit.costEstimator.estimateReservation?.({ inputTokens: 1000000, outputTokens: 0 })
+  ).toEqual({ currency: "USD", amountNanos: "6000000000" })
+})
 
 // Regression proof: remove the FW fallback in RemoteModelsDevCatalog.get; these bindings lose
 // their capabilities and prices. Fictional versions ensure this isn't a curated model table.

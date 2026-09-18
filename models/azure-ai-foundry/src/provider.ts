@@ -148,6 +148,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
   const list = async (protocol?: FoundryProtocol, refresh = false) => {
     if (refresh) modelCatalog.invalidate()
     const records = await deployments.list(refresh)
+    const lookup = records.length ? await modelCatalog.lookup() : undefined
     const results: LanguageModelDefinition[] = []
     for (const deployment of records) {
       const name = deployment.name
@@ -158,7 +159,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
           protocol,
           options: {},
           deployment,
-          catalogModel: await modelCatalog.get(deployment.modelName),
+          catalogModel: lookup?.(deployment.modelName),
         })
         const flags = deployment.capabilities
         const supported =
