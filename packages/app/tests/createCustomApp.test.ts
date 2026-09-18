@@ -416,12 +416,18 @@ describe("createCustomApp.dev", () => {
   })
 
   // Regression proof: replace publicEnv: config.publicEnv with publicEnv: {} in the injector.
+  // Remove the fixture tsconfig with app/client dist absent to reproduce the clean-CI failure.
   test("delivers public env before the development app entry", async () => {
     const previous = process.env.SIXB_PUBLIC_TEST_KEY
     process.env.SIXB_PUBLIC_TEST_KEY = "dev-runtime-sentinel"
     const app = await createCustomApp({ rootDir: tempRoot, authEnabled: false, agentRoutes: false })
     let server: Awaited<ReturnType<typeof app.dev>> | undefined
     try {
+      // Unit CI runs from source without building package exports first.
+      await writeFile(
+        join(tempRoot, "tsconfig.json"),
+        JSON.stringify({ extends: resolve(import.meta.dir, "../../../tsconfig.json") })
+      )
       await writeFile(
         join(tempRoot, "app/page.tsx"),
         'import { publicEnv } from "@sixb/app"\nconst key = publicEnv.SIXB_PUBLIC_TEST_KEY\nexport default function Page() { return <main>{key}</main> }\n'
