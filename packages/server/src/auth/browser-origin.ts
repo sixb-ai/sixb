@@ -5,6 +5,12 @@ import {
   isValidAuthSessionAudience,
   resolveAuthSessionAudience,
 } from "@sixb/core"
+import { matchesPathPattern, normalizeRoutePath, SIXB_API_ROUTES } from "@sixb/core/internal/http"
+
+const fileNavigationRoutes = SIXB_API_ROUTES.filter(
+  (route) =>
+    (route.method === "GET" || route.method === "HEAD") && route.path.endsWith("/files/content")
+)
 
 export interface SixbBrowserOrigin {
   readonly origin: string
@@ -137,12 +143,14 @@ export function resolveApiBrowserAuthContext(
   request: Request
 ): RequestAuthContext {
   const origin = normalizeRequestOrigin(request)
+  const fileAudience = resolveFileNavigationAudience(policy, request)
   if (!origin) {
-    return { audience: policy.apiOriginAudience, absoluteReturnTo: true }
+    return { audience: fileAudience ?? policy.apiOriginAudience, absoluteReturnTo: true }
   }
 
   const allowed = findAllowedBrowserOrigin(policy, origin)
   if (allowed) {
+    assertFileAudienceMatchesOrigin(fileAudience, allowed.audience)
     return {
       audience: allowed.audience,
       browserOrigin: allowed.origin,
@@ -151,10 +159,51 @@ export function resolveApiBrowserAuthContext(
   }
 
   if (isSameOriginApiRequest(policy, origin, request)) {
+    assertFileAudienceMatchesOrigin(fileAudience, policy.apiOriginAudience)
     return { audience: policy.apiOriginAudience, browserOrigin: origin, absoluteReturnTo: true }
   }
 
   throw new BrowserOriginError(`[SixbServer] Browser origin '${origin}' is not allowed.`)
+}
+
+// A URL audience selects credentials, never grants authority. Only file GET/HEAD
+// routes accept it; Origin remains authoritative whenever the browser sends one.
+function resolveFileNavigationAudience(
+  policy: ResolvedSixbApiBrowserPolicy,
+  request: Request
+): AuthSessionAudience | undefined {
+  const url = new URL(request.url)
+  if (
+    !fileNavigationRoutes.some(
+      (route) =>
+        route.method === request.method &&
+        matchesPathPattern(normalizeRoutePath(url.pathname), route.path)
+    )
+  ) {
+    return undefined
+  }
+  const values = url.searchParams.getAll("audience")
+  if (values.length === 0) return undefined
+  const audience = values[0]
+  if (
+    values.length !== 1 ||
+    !audience ||
+    !isValidAuthSessionAudience(audience) ||
+    (audience !== policy.apiOriginAudience &&
+      !policy.allowedOrigins.some((entry) => entry.audience === audience))
+  ) {
+    throw new BrowserOriginError("[SixbServer] File navigation audience is not allowed.")
+  }
+  return audience
+}
+
+function assertFileAudienceMatchesOrigin(
+  audience: AuthSessionAudience | undefined,
+  originAudience: AuthSessionAudience
+): void {
+  if (audience !== undefined && audience !== originAudience) {
+    throw new BrowserOriginError("[SixbServer] File navigation audience conflicts with Origin.")
+  }
 }
 
 export function isAllowedApiBrowserOrigin(
