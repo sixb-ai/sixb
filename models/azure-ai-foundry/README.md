@@ -84,6 +84,11 @@ const cached = await model.resolve({ offline: true })
 | Missing catalog metadata | Stays unknown; explicit capability and pricing overrides are available |
 | Refresh | Updates future resolutions; existing resolved models stay pinned |
 | Offline resolution | Requires a cached deployment; performs no network requests |
+| Publisher display | Azure publisher names are normalized for model logos; Fireworks GLM, Kimi, and DeepSeek catalog families identify their authors. Unknown families retain the Fireworks publisher. |
+
+Resolved definitions include `publisher: { id, name }` and `via: "Azure AI Foundry"` for model
+pickers, including custom provider namespaces. These fields do not change routing or capabilities.
+Use `definition.publisher` to override the displayed author for an unrecognized model family.
 
 ## Protocols and controls
 
@@ -116,6 +121,13 @@ Messages `thinkingMode` selects manual or adaptive thinking. Manual budgets star
 and must stay below the output ceiling. Inline media has a 20 MiB aggregate default limit,
 configurable with `maxInputFileBytes`. Provider-native tools, audio/video, and worker native-PDF
 projection are unsupported. Direct calls rely on Azure for input/context enforcement.
+
+Responses defaults to `reasoningSummary: "auto"` when Azure identifies the publisher as OpenAI,
+the base model is `gpt-5`, `gpt-5-mini`, `gpt-5-nano`, `o3`, or `o4-mini`, and the resolved
+capabilities declare reasoning. The automatic default is omitted when reasoning is `"none"`.
+Set `reasoningSummary: false` to opt out, or select `"auto"`, `"concise"`, or `"detailed"` explicitly.
+Unknown models and other publishers require an explicit setting; Chat and Messages are unchanged.
+Encrypted reasoning is retained for replay separately and is not displayable text.
 
 ## Override capabilities and prices
 

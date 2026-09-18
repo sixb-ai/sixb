@@ -53,6 +53,106 @@ const record = (cost = 2, tools = true) => ({
 const page = (value = record()) => Response.json({ azure: { models: { "new-model": value } } })
 const usage = { inputTokens: 10, uncachedInputTokens: 10, cacheReadInputTokens: 0, outputTokens: 2 }
 
+// Removal proof: remove Foundry's publisher mapping; Azure models lose their author,
+// and Fireworks models display the host instead of the catalog family's publisher.
+test("publishes model authors from Azure or Fireworks catalog families with explicit overrides", async () => {
+  const fixtures = [
+    {
+      name: "production",
+      modelName: "new-model",
+      publisher: "OpenAI",
+      family: "gpt-mini",
+      expected: { id: "openai", name: "OpenAI" },
+    },
+    {
+      name: "glm",
+      modelName: "FW-GLM-5.3",
+      publisher: "Fireworks",
+      family: "glm",
+      expected: { id: "zai", name: "Z.ai" },
+    },
+    {
+      name: "kimi",
+      modelName: "FW-Kimi-K3",
+      publisher: "Fireworks",
+      family: "kimi-k3",
+      expected: { id: "moonshotai", name: "Moonshot AI" },
+    },
+    {
+      name: "deepseek",
+      modelName: "FW-DeepSeek-V4-Flash-0731",
+      publisher: "Fireworks",
+      family: "deepseek-flash",
+      expected: { id: "deepseek", name: "DeepSeek" },
+    },
+    {
+      name: "unknown",
+      modelName: "FW-Unknown",
+      publisher: "Fireworks",
+      family: "unknown",
+      expected: { id: "fireworks-ai", name: "Fireworks" },
+    },
+    {
+      name: "gpt-pretender",
+      modelName: "unknown",
+      publisher: "Future Lab",
+      family: "unknown",
+      expected: { id: "future-lab", name: "Future Lab" },
+    },
+  ]
+  const provider = create({
+    endpoint,
+    apiKey: "key",
+    providerId: "company-foundry",
+    fetch: async () =>
+      Response.json({
+        value: fixtures.map((f) => ({
+          type: "ModelDeployment",
+          name: f.name,
+          modelName: f.modelName,
+          modelVersion: "1",
+          modelPublisher: f.publisher,
+          sku: { name: "GlobalStandard" },
+          capabilities: { chatCompletion: "true" },
+        })),
+      }),
+    catalog: {
+      fetch: async () =>
+        Response.json({
+          azure: { models: { "new-model": record() } },
+          "fireworks-ai": {
+            models: Object.fromEntries(
+              fixtures
+                .filter((f) => f.publisher === "Fireworks")
+                .map((f) => {
+                  const id = `accounts/fireworks/models/${f.modelName.slice(3).toLowerCase()}`
+                  return [id, { ...record(), id, family: f.family }]
+                })
+            ),
+          },
+        }),
+    },
+  })
+  const listed = await provider.catalog.list()
+  for (const fixture of fixtures) {
+    const model = await provider(fixture.name).resolve()
+    expect(model.definition).toMatchObject({
+      providerId: "company-foundry",
+      modelId: fixture.name,
+      publisher: fixture.expected,
+      via: "Azure AI Foundry",
+    })
+    expect(listed.find((d) => d.modelId === fixture.name)?.publisher).toEqual(fixture.expected)
+    expect((await provider(fixture.name).resolve({ offline: true })).definition.publisher).toEqual(
+      fixture.expected
+    )
+  }
+  const override = await provider("production", {
+    definition: { capabilities: {}, publisher: { id: "custom", name: "Custom" } },
+  }).resolve()
+  expect(override.definition.publisher).toEqual({ id: "custom", name: "Custom" })
+})
+
 // Regression proof: restore the per-deployment catalog.get() in provider.list(); each
 // operation downloads three catalogs and the deployment definitions use different snapshots.
 test("uses one fresh catalog snapshot per list, get and refresh when caching is disabled", async () => {

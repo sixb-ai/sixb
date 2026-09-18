@@ -6,6 +6,7 @@ import {
   ModelCatalogUnavailableError,
   type ModelReasoningCapabilities,
 } from "@sixb/core/models"
+import { fireworksPublisher } from "./publisher"
 import type { FoundryProtocol } from "./transport"
 import { abortable } from "./transport"
 import { object, PREFIX } from "./util"
@@ -152,6 +153,9 @@ export class RemoteModelsDevCatalog {
               providerId: "azure-ai-foundry",
               modelId: id,
               ...(typeof raw.name === "string" ? { name: raw.name } : {}),
+              ...(catalogProvider === "fireworks-ai"
+                ? { publisher: fireworksPublisher(raw.family) }
+                : {}),
               contextWindow: limit(limits?.context),
               maxInputTokens: limit(limits?.input),
               maxOutputTokens: limit(limits?.output),
