@@ -11,6 +11,11 @@ options, and does not mutate `model.definition`. Anthropic's `max_input_tokens` 
 `maxInputTokens`, not as a shared input/output context window. Agent workers resolve missing limits
 at startup; an explicit `loop.context.windowTokens` or locally supplied limit avoids network access.
 
+Messages serialization, SSE streaming, usage normalization, and signed/opaque block replay use
+Sixb's internal `@sixb/model-protocols/messages` implementation. Anthropic owns credentials,
+catalog metadata, model-specific thinking and schema policy, request options, and rate cards.
+Thinking signatures are assembled across all signature deltas before being stored for replay.
+
 ```ts
 import { anthropic } from "@sixb/anthropic"
 

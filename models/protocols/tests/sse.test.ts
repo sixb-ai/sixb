@@ -1,6 +1,37 @@
 import { expect, test } from "bun:test"
 import { decodeServerSentEvents } from "../src/sse"
 
+test("decodes CRLF, comments, repeated data lines, and arbitrary chunks", async () => {
+  const text = ': ping\r\nevent: custom\r\ndata: {"one":\r\ndata: 1}\r\n\r\n'
+  const bytes = new TextEncoder().encode(text)
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      for (const byte of bytes) controller.enqueue(Uint8Array.of(byte))
+      controller.close()
+    },
+  })
+  const events = []
+  for await (const event of decodeServerSentEvents(body, new AbortController().signal)) {
+    events.push(event)
+  }
+  expect(events).toEqual([{ event: "custom", data: '{"one":\n1}' }])
+})
+
+test("cancels a blocked SSE reader when the model signal aborts", async () => {
+  let cancelled = false
+  const body = new ReadableStream<Uint8Array>({
+    cancel() {
+      cancelled = true
+    },
+  })
+  const abort = new AbortController()
+  const iterator = decodeServerSentEvents(body, abort.signal)[Symbol.asyncIterator]()
+  const pending = iterator.next()
+  abort.abort()
+  await expect(pending).rejects.toMatchObject({ name: "AbortError" })
+  expect(cancelled).toBe(true)
+})
+
 // Regression proof: remove cancellation from the decoder's finally block.
 test("cancels unfinished SSE bodies on consumer return and preserves consumer errors", async () => {
   for (const fail of [false, true]) {
