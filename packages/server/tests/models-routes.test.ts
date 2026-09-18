@@ -55,6 +55,37 @@ function createApp(models?: ModelCatalogInput) {
 }
 
 describe("GET /api/models", () => {
+  // Removal proof: derive publisher only from entry.provider; these hosted models lose
+  // their author/logo identity. Custom provider IDs must not change the displayed host.
+  test("uses resolved publisher metadata independently of routing identity", async () => {
+    const model = testModel("company-foundry", "production")
+    const response = await createApp({
+      language: [
+        {
+          ...model,
+          resolve: async () => ({
+            ...model,
+            definition: defineLanguageModel({
+              ...model.definition,
+              publisher: { id: "zai", name: "Z.ai" },
+              via: "Azure AI Foundry",
+            }),
+          }),
+        },
+      ],
+    }).fetch(new Request("http://localhost/api/models"))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      language: [
+        {
+          provider: "company-foundry",
+          modelId: "production",
+          publisher: { id: "zai", name: "Z.ai" },
+          via: "Azure AI Foundry",
+        },
+      ],
+    })
+  })
   test("resolves provider metadata and keeps configured identities and order", async () => {
     // Removal proof: return only entry.model.definition in the route; the resolved metadata is lost.
     const model = testModel("vercel-ai-gateway", "openai/example")

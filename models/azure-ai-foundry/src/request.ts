@@ -8,18 +8,24 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { responsesInput } from "@sixb/model-protocols/responses"
+import type { AzureAIFoundryDeployment } from "./discovery"
 import { foundryOutputSchema } from "./structured-output"
 import { object, PREFIX, positiveInteger } from "./util"
 
 export interface RequestOptions {
   readonly maxOutputTokens?: number
   readonly request?: JsonObject
-  readonly reasoningSummary?: "auto" | "concise" | "detailed"
+  /** Defaults to auto for known OpenAI reasoning models on Responses; false disables summaries. */
+  readonly reasoningSummary?: false | "auto" | "concise" | "detailed"
   /** Defaults to true. Disable only for deployments that do not support encrypted replay. */
   readonly encryptedReasoning?: boolean
   /** Aggregate decoded inline image/PDF bytes; defaults to 20 MiB. */
   readonly maxInputFileBytes?: number
 }
+
+// Summary support is separate from reasoning effort. Keep unknown model identities opt-in.
+// Azure reports the base model name separately from its deployment name and version.
+const SUMMARY_MODELS = new Set(["gpt-5", "gpt-5-mini", "gpt-5-nano", "o3", "o4-mini"])
 
 const RESERVED = new Set([
   "model",
@@ -51,6 +57,7 @@ export function validateOptions(options: RequestOptions): void {
     throw new TypeError(`${PREFIX} encryptedReasoning must be boolean.`)
   if (
     options.reasoningSummary !== undefined &&
+    options.reasoningSummary !== false &&
     !["auto", "concise", "detailed"].includes(options.reasoningSummary)
   )
     throw new TypeError(`${PREFIX} Invalid reasoningSummary.`)
@@ -60,7 +67,8 @@ export function responsesRequest(
   request: LanguageModelRequest,
   definition: LanguageModelDefinition,
   options: RequestOptions,
-  scope: string
+  scope: string,
+  deployment?: AzureAIFoundryDeployment
 ): JsonObject {
   const max = prepareRequest(request, definition, options, scope)
   const input = responsesInput(request.messages, definition.providerId).map((item) => {
@@ -90,6 +98,14 @@ export function responsesRequest(
     )
   }
   const reasoning = request.reasoning
+  const summary =
+    options.reasoningSummary ??
+    (reasoning !== "none" &&
+    caps.reasoning &&
+    deployment?.modelPublisher.toLowerCase() === "openai" &&
+    SUMMARY_MODELS.has(deployment.modelName.toLowerCase())
+      ? "auto"
+      : undefined)
   if (reasoning !== undefined && reasoning !== "provider-default") {
     const issue = modelReasoningSupportIssue(caps.reasoning, reasoning)
     if (typeof reasoning !== "string" || caps.reasoning === undefined || issue) {
@@ -98,7 +114,7 @@ export function responsesRequest(
       )
     }
   }
-  if (options.reasoningSummary && (!caps.reasoning || typeof caps.reasoning !== "object"))
+  if (summary && (!caps.reasoning || typeof caps.reasoning !== "object"))
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Reasoning summaries require a declared reasoning capability.`
     )
@@ -126,13 +142,13 @@ export function responsesRequest(
             !schema && !tools.some((t) => t.strict) && caps.parallelToolCalls === true,
         }
       : {}),
-    ...((reasoning !== undefined && reasoning !== "provider-default") || options.reasoningSummary
+    ...((reasoning !== undefined && reasoning !== "provider-default") || summary
       ? {
           reasoning: {
             ...(reasoning === undefined || reasoning === "provider-default"
               ? {}
               : { effort: reasoning }),
-            ...(options.reasoningSummary ? { summary: options.reasoningSummary } : {}),
+            ...(summary ? { summary } : {}),
           },
         }
       : {}),

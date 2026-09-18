@@ -29,6 +29,7 @@ export async function languageModelDisplay(entry: LanguageModelEntry) {
   }
   const gateway = entry.provider === "vercel-ai-gateway"
   const publisherId = gateway ? entry.modelId.split("/")[0]! : entry.provider
+  const via = definition.via ?? (gateway ? "AI Gateway" : undefined)
   const capabilities = definition.capabilities
   const media = capabilities.inputMediaTypes
   const input = ["text"]
@@ -43,8 +44,8 @@ export async function languageModelDisplay(entry: LanguageModelEntry) {
   return {
     name: definition.name ?? entry.modelId,
     ...(definition.description === undefined ? {} : { description: definition.description }),
-    publisher: { id: publisherId, name: publisherName(publisherId) },
-    ...(gateway ? { via: "AI Gateway" } : {}),
+    publisher: definition.publisher ?? { id: publisherId, name: publisherName(publisherId) },
+    ...(via === undefined ? {} : { via }),
     capabilities: {
       input,
       output: ["text"],

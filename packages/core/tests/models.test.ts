@@ -7,6 +7,33 @@ import { createSixb, defineAgentTool, defineObjectType, prop } from "../src"
 import { createModelCatalog, defineLanguageModel, type LanguageModel } from "../src/models"
 import { createTestSixb } from "../src/testing"
 
+// Removal proof: omit publisher/via from defineLanguageModel, or retain the caller's
+// publisher object; this loses display identity or allows it to mutate after definition.
+test("model definitions validate and snapshot publisher display metadata", () => {
+  const publisher = { id: "openai", name: "OpenAI" }
+  const input = {
+    kind: "language" as const,
+    providerId: "host",
+    modelId: "deployment",
+    capabilities: {},
+    publisher,
+    via: "Azure AI Foundry",
+  }
+  const definition = defineLanguageModel(input)
+  publisher.name = "Changed"
+  expect(definition.publisher).toEqual({ id: "openai", name: "OpenAI" })
+  expect(Object.isFrozen(definition.publisher)).toBe(true)
+  expect(definition.via).toBe("Azure AI Foundry")
+  for (const invalid of [
+    { id: "", name: "OpenAI" },
+    { id: " openai", name: "OpenAI" },
+    { id: "openai", name: "" },
+  ]) {
+    expect(() => defineLanguageModel({ ...input, publisher: invalid })).toThrow("publisher")
+  }
+  expect(() => defineLanguageModel({ ...input, via: "" })).toThrow("via")
+})
+
 test("model definitions preserve and validate distinct input limits", () => {
   // Regression proof: omit maxInputTokens from defineLanguageModel's output or validation.
   const definition = {
