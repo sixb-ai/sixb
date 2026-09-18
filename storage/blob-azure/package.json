@@ -1,13 +1,14 @@
 {
-  "name": "@sixb/server",
-  "version": "0.1.9",
-  "description": "HTTP and WebSocket API server for Sixb",
+  "name": "@sixb/blob-azure",
+  "version": "0.1.1",
+  "description": "Azure Blob Storage for Sixb fileRef payloads",
   "keywords": [
     "sixb",
     "bun",
-    "api",
-    "openapi",
-    "elysia"
+    "storage",
+    "blob",
+    "azure",
+    "files"
   ],
   "homepage": "https://sixb.ai",
   "bugs": {
@@ -16,34 +17,39 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/sixb-ai/sixb.git",
-    "directory": "packages/server"
+    "directory": "storage/blob-azure"
   },
   "author": "Sixb contributors",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "generate:openapi": "bun run scripts/generate-openapi.ts",
+    "test:e2e": "bun test --preload ./tests/setup.ts ./tests/*.e2e.ts",
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@elysiajs/cors": "^1.2.0",
-    "@elysiajs/openapi": "^1.4.16",
-    "elysia": "^1.2.0",
-    "zod": "^3.24.0",
-    "zod-to-json-schema": "^3.24.0"
+    "@azure/core-auth": "1.10.1",
+    "@azure/identity": "4.13.3",
+    "@azure/storage-blob": "12.33.0"
   },
   "peerDependencies": {
-    "@sixb/core": "workspace:*"
+    "@sixb/core": "workspace:^"
   },
   "devDependencies": {
-    "@sixb/auth-magic-link": "workspace:*",
-    "@sixb/auth-oidc": "workspace:*",
+    "@sixb/client": "workspace:*",
     "@sixb/core": "workspace:*",
-    "@sixb/sqlite": "workspace:*",
+    "@sixb/server": "workspace:*",
     "@types/bun": "latest",
     "typescript": "^5.7.0"
   },
@@ -59,13 +65,5 @@
     "src",
     "README.md",
     "LICENSE"
-  ],
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "bun": "./src/index.ts",
-      "import": "./dist/index.js",
-      "default": "./dist/index.js"
-    }
-  }
+  ]
 }

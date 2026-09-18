@@ -366,6 +366,8 @@ export function createSixbApi(server: SixbServer) {
     openapi({
       path: "/docs",
       provider: "swagger-ui",
+      // zodToJsonSchema below emits OpenAPI 3.0 nullable schemas.
+      openapiVersion: "3.0.3",
       documentation: {
         info: {
           title: "Sixb API",

@@ -131,7 +131,7 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
     createFileUpload({ body: uploadBody, client: options.client, ...callOptions(options.signal) })
   )
 
-  let parts: Array<{ partNumber: number; etag: string }> | undefined
+  let parts: Array<{ partNumber: number; etag?: string }> | undefined
   let completed: Omit<FileRef, "digest"> & { readonly digest: string }
   try {
     if (upload.strategy === "server") {
@@ -158,6 +158,7 @@ async function uploadFileStaged(file: File | Blob, options: UploadFileOptions): 
         fetch: options.fetch ?? globalThis.fetch,
         file,
         partSizeBytes: upload.partSizeBytes,
+        partReceipt: upload.partReceipt ?? "etag",
         uploadId: upload.uploadId,
         signal: options.signal,
       })
@@ -220,10 +221,11 @@ async function uploadMultipartFile(input: {
   readonly fetch: typeof fetch
   readonly file: File | Blob
   readonly partSizeBytes: number
+  readonly partReceipt: "etag" | "none"
   readonly uploadId: string
   readonly signal?: AbortSignal
-}): Promise<Array<{ partNumber: number; etag: string }>> {
-  const parts: Array<{ partNumber: number; etag: string }> = []
+}): Promise<Array<{ partNumber: number; etag?: string }>> {
+  const parts: Array<{ partNumber: number; etag?: string }> = []
   let partNumber = 1
 
   for (let offset = 0; offset < input.file.size; offset += input.partSizeBytes) {
@@ -255,14 +257,14 @@ async function uploadMultipartFile(input: {
     }
 
     const etag = response.headers.get("etag")
-    if (!etag) {
+    if (input.partReceipt === "etag" && !etag) {
       throw new SixbFileUploadError(
         `[SixbClient] Multipart file upload part ${partNumber} did not return an ETag.`,
         { stage: "multipart" }
       )
     }
 
-    parts.push({ partNumber, etag })
+    parts.push(input.partReceipt === "etag" && etag ? { partNumber, etag } : { partNumber })
     partNumber += 1
   }
 

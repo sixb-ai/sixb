@@ -2,9 +2,12 @@ import type { ElysiaOpenAPIConfig } from "@elysiajs/openapi"
 import { z } from "zod"
 import { JsonValueSchema } from "./common"
 
-type OpenApiSchemas = NonNullable<
-  NonNullable<ElysiaOpenAPIConfig["documentation"]>["components"]
->["schemas"]
+type OpenApiSchema = NonNullable<
+  NonNullable<NonNullable<ElysiaOpenAPIConfig["documentation"]>["components"]>["schemas"]
+>[string]
+// The plugin supports both dialects; nullable identifies the 3.0 schemas we emit.
+type OpenApi3Schema = Extract<OpenApiSchema, { nullable?: boolean }>
+type OpenApiSchemas = Record<string, OpenApi3Schema>
 
 export const ObjectParamsSchema = z.object({
   objectTypeId: z.string().min(1),
@@ -345,7 +348,10 @@ export const ObjectListResponseSchema = z.object({
 })
 
 const anyJsonValueSchema = {}
-const stringArraySchema = { type: "array", items: { type: "string", minLength: 1 } }
+const stringArraySchema = {
+  type: "array",
+  items: { type: "string", minLength: 1 },
+} satisfies OpenApi3Schema
 const objectQueryRef = { $ref: "#/components/schemas/ObjectQuery" }
 const objectQueryPredicateRef = { $ref: "#/components/schemas/ObjectQueryPredicate" }
 const objectQuerySortFieldRef = { $ref: "#/components/schemas/ObjectQuerySortField" }
@@ -357,7 +363,7 @@ const objectRefSchemaRef = { $ref: "#/components/schemas/ObjectRef" }
  * OpenAPI config inlines refs. Keep the HTTP validator above in Zod, and provide
  * the recursive request contract directly for generated clients and docs.
  */
-export const ObjectQueryOpenApiSchemas = {
+export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
   ErrorResponse: {
     type: "object",
     required: ["error"],
@@ -860,4 +866,4 @@ export const ObjectQueryOpenApiSchemas = {
     ],
     discriminator: { propertyName: "kind" },
   },
-} as unknown as OpenApiSchemas
+}

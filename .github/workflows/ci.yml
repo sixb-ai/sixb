@@ -218,6 +218,8 @@ jobs:
             package: "@sixb/core"
           - name: create-sixb
             package: "create-sixb"
+          - name: blob-azure
+            package: "@sixb/blob-azure"
           - name: blob-s3
             package: "@sixb/blob-s3"
           - name: ducklake

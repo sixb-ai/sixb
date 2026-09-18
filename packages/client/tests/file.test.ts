@@ -4,6 +4,75 @@ import { createSixbClient, SixbFileUploadError, uploadFile } from "../src"
 
 const encoder = new TextEncoder()
 
+// Regression: remove the partReceipt condition from the missing-ETag guard.
+// A "none" session must still complete when the upload returns no ETag.
+test.each([
+  ["etag", true],
+  ["etag", false],
+  ["none", true],
+  ["none", false],
+  [undefined, true],
+  [undefined, false],
+] as const)("multipart policy %s, response ETag %s", async (partReceipt, hasEtag) => {
+  let completed: unknown
+  const client = createSixbClient({
+    baseUrl: "http://sixb.test/api",
+    fetch: Object.assign(
+      async (input: Parameters<typeof fetch>[0], init?: Parameters<typeof fetch>[1]) => {
+        const request = new Request(input, init)
+        if (request.method === "DELETE") return Response.json({ success: true })
+        if (request.url.endsWith("/complete")) {
+          completed = await request.json()
+          return Response.json({
+            blobId: "blob_test",
+            digest: computeBlobDigest(encoder.encode("abc")),
+            sizeBytes: 3,
+          })
+        }
+        if (request.url.includes("/parts/"))
+          return Response.json({
+            partNumber: 1,
+            method: "PUT",
+            url: "http://blob.test/part",
+            headers: {},
+            expiresAt: "2099-01-01T00:00:00Z",
+          })
+        return Response.json({
+          strategy: "multipart",
+          uploadId: "upload_1",
+          partSizeBytes: 4,
+          ...(partReceipt === undefined ? {} : { partReceipt }),
+          expiresAt: "2099-01-01T00:00:00Z",
+        })
+      },
+      { preconnect: fetch.preconnect }
+    ),
+  })
+  const upload = uploadFile(new Blob(["abc"]), {
+    client,
+    stagedUploadThresholdBytes: 0,
+    fetch: Object.assign(
+      async () =>
+        new Response(null, {
+          status: 201,
+          headers: hasEtag ? { etag: '"s3-part"' } : {},
+        }),
+      { preconnect: fetch.preconnect }
+    ),
+  })
+  if (partReceipt !== "none" && !hasEtag) {
+    await expect(upload).rejects.toThrow("did not return an ETag")
+    expect(completed).toBeUndefined()
+  } else {
+    await upload
+    expect(completed).toEqual(
+      expect.objectContaining({
+        parts: [partReceipt === "none" ? { partNumber: 1 } : { partNumber: 1, etag: '"s3-part"' }],
+      })
+    )
+  }
+})
+
 function createFileUploadClient() {
   const requests: Request[] = []
   const client = createSixbClient({

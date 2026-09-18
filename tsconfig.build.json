@@ -155,6 +155,9 @@
       "path": "sandboxes/vercel/tsconfig.build.json"
     },
     {
+      "path": "storage/blob-azure/tsconfig.build.json"
+    },
+    {
       "path": "storage/blob-local/tsconfig.build.json"
     },
     {
