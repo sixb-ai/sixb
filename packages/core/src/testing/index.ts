@@ -59,6 +59,10 @@ export {
   type ExecutionStorageContractSuiteOptions,
   runExecutionStorageContractSuite,
 } from "./execution-storage-contract"
+export {
+  type FileUploadSessionStorageContractSuiteOptions,
+  runFileUploadSessionStorageContractSuite,
+} from "./file-upload-session-storage-contract"
 export { runLakeChangesContractSuite } from "./lake-changes-contract"
 export {
   type LakeMergeStorageContractSuiteOptions,
