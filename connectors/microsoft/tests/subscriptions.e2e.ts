@@ -1,47 +1,58 @@
 import { describe, expect, test } from "bun:test"
 import { microsoft } from "../src"
 
-const tenantId = process.env.MICROSOFT_TENANT_ID
-const clientId = process.env.MICROSOFT_CLIENT_ID
-const clientSecret = process.env.MICROSOFT_CLIENT_SECRET
-const mailbox = process.env.MICROSOFT_MAIL_TEST_MAILBOX
-const folderId = process.env.MICROSOFT_TEST_MAIL_FOLDER_ID ?? "inbox"
-const notificationUrl = process.env.MICROSOFT_TEST_NOTIFICATION_URL
-const webhookSecret = process.env.MICROSOFT_WEBHOOK_SECRET
-const enabled = Boolean(
-  tenantId && clientId && clientSecret && mailbox && notificationUrl && webhookSecret
-)
-
-function connect(signal: AbortSignal) {
-  if (!tenantId || !clientId || !clientSecret) throw new Error("Missing Microsoft E2E credentials.")
-  return microsoft({ auth: { tenantId, clientId, clientSecret }, webhookSecret }).connect({
-    projectId: "mail-subscriptions-e2e",
-    connectorId: "microsoft",
-    signal,
-  })
+const enabled = process.env.MICROSOFT_SUBSCRIPTIONS_E2E === "1"
+function required(name: string): string {
+  const value = process.env[name]
+  if (!value) throw new Error(`Missing ${name} for the explicitly enabled subscriptions E2E.`)
+  return value
 }
 
-describe.skipIf(!enabled)("Microsoft 365 live mail subscriptions", () => {
-  test("creates, validates, renews and cleans up a mail subscription", async () => {
-    if (!mailbox || !notificationUrl) throw new Error("Missing live subscription configuration.")
-    const client = await connect(AbortSignal.timeout(80_000))
-    const subscription = await client.mail.subscribe(mailbox, {
-      folderId,
-      notificationUrl,
-      changeTypes: ["created", "updated", "deleted"],
-      expirationDateTime: new Date(Date.now() + 86_400_000).toISOString(),
+// Use a dedicated resource with no existing subscription for this application/changeType.
+// The public HTTPS receiver must implement Graph's validation challenge before running this test.
+describe.skipIf(!enabled)("Graph subscriptions live application access", () => {
+  test("create, read, list, renew and delete a basic subscription", async () => {
+    const { subscriptions } = await microsoft({
+      auth: {
+        tenantId: required("MICROSOFT_TENANT_ID"),
+        clientId: required("MICROSOFT_CLIENT_ID"),
+        clientSecret: required("MICROSOFT_CLIENT_SECRET"),
+      },
+    }).connect({
+      projectId: "subscriptions-e2e",
+      connectorId: "microsoft",
+      signal: new AbortController().signal,
     })
+    const options = { signal: AbortSignal.timeout(120_000) }
+    const created = await subscriptions.create(
+      {
+        resource: required("MICROSOFT_SUBSCRIPTIONS_TEST_RESOURCE"),
+        notificationUrl: required("MICROSOFT_SUBSCRIPTIONS_NOTIFICATION_URL"),
+        changeType: "updated",
+        expirationDateTime: new Date(Date.now() + 3600_000).toISOString(),
+        clientState: required("MICROSOFT_WEBHOOK_SECRET"),
+      },
+      options
+    )
     try {
-      expect((await client.subscriptions.get(subscription.id)).id).toBe(subscription.id)
-      const renewed = await client.subscriptions.renew(
-        subscription.id,
-        new Date(Date.now() + 2 * 86_400_000).toISOString()
+      expect((await subscriptions.get(created.id, options)).id).toBe(created.id)
+      const ids: string[] = []
+      for await (const item of subscriptions.listAll(options)) ids.push(item.id)
+      expect(ids).toContain(created.id)
+      const renewed = await subscriptions.update(
+        created.id,
+        {
+          expirationDateTime: new Date(Date.now() + 7200_000).toISOString(),
+        },
+        options
       )
-      expect(Date.parse(renewed.expirationDateTime!)).toBeGreaterThan(
-        Date.parse(subscription.expirationDateTime!)
+      expect(Date.parse(renewed.expirationDateTime ?? "")).toBeGreaterThan(
+        Date.parse(created.expirationDateTime ?? "")
       )
+      // PATCH also reauthorizes. Graph forbids a separate reauthorize within ten minutes.
     } finally {
-      await (await connect(AbortSignal.timeout(30_000))).subscriptions.delete(subscription.id)
+      // Bound cleanup independently of the earlier operations.
+      await subscriptions.delete(created.id, { signal: AbortSignal.timeout(30_000) })
     }
-  }, 120_000)
+  }, 160_000)
 })

@@ -133,6 +133,34 @@ describe("Microsoft webhooks through Sixb", () => {
     expect((await storage.webhookRuns.list({ projectId: "mail-test" })).total).toBe(0)
   })
 
+  test("dispatches basic SharePoint notifications through the same receiver", async () => {
+    const received: MicrosoftWebhookEvent[] = []
+    const { deliver } = runtime(({ event }) => {
+      received.push(event)
+    })
+    const response = await deliver({
+      value: [
+        {
+          ...notification,
+          changeType: "updated",
+          resource: "drives/drive-id/root",
+          resourceData: undefined,
+        },
+      ],
+    })
+    expect(response.status).toBe(202)
+    expect(received).toEqual([
+      {
+        kind: "change",
+        subscriptionId: notification.subscriptionId,
+        tenantId: notification.tenantId,
+        subscriptionExpirationDateTime: notification.subscriptionExpirationDateTime,
+        changeType: "updated",
+        resource: "drives/drive-id/root",
+      },
+    ])
+  })
+
   test("rejects malformed notifications and missing secrets", async () => {
     const { deliver } = runtime(() => {
       throw new Error("must not run")

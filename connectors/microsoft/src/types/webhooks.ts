@@ -1,6 +1,6 @@
 import type { WebhookHandlerContext } from "@sixb/core"
 import type { MicrosoftClient } from "../client"
-import type { MailChangeType } from "./subscriptions"
+import type { SubscriptionChangeType } from "./subscriptions"
 
 interface MicrosoftNotificationBase {
   readonly subscriptionId: string
@@ -8,9 +8,9 @@ interface MicrosoftNotificationBase {
   readonly tenantId: string
 }
 
-export interface MicrosoftMailChangeEvent extends MicrosoftNotificationBase {
+export interface MicrosoftChangeEvent extends MicrosoftNotificationBase {
   readonly kind: "change"
-  readonly changeType: MailChangeType
+  readonly changeType: SubscriptionChangeType
   readonly resource: string
   readonly resourceData?: {
     readonly id?: string
@@ -25,7 +25,7 @@ export interface MicrosoftLifecycleEvent extends MicrosoftNotificationBase {
   readonly lifecycleEvent: "reauthorizationRequired" | "subscriptionRemoved" | "missed"
 }
 
-export type MicrosoftWebhookEvent = MicrosoftMailChangeEvent | MicrosoftLifecycleEvent
+export type MicrosoftWebhookEvent = MicrosoftChangeEvent | MicrosoftLifecycleEvent
 
 export interface MicrosoftEventContext
   extends Pick<WebhookHandlerContext<unknown, MicrosoftClient>, "sixb" | "logger" | "client"> {
