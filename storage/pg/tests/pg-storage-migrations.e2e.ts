@@ -338,6 +338,7 @@ describe("Postgres storage migrations", () => {
             "045-agent-thread-sandbox-state",
             "046-workflow-intervention-principals",
             "047-ontology-commit-attribution",
+            "048-file-upload-sessions",
           ],
         },
       ])
@@ -670,6 +671,13 @@ describe("Postgres storage migrations", () => {
           id: "047-ontology-commit-attribution",
           status: "applied",
           version: 47,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "048-file-upload-sessions",
+          status: "applied",
+          version: 48,
         },
       ])
     })
@@ -2540,6 +2548,13 @@ describe("Postgres storage migrations", () => {
           id: "047-ontology-commit-attribution",
           status: "applied",
           version: 47,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "048-file-upload-sessions",
+          status: "applied",
+          version: 48,
         },
       ])
     } finally {
