@@ -1,5 +1,11 @@
+import { type BlobStorage, supportsDirectUpload } from "../blob-storage"
 import type { OntologyOutboxDispatcher } from "../events"
-import type { Storage } from "../storage"
+import {
+  type FileUploadSession,
+  FileUploadSessionError,
+  type FileUploadSessionStore,
+  type Storage,
+} from "../storage"
 import type {
   OntologyMaintenanceCleanupSnapshot,
   OntologyMaintenanceHandle,
@@ -14,11 +20,14 @@ const DEFAULT_CLEANUP_LIMIT = 1_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
 const DEGRADED_ATTEMPT_THRESHOLD = 3
 const DEGRADED_FAILURE_THRESHOLD = 2
+const ABANDONED_UPLOAD_ABORT_GRACE_MS = 15 * 60_000
 
 interface OntologyMaintenanceDependencies {
   readonly projectId: string
   readonly storage: Storage
   readonly dispatcher: OntologyOutboxDispatcher
+  /** Aborts the provider side of abandoned staged uploads. */
+  readonly blobStorage?: BlobStorage
   readonly options?: OntologyMaintenanceOptions
   readonly now?: () => Date
   readonly onError?: (error: unknown) => void
@@ -29,6 +38,7 @@ export class OntologyMaintenance {
   private readonly projectId: string
   private readonly storage: Storage
   private readonly dispatcher: OntologyOutboxDispatcher
+  private readonly blobStorage: BlobStorage | undefined
   private readonly intervalMs: number
   private readonly publishedOutboxRetentionMs: number
   private readonly terminalSourceRetentionMs: number
@@ -48,6 +58,7 @@ export class OntologyMaintenance {
     this.projectId = dependencies.projectId
     this.storage = dependencies.storage
     this.dispatcher = dependencies.dispatcher
+    this.blobStorage = dependencies.blobStorage
     this.intervalMs = positiveInteger(options.intervalMs ?? DEFAULT_INTERVAL_MS, "intervalMs")
     this.publishedOutboxRetentionMs = nonnegativeInteger(
       options.publishedOutboxRetentionMs ?? DEFAULT_RETENTION_MS,
@@ -173,12 +184,69 @@ export class OntologyMaintenance {
       failures,
       { rowsDeleted: 0, materializationsDeleted: 0 }
     )
+    const uploads = this.storage.fileUploadSessions
+    if (uploads) {
+      // Retire abandoned uploads first: the store never reaps one that is still pending.
+      await captureFailure(() => this.retireAbandonedUploads(uploads, started, failures), failures)
+      await captureFailure(() => uploads.cleanupExpired(started), failures, 0)
+    }
 
     return {
       publishedOutboxRowsDeleted,
       terminalSourceRowsDeleted: terminalSources.rowsDeleted,
       terminalSourceMaterializationsDeleted: terminalSources.materializationsDeleted,
     }
+  }
+
+  private async retireAbandonedUploads(
+    uploads: FileUploadSessionStore,
+    now: Date,
+    failures: unknown[]
+  ): Promise<void> {
+    for (const session of await uploads.listAbandoned(now, this.cleanupLimit)) {
+      await captureFailure(() => this.retireAbandonedUpload(uploads, session, now), failures)
+    }
+  }
+
+  /**
+   * Releases one abandoned upload's provider-side parts, then makes its row terminal so
+   * `cleanupExpired` can reap it. Throwing records a pass failure and moves on to the next.
+   */
+  private async retireAbandonedUpload(
+    uploads: FileUploadSessionStore,
+    session: FileUploadSession,
+    now: Date
+  ): Promise<void> {
+    const blobStorage = this.blobStorage
+    const providerUpload = session.providerUpload
+    let abortFailure: unknown
+    if (providerUpload && blobStorage && supportsDirectUpload(blobStorage)) {
+      try {
+        await blobStorage.abortUpload({
+          uploadId: session.id,
+          stagingKey: providerUpload.stagingKey,
+          ...(providerUpload.providerUploadId === undefined
+            ? {}
+            : { providerUploadId: providerUpload.providerUploadId }),
+        })
+      } catch (error) {
+        // Retry on later passes for a bounded time. After that the bucket lifecycle rule owns
+        // the parts: a row that can never be aborted would hold a slot in every pass's limit.
+        if (now.getTime() - session.expiresAt.getTime() < ABANDONED_UPLOAD_ABORT_GRACE_MS)
+          throw error
+        abortFailure = error
+      }
+    }
+
+    try {
+      await uploads.abort(session.id)
+    } catch (error) {
+      // Another API instance's pass retired it first.
+      if (!(error instanceof FileUploadSessionError && error.reason === "already_aborted")) {
+        throw error
+      }
+    }
+    if (abortFailure !== undefined) throw abortFailure
   }
 
   private async readOperationalSummaries(failures: unknown[]): Promise<{
