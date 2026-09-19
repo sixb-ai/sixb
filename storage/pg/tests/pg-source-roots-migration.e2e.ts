@@ -19,9 +19,11 @@ test("source-root upgrade preserves active, terminal and unfinished snapshots", 
       },
     }
     const steps = postgresStorageMigrations.steps
-    for (const step of steps.slice(0, -1)) await step.up(context)
+    const migrationIndex = steps.findIndex((step) => step.id === "039-projection-source-roots")
+    expect(migrationIndex).toBeGreaterThan(-1)
+    for (const step of steps.slice(0, migrationIndex)) await step.up(context)
     await sql.unsafe(legacySourceFixture())
-    await steps.at(-1)!.up(context)
+    await steps[migrationIndex]!.up(context)
     const rows = await sql`SELECT materialization_id,active,retired_at IS NOT NULL AS retired
       FROM ontology_source_roots ORDER BY materialization_id`
     expect([...rows]).toEqual([

@@ -9,9 +9,11 @@ test("source-root upgrade preserves active, terminal and unfinished snapshots", 
   try {
     db.exec("PRAGMA foreign_keys = ON")
     const steps = sqliteStorageMigrations.steps
-    for (const step of steps.slice(0, -1)) await step.up(db)
+    const migrationIndex = steps.findIndex((step) => step.id === "038-projection-source-roots")
+    expect(migrationIndex).toBeGreaterThan(-1)
+    for (const step of steps.slice(0, migrationIndex)) await step.up(db)
     db.exec(legacySourceFixture())
-    await steps.at(-1)!.up(db)
+    await steps[migrationIndex]!.up(db)
     expect(
       db
         .query(`SELECT materialization_id, active, retired_at IS NOT NULL AS retired
