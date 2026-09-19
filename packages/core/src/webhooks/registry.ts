@@ -1,6 +1,6 @@
-import { type ConnectorDefinition, isStaticConnectorDefinition } from "../connectors/types"
+import type { ConnectorDefinition } from "../connectors/types"
 import { WebhookValidationError } from "./errors"
-import type { RegisteredWebhook, WebhookDefinition } from "./types"
+import type { RegisteredWebhook } from "./types"
 
 /** Read-only access to connector webhooks registered by a host. */
 export interface WebhookCatalog {
@@ -21,7 +21,6 @@ export class WebhookRegistry implements WebhookCatalog {
     const registered: RegisteredWebhook[] = []
 
     for (const connector of options.connectors) {
-      if (!isStaticConnectorDefinition(connector)) continue
       const webhooks = connector.adapter.webhooks ?? []
       if (!Array.isArray(webhooks)) {
         throw new WebhookValidationError(
@@ -82,7 +81,7 @@ export function webhookRoute(connectorId: string, webhookId: string): string {
 function assertValidWebhook(
   connectorId: string,
   webhook: unknown
-): asserts webhook is WebhookDefinition {
+): asserts webhook is RegisteredWebhook["webhook"] {
   if (!isRecord(webhook)) {
     throw new WebhookValidationError(`[Sixb] Connector '${connectorId}' has an invalid webhook.`)
   }

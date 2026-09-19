@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { col, defineConnector, defineDataset, defineSync, SixbHost } from "../src"
+import { col, defineConnector, defineDataset, defineSync, defineWebhook, SixbHost } from "../src"
 import { ConnectorService } from "../src/connectors/service"
 import { InMemoryStorage } from "../src/storage/in-memory"
 import { createHarness, encryptionKey } from "./connector-connections.fixture"
@@ -58,7 +58,7 @@ describe("connector connection startup validation", () => {
     ).not.toThrow()
   })
 
-  test("accepts OAuth Syncs while rejecting unrouted webhook surfaces", () => {
+  test("accepts OAuth Syncs and ordinary webhook definitions", () => {
     const harness = createHarness()
     const dataset = defineDataset("accounts", { schema: [col("id", "string")] })
     const sync = defineSync("accounts")
@@ -78,7 +78,14 @@ describe("connector connection startup validation", () => {
         })
     ).not.toThrow()
 
-    Object.defineProperty(harness.connector.adapter, "webhooks", { value: [] })
+    Object.defineProperty(harness.connector.adapter, "webhooks", {
+      value: [
+        defineWebhook("events")
+          .post()
+          .json()
+          .handle(() => {}),
+      ],
+    })
     expect(
       () =>
         new SixbHost<readonly []>({
@@ -87,6 +94,6 @@ describe("connector connection startup validation", () => {
           connectorConnections: { encryptionKey },
           ...createTestRuntimeDeps(),
         })
-    ).toThrow("cannot register webhooks")
+    ).not.toThrow()
   })
 })
