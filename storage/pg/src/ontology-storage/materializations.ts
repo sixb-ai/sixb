@@ -539,7 +539,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     assertMaterializationFinalizationCorrelation(session, input)
     const laneCounts = await this.sessions.laneCounts(session)
     assertMaterializationLaneCompletion(session, laneCounts)
-    await this.assertFinalCardinality(session)
+    if (laneCounts.cardinality > 0) await this.assertFinalCardinality(session)
     const eventCount = laneCounts.event
     const [outbox] = await this.sql<
       {
@@ -584,17 +584,27 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
   }
 
   private async assertFinalCardinality(session: PgMaterializationSessionState): Promise<void> {
-    const [violation] = await this.sql<{ readonly reason: "duplicate" | "mismatch" }[]>`
-      WITH work AS (
-        SELECT payload->>'scopeSortKey' AS scope_sort_key,
-          payload->>'linkSortKey' AS link_sort_key,
+    // A mixed work table can hide a few occupied scopes among millions of other records.
+    // Even ANALYZE can miss that population. Isolate it before planning the final join so
+    // the planner sees a relation of scopes, without JSON/session selectivity guesses.
+    // Session IDs are provider-generated UUIDs. Use unprepared statements for this private
+    // identifier so each session does not leave a new statement in the connection cache.
+    const table = `ontology_cardinality_${session.id.replaceAll("-", "")}`
+    await this.sql.unsafe(
+      `CREATE TEMP TABLE ${table} ON COMMIT DROP AS
+        SELECT sort_one AS scope_sort_key, sort_two AS link_sort_key,
           (payload->>'occupied')::boolean AS occupied,
           payload->'ref'->'source'->>'objectTypeId' AS source_type_id,
           payload->'ref'->'source'->>'primaryId' AS source_id,
           payload->'ref'->>'linkId' AS link_id
-        FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-        WHERE session_id = ${session.id} AND kind = 'cardinality'
-          AND payload->>'view' = 'effective'
+        FROM ${PG_MATERIALIZATION_WORK_TABLE}
+        WHERE session_id = $1 AND lane = 'cardinality' AND major_order = 0`,
+      [session.id]
+    )
+    await this.sql.unsafe(`ANALYZE ${table}`)
+    const [violation] = await this.sql.unsafe<{ readonly reason: "duplicate" | "mismatch" }[]>(
+      `WITH work AS (
+        SELECT * FROM ${table}
       ), duplicate AS (
         SELECT scope_sort_key FROM work WHERE occupied
         GROUP BY scope_sort_key HAVING COUNT(*) > 1
@@ -604,10 +614,10 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         SELECT scope_sort_key, link_sort_key FROM work WHERE occupied
       ), actual AS (
         SELECT scopes.scope_sort_key,
-          ${this.sql.unsafe(linkSortExpression("links"))} AS link_sort_key
+          ${linkSortExpression("links")} AS link_sort_key
         FROM scopes
         JOIN links USING (source_type_id, source_id, link_id)
-        WHERE links.project_id = ${session.header.commit.projectId}
+        WHERE links.project_id = $1
       ), differences AS (
         (SELECT * FROM expected EXCEPT SELECT * FROM actual)
         UNION ALL
@@ -616,8 +626,10 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       SELECT 'duplicate'::text AS reason FROM duplicate
       UNION ALL
       SELECT 'mismatch'::text AS reason FROM differences
-      LIMIT 1
-    `
+      LIMIT 1`,
+      [session.header.commit.projectId]
+    )
+    await this.sql.unsafe(`DROP TABLE ${table}`)
     if (violation?.reason === "duplicate") {
       invalidCorrelation("Materialization cardinality work violates cardinality-one.")
     }
