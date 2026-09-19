@@ -191,6 +191,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("038-projection-source-roots", projectionSourceRootsSql),
     sqliteSql("039-connector-optional-pkce", connectorOptionalPkceSql),
     sqliteSql("040-outbox-publication-order", outboxPublicationOrderSql),
+    sqliteSql("041-file-upload-sessions", fileUploadSessionsSql),
   ],
 })
 
@@ -414,3 +415,4 @@ import executionRequesterGroupsSql from "./migrations/037-execution-requester-gr
 import connectorOptionalPkceSql from "./migrations/039-connector-optional-pkce.sql" with {
   type: "text",
 }
+import fileUploadSessionsSql from "./migrations/041-file-upload-sessions.sql" with { type: "text" }
