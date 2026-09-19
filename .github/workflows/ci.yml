@@ -216,6 +216,8 @@ jobs:
           # test process.
           - name: publish
             package: "@sixb/core"
+          - name: sandboxes-azure
+            package: "@sixb/sandboxes-azure"
           - name: create-sixb
             package: "create-sixb"
           - name: blob-s3
