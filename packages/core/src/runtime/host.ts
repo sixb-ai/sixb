@@ -238,6 +238,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       projectId: this.projectId,
       storage: this.storage,
       dispatcher: this.committedFacts,
+      blobStorage: this.blobStorage,
       options: options.ontologyMaintenance,
     })
 

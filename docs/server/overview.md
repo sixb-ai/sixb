@@ -72,8 +72,6 @@ curl 'https://api.example.com/api/objects/Invoice/inv-1/files/content?path=/prop
 
 The API checks access to the owning resource before returning the bytes. For browser images and download links, use [`objectFileContentUrl`](../client/overview.md#display-files).
 
-With the built-in PostgreSQL and SQLite providers, upload sessions are currently held in the serving process. Route a session's requests to one instance; a restart loses it. Single-request uploads are unaffected.
-
 ## Errors
 
 Check the HTTP status and structured error code instead of parsing message text. See [Errors](../errors/overview.md) for the response format and code reference.
