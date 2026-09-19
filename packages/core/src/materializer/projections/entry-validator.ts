@@ -1,5 +1,5 @@
 import { MaterializationValidationError } from "../../materialization/errors"
-import type { ProjectionSourceEntry } from "../../materialization/model"
+import type { ProjectionEntityRef, ProjectionSourceEntry } from "../../materialization/model"
 import { linkOwnershipKey } from "../../materialization/refs"
 import type { OntologyRegistry } from "../../ontology"
 import type { ProjectionRegistry } from "../../projections/registry"
@@ -28,6 +28,24 @@ export function createProjectionEntryValidator(
 ): ProjectionEntryValidator {
   const policy = createValidationPolicy(resolved)
   return (entry) => validateProjectionEntry(ontology, resolved, policy, entry)
+}
+
+export function validateProjectionRootRef(
+  resolved: ResolvedSourceProjection,
+  root: ProjectionEntityRef
+): void {
+  const definition = resolved.definition
+  const owned =
+    definition._tag === "ObjectProjectionDefinition"
+      ? root.kind === "object" && root.ref.objectTypeId === definition.objectTypeId
+      : root.kind === "link" &&
+        root.ref.source.objectTypeId === definition.sourceObjectTypeId &&
+        root.ref.target.objectTypeId === definition.targetObjectTypeId &&
+        root.ref.linkId === definition.linkId
+  if (!owned)
+    throw new MaterializationValidationError(
+      "Projection root is outside its owned type or link scope."
+    )
 }
 
 function createValidationPolicy(resolved: ResolvedSourceProjection): ProjectionValidationPolicy {

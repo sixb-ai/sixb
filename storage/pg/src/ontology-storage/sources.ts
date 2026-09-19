@@ -49,6 +49,8 @@ import {
   sourceRecord,
   toIsoString,
 } from "./shared"
+import { cleanupSourceVersions } from "./source-cleanup"
+import { assertSourceRootCoverage, stageSourceRoots } from "./source-roots"
 
 export class PgOntologySourceStorage implements OntologySourceStorage {
   constructor(private readonly runRootOperation: PgRootOperation) {}
@@ -97,14 +99,15 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
           dataset_id, dataset_version_id, dataset_version_created_at,
           projection_revision, ownership_hash, ontology_revision,
           root_count, assertion_count, created_at, ready_at, activated_at,
-          terminal_at, last_commit_id, updated_at
+          terminal_at, last_commit_id, updated_at, base_materialization_id, base_commit_id
         ) VALUES (
           ${input.projectId}, ${input.source.projectionId}, ${input.materializationId},
           ${input.execution.projectionRunId}, ${input.projectionKind}, 'replacement',
           'staging', ${input.execution.executionToken}, ${input.datasetVersion.datasetId},
           ${input.datasetVersion.versionId}, ${input.datasetVersion.createdAt},
           ${input.projectionRevision}, ${input.ownershipHash}, ${input.ontologyRevision},
-          NULL, NULL, ${input.createdAt}, NULL, NULL, NULL, NULL, ${input.createdAt}
+          NULL, NULL, ${input.createdAt}, NULL, NULL, NULL, NULL, ${input.createdAt},
+          ${input.base?.materializationId ?? null}, ${input.base?.lastCommitId ?? null}
         )
         ON CONFLICT DO NOTHING
         RETURNING *
@@ -153,6 +156,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       const rows = sourceStageRows(manifest.projection_kind, input.rows)
       const existing = await this.findStageRows(sql, input, rows)
       const { pending, unchanged } = reconcileSourceStageRows(rows, existing)
+      await stageSourceRoots(sql, manifest, input)
       await this.insertStageRows(sql, input, pending)
       return { inserted: pending.length, unchanged }
     })
@@ -192,6 +196,12 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       }
       if (input.readyAt < toIsoString(manifest.created_at)) {
         throw new MaterializationValidationError("Source readyAt cannot precede source createdAt.")
+      }
+      // A newly loaded run is absent from the planner statistics. Without refreshing them,
+      // PostgreSQL can scan the whole run for each identity instead of using its full key.
+      // Sparse deltas avoid this table-level sampling cost.
+      if (input.assertionCount >= 1_000 || input.rootCount >= 1_000) {
+        await sql`ANALYZE ontology_source_rows, ontology_source_roots`
       }
       await this.assertReadyState(sql, manifest, input.rootCount, input.assertionCount)
       const rows = await sql<PgOntologySourceRow[]>`
@@ -247,59 +257,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       assertNonblank(input.projectId, "Terminal source cleanup project id")
       assertTimestamp(input.terminalBefore, "Terminal source cleanup cutoff", true)
       assertPositiveInteger(input.limit, "Terminal source cleanup limit")
-      const manifests = await sql<PgOntologySourceRow[]>`
-        SELECT * FROM ontology_sources
-        WHERE project_id = ${input.projectId}
-          AND status IN ('superseded', 'abandoned')
-          AND terminal_at < ${input.terminalBefore}
-        ORDER BY terminal_at, source_id, materialization_id
-        LIMIT ${input.limit}
-        FOR UPDATE SKIP LOCKED
-      `
-      let remaining = input.limit
-      let rowsDeleted = 0
-      let materializationsDeleted = 0
-      for (const manifest of manifests) {
-        if (remaining === 0) break
-        const deletedRows = await sql<{ readonly entity_sort_key: string }[]>`
-          WITH selected AS (
-            SELECT rows.ctid
-            FROM ontology_source_rows AS rows
-            WHERE rows.project_id = ${manifest.project_id}
-              AND rows.source_id = ${manifest.source_id}
-              AND rows.materialization_id = ${manifest.materialization_id}
-            ORDER BY rows.entity_sort_key
-            LIMIT ${remaining}
-            FOR UPDATE SKIP LOCKED
-          )
-          DELETE FROM ontology_source_rows AS rows
-          USING selected
-          WHERE rows.ctid = selected.ctid
-          RETURNING rows.entity_sort_key
-        `
-        rowsDeleted += deletedRows.length
-        remaining -= deletedRows.length
-        if (remaining === 0) break
-        const removed = await sql<{ readonly materialization_id: string }[]>`
-          DELETE FROM ontology_sources AS sources
-          WHERE sources.project_id = ${manifest.project_id}
-            AND sources.source_id = ${manifest.source_id}
-            AND sources.materialization_id = ${manifest.materialization_id}
-            AND sources.status IN ('superseded', 'abandoned')
-            AND sources.terminal_at = ${manifest.terminal_at}
-            AND sources.terminal_at < ${input.terminalBefore}
-            AND NOT EXISTS (
-              SELECT 1 FROM ontology_source_rows AS rows
-              WHERE rows.project_id = sources.project_id
-                AND rows.source_id = sources.source_id
-                AND rows.materialization_id = sources.materialization_id
-            )
-          RETURNING sources.materialization_id
-        `
-        materializationsDeleted += removed.length
-        remaining -= removed.length
-      }
-      return { rowsDeleted, materializationsDeleted }
+      return cleanupSourceVersions(sql, input)
     })
   }
 
@@ -408,6 +366,9 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         `Source materialization '${manifest.materialization_id}' cannot transition to 'abandoned'.`
       )
     }
+    await sql`UPDATE ontology_source_roots SET retired_at = ${abandonedAt}
+      WHERE project_id = ${manifest.project_id} AND source_id = ${manifest.source_id}
+        AND materialization_id = ${manifest.materialization_id} AND NOT active`
     return sourceRecord(rows[0])
   }
 
@@ -426,10 +387,12 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         readonly max_ordinal: number | string | null
       }[]
     >`
-      SELECT COUNT(*) AS assertions, COUNT(DISTINCT root_key) AS roots,
+      SELECT (SELECT COUNT(*) FROM ontology_source_rows
+        WHERE project_id = ${manifest.project_id} AND source_id = ${manifest.source_id}
+          AND materialization_id = ${manifest.materialization_id}) AS assertions, COUNT(*) AS roots,
         COUNT(DISTINCT staging_ordinal) AS ordinals,
         MIN(staging_ordinal) AS min_ordinal, MAX(staging_ordinal) AS max_ordinal
-      FROM ontology_source_rows
+      FROM ontology_source_roots
       WHERE project_id = ${manifest.project_id}
         AND source_id = ${manifest.source_id}
         AND materialization_id = ${manifest.materialization_id}
@@ -449,6 +412,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         "Source ready counts do not match the staged roots and assertions."
       )
     }
+    await assertSourceRootCoverage(sql, manifest)
 
     const [invalid] =
       manifest.projection_kind === "link"

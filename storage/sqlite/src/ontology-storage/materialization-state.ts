@@ -44,6 +44,7 @@ import {
   type SqliteOntologySourceAssertionRow,
   type SqliteStoredOverrideRow,
 } from "./shared"
+import { activeSourceRows, replacementAssertionRows, replacementSourceRows } from "./source-roots"
 
 export const SQLITE_MATERIALIZATION_WORK_TABLE = "ontology_materialization_work"
 export const SQLITE_REPLACEMENT_WORK_TABLE = "ontology_replacement_work"
@@ -142,6 +143,7 @@ export type ReplacementIdentity =
     }
 
 interface ReplacementIdentityInput {
+  readonly incremental?: boolean
   readonly sessionId: string
   readonly sourceId: string
   readonly candidateMaterializationId: string
@@ -195,22 +197,11 @@ export class SqliteMaterializationStateReader {
           AND objects.primary_id = requested.primary_id`
       )
       .all(requested, this.projectId) as EffectiveObjectRow[]
-    const sourceRows = this.db
-      .query(
-        `WITH requested AS (${requestedObjects})
-         SELECT rows.* FROM requested
-         CROSS JOIN ontology_source_rows AS rows
-           ON rows.project_id = ?
-          AND rows.entity_kind = 'object'
-          AND rows.object_type_id = requested.object_type_id
-          AND rows.primary_id = requested.primary_id
-         JOIN ontology_sources AS sources
-           ON sources.project_id = rows.project_id
-          AND sources.source_id = rows.source_id
-          AND sources.materialization_id = rows.materialization_id
-         WHERE sources.status = 'active'`
-      )
-      .all(requested, this.projectId) as SqliteOntologySourceAssertionRow[]
+    const sourceRows = activeSourceRows(
+      this.db,
+      this.projectId,
+      refs.map((ref) => ({ kind: "object", ref }))
+    )
     const overrideRows = this.db
       .query(
         `WITH requested AS (${requestedObjects})
@@ -321,25 +312,11 @@ export class SqliteMaterializationStateReader {
           AND links.target_id = requested.target_id`
       )
       .all(requested, this.projectId) as EffectiveLinkRow[]
-    const sourceRows = this.db
-      .query(
-        `WITH requested AS (${sourceRequest})
-         SELECT rows.* FROM requested
-         CROSS JOIN ontology_source_rows AS rows
-           ON rows.project_id = ?
-          AND rows.entity_kind = 'link'
-          AND rows.source_type_id = requested.source_type_id
-          AND rows.source_primary_id = requested.source_primary_id
-          AND rows.link_id = requested.link_id
-          AND rows.target_type_id = requested.target_type_id
-          AND rows.target_primary_id = requested.target_primary_id
-         JOIN ontology_sources AS sources
-           ON sources.project_id = rows.project_id
-          AND sources.source_id = rows.source_id
-          AND sources.materialization_id = rows.materialization_id
-         WHERE sources.status = 'active'`
-      )
-      .all(requested, this.projectId) as SqliteOntologySourceAssertionRow[]
+    const sourceRows = activeSourceRows(
+      this.db,
+      this.projectId,
+      refs.map((ref) => ({ kind: "link", ref }))
+    )
     const overrideRows = this.db
       .query(
         `WITH requested AS (${sourceRequest})
@@ -468,11 +445,12 @@ export class SqliteMaterializationStateReader {
           AND rows.source_type_id = requested.source_type_id
           AND rows.source_primary_id = requested.source_primary_id
           AND rows.link_id = requested.link_id
-         JOIN ontology_sources AS sources
+         JOIN ontology_source_roots AS sources
            ON sources.project_id = rows.project_id
           AND sources.source_id = rows.source_id
           AND sources.materialization_id = rows.materialization_id
-         WHERE sources.status = 'active'`
+         AND sources.root_sort_key = rows.root_sort_key
+         WHERE sources.active = 1`
       )
       .all(requestedJson, this.projectId) as SqliteOntologySourceAssertionRow[]
     const slotOverrideRows = this.db
@@ -592,11 +570,12 @@ export class SqliteMaterializationStateReader {
               SELECT rows.source_type_id, rows.source_primary_id, rows.link_id,
                 rows.target_type_id, rows.target_primary_id
               FROM ontology_source_rows AS rows
-              JOIN ontology_sources AS sources
+              JOIN ontology_source_roots AS sources
                 ON sources.project_id = rows.project_id
                AND sources.source_id = rows.source_id
                AND sources.materialization_id = rows.materialization_id
-              WHERE rows.project_id = ? AND rows.entity_kind = 'link' AND sources.status = 'active'
+         AND sources.root_sort_key = rows.root_sort_key
+              WHERE rows.project_id = ? AND rows.entity_kind = 'link' AND sources.active = 1
             ), selected AS (
               SELECT DISTINCT links.*,
                 ${linkSortExpression("links")} AS sort_key
@@ -671,14 +650,16 @@ export class SqliteMaterializationStateReader {
     sourceId: string,
     candidateMaterializationId: string,
     materializationIds: readonly string[],
-    identities: readonly Extract<ReplacementIdentity, { readonly kind: "link" }>[]
+    identities: readonly Extract<ReplacementIdentity, { readonly kind: "link" }>[],
+    incremental = false
   ): readonly SourceReplacementLinkState[] {
     const refs = identities.map((identity) => identity.ref)
     const base = this.linkStates(refs)
     const replacements = this.replacementSources(
       sourceId,
       materializationIds,
-      refs.map((ref) => ({ kind: "link" as const, ref }))
+      refs.map((ref) => ({ kind: "link" as const, ref })),
+      incremental
     )
     const candidate = replacements.byMaterialization.get(candidateMaterializationId)
     return base.map((state, index) => {
@@ -735,39 +716,20 @@ export class SqliteMaterializationStateReader {
   private replacementSources(
     sourceId: string,
     materializationIds: readonly string[],
-    refs: readonly ProjectionEntityRef[]
+    refs: readonly ProjectionEntityRef[],
+    incremental = false
   ): ReplacementSources {
     if (materializationIds.length === 0 || refs.length === 0) {
       return { owned: new Set(), byMaterialization: new Map() }
     }
-    const requestedEntities = canonicalJson(
-      refs.map((ref) => ({ entityKind: ref.kind, entityKey: projectionEntityKey(ref) }))
-    )
-    const requestedMaterializations = canonicalJson([...new Set(materializationIds)])
-    const rows = this.db
-      .query(
-        `WITH requested_entities AS (
-           SELECT DISTINCT json_extract(value, '$.entityKind') AS entity_kind,
-             json_extract(value, '$.entityKey') AS entity_key
-           FROM json_each(?)
-         ), requested_materializations AS (
-           SELECT value AS materialization_id FROM json_each(?)
-         )
-         SELECT rows.* FROM requested_materializations
-         CROSS JOIN requested_entities
-         CROSS JOIN ontology_source_rows AS rows
-           ON rows.project_id = ?
-          AND rows.source_id = ?
-          AND rows.materialization_id = requested_materializations.materialization_id
-          AND rows.entity_kind = requested_entities.entity_kind
-          AND rows.entity_key = requested_entities.entity_key`
-      )
-      .all(
-        requestedEntities,
-        requestedMaterializations,
-        this.projectId,
-        sourceId
-      ) as SqliteOntologySourceAssertionRow[]
+    const rows = replacementAssertionRows(this.db, {
+      projectId: this.projectId,
+      sourceId,
+      materializationId: materializationIds[0]!,
+      incremental,
+      includePrevious: materializationIds.length > 1,
+      refs,
+    })
     const owned = new Set<string>()
     const byMaterialization = new Map<string, Map<string, StoredSourceAssertion>>()
     for (const row of rows) {
@@ -790,6 +752,12 @@ export class SqliteMaterializationStateReader {
   }
 
   private prepareReplacementObjects(input: ReplacementIdentityInput): void {
+    const rows = replacementSourceRows({
+      projectId: this.projectId,
+      sourceId: input.sourceId,
+      materializationId: input.candidateMaterializationId,
+      incremental: input.incremental ?? false,
+    })
     this.db
       .query(
         `
@@ -798,22 +766,21 @@ export class SqliteMaterializationStateReader {
           )
           SELECT ?, 'object', json_array(object_type_id, primary_id),
             MIN(entity_sort_key), 1
-          FROM ontology_source_rows
-          WHERE project_id = ? AND source_id = ? AND entity_kind = 'object'
-            AND materialization_id IN (?, COALESCE(?, ''))
+          FROM (${rows.sql}) AS rows
+          WHERE entity_kind = 'object'
           GROUP BY object_type_id, primary_id
         `
       )
-      .run(
-        input.sessionId,
-        this.projectId,
-        input.sourceId,
-        input.candidateMaterializationId,
-        input.previousMaterializationId
-      )
+      .run(input.sessionId, ...rows.values)
   }
 
   private prepareReplacementLinks(input: ReplacementIdentityInput): void {
+    const rows = replacementSourceRows({
+      projectId: this.projectId,
+      sourceId: input.sourceId,
+      materializationId: input.candidateMaterializationId,
+      incremental: input.incremental ?? false,
+    })
     this.db
       .query(
         `
@@ -826,9 +793,8 @@ export class SqliteMaterializationStateReader {
           ), replacement_links AS (
             SELECT source_type_id, source_primary_id AS source_id, link_id,
               target_type_id, target_primary_id AS target_id
-            FROM ontology_source_rows
-            WHERE project_id = ? AND source_id = ? AND entity_kind = 'link'
-              AND materialization_id IN (?, COALESCE(?, ''))
+            FROM (${rows.sql}) AS rows
+            WHERE entity_kind = 'link'
           ), incident_links AS (
             SELECT links.source_type_id, links.source_id, links.link_id,
               links.target_type_id, links.target_id
@@ -869,28 +835,30 @@ export class SqliteMaterializationStateReader {
             SELECT rows.source_type_id, rows.source_primary_id AS source_id,
               rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
             FROM ontology_source_rows AS rows
-            JOIN ontology_sources AS sources
+            JOIN ontology_source_roots AS sources
               ON sources.project_id = rows.project_id
              AND sources.source_id = rows.source_id
              AND sources.materialization_id = rows.materialization_id
+         AND sources.root_sort_key = rows.root_sort_key
             JOIN incident_objects
               ON incident_objects.object_type_id = rows.source_type_id
              AND incident_objects.primary_id = rows.source_primary_id
             WHERE rows.project_id = ? AND rows.entity_kind = 'link'
-              AND sources.status = 'active'
+              AND sources.active = 1
             UNION
             SELECT rows.source_type_id, rows.source_primary_id AS source_id,
               rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
             FROM ontology_source_rows AS rows
-            JOIN ontology_sources AS sources
+            JOIN ontology_source_roots AS sources
               ON sources.project_id = rows.project_id
              AND sources.source_id = rows.source_id
              AND sources.materialization_id = rows.materialization_id
+         AND sources.root_sort_key = rows.root_sort_key
             JOIN incident_objects
               ON incident_objects.object_type_id = rows.target_type_id
              AND incident_objects.primary_id = rows.target_primary_id
             WHERE rows.project_id = ? AND rows.entity_kind = 'link'
-              AND sources.status = 'active'
+              AND sources.active = 1
           ), diff_links AS (
             SELECT * FROM replacement_links
             UNION SELECT * FROM incident_links
@@ -932,10 +900,7 @@ export class SqliteMaterializationStateReader {
       )
       .run(
         input.sessionId,
-        this.projectId,
-        input.sourceId,
-        input.candidateMaterializationId,
-        input.previousMaterializationId,
+        ...rows.values,
         this.projectId,
         this.projectId,
         this.projectId,

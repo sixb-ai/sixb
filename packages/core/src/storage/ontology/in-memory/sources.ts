@@ -13,6 +13,7 @@ import {
   isExactStagingManifest,
   sourceConflict,
   sourceMaterializationIdentity,
+  sourceStageRoots,
 } from "../provider"
 import type {
   AbandonSourceMaterializationCandidateInput,
@@ -32,6 +33,7 @@ import type {
   SummarizeTerminalSourceMaterializationsInput,
   TerminalSourceMaterializationSummary,
 } from "../sources"
+import { findActiveSourceMaterialization } from "./materializations-state"
 import {
   assertNonblank,
   type InMemoryOntologyState,
@@ -93,6 +95,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
         projectionRevision: input.projectionRevision,
         ownershipHash: input.ownershipHash,
         ontologyRevision: input.ontologyRevision,
+        ...(input.base ? { base: structuredClone(input.base) } : {}),
         rootCount: null,
         assertionCount: null,
         createdAt: input.createdAt,
@@ -102,6 +105,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
         lastCommitId: null,
         updatedAt: input.createdAt,
         rowsByEntity: new Map(),
+        roots: new Map(),
         rootOrdinals: new Map(),
         ordinalRoots: new Map(),
       }
@@ -121,7 +125,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
           `Source materialization '${input.materializationId}' is '${materialization.status}' and cannot accept rows.`
         )
       }
-      return stageRowsAtomically(materialization, input.rows)
+      return stageRowsAtomically(materialization, input)
     })
   }
 
@@ -178,18 +182,12 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
   async getActive(input: GetActiveOntologySourceInput): Promise<OntologySourceRecord | null> {
     return this.runRootOperation(() => {
       assertProjectAndSource(input)
-      const active = [...this.state.sourceMaterializations.values()].filter(
-        (materialization) =>
-          materialization.projectId === input.projectId &&
-          materialization.source.projectionId === input.source.projectionId &&
-          materialization.status === "active"
+      const active = findActiveSourceMaterialization(
+        this.state,
+        input.projectId,
+        input.source.projectionId
       )
-      if (active.length > 1) {
-        throw sourceConflict(
-          `Source '${input.source.projectionId}' has more than one active materialization.`
-        )
-      }
-      return active[0] ? sourceMaterializationRecord(active[0]) : null
+      return active ? sourceMaterializationRecord(active) : null
     })
   }
 
@@ -230,6 +228,14 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
         ) {
           continue
         }
+        if (
+          materialization.roots.size > 0 &&
+          ![...materialization.roots.values()].some(
+            (root) =>
+              !root.active && root.retiredAt !== null && root.retiredAt < input.terminalBefore
+          )
+        )
+          continue
         insertBounded(candidates, entry, input.limit, compareTerminalMaterializations)
       }
 
@@ -240,18 +246,28 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
         if (remaining === 0) break
         const current = this.state.sourceMaterializations.get(key)
         if (current !== candidate) continue
-        // Terminal manifests never participate in reads or activation again. Release their
-        // ingestion-only indexes immediately instead of retaining O(root count) memory until the
-        // last child row is removed by a later bounded cleanup pass.
         current.rootOrdinals.clear()
         current.ordinalRoots.clear()
-        for (const entityKey of current.rowsByEntity.keys()) {
+        for (const [rootKey, root] of current.roots) {
           if (remaining === 0) break
-          current.rowsByEntity.delete(entityKey)
-          rowsDeleted += 1
-          remaining -= 1
+          if (root.active || root.retiredAt === null || root.retiredAt >= input.terminalBefore)
+            continue
+          for (const entityKey of root.entityKeys) {
+            if (remaining === 0) break
+            current.rowsByEntity.delete(entityKey)
+            root.entityKeys.delete(entityKey)
+            rowsDeleted += 1
+            remaining -= 1
+          }
+          if (root.entityKeys.size === 0 && remaining > 0) {
+            current.roots.delete(rootKey)
+            current.rootOrdinals.delete(rootKey)
+            current.ordinalRoots.delete(root.stagingOrdinal)
+            rowsDeleted += 1
+            remaining -= 1
+          }
         }
-        if (current.rowsByEntity.size === 0 && remaining > 0) {
+        if (current.roots.size === 0 && current.rowsByEntity.size === 0 && remaining > 0) {
           this.state.sourceMaterializations.delete(key)
           materializationsDeleted += 1
           remaining -= 1
@@ -372,6 +388,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
     if (materialization.readyAt !== null) {
       assertNotBefore(abandonedAt, materialization.readyAt, "Source abandonedAt", "readyAt")
     }
+    for (const root of materialization.roots.values()) root.retiredAt = abandonedAt
     const abandoned: InMemorySourceMaterialization = {
       ...materialization,
       status: "abandoned",
@@ -407,14 +424,33 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
 
 function stageRowsAtomically(
   materialization: InMemorySourceMaterialization,
-  rows: StageSourceRowsInput["rows"]
+  input: StageSourceRowsInput
 ): StageSourceRowsResult {
   let inserted = 0
   let unchanged = 0
   const newRows = new Map<string, StageSourceRowsInput["rows"][number]>()
   const newRootOrdinals = new Map<string, number>()
   const newOrdinalRoots = new Map<number, string>()
-  for (const row of rows) {
+  const roots = sourceStageRoots(materialization.projectionKind, input)
+  if (!materialization.base && roots.some((root) => root.deleted)) {
+    throw new MaterializationValidationError("Root deletions require a source delta base.")
+  }
+  for (const root of roots) {
+    const previous = materialization.roots.get(root.rootKey)
+    const otherRoot = materialization.ordinalRoots.get(root.stagingOrdinal)
+    if (
+      (previous &&
+        (previous.deleted !== root.deleted || previous.stagingOrdinal !== root.stagingOrdinal)) ||
+      (otherRoot !== undefined && otherRoot !== root.rootKey)
+    ) {
+      throw new MaterializationValidationError(
+        "Source materialization repeats root or stream ordinal with different content."
+      )
+    }
+    newRootOrdinals.set(root.rootKey, root.stagingOrdinal)
+    newOrdinalRoots.set(root.stagingOrdinal, root.rootKey)
+  }
+  for (const row of input.rows) {
     assertSourceStagedRow(materialization.projectionKind, row)
 
     const rootKey = projectionEntityKey(row.root)
@@ -458,7 +494,21 @@ function stageRowsAtomically(
   for (const [ordinal, rootKey] of newOrdinalRoots) {
     materialization.ordinalRoots.set(ordinal, rootKey)
   }
-  for (const [entityKey, row] of newRows) materialization.rowsByEntity.set(entityKey, row)
+  for (const root of roots) {
+    if (!materialization.roots.has(root.rootKey))
+      materialization.roots.set(root.rootKey, {
+        root: structuredClone(root.root),
+        stagingOrdinal: root.stagingOrdinal,
+        deleted: root.deleted,
+        entityKeys: new Set(),
+        active: false,
+        retiredAt: null,
+      })
+  }
+  for (const [entityKey, row] of newRows) {
+    materialization.rowsByEntity.set(entityKey, row)
+    materialization.roots.get(projectionEntityKey(row.root))!.entityKeys.add(entityKey)
+  }
   return { inserted, unchanged }
 }
 
@@ -497,6 +547,11 @@ function assertReadyTopology(materialization: InMemorySourceMaterialization): vo
 
   for (const rootKey of materialization.rootOrdinals.keys()) {
     const rows = rowsByRoot.get(rootKey) ?? []
+    if (materialization.roots.get(rootKey)?.deleted) {
+      if (rows.length > 0)
+        throw new MaterializationValidationError("Deleted source roots cannot contain assertions.")
+      continue
+    }
     const first = rows[0]
     if (!first) {
       throw new MaterializationValidationError(`Source root ${rootKey} has no staged assertions.`)

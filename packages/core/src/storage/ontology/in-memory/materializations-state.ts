@@ -27,6 +27,7 @@ import type {
   InMemoryStoredLinkSlotOverride,
   InMemoryStoredObjectOverride,
 } from "./shared-state"
+import { projectEntityKey, sourceMaterializationKey } from "./shared-state"
 
 export function publicObjectOverride(
   value: InMemoryStoredObjectOverride | undefined
@@ -120,24 +121,10 @@ export function findActiveSourceMaterialization(
   projectId: string,
   sourceId: string
 ): InMemorySourceMaterialization | undefined {
-  let active: InMemorySourceMaterialization | undefined
-  for (const materialization of state.sourceMaterializations.values()) {
-    if (
-      materialization.projectId !== projectId ||
-      materialization.source.projectionId !== sourceId ||
-      materialization.status !== "active"
-    ) {
-      continue
-    }
-    if (active) {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        `Source '${sourceId}' has more than one active materialization.`
-      )
-    }
-    active = materialization
-  }
-  return active
+  const id = state.activeSourceHeads.get(projectEntityKey(projectId, sourceId))
+  return id
+    ? state.sourceMaterializations.get(sourceMaterializationKey(projectId, sourceId, id))
+    : undefined
 }
 
 export function storedSource(

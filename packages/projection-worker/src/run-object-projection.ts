@@ -1,5 +1,6 @@
 import {
   type DatasetDefinition,
+  type DatasetRow,
   isJsonValue,
   MaterializationValidationError,
   type ObjectProjectionDefinition,
@@ -7,6 +8,7 @@ import {
 import type { ProjectionSourceEntry } from "@sixb/core/internal/materialization"
 import {
   buildObjectProjectionPlan,
+  type ObjectProjectionPlan,
   type ProjectedObjectRow,
   projectObjectRow,
 } from "./object-projection-plan"
@@ -45,24 +47,17 @@ export function mapObjectProjectionEntries(input: {
         columns: objectProjectionReadColumns(projection),
       })) {
         throwIfAborted(signal)
-        const projected = projectObjectRow(plan, row)
-        if (!projected.ok) {
-          await failCurrentRow(progress, projected.errorMessage)
-          continue
+        let entry: ProjectionSourceEntry | null
+        try {
+          entry = mapObjectProjectionRow(plan, row)
+        } catch (error) {
+          if (error instanceof MaterializationValidationError)
+            await failCurrentRow(progress, error.message)
+          throw error
         }
-        if (isBlank(projected.row.primaryValue)) {
+        if (!entry) {
           await progress.recordRow(true)
           continue
-        }
-
-        let entry: ProjectionSourceEntry
-        try {
-          entry = toSourceEntry(projection, plan.primaryPropertyId, projected.row)
-        } catch (error) {
-          if (error instanceof MaterializationValidationError) {
-            await failCurrentRow(progress, error.message)
-          }
-          throw error
         }
         await progress.recordRow(false)
         yield entry
@@ -72,6 +67,16 @@ export function mapObjectProjectionEntries(input: {
       await progress.flush()
     }
   }
+}
+
+export function mapObjectProjectionRow(
+  plan: ObjectProjectionPlan,
+  row: DatasetRow
+): ProjectionSourceEntry | null {
+  const projected = projectObjectRow(plan, row)
+  if (!projected.ok) throw new MaterializationValidationError(projected.errorMessage)
+  if (isBlank(projected.row.primaryValue)) return null
+  return toSourceEntry(plan.projection, plan.primaryPropertyId, projected.row)
 }
 
 function toSourceEntry(
@@ -120,7 +125,9 @@ function toSourceEntry(
   }
 }
 
-function objectProjectionReadColumns(projection: ObjectProjectionDefinition): readonly string[] {
+export function objectProjectionReadColumns(
+  projection: ObjectProjectionDefinition
+): readonly string[] {
   const linkSourceFields = Object.values(projection.links).flatMap((descriptor) =>
     descriptor.sourceField ? [descriptor.sourceField] : []
   )

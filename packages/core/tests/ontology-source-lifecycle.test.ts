@@ -439,6 +439,7 @@ describe("in-memory ontology source lifecycle", () => {
     const liveKey = sourceMaterializationKey(projectId, source.projectionId, "cleanup-live")
     const readyLive = state.sourceMaterializations.get(liveKey)
     if (!readyLive) throw new Error("expected ready source materialization")
+    state.activeSourceHeads.set(JSON.stringify([projectId, source.projectionId]), "cleanup-live")
     state.sourceMaterializations.set(liveKey, {
       ...readyLive,
       status: "active",
@@ -465,6 +466,13 @@ describe("in-memory ontology source lifecycle", () => {
     )
     expect(partiallyCleaned?.rootOrdinals.size).toBe(0)
     expect(partiallyCleaned?.ordinalRoots.size).toBe(0)
+    expect(
+      await storage.cleanupTerminal({
+        projectId,
+        terminalBefore: "2026-02-01T00:00:00.000Z",
+        limit: 2,
+      })
+    ).toEqual({ rowsDeleted: 2, materializationsDeleted: 0 })
 
     expect(
       await storage.cleanupTerminal({

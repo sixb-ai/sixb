@@ -38,12 +38,21 @@ describe("SQLite materialization query plans", () => {
         "SEARCH objects",
         ["project_id=?", "object_type_id=?", "primary_id=?"]
       )
-      expectRequestedFirstLookup(
-        db,
-        findRecorded(recorded, "CROSS JOIN ontology_source_rows AS rows", "'object'"),
-        "SEARCH rows",
-        ["project_id=?", "object_type_id=?", "primary_id=?"]
+      const sourceRead = findRecorded(
+        recorded,
+        "CROSS JOIN ontology_source_roots AS roots",
+        "CROSS JOIN ontology_source_rows AS rows"
       )
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH roots", [
+        "project_id=?",
+        "root_sort_key=?",
+      ])
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", [
+        "project_id=?",
+        "source_id=?",
+        "materialization_id=?",
+        "root_sort_key=?",
+      ])
       expectRequestedFirstLookup(
         db,
         findRecorded(recorded, "CROSS JOIN ontology_object_overrides AS overrides"),
@@ -76,19 +85,21 @@ describe("SQLite materialization query plans", () => {
           "target_id=?",
         ]
       )
-      expectRequestedFirstLookup(
-        db,
-        findRecorded(recorded, "CROSS JOIN ontology_source_rows AS rows", "'link'"),
-        "SEARCH rows",
-        [
-          "project_id=?",
-          "source_type_id=?",
-          "source_primary_id=?",
-          "link_id=?",
-          "target_type_id=?",
-          "target_primary_id=?",
-        ]
+      const sourceRead = findRecorded(
+        recorded,
+        "CROSS JOIN ontology_source_roots AS roots",
+        "CROSS JOIN ontology_source_rows AS rows"
       )
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH roots", [
+        "project_id=?",
+        "root_sort_key=?",
+      ])
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", [
+        "project_id=?",
+        "source_id=?",
+        "materialization_id=?",
+        "root_sort_key=?",
+      ])
       expectRequestedFirstLookup(
         db,
         findRecorded(recorded, "CROSS JOIN ontology_link_overrides AS overrides", "'edge'"),
@@ -136,7 +147,7 @@ describe("SQLite materialization query plans", () => {
 
       expectRequestedFirstLookup(
         db,
-        findRecorded(recorded, "requested_materializations", "SELECT rows.*"),
+        findRecorded(recorded, "requested_entities", "SELECT rows.*"),
         "SEARCH rows",
         ["project_id=?", "source_id=?", "materialization_id=?", "entity_kind=?", "entity_key=?"]
       )
@@ -312,6 +323,8 @@ function insertReadyLinkCandidate(db: Database, count: number): void {
       employeeId
     )
   }
+  db.run(`INSERT INTO ontology_source_roots (project_id, source_id, materialization_id, root_sort_key, root_kind, root_key, root, staging_ordinal)
+    SELECT DISTINCT project_id, source_id, materialization_id, root_sort_key, root_kind, root_key, root, staging_ordinal FROM ontology_source_rows`)
 }
 
 function findRecorded(
@@ -334,7 +347,10 @@ function expectRequestedFirstLookup(
     .all(...query.bindings)
   const lookupIndex = plan.findIndex(({ detail }) => detail.startsWith(searchPrefix))
   const requestedIndex = plan.findIndex(
-    ({ detail }) => detail === "SCAN requested" || detail.startsWith("SCAN json_each")
+    ({ detail }) =>
+      detail === "SCAN requested" ||
+      detail === "SCAN requested_entities" ||
+      detail.startsWith("SCAN json_each")
   )
 
   expect(requestedIndex).toBeGreaterThanOrEqual(0)

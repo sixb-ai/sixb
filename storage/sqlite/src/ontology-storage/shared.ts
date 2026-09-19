@@ -62,6 +62,8 @@ export interface SqliteOntologySourceRow {
   readonly ownership_hash: string
   readonly ontology_revision: string
   readonly root_count: number | null
+  readonly base_materialization_id: string | null
+  readonly base_commit_id: string | null
   readonly assertion_count: number | null
   readonly created_at: string
   readonly ready_at: string | null
@@ -125,6 +127,14 @@ export function sourceRecord(row: SqliteOntologySourceRow): OntologySourceRecord
     projectionRevision: row.projection_revision,
     ownershipHash: row.ownership_hash,
     ontologyRevision: row.ontology_revision,
+    ...(row.base_materialization_id === null
+      ? {}
+      : {
+          base: {
+            materializationId: row.base_materialization_id,
+            lastCommitId: row.base_commit_id!,
+          },
+        }),
     rootCount: row.root_count,
     assertionCount: row.assertion_count,
     createdAt: row.created_at,

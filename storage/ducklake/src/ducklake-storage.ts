@@ -3,11 +3,14 @@ import type {
   BeginDatasetMergeInput,
   BeginDatasetWriteInput,
   DatasetCatalogState,
+  DatasetChanges,
   DatasetVersion,
   LakeMergeSession,
   LakeWriteSession,
+  ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
+import { DuckLakeChangeReader } from "./internal/ducklake-change-reader"
 import { DuckLakeConnectionManager } from "./internal/ducklake-connection-manager"
 import { DuckLakeDatasetCatalog } from "./internal/ducklake-dataset-catalog"
 import { DuckLakeMaintenance } from "./internal/ducklake-maintenance"
@@ -36,6 +39,7 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
   private readonly datasets: DuckLakeDatasetCatalog
   private readonly maintenance: DuckLakeMaintenance
   private readonly rows: DuckLakeRowReader
+  private readonly changes: DuckLakeChangeReader
   private readonly snapshotReader: DuckLakeSnapshotReader
   private readonly writes: DuckLakeWriteCoordinator
 
@@ -59,6 +63,11 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
       this.datasets
     )
     this.rows = new DuckLakeRowReader(normalizedOptions, this.connections, this.snapshotReader)
+    this.changes = new DuckLakeChangeReader(
+      normalizedOptions,
+      this.connections,
+      this.snapshotReader
+    )
     this.writes = new DuckLakeWriteCoordinator(
       normalizedOptions,
       this.connections,
@@ -120,6 +129,10 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
 
   readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
     return this.rows.readRows(input)
+  }
+
+  readChanges(input: ReadDatasetChangesInput): Promise<DatasetChanges | null> {
+    return this.changes.readChanges(input)
   }
 
   async runMaintenance(options?: DuckLakeMaintenanceOptions): Promise<DuckLakeMaintenanceReport> {

@@ -164,6 +164,7 @@ function isJsonValue(value: unknown): value is import("../../json").JsonValue {
 }
 
 export interface ProviderReplacementSessionState {
+  readonly incremental?: boolean
   readonly sourceId: string
   readonly candidateMaterializationId: string
   readonly previousMaterializationId: string | null
@@ -654,6 +655,66 @@ export function sourceStageRow(row: StageSourceAssertion): SourceStageRow {
   }
 }
 
+export interface SourceStageRoot {
+  readonly root: StageSourceAssertion["root"]
+  readonly rootKey: string
+  readonly sortKey: string
+  readonly stagingOrdinal: number
+  readonly deleted: boolean
+}
+
+/** Shared root identity rules, including deletions that deliberately have no assertion rows. */
+export function sourceStageRoots(
+  projectionKind: OntologySourceRecord["projectionKind"],
+  input: {
+    readonly rows: readonly StageSourceAssertion[]
+    readonly deletions?: readonly {
+      readonly root: StageSourceAssertion["root"]
+      readonly stagingOrdinal: number
+    }[]
+  }
+): readonly SourceStageRoot[] {
+  for (const row of input.rows) assertSourceStagedRow(projectionKind, row)
+  const roots = new Map<string, SourceStageRoot>()
+  const ordinals = new Map<number, string>()
+  for (const [items, deleted] of [
+    [input.rows, false],
+    [input.deletions ?? [], true],
+  ] as const) {
+    for (const row of items) {
+      assertSourceEntity(row.root, "Source root")
+      if (
+        row.root.kind !== projectionKind ||
+        !Number.isSafeInteger(row.stagingOrdinal) ||
+        row.stagingOrdinal < 0
+      ) {
+        throw new MaterializationValidationError("Source root kind or staging ordinal is invalid.")
+      }
+      const key = projectionEntityKey(row.root)
+      const previous = roots.get(key)
+      const otherRoot = ordinals.get(row.stagingOrdinal)
+      if (
+        (previous &&
+          (previous.deleted !== deleted || previous.stagingOrdinal !== row.stagingOrdinal)) ||
+        (otherRoot !== undefined && otherRoot !== key)
+      ) {
+        throw new MaterializationValidationError(
+          `Source materialization repeats root or stream ordinal ${row.stagingOrdinal} with different content.`
+        )
+      }
+      roots.set(key, {
+        root: row.root,
+        rootKey: key,
+        sortKey: utf8SortKey(key),
+        stagingOrdinal: row.stagingOrdinal,
+        deleted,
+      })
+      ordinals.set(row.stagingOrdinal, key)
+    }
+  }
+  return [...roots.values()]
+}
+
 export function reconcileSourceStageRows(
   rows: readonly SourceStageRow[],
   existingRows: readonly SourceStageRow[]
@@ -732,6 +793,13 @@ export function assertSourceBeginInput(input: BeginSourceMaterializationInput): 
   assertNonblank(input.datasetVersion.versionId, "Source dataset version id")
   assertTimestamp(input.datasetVersion.createdAt, "Source dataset version createdAt", true)
   assertTimestamp(input.createdAt, "Source createdAt", true)
+  if (input.base) {
+    assertNonblank(input.base.materializationId, "Source base materialization id")
+    assertNonblank(input.base.lastCommitId, "Source base commit id")
+    if (input.base.materializationId === input.materializationId) {
+      throw new MaterializationValidationError("A source candidate cannot be its own base.")
+    }
+  }
 }
 
 export function assertSourceWriteIdentity(input: {
@@ -863,6 +931,8 @@ export function isExactStagingManifest(
     row.datasetVersion.createdAt === input.datasetVersion.createdAt &&
     row.projectionRevision === input.projectionRevision &&
     row.ownershipHash === input.ownershipHash &&
+    row.base?.materializationId === input.base?.materializationId &&
+    row.base?.lastCommitId === input.base?.lastCommitId &&
     row.ontologyRevision === input.ontologyRevision
   )
 }

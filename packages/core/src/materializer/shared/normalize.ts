@@ -344,7 +344,7 @@ export function normalizeProjectionExecution(input: ProjectionExecution): Projec
   })
 }
 
-function normalizeProjectionEntity(entity: ProjectionEntityRef): ProjectionEntityRef {
+export function normalizeProjectionEntity(entity: ProjectionEntityRef): ProjectionEntityRef {
   return entity.kind === "object"
     ? Object.freeze({ kind: "object", ref: normalizeObjectRef(entity.ref) })
     : Object.freeze({ kind: "link", ref: normalizeLinkRef(entity.ref) })

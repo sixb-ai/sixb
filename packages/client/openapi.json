@@ -36399,6 +36399,9 @@
                                       },
                                       "sourceRowsSkipped": {
                                         "type": "number"
+                                      },
+                                      "sourceChangesRead": {
+                                        "type": "number"
                                       }
                                     },
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
@@ -36583,6 +36586,9 @@
                                         "type": "number"
                                       },
                                       "sourceRowsSkipped": {
+                                        "type": "number"
+                                      },
+                                      "sourceChangesRead": {
                                         "type": "number"
                                       }
                                     },
@@ -36771,6 +36777,9 @@
                                         "type": "number"
                                       },
                                       "sourceRowsSkipped": {
+                                        "type": "number"
+                                      },
+                                      "sourceChangesRead": {
                                         "type": "number"
                                       }
                                     },
@@ -37006,6 +37015,9 @@
                                       },
                                       "sourceRowsSkipped": {
                                         "type": "number"
+                                      },
+                                      "sourceChangesRead": {
+                                        "type": "number"
                                       }
                                     },
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
@@ -37190,6 +37202,9 @@
                                         "type": "number"
                                       },
                                       "sourceRowsSkipped": {
+                                        "type": "number"
+                                      },
+                                      "sourceChangesRead": {
                                         "type": "number"
                                       }
                                     },
@@ -37378,6 +37393,9 @@
                                         "type": "number"
                                       },
                                       "sourceRowsSkipped": {
+                                        "type": "number"
+                                      },
+                                      "sourceChangesRead": {
                                         "type": "number"
                                       }
                                     },
@@ -37624,6 +37642,9 @@
                                       },
                                       "sourceRowsSkipped": {
                                         "type": "number"
+                                      },
+                                      "sourceChangesRead": {
+                                        "type": "number"
                                       }
                                     },
                                     "required": ["sourceRowsRead", "sourceRowsSkipped"],
@@ -37808,6 +37829,9 @@
                                         "type": "number"
                                       },
                                       "sourceRowsSkipped": {
+                                        "type": "number"
+                                      },
+                                      "sourceChangesRead": {
                                         "type": "number"
                                       }
                                     },
@@ -37996,6 +38020,9 @@
                                         "type": "number"
                                       },
                                       "sourceRowsSkipped": {
+                                        "type": "number"
+                                      },
+                                      "sourceChangesRead": {
                                         "type": "number"
                                       }
                                     },
@@ -38301,6 +38328,9 @@
                                     },
                                     "sourceRowsSkipped": {
                                       "type": "number"
+                                    },
+                                    "sourceChangesRead": {
+                                      "type": "number"
                                     }
                                   },
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
@@ -38479,6 +38509,9 @@
                                       "type": "number"
                                     },
                                     "sourceRowsSkipped": {
+                                      "type": "number"
+                                    },
+                                    "sourceChangesRead": {
                                       "type": "number"
                                     }
                                   },
@@ -38661,6 +38694,9 @@
                                       "type": "number"
                                     },
                                     "sourceRowsSkipped": {
+                                      "type": "number"
+                                    },
+                                    "sourceChangesRead": {
                                       "type": "number"
                                     }
                                   },
@@ -38887,6 +38923,9 @@
                                     },
                                     "sourceRowsSkipped": {
                                       "type": "number"
+                                    },
+                                    "sourceChangesRead": {
+                                      "type": "number"
                                     }
                                   },
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
@@ -39065,6 +39104,9 @@
                                       "type": "number"
                                     },
                                     "sourceRowsSkipped": {
+                                      "type": "number"
+                                    },
+                                    "sourceChangesRead": {
                                       "type": "number"
                                     }
                                   },
@@ -39247,6 +39289,9 @@
                                       "type": "number"
                                     },
                                     "sourceRowsSkipped": {
+                                      "type": "number"
+                                    },
+                                    "sourceChangesRead": {
                                       "type": "number"
                                     }
                                   },
@@ -39484,6 +39529,9 @@
                                     },
                                     "sourceRowsSkipped": {
                                       "type": "number"
+                                    },
+                                    "sourceChangesRead": {
+                                      "type": "number"
                                     }
                                   },
                                   "required": ["sourceRowsRead", "sourceRowsSkipped"],
@@ -39662,6 +39710,9 @@
                                       "type": "number"
                                     },
                                     "sourceRowsSkipped": {
+                                      "type": "number"
+                                    },
+                                    "sourceChangesRead": {
                                       "type": "number"
                                     }
                                   },
@@ -39844,6 +39895,9 @@
                                       "type": "number"
                                     },
                                     "sourceRowsSkipped": {
+                                      "type": "number"
+                                    },
+                                    "sourceChangesRead": {
                                       "type": "number"
                                     }
                                   },
@@ -40167,6 +40221,9 @@
                                   },
                                   "sourceRowsSkipped": {
                                     "type": "number"
+                                  },
+                                  "sourceChangesRead": {
+                                    "type": "number"
                                   }
                                 },
                                 "required": ["sourceRowsRead", "sourceRowsSkipped"],
@@ -40345,6 +40402,9 @@
                                     "type": "number"
                                   },
                                   "sourceRowsSkipped": {
+                                    "type": "number"
+                                  },
+                                  "sourceChangesRead": {
                                     "type": "number"
                                   }
                                 },
@@ -40527,6 +40587,9 @@
                                     "type": "number"
                                   },
                                   "sourceRowsSkipped": {
+                                    "type": "number"
+                                  },
+                                  "sourceChangesRead": {
                                     "type": "number"
                                   }
                                 },
@@ -40783,6 +40846,9 @@
                             },
                             "sourceRowsSkipped": {
                               "type": "number"
+                            },
+                            "sourceChangesRead": {
+                              "type": "number"
                             }
                           },
                           "required": ["sourceRowsRead", "sourceRowsSkipped"],
@@ -40961,6 +41027,9 @@
                               "type": "number"
                             },
                             "sourceRowsSkipped": {
+                              "type": "number"
+                            },
+                            "sourceChangesRead": {
                               "type": "number"
                             }
                           },
@@ -41143,6 +41212,9 @@
                               "type": "number"
                             },
                             "sourceRowsSkipped": {
+                              "type": "number"
+                            },
+                            "sourceChangesRead": {
                               "type": "number"
                             }
                           },

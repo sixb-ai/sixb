@@ -46,6 +46,7 @@ import {
   type PgStoredOverrideRow,
   toIsoString,
 } from "./shared"
+import { activeSourceRows, replacementAssertionRows, replacementSourceRows } from "./source-roots"
 
 export const PG_MATERIALIZATION_WORK_TABLE = "ontology_materialization_work"
 export const PG_REPLACEMENT_WORK_TABLE = "ontology_replacement_work"
@@ -141,6 +142,7 @@ interface ReplacementSources {
 }
 
 interface ReplacementIdentityInput {
+  readonly incremental?: boolean
   readonly sessionId: string
   readonly sourceId: string
   readonly candidateMaterializationId: string
@@ -186,22 +188,11 @@ export class PgMaterializationStateReader {
         JOIN requested USING (object_type_id, primary_id)
         WHERE objects.project_id = ${this.projectId}
       `,
-      this.sql<PgOntologySourceAssertionRow[]>`
-        WITH requested AS (
-          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
-            AS requested_values(object_type_id TEXT, primary_id TEXT)
-        )
-        SELECT rows.*
-        FROM ontology_source_rows AS rows
-        JOIN requested USING (object_type_id, primary_id)
-        JOIN ontology_sources AS sources
-          ON sources.project_id = rows.project_id
-         AND sources.source_id = rows.source_id
-         AND sources.materialization_id = rows.materialization_id
-        WHERE rows.project_id = ${this.projectId}
-          AND rows.entity_kind = 'object'
-          AND sources.status = 'active'
-      `,
+      activeSourceRows(
+        this.sql,
+        this.projectId,
+        refs.map((ref) => ({ kind: "object", ref }))
+      ),
       this.sql<ObjectOverrideRow[]>`
         WITH requested AS (
           SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter})
@@ -291,26 +282,11 @@ export class PgMaterializationStateReader {
         JOIN requested USING (source_type_id, source_id, link_id, target_type_id, target_id)
         WHERE links.project_id = ${this.projectId}
       `,
-      this.sql<PgOntologySourceAssertionRow[]>`
-        WITH requested AS (
-          SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
-            source_type_id TEXT, source_primary_id TEXT, link_id TEXT,
-            target_type_id TEXT, target_primary_id TEXT
-          )
-        )
-        SELECT rows.*
-        FROM ontology_source_rows AS rows
-        JOIN requested USING (
-          source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
-        )
-        JOIN ontology_sources AS sources
-          ON sources.project_id = rows.project_id
-         AND sources.source_id = rows.source_id
-         AND sources.materialization_id = rows.materialization_id
-        WHERE rows.project_id = ${this.projectId}
-          AND rows.entity_kind = 'link'
-          AND sources.status = 'active'
-      `,
+      activeSourceRows(
+        this.sql,
+        this.projectId,
+        refs.map((ref) => ({ kind: "link", ref }))
+      ),
       this.sql<LinkOverrideRow[]>`
         WITH requested AS (
           SELECT DISTINCT * FROM jsonb_to_recordset(${requestedParameter}) AS requested_values(
@@ -440,13 +416,14 @@ export class PgMaterializationStateReader {
           ON requested.source_type_id = rows.source_type_id
          AND requested.source_id = rows.source_primary_id
          AND requested.link_id = rows.link_id
-        JOIN ontology_sources AS sources
+        JOIN ontology_source_roots AS sources
           ON sources.project_id = rows.project_id
          AND sources.source_id = rows.source_id
          AND sources.materialization_id = rows.materialization_id
+         AND sources.root_sort_key = rows.root_sort_key
         WHERE rows.project_id = ${this.projectId}
           AND rows.entity_kind = 'link'
-          AND sources.status = 'active'
+          AND sources.active
       `,
       this.sql<LinkSlotOverrideRow[]>`
         WITH requested AS (
@@ -605,30 +582,32 @@ export class PgMaterializationStateReader {
           SELECT rows.source_type_id, rows.source_primary_id AS source_id,
             rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
           FROM ontology_source_rows AS rows
-          JOIN ontology_sources AS sources
+          JOIN ontology_source_roots AS sources
             ON sources.project_id = rows.project_id
            AND sources.source_id = rows.source_id
            AND sources.materialization_id = rows.materialization_id
+         AND sources.root_sort_key = rows.root_sort_key
           JOIN requested
             ON requested.object_type_id = rows.source_type_id
            AND requested.primary_id = rows.source_primary_id
           WHERE rows.project_id = ${this.projectId}
             AND rows.entity_kind = 'link'
-            AND sources.status = 'active'
+            AND sources.active
           UNION
           SELECT rows.source_type_id, rows.source_primary_id AS source_id,
             rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
           FROM ontology_source_rows AS rows
-          JOIN ontology_sources AS sources
+          JOIN ontology_source_roots AS sources
             ON sources.project_id = rows.project_id
            AND sources.source_id = rows.source_id
            AND sources.materialization_id = rows.materialization_id
+         AND sources.root_sort_key = rows.root_sort_key
           JOIN requested
             ON requested.object_type_id = rows.target_type_id
            AND requested.primary_id = rows.target_primary_id
           WHERE rows.project_id = ${this.projectId}
             AND rows.entity_kind = 'link'
-            AND sources.status = 'active'
+            AND sources.active
         ), selected AS (
           SELECT DISTINCT links.*,
             ${this.sql.unsafe(linkSortExpression("links"))} AS sort_key
@@ -699,14 +678,16 @@ export class PgMaterializationStateReader {
     sourceId: string,
     candidateMaterializationId: string,
     materializationIds: readonly string[],
-    identities: readonly Extract<ReplacementIdentity, { readonly kind: "link" }>[]
+    identities: readonly Extract<ReplacementIdentity, { readonly kind: "link" }>[],
+    incremental = false
   ): Promise<readonly SourceReplacementLinkState[]> {
     const refs = identities.map((identity) => identity.ref)
     const base = await this.linkStates(refs)
     const replacements = await this.replacementSources(
       sourceId,
       materializationIds,
-      refs.map((ref) => ({ kind: "link" as const, ref }))
+      refs.map((ref) => ({ kind: "link" as const, ref })),
+      incremental
     )
     const candidate = replacements.byMaterialization.get(candidateMaterializationId)
     return base.map((state, index) => {
@@ -813,29 +794,20 @@ export class PgMaterializationStateReader {
   private async replacementSources(
     sourceId: string,
     materializationIds: readonly string[],
-    refs: readonly ProjectionEntityRef[]
+    refs: readonly ProjectionEntityRef[],
+    incremental = false
   ): Promise<ReplacementSources> {
     if (materializationIds.length === 0 || refs.length === 0) {
       return { owned: new Set(), byMaterialization: new Map() }
     }
-    const keys = refs.map((ref) => ({
-      entity_kind: ref.kind,
-      entity_key: JSON.parse(projectionEntityKey(ref)) as unknown,
-    }))
-    const rows = await this.sql<PgOntologySourceAssertionRow[]>`
-      WITH requested AS (
-        SELECT *
-        FROM jsonb_to_recordset(${jsonParameter(this.sql, keys)})
-          AS requested_values(entity_kind TEXT, entity_key JSONB)
-      )
-      SELECT rows.* FROM ontology_source_rows AS rows
-      JOIN requested USING (entity_kind, entity_key)
-      WHERE rows.project_id = ${this.projectId}
-        AND rows.source_id = ${sourceId}
-        AND rows.materialization_id = ANY(
-          ${this.sql.array([...new Set(materializationIds)])}::text[]
-        )
-    `
+    const rows = await replacementAssertionRows(this.sql, {
+      projectId: this.projectId,
+      sourceId,
+      materializationId: materializationIds[0]!,
+      incremental,
+      includePrevious: materializationIds.length > 1,
+      refs,
+    })
     const owned = new Set<string>()
     const byMaterialization = new Map<string, Map<string, StoredSourceAssertion>>()
     for (const row of rows) {
@@ -858,20 +830,19 @@ export class PgMaterializationStateReader {
   }
 
   private async prepareReplacementObjects(input: ReplacementIdentityInput): Promise<void> {
-    const materializationIds = [
-      input.candidateMaterializationId,
-      ...(input.previousMaterializationId ? [input.previousMaterializationId] : []),
-    ]
+    const rows = replacementSourceRows(this.sql, {
+      projectId: this.projectId,
+      sourceId: input.sourceId,
+      materializationId: input.candidateMaterializationId,
+      incremental: input.incremental ?? false,
+    })
     await this.sql`
       WITH selected AS (
         SELECT DISTINCT object_type_id, primary_id,
           ${this.sql.unsafe(objectKeyExpression("rows"))} AS identity_key,
           ${this.sql.unsafe(objectSortExpression("rows"))} AS sort_key
-        FROM ontology_source_rows AS rows
-        WHERE project_id = ${this.projectId}
-          AND source_id = ${input.sourceId}
-          AND entity_kind = 'object'
-          AND materialization_id = ANY(${this.sql.array(materializationIds)}::text[])
+        FROM (${rows}) AS rows
+        WHERE entity_kind = 'object'
       )
       INSERT INTO ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
         session_id, entity_kind, identity_key, sort_key, diff_required
@@ -886,10 +857,12 @@ export class PgMaterializationStateReader {
 
   private async prepareReplacementLinks(input: ReplacementIdentityInput): Promise<void> {
     await this.sql`ANALYZE ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}`
-    const materializationIds = [
-      input.candidateMaterializationId,
-      ...(input.previousMaterializationId ? [input.previousMaterializationId] : []),
-    ]
+    const rows = replacementSourceRows(this.sql, {
+      projectId: this.projectId,
+      sourceId: input.sourceId,
+      materializationId: input.candidateMaterializationId,
+      incremental: input.incremental ?? false,
+    })
     await this.sql`
       WITH incident_objects AS (
         SELECT DISTINCT payload->'ref'->>'objectTypeId' AS object_type_id,
@@ -899,11 +872,8 @@ export class PgMaterializationStateReader {
       ), replacement_links AS (
         SELECT source_type_id, source_primary_id AS source_id, link_id,
           target_type_id, target_primary_id AS target_id
-        FROM ontology_source_rows
-        WHERE project_id = ${this.projectId}
-          AND source_id = ${input.sourceId}
-          AND entity_kind = 'link'
-          AND materialization_id = ANY(${this.sql.array(materializationIds)}::text[])
+        FROM (${rows}) AS rows
+        WHERE entity_kind = 'link'
       ), incident_links AS (
         SELECT links.source_type_id, links.source_id, links.link_id,
           links.target_type_id, links.target_id
@@ -942,30 +912,32 @@ export class PgMaterializationStateReader {
         SELECT rows.source_type_id, rows.source_primary_id AS source_id,
           rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
         FROM ontology_source_rows AS rows
-        JOIN ontology_sources AS sources
+        JOIN ontology_source_roots AS sources
           ON sources.project_id = rows.project_id
          AND sources.source_id = rows.source_id
          AND sources.materialization_id = rows.materialization_id
+         AND sources.root_sort_key = rows.root_sort_key
         JOIN incident_objects
           ON incident_objects.object_type_id = rows.source_type_id
          AND incident_objects.primary_id = rows.source_primary_id
         WHERE rows.project_id = ${this.projectId}
           AND rows.entity_kind = 'link'
-          AND sources.status = 'active'
+          AND sources.active
         UNION
         SELECT rows.source_type_id, rows.source_primary_id AS source_id,
           rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
         FROM ontology_source_rows AS rows
-        JOIN ontology_sources AS sources
+        JOIN ontology_source_roots AS sources
           ON sources.project_id = rows.project_id
          AND sources.source_id = rows.source_id
          AND sources.materialization_id = rows.materialization_id
+         AND sources.root_sort_key = rows.root_sort_key
         JOIN incident_objects
           ON incident_objects.object_type_id = rows.target_type_id
          AND incident_objects.primary_id = rows.target_primary_id
         WHERE rows.project_id = ${this.projectId}
           AND rows.entity_kind = 'link'
-          AND sources.status = 'active'
+          AND sources.active
       ), diff_links AS (
         SELECT * FROM replacement_links
         UNION SELECT * FROM incident_links

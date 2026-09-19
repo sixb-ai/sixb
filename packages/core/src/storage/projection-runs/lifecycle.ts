@@ -287,7 +287,7 @@ export function mergeProjectionRunProgress(
     const value = patch[key]
     if (value === undefined) continue
     assertProjectionRunCounter(value, key)
-    if (value < current[key]) {
+    if (value < (current[key] ?? 0)) {
       throw new ProjectionRunError(`[Sixb] Projection run ${key} must not decrease.`)
     }
     progress[key] = value
@@ -706,7 +706,10 @@ function projectionTargetsEqual(left: ProjectionTarget, right: ProjectionTarget)
 
 function assertProjectionRunProgress(progress: ProjectionRunProgress): void {
   for (const key of PROJECTION_RUN_PROGRESS_KEYS) {
-    assertProjectionRunCounter(progress[key], key)
+    assertProjectionRunCounter(
+      key === "sourceChangesRead" ? (progress[key] ?? 0) : progress[key],
+      key
+    )
   }
   if (progress.sourceRowsSkipped > progress.sourceRowsRead) {
     throw new ProjectionRunError(

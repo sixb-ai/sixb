@@ -4,12 +4,14 @@ import type {
   OntologyEditCommit,
   ProjectionCommitResult,
   ProjectionRunFinishInput,
+  ProjectionSourceRef,
   ProjectionSourceReplacement,
   TelemetryAppend,
   TelemetryCommitResult,
 } from "../materialization/model"
 import type { OntologyRegistry } from "../ontology"
 import type { ProjectionRegistry } from "../projections/registry"
+import type { OntologySourceRecord } from "../storage/ontology"
 import {
   createMaterializerContext,
   type MaterializerContext,
@@ -34,6 +36,7 @@ export interface OntologyMaterializerContract {
     commit(input: MaterializerCommand<OntologyEditCommit>): Promise<EditCommitResult>
   }
   readonly projections: {
+    getActive(source: ProjectionSourceRef): Promise<OntologySourceRecord | null>
     replace(
       input: MaterializerCommand<ProjectionSourceReplacement>
     ): Promise<ProjectionCommitResult>
@@ -50,6 +53,7 @@ export interface BoundOntologyMaterializer {
     commit(input: OntologyEditCommit): Promise<EditCommitResult>
   }
   readonly projections: {
+    getActive(source: ProjectionSourceRef): Promise<OntologySourceRecord | null>
     replace(input: ProjectionSourceReplacement): Promise<ProjectionCommitResult>
     finishRun(input: ProjectionRunFinishInput): Promise<void>
   }
@@ -64,6 +68,11 @@ export class OntologyMaterializer implements OntologyMaterializerContract {
       commitEdits(this.context, command),
   }
   readonly projections = {
+    getActive: (source: ProjectionSourceRef) =>
+      this.context.storage.ontology.sources.getActive({
+        projectId: this.context.projectId,
+        source,
+      }),
     replace: (command: MaterializerCommand<ProjectionSourceReplacement>) =>
       replaceProjection(this.context, command),
     finishRun: (command: MaterializerCommand<ProjectionRunFinishInput>) =>
@@ -80,6 +89,7 @@ export class OntologyMaterializer implements OntologyMaterializerContract {
         commit: (input: OntologyEditCommit) => this.edits.commit({ scope, input }),
       }),
       projections: Object.freeze({
+        getActive: (source: ProjectionSourceRef) => this.projections.getActive(source),
         replace: (input: ProjectionSourceReplacement) => this.projections.replace({ scope, input }),
         finishRun: (input: ProjectionRunFinishInput) =>
           this.projections.finishRun({ scope, input }),

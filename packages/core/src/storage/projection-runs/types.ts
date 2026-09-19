@@ -23,11 +23,14 @@ export interface ProjectionRunProgress {
   readonly sourceRowsRead: number
   /** Physical rows intentionally skipped because a required mapped value was blank. */
   readonly sourceRowsSkipped: number
+  /** Maximum complete change records consumed by one incremental attempt; not a recovery cursor. */
+  readonly sourceChangesRead?: number
 }
 
 const progressKeyFlags: Record<keyof ProjectionRunProgress, true> = {
   sourceRowsRead: true,
   sourceRowsSkipped: true,
+  sourceChangesRead: true,
 }
 
 export const PROJECTION_RUN_PROGRESS_KEYS = Object.keys(
@@ -35,9 +38,7 @@ export const PROJECTION_RUN_PROGRESS_KEYS = Object.keys(
 ) as readonly (keyof ProjectionRunProgress)[]
 
 export function zeroProjectionRunProgress(): ProjectionRunProgress {
-  const progress = {} as Record<keyof ProjectionRunProgress, number>
-  for (const key of PROJECTION_RUN_PROGRESS_KEYS) progress[key] = 0
-  return progress
+  return { sourceRowsRead: 0, sourceRowsSkipped: 0 }
 }
 
 export interface ProjectionTelemetryCheckpoint {

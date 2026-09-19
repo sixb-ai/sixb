@@ -287,6 +287,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 37,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "038-projection-source-roots",
+    status: "applied",
+    version: 38,
+  },
 ]
 
 afterEach(async () => {
@@ -1183,6 +1190,9 @@ describe("SQLite storage migrations", () => {
           .get()
       ).toEqual({ count: 5 })
       expect(readMemoryTableNames(db)).not.toContain("ontology_overrides")
+      sqliteStorageMigrations.steps
+        .find((step) => step.id === "038-projection-source-roots")!
+        .up(db)
       expect(
         new SqliteMaterializationStateReader(db, "project").linkState({
           source: { objectTypeId: "Device", primaryId: "ambiguous" },
@@ -1458,6 +1468,7 @@ describe("SQLite storage migrations", () => {
         "ontology_link_overrides",
         "ontology_object_overrides",
         "ontology_outbox",
+        "ontology_source_roots",
         "ontology_source_rows",
         "ontology_sources",
       ])

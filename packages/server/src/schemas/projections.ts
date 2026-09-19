@@ -36,6 +36,7 @@ const ProjectionRunBaseSchema = z.object({
   progress: z.object({
     sourceRowsRead: z.number(),
     sourceRowsSkipped: z.number(),
+    sourceChangesRead: z.number().optional(),
   }),
   queuedAt: z.string(),
   startedAt: z.string().optional(),

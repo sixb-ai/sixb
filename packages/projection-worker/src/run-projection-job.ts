@@ -22,6 +22,7 @@ import {
   type ProjectionRunRecord,
 } from "@sixb/core/storage"
 import { collectIdentityMismatches } from "./identity-mismatch"
+import { prepareIncrementalReplacement } from "./incremental-replacement"
 import {
   assertProjectionJobId,
   type ValidatedProjectionJob,
@@ -184,21 +185,36 @@ async function materializeProjection(
       })
     case "object":
     case "link": {
-      const entries = replacementEntries(
-        input,
-        validated.projection,
-        validated.dataset,
+      const incremental = await prepareIncrementalReplacement({
+        runtime: input.runtime,
+        projection: validated.projection,
+        dataset: validated.dataset,
         execution,
-        validated.version.rowCount,
-        signal
-      )
-      await getOntologyMutationRuntime(input.runtime).replaceProjection({
-        source: { projectionId: validated.projection.id },
-        datasetVersion: input.job.datasetVersion,
-        execution: execution.execution,
-        entries,
+        expectedRows: validated.version.rowCount,
         signal,
       })
+      try {
+        const entries =
+          incremental?.entries ??
+          replacementEntries(
+            input,
+            validated.projection,
+            validated.dataset,
+            execution,
+            validated.version.rowCount,
+            signal
+          )
+        await getOntologyMutationRuntime(input.runtime).replaceProjection({
+          source: { projectionId: validated.projection.id },
+          datasetVersion: input.job.datasetVersion,
+          execution: execution.execution,
+          entries,
+          ...(incremental ? { base: incremental.base } : {}),
+          signal,
+        })
+      } finally {
+        await incremental?.close()
+      }
       return { protocol: "replacement" }
     }
   }

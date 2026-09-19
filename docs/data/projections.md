@@ -302,9 +302,7 @@ sixb worker projection
 - Link overrides follow ontology cardinality: a `many` override owns one exact edge, while a `one`
   override owns the `(source, linkId)` slot. A projected target change therefore stays hidden until
   that slot is reset; it cannot create a second effective target beside the managed one.
-- Replacement snapshots are the only pre-0.1 source materialization protocol. Activation, the
-  durable `ontology_commits` record, and stable outbox envelopes commit atomically. Dataset CDC or
-  change-stream projection is deferred.
+- Activation, the durable commit, and its outbox events publish atomically.
 - An object projection requires one nonblank primary identity per dataset row and one row per object
   root. Repeated roots fail the run instead of merging partial object state.
 - A nonblank FK contributes a link from that object row. Blank FKs contribute no link. Model
@@ -313,6 +311,20 @@ sixb worker projection
 - Link projections require string source and target fields.
 - For an FK descriptor, `target` must be the link's declared target type or a subtype (via
   `extends`).
+
+## Incremental updates
+
+With DuckLake or InMemoryLakeStorage, object and link projections compare pinned dataset versions
+and recompute changed roots, including their FK links. Unchanged source values remain available
+for conflict resolution and resets. Retention removes only retired root versions.
+
+The first run, changed definitions, unavailable snapshots, or ambiguous identities use a complete
+replacement with the same validation rules. Comparing snapshots can still scan the dataset;
+incremental materialization does not imply incremental ingestion. Telemetry keeps its batch protocol.
+
+Atlas reports **Changes read** for incremental attempts and **Rows read** for complete reads.
+These counters describe input work, not the number of published objects or a recovery cursor.
+Unchanged roots are excluded from an incremental run’s commit counts.
 
 ## Related
 

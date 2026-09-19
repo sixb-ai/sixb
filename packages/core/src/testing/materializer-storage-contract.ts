@@ -19,6 +19,8 @@ import {
   createOntologyMaterializer,
   type OntologyEditOperation,
   ProjectionRegistry,
+  type ProjectionSourceBase,
+  type ProjectionSourceDeletion,
   type ProjectionSourceEntry,
 } from "../materializer"
 import type { ActionRunStorage, ProjectionRunStorage } from "../storage"
@@ -125,6 +127,175 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
   name: string,
   provider: MaterializerStorageContractProvider<TStorage>
 ): void {
+  // Regression: replacing previousSourceRows with only the latest manifest loses "a" at v3.
+  // Removing root retirement checks from cleanup deletes "a" when v1 becomes terminal.
+  test(`${name} retains current roots across deltas, cleanup, overrides and full replacement`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let ordinal = 0
+    const projectId = "materializer-storage-contract"
+    const source = { projectionId: devices.id }
+    const materializer = createOntologyMaterializer({
+      projectId,
+      ontology,
+      projections,
+      storage,
+      dependencies: { batching: { sourceStageRows: 1, statePageRows: 1, planChunkRows: 1 } },
+    })
+    const active = async (): Promise<ProjectionSourceBase> => {
+      const current = await materializer.projections.getActive(source)
+      if (!current?.lastCommitId) throw new Error("Missing source head")
+      return { materializationId: current.materializationId, lastCommitId: current.lastCommitId }
+    }
+    const replace = async (
+      values: readonly (ProjectionSourceEntry | ProjectionSourceDeletion)[],
+      base?: ProjectionSourceBase,
+      interleave?: { readonly version: number; readonly beforeSeal?: () => Promise<void> }
+    ) => {
+      const version = interleave?.version ?? ++ordinal
+      const datasetVersion = {
+        datasetId: devices.id,
+        versionId: `delta-v${version}`,
+        createdAt: `2026-01-${String(version).padStart(2, "0")}T00:00:00.000Z`,
+      }
+      const execution = await claim(storage, {
+        runId: `delta-run-${version}`,
+        projectionId: devices.id,
+        protocol: "replacement",
+        datasetVersion,
+      })
+      const bound = await projectionMaterializer(
+        materializer,
+        storage,
+        devices.id,
+        execution.projectionRunId
+      )
+      return bound.projections.replace({
+        source,
+        datasetVersion,
+        execution,
+        entries: (async function* () {
+          yield* entries(values)
+          await interleave?.beforeSeal?.()
+        })(),
+        ...(base ? { base } : {}),
+      })
+    }
+    const ref = (primaryId: string) => ({ objectTypeId: Device.id, primaryId })
+    const object = (id: string) => storage.objects.getByPrimaryId({ projectId, ...ref(id) })
+    const remove = (id: string): ProjectionSourceDeletion => ({
+      root: { kind: "object", ref: ref(id) },
+      deleted: true,
+    })
+    try {
+      await replace([sourceEntry("a", "A"), sourceEntry("b", "B", "a"), sourceEntry("c", "C")])
+      const stale = await active()
+      const initialA = await object("a")
+      const initialB = await object("b")
+      const transact = storage.transaction.bind(storage)
+      // Fail after finalize has moved the source pointers, written the commit and its outbox.
+      // Removing the enclosing transaction rollback must fail these head/value assertions.
+      storage.transaction = (run, options) =>
+        transact(async (tx) => {
+          const materializations = new Proxy(tx.ontology.materializations, {
+            get(target, key) {
+              if (key !== "finalize") return Reflect.get(target, key)
+              return async (input: Parameters<typeof target.finalize>[0]) => {
+                await target.finalize(input)
+                throw new Error("injected after source activation")
+              }
+            },
+          })
+          const ontology = new Proxy(tx.ontology, {
+            get(target, key) {
+              return key === "materializations" ? materializations : Reflect.get(target, key)
+            },
+          })
+          return run(
+            new Proxy(tx, {
+              get(target, key) {
+                return key === "ontology" ? ontology : Reflect.get(target, key)
+              },
+            })
+          )
+        }, options)
+      try {
+        await expect(replace([remove("a"), sourceEntry("b", "Failed B")], stale)).rejects.toThrow(
+          "injected after source activation"
+        )
+      } finally {
+        storage.transaction = transact
+      }
+      expect(await active()).toEqual(stale)
+      expect(await object("a")).toEqual(initialA)
+      expect(await object("b")).toEqual(initialB)
+      await replace([sourceEntry("b", "B2", "c")], await active())
+      await replace([sourceEntry("c", "C2")], await active())
+      expect(await object("a")).toEqual(initialA)
+      expect(await object("b")).toMatchObject({ properties: { name: "B2" } })
+      for (let pass = 0; pass < 20; pass++) {
+        const result = await storage.ontology.sources.cleanupTerminal({
+          projectId,
+          terminalBefore: "2100-01-01T00:00:00.000Z",
+          limit: 2,
+        })
+        if (result.rowsDeleted + result.materializationsDeleted === 0) break
+      }
+      const scoped = materializer.withScope(runtimeScope())
+      const edit = (operations: readonly OntologyEditOperation[]) =>
+        scoped.edits.commit({
+          mode: "atomic",
+          source: { kind: "runtime", requestId: `delta-edit-${++ordinal}` },
+          operations,
+          expectedObjects: [],
+          expectedLinks: [],
+          expectedLinkScopes: [],
+        })
+      await edit([
+        { id: "edit-a", kind: "object.upsert", ref: ref("a"), properties: { name: "Edited A" } },
+      ])
+      await edit([
+        { id: "reset-a", kind: "object.patch", ref: ref("a"), set: {}, unset: [], reset: ["name"] },
+      ])
+      expect(await object("a")).toMatchObject({ properties: { name: "A" } })
+      await replace([], await active())
+      expect(await object("a")).toMatchObject({ properties: { name: "A" } })
+      await expect(replace([remove("a")], stale)).rejects.toMatchObject({
+        kind: "source-materialization",
+      })
+      expect(await object("a")).not.toBeNull()
+      await replace([remove("a")], await active())
+      expect(await object("a")).toBeNull()
+      expect(await object("b")).toMatchObject({ properties: { name: "B2" } })
+      await replace([sourceEntry("b", "B3")])
+      expect(await object("b")).toMatchObject({ properties: { name: "B3" } })
+      expect(await object("c")).toBeNull()
+      await replace([], await active())
+      expect(await object("b")).toMatchObject({ properties: { name: "B3" } })
+      await replace([])
+      expect(await object("b")).toBeNull()
+
+      // A different run commits after base validation but before this candidate is sealed.
+      // Only checking the base before reading the delta would allow a stale publication here.
+      const base = await active()
+      const earlier = ++ordinal
+      const later = ++ordinal
+      await expect(
+        replace([sourceEntry("a", "Stale delta")], base, {
+          version: later,
+          beforeSeal: async () => {
+            await replace([sourceEntry("a", "Concurrent value")], base, { version: earlier })
+          },
+        })
+      ).rejects.toMatchObject({ kind: "source-materialization" })
+      expect(await object("a")).toMatchObject({ properties: { name: "Concurrent value" } })
+      await replace([sourceEntry("a", "Fresh delta")], await active())
+      expect(await object("a")).toMatchObject({ properties: { name: "Fresh delta" } })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
   test(`${name} persists replacement, Action, and telemetry commits atomically`, async () => {
     const createdStorage = await provider.createStorage()
     const storage = requireContractStorage(createdStorage)
@@ -811,7 +982,7 @@ function sourceEntry(id: string, name: string, parentId?: string): ProjectionSou
   }
 }
 
-async function* entries(values: readonly ProjectionSourceEntry[]) {
+async function* entries(values: readonly (ProjectionSourceEntry | ProjectionSourceDeletion)[]) {
   for (const value of values) yield value
 }
 

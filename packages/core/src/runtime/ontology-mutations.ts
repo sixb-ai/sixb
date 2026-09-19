@@ -3,13 +3,16 @@ import type {
   OntologyEditCommit,
   ProjectionCommitResult,
   ProjectionRunFinishInput,
+  ProjectionSourceRef,
   ProjectionSourceReplacement,
   TelemetryAppend,
   TelemetryCommitResult,
 } from "../materialization/model"
 import type { BoundOntologyMaterializer } from "../materializer"
+import type { OntologySourceRecord } from "../storage/ontology"
 
 export interface OntologyMutationRuntime {
+  getProjectionSource?(source: ProjectionSourceRef): Promise<OntologySourceRecord | null>
   commitEdits(input: OntologyEditCommit): Promise<EditCommitResult>
   replaceProjection(input: ProjectionSourceReplacement): Promise<ProjectionCommitResult>
   finishProjection(input: ProjectionRunFinishInput): Promise<void>
@@ -55,6 +58,7 @@ export function createOntologyMutationRuntime(input: {
   readonly notifyCommittedFacts: () => void
 }): OntologyMutationRuntime {
   const runtime: OntologyMutationRuntime = {
+    getProjectionSource: (source) => input.materializer.projections.getActive(source),
     commitEdits: (command) =>
       commitAndNotify(() => input.materializer.edits.commit(command), input.notifyCommittedFacts),
     replaceProjection: (command) =>

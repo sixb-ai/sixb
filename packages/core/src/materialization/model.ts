@@ -169,11 +169,24 @@ export interface ProjectionSourceEntry {
   readonly assertions: readonly ProjectionSourceAssertion[]
 }
 
+export interface ProjectionSourceDeletion {
+  readonly root: ProjectionEntityRef
+  readonly deleted: true
+}
+
+/** Exact committed source state against which a complete delta was calculated. */
+export interface ProjectionSourceBase {
+  readonly materializationId: string
+  readonly lastCommitId: string
+}
+
 export interface ProjectionSourceReplacement {
   readonly source: ProjectionSourceRef
   readonly datasetVersion: PinnedDatasetVersion
   readonly execution: ProjectionExecution
-  readonly entries: AsyncIterable<ProjectionSourceEntry>
+  /** Without a base, entries replace the whole source. With a base, unchanged roots are retained. */
+  readonly entries: AsyncIterable<ProjectionSourceEntry | ProjectionSourceDeletion>
+  readonly base?: ProjectionSourceBase
   readonly signal?: AbortSignal
 }
 
