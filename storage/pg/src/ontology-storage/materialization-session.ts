@@ -45,6 +45,7 @@ export interface PgChunkSequenceProgress {
 }
 
 export class PgMaterializationSessionState extends ProviderMaterializationSessionState {
+  stagedWorkCount = 0
   appliedPlanCursor: WorkCursor | null = null
   appliedEventCursor: WorkCursor | null = null
 }
@@ -157,6 +158,7 @@ export class PgMaterializationSessions {
       }
       throw error
     }
+    session.stagedWorkCount += records.length
   }
 
   async *stream(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
@@ -169,6 +171,11 @@ export class PgMaterializationSessions {
       )
     }
     stream.started = true
+    if (!session.workSealed && session.stagedWorkCount >= 10_000) {
+      // Planning has finished writing work. Refresh once before draining a large population;
+      // small edits avoid the extra database round trip.
+      await this.sql`ANALYZE ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}`
+    }
     session.workSealed = true
     let cursor: WorkCursor | null = null
     while (true) {
@@ -199,20 +206,27 @@ export class PgMaterializationSessions {
     const keys = refs.map(
       (ref) => `object-existence:${JSON.stringify([ref.objectTypeId, ref.primaryId])}`
     )
+    // OFFSET 0 keeps each unique-key lookup parameterized instead of letting the planner
+    // flatten the lateral join into a scan of the entire temporary work table.
     const rows = await this.sql<{ readonly unique_key: string; readonly payload: unknown }[]>`
-      SELECT unique_key, payload FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-      WHERE session_id = ${session.id}
-        AND unique_key = ANY(${this.sql.array(keys)}::text[])
-        AND kind = 'object-existence'
+      SELECT work.unique_key, work.payload
+      FROM unnest(${this.sql.array(keys)}::text[]) AS requested(unique_key)
+      CROSS JOIN LATERAL (
+        SELECT unique_key, payload FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
+        WHERE session_id = ${session.id} AND unique_key = requested.unique_key
+        OFFSET 0
+      ) AS work
     `
     const found = new Map(rows.map((row) => [row.unique_key, row.payload] as const))
     return keys.flatMap((key) => {
       const payload = found.get(key)
       if (!payload) return []
-      const record = structuredClone(payload) as Extract<
-        MaterializationWorkRecord,
-        { readonly kind: "object-existence" }
-      >
+      // prepareMaterializationWork owns this unique-key namespace. Filtering kind in SQL
+      // makes stale temporary-table statistics favor a scan over exact indexed lookups.
+      const record = structuredClone(payload) as MaterializationWorkRecord
+      if (record.kind !== "object-existence") {
+        invalidCorrelation("Object existence work has an invalid kind.")
+      }
       return [{ ref: record.ref, exists: record.exists }]
     })
   }

@@ -42,6 +42,7 @@ default Redis URL.
 | --- | --- | --- | --- |
 | `connection` | `RedisBrokerConnectionOptions` | `undefined` | Redis connection and command settings. Supports `url`, `commandTimeoutMs`, `connectionTimeout`, `idleTimeout`, `autoReconnect`, `maxRetries`, `enableOfflineQueue`, `enableAutoPipelining`, and `tls`. |
 | `prefix` | `string` | `"sixb:broker"` | Redis key prefix. |
+| `streamRetention` | `BrokerStreamRetention` | `{}` | Per-stream retention overrides at creation. |
 | `dedupeTtlMs` | `number` | `120000` | Retry dedupe window for `idempotencyKey`. |
 | `readBatchSize` | `number` | `1000` | `XRANGE COUNT` page size for retained reads. |
 | `subscribeBatchSize` | `number` | `100` | `XREAD COUNT` page size for subscriptions. |
@@ -118,6 +119,9 @@ or its connection fails, the broker replaces that client and resumes from the
 last observed cursor.
 
 ### Retention
+
+Set `streamRetention: { __events: { maxRecords: 100_000 } }` on `RedisBroker` to cap events.
+Supplied limits must be positive safe integers; omitted limits keep the runtime's defaults.
 
 `maxRecords` maps to exact `XTRIM MAXLEN`, and `maxAgeMs` maps to exact
 `XTRIM MINID`. Trimming happens during append. Existing metadata is not rewritten

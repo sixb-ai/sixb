@@ -377,6 +377,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("035-share-grants", shareGrantsSql),
     pgSql("036-share-sessions", shareSessionsSql),
     pgSql("037-execution-requester-groups", executionRequesterGroupsSql),
+    pgSql("038-outbox-publication-order", outboxPublicationOrderSql),
   ],
 })
 
@@ -391,5 +392,8 @@ interface PostgresMigrationRow {
 }
 
 import executionRequesterGroupsSql from "./migrations/037-execution-requester-groups.sql" with {
+  type: "text",
+}
+import outboxPublicationOrderSql from "./migrations/038-outbox-publication-order.sql" with {
   type: "text",
 }

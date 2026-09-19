@@ -21,6 +21,9 @@ export interface BrokerStreamDefinition {
   readonly retention?: BrokerRetention
 }
 
+/** Per-stream overrides at creation; omitted limits keep the stream's own defaults. */
+export type BrokerStreamRetention = Readonly<Record<string, BrokerRetention>>
+
 export interface BrokerRecordInput {
   readonly name?: string
   readonly key?: string

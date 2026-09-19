@@ -5,6 +5,8 @@ import {
   type BrokerRecord,
   type BrokerRecordInput,
   type BrokerStreamDefinition,
+  type BrokerStreamRetention,
+  createStreamRetentionResolver,
 } from "@sixb/core/broker"
 import {
   type RedisBrokerCommandClient,
@@ -44,6 +46,7 @@ interface AppendBatchResult {
 }
 
 export interface RedisBrokerOptions {
+  readonly streamRetention?: BrokerStreamRetention
   /** Bun Redis client options, commonly `{ url: "redis://localhost:6379" }`. */
   readonly connection?: RedisBrokerConnectionOptions
   /** Redis key prefix. Defaults to `"sixb:broker"`. */
@@ -78,8 +81,10 @@ export class RedisBroker implements Broker {
   private readonly subscribeBatchSize: number
   private readonly subscribeBlockMs: number
   private closed = false
+  private readonly resolveStream: ReturnType<typeof createStreamRetentionResolver>
 
   constructor(options: RedisBrokerOptions = {}) {
+    this.resolveStream = createStreamRetentionResolver(options.streamRetention)
     const prefix = options.prefix ?? DEFAULT_PREFIX
     assertPrefix(prefix)
 
@@ -95,7 +100,7 @@ export class RedisBroker implements Broker {
 
   async ensureStream(params: { projectId: string; stream: BrokerStreamDefinition }): Promise<void> {
     this.assertOpen()
-    await this.streamManager.ensureStream(params.projectId, params.stream)
+    await this.streamManager.ensureStream(params.projectId, this.resolveStream(params.stream))
   }
 
   async append(params: {

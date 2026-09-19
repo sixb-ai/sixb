@@ -649,13 +649,19 @@ export class PgMaterializationStateReader {
     input: ReplacementIdentityInput
   ): AsyncIterable<ReplacementIdentity[]> {
     await this.prepareReplacementIdentities(input)
+    // Temporary tables are not auto-analyzed. Refresh after each identity population is
+    // prepared so the planner can choose the ordered index for its bounded pages.
+    await this.sql`ANALYZE ${this.sql(PG_REPLACEMENT_WORK_TABLE)}`
     let cursor: string | null = null
     while (true) {
+      // Keep the next-page bound indexable in generic prepared plans. A nullable OR
+      // makes PostgreSQL revisit the preceding pages before applying the cursor filter.
+      const after = cursor === null ? this.sql`` : this.sql`AND sort_key > ${cursor}`
       const rows: ReplacementWorkRow[] = await this.sql<ReplacementWorkRow[]>`
         SELECT entity_kind, identity_key, sort_key, diff_required
         FROM ${this.sql(PG_REPLACEMENT_WORK_TABLE)}
         WHERE session_id = ${input.sessionId} AND entity_kind = ${input.kind}
-          AND (${cursor}::text IS NULL OR sort_key > ${cursor})
+          ${after}
         ORDER BY sort_key
         LIMIT ${input.pageRows}
       `
@@ -879,6 +885,7 @@ export class PgMaterializationStateReader {
   }
 
   private async prepareReplacementLinks(input: ReplacementIdentityInput): Promise<void> {
+    await this.sql`ANALYZE ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}`
     const materializationIds = [
       input.candidateMaterializationId,
       ...(input.previousMaterializationId ? [input.previousMaterializationId] : []),

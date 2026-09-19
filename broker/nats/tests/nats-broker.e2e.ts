@@ -15,6 +15,38 @@ runBrokerContractSuite("NatsBroker", {
 })
 
 describe("NatsBroker", () => {
+  // Bypass resolveStream() in ensureStream() to reproduce the failed count/byte assertions.
+  test("applies configured retention only to the named streams", async () => {
+    const { broker, projectId, cleanup } = createTestBroker({
+      streamRetention: {
+        __events: { maxRecords: 2 },
+        __bytes: { maxBytes: 1024 },
+      },
+    })
+    try {
+      for (const id of ["__events", "__logs", "__bytes"]) {
+        await broker.ensureStream({ projectId, stream: { id, retention: { maxRecords: 10 } } })
+        const appended = await broker.append({
+          projectId,
+          streamId: id,
+          records: Array.from({ length: 10 }, (_, n) => ({
+            payload: { n, text: "x".repeat(256) },
+          })),
+        })
+        const { records } = await broker.read({ projectId, streamId: id })
+        if (id === "__events") expect(records).toEqual(appended.slice(-2))
+        else if (id === "__logs") expect(records).toEqual(appended)
+        else {
+          expect(records.length).toBeGreaterThan(0)
+          expect(records.length).toBeLessThan(10)
+          expect(records).toEqual(appended.slice(-records.length))
+        }
+      }
+    } finally {
+      await cleanup()
+    }
+  })
+
   test("deduplicates records by idempotencyKey within the JetStream duplicate window", async () => {
     const { broker, projectId, cleanup } = createTestBroker()
     const stream = { id: "__events" }

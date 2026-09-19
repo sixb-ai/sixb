@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { RedisBroker } from "../src"
+import { RedisBroker, type RedisBrokerOptions } from "../src"
 
 export function requireRedisUrl(): string {
   const url = process.env["SIXB_REDIS_BROKER_URL"]
@@ -16,7 +16,7 @@ export function requireRedisUrl(): string {
  * unique prefix and project id so shared contract tests can use stable stream
  * names without colliding with parallel runs.
  */
-export function createTestBroker(): {
+export function createTestBroker(options: Pick<RedisBrokerOptions, "streamRetention"> = {}): {
   broker: RedisBroker
   projectId: string
   cleanup: () => Promise<void>
@@ -26,6 +26,7 @@ export function createTestBroker(): {
     connection: { url: requireRedisUrl() },
     prefix: `sixb:test:broker:${suffix}`,
     subscribeBlockMs: 100,
+    ...options,
   })
 
   const cleanup = async (): Promise<void> => {

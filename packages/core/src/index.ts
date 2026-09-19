@@ -163,7 +163,13 @@ export {
 
 // ── Broker ─────────────────────────────────────────────────
 
-export type { Broker, BrokerCursor } from "./broker"
+export type {
+  Broker,
+  BrokerCursor,
+  BrokerRetention,
+  BrokerStreamRetention,
+  InMemoryBrokerOptions,
+} from "./broker"
 export { InMemoryBroker } from "./broker"
 export type { JsonValue, ReadonlyJsonValue } from "./json"
 export {

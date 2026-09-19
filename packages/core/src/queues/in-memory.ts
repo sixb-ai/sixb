@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { SixbErrorCode } from "../errors/types"
 import { QueueError } from "./errors"
+import { IndexedHeap } from "./indexed-heap"
 import type {
   ActionQueueJobFailureCode,
   ActionRunRequestedQueueJob,
@@ -29,6 +30,9 @@ interface QueueRecord<TQueueJob extends QueueJob = QueueJob> {
   readonly sequence: number
   readonly queueId: string
   job: TQueueJob
+  availableAtMs: number
+  readonly createdAtMs: number
+  leaseExpiryMs: number | null
   // A leased job stays "queued" until a worker completes or fails it.
   state: QueueRecordState
   failure: QueueJobFailure | null
@@ -63,25 +67,15 @@ function clearLease(record: QueueRecord): void {
   record.leaseId = null
   record.claimedAt = null
   record.leaseExpiresAt = null
+  record.leaseExpiryMs = null
 }
 
 // Best-effort ordering is part of the contract; this keeps the in-memory provider deterministic.
 function compareQueueRecords(left: QueueRecord, right: QueueRecord): number {
-  const availableDifference =
-    parseTimestamp(left.job.availableAt, "job.availableAt") -
-    parseTimestamp(right.job.availableAt, "job.availableAt")
-
-  if (availableDifference !== 0) {
-    return availableDifference
-  }
-
-  const createdDifference =
-    parseTimestamp(left.job.createdAt, "job.createdAt") -
-    parseTimestamp(right.job.createdAt, "job.createdAt")
-
-  if (createdDifference !== 0) {
-    return createdDifference
-  }
+  const availableDifference = left.availableAtMs - right.availableAtMs
+  if (availableDifference !== 0) return availableDifference
+  const createdDifference = left.createdAtMs - right.createdAtMs
+  if (createdDifference !== 0) return createdDifference
 
   return left.sequence - right.sequence
 }
@@ -107,11 +101,18 @@ function createQueueJob<TQueueJob extends QueueJob>(
 }
 
 function leaseExpiresAtMs(record: QueueRecord): number | null {
-  if (!record.leaseId || !record.leaseExpiresAt) {
-    return null
-  }
+  return record.leaseExpiryMs
+}
 
-  return parseTimestamp(record.leaseExpiresAt, "leaseExpiresAt")
+function eligibleAt(record: QueueRecord): number {
+  return Math.max(record.availableAtMs, record.leaseExpiryMs ?? -Infinity)
+}
+
+interface QueueLane {
+  // Terminal records remain here for caller-id deduplication, never in the delivery indexes.
+  readonly records: Map<string, QueueRecord>
+  readonly ready: IndexedHeap<QueueRecord>
+  readonly waiting: IndexedHeap<QueueRecord>
 }
 
 function toClaimedQueueJob<TQueueJob extends QueueJob>(
@@ -130,27 +131,26 @@ function toClaimedQueueJob<TQueueJob extends QueueJob>(
 }
 
 class InMemoryQueueStore {
-  private readonly recordsByProject = new Map<string, QueueRecord[]>()
+  private readonly projects = new Map<string, Map<string, QueueLane>>()
   private nextSequence = 1
 
   add<TQueueJob extends QueueJob>(projectId: string, queueId: string, job: TQueueJob): void {
-    const records = this.getOrCreateRecords(projectId)
-    records.push({
-      sequence: this.nextSequence,
+    const lane = this.lane(projectId, queueId)
+    const record: QueueRecord = {
+      sequence: this.nextSequence++,
       queueId,
       job,
+      availableAtMs: parseTimestamp(job.availableAt, "job.availableAt"),
+      createdAtMs: parseTimestamp(job.createdAt, "job.createdAt"),
+      leaseExpiryMs: null,
       state: "queued",
       failure: null,
       leaseId: null,
       claimedAt: null,
       leaseExpiresAt: null,
-    })
-    this.nextSequence += 1
-  }
-
-  list<TQueueJob extends QueueJob>(projectId: string, queueId: string): QueueRecord<TQueueJob>[] {
-    const records = this.recordsByProject.get(projectId) ?? []
-    return records.filter((record) => record.queueId === queueId) as QueueRecord<TQueueJob>[]
+    }
+    lane.records.set(job.id, record)
+    this.schedule(projectId, record, Date.now())
   }
 
   find<TQueueJob extends QueueJob>(
@@ -158,20 +158,67 @@ class InMemoryQueueStore {
     queueId: string,
     jobId: string
   ): QueueRecord<TQueueJob> | null {
-    return (
-      this.list<TQueueJob>(projectId, queueId).find((record) => record.job.id === jobId) ?? null
-    )
+    return (this.projects.get(projectId)?.get(queueId)?.records.get(jobId) ??
+      null) as QueueRecord<TQueueJob> | null
   }
 
-  private getOrCreateRecords(projectId: string): QueueRecord[] {
-    const existing = this.recordsByProject.get(projectId)
-    if (existing) {
-      return existing
+  schedule(projectId: string, record: QueueRecord, now: number): void {
+    const lane = this.lane(projectId, record.queueId)
+    if (record.state !== "queued") {
+      lane.ready.delete(record)
+      lane.waiting.delete(record)
+    } else if (eligibleAt(record) <= now) {
+      lane.waiting.delete(record)
+      lane.ready.set(record)
+    } else {
+      lane.ready.delete(record)
+      lane.waiting.set(record)
     }
+  }
 
-    const records: QueueRecord[] = []
-    this.recordsByProject.set(projectId, records)
-    return records
+  takeReady<TQueueJob extends QueueJob>(
+    projectId: string,
+    queueId: string,
+    now: number,
+    limit: number
+  ): QueueRecord<TQueueJob>[] {
+    const lane = this.projects.get(projectId)?.get(queueId)
+    if (!lane) return []
+    // Wake delayed jobs and expired leases, then order all ready jobs by the original contract.
+    // A lease expiry controls eligibility, not the priority of a redelivered job.
+    while (lane.waiting.peek() && eligibleAt(lane.waiting.peek()!) <= now) {
+      lane.ready.set(lane.waiting.pop()!)
+    }
+    const selected: QueueRecord[] = []
+    while (selected.length < limit) {
+      const record = lane.ready.peek()
+      if (!record || record.availableAtMs > now) break
+      lane.ready.pop()
+      // A backwards wall-clock adjustment can make a previously expired lease live again.
+      if (eligibleAt(record) > now) lane.waiting.set(record)
+      else selected.push(record)
+    }
+    return selected as QueueRecord<TQueueJob>[]
+  }
+
+  private lane(projectId: string, queueId: string): QueueLane {
+    let queues = this.projects.get(projectId)
+    if (!queues) {
+      queues = new Map()
+      this.projects.set(projectId, queues)
+    }
+    let lane = queues.get(queueId)
+    if (!lane) {
+      lane = {
+        records: new Map(),
+        ready: new IndexedHeap(compareQueueRecords),
+        waiting: new IndexedHeap(
+          (left, right) => eligibleAt(left) - eligibleAt(right) || left.sequence - right.sequence
+        ),
+      }
+      queues.set(queueId, lane)
+    }
+    return lane
   }
 }
 
@@ -219,8 +266,8 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     assertNonEmpty(params.projectId, "projectId")
     assertNonEmpty(params.workerId, "workerId")
 
-    const limit = params.limit ?? 1
-    if (limit <= 0) {
+    const limit = Math.trunc(params.limit ?? 1)
+    if (!(limit > 0)) {
       return []
     }
 
@@ -228,24 +275,11 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     assertPositiveNumber(leaseMs, "leaseMs")
 
     const now = Date.now()
-    const claimable = this.store
-      .list<TQueueJob>(params.projectId, this.queueId)
-      .filter((record) => {
-        if (record.state !== "queued") {
-          return false
-        }
-
-        if (parseTimestamp(record.job.availableAt, "job.availableAt") > now) {
-          return false
-        }
-
-        const expiresAt = leaseExpiresAtMs(record)
-        return expiresAt === null || expiresAt <= now
-      })
-      .sort(compareQueueRecords)
-      .slice(0, limit)
-
     const claimedAt = new Date(now).toISOString()
+    // Validate before removing candidates, and cache the same millisecond precision we return.
+    const leaseExpiry = new Date(now + leaseMs)
+    const leaseExpiresAt = leaseExpiry.toISOString()
+    const claimable = this.store.takeReady<TQueueJob>(params.projectId, this.queueId, now, limit)
 
     return claimable.map((record) => {
       // Attempts count claims so redelivery after lease expiry or retry is visible to workers.
@@ -255,7 +289,9 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
       }
       record.leaseId = randomUUID()
       record.claimedAt = claimedAt
-      record.leaseExpiresAt = new Date(now + leaseMs).toISOString()
+      record.leaseExpiresAt = leaseExpiresAt
+      record.leaseExpiryMs = leaseExpiry.getTime()
+      this.store.schedule(params.projectId, record, now)
 
       return toClaimedQueueJob(record)
     })
@@ -265,6 +301,7 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     const record = this.requireActiveLease(params)
     record.state = "completed"
     clearLease(record)
+    this.store.schedule(params.projectId, record, Date.now())
   }
 
   async retry(params: {
@@ -275,13 +312,15 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
   }): Promise<void> {
     const record = this.requireActiveLease(params)
     const availableAt = params.availableAt ?? new Date().toISOString()
-    parseTimestamp(availableAt, "availableAt")
+    const availableAtMs = parseTimestamp(availableAt, "availableAt")
 
+    record.availableAtMs = availableAtMs
     record.job = {
       ...record.job,
       availableAt,
     }
     clearLease(record)
+    this.store.schedule(params.projectId, record, Date.now())
   }
 
   async fail(params: {
@@ -294,6 +333,7 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     record.state = "failed"
     record.failure = structuredClone(params.failure)
     clearLease(record)
+    this.store.schedule(params.projectId, record, Date.now())
   }
 
   async renewLease(params: {
@@ -319,7 +359,10 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
       return null
     }
 
-    record.leaseExpiresAt = new Date(now + params.leaseMs).toISOString()
+    const leaseExpiry = new Date(now + params.leaseMs)
+    record.leaseExpiresAt = leaseExpiry.toISOString()
+    record.leaseExpiryMs = leaseExpiry.getTime()
+    this.store.schedule(params.projectId, record, now)
     return toClaimedQueueJob(record)
   }
 

@@ -1,11 +1,13 @@
 import { getInvalidJsonValueReason, type JsonValue } from "../json"
 import { BrokerCursorExpiredError, BrokerError } from "./errors"
+import { createStreamRetentionResolver } from "./retention"
 import type {
   Broker,
   BrokerPage,
   BrokerRecord,
   BrokerRecordInput,
   BrokerStreamDefinition,
+  BrokerStreamRetention,
 } from "./types"
 
 // Payloads are validated by assertBrokerPayload above the call site, so we can
@@ -37,15 +39,24 @@ interface Subscription {
   readonly handler: (records: readonly BrokerRecord[]) => void
 }
 
+export interface InMemoryBrokerOptions {
+  readonly streamRetention?: BrokerStreamRetention
+}
+
 export class InMemoryBroker implements Broker {
   readonly scope = "process" as const
   private readonly streams = new Map<string, StoredStream>()
   private readonly subscriptions = new Set<Subscription>()
+  private readonly resolveStream: ReturnType<typeof createStreamRetentionResolver>
+
+  constructor(options: InMemoryBrokerOptions = {}) {
+    this.resolveStream = createStreamRetentionResolver(options.streamRetention)
+  }
 
   async ensureStream(params: { projectId: string; stream: BrokerStreamDefinition }): Promise<void> {
     assertProjectId(params.projectId)
     assertStream(params.stream)
-    this.getOrCreateStream(params.projectId, params.stream)
+    this.getOrCreateStream(params.projectId, this.resolveStream(params.stream))
   }
 
   async append(params: {
@@ -378,11 +389,9 @@ export class InMemoryBroker implements Broker {
     let cursor = filters.afterCursor
     let stoppedAt = records.length
 
-    for (let index = 0; index < records.length; index += 1) {
+    const start = afterCursor === undefined ? 0 : cursorBoundary(records, afterCursor, true)
+    for (let index = start; index < records.length; index += 1) {
       const record = records[index]!
-      if (afterCursor !== undefined && BigInt(record.cursor) <= afterCursor) {
-        continue
-      }
       cursor = record.cursor
       if (!matchesFilters(record, names, keys)) {
         continue
@@ -397,7 +406,7 @@ export class InMemoryBroker implements Broker {
     return {
       records: result,
       cursor,
-      hasMore: records.slice(stoppedAt).some((record) => matchesFilters(record, names, keys)),
+      hasMore: hasMatchingRecord(records, stoppedAt, records.length, names, keys),
     }
   }
 
@@ -417,11 +426,12 @@ export class InMemoryBroker implements Broker {
     let cursor = filters.beforeCursor
     let stoppedAt = -1
 
-    for (let index = records.length - 1; index >= 0; index -= 1) {
+    const start =
+      beforeCursor === undefined
+        ? records.length - 1
+        : cursorBoundary(records, beforeCursor, false) - 1
+    for (let index = start; index >= 0; index -= 1) {
       const record = records[index]!
-      if (beforeCursor !== undefined && BigInt(record.cursor) >= beforeCursor) {
-        continue
-      }
       cursor = record.cursor
       if (!matchesFilters(record, names, keys)) {
         continue
@@ -436,9 +446,7 @@ export class InMemoryBroker implements Broker {
     return {
       records: reversed.reverse(),
       cursor,
-      hasMore:
-        stoppedAt >= 0 &&
-        records.slice(0, stoppedAt + 1).some((record) => matchesFilters(record, names, keys)),
+      hasMore: stoppedAt >= 0 && hasMatchingRecord(records, 0, stoppedAt + 1, names, keys),
     }
   }
 }
@@ -515,4 +523,33 @@ function assertCursor(cursor: string | undefined): void {
       cause: error,
     })
   }
+}
+
+function cursorBoundary(records: readonly StoredRecord[], cursor: bigint, after: boolean): number {
+  // Retained cursors remain sorted even after retention removes older records.
+  let low = 0
+  let high = records.length
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2)
+    const value = BigInt(records[middle]!.cursor)
+    if (value < cursor || (after && value === cursor)) {
+      low = middle + 1
+    } else {
+      high = middle
+    }
+  }
+  return low
+}
+
+function hasMatchingRecord(
+  records: readonly StoredRecord[],
+  start: number,
+  end: number,
+  names?: ReadonlySet<string>,
+  keys?: ReadonlySet<string>
+): boolean {
+  for (let i = start; i < end; i++) {
+    if (matchesFilters(records[i]!, names, keys)) return true
+  }
+  return false
 }
