@@ -86,7 +86,6 @@ import {
   publicLinkSlotOverride,
   publicObjectOverride,
   storedPoint,
-  storedSource,
   storedSourceLink,
   storedSourceObject,
   uniqueBy,
@@ -117,6 +116,7 @@ import {
   projectEntityKey,
   sourceMaterializationKey,
 } from "./shared-state"
+import { activateSourceRoots, previousSourceRows } from "./source-roots"
 
 export interface SessionState {
   readonly providerToken: object
@@ -160,7 +160,7 @@ export interface ReplacementLinkWork {
 export interface ReplacementSessionState {
   readonly sourceId: string
   readonly candidateMaterializationId: string
-  readonly previous: InMemorySourceMaterialization | undefined
+  readonly owned: Set<string>
   readonly candidate: InMemorySourceMaterialization
   readonly objects: Map<string, ReplacementObjectWork>
   readonly links: Map<string, ReplacementLinkWork>
@@ -432,8 +432,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       for (const entry of selected) {
         const key = projectionEntityKey({ kind: "link", ref: entry.ref })
         const base = await this.linkState(session, entry.ref)
-        const ownedByReplacement =
-          replacement.previous?.rowsByEntity.has(key) || replacement.candidate.rowsByEntity.has(key)
+        const ownedByReplacement = replacement.owned.has(key)
         links.push({
           ref: base.ref,
           candidateSource: ownedByReplacement
@@ -788,6 +787,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           }
         )
       }
+      activateSourceRoots(this.state, candidate, activation)
       this.state.sourceMaterializations.set(candidateKey, {
         ...candidate,
         status: "active",
@@ -872,7 +872,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     const replacement: ReplacementSessionState = {
       sourceId,
       candidateMaterializationId: input.candidateMaterializationId,
-      previous,
+      owned: new Set(),
       candidate,
       objects: new Map(),
       links: new Map(),
@@ -886,9 +886,12 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       linkStreamCompleted: false,
       linksExpanded: false,
     }
-    for (const materialization of [previous, candidate]) {
-      if (!materialization) continue
-      for (const row of materialization.rowsByEntity.values()) {
+    for (const rows of [
+      previousSourceRows(this.state, candidate),
+      candidate.rowsByEntity.values(),
+    ]) {
+      for (const row of rows) {
+        replacement.owned.add(projectionEntityKey(row.assertion))
         if (row.assertion.kind === "object") {
           const ref = row.assertion.ref
           replacement.objects.set(objectRefKey(ref), { ref, sortKey: objectRefSortKey(ref) })
@@ -915,53 +918,53 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       incident.has(objectRefKey(ref.source)) || incident.has(objectRefKey(ref.target))
 
     const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
-    adapter.visitExactLinks(projectId, (row) => {
-      const ref = linkRef(row)
-      if (touchesIncident(ref)) addReplacementLink(replacement, ref, true)
-    })
-    for (const override of this.state.linkOverrides.values()) {
-      if (override.projectId !== projectId) continue
-      if (touchesIncident(override.ref)) addReplacementLink(replacement, override.ref, true)
-    }
-    for (const override of this.state.linkSlotOverrides.values()) {
-      if (override.projectId !== projectId) continue
-      const ref = {
-        source: override.ref.source,
-        linkId: override.ref.linkId,
-        target: override.value.target,
+    if (incident.size > 0) {
+      adapter.visitExactLinks(projectId, (row) => {
+        const ref = linkRef(row)
+        if (touchesIncident(ref)) addReplacementLink(replacement, ref, true)
+      })
+      for (const override of this.state.linkOverrides.values()) {
+        if (override.projectId !== projectId) continue
+        if (touchesIncident(override.ref)) addReplacementLink(replacement, override.ref, true)
       }
-      if (touchesIncident(ref)) addReplacementLink(replacement, ref, true)
-    }
-    for (const active of this.state.sourceMaterializations.values()) {
-      if (active.projectId !== projectId || active.status !== "active") continue
-      for (const row of active.rowsByEntity.values()) {
-        if (row.assertion.kind === "link" && touchesIncident(row.assertion.ref)) {
-          addReplacementLink(replacement, row.assertion.ref, true)
+      for (const override of this.state.linkSlotOverrides.values()) {
+        if (override.projectId !== projectId) continue
+        const ref = {
+          source: override.ref.source,
+          linkId: override.ref.linkId,
+          target: override.value.target,
+        }
+        if (touchesIncident(ref)) addReplacementLink(replacement, ref, true)
+      }
+      for (const [scopeKey, rows] of this.state.activeSourceLinkScopes) {
+        if (JSON.parse(scopeKey)[0] !== projectId) continue
+        for (const row of rows.values()) {
+          if (row.assertion.kind === "link" && touchesIncident(row.assertion.ref)) {
+            addReplacementLink(replacement, row.assertion.ref, true)
+          }
         }
       }
     }
-
-    adapter.visitExactLinks(projectId, (row) => {
-      const ref = linkRef(row)
-      if (replacement.affectedScopes.has(linkScopeSortKey(ref.source, ref.linkId))) {
-        addReplacementLink(replacement, ref, false)
-      }
-    })
-    for (const override of this.state.linkSlotOverrides.values()) {
-      if (
-        override.projectId === projectId &&
-        replacement.affectedScopes.has(linkScopeSortKey(override.ref.source, override.ref.linkId))
-      ) {
-        addReplacementLink(
-          replacement,
-          {
-            source: override.ref.source,
-            linkId: override.ref.linkId,
-            target: override.value.target,
-          },
-          false
-        )
-      }
+    const scopes = new Map<string, { source: OntologyObjectRef; linkId: string }>()
+    for (const { ref } of replacement.links.values()) {
+      const key = linkScopeSortKey(ref.source, ref.linkId)
+      if (replacement.affectedScopes.has(key)) scopes.set(key, ref)
+    }
+    for (const scope of scopes.values()) {
+      adapter.visitExactScopeLinks(
+        projectId,
+        scope.source.objectTypeId,
+        scope.source.primaryId,
+        scope.linkId,
+        (row) => {
+          addReplacementLink(replacement, linkRef(row), false)
+        }
+      )
+      const override = this.state.linkSlotOverrides.get(
+        projectEntityKey(projectId, linkScopeKey(scope.source, scope.linkId))
+      )
+      if (override)
+        addReplacementLink(replacement, { ...scope, target: override.value.target }, false)
     }
     replacement.linksExpanded = true
     replacement.orderedLinks = null
@@ -1206,31 +1209,15 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     source: OntologyObjectRef,
     linkId: string
   ): StoredSourceLinkAssertion | null {
-    let found: StoredSourceLinkAssertion | null = null
-    for (const active of this.state.sourceMaterializations.values()) {
-      if (active.projectId !== projectId || active.status !== "active") continue
-      for (const row of active.rowsByEntity.values()) {
-        if (
-          row.assertion.kind !== "link" ||
-          objectRefKey(row.assertion.ref.source) !== objectRefKey(source) ||
-          row.assertion.ref.linkId !== linkId
-        ) {
-          continue
-        }
-        if (found) {
-          throw new MaterializationConflictError(
-            "source-materialization",
-            `Multiple active source links assert cardinality-one scope '${source.objectTypeId}.${linkId}'.`
-          )
-        }
-        found = storedSource(
-          active.source.projectionId,
-          active.materializationId,
-          row
-        ) as StoredSourceLinkAssertion
-      }
-    }
-    return structuredClone(found)
+    const rows = this.state.activeSourceLinkScopes.get(
+      projectEntityKey(projectId, linkScopeSortKey(source, linkId))
+    )
+    if (rows && rows.size > 1)
+      throw new MaterializationConflictError(
+        "source-materialization",
+        `Multiple active source links assert cardinality-one scope '${source.objectTypeId}.${linkId}'.`
+      )
+    return structuredClone(rows?.values().next().value ?? null)
   }
 
   private findActiveObjectSource(
@@ -1250,19 +1237,13 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
   }
 
   private findActiveSource(projectId: string, entityKey: string): StoredSourceAssertion | null {
-    let found: StoredSourceAssertion | null = null
-    for (const active of this.state.sourceMaterializations.values()) {
-      if (active.projectId !== projectId || active.status !== "active") continue
-      const row = active.rowsByEntity.get(entityKey)
-      if (!row) continue
-      if (found)
-        throw new MaterializationConflictError(
-          "source-materialization",
-          `Multiple active sources assert ${entityKey}.`
-        )
-      found = storedSource(active.source.projectionId, active.materializationId, row)
-    }
-    return structuredClone(found)
+    const rows = this.state.activeSourceRows.get(projectEntityKey(projectId, entityKey))
+    if (rows && rows.size > 1)
+      throw new MaterializationConflictError(
+        "source-materialization",
+        `Multiple active sources assert ${entityKey}.`
+      )
+    return structuredClone(rows?.values().next().value ?? null)
   }
 
   private incidentLinkRefs(
@@ -1307,9 +1288,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         target: override.value.target,
       })
     }
-    for (const active of this.state.sourceMaterializations.values()) {
-      if (active.projectId !== projectId || active.status !== "active") continue
-      for (const row of active.rowsByEntity.values()) {
+    for (const [scopeKey, rows] of this.state.activeSourceLinkScopes) {
+      if (JSON.parse(scopeKey)[0] !== projectId) continue
+      for (const row of rows.values()) {
         if (row.assertion.kind === "link") consider(row.assertion.ref)
       }
     }

@@ -7,6 +7,7 @@ function materializerWithEventCount(eventCount: number): BoundOntologyMaterializ
   return {
     edits: { commit: async () => result },
     projections: {
+      getActive: async () => null,
       replace: async () => result,
       finishRun: async () => undefined,
     },

@@ -68,6 +68,7 @@ import {
   type PgOntologySourceRow,
   toIsoString,
 } from "./shared"
+import { activateSourceRoots } from "./source-roots"
 
 interface ProjectionCountsRow {
   readonly object_classifications: number | string
@@ -235,6 +236,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         sourceId: replacement.sourceId,
         candidateMaterializationId: replacement.candidateMaterializationId,
         previousMaterializationId: replacement.previousMaterializationId,
+        incremental: replacement.incremental,
         kind: "object",
         pageRows: input.pageRows,
       })) {
@@ -279,6 +281,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       sourceId: replacement.sourceId,
       candidateMaterializationId: replacement.candidateMaterializationId,
       previousMaterializationId: replacement.previousMaterializationId,
+      incremental: replacement.incremental,
       kind: "link",
       pageRows: input.pageRows,
     })) {
@@ -293,7 +296,8 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         replacement.sourceId,
         replacement.candidateMaterializationId,
         materializationIds,
-        linkIdentities
+        linkIdentities,
+        replacement.incremental
       )
       yield { objects: [], links }
     }
@@ -323,6 +327,10 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     assertPlanChunkCorrelations(input.chunk, commit)
     const progress = await this.sessions.prepareChunkSequence(session, input.chunk)
     await this.writer.apply(commit.projectId, commit.id, input.chunk)
+    session.changedObjects +=
+      input.chunk.effective.objectUpserts.length + input.chunk.effective.objectDeletes.length
+    session.changedLinks +=
+      input.chunk.effective.linkUpserts.length + input.chunk.effective.linkDeletes.length
     this.sessions.commitChunkSequence(session, progress)
   }
 
@@ -333,6 +341,10 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     for (const activation of input.finalization.sourceActivations) {
       await this.activateSource(session, activation)
     }
+    // The next sparse projection must see the distribution of a newly published bulk load.
+    // With empty/stale statistics, a link lookup can scan every edge sharing its target.
+    if (session.changedObjects >= 1_000) await this.sql`ANALYZE objects`
+    if (session.changedLinks >= 1_000) await this.sql`ANALYZE links`
     const record = await this.insertCommit(session.header, input)
     await this.sessions.release(session)
     return { commit: record }
@@ -393,6 +405,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       sourceId: input.source.projectionId,
       candidateMaterializationId: input.candidateMaterializationId,
       previousMaterializationId: previous?.materialization_id ?? null,
+      incremental: candidate.base_materialization_id !== null,
       projectionKind: candidate.projection_kind,
       objectStreamStarted: false,
       objectStreamCompleted: false,
@@ -778,6 +791,7 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       true
     )
     this.assertSourceRow(activation.expected, previous)
+    await activateSourceRoots(this.sql, commit.projectId, candidate, activation)
     if (previous) {
       assertPinnedDatasetWatermark(
         {

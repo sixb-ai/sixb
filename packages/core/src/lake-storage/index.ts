@@ -8,6 +8,7 @@ export type {
 } from "../datasets"
 export { assertDatasetDefinition } from "../datasets/validation"
 export type { JsonValue } from "../json"
+export { resolveDatasetChangeColumns } from "./changes"
 export type {
   DatasetDefinitionUpdatePlan,
   DatasetMetadataUpdatePlan,
@@ -54,9 +55,11 @@ export type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
   DatasetCatalogState,
+  DatasetChanges,
   DatasetLatestVersionSummary,
   DatasetProducer,
   DatasetRow,
+  DatasetRowChange,
   DatasetVersion,
   DatasetVersionMode,
   DatasetVersionRef,
@@ -66,6 +69,7 @@ export type {
   LakeStandardId,
   LakeStorage,
   LakeWriteSession,
+  ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "./types"
 export { hasDatasetInputChanges } from "./version-inputs"

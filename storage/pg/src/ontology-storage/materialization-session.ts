@@ -46,6 +46,8 @@ export interface PgChunkSequenceProgress {
 
 export class PgMaterializationSessionState extends ProviderMaterializationSessionState {
   stagedWorkCount = 0
+  changedObjects = 0
+  changedLinks = 0
   appliedPlanCursor: WorkCursor | null = null
   appliedEventCursor: WorkCursor | null = null
 }

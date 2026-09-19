@@ -220,6 +220,7 @@ describe("Postgres storage migrations", () => {
             "036-share-sessions",
             "037-execution-requester-groups",
             "038-outbox-publication-order",
+            "039-projection-source-roots",
           ],
         },
       ])
@@ -489,6 +490,13 @@ describe("Postgres storage migrations", () => {
           id: "038-outbox-publication-order",
           status: "applied",
           version: 38,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "039-projection-source-roots",
+          status: "applied",
+          version: 39,
         },
       ])
     })
@@ -1089,6 +1097,7 @@ describe("Postgres storage migrations", () => {
         "ontology_link_overrides",
         "ontology_object_overrides",
         "ontology_outbox",
+        "ontology_source_roots",
         "ontology_source_rows",
         "ontology_sources",
       ])
@@ -2226,6 +2235,13 @@ describe("Postgres storage migrations", () => {
           id: "038-outbox-publication-order",
           status: "applied",
           version: 38,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "039-projection-source-roots",
+          status: "applied",
+          version: 39,
         },
       ])
     } finally {

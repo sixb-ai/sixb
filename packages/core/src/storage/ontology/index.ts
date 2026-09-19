@@ -109,6 +109,7 @@ export type {
   OntologySourceStorage,
   ReclaimSourceMaterializationInput,
   StageSourceAssertion,
+  StageSourceRoot,
   StageSourceRowsInput,
   StageSourceRowsResult,
   StoredSourceAssertion,

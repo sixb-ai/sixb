@@ -3,8 +3,14 @@ import postgresSchema from "../../pg/src/migrations/001-initial-schema.sql" with
 import postgresSplitOverrides from "../../pg/src/migrations/007-split-overrides.sql" with {
   type: "text",
 }
+import postgresSourceRoots from "../../pg/src/migrations/039-projection-source-roots.sql" with {
+  type: "text",
+}
 import sqliteSchema from "../src/migrations/001-initial-schema.sql" with { type: "text" }
 import sqliteSplitOverrides from "../src/migrations/007-split-overrides.sql" with { type: "text" }
+import sqliteSourceRoots from "../src/migrations/038-projection-source-roots.sql" with {
+  type: "text",
+}
 
 const ontologyTables = [
   "ontology_commits",
@@ -48,6 +54,18 @@ test("SQLite and PostgreSQL override tables stay aligned", () => {
   expect(applicationIndexes(sqliteSplitOverrides, tables)).toEqual(
     applicationIndexes(postgresSplitOverrides, tables)
   )
+})
+
+test("SQLite and PostgreSQL source-root migrations stay aligned", () => {
+  expect(tableColumns(sqliteSourceRoots, "ontology_source_roots")).toEqual(
+    tableColumns(postgresSourceRoots, "ontology_source_roots")
+  )
+  expect(applicationIndexes(sqliteSourceRoots, ["ontology_source_roots"])).toEqual(
+    applicationIndexes(postgresSourceRoots, ["ontology_source_roots"])
+  )
+  const additions = (sql: string) =>
+    [...sql.matchAll(/ALTER TABLE (\w+) ADD COLUMN (\w+)/g)].map((match) => [match[1], match[2]])
+  expect(additions(sqliteSourceRoots)).toEqual(additions(postgresSourceRoots))
 })
 
 function applicationTables(schema: string): string[] {

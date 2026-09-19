@@ -1,6 +1,8 @@
 import { randomUUID } from "node:crypto"
+import { isDeepStrictEqual } from "node:util"
 import type { DatasetDefinition, DatasetSchema, MergeChange } from "../datasets"
 import { getDatasetRowValidationError } from "../datasets/validation"
+import { resolveDatasetChangeColumns } from "./changes"
 import { mergeStrictDatasetDefinition } from "./definition-updates"
 import { LakeConcurrencyError, LakeStorageError } from "./errors"
 import type {
@@ -26,12 +28,15 @@ import type {
   BeginDatasetWriteInput,
   CommitDatasetWriteInput,
   DatasetCatalogState,
+  DatasetChanges,
   DatasetRow,
+  DatasetRowChange,
   DatasetVersion,
   DatasetWriteCommitResult,
   DatasetWriteMode,
   LakeStorage,
   LakeWriteSession,
+  ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "./types"
 import { hasDatasetInputChanges } from "./version-inputs"
@@ -386,6 +391,74 @@ export class InMemoryLakeStorage implements LakeStorage {
 
     for (const row of rows ?? []) {
       yield selectColumns(row, input.columns)
+    }
+  }
+
+  async readChanges(input: ReadDatasetChangesInput): Promise<DatasetChanges | null> {
+    input.signal?.throwIfAborted()
+    const before = await this.getVersion(input.datasetId, input.fromVersionId)
+    const after = await this.getVersion(input.datasetId, input.toVersionId)
+    if (!resolveDatasetChangeColumns(input, before, after)) return null
+    const previous = this.rowsByVersionId.get(input.fromVersionId)!
+    const next = this.rowsByVersionId.get(input.toVersionId)!
+    const index = (rows: readonly DatasetRow[]) => {
+      const result = new Map<string, DatasetRow>()
+      for (const row of rows) {
+        input.signal?.throwIfAborted()
+        const values = input.keyColumns.map((column) => row[column])
+        if (values.some((value) => typeof value !== "string" || value.trim().length === 0))
+          return null
+        const key = JSON.stringify(values)
+        if (result.has(key)) return null
+        result.set(key, row)
+      }
+      return result
+    }
+    const oldRows = index(previous)
+    const newRows = index(next)
+    if (!oldRows || !newRows) return null
+    let pending: DatasetRowChange[] = []
+    for (const [key, row] of oldRows) {
+      const newRow = newRows.get(key)
+      if (
+        !newRow ||
+        input.columns.some(
+          (column) => !isDeepStrictEqual(row[column] ?? null, newRow[column] ?? null)
+        )
+      ) {
+        pending.push({
+          before: selectColumns(row, input.columns),
+          after: newRow ? selectColumns(newRow, input.columns) : null,
+        })
+      }
+    }
+    for (const [key, row] of newRows) {
+      if (!oldRows.has(key))
+        pending.push({ before: null, after: selectColumns(row, input.columns) })
+    }
+    let closed = false
+    const changeCount = pending.length
+    return {
+      fromRowCount: previous.length,
+      toRowCount: next.length,
+      changeCount,
+      changes: (async function* () {
+        if (closed) throw new LakeStorageError("[LakeStorage] Change reader is closed.")
+        try {
+          for (let i = 0; i < changeCount; i++) {
+            input.signal?.throwIfAborted()
+            if (closed) throw new LakeStorageError("[LakeStorage] Change reader is closed.")
+            yield structuredClone(pending[i]!)
+          }
+        } finally {
+          closed = true
+          pending = []
+        }
+      })(),
+      async close() {
+        closed = true
+        pending = []
+      },
     }
   }
 

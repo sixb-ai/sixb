@@ -114,7 +114,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
                 input_exhausted = ?, missing_target_object_type_id = NULL,
                 missing_target_object_id = NULL, missing_target_batch_ordinal = NULL,
                 missing_target_first_seen_at = NULL, source_rows_read = 0,
-                source_rows_skipped = 0, error = NULL
+                source_rows_skipped = 0, source_changes_read = NULL, error = NULL
               WHERE project_id = ? AND id = ? AND status = 'failed'
                 AND json_extract(error, '$.code') = 'queue.enqueue_failed'
             `
@@ -257,6 +257,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
             execution_token = NULL,
             source_rows_read = ?,
             source_rows_skipped = ?,
+            source_changes_read = ?,
             input_exhausted = ?,
             error = ?
           WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
@@ -267,6 +268,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
           plan.finishedAt.toISOString(),
           plan.progress.sourceRowsRead,
           plan.progress.sourceRowsSkipped,
+          plan.progress.sourceChangesRead ?? null,
           plan.inputExhausted ? 1 : existingRow.input_exhausted,
           plan.error === undefined
             ? null
@@ -531,9 +533,10 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     progress: ProjectionRunProgress,
     executionToken: string
   ): number {
-    const args: (string | number)[] = [
+    const args: (string | number | null)[] = [
       progress.sourceRowsRead,
       progress.sourceRowsSkipped,
+      progress.sourceChangesRead ?? null,
       existing.project_id,
       existing.id,
       executionToken,
@@ -544,7 +547,8 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
         UPDATE projection_runs
         SET
           source_rows_read = ?,
-          source_rows_skipped = ?
+          source_rows_skipped = ?,
+          source_changes_read = ?
         WHERE project_id = ? AND id = ? AND status = 'running'
           AND execution_token = ?
       `
@@ -631,6 +635,9 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
     progress: {
       sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
       sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
+      ...(row.source_changes_read == null
+        ? {}
+        : { sourceChangesRead: databaseSafeInteger(row.source_changes_read, "sourceChangesRead") }),
     },
     error: row.error ?? undefined,
   }
@@ -694,6 +701,7 @@ interface DatabaseRow {
   missing_target_first_seen_at: string | null
   source_rows_read: number
   source_rows_skipped: number
+  source_changes_read: number | null
   error: string | null
 }
 
