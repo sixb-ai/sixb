@@ -46,6 +46,11 @@ its own provider.
 - **`blobStorage`** — content-addressed binary blobs. When a property or dataset column is a
   `fileRef`, the bytes live here and the other stores keep only the reference.
 
+When the API is down, nothing aborts abandoned staged uploads, and their multipart parts stay in
+the bucket. Add a lifecycle rule to the bucket as the second line of defence — for S3,
+`AbortIncompleteMultipartUpload` with `DaysAfterInitiation` a day or more beyond the one-hour
+upload session lifetime.
+
 ## Broker vs queues
 
 The two messaging slots are **not** the same thing — keep them distinct.

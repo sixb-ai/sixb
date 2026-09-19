@@ -33,11 +33,9 @@ import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/req
 export const DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES = DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1024 * 1024
 
 export function registerFileRoutes(app: Elysia, host: SixbHostView) {
-  // Staged/direct-put upload sessions default to an in-memory store: they are NOT
-  // durable across restart and NOT shared across instances. A durable Pg/Sqlite
-  // store is a follow-up; deployments needing durability supply their own via
-  // `host.storage.fileUploadSessions`.
-  const uploadSessions = host.storage.fileUploadSessions ?? new InMemoryFileUploadSessions()
+  // Every published storage provider supplies a durable store. A custom Storage without one
+  // still works on a single instance, but staged uploads then die with the process.
+  const uploadSessions = host.storage.fileUploadSessions ?? inMemoryUploadSessionsWithWarning()
 
   return app
     .post(
@@ -661,4 +659,14 @@ function expectedContentLengthError(session: FileUploadSession, request: Request
   }
 
   return expectedSizeBytesError(session, sizeBytes)
+}
+
+function inMemoryUploadSessionsWithWarning(): InMemoryFileUploadSessions {
+  console.warn(
+    "[SixbServer] Storage provides no fileUploadSessions; staged uploads are kept in memory, " +
+      "so they do not survive a restart, cannot span multiple API instances, and abandoned " +
+      "multipart uploads are left to the bucket's lifecycle rule."
+  )
+  // Maintenance sweeps host.storage only, so this store must drop abandoned sessions itself.
+  return new InMemoryFileUploadSessions({ unswept: true })
 }

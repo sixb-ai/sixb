@@ -1,32 +1,48 @@
-import type { Principal } from "../../auth"
-import type { FileRef, SignedBlobUploadPart } from "../../blob-storage"
-import { FileUploadSessionError } from "./errors"
+import {
+  DurableFileUploadSessions,
+  type FileUploadSessionPersistence,
+  type FileUploadSessionPersistenceBackend,
+} from "./provider"
 import type {
   CreateFileUploadSessionInput,
   FileUploadSession,
-  FileUploadSessionStore,
+  ListAbandonedFileUploadSessionsInput,
 } from "./types"
-import {
-  createFileUploadId,
-  isFileUploadSessionExpired,
-  isTerminalFileUploadSessionExpired,
-  principalKey,
-  shouldDeleteFileUploadSession,
-} from "./utils"
+import { isAbandonedFileUploadSession, shouldDeleteFileUploadSession } from "./utils"
 
 export type InMemoryFileUploadSessionsSnapshot = Map<string, FileUploadSession>
 
 /**
- * In-memory {@link FileUploadSessionStore}.
+ * In-memory {@link FileUploadSessionStore}: the shared durable state machine over a Map.
  *
- * Sessions live only in this process's memory: they do not survive a restart and
- * are not shared across instances. Staged/direct-put uploads therefore require a
- * single-instance deployment for now; a durable (Pg/Sqlite) store is a follow-up.
- * Expired sessions are reaped opportunistically on `create` and on demand via
- * `cleanupExpired` (there is no background sweeper).
+ * Sessions live only in this process's memory: they do not survive a restart and are not
+ * shared across instances, so staged uploads need a single instance. `@sixb/pg` and
+ * `@sixb/sqlite` provide durable stores. Reapable sessions are also reaped on `create`.
  */
-export class InMemoryFileUploadSessions implements FileUploadSessionStore {
-  private readonly sessionsById = new Map<string, FileUploadSession>()
+export class InMemoryFileUploadSessions extends DurableFileUploadSessions {
+  private readonly sessionsById: Map<string, FileUploadSession>
+  private readonly unswept: boolean
+
+  /**
+   * `unswept`: no maintenance pass retires this store's abandoned sessions, so `create` drops
+   * them too, bounding memory and leaving their provider parts to the bucket lifecycle rule.
+   */
+  constructor(options: { readonly unswept?: boolean } = {}) {
+    const sessionsById = new Map<string, FileUploadSession>()
+    super(new InMemoryFileUploadSessionBackend(sessionsById))
+    this.sessionsById = sessionsById
+    this.unswept = options.unswept ?? false
+  }
+
+  override async create(input: CreateFileUploadSessionInput): Promise<FileUploadSession> {
+    await this.cleanupExpired()
+    if (this.unswept) {
+      for (const [id, session] of this.sessionsById) {
+        if (isAbandonedFileUploadSession(session)) this.sessionsById.delete(id)
+      }
+    }
+    return super.create(input)
+  }
 
   snapshot(): InMemoryFileUploadSessionsSnapshot {
     return structuredClone(this.sessionsById)
@@ -38,100 +54,63 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
       this.sessionsById.set(id, structuredClone(session))
     }
   }
+}
 
-  async create(input: CreateFileUploadSessionInput): Promise<FileUploadSession> {
-    await this.cleanupExpired()
+class InMemoryFileUploadSessionBackend implements FileUploadSessionPersistenceBackend {
+  private readonly persistence: FileUploadSessionPersistence
+  // Every await yields; chaining transactions keeps read-modify-write atomic.
+  private tail: Promise<unknown> = Promise.resolve()
 
-    const session: FileUploadSession = {
-      id: input.id ?? createFileUploadId(),
-      projectId: input.projectId,
-      principalKey: principalKey(input.principal),
-      strategy: input.strategy,
-      status: "pending",
-      ...(input.fileName === undefined ? {} : { fileName: input.fileName }),
-      ...(input.mediaType === undefined ? {} : { mediaType: input.mediaType }),
-      ...(input.logicalPath === undefined ? {} : { logicalPath: input.logicalPath }),
-      ...(input.expectedSizeBytes === undefined
-        ? {}
-        : { expectedSizeBytes: input.expectedSizeBytes }),
-      ...(input.expectedDigest === undefined ? {} : { expectedDigest: input.expectedDigest }),
-      ...(input.providerUpload === undefined ? {} : { providerUpload: input.providerUpload }),
-      signedParts: [],
-      createdAt: new Date(),
-      expiresAt: input.expiresAt,
-    }
+  constructor(sessionsById: Map<string, FileUploadSession>) {
+    this.persistence = new InMemoryFileUploadSessionPersistence(sessionsById)
+  }
 
+  read<T>(run: (persistence: FileUploadSessionPersistence) => Promise<T>): Promise<T> {
+    return run(this.persistence)
+  }
+
+  transaction<T>(run: (persistence: FileUploadSessionPersistence) => Promise<T>): Promise<T> {
+    const result = this.tail.then(() => run(this.persistence))
+    this.tail = result.catch(() => undefined)
+    return result
+  }
+}
+
+class InMemoryFileUploadSessionPersistence implements FileUploadSessionPersistence {
+  constructor(private readonly sessionsById: Map<string, FileUploadSession>) {}
+
+  async now(): Promise<Date> {
+    return new Date()
+  }
+
+  async insert(session: FileUploadSession): Promise<boolean> {
+    if (this.sessionsById.has(session.id)) return false
     this.sessionsById.set(session.id, session)
-    return session
+    return true
   }
 
-  async getForPrincipal(uploadId: string, principal: Principal): Promise<FileUploadSession> {
-    const session = this.sessionsById.get(uploadId)
-    if (!session || session.principalKey !== principalKey(principal)) {
-      throw new FileUploadSessionError("not_found", "File upload session not found.")
-    }
-
-    const nowMs = Date.now()
-    if (isFileUploadSessionExpired(session, nowMs)) {
-      this.sessionsById.delete(uploadId)
-      throw new FileUploadSessionError("expired", "File upload session has expired.")
-    }
-
-    if (isTerminalFileUploadSessionExpired(session, nowMs)) {
-      this.sessionsById.delete(uploadId)
-      throw new FileUploadSessionError("not_found", "File upload session not found.")
-    }
-
-    return session
+  async get(uploadId: string): Promise<FileUploadSession | null> {
+    return this.sessionsById.get(uploadId) ?? null
   }
 
-  async markUploaded(uploadId: string, fileRef: FileRef): Promise<FileUploadSession> {
-    const session = this.requirePending(uploadId)
-    const updated = {
-      ...session,
-      fileRef,
-    }
-    this.sessionsById.set(uploadId, updated)
-    return updated
+  async update(session: FileUploadSession): Promise<void> {
+    this.sessionsById.set(session.id, session)
   }
 
-  async addSignedPart(uploadId: string, part: SignedBlobUploadPart): Promise<FileUploadSession> {
-    const session = this.requirePending(uploadId)
-    const updated = {
-      ...session,
-      signedParts: [
-        ...session.signedParts.filter((candidate) => candidate.partNumber !== part.partNumber),
-        part,
-      ].sort((left, right) => left.partNumber - right.partNumber),
-    }
-    this.sessionsById.set(uploadId, updated)
-    return updated
+  async listAbandoned(
+    input: ListAbandonedFileUploadSessionsInput
+  ): Promise<readonly FileUploadSession[]> {
+    return [...this.sessionsById.values()]
+      .filter(
+        (session) =>
+          session.projectId === input.projectId &&
+          isAbandonedFileUploadSession(session, input.now.getTime())
+      )
+      .sort((left, right) => left.expiresAt.getTime() - right.expiresAt.getTime())
+      .slice(0, input.limit)
   }
 
-  async complete(uploadId: string, fileRef: FileRef): Promise<FileUploadSession> {
-    const session = this.requirePending(uploadId)
-    const updated = {
-      ...session,
-      status: "completed" as const,
-      fileRef,
-      completedAt: new Date(),
-    }
-    this.sessionsById.set(uploadId, updated)
-    return updated
-  }
-
-  async abort(uploadId: string): Promise<FileUploadSession> {
-    const session = this.requirePending(uploadId)
-    const updated = {
-      ...session,
-      status: "aborted" as const,
-      abortedAt: new Date(),
-    }
-    this.sessionsById.set(uploadId, updated)
-    return updated
-  }
-
-  async cleanupExpired(now = new Date()): Promise<number> {
+  async deleteReapable(now: Date): Promise<number> {
     let deleted = 0
     for (const [id, session] of this.sessionsById) {
       if (shouldDeleteFileUploadSession(session, now.getTime())) {
@@ -139,23 +118,6 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
         deleted += 1
       }
     }
-
     return deleted
-  }
-
-  private requirePending(uploadId: string): FileUploadSession {
-    const session = this.sessionsById.get(uploadId)
-    if (!session) {
-      throw new FileUploadSessionError("not_found", "File upload session not found.")
-    }
-
-    if (session.status !== "pending") {
-      throw new FileUploadSessionError(
-        session.status === "completed" ? "already_completed" : "already_aborted",
-        `File upload session is already ${session.status}.`
-      )
-    }
-
-    return session
   }
 }

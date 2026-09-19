@@ -353,6 +353,7 @@ export type {
   FileUploadSessionStore,
   FileUploadStatus,
   FileUploadStrategy,
+  ListAbandonedFileUploadSessionsInput,
 } from "./file-upload-sessions"
 export {
   DEFAULT_FILE_UPLOAD_SESSION_TTL_MS,
