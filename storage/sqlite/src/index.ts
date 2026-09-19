@@ -39,6 +39,7 @@ import { SqliteAiUsageStorage } from "./ai-usage-storage"
 import { SqliteAuthStorage } from "./auth-storage"
 import { SqliteConnectorConnectionStorage } from "./connector-connection-storage"
 import { SqliteExecutionStorage } from "./execution-storage"
+import { SqliteFileUploadSessionStorage } from "./file-upload-session-storage"
 import {
   createSqliteStorageMigrators,
   installFreshSqliteSchema,
@@ -106,6 +107,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly shareGrants: ShareGrantStorage
   readonly shareSessions: ShareSessionStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
+  readonly fileUploadSessions: SqliteFileUploadSessionStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly connection: SqliteStoreConnection
@@ -172,6 +174,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
     this.shareSessions = createOperationScopedFacade(stores.shareSessions, scope)
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
+    this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
     registerSqliteStorageTestingAdapter(this, (durationMs) =>
       stores.connectorConnections.advanceTimeForTesting(durationMs)
@@ -333,6 +336,7 @@ function createSqliteStores(
     shareGrants,
     shareSessions,
     connectorConnections: new SqliteConnectorConnectionStorage(connection),
+    fileUploadSessions: new SqliteFileUploadSessionStorage(connection),
   }
 }
 
@@ -357,6 +361,7 @@ interface SqliteStoreSet {
   readonly shareGrants: SqliteShareGrantStorage
   readonly shareSessions: SqliteShareSessionStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
+  readonly fileUploadSessions: SqliteFileUploadSessionStorage
 }
 
 export { migrateSqliteStorage } from "./migrations"

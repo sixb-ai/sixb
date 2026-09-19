@@ -448,6 +448,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 47,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "048-file-upload-sessions",
+    status: "applied",
+    version: 48,
+  },
 ]
 
 afterEach(async () => {

@@ -213,6 +213,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("045-agent-thread-sandbox-state", agentThreadSandboxStateSql),
     sqliteSql("046-workflow-intervention-principals", workflowInterventionPrincipalsSql),
     sqliteSql("047-ontology-commit-attribution", ontologyCommitAttributionSql),
+    sqliteSql("048-file-upload-sessions", fileUploadSessionsSql),
   ],
 })
 
@@ -436,3 +437,4 @@ import executionRequesterGroupsSql from "./migrations/037-execution-requester-gr
 import connectorOptionalPkceSql from "./migrations/039-connector-optional-pkce.sql" with {
   type: "text",
 }
+import fileUploadSessionsSql from "./migrations/048-file-upload-sessions.sql" with { type: "text" }
