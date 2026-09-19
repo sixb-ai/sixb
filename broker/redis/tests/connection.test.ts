@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test"
-import { type RedisBrokerClient, RedisConnectionManager } from "../src/connection"
+import {
+  type RedisBrokerClient,
+  type RedisBrokerCommandClient,
+  RedisConnectionManager,
+} from "../src/connection"
 import { RedisBrokerError } from "../src/errors"
 import { streamKeysFor } from "../src/keys"
 import { RedisBroker } from "../src/redis-broker"
@@ -284,3 +288,244 @@ test("bounds the latest-cursor lookup on the subscription client", async () => {
   expect(clientCount).toBe(2)
   await broker.close()
 }, 250)
+
+function failedConnection(): Error {
+  return Object.assign(new Error("Connection has failed"), {
+    name: "RedisError",
+    code: "ERR_REDIS_CONNECTION_CLOSED",
+  })
+}
+
+// Regression proof: restore connection.ts from 3a9a076c and run this file. Recovery cases
+// fail on Bun 1.4.2; connection-recovery.e2e.ts exercises the same failure with native clients.
+for (const method of ["exists", "hmget", "send"] as const) {
+  for (const synchronous of [false, true]) {
+    test(`replaces a terminal client for ${method} (${synchronous ? "throw" : "rejection"})`, async () => {
+      let created = 0
+      let closed = 0
+      let rejectedCalls = 0
+      const failed = fakeClient({
+        [method]: () => {
+          rejectedCalls++
+          if (synchronous) throw failedConnection()
+          return Promise.reject(failedConnection())
+        },
+        close: () => closed++,
+      })
+      const healthy = fakeClient({
+        exists: async () => true,
+        hmget: async () => ["value"],
+        send: async () => "PONG",
+      })
+      const manager = new RedisConnectionManager({}, () => (++created === 1 ? failed : healthy))
+      try {
+        const call = (client: RedisBrokerCommandClient) => {
+          if (method === "exists") return client.exists("key")
+          if (method === "hmget") return client.hmget("key", ["field"])
+          return client.send("PING", [])
+        }
+        const expected = method === "exists" ? true : method === "hmget" ? ["value"] : "PONG"
+        // Calls queued behind the failed command must share the replacement.
+        expect(
+          await Promise.all([manager.useCommandClient(call), manager.useCommandClient(call)])
+        ).toEqual([expected, expected])
+        expect(created).toBe(2)
+        expect(closed).toBe(1)
+        expect(rejectedCalls).toBe(1)
+      } finally {
+        await manager.close()
+      }
+    })
+  }
+}
+
+test("retries only the unsent command and keeps its replacement for the rest of the operation", async () => {
+  const commands: string[] = []
+  let created = 0
+  const first = fakeClient({
+    send: async (command) => {
+      commands.push(`first:${command}`)
+      if (command === "SECOND") throw failedConnection()
+      return "OK"
+    },
+  })
+  const second = fakeClient({
+    send: async (command) => {
+      commands.push(`second:${command}`)
+      return "OK"
+    },
+  })
+  const manager = new RedisConnectionManager({}, () => (++created === 1 ? first : second))
+  try {
+    await manager.useCommandClient(async (client) => {
+      await client.send("FIRST", [])
+      await client.send("SECOND", [])
+      await client.send("THIRD", [])
+    })
+    expect(commands).toEqual(["first:FIRST", "first:SECOND", "second:SECOND", "second:THIRD"])
+    expect(created).toBe(2)
+  } finally {
+    await manager.close()
+  }
+})
+
+test("bounds terminal recovery to one retry and discards a failed replacement", async () => {
+  let created = 0
+  let closed = 0
+  const manager = new RedisConnectionManager({}, () => {
+    created++
+    return fakeClient({
+      send: async () => {
+        throw failedConnection()
+      },
+      close: () => closed++,
+    })
+  })
+  try {
+    await expect(manager.useCommandClient((client) => client.send("PING", []))).rejects.toThrow(
+      "Connection has failed"
+    )
+    expect(created).toBe(2)
+    expect(closed).toBe(2)
+    await expect(manager.useCommandClient((client) => client.send("PING", []))).rejects.toThrow(
+      "Connection has failed"
+    )
+    expect(created).toBe(4)
+  } finally {
+    await manager.close()
+  }
+})
+
+for (const error of [
+  Object.assign(new Error("Connection closed"), {
+    name: "RedisError",
+    code: "ERR_REDIS_CONNECTION_CLOSED",
+  }),
+  Object.assign(new Error("Connection timeout"), {
+    name: "RedisError",
+    code: "ERR_REDIS_CONNECTION_TIMEOUT",
+  }),
+  Object.assign(new Error("WRONGTYPE Operation against a key holding the wrong kind of value"), {
+    name: "RedisError",
+  }),
+  new Error("Connection has failed"),
+]) {
+  test(`does not replay a command with an uncertain or server failure: ${error.message}`, async () => {
+    let created = 0
+    let calls = 0
+    const manager = new RedisConnectionManager({}, () => {
+      created++
+      return fakeClient({
+        send: async () => {
+          calls++
+          throw error
+        },
+      })
+    })
+    try {
+      await expect(
+        manager.useCommandClient((client) => client.send("INCR", ["counter"]))
+      ).rejects.toBe(error)
+      expect(calls).toBe(1)
+      expect(created).toBe(1)
+    } finally {
+      await manager.close()
+    }
+  })
+}
+
+test("shutdown aborts a pending replacement connection", async () => {
+  let created = 0
+  let closed = 0
+  const connecting = Promise.withResolvers<void>()
+  const manager = new RedisConnectionManager({}, () => {
+    created++
+    return fakeClient(
+      created === 1
+        ? {
+            send: async () => {
+              throw failedConnection()
+            },
+            close: () => closed++,
+          }
+        : {
+            connect: () => {
+              connecting.resolve()
+              return neverResponds()
+            },
+            close: () => closed++,
+          }
+    )
+  })
+  const result = settle(manager.useCommandClient((client) => client.send("PING", [])))
+  try {
+    await connecting.promise
+    await manager.close()
+    expect(await result).toBeInstanceOf(RedisBrokerError)
+    expect(created).toBe(2)
+    expect(closed).toBe(2)
+  } finally {
+    await manager.close()
+  }
+})
+
+test("subscription commands leave terminal recovery to their pump", async () => {
+  let created = 0
+  let closed = 0
+  const error = failedConnection()
+  const manager = new RedisConnectionManager({}, () => {
+    created++
+    return fakeClient({
+      send: async () => {
+        throw error
+      },
+      close: () => closed++,
+    })
+  })
+  const subscription = await manager.createSubscriptionClient()
+  try {
+    await expect(
+      manager.boundedCommandClient(subscription).send("XREVRANGE", ["stream", "+", "-"])
+    ).rejects.toBe(error)
+    expect(created).toBe(1)
+    expect(closed).toBe(0)
+  } finally {
+    manager.closeClient(subscription)
+    await manager.close()
+  }
+})
+
+test("a failed replacement connect surfaces and leaves the next operation able to reconnect", async () => {
+  let created = 0
+  let closed = 0
+  const manager = new RedisConnectionManager({}, () => {
+    created++
+    return fakeClient({
+      ...(created === 1
+        ? {
+            send: async () => {
+              throw failedConnection()
+            },
+          }
+        : created === 2
+          ? {
+              connect: async () => {
+                throw new Error("Redis is still offline")
+              },
+            }
+          : { send: async () => "PONG" }),
+      close: () => closed++,
+    })
+  })
+  try {
+    const error = await settle(manager.useCommandClient((client) => client.send("PING", [])))
+    expect(error).toBeInstanceOf(RedisBrokerError)
+    expect((error as Error).cause).toEqual(new Error("Redis is still offline"))
+    expect(created).toBe(2)
+    expect(closed).toBe(2)
+    expect(await manager.useCommandClient((client) => client.send("PING", []))).toBe("PONG")
+    expect(created).toBe(3)
+  } finally {
+    await manager.close()
+  }
+})
