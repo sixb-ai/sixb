@@ -112,7 +112,11 @@ cannot be used for direct uploads.
 Direct uploads and streamed `put(...)` calls land under `<basePath>/uploads/<uploadId>/object`
 before being promoted to the content-addressed `blobs/sha256/` prefix. A crashed or abandoned
 upload can leave bytes under `uploads/`, so configure an S3 lifecycle rule to expire objects under
-that prefix (there is no in-repo sweeper).
+that prefix.
+
+The API aborts the multipart upload of a direct-upload session that expires unfinished, but only
+while it is running. Add an `AbortIncompleteMultipartUpload` rule to the same bucket, with
+`DaysAfterInitiation` set to at least one day, so parts left while the API was down are released.
 
 For S3-compatible providers, pass an `endpoint`. For example, with the local SeaweedFS test fixture:
 
