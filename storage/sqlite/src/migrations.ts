@@ -182,6 +182,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("035-share-grants", shareGrantsSql),
     sqliteSql("036-share-sessions", shareSessionsSql),
     sqliteSql("037-execution-requester-groups", executionRequesterGroupsSql),
+    sqliteSql("038-file-upload-sessions", fileUploadSessionsSql),
   ],
 })
 
@@ -401,3 +402,4 @@ function rollbackQuietly(db: Database): void {
 import executionRequesterGroupsSql from "./migrations/037-execution-requester-groups.sql" with {
   type: "text",
 }
+import fileUploadSessionsSql from "./migrations/038-file-upload-sessions.sql" with { type: "text" }
