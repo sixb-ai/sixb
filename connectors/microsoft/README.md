@@ -295,7 +295,7 @@ folder membership across independent streams. Invalid/expired delta state is pro
 Reads honor REST retry policies and Retry-After. Pace work per mailbox: Outlook allows four
 concurrent requests per application/mailbox, and minDelayMs only spaces starts, not in-flight
 concurrency. Sequential per-mailbox processing is a safe default; coordinate across workers.
-The connector does not install background polling, subscriptions or a persistent sync store.
+The connector does not install background polling, automatic subscription renewal or a persistent sync store.
 Calendar/Teams operations, rules, mailbox settings and MIME composition are outside this surface.
 
 ### Mail verification
@@ -323,6 +323,7 @@ bun test ./connectors/microsoft/tests/mail.e2e.ts
   `downloadResponse`, `createFolder`, `rename`, `move`, `delete`.
 - `drives.uploads`: `upload`, `createSession`, `getStatus`, `resume`, `cancel`.
 - `drives.delta`: `list`, `pages`.
+- `subscriptions`: `create`, `get`, `list`, `listAll`, `update`, `delete`, `reauthorize`.
 
 Collection responses retain Graph's `value` and annotations. Select/expand options preserve wire
 properties; projections include `id` so item identity remains available. Wire types cover the
@@ -333,7 +334,7 @@ Microsoft Graph cannot directly move files between libraries; `move` stays in on
 also rejects replacing sensitivity-labelled file content with app-only authentication; Microsoft
 requires delegated access for that operation. Retention rules and other SharePoint policies still
 apply. Sovereign clouds, on-premises SharePoint, permission provisioning, cross-drive copy jobs,
-webhooks and Office document-content editing are outside this package's current surface.
+webhook receivers and Office document-content editing are outside this package's current surface.
 
 ## Verification
 
@@ -481,6 +482,101 @@ attachments, primary-calendar delta, availability and the organizer's received a
 requires an Exchange Online tenant; passing mocked tests does not establish live compatibility.
 If cleanup fails after a network interruption, use the unique `sixb-calendar-e2e-...` subject/name
 reported by the test to remove remaining test data.
+
+## Graph subscriptions
+
+`client.subscriptions` manages Graph v1.0 basic HTTPS notifications using the connector's
+existing authentication. It exposes `create`, `get`, `list`, `listAll`, `update`, `delete` and
+`reauthorize`. Listing does not accept OData options; with application authentication it returns
+subscriptions owned by the calling application, not every subscription in the tenant.
+
+```ts
+const subscription = await client.subscriptions.create({
+  resource: `drives/${driveId}/root`,
+  changeType: "updated",
+  notificationUrl: "https://app.example.com/webhooks/microsoft",
+  lifecycleNotificationUrl: "https://app.example.com/webhooks/microsoft-lifecycle",
+  expirationDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+  clientState: crypto.randomUUID(),
+})
+// Persist the returned ID and expiration, the expected resource/URLs, and clientState securely.
+
+// Run before expiration from an application-owned scheduled job, under a per-subscription lock.
+const renewed = await client.subscriptions.update(subscription.id, {
+  expirationDateTime: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+})
+// Persist renewed.expirationDateTime before releasing the lock.
+```
+
+Renewal recipe: run a Sixb cron schedule periodically, select persisted subscriptions approaching
+expiry, acquire a durable lock per subscription, renew, and save Graph's returned expiration.
+Use a renewal margin that allows multiple job runs and outages; do not wait until the last minute.
+The connector does not own the subscription database, distributed lock, or scheduler.
+
+- For SharePoint libraries use `drives/{id}/root`; for lists use `sites/{siteId}/lists/{listId}`.
+  These resources support `updated` only. Native SharePoint `/_api/.../subscriptions` is a different API.
+- Outlook resources include `users/{id}/messages` and `users/{id}/events`. Pass
+  `{ immutableIds: true }` as the second argument to `create` to match this connector's Outlook IDs.
+  Changing the ID format of an existing subscription requires recreation.
+- Graph currently caps drive/list subscriptions at 42,300 minutes and basic Outlook subscriptions
+  at 10,080 minutes. It may increase a requested expiration shorter than 45 minutes. Always persist
+  the returned expiration; the connector leaves resource-specific lifetime enforcement to Graph.
+- `update` accepts only `expirationDateTime` and/or `notificationUrl`. Configure lifecycle URLs at
+  creation. `reauthorize` does not renew expiration; renewal also reauthorizes. Serialize these
+  operations and never call both within ten minutes for the same subscription.
+- Reads use configured retries. Mutations are sent once. `MicrosoftApiError` preserves HTTP errors:
+  a renewal `404` requires explicit recreation and reconciliation; creation `409` requires checking
+  the existing subscription's owner, resource, change types and URLs before adopting it.
+  `MicrosoftSubscriptionMutationError.outcomeUnknown` means the result could not be established:
+  reconcile with `get`/`listAll` before retrying. Do not log error causes or Graph bodies containing secrets.
+- Resource data encryption and Web Push are outside this API's creation contract. Listing may return
+  subscriptions provisioned elsewhere, including rich subscriptions.
+
+### Receiver and permissions
+
+Provision the HTTPS receiver **before** creating the subscription. For Graph's validation POST,
+return the decoded `validationToken` query parameter as plain text with HTTP 200 within ten seconds.
+Handle this before JSON body parsing and normal notification authentication. For notifications,
+verify the subscription identity and `clientState`, durably enqueue each item in the batch, then
+acknowledge promptly (202 when queued); return an error if persistence fails. Do not log `clientState`.
+
+A notification requests synchronization; it is not a complete change log. Keep periodic reconciliation
+and the existing polling fallback. `reauthorizationRequired` applies across resources, while the
+`missed` lifecycle event is documented for Outlook, not SharePoint. Recover gaps with delta where
+supported, or a full reconciliation. Do not mark synchronization complete merely on receipt.
+
+Use the resource-specific application permissions in Microsoft's subscription creation table
+(e.g. `Files.Read.All`, `Sites.Read.All`, `Mail.Read`, `Calendars.Read`). Do not assume existing write
+permissions suffice. `Sites.Selected` is not listed there: validate the intended tenant configuration
+before rollout, and never broaden consent automatically. No interactive user login is introduced.
+
+### Subscription verification
+
+Unit tests cover request contracts, validation, pagination, retries, cancellation and uncertain results.
+An opt-in live provisioning test requires a dedicated resource and an already deployed receiver:
+
+```bash
+MICROSOFT_SUBSCRIPTIONS_E2E=1 \
+MICROSOFT_TENANT_ID=... MICROSOFT_CLIENT_ID=... MICROSOFT_CLIENT_SECRET=... \
+MICROSOFT_SUBSCRIPTIONS_TEST_RESOURCE='drives/TEST_DRIVE_ID/root' \
+MICROSOFT_SUBSCRIPTIONS_NOTIFICATION_URL='https://app.example.com/webhooks/microsoft' \
+bun test ./connectors/microsoft/tests/subscriptions.e2e.ts
+```
+
+It creates, reads, lists, renews and deletes only its own subscription. Use a resource without an
+existing subscription for this app/change type. If creation's outcome is unknown, reconcile externally
+before rerunning. The test does not prove notification delivery, receiver authentication, lifecycle
+recovery, or tenant-scoped permissions; validate those in the consuming application's integration tests.
+
+References: [create](https://learn.microsoft.com/en-us/graph/api/subscription-post-subscriptions?view=graph-rest-1.0),
+[update](https://learn.microsoft.com/en-us/graph/api/subscription-update?view=graph-rest-1.0),
+[list](https://learn.microsoft.com/en-us/graph/api/subscription-list?view=graph-rest-1.0),
+[get](https://learn.microsoft.com/en-us/graph/api/subscription-get?view=graph-rest-1.0),
+[delete](https://learn.microsoft.com/en-us/graph/api/subscription-delete?view=graph-rest-1.0),
+[reauthorize](https://learn.microsoft.com/en-us/graph/api/subscription-reauthorize?view=graph-rest-1.0),
+[lifetimes and fields](https://learn.microsoft.com/en-us/graph/api/resources/subscription?view=graph-rest-1.0),
+[lifecycle events](https://learn.microsoft.com/en-us/graph/change-notifications-lifecycle-events),
+[webhook delivery](https://learn.microsoft.com/en-us/graph/change-notifications-delivery-webhooks).
 
 ## Microsoft API references
 
