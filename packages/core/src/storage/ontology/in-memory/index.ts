@@ -1,4 +1,5 @@
 import type { InMemoryObjectStorage } from "../../objects/in-memory"
+import { getInMemoryObjectMaterializerAdapter } from "../../objects/in-memory"
 import type { InMemoryTimeseriesStorage } from "../../timeseries/store"
 import type { OntologyStorage } from ".."
 import type { ProviderMaterializationTransactionLifecycle } from "../provider"
@@ -29,8 +30,11 @@ interface InMemoryOntologyStorageOptions {
   readonly executionExists: (projectId: string, executionId: string) => Promise<boolean>
 }
 
+import { InMemoryOntologyVectorStorage, vectorObjectKey } from "./vectors"
+
 export class InMemoryOntologyStorage implements OntologyStorage {
   private readonly state = createInMemoryOntologyState()
+  readonly vectors: InMemoryOntologyVectorStorage
   readonly commits: InMemoryOntologyCommitStorage
   readonly sources: InMemoryOntologySourceStorage
   readonly materializations: InMemoryOntologyMaterializationStorage
@@ -46,6 +50,15 @@ export class InMemoryOntologyStorage implements OntologyStorage {
     timeseries: InMemoryTimeseriesStorage,
     options: InMemoryOntologyStorageOptions
   ) {
+    this.vectors = new InMemoryOntologyVectorStorage(
+      this.state.vectors,
+      (session, projectId, commitId) =>
+        this.materializations.assertVectorSession(session, projectId, commitId),
+      options.runRootOperation
+    )
+    getInMemoryObjectMaterializerAdapter(objects).setVectorReader((projectId, ref, profile) =>
+      this.state.vectors.get(vectorObjectKey(projectId, ref))?.get(profile)
+    )
     this.commits = new InMemoryOntologyCommitStorage(this.state, options.runRootOperation)
     this.sources = new InMemoryOntologySourceStorage(
       this.state,

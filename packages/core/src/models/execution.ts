@@ -86,12 +86,12 @@ export function createModelsRuntime(
     signal.throwIfAborted()
     const selected = input.model
       ? catalog
-        ? catalog.language.getByRef({
+        ? catalog.language?.getByRef({
             provider: input.model.providerId,
             modelId: input.model.modelId,
           })?.model
         : input.model
-      : catalog?.language.default.model
+      : catalog?.language?.default.model
     if (!selected) {
       throw new Error(
         input.model

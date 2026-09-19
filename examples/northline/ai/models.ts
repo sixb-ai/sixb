@@ -1,7 +1,5 @@
-import type { ModelCatalogInput } from "@sixb/core"
+import type { LanguageModel } from "@sixb/core/models"
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
-
-type LanguageModel = ModelCatalogInput["language"][number]
 
 /** The first language model is the default used by the project Agent. */
 export const languageModels: readonly [LanguageModel, ...LanguageModel[]] = [

@@ -184,7 +184,7 @@ describe("createSixb models", () => {
       ...createTestRuntimeDeps(),
     })
 
-    expect(sixb.definitions.models?.language.default.model).toBe(gpt)
+    expect(sixb.definitions.models?.language?.default.model).toBe(gpt)
     expect("agents" in sixb.definitions).toBe(false)
     expect(createTestSixb(sixb).agent.get()).toEqual({
       name: "Sixb",

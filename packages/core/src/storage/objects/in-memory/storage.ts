@@ -1,4 +1,6 @@
 import type { EffectiveLinkSnapshot, EffectiveObjectSnapshot } from "../../../materialization/model"
+import { hasVectorProfile } from "../../../objects/vectors/query"
+import type { StoredObjectVector } from "../../ontology/vectors"
 import type { ObjectReadExecutionLimits } from "../execution-limits"
 import { type LinkBatchKey, type ObjectBatchKey, objectBatchKey } from "../keys"
 import type {
@@ -44,7 +46,14 @@ export interface InMemoryObjectStorageSnapshot {
   readonly links: Map<string, Map<string, ObjectLinkRow>>
 }
 
+type VectorReader = (
+  projectId: string,
+  ref: { objectTypeId: string; primaryId: string },
+  profile: string
+) => StoredObjectVector | undefined
+
 interface InMemoryObjectMaterializerAdapter {
+  setVectorReader(reader: VectorReader): void
   getExactObjectRow(projectId: string, objectTypeId: string, primaryId: string): ObjectRow | null
   getExactLinkRow(
     projectId: string,
@@ -92,8 +101,13 @@ export class InMemoryObjectStorage implements ObjectStorage {
   private readonly rows = new Map<string, Map<string, ObjectRow>>()
   private readonly links = new Map<string, Map<string, ObjectLinkRow>>()
 
+  private vectorReader?: VectorReader
+
   constructor() {
     materializerAdapters.set(this, {
+      setVectorReader: (reader) => {
+        this.vectorReader = reader
+      },
       getExactObjectRow: (projectId, objectTypeId, primaryId) =>
         this.getExactObjectRow(projectId, objectTypeId, primaryId),
       getExactLinkRow: (projectId, ref) => this.getExactLinkRow(projectId, ref),
@@ -243,6 +257,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
     // Keep indexed access live across writes and snapshot restores; do not capture individual buckets.
     return {
       projectId,
+      getVector: (ref, profile) => this.vectorReader?.(projectId, ref, profile),
       objectsOfType: (objectTypeId) => [
         ...(this.rows.get(objectRowKey(projectId, objectTypeId))?.values() ?? []),
       ],
@@ -257,7 +272,10 @@ export class InMemoryObjectStorage implements ObjectStorage {
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
     const result = evaluateObjectQuery(params.query, this.readSource(params.projectId))
     return {
-      objects: result.entries.map((entry) => entry.row),
+      objects: result.entries.map((entry) => ({
+        ...entry.row,
+        ...(hasVectorProfile(params.query) ? { score: entry.score } : {}),
+      })),
       hasMore: result.hasMore,
       nextPageToken: result.nextPageToken,
       ...(params.includeTotal === false ? {} : { total: result.total }),

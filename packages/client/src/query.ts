@@ -126,6 +126,7 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
 // builder types `links` precisely; here it flows through as runtime data.
 function reviveQueryRow(row: ObjectQueryObject): ObjectQueryExecutorRow {
   const revived: ObjectQueryExecutorRow = {
+    ...(row.score === undefined ? {} : { score: row.score }),
     primaryId: row.primaryId,
     objectTypeId: row.objectTypeId,
     properties: row.properties,

@@ -124,3 +124,17 @@ finish still commit atomically.
 Keep use-case entrypoints explicit. Share mechanics only after they have identical semantics; do
 not hide projection candidate lifecycle, edit continuation, or telemetry batching behind a generic
 workflow engine.
+
+## Vector profiles
+
+The SDK's explicit `index()` captures an internal `PreparedObjectVector`: object/profile identity,
+configuration and source fingerprints, canonical input text, object revision and current vector
+commit id. Source values stay local to preparation rather than being copied into the write payload.
+Text is ordered JSON pairs of source names and values; missing/null values become `null`, while
+empty strings remain distinct. The configuration includes an encoding version.
+
+The configured model runs outside the transaction. Atomic edits then verify the object revision,
+source/configuration fingerprints and vector commit id before storing validated float32 values.
+An unrelated edit may conservatively reject in-flight indexing even when an existing vector remains
+valid. A provider failure leaves the current representation untouched and is never retried here.
+Effective-state changes invalidate affected profiles in the same transaction as the object write.

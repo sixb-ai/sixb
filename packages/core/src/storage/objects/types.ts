@@ -14,6 +14,8 @@ import type { LinkBatchKey, ObjectBatchKey } from "./keys"
  */
 
 export interface ObjectRow {
+  /** Cosine similarity, present only on named vector query results. */
+  score?: number
   projectId: string
   objectTypeId: string
   primaryId: string
