@@ -613,8 +613,13 @@ supported, or a full reconciliation. Do not mark synchronization complete merely
 
 Use the resource-specific application permissions in Microsoft's subscription creation table
 (e.g. `Files.Read.All`, `Sites.Read.All`, `Mail.Read`, `Calendars.Read`). Do not assume existing write
-permissions suffice. `Sites.Selected` is not listed there: validate the intended tenant configuration
-before rollout, and never broaden consent automatically. No interactive user login is introduced.
+permissions suffice. Check permissions for every operation: Microsoft currently lists
+`Files.ReadWrite.All` (driveItem) and `Sites.ReadWrite.All` (list) in the
+[renewal table](https://learn.microsoft.com/en-us/graph/api/subscription-update?view=graph-rest-1.0),
+where the creation table lists read permissions. Validate both provisioning and renewal with the
+intended tenant grants; successful creation alone does not validate the full lifecycle.
+`Sites.Selected` is not listed in those tables: validate it before rollout, and never broaden consent
+automatically. No interactive user login is introduced.
 
 ### Subscription verification
 
