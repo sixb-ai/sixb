@@ -383,6 +383,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("038-outbox-publication-order", outboxPublicationOrderSql),
     pgSql("039-projection-source-roots", projectionSourceRootsSql),
     pgSql("040-connector-optional-pkce", connectorOptionalPkceSql),
+    pgSql("041-file-upload-sessions", fileUploadSessionsSql),
   ],
 })
 
@@ -406,3 +407,4 @@ import outboxPublicationOrderSql from "./migrations/038-outbox-publication-order
 import connectorOptionalPkceSql from "./migrations/040-connector-optional-pkce.sql" with {
   type: "text",
 }
+import fileUploadSessionsSql from "./migrations/041-file-upload-sessions.sql" with { type: "text" }
