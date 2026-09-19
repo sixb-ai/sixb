@@ -1,0 +1,21 @@
+{
+  "QueryResponse": {
+    "Customer": [
+      {
+        "Id": "42",
+        "SyncToken": "0",
+        "DisplayName": "Example Customer",
+        "CompanyName": "Example Customer LLC",
+        "Active": true,
+        "Balance": 125.5,
+        "CurrencyRef": { "value": "USD", "name": "United States Dollar" },
+        "PrimaryEmailAddr": { "Address": "billing@example.test" },
+        "domain": "QBO",
+        "sparse": false
+      }
+    ],
+    "startPosition": 1,
+    "maxResults": 1
+  },
+  "time": "2026-09-16T12:00:00Z"
+}
