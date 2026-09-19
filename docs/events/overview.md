@@ -78,8 +78,20 @@ consumer that may see an event twice can de-duplicate on it.
 | `runtime` | absent | system code: a worker, a sync, startup |
 | `projection` | absent | derived from a dataset |
 
-By default events are kept as a short recent log (the built-in stream retains the last two
-days), not a permanent history. A custom broker stream can change the retention window.
+Events are retained for two days by default, without count or byte caps. Configure the
+`__events` stream on your broker (`InMemoryBroker`, `RedisBroker`, or `NatsBroker`):
+
+```ts
+const broker = new InMemoryBroker({
+  streamRetention: {
+    __events: { maxRecords: 100_000, maxBytes: 64 * 1024 * 1024 },
+  },
+})
+```
+
+Omitted limits keep their defaults; other streams are unaffected. `maxBytes` measures retained
+data, not total RAM. Limits apply when creating a stream; existing streams keep their configuration.
+A consumer whose cursor has expired receives `BrokerCursorExpiredError` and must recover missed events.
 
 ### Reading events
 

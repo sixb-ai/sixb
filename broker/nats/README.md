@@ -73,27 +73,20 @@ NATS names or subjects.
 
 ## Retention
 
-Retention is controlled by the `BrokerStreamDefinition.retention` value passed
-when core runtimes ensure a stream:
+`streamRetention` overrides individual limits by stream id when creating a stream.
+Omitted limits keep the defaults supplied by the runtime:
 
 ```typescript
-await broker.ensureStream({
-  projectId: "acme",
-  stream: {
-    id: "__events",
-    retention: { maxAgeMs: 2 * 24 * 60 * 60 * 1000 },
+new NatsBroker({
+  connection: { servers: "nats://localhost:4222" },
+  streamRetention: {
+    __events: { maxRecords: 100_000, maxBytes: 64 * 1024 * 1024 },
   },
-})
-
-await broker.append({
-  projectId: "acme",
-  streamId: "__events",
-  records: [{ name: "test.record", payload: { id: "room-1" } }],
 })
 ```
 
-`maxAgeMs` maps to JetStream `max_age`, and `maxRecords` maps to
-JetStream `max_msgs`. Streams are created with `discard: old`, so bounded
+Supplied limits must be positive safe integers. `maxAgeMs`, `maxRecords`, and `maxBytes`
+map to JetStream `max_age`, `max_msgs`, and `max_bytes`. Streams use `discard: old`, so bounded
 streams drop the oldest records when retention limits are reached. Existing
 stream configurations are not rewritten by the provider.
 

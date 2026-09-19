@@ -9,6 +9,8 @@ import {
   type BrokerRecord,
   type BrokerRecordInput,
   type BrokerStreamDefinition,
+  type BrokerStreamRetention,
+  createStreamRetentionResolver,
 } from "@sixb/core/broker"
 import { NatsConnectionManager } from "./connection"
 import { NatsBrokerError } from "./errors"
@@ -23,6 +25,7 @@ const DEFAULT_FETCH_BATCH_SIZE = 1_000
 const PUBLISH_CONCURRENCY = 256
 
 export interface NatsBrokerOptions {
+  readonly streamRetention?: BrokerStreamRetention
   /**
    * NATS connection options passed through to the official client. All auth
    * modes (user/pass, token, NKey, creds file, TLS) are supported via the
@@ -62,8 +65,10 @@ export class NatsBroker implements Broker {
   private readonly namespace: string
   private jsClient: JetStreamClient | undefined
   private closed = false
+  private readonly resolveStream: ReturnType<typeof createStreamRetentionResolver>
 
   constructor(options: NatsBrokerOptions) {
+    this.resolveStream = createStreamRetentionResolver(options.streamRetention)
     this.namespace = options.namespace ?? DEFAULT_NAMESPACE
     assertNamespace(this.namespace)
     this.connectionManager = new NatsConnectionManager(options.connection)
@@ -75,7 +80,7 @@ export class NatsBroker implements Broker {
 
   async ensureStream(params: { projectId: string; stream: BrokerStreamDefinition }): Promise<void> {
     this.assertOpen()
-    await this.streamManager.ensureStream(params.projectId, params.stream)
+    await this.streamManager.ensureStream(params.projectId, this.resolveStream(params.stream))
   }
 
   async append(params: {

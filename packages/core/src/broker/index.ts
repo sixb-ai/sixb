@@ -1,6 +1,7 @@
 export type { ProviderScope } from "../provider-scope"
 export { BrokerCursorExpiredError, BrokerError } from "./errors"
-export { InMemoryBroker } from "./in-memory"
+export { InMemoryBroker, type InMemoryBrokerOptions } from "./in-memory"
+export { createStreamRetentionResolver } from "./retention"
 export type {
   Broker,
   BrokerCursor,
@@ -9,4 +10,5 @@ export type {
   BrokerRecordInput,
   BrokerRetention,
   BrokerStreamDefinition,
+  BrokerStreamRetention,
 } from "./types"

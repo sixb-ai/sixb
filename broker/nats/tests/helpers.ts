@@ -1,11 +1,11 @@
-import { NatsBroker } from "../src"
+import { NatsBroker, type NatsBrokerOptions } from "../src"
 
 /**
  * Build a NatsBroker wired against the test nats-server. Each broker gets a
  * unique namespace so shared contract tests can reuse stable project ids
  * without colliding with parallel runs.
  */
-export function createTestBroker(): {
+export function createTestBroker(options: Pick<NatsBrokerOptions, "streamRetention"> = {}): {
   broker: NatsBroker
   projectId: string
   cleanup: () => Promise<void>
@@ -23,6 +23,7 @@ export function createTestBroker(): {
   const broker = new NatsBroker({
     connection: { servers: natsUrl },
     namespace,
+    ...options,
   })
 
   const cleanup = async (): Promise<void> => {
