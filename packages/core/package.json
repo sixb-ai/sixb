@@ -221,6 +221,12 @@
       "import": "./dist/storage/executions/provider.js",
       "default": "./dist/storage/executions/provider.js"
     },
+    "./internal/file-upload-session-storage-provider": {
+      "types": "./dist/storage/file-upload-sessions/provider.d.ts",
+      "bun": "./src/storage/file-upload-sessions/provider.ts",
+      "import": "./dist/storage/file-upload-sessions/provider.js",
+      "default": "./dist/storage/file-upload-sessions/provider.js"
+    },
     "./internal/http": {
       "types": "./dist/http/index.d.ts",
       "bun": "./src/http/index.ts",
