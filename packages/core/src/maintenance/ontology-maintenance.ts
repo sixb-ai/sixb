@@ -20,6 +20,9 @@ const DEFAULT_CLEANUP_LIMIT = 1_000
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 30_000
 const DEGRADED_ATTEMPT_THRESHOLD = 3
 const DEGRADED_FAILURE_THRESHOLD = 2
+// A request that passed the expiry gate may still be finishing blob I/O, and the API clock may
+// run ahead of the database's; the sweep leaves sessions alone until this long past expiry.
+const ABANDONED_UPLOAD_SWEEP_DELAY_MS = 5 * 60_000
 const ABANDONED_UPLOAD_ABORT_GRACE_MS = 15 * 60_000
 
 interface OntologyMaintenanceDependencies {
@@ -203,7 +206,12 @@ export class OntologyMaintenance {
     now: Date,
     failures: unknown[]
   ): Promise<void> {
-    for (const session of await uploads.listAbandoned(now, this.cleanupLimit)) {
+    const abandoned = await uploads.listAbandoned({
+      projectId: this.projectId,
+      now: new Date(now.getTime() - ABANDONED_UPLOAD_SWEEP_DELAY_MS),
+      limit: this.cleanupLimit,
+    })
+    for (const session of abandoned) {
       await captureFailure(() => this.retireAbandonedUpload(uploads, session, now), failures)
     }
   }
