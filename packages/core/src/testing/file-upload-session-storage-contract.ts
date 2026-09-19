@@ -15,6 +15,7 @@ export interface FileUploadSessionStorageContractSuiteOptions<
 }
 
 const HOUR_MS = 60 * 60 * 1000
+const projectId = "file-upload-contract"
 const principal: Principal = { type: "user", id: "usr_contract" }
 const fileRef: FileRef = {
   blobId: `blob_${"a".repeat(64)}`,
@@ -146,23 +147,46 @@ export function runFileUploadSessionStorageContractSuite<TStorage extends FileUp
       })
     })
 
-    test("rejects progress on an expired session but still lets it be aborted", async () => {
+    test("checks expiry at the gate only, so a request that passed it can finish", async () => {
       await withStorage(async (storage) => {
-        await storage.create(sessionInput("upload_late", { expiresAt: ago(HOUR_MS) }))
+        // Provider uploads keep both rows unreapable while pending.
+        for (const id of ["upload_late", "upload_abort_late"]) {
+          await storage.create(
+            sessionInput(id, { expiresAt: ago(HOUR_MS), providerUpload: multipart(id) })
+          )
+        }
 
         await expect(storage.getForPrincipal("upload_late", principal)).rejects.toMatchObject({
           reason: "expired",
         })
-        await expect(storage.markUploaded("upload_late", fileRef)).rejects.toMatchObject({
-          reason: "expired",
-        })
-        await expect(storage.addSignedPart("upload_late", signedPart(1))).rejects.toMatchObject({
-          reason: "expired",
-        })
-        await expect(storage.complete("upload_late", fileRef)).rejects.toMatchObject({
-          reason: "expired",
-        })
-        expect((await storage.abort("upload_late")).status).toBe("aborted")
+        // Transitions run after slow blob I/O that began before `expiresAt`.
+        await storage.addSignedPart("upload_late", signedPart(1))
+        await storage.markUploaded("upload_late", fileRef)
+        expect((await storage.complete("upload_late", fileRef)).status).toBe("completed")
+        expect((await storage.abort("upload_abort_late")).status).toBe("aborted")
+      })
+    })
+
+    test("lists abandoned sessions for one project only", async () => {
+      await withStorage(async (storage) => {
+        await storage.create(
+          sessionInput("upload_ours", {
+            expiresAt: ago(HOUR_MS),
+            providerUpload: multipart("ours"),
+          })
+        )
+        await storage.create(
+          sessionInput("upload_theirs", {
+            projectId: "other-project",
+            expiresAt: ago(HOUR_MS),
+            providerUpload: multipart("theirs"),
+          })
+        )
+
+        const ids = (await storage.listAbandoned({ projectId, now: new Date(), limit: 10 })).map(
+          (session) => session.id
+        )
+        expect(ids).toEqual(["upload_ours"])
       })
     })
 
@@ -180,9 +204,11 @@ export function runFileUploadSessionStorageContractSuite<TStorage extends FileUp
           reason: "expired",
         })
         expect(await storage.cleanupExpired(later(HOUR_MS))).toBe(0)
-        expect((await storage.listAbandoned(new Date(), 10)).map((session) => session.id)).toEqual([
-          "upload_abandoned",
-        ])
+        expect(
+          (await storage.listAbandoned({ projectId, now: new Date(), limit: 10 })).map(
+            (session) => session.id
+          )
+        ).toEqual(["upload_abandoned"])
       })
     })
 
@@ -208,12 +234,16 @@ export function runFileUploadSessionStorageContractSuite<TStorage extends FileUp
         await storage.abort("upload_aborted")
 
         const ids = async (limit: number) =>
-          (await storage.listAbandoned(new Date(), limit)).map((session) => session.id)
+          (await storage.listAbandoned({ projectId, now: new Date(), limit })).map(
+            (session) => session.id
+          )
         expect(await ids(10)).toEqual(["upload_older", "upload_newer"])
         expect(await ids(1)).toEqual(["upload_older"])
-        const [oldest] = await storage.listAbandoned(new Date(), 1)
+        const [oldest] = await storage.listAbandoned({ projectId, now: new Date(), limit: 1 })
         expect(oldest?.providerUpload?.expiresAt).toBeInstanceOf(Date)
-        await expect(storage.listAbandoned(new Date(), 0)).rejects.toThrow("positive integer")
+        await expect(
+          storage.listAbandoned({ projectId, now: new Date(), limit: 0 })
+        ).rejects.toThrow("positive integer")
       })
     })
 
@@ -251,7 +281,7 @@ export function runFileUploadSessionStorageContractSuite<TStorage extends FileUp
         )
         await storage.abort("upload_swept")
 
-        expect(await storage.listAbandoned(new Date(), 10)).toEqual([])
+        expect(await storage.listAbandoned({ projectId, now: new Date(), limit: 10 })).toEqual([])
         expect(await storage.cleanupExpired(new Date())).toBe(0)
         expect(
           await storage.cleanupExpired(later(DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS + 60_000))
@@ -267,7 +297,7 @@ function sessionInput(
 ): CreateFileUploadSessionInput {
   return {
     id,
-    projectId: "file-upload-contract",
+    projectId,
     principal,
     strategy: overrides.providerUpload?.strategy ?? "server",
     expiresAt: later(HOUR_MS),

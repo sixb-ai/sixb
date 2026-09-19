@@ -665,7 +665,9 @@ function expectedContentLengthError(session: FileUploadSession, request: Request
 function inMemoryUploadSessionsWithWarning(): InMemoryFileUploadSessions {
   console.warn(
     "[SixbServer] Storage provides no fileUploadSessions; staged uploads are kept in memory, " +
-      "so they do not survive a restart and cannot span multiple API instances."
+      "so they do not survive a restart, cannot span multiple API instances, and abandoned " +
+      "multipart uploads are left to the bucket's lifecycle rule."
   )
-  return new InMemoryFileUploadSessions()
+  // Maintenance sweeps host.storage only, so this store must drop abandoned sessions itself.
+  return new InMemoryFileUploadSessions({ unswept: true })
 }
