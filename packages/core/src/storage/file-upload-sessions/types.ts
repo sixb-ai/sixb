@@ -43,6 +43,12 @@ export interface FileUploadSession {
   readonly abortedAt?: Date
 }
 
+export interface ListAbandonedFileUploadSessionsInput {
+  readonly projectId: string
+  readonly now: Date
+  readonly limit: number
+}
+
 /**
  * State machine for a staged/direct-put upload session. A session is created
  * `pending`; `markUploaded` records the resolved {@link FileRef} but keeps the
@@ -57,18 +63,18 @@ export interface FileUploadSession {
  */
 export interface FileUploadSessionStore {
   create(input: CreateFileUploadSessionInput): Promise<FileUploadSession>
-  /** Read-only: throws `expired` or `not_found`, never deletes. */
+  /**
+   * The expiry gate: throws `expired` or `not_found`, and never deletes. Callers check expiry
+   * here when a request starts; the transitions below do not re-check it, because a request
+   * that passed the gate may finish slow blob I/O after `expiresAt`.
+   */
   getForPrincipal(uploadId: string, principal: Principal): Promise<FileUploadSession>
-  /** Rejects an expired session with `expired`. */
   markUploaded(uploadId: string, fileRef: FileRef): Promise<FileUploadSession>
-  /** Rejects an expired session with `expired`. */
   addSignedPart(uploadId: string, part: SignedBlobUploadPart): Promise<FileUploadSession>
-  /** Rejects an expired session with `expired`. */
   complete(uploadId: string, fileRef: FileRef): Promise<FileUploadSession>
-  /** Accepts an expired `pending` session; it is how abandoned uploads become terminal. */
   abort(uploadId: string): Promise<FileUploadSession>
-  /** Oldest-expiry-first abandoned sessions, at most `limit`. */
-  listAbandoned(now: Date, limit: number): Promise<readonly FileUploadSession[]>
+  /** One project's abandoned sessions expired at or before `now`, oldest expiry first. */
+  listAbandoned(input: ListAbandonedFileUploadSessionsInput): Promise<readonly FileUploadSession[]>
   /** Deletes reapable sessions and returns the count. Never deletes an abandoned session. */
   cleanupExpired(now?: Date): Promise<number>
 }

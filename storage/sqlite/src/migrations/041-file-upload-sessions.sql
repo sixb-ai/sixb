@@ -29,5 +29,5 @@ CREATE INDEX idx_file_upload_sessions_reap
   WHERE reap_at IS NOT NULL;
 
 CREATE INDEX idx_file_upload_sessions_abandoned
-  ON file_upload_sessions (expires_at)
+  ON file_upload_sessions (project_id, expires_at)
   WHERE status = 'pending' AND provider_upload IS NOT NULL;

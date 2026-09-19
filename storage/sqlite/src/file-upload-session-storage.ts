@@ -6,7 +6,7 @@ import {
   fileUploadSessionReapAt,
   parseFileUploadSessionRow,
 } from "@sixb/core/internal/file-upload-session-storage-provider"
-import type { FileUploadSession } from "@sixb/core/storage"
+import type { FileUploadSession, ListAbandonedFileUploadSessionsInput } from "@sixb/core/storage"
 import { isUniqueConstraintError } from "./storage-errors"
 import { runImmediateTransactionAsync, type SqliteStoreConnection } from "./transactions"
 
@@ -95,15 +95,18 @@ class SqliteFileUploadSessionPersistence implements FileUploadSessionPersistence
       .run(session.status, ...mutableColumns(session), session.id)
   }
 
-  async listAbandoned(now: Date, limit: number): Promise<readonly FileUploadSession[]> {
+  async listAbandoned(
+    input: ListAbandonedFileUploadSessionsInput
+  ): Promise<readonly FileUploadSession[]> {
     const rows = this.db
       .query(
         `${SELECT_SESSION}
-         WHERE status = 'pending' AND provider_upload IS NOT NULL AND expires_at <= ?
+         WHERE project_id = ? AND status = 'pending' AND provider_upload IS NOT NULL
+           AND expires_at <= ?
          ORDER BY expires_at, id
          LIMIT ?`
       )
-      .all(now.toISOString(), limit)
+      .all(input.projectId, input.now.toISOString(), input.limit)
     return rows.map((row) => parseFileUploadSessionRow(row as Record<string, unknown>))
   }
 

@@ -7,6 +7,7 @@ import type {
   FileUploadSessionStore,
   FileUploadStatus,
   FileUploadStrategy,
+  ListAbandonedFileUploadSessionsInput,
 } from "./types"
 import {
   createFileUploadId,
@@ -25,8 +26,8 @@ export interface FileUploadSessionPersistence {
   /** Inside `transaction`, must lock the row until the transaction ends. */
   get(uploadId: string): Promise<FileUploadSession | null>
   update(session: FileUploadSession): Promise<void>
-  /** `pending`, holding a provider upload, `expires_at <= now`; oldest expiry first. */
-  listAbandoned(now: Date, limit: number): Promise<readonly FileUploadSession[]>
+  /** The project's `pending` rows holding a provider upload, `expires_at <= now`, oldest first. */
+  listAbandoned(input: ListAbandonedFileUploadSessionsInput): Promise<readonly FileUploadSession[]>
   /** Deletes rows whose persisted `fileUploadSessionReapAt` is `<= now`. */
   deleteReapable(now: Date): Promise<number>
 }
@@ -92,11 +93,11 @@ export class DurableFileUploadSessions implements FileUploadSessionStore {
   }
 
   markUploaded(uploadId: string, fileRef: FileRef): Promise<FileUploadSession> {
-    return this.transition(uploadId, false, (session) => ({ ...session, fileRef }))
+    return this.transition(uploadId, (session) => ({ ...session, fileRef }))
   }
 
   addSignedPart(uploadId: string, part: SignedBlobUploadPart): Promise<FileUploadSession> {
-    return this.transition(uploadId, false, (session) => ({
+    return this.transition(uploadId, (session) => ({
       ...session,
       signedParts: [
         ...session.signedParts.filter((candidate) => candidate.partNumber !== part.partNumber),
@@ -106,7 +107,7 @@ export class DurableFileUploadSessions implements FileUploadSessionStore {
   }
 
   complete(uploadId: string, fileRef: FileRef): Promise<FileUploadSession> {
-    return this.transition(uploadId, false, (session, now) => ({
+    return this.transition(uploadId, (session, now) => ({
       ...session,
       status: "completed",
       fileRef,
@@ -115,18 +116,23 @@ export class DurableFileUploadSessions implements FileUploadSessionStore {
   }
 
   abort(uploadId: string): Promise<FileUploadSession> {
-    return this.transition(uploadId, true, (session, now) => ({
+    return this.transition(uploadId, (session, now) => ({
       ...session,
       status: "aborted",
       abortedAt: now,
     }))
   }
 
-  async listAbandoned(now: Date, limit: number): Promise<readonly FileUploadSession[]> {
-    if (!Number.isSafeInteger(limit) || limit <= 0) {
+  async listAbandoned(
+    input: ListAbandonedFileUploadSessionsInput
+  ): Promise<readonly FileUploadSession[]> {
+    if (input.projectId.trim().length === 0) {
+      throw new Error("[Sixb] File upload session listAbandoned projectId must not be blank.")
+    }
+    if (!Number.isSafeInteger(input.limit) || input.limit <= 0) {
       throw new Error("[Sixb] File upload session listAbandoned limit must be a positive integer.")
     }
-    return this.backend.read((persistence) => persistence.listAbandoned(now, limit))
+    return this.backend.read((persistence) => persistence.listAbandoned(input))
   }
 
   async cleanupExpired(now?: Date): Promise<number> {
@@ -137,7 +143,6 @@ export class DurableFileUploadSessions implements FileUploadSessionStore {
 
   private transition(
     uploadId: string,
-    allowExpired: boolean,
     next: (session: FileUploadSession, now: Date) => FileUploadSession
   ): Promise<FileUploadSession> {
     return this.backend.transaction(async (persistence) => {
@@ -152,12 +157,7 @@ export class DurableFileUploadSessions implements FileUploadSessionStore {
         )
       }
 
-      const now = await persistence.now()
-      if (!allowExpired && isFileUploadSessionExpired(session, now.getTime())) {
-        throw new FileUploadSessionError("expired", "File upload session has expired.")
-      }
-
-      const updated = next(session, now)
+      const updated = next(session, await persistence.now())
       await persistence.update(updated)
       return updated
     })
