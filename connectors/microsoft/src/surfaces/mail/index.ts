@@ -1,9 +1,9 @@
 import type { MicrosoftHttp } from "../../http"
 import type { MailSubscribeOptions, MicrosoftSubscription } from "../../types/subscriptions"
-import { subscribeMailbox } from "../subscriptions"
 import { attachmentsResource, type MailAttachmentsResource } from "./attachments"
 import { foldersResource, type MailFoldersResource } from "./folders"
 import { type MailMessagesResource, messagesResource } from "./messages"
+import { subscribeMailbox } from "./subscribe"
 
 export interface MailSurface {
   readonly messages: MailMessagesResource

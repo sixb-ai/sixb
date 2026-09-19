@@ -3,7 +3,7 @@ import { defineWebhook, type WebhookDefinition } from "@sixb/core"
 import type { MicrosoftClient } from "./client"
 import { MicrosoftProtocolError } from "./errors"
 import { isRecord } from "./guards"
-import { validateWebhookSecret } from "./surfaces/subscriptions"
+import { validateWebhookSecret } from "./surfaces/subscriptions/validation"
 import type { MicrosoftEventHandler, MicrosoftWebhookEvent } from "./types/webhooks"
 
 function challenge(request: Request): string | null {
