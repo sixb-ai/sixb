@@ -103,7 +103,15 @@ covers connecting and `idleTimeout` covers an idle socket; neither bounds a
 command that was sent and never answered. One operation can make multiple round
 trips; each round trip gets its own command timeout.
 
-A command that passes the bound fails with a `RedisBrokerError`, and its client is discarded rather than reused, because the missing reply may still arrive and a late reply on a shared connection can be matched to the wrong command. A timeout is **indeterminate**: Redis may still apply a write after its caller has failed. Pass a stable `idempotencyKey` and retry while its deduplication key is still alive. Size `dedupeTtlMs` for the complete elapsed time from the original write through any later commands and retry backoff; `commandTimeoutMs` alone cannot guarantee that window. A Redis failover longer than the bound no longer completes transparently through Bun's reconnect and offline queue; it surfacesas a failed command.
+If Bun exhausts its reconnect attempts while the broker is idle, the next command can fail with
+`RedisError: Connection has failed` (`ERR_REDIS_CONNECTION_CLOSED`). Bun rejects that specific
+command before sending it. The broker discards the failed client, opens a replacement, and retries
+only that command once. Later commands share the replacement; earlier successful commands in the
+operation are not replayed. If reconnecting or the retry fails, the error reaches the caller.
+Other connection errors and server errors are not automatically retried because a write may already
+have been applied.
+
+A command that passes the bound fails with a `RedisBrokerError`, and its client is discarded rather than reused, because the missing reply may still arrive and a late reply on a shared connection can be matched to the wrong command. A timeout is **indeterminate**: Redis may still apply a write after its caller has failed. Pass a stable `idempotencyKey` and retry while its deduplication key is still alive. Size `dedupeTtlMs` for the complete elapsed time from the original write through any later commands and retry backoff; `commandTimeoutMs` alone cannot guarantee that window. A Redis failover longer than the bound no longer completes transparently through Bun's reconnect and offline queue; it surfaces as a failed command.
 
 ### Subscribe
 

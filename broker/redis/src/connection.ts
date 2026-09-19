@@ -143,14 +143,37 @@ export class RedisConnectionManager {
     }
   }
 
-  /** Returns a facade that applies the command timeout to every non-blocking call. */
+  /** Bounds each command and replaces clients that reject it before sending. */
   boundedCommandClient(client: RedisBrokerClient): RedisBrokerCommandClient {
+    // Keep the replacement for subsequent commands in the same operation. Replaying the whole
+    // operation could duplicate earlier successful writes, even when this command was not sent.
+    let activeClient = client
+    const run = async <T>(
+      command: string,
+      execute: (current: RedisBrokerClient) => Promise<T>
+    ): Promise<T> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await this.runWithCommandTimeout(activeClient, command, () =>
+            execute(activeClient)
+          )
+        } catch (error) {
+          // Subscription clients belong to their pump and must never borrow the shared client.
+          if (activeClient !== this.client || !isUnsentCommandOnFailedConnection(error)) {
+            throw error
+          }
+          this.discardClient(activeClient)
+          // One fresh connection attempt per command; a continuing outage must still surface.
+          if (attempt === 1) throw error
+          this.assertOpen()
+          activeClient = await this.connect()
+        }
+      }
+    }
     return {
-      exists: (key) => this.runWithCommandTimeout(client, "EXISTS", () => client.exists(key)),
-      hmget: (key, fields) =>
-        this.runWithCommandTimeout(client, "HMGET", () => client.hmget(key, fields)),
-      send: (command, args) =>
-        this.runWithCommandTimeout(client, command, () => client.send(command, args)),
+      exists: (key) => run("EXISTS", (current) => current.exists(key)),
+      hmget: (key, fields) => run("HMGET", (current) => current.hmget(key, fields)),
+      send: (command, args) => run(command, (current) => current.send(command, args)),
     }
   }
 
@@ -186,7 +209,7 @@ export class RedisConnectionManager {
     }
   }
 
-  /** Closes a timed-out client and forgets it when it is the shared command client. */
+  /** Closes an unusable client and forgets it when it is the shared command client. */
   private discardClient(client: RedisBrokerClient): void {
     if (this.client === client) {
       this.client = undefined
@@ -269,6 +292,23 @@ export class RedisConnectionManager {
       throw new RedisBrokerError("broker connection has been closed")
     }
   }
+}
+
+/**
+ * Bun rejects this command before enqueueing it when the native client has failed permanently.
+ * The code alone is insufficient: other connection-closed errors can reject an in-flight write.
+ * Keep this narrow; timeouts, disconnects, and Redis script errors must not replay writes.
+ * Verified against Bun 1.4.2's send_rejection() and send():
+ * https://github.com/oven-sh/bun/blob/bun-v1.4.2/src/runtime/valkey_jsc/valkey.rs
+ */
+function isUnsentCommandOnFailedConnection(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.name === "RedisError" &&
+    "code" in error &&
+    error.code === "ERR_REDIS_CONNECTION_CLOSED" &&
+    error.message === "Connection has failed"
+  )
 }
 
 /** Reports how an abandoned command ended, once its caller has already been failed. */
