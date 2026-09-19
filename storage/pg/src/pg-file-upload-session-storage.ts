@@ -5,7 +5,7 @@ import {
   fileUploadSessionReapAt,
   parseFileUploadSessionRow,
 } from "@sixb/core/internal/file-upload-session-storage-provider"
-import type { FileUploadSession } from "@sixb/core/storage"
+import type { FileUploadSession, ListAbandonedFileUploadSessionsInput } from "@sixb/core/storage"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgFileUploadSessionStorage extends DurableFileUploadSessions {
@@ -87,12 +87,15 @@ class PgFileUploadSessionPersistence implements FileUploadSessionPersistence {
     `
   }
 
-  async listAbandoned(now: Date, limit: number): Promise<readonly FileUploadSession[]> {
+  async listAbandoned(
+    input: ListAbandonedFileUploadSessionsInput
+  ): Promise<readonly FileUploadSession[]> {
     const rows = await this.sql<PgFileUploadSessionRow[]>`
       SELECT * FROM file_upload_sessions
-      WHERE status = 'pending' AND provider_upload IS NOT NULL AND expires_at <= ${now}
+      WHERE project_id = ${input.projectId} AND status = 'pending'
+        AND provider_upload IS NOT NULL AND expires_at <= ${input.now}
       ORDER BY expires_at, id COLLATE "C"
-      LIMIT ${limit}
+      LIMIT ${input.limit}
     `
     return rows.map(sessionFromRow)
   }

@@ -17,7 +17,7 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
   test("aborts the provider upload, retires the session, then reaps it", async () => {
     const blobs = new DirectUploadBlobStorage()
     const { storage, maintenance } = setup(blobs)
-    await abandoned(storage, "upload_abandoned", 5 * MINUTE_MS)
+    await abandoned(storage, "upload_abandoned", 10 * MINUTE_MS)
     await storage.fileUploadSessions.create({
       id: "upload_live",
       projectId: "project",
@@ -36,7 +36,7 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
         providerUploadId: "provider-upload_abandoned",
       },
     ])
-    expect(await storage.fileUploadSessions.listAbandoned(new Date(), 10)).toEqual([])
+    expect(await listed(storage)).toEqual([])
     expect(maintenance.getSnapshot().lastError).toBeNull()
     // Aborted, not deleted: it stays until the terminal TTL, like any retired session.
     expect(await storage.fileUploadSessions.cleanupExpired(new Date())).toBe(0)
@@ -47,17 +47,27 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
     ).toBe(1)
   })
 
+  test("leaves a session alone until well past expiry", async () => {
+    const blobs = new DirectUploadBlobStorage()
+    const { storage, maintenance } = setup(blobs)
+    // A request that passed the expiry gate may still be completing its provider upload.
+    await abandoned(storage, "upload_just_expired", MINUTE_MS)
+
+    await maintenance.runNow()
+
+    expect(blobs.attempts).toBe(0)
+    expect((await listed(storage)).map((s) => s.id)).toEqual(["upload_just_expired"])
+  })
+
   test("keeps a session whose provider abort fails within the grace period", async () => {
     const blobs = new DirectUploadBlobStorage({ fail: true })
     const { storage, maintenance } = setup(blobs)
-    await abandoned(storage, "upload_retry", MINUTE_MS)
+    await abandoned(storage, "upload_retry", 6 * MINUTE_MS)
 
     await maintenance.runNow()
 
     // Still pending and still listed, so the next pass retries the abort.
-    expect(
-      (await storage.fileUploadSessions.listAbandoned(new Date(), 10)).map((s) => s.id)
-    ).toEqual(["upload_retry"])
+    expect((await listed(storage)).map((s) => s.id)).toEqual(["upload_retry"])
     expect(maintenance.getSnapshot().lastError).toContain("provider abort failed")
   })
 
@@ -69,25 +79,25 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
     await maintenance.runNow()
 
     expect(blobs.attempts).toBe(1)
-    expect(await storage.fileUploadSessions.listAbandoned(new Date(), 10)).toEqual([])
+    expect(await listed(storage)).toEqual([])
     // Giving up is still reported: the parts now depend on the bucket lifecycle rule.
     expect(maintenance.getSnapshot().lastError).toContain("provider abort failed")
   })
 
   test("retires sessions directly when blob storage cannot abort uploads", async () => {
     const { storage, maintenance } = setup(new InMemoryBlobStorage())
-    await abandoned(storage, "upload_no_provider", 5 * MINUTE_MS)
+    await abandoned(storage, "upload_no_provider", 10 * MINUTE_MS)
 
     await maintenance.runNow()
 
-    expect(await storage.fileUploadSessions.listAbandoned(new Date(), 10)).toEqual([])
+    expect(await listed(storage)).toEqual([])
     expect(maintenance.getSnapshot().lastError).toBeNull()
   })
 
   test("treats a session another instance retired first as done", async () => {
     const blobs = new DirectUploadBlobStorage()
     const { storage, maintenance } = setup(blobs)
-    await abandoned(storage, "upload_raced", 5 * MINUTE_MS)
+    await abandoned(storage, "upload_raced", 10 * MINUTE_MS)
     // Another API instance's pass retires the row while ours is aborting the provider upload.
     blobs.onAbort = () => storage.fileUploadSessions.abort("upload_raced")
 
@@ -97,18 +107,26 @@ describe("OntologyMaintenance abandoned upload sweep", () => {
     expect(maintenance.getSnapshot().lastError).toBeNull()
   })
 
+  test("sweeps only its own project's sessions", async () => {
+    const blobs = new DirectUploadBlobStorage()
+    const { storage, maintenance } = setup(blobs)
+    await abandoned(storage, "upload_other_project", 10 * MINUTE_MS, "other-project")
+
+    await maintenance.runNow()
+
+    expect(blobs.attempts).toBe(0)
+  })
+
   test("retires at most cleanupLimit sessions per pass, oldest expiry first", async () => {
     const blobs = new DirectUploadBlobStorage()
     const { storage, maintenance } = setup(blobs, { cleanupLimit: 1 })
-    await abandoned(storage, "upload_newer", 5 * MINUTE_MS)
-    await abandoned(storage, "upload_older", 10 * MINUTE_MS)
+    await abandoned(storage, "upload_newer", 10 * MINUTE_MS)
+    await abandoned(storage, "upload_older", 20 * MINUTE_MS)
 
     await maintenance.runNow()
 
     expect(blobs.aborted.map((input) => input.uploadId)).toEqual(["upload_older"])
-    expect(
-      (await storage.fileUploadSessions.listAbandoned(new Date(), 10)).map((s) => s.id)
-    ).toEqual(["upload_newer"])
+    expect((await listed(storage)).map((s) => s.id)).toEqual(["upload_newer"])
   })
 })
 
@@ -126,10 +144,23 @@ function setup(blobStorage: BlobStorage, options: { readonly cleanupLimit?: numb
   return { storage, maintenance }
 }
 
-async function abandoned(storage: InMemoryStorage, id: string, expiredForMs: number) {
+function listed(storage: InMemoryStorage) {
+  return storage.fileUploadSessions.listAbandoned({
+    projectId: "project",
+    now: new Date(),
+    limit: 10,
+  })
+}
+
+async function abandoned(
+  storage: InMemoryStorage,
+  id: string,
+  expiredForMs: number,
+  projectId = "project"
+) {
   await storage.fileUploadSessions.create({
     id,
-    projectId: "project",
+    projectId,
     principal,
     strategy: "multipart",
     expiresAt: new Date(Date.now() - expiredForMs),

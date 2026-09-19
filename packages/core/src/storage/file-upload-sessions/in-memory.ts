@@ -3,7 +3,11 @@ import {
   type FileUploadSessionPersistence,
   type FileUploadSessionPersistenceBackend,
 } from "./provider"
-import type { CreateFileUploadSessionInput, FileUploadSession } from "./types"
+import type {
+  CreateFileUploadSessionInput,
+  FileUploadSession,
+  ListAbandonedFileUploadSessionsInput,
+} from "./types"
 import { isAbandonedFileUploadSession, shouldDeleteFileUploadSession } from "./utils"
 
 export type InMemoryFileUploadSessionsSnapshot = Map<string, FileUploadSession>
@@ -13,20 +17,30 @@ export type InMemoryFileUploadSessionsSnapshot = Map<string, FileUploadSession>
  *
  * Sessions live only in this process's memory: they do not survive a restart and are not
  * shared across instances, so staged uploads need a single instance. `@sixb/pg` and
- * `@sixb/sqlite` provide durable stores. Reapable sessions are also swept on `create`,
- * because the `files.ts` fallback instance has no maintenance loop behind it.
+ * `@sixb/sqlite` provide durable stores. Reapable sessions are also reaped on `create`.
  */
 export class InMemoryFileUploadSessions extends DurableFileUploadSessions {
   private readonly sessionsById: Map<string, FileUploadSession>
+  private readonly unswept: boolean
 
-  constructor() {
+  /**
+   * `unswept`: no maintenance pass retires this store's abandoned sessions, so `create` drops
+   * them too, bounding memory and leaving their provider parts to the bucket lifecycle rule.
+   */
+  constructor(options: { readonly unswept?: boolean } = {}) {
     const sessionsById = new Map<string, FileUploadSession>()
     super(new InMemoryFileUploadSessionBackend(sessionsById))
     this.sessionsById = sessionsById
+    this.unswept = options.unswept ?? false
   }
 
   override async create(input: CreateFileUploadSessionInput): Promise<FileUploadSession> {
     await this.cleanupExpired()
+    if (this.unswept) {
+      for (const [id, session] of this.sessionsById) {
+        if (isAbandonedFileUploadSession(session)) this.sessionsById.delete(id)
+      }
+    }
     return super.create(input)
   }
 
@@ -83,11 +97,17 @@ class InMemoryFileUploadSessionPersistence implements FileUploadSessionPersisten
     this.sessionsById.set(session.id, session)
   }
 
-  async listAbandoned(now: Date, limit: number): Promise<readonly FileUploadSession[]> {
+  async listAbandoned(
+    input: ListAbandonedFileUploadSessionsInput
+  ): Promise<readonly FileUploadSession[]> {
     return [...this.sessionsById.values()]
-      .filter((session) => isAbandonedFileUploadSession(session, now.getTime()))
+      .filter(
+        (session) =>
+          session.projectId === input.projectId &&
+          isAbandonedFileUploadSession(session, input.now.getTime())
+      )
       .sort((left, right) => left.expiresAt.getTime() - right.expiresAt.getTime())
-      .slice(0, limit)
+      .slice(0, input.limit)
   }
 
   async deleteReapable(now: Date): Promise<number> {
