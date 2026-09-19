@@ -106,8 +106,10 @@ export const socialConnector = defineConnector("social", {
       const url = new URL("https://social.example/oauth/authorize")
       url.searchParams.set("redirect_uri", context.redirectUri)
       url.searchParams.set("state", state)
-      url.searchParams.set("code_challenge", codeChallenge)
-      url.searchParams.set("code_challenge_method", codeChallengeMethod)
+      if (codeChallenge !== undefined && codeChallengeMethod !== undefined) {
+        url.searchParams.set("code_challenge", codeChallenge)
+        url.searchParams.set("code_challenge_method", codeChallengeMethod)
+      }
       return url
     },
     exchangeCode(context, input) {
@@ -180,6 +182,61 @@ in the Sync definition. See [OAuth connector fan-out](./syncs.md#oauth-connector
 
 > **Current scope.** OAuth-backed webhook routing remains rejected until its connection admission
 > contract is defined.
+
+### PKCE
+
+PKCE defaults to S256. Disable it explicitly for providers whose OAuth flow does not support it:
+
+```ts
+authentication: {
+  type: "oauth2",
+  pkce: "disabled",
+  // authorizationUrl, exchangeCode, refresh, and revoke as above.
+},
+```
+
+When disabled, Sixb omits the challenge and verifier. State, browser binding, redirect validation,
+and replay protection still apply. Changing the mode requires restarting any in-flight authorization.
+
+### Provider callback parameters and authorization context
+
+Declare the extra callback parameters your provider returns. Store grant-specific data in
+`authorizationContext` for account discovery, refresh, and revocation.
+
+```ts
+authentication: {
+  type: "oauth2",
+  callbackParameters: ["tenant"],
+  // Other OAuth methods as above.
+  async exchangeCode(context, input) {
+    const tenant = input.callbackParameters?.tenant
+    if (!tenant) throw new Error("[Acme] OAuth callback is missing its tenant.")
+
+    const credentials = await exchangeAcmeCode(context, input)
+    return {
+      ...credentials,
+      authorizationContext: { tenant },
+    }
+  },
+},
+async discoverAccounts(context, credentials) {
+  const tenant = credentials.authorizationContext?.tenant
+  if (typeof tenant !== "string") throw new Error("[Acme] Missing tenant context.")
+
+  // Verify access with the provider before offering the account.
+  const account = await getAcmeTenant(credentials, tenant, { signal: context.signal })
+  return [{ id: account.id, label: account.name }]
+},
+```
+
+Sixb forwards only declared parameters and rejects duplicate values. The adapter validates required
+values; OAuth fields such as `state`, `code`, and `error` remain framework-owned.
+
+Context must be a JSON object. Sixb encrypts it with the tokens and keeps it out of public connection
+views. It survives restarts.
+
+- **Refresh:** omit context to preserve it, return an object to replace it, or `{}` to clear it.
+- **Reauthorization:** uses fresh context and verifies that existing connected accounts remain available.
 
 ## Protect OAuth credentials
 

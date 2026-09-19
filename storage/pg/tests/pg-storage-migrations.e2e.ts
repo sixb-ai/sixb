@@ -219,6 +219,7 @@ describe("Postgres storage migrations", () => {
             "035-share-grants",
             "036-share-sessions",
             "037-execution-requester-groups",
+            "038-connector-optional-pkce",
           ],
         },
       ])
@@ -481,6 +482,13 @@ describe("Postgres storage migrations", () => {
           id: "037-execution-requester-groups",
           status: "applied",
           version: 37,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "038-connector-optional-pkce",
+          status: "applied",
+          version: 38,
         },
       ])
     })
@@ -2211,6 +2219,13 @@ describe("Postgres storage migrations", () => {
           id: "037-execution-requester-groups",
           status: "applied",
           version: 37,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "038-connector-optional-pkce",
+          status: "applied",
+          version: 38,
         },
       ])
     } finally {

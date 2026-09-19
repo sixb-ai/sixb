@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto"
+import { isJsonObject } from "../../json"
 import type { ConnectorAuthorizationRecord } from "../../storage"
 import { createConnectorCodedError } from "../errors"
 import type { ConnectorAccountCandidate, ConnectorOAuthCredentials } from "../types"
@@ -26,6 +27,7 @@ export function validateCredentials(
     tokenType?: string
     scopes?: string[]
     expiresAt?: Date
+    authorizationContext?: ConnectorOAuthCredentials["authorizationContext"]
   } = {
     accessToken: nonblank(
       credentials.accessToken,
@@ -74,6 +76,16 @@ export function validateCredentials(
       )
     }
     normalized.expiresAt = new Date(credentials.expiresAt)
+  }
+
+  if (credentials.authorizationContext !== undefined) {
+    if (!isJsonObject(credentials.authorizationContext)) {
+      throw createConnectorCodedError(
+        "connector.adapter_invalid",
+        "OAuth connector adapter returned invalid authorization context; expected a JSON object."
+      )
+    }
+    normalized.authorizationContext = structuredClone(credentials.authorizationContext)
   }
 
   return normalized
@@ -135,6 +147,9 @@ export function serializeCredentials(credentials: ConnectorOAuthCredentials): st
     ...(credentials.expiresAt === undefined
       ? {}
       : { expiresAt: credentials.expiresAt.toISOString() }),
+    ...(credentials.authorizationContext === undefined
+      ? {}
+      : { authorizationContext: credentials.authorizationContext }),
   })
 }
 
@@ -160,7 +175,8 @@ export function parseCredentials(serialized: string): ConnectorOAuthCredentials 
     (value.tokenType !== undefined && typeof value.tokenType !== "string") ||
     (value.scopes !== undefined &&
       (!Array.isArray(value.scopes) || value.scopes.some((scope) => typeof scope !== "string"))) ||
-    (value.expiresAt !== undefined && typeof value.expiresAt !== "string")
+    (value.expiresAt !== undefined && typeof value.expiresAt !== "string") ||
+    (value.authorizationContext !== undefined && !isJsonObject(value.authorizationContext))
   ) {
     throw createConnectorCodedError(
       "connector.credentials_unavailable",
@@ -175,6 +191,9 @@ export function parseCredentials(serialized: string): ConnectorOAuthCredentials 
       ...(value.tokenType === undefined ? {} : { tokenType: value.tokenType }),
       ...(value.scopes === undefined ? {} : { scopes: value.scopes as string[] }),
       ...(expiresAt === undefined ? {} : { expiresAt }),
+      ...(value.authorizationContext === undefined
+        ? {}
+        : { authorizationContext: value.authorizationContext }),
     })
   } catch (error) {
     throw createConnectorCodedError(
@@ -238,19 +257,86 @@ export function normalizedHttpUrl(
 
 export function assertAuthorizationUrlParameters(
   authorizationUrl: string,
-  expected: { readonly state: string; readonly codeChallenge: string }
+  expected: { readonly state: string; readonly codeChallenge?: string }
 ): void {
   const parameters = new URL(authorizationUrl).searchParams
   if (
     !sameSingleParameter(parameters, "state", expected.state) ||
-    !sameSingleParameter(parameters, "code_challenge", expected.codeChallenge) ||
-    !sameSingleParameter(parameters, "code_challenge_method", "S256")
+    (expected.codeChallenge === undefined
+      ? parameters.has("code_challenge") || parameters.has("code_challenge_method")
+      : !sameSingleParameter(parameters, "code_challenge", expected.codeChallenge) ||
+        !sameSingleParameter(parameters, "code_challenge_method", "S256"))
   ) {
     throw createConnectorCodedError(
       "connector.adapter_invalid",
-      "OAuth connector authorization URL must preserve the framework-provided state and PKCE S256 parameters."
+      expected.codeChallenge === undefined
+        ? "OAuth connector authorization URL must preserve the framework-provided state and omit disabled PKCE parameters."
+        : "OAuth connector authorization URL must preserve the framework-provided state and PKCE S256 parameters."
     )
   }
+}
+
+export function connectorPkceEnabled(pkce: "S256" | "disabled" | undefined): boolean {
+  if (pkce === undefined || pkce === "S256") return true
+  if (pkce === "disabled") return false
+  throw createConnectorCodedError(
+    "connector.adapter_invalid",
+    "OAuth connector PKCE must be S256 or disabled."
+  )
+}
+
+const reservedCallbackParameters = new Set([
+  "state",
+  "code",
+  "auth_code",
+  "error",
+  "error_description",
+  "error_uri",
+])
+
+export function validateCallbackParameterNames(names: readonly string[] = []): void {
+  if (
+    !Array.isArray(names) ||
+    names.some(
+      (name) =>
+        typeof name !== "string" ||
+        !/^[A-Za-z_][A-Za-z0-9_.-]*$/.test(name) ||
+        reservedCallbackParameters.has(name)
+    ) ||
+    new Set(names).size !== names.length
+  ) {
+    throw createConnectorCodedError(
+      "connector.adapter_invalid",
+      "OAuth callback parameter names must be unique, non-reserved parameter names."
+    )
+  }
+}
+
+/** Select only declared provider values after the callback's state and browser binding are proved. */
+export function selectCallbackParameters(
+  names: readonly string[] = [],
+  parameters: Readonly<Record<string, string | readonly string[]>> = {}
+): Readonly<Record<string, string>> {
+  validateCallbackParameterNames(names)
+  if (!isRecord(parameters)) {
+    throw createConnectorCodedError(
+      "connector.authorization_invalid",
+      "OAuth provider callback parameters must be an object."
+    )
+  }
+  return Object.fromEntries(
+    names.flatMap((name) => {
+      if (!Object.hasOwn(parameters, name)) return []
+      const value = parameters[name]
+      if (typeof value !== "string") {
+        throw createConnectorCodedError(
+          "connector.authorization_invalid",
+          "OAuth provider callback parameters must have a single string value."
+        )
+      }
+      return [[name, value]]
+    })
+  )
 }
 
 export function nonblank(

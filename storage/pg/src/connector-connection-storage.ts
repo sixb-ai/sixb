@@ -86,7 +86,7 @@ class PgConnectorConnectionPersistence implements ConnectorConnectionPersistence
         ) VALUES (
           ${record.projectId}, ${record.connectorId}, ${record.id}, ${record.slot},
           ${record.initiatedByExecutionId}, ${record.stateHash},
-          ${jsonParameter(this.sql, record.codeVerifier)}, ${record.redirectUri},
+          ${record.codeVerifier === undefined ? null : jsonParameter(this.sql, record.codeVerifier)}, ${record.redirectUri},
           ${record.connectionRunId ?? null}, ${record.returnTo ?? null},
           ${record.callbackBindingHash ?? null}, ${record.reauthorizationId ?? null},
           ${record.reauthorizationRevision ?? null},
@@ -429,7 +429,7 @@ function authorizationAttemptFromRow(
     slot: row.slot,
     initiatedByExecutionId: row.initiated_by_execution_id,
     stateHash: row.state_hash,
-    codeVerifier: row.code_verifier,
+    ...(row.code_verifier === null ? {} : { codeVerifier: row.code_verifier }),
     redirectUri: row.redirect_uri,
     ...(row.connection_run_id === null ? {} : { connectionRunId: row.connection_run_id }),
     ...(row.return_to === null ? {} : { returnTo: row.return_to }),
@@ -687,7 +687,7 @@ interface PgAuthorizationAttemptRow {
   readonly slot: string
   readonly initiated_by_execution_id: string
   readonly state_hash: string
-  readonly code_verifier: ConnectorAuthorizationAttemptRecord["codeVerifier"]
+  readonly code_verifier: NonNullable<ConnectorAuthorizationAttemptRecord["codeVerifier"]> | null
   readonly redirect_uri: string
   readonly connection_run_id: string | null
   readonly return_to: string | null

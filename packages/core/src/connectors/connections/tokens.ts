@@ -169,6 +169,10 @@ export class ConnectorTokenAccess {
                 ? { tokenType: current.tokenType }
                 : {}),
               scopes: refreshed.scopes ?? current.scopes ?? authorization.scopes,
+              ...(refreshed.authorizationContext === undefined &&
+              current.authorizationContext !== undefined
+                ? { authorizationContext: current.authorizationContext }
+                : {}),
             } satisfies ConnectorOAuthCredentials
             const envelope = await this.credentials.seal(
               definition.id,

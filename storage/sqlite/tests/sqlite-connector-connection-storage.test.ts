@@ -14,7 +14,10 @@ runConnectorConnectionStorageContractSuite("SqliteConnectorConnectionStorage", {
   teardown: (storage) => storage.close(),
 })
 
-test("persists connector attempts, runs, authorizations and connections across restarts", async () => {
+test.each([
+  true,
+  false,
+])("persists connector attempts, runs, authorizations and connections across restarts (PKCE %s)", async (pkce) => {
   const directory = await mkdtemp(join(tmpdir(), "sixb-sqlite-connectors-"))
   let storage: SqliteStorage | undefined
   try {
@@ -39,7 +42,7 @@ test("persists connector attempts, runs, authorizations and connections across r
       slot: "default",
       initiatedByExecutionId: "execution-a",
       stateHash: "state-hash",
-      codeVerifier: sealedCredential(),
+      ...(pkce ? { codeVerifier: sealedCredential() } : {}),
       redirectUri: "https://example.com/oauth/callback",
       connectionRunId: "run-a",
       returnTo: "https://app.example.com/connectors",
@@ -76,15 +79,16 @@ test("persists connector attempts, runs, authorizations and connections across r
         runId: "run-a",
       })
     ).resolves.toMatchObject({ id: "run-a", status: "waiting" })
-    await expect(
-      storage.connectorConnections.consumeAuthorizationAttempt({
-        id: "attempt-a",
-        projectId: "project-a",
-        connectorId: "social",
-        stateHash: "state-hash",
-        redirectUri: "https://example.com/oauth/callback",
-      })
-    ).resolves.toMatchObject({ id: "attempt-a" })
+    const attempt = await storage.connectorConnections.consumeAuthorizationAttempt({
+      id: "attempt-a",
+      projectId: "project-a",
+      connectorId: "social",
+      stateHash: "state-hash",
+      redirectUri: "https://example.com/oauth/callback",
+    })
+    expect(attempt.id).toBe("attempt-a")
+    if (pkce) expect(attempt.codeVerifier).toEqual(sealedCredential())
+    else expect(attempt).not.toHaveProperty("codeVerifier")
     await expect(
       storage.connectorConnections.getAuthorization({
         projectId: "project-a",

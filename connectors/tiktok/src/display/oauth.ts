@@ -18,6 +18,7 @@ export function createDisplayAuthentication(
 ): ConnectorOAuth2Authentication {
   return {
     type: "oauth2",
+    pkce: "disabled",
     authorizationUrl(context, input) {
       const url = new URL(DISPLAY_AUTHORIZATION_URL)
       url.searchParams.set("client_key", options.clientKey)
@@ -26,8 +27,6 @@ export function createDisplayAuthentication(
       url.searchParams.set("redirect_uri", displayRedirectUri(context.redirectUri))
       url.searchParams.set("state", input.state)
       if (options.disableAutoAuth) url.searchParams.set("disable_auto_auth", "1")
-      // Login Kit Web relies on state for CSRF protection. TikTok only documents PKCE for its
-      // mobile and desktop flows, so Sixb's framework challenge is intentionally not forwarded.
       return url
     },
     async exchangeCode(context, input) {

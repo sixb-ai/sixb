@@ -282,16 +282,25 @@ export function registerConnectorConnectionRunRoutes(
     )
     .get(
       "/auth/connectors/callback",
-      async ({ query, request, set }) => {
+      async ({ request, set }) => {
         let callbackCookie: ReturnType<typeof readConnectorCallbackCookie> | undefined
         try {
-          const parsed = ConnectorOAuthCallbackQuerySchema.parse(query)
+          const parameters = new URL(request.url).searchParams
+          const callbackParameters = Object.fromEntries(
+            [...new Set(parameters.keys())].map((name) => {
+              const values = parameters.getAll(name)
+              return [name, values.length === 1 ? values[0] : values]
+            })
+          )
+          const parsed = ConnectorOAuthCallbackQuerySchema.parse(callbackParameters)
           callbackCookie = readConnectorCallbackCookie(request, parsed.state)
           const result = await getConnectorConnectionCallbackProcess(host).completeConnectionRun({
             state: parsed.state,
             redirectUri: options.resolveCallbackUrl(request),
             callbackBinding: callbackCookie.value ?? "",
-            ...(parsed.code === undefined ? { error: parsed.error! } : { code: parsed.code }),
+            ...(parsed.code === undefined
+              ? { error: parsed.error! }
+              : { code: parsed.code, callbackParameters }),
           })
           return connectorCallbackRedirect(
             result.returnTo,

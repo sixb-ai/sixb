@@ -90,6 +90,22 @@ export function runConnectorConnectionStorageContractSuite<
       })
     })
 
+    test("persists explicitly non-PKCE attempts without a verifier", async () => {
+      // Removal proof: restore required code_verifier storage or omit migration 038; SQL providers fail.
+      await withStorage(async (storage) => {
+        const { codeVerifier: _verifier, ...input } = authorizationAttempt()
+        const created = await storage.createAuthorizationAttempt(input)
+        expect(created).not.toHaveProperty("codeVerifier")
+        const consumed = await storage.consumeAuthorizationAttempt(
+          authorizationAttemptConsumption()
+        )
+        expect(consumed).not.toHaveProperty("codeVerifier")
+        await expect(
+          storage.consumeAuthorizationAttempt(authorizationAttemptConsumption())
+        ).rejects.toThrow("invalid, expired, or already used")
+      })
+    })
+
     test("expires authorization attempts from the authoritative storage clock", async () => {
       await withStorage(async (storage, root) => {
         const ttlMs = 60_000
@@ -110,12 +126,13 @@ export function runConnectorConnectionStorageContractSuite<
     test("returns detached authorization attempt records", async () => {
       await withStorage(async (storage) => {
         const created = await storage.createAuthorizationAttempt(authorizationAttempt())
+        if (!created.codeVerifier) throw new Error("Expected a stored PKCE verifier.")
         Object.assign(created.codeVerifier, { ciphertext: "mutated" })
 
         const consumed = await storage.consumeAuthorizationAttempt(
           authorizationAttemptConsumption()
         )
-        expect(consumed.codeVerifier.ciphertext).toBe(credentials.ciphertext)
+        expect(consumed.codeVerifier?.ciphertext).toBe(credentials.ciphertext)
       })
     })
 

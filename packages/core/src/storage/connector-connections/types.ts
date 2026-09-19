@@ -198,7 +198,8 @@ export interface ConnectorAuthorizationAttemptRecord extends ConnectorConnection
   /** Durable execution that initiated and authorizes completion of this OAuth attempt. */
   readonly initiatedByExecutionId: string
   readonly stateHash: string
-  readonly codeVerifier: SealedConnectorCredential
+  /** Absent when the authorization attempt explicitly disabled PKCE. */
+  readonly codeVerifier?: SealedConnectorCredential
   readonly redirectUri: string
   /** Present only for attempts created by the headless connection-run API. */
   readonly connectionRunId?: string
@@ -219,7 +220,7 @@ export interface CreateConnectorAuthorizationAttemptInput extends ConnectorConne
   readonly connectorId: string
   readonly initiatedByExecutionId: string
   readonly stateHash: string
-  readonly codeVerifier: SealedConnectorCredential
+  readonly codeVerifier?: SealedConnectorCredential
   readonly redirectUri: string
   readonly connectionRunId?: string
   readonly returnTo?: string

@@ -87,7 +87,7 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
           record.slot,
           record.initiatedByExecutionId,
           record.stateHash,
-          json(record.codeVerifier),
+          record.codeVerifier === undefined ? null : json(record.codeVerifier),
           record.redirectUri,
           record.connectionRunId ?? null,
           record.returnTo ?? null,
@@ -411,7 +411,7 @@ function authorizationAttemptFromRow(
     slot: row.slot,
     initiatedByExecutionId: row.initiated_by_execution_id,
     stateHash: row.state_hash,
-    codeVerifier: parseJson(row.code_verifier),
+    ...(row.code_verifier === null ? {} : { codeVerifier: parseJson(row.code_verifier) }),
     redirectUri: row.redirect_uri,
     ...(row.connection_run_id === null ? {} : { connectionRunId: row.connection_run_id }),
     ...(row.return_to === null ? {} : { returnTo: row.return_to }),
@@ -706,7 +706,7 @@ interface SqliteAuthorizationAttemptRow {
   readonly slot: string
   readonly initiated_by_execution_id: string
   readonly state_hash: string
-  readonly code_verifier: string
+  readonly code_verifier: string | null
   readonly redirect_uri: string
   readonly connection_run_id: string | null
   readonly return_to: string | null
