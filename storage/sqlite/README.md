@@ -39,6 +39,15 @@ file when upgrading normally; incompatible or dirty history fails startup instea
 rewriting an unknown schema. Before 1.0, an explicitly breaking migration may still require deleting
 the database file and starting over.
 
+## Vector profiles
+
+Named `search.vectors` profiles persist outside object properties as float32 blobs with their
+provenance. Writes and invalidation share the object's materialization transaction; stale model
+results fail explicitly instead of overwriting newer vectors. No extension is needed to persist.
+
+Search is not available yet: vector queries fail explicitly. Existing numeric arrays are not
+promoted to managed profiles. Search support and its extension setup will follow separately.
+
 ## Transactions
 
 ```ts

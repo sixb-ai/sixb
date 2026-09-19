@@ -177,6 +177,8 @@ Generate `queryVector` with the same model: numeric validation cannot establish 
 | Query bounds | One profile and concrete type; `where` before ranking, `limit` after (`project` in JSON IR). `k`: 1–1,000. Counts, facets and `total` describe the selected top-k. |
 
 V1 excludes pagination, traversal, expansion, subtype search, hybrid search and profile fusion.
-**Only `InMemoryStorage` supports named profiles in this slice**; PostgreSQL and SQLite reject
-these declarations at startup. Legacy `search.vector` and numeric-property queries remain
+**Persistence:** `InMemoryStorage`, `PostgresStorage` and `SqliteStorage` support named profiles.
+PostgreSQL uses native arrays and SQLite uses float32 blobs, without search extensions for storage.
+**Search:** currently `InMemoryStorage` only; PostgreSQL and SQLite reject vector queries until
+their search implementations land. Legacy `search.vector` and numeric-property queries remain
 compatible, without managed provenance or invalidation.

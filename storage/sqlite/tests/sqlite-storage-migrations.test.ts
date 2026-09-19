@@ -287,6 +287,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 37,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "038-vector-profiles",
+    status: "applied",
+    version: 38,
+  },
 ]
 
 afterEach(async () => {
@@ -1461,6 +1468,7 @@ describe("SQLite storage migrations", () => {
         "ontology_source_rows",
         "ontology_sources",
       ])
+      expect(readMemoryTableNames(db)).toContain("object_vectors")
       expect(readMemoryTableColumns(db, "objects")).toContain("last_commit_id")
       expect(readMemoryTableColumns(db, "links")).toContain("last_commit_id")
       expect(readMemoryTableColumns(db, "timeseries")).toContain("last_commit_id")

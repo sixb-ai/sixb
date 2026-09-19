@@ -91,6 +91,8 @@ import deviceAuthorizationsSql from "./migrations/034-device-authorizations.sql"
 import shareGrantsSql from "./migrations/035-share-grants.sql" with { type: "text" }
 import shareSessionsSql from "./migrations/036-share-sessions.sql" with { type: "text" }
 
+import vectorProfilesSql from "./migrations/038-vector-profiles.sql" with { type: "text" }
+
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
     adapter_id TEXT NOT NULL,
@@ -182,6 +184,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("035-share-grants", shareGrantsSql),
     sqliteSql("036-share-sessions", shareSessionsSql),
     sqliteSql("037-execution-requester-groups", executionRequesterGroupsSql),
+    sqliteSql("038-vector-profiles", vectorProfilesSql),
   ],
 })
 

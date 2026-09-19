@@ -87,6 +87,7 @@ import deviceAuthorizationsSql from "./migrations/034-device-authorizations.sql"
 }
 import shareGrantsSql from "./migrations/035-share-grants.sql" with { type: "text" }
 import shareSessionsSql from "./migrations/036-share-sessions.sql" with { type: "text" }
+import vectorProfilesSql from "./migrations/038-vector-profiles.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -377,6 +378,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("035-share-grants", shareGrantsSql),
     pgSql("036-share-sessions", shareSessionsSql),
     pgSql("037-execution-requester-groups", executionRequesterGroupsSql),
+    pgSql("038-vector-profiles", vectorProfilesSql),
   ],
 })
 

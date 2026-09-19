@@ -219,6 +219,7 @@ describe("Postgres storage migrations", () => {
             "035-share-grants",
             "036-share-sessions",
             "037-execution-requester-groups",
+            "038-vector-profiles",
           ],
         },
       ])
@@ -481,6 +482,13 @@ describe("Postgres storage migrations", () => {
           id: "037-execution-requester-groups",
           status: "applied",
           version: 37,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "038-vector-profiles",
+          status: "applied",
+          version: 38,
         },
       ])
     })
@@ -1084,6 +1092,7 @@ describe("Postgres storage migrations", () => {
         "ontology_source_rows",
         "ontology_sources",
       ])
+      expect(await readTableNames(schemaName)).toContain("object_vectors")
       expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
@@ -2211,6 +2220,13 @@ describe("Postgres storage migrations", () => {
           id: "037-execution-requester-groups",
           status: "applied",
           version: 37,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "038-vector-profiles",
+          status: "applied",
+          version: 38,
         },
       ])
     } finally {
