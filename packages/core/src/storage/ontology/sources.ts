@@ -3,6 +3,7 @@ import type {
   ProjectionEntityRef,
   ProjectionExecution,
   ProjectionSourceAssertion,
+  ProjectionSourceBase,
   ProjectionSourceRef,
 } from "../../materialization/model"
 
@@ -32,7 +33,8 @@ export interface OntologySourceRecord {
   readonly projectionRevision: string
   readonly ownershipHash: string
   readonly ontologyRevision: string
-  /** Null until staging is sealed by markReady; zero explicitly represents an empty output. */
+  readonly base?: ProjectionSourceBase
+  /** Staged roots, including explicit deletions for a delta; null until sealed by markReady. */
   readonly rootCount: number | null
   /** Null until staging is sealed by markReady; zero explicitly represents an empty output. */
   readonly assertionCount: number | null
@@ -78,6 +80,7 @@ export interface BeginSourceMaterializationInput {
   readonly projectionRevision: string
   readonly ownershipHash: string
   readonly ontologyRevision: string
+  readonly base?: ProjectionSourceBase
   readonly createdAt: string
 }
 
@@ -94,6 +97,13 @@ export interface StageSourceRowsInput {
   readonly materializationId: string
   readonly execution: ProjectionExecution
   readonly rows: readonly StageSourceAssertion[]
+  /** Explicit root removals, allowed only for a candidate with a pinned base. */
+  readonly deletions?: readonly StageSourceRoot[]
+}
+
+export interface StageSourceRoot {
+  readonly root: ProjectionEntityRef
+  readonly stagingOrdinal: number
 }
 
 export interface StageSourceRowsResult {
@@ -139,13 +149,14 @@ export type AbandonSourceMaterializationInput =
 
 export interface CleanupTerminalSourceMaterializationsInput {
   readonly projectId: string
-  /** Exclusive cutoff applied only to superseded/abandoned terminalAt. */
+  /** Exclusive cutoff for retired roots in terminal manifests, and for empty terminal manifests. */
   readonly terminalBefore: string
-  /** Maximum total child-row plus manifest deletions performed by one call. */
+  /** Maximum total assertion, root-reference, and manifest deletions performed by one call. */
   readonly limit: number
 }
 
 export interface CleanupTerminalSourceMaterializationsResult {
+  /** Assertion rows and root references deleted. */
   readonly rowsDeleted: number
   readonly materializationsDeleted: number
 }

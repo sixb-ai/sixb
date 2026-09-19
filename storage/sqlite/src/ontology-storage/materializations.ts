@@ -65,6 +65,7 @@ import {
   type SqliteOntologyCommitRow,
   type SqliteOntologySourceRow,
 } from "./shared"
+import { activateSourceRoots } from "./source-roots"
 
 export class SqliteOntologyMaterializationStorage implements OntologyMaterializationStorage {
   private readonly sessions: SqliteMaterializationSessions
@@ -192,6 +193,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         sourceId: replacement.sourceId,
         candidateMaterializationId: replacement.candidateMaterializationId,
         previousMaterializationId: replacement.previousMaterializationId,
+        incremental: replacement.incremental,
         kind: "object",
         pageRows: input.pageRows,
       })) {
@@ -236,6 +238,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       sourceId: replacement.sourceId,
       candidateMaterializationId: replacement.candidateMaterializationId,
       previousMaterializationId: replacement.previousMaterializationId,
+      incremental: replacement.incremental,
       kind: "link",
       pageRows: input.pageRows,
     })) {
@@ -250,7 +253,8 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         replacement.sourceId,
         replacement.candidateMaterializationId,
         materializationIds,
-        linkIdentities
+        linkIdentities,
+        replacement.incremental
       )
       yield { objects: [], links }
     }
@@ -359,6 +363,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       sourceId: input.source.projectionId,
       candidateMaterializationId: input.candidateMaterializationId,
       previousMaterializationId: previous?.materialization_id ?? null,
+      incremental: candidate.base_materialization_id !== null,
       projectionKind: candidate.projection_kind,
       objectStreamStarted: false,
       objectStreamCompleted: false,
@@ -627,6 +632,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       invalidCorrelation("Source activation does not match its ready candidate identity.")
     }
     this.assertSource(activation.expected, commit.projectId)
+    activateSourceRoots(this.db, commit.projectId, candidate, activation)
     const previous = this.getActiveSource(commit.projectId, activation.source.projectionId)
     if (previous) {
       assertPinnedDatasetWatermark(

@@ -87,6 +87,9 @@ import deviceAuthorizationsSql from "./migrations/034-device-authorizations.sql"
 }
 import shareGrantsSql from "./migrations/035-share-grants.sql" with { type: "text" }
 import shareSessionsSql from "./migrations/036-share-sessions.sql" with { type: "text" }
+import projectionSourceRootsSql from "./migrations/039-projection-source-roots.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -378,6 +381,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("036-share-sessions", shareSessionsSql),
     pgSql("037-execution-requester-groups", executionRequesterGroupsSql),
     pgSql("038-outbox-publication-order", outboxPublicationOrderSql),
+    pgSql("039-projection-source-roots", projectionSourceRootsSql),
   ],
 })
 

@@ -126,10 +126,16 @@ function runMetrics(run: ProjectionRun): { label: string; value: number }[] {
   return [
     { label: "Rows read", value: run.progress.sourceRowsRead },
     { label: "Rows skipped", value: run.progress.sourceRowsSkipped },
+    ...(run.progress.sourceChangesRead === undefined
+      ? []
+      : [{ label: "Changes read", value: run.progress.sourceChangesRead }]),
   ]
 }
 
 function primaryMetric(run: ProjectionRun): { label: string; value: number } {
+  if (run.progress.sourceRowsRead === 0 && run.progress.sourceChangesRead !== undefined) {
+    return { label: "Changes", value: run.progress.sourceChangesRead }
+  }
   return { label: "Rows", value: run.progress.sourceRowsRead }
 }
 

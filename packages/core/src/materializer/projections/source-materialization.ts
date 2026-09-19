@@ -1,16 +1,19 @@
+import { MaterializationValidationError } from "../../materialization/errors"
 import type {
   PinnedDatasetVersion,
   ProjectionExecution,
+  ProjectionSourceBase,
+  ProjectionSourceDeletion,
   ProjectionSourceEntry,
   ProjectionSourceRef,
 } from "../../materialization/model"
 import { utf8JsonByteLength } from "../../materialization/refs"
-import type { StageSourceAssertion } from "../../storage/ontology"
+import type { StageSourceAssertion, StageSourceRoot } from "../../storage/ontology"
 import type { MaterializerContext } from "../context"
 import { throwIfAborted } from "../shared/abort"
 import { chunkBySize } from "../shared/chunking"
-import { normalizeProjectionSourceEntry } from "../shared/normalize"
-import type { ProjectionEntryValidator } from "./entry-validator"
+import { normalizeProjectionEntity, normalizeProjectionSourceEntry } from "../shared/normalize"
+import { type ProjectionEntryValidator, validateProjectionRootRef } from "./entry-validator"
 
 export interface StagedProjectionMaterialization {
   readonly rootCount: number
@@ -37,7 +40,8 @@ export async function stageProjectionMaterialization(
     readonly projectionRevision: string
     readonly ownershipHash: string
     readonly createdAt: string
-    readonly entries: AsyncIterable<ProjectionSourceEntry>
+    readonly entries: AsyncIterable<ProjectionSourceEntry | ProjectionSourceDeletion>
+    readonly base?: ProjectionSourceBase
     readonly validateEntry: ProjectionEntryValidator
     readonly signal?: AbortSignal
   }
@@ -54,13 +58,28 @@ export async function stageProjectionMaterialization(
     ownershipHash: input.ownershipHash,
     ontologyRevision: context.projectionRegistry.ontologyRevision,
     createdAt: input.createdAt,
+    ...(input.base ? { base: input.base } : {}),
   })
 
   let rootCount = 0
   let assertionCount = 0
-  async function* assertions(): AsyncIterable<StageSourceAssertion> {
+  async function* assertions(): AsyncIterable<StageSourceAssertion | StageSourceRoot> {
     for await (const rawEntry of input.entries) {
       throwIfAborted(input.signal)
+      if ("deleted" in rawEntry) {
+        if (!input.base || rawEntry.deleted !== true) {
+          throw new MaterializationValidationError(
+            "Explicit root deletions require a pinned source base."
+          )
+        }
+        const root = normalizeProjectionEntity(rawEntry.root)
+        validateProjectionRootRef(
+          context.projectionRegistry.resolveSource(input.source.projectionId),
+          root
+        )
+        yield { root, stagingOrdinal: rootCount++ }
+        continue
+      }
       const entry = input.validateEntry(normalizeProjectionSourceEntry(rawEntry))
       const stagingOrdinal = rootCount
       for (const assertion of entry.assertions) {
@@ -82,7 +101,8 @@ export async function stageProjectionMaterialization(
       source: input.source,
       materializationId: input.materializationId,
       execution: input.execution,
-      rows,
+      rows: rows.filter((row): row is StageSourceAssertion => "assertion" in row),
+      deletions: rows.filter((row) => !("assertion" in row)),
     })
   }
 

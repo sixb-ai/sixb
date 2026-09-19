@@ -73,6 +73,39 @@ export interface ReadDatasetRowsInput {
   readonly offset?: number
 }
 
+export interface ReadDatasetChangesInput {
+  readonly datasetId: string
+  readonly fromVersionId: string
+  readonly toVersionId: string
+  /** Stable, unique row identity in both versions; it need not be the dataset primary key. */
+  readonly keyColumns: readonly string[]
+  /** Complete inputs of the consumer's calculation, including key columns and timestamps. */
+  readonly columns: readonly string[]
+  readonly signal?: AbortSignal
+}
+
+export interface DatasetRowChange {
+  /** Null for an insertion. Otherwise includes every requested column. */
+  readonly before: DatasetRow | null
+  /** Null for a deletion. Otherwise includes every requested column. */
+  readonly after: DatasetRow | null
+}
+
+/** A complete, pinned change set. Call close in finally, including when iteration never starts. */
+export interface DatasetChanges {
+  readonly fromRowCount: number
+  readonly toRowCount: number
+  /** Exact number of records the iterator must deliver before EOF. */
+  readonly changeCount: number
+  /**
+   * At most one record per key, with at least one non-null image. Includes every changed key;
+   * providers may conservatively include equal images (for example, reordered JSON fields).
+   * Order is unspecified. Consumers must exhaust the stream before publishing its result.
+   */
+  readonly changes: AsyncIterable<DatasetRowChange>
+  close(): Promise<void>
+}
+
 export interface CommitDatasetWriteInput {
   /** Atomic version guard; null requires that no version exists, undefined leaves it unguarded. */
   readonly expectedLatestVersionId?: string | null
@@ -137,6 +170,13 @@ export interface LakeStorage {
   getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null>
   /** Explicit immutable-version reads have stable physical order and stable offset semantics. */
   readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow>
+
+  /**
+   * Optional comparison of two immutable versions. Null means the snapshots, schemas or unique
+   * keys cannot support a complete delta: use a full read. Operational errors must propagate.
+   * Iteration releases the provider connection between bounded pages, allowing other lake work.
+   */
+  readChanges?(input: ReadDatasetChangesInput): Promise<DatasetChanges | null>
 
   /** Release external resources. Optional: a provider that owns none omits it. */
   close?(): void | Promise<void>

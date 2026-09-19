@@ -42,6 +42,8 @@ export type {
   ProjectionProtocolIdentity,
   ProjectionRunFinishInput,
   ProjectionSourceAssertion,
+  ProjectionSourceBase,
+  ProjectionSourceDeletion,
   ProjectionSourceEntry,
   ProjectionSourceRef,
   ProjectionSourceReplacement,

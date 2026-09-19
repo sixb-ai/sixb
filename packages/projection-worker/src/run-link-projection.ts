@@ -1,5 +1,6 @@
 import {
   type DatasetDefinition,
+  type DatasetRow,
   getDatasetRowValidationError,
   type LinkProjectionDefinition,
   MaterializationValidationError,
@@ -40,34 +41,47 @@ export function mapLinkProjectionEntries(input: {
         columns,
       })) {
         throwIfAborted(signal)
-        const validationError = getDatasetRowValidationError(row, dataset, { columns })
-        if (validationError) await failCurrentRow(progress, validationError)
-
-        const sourceValue = row[projection.sourceField]
-        const targetValue = row[projection.targetField]
-        if (isBlank(sourceValue) || isBlank(targetValue)) {
-          await progress.recordRow(true)
-          continue
+        let entry: ProjectionSourceEntry | null
+        try {
+          entry = mapLinkProjectionRow(projection, dataset, row)
+        } catch (error) {
+          if (error instanceof MaterializationValidationError)
+            await failCurrentRow(progress, error.message)
+          throw error
         }
-
-        const sourceId = requireIdentity(sourceValue, projection.id, projection.sourceField)
-        const targetId = requireIdentity(targetValue, projection.id, projection.targetField)
-        const ref = {
-          source: { objectTypeId: projection.sourceObjectTypeId, primaryId: sourceId },
-          linkId: projection.linkId,
-          target: { objectTypeId: projection.targetObjectTypeId, primaryId: targetId },
-        }
-        await progress.recordRow(false)
-        yield {
-          root: { kind: "link", ref },
-          assertions: [{ kind: "link", ref }],
-        }
+        await progress.recordRow(entry === null)
+        if (entry) yield entry
       }
       progress.assertComplete()
     } finally {
       await progress.flush()
     }
   }
+}
+
+export function mapLinkProjectionRow(
+  projection: LinkProjectionDefinition,
+  dataset: DatasetDefinition,
+  row: DatasetRow
+): ProjectionSourceEntry | null {
+  const columns = [...new Set([projection.sourceField, projection.targetField])]
+  const validationError = getDatasetRowValidationError(row, dataset, { columns })
+  if (validationError) throw new MaterializationValidationError(validationError)
+  const sourceValue = row[projection.sourceField]
+  const targetValue = row[projection.targetField]
+  if (isBlank(sourceValue) || isBlank(targetValue)) return null
+  const ref = {
+    source: {
+      objectTypeId: projection.sourceObjectTypeId,
+      primaryId: requireIdentity(sourceValue, projection.id, projection.sourceField),
+    },
+    linkId: projection.linkId,
+    target: {
+      objectTypeId: projection.targetObjectTypeId,
+      primaryId: requireIdentity(targetValue, projection.id, projection.targetField),
+    },
+  }
+  return { root: { kind: "link", ref }, assertions: [{ kind: "link", ref }] }
 }
 
 function requireIdentity(value: unknown, projectionId: string, column: string): string {

@@ -10,6 +10,8 @@ import type {
   ProjectionCommitResult,
   ProjectionExecution,
   ProjectionMaterializationIdentity,
+  ProjectionSourceBase,
+  ProjectionSourceDeletion,
   ProjectionSourceEntry,
   ProjectionSourceRef,
   ProjectionSourceReplacement,
@@ -19,6 +21,7 @@ import type {
   OntologyCommitRecord,
   OntologyCommitWrite,
   OntologyMaterializationStorage,
+  OntologySourceRecord,
   OntologyStorage,
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
@@ -60,7 +63,8 @@ interface PreparedProjectionReplacement {
   readonly source: ProjectionSourceRef
   readonly datasetVersion: PinnedDatasetVersion
   readonly execution: ProjectionExecution
-  readonly entries: AsyncIterable<ProjectionSourceEntry>
+  readonly entries: AsyncIterable<ProjectionSourceEntry | ProjectionSourceDeletion>
+  readonly base?: ProjectionSourceBase
   readonly signal?: AbortSignal
   readonly resolved: ResolvedSourceProjection
   readonly projectionKind: "object" | "link"
@@ -128,6 +132,7 @@ function prepareProjectionReplacement(
     datasetVersion,
     execution,
     entries: raw.input.entries,
+    ...(raw.input.base ? { base: Object.freeze({ ...raw.input.base }) } : {}),
     resolved,
     projectionKind,
     runIdentity,
@@ -237,6 +242,7 @@ async function prepareProjectionCandidate(
     source: command.source,
   })
   validateProjectionWatermark(active, command.datasetVersion)
+  assertDeltaBase(active, command)
   return {
     materializationId: context.materializationId(),
     createdAt: context.clock().toISOString(),
@@ -263,6 +269,7 @@ async function stageProjectionCandidate(
     ownershipHash: command.resolved.ownershipHash,
     createdAt: candidate.createdAt,
     entries: command.entries,
+    ...(command.base ? { base: command.base } : {}),
     validateEntry: createProjectionEntryValidator(context.ontology, command.resolved),
   }
   const staged = await stageCandidateEntries(context, input, command.signal)
@@ -312,6 +319,14 @@ async function executeProjectionTransaction(
   )
   if (replay) return projectionReplayResult(replay, command)
 
+  if (command.base) {
+    const active = await storage.ontology.sources.getActive({
+      projectId: context.projectId,
+      source: command.source,
+    })
+    validateProjectionWatermark(active, command.datasetVersion)
+    assertDeltaBase(active, command)
+  }
   const origin = projectionOrigin(command)
   throwIfAborted(command.signal)
   const session = await storage.ontology.materializations.begin({
@@ -477,4 +492,24 @@ function validateProjectionWatermark(
 ): void {
   if (!active) return
   assertPinnedDatasetWatermark(active.datasetVersion, next, "Projection replacement")
+}
+
+function assertDeltaBase(
+  active: OntologySourceRecord | null,
+  command: PreparedProjectionReplacement
+): void {
+  if (
+    command.base &&
+    (!active ||
+      active.materializationId !== command.base.materializationId ||
+      active.lastCommitId !== command.base.lastCommitId ||
+      active.projectionRevision !== command.runIdentity.projectionRevision ||
+      active.ontologyRevision !== command.runIdentity.ontologyRevision ||
+      active.ownershipHash !== command.runIdentity.ownershipHash)
+  ) {
+    throw new MaterializationConflictError(
+      "source-materialization",
+      "Projection delta no longer matches the active source or its definition."
+    )
+  }
 }

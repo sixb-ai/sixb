@@ -102,7 +102,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
             input_exhausted = ${input.fixedBatchSize === undefined ? null : false},
             missing_target_object_type_id = ${null}, missing_target_object_id = ${null},
             missing_target_batch_ordinal = ${null}, missing_target_first_seen_at = ${null},
-            source_rows_read = ${0}, source_rows_skipped = ${0}, error = ${null}
+            source_rows_read = ${0}, source_rows_skipped = ${0}, source_changes_read = ${null}, error = ${null}
           WHERE project_id = ${input.projectId} AND id = ${input.id}
             AND status = ${"failed"} AND error->>'code' = ${"queue.enqueue_failed"}
           RETURNING *
@@ -216,7 +216,8 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
         UPDATE projection_runs
         SET
           source_rows_read = ${progress.sourceRowsRead},
-          source_rows_skipped = ${progress.sourceRowsSkipped}
+          source_rows_skipped = ${progress.sourceRowsSkipped},
+          source_changes_read = ${progress.sourceChangesRead ?? null}
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
@@ -241,6 +242,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           execution_token = ${null},
           source_rows_read = ${plan.progress.sourceRowsRead},
           source_rows_skipped = ${plan.progress.sourceRowsSkipped},
+          source_changes_read = ${plan.progress.sourceChangesRead ?? null},
           input_exhausted = ${plan.inputExhausted ?? existingRow.input_exhausted},
           error = ${plan.error === undefined ? null : serializeSixbFailure(plan.error, PROJECTION_RUN_FAILURE_CODES)}::text::jsonb
         WHERE project_id = ${input.projectId}
@@ -529,6 +531,9 @@ function restoreProjectionRunRow(row: DatabaseRow): StoredProjectionRunRecord {
     progress: {
       sourceRowsRead: databaseSafeInteger(row.source_rows_read, "sourceRowsRead"),
       sourceRowsSkipped: databaseSafeInteger(row.source_rows_skipped, "sourceRowsSkipped"),
+      ...(row.source_changes_read == null
+        ? {}
+        : { sourceChangesRead: databaseSafeInteger(row.source_changes_read, "sourceChangesRead") }),
     },
     error: row.error ?? undefined,
   }
@@ -584,6 +589,7 @@ interface DatabaseRow {
   missing_target_first_seen_at: Date | string | null
   source_rows_read: number | string
   source_rows_skipped: number | string
+  source_changes_read: number | string | null
   error: JsonValue | null
 }
 

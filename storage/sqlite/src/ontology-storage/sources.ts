@@ -47,6 +47,8 @@ import {
   sourceAssertion,
   sourceRecord,
 } from "./shared"
+import { cleanupSourceVersions } from "./source-cleanup"
+import { assertSourceRootCoverage, stageSourceRoots } from "./source-roots"
 
 export class SqliteOntologySourceStorage implements OntologySourceStorage {
   constructor(
@@ -98,9 +100,9 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
               dataset_id, dataset_version_id, dataset_version_created_at,
               projection_revision, ownership_hash, ontology_revision,
               root_count, assertion_count, created_at, ready_at, activated_at,
-              terminal_at, last_commit_id, updated_at
+              terminal_at, last_commit_id, updated_at, base_materialization_id, base_commit_id
             ) VALUES (?, ?, ?, ?, ?, 'replacement', 'staging', ?, ?, ?, ?, ?, ?, ?,
-              NULL, NULL, ?, NULL, NULL, NULL, NULL, ?)
+              NULL, NULL, ?, NULL, NULL, NULL, NULL, ?, ?, ?)
           `
         )
         .run(
@@ -117,7 +119,9 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
           input.ownershipHash,
           input.ontologyRevision,
           input.createdAt,
-          input.createdAt
+          input.createdAt,
+          input.base?.materializationId ?? null,
+          input.base?.lastCommitId ?? null
         )
       return sourceRecord(
         this.requireManifest(input.projectId, input.source.projectionId, input.materializationId)
@@ -144,6 +148,7 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
       const rows = sourceStageRows(manifest.projection_kind, input.rows)
       const existing = this.findStageRows(input, rows)
       const { pending, unchanged } = reconcileSourceStageRows(rows, existing)
+      stageSourceRoots(this.db, manifest, input)
       this.insertStageRows(input, pending)
       return { inserted: pending.length, unchanged }
     })
@@ -249,78 +254,7 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
       assertNonblank(input.projectId, "Terminal source cleanup project id")
       assertTimestamp(input.terminalBefore, "Terminal source cleanup cutoff", true)
       assertPositiveInteger(input.limit, "Terminal source cleanup limit")
-      const manifests = this.db
-        .query(
-          `
-            SELECT * FROM ontology_sources
-            WHERE project_id = ? AND status IN ('superseded', 'abandoned')
-              AND terminal_at < ?
-            ORDER BY terminal_at, source_id, materialization_id
-            LIMIT ?
-          `
-        )
-        .all(input.projectId, input.terminalBefore, input.limit) as SqliteOntologySourceRow[]
-      let remaining = input.limit
-      let rowsDeleted = 0
-      let materializationsDeleted = 0
-      for (const manifest of manifests) {
-        if (remaining === 0) break
-        const deleted = this.db
-          .query(
-            `
-              DELETE FROM ontology_source_rows
-              WHERE rowid IN (
-                SELECT rows.rowid
-                FROM ontology_source_rows AS rows
-                JOIN ontology_sources AS sources
-                  ON sources.project_id = rows.project_id
-                 AND sources.source_id = rows.source_id
-                 AND sources.materialization_id = rows.materialization_id
-                WHERE rows.project_id = ? AND rows.source_id = ? AND rows.materialization_id = ?
-                  AND sources.status IN ('superseded', 'abandoned')
-                  AND sources.terminal_at = ? AND sources.terminal_at < ?
-                ORDER BY rows.entity_sort_key
-                LIMIT ?
-              )
-            `
-          )
-          .run(
-            manifest.project_id,
-            manifest.source_id,
-            manifest.materialization_id,
-            manifest.terminal_at,
-            input.terminalBefore,
-            remaining
-          ).changes
-        rowsDeleted += deleted
-        remaining -= deleted
-        if (remaining === 0) break
-        const removed = this.db
-          .query(
-            `
-              DELETE FROM ontology_sources
-              WHERE project_id = ? AND source_id = ? AND materialization_id = ?
-                AND status IN ('superseded', 'abandoned')
-                AND terminal_at = ? AND terminal_at < ?
-                AND NOT EXISTS (
-                  SELECT 1 FROM ontology_source_rows AS rows
-                  WHERE rows.project_id = ontology_sources.project_id
-                    AND rows.source_id = ontology_sources.source_id
-                    AND rows.materialization_id = ontology_sources.materialization_id
-                )
-            `
-          )
-          .run(
-            manifest.project_id,
-            manifest.source_id,
-            manifest.materialization_id,
-            manifest.terminal_at,
-            input.terminalBefore
-          ).changes
-        materializationsDeleted += removed
-        remaining -= removed
-      }
-      return { rowsDeleted, materializationsDeleted }
+      return cleanupSourceVersions(this.db, input)
     })
   }
 
@@ -433,6 +367,10 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
         `Source materialization '${manifest.materialization_id}' cannot transition to 'abandoned'.`
       )
     }
+    this.db
+      .query(`UPDATE ontology_source_roots SET retired_at = ?
+      WHERE project_id = ? AND source_id = ? AND materialization_id = ? AND active = 0`)
+      .run(abandonedAt, manifest.project_id, manifest.source_id, manifest.materialization_id)
     return sourceRecord(
       this.requireManifest(manifest.project_id, manifest.source_id, manifest.materialization_id)
     )
@@ -446,14 +384,22 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
     const counts = this.db
       .query(
         `
-          SELECT COUNT(*) AS assertions, COUNT(DISTINCT root_key) AS roots,
+          SELECT (SELECT COUNT(*) FROM ontology_source_rows
+            WHERE project_id = ? AND source_id = ? AND materialization_id = ?) AS assertions, COUNT(*) AS roots,
             COUNT(DISTINCT staging_ordinal) AS ordinals,
             MIN(staging_ordinal) AS min_ordinal, MAX(staging_ordinal) AS max_ordinal
-          FROM ontology_source_rows
+          FROM ontology_source_roots
           WHERE project_id = ? AND source_id = ? AND materialization_id = ?
         `
       )
-      .get(manifest.project_id, manifest.source_id, manifest.materialization_id) as {
+      .get(
+        manifest.project_id,
+        manifest.source_id,
+        manifest.materialization_id,
+        manifest.project_id,
+        manifest.source_id,
+        manifest.materialization_id
+      ) as {
       assertions: number
       roots: number
       ordinals: number
@@ -470,6 +416,7 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
         "Source ready counts do not match the staged roots and assertions."
       )
     }
+    assertSourceRootCoverage(this.db, manifest)
     const invalid = this.db
       .query(
         manifest.projection_kind === "link"

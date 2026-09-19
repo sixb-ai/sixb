@@ -389,6 +389,13 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             terminalBefore: "2026-02-01T00:00:00.000Z",
             limit: 1,
           })
+        ).toEqual({ rowsDeleted: 1, materializationsDeleted: 0 })
+        expect(
+          await storage.ontology.sources.cleanupTerminal({
+            projectId: "contract-project",
+            terminalBefore: "2026-02-01T00:00:00.000Z",
+            limit: 1,
+          })
         ).toEqual({ rowsDeleted: 0, materializationsDeleted: 1 })
         expect(
           await storage.ontology.sources.summarizeTerminal({ projectId: "contract-project" })

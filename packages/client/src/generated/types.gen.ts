@@ -12291,6 +12291,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12346,6 +12347,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12402,6 +12404,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12469,6 +12472,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12524,6 +12528,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12580,6 +12585,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12651,6 +12657,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12706,6 +12713,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12762,6 +12770,7 @@ export type ListProjectionsResponses = {
             progress: {
               sourceRowsRead: number
               sourceRowsSkipped: number
+              sourceChangesRead?: number
             }
             queuedAt: string
             startedAt?: string
@@ -12874,6 +12883,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -12929,6 +12939,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -12985,6 +12996,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -13052,6 +13064,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -13107,6 +13120,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -13163,6 +13177,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -13234,6 +13249,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -13289,6 +13305,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -13345,6 +13362,7 @@ export type GetProjectionResponses = {
               progress: {
                 sourceRowsRead: number
                 sourceRowsSkipped: number
+                sourceChangesRead?: number
               }
               queuedAt: string
               startedAt?: string
@@ -13447,6 +13465,7 @@ export type ListProjectionRunsResponses = {
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
+            sourceChangesRead?: number
           }
           queuedAt: string
           startedAt?: string
@@ -13502,6 +13521,7 @@ export type ListProjectionRunsResponses = {
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
+            sourceChangesRead?: number
           }
           queuedAt: string
           startedAt?: string
@@ -13558,6 +13578,7 @@ export type ListProjectionRunsResponses = {
           progress: {
             sourceRowsRead: number
             sourceRowsSkipped: number
+            sourceChangesRead?: number
           }
           queuedAt: string
           startedAt?: string
@@ -13659,6 +13680,7 @@ export type GetProjectionRunResponses = {
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
+          sourceChangesRead?: number
         }
         queuedAt: string
         startedAt?: string
@@ -13714,6 +13736,7 @@ export type GetProjectionRunResponses = {
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
+          sourceChangesRead?: number
         }
         queuedAt: string
         startedAt?: string
@@ -13770,6 +13793,7 @@ export type GetProjectionRunResponses = {
         progress: {
           sourceRowsRead: number
           sourceRowsSkipped: number
+          sourceChangesRead?: number
         }
         queuedAt: string
         startedAt?: string

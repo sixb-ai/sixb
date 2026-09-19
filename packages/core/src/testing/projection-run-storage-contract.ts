@@ -256,6 +256,40 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
       })
     })
 
+    test("persists independent incremental progress across reclaim without a physical-row floor", async () => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        await admitProjectionRun(context, replacementInput("delta-progress"))
+        const first = await storage.startOrReclaim(replacementInput("delta-progress"))
+        const updated = await storage.update({
+          ...executionInput(first),
+          progress: { sourceChangesRead: 12 },
+        })
+        expect(updated.progress).toEqual({
+          sourceRowsRead: 0,
+          sourceRowsSkipped: 0,
+          sourceChangesRead: 12,
+        })
+        const second = await storage.startOrReclaim(replacementInput("delta-progress"))
+        expect(second.run.progress).toEqual(updated.progress)
+        await expect(
+          storage.update({ ...executionInput(first), progress: { sourceChangesRead: 13 } })
+        ).rejects.toThrow()
+        await expect(
+          storage.update({ ...executionInput(second), progress: { sourceChangesRead: 11 } })
+        ).rejects.toThrow("must not decrease")
+        const fallback = await storage.update({
+          ...executionInput(second),
+          progress: { sourceRowsRead: 2 },
+        })
+        expect(fallback.progress).toEqual({
+          sourceRowsRead: 2,
+          sourceRowsSkipped: 0,
+          sourceChangesRead: 12,
+        })
+      })
+    })
+
     test("rejects immutable dataset-version metadata reuse", async () => {
       await withStorage(async (context) => {
         await admitProjectionRun(context, replacementInput("dataset-metadata-first"))

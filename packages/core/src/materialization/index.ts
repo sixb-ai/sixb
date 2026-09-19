@@ -51,6 +51,8 @@ export type {
   ProjectionRunFinishInput,
   ProjectionRunTerminalDecision,
   ProjectionSourceAssertion,
+  ProjectionSourceBase,
+  ProjectionSourceDeletion,
   ProjectionSourceEntry,
   ProjectionSourceRef,
   ProjectionSourceReplacement,

@@ -532,6 +532,7 @@ export type {
   SourceReplacementStatePage,
   StageMaterializationWorkInput,
   StageSourceAssertion,
+  StageSourceRoot,
   StageSourceRowsInput,
   StageSourceRowsResult,
   StoredLinkOverride,

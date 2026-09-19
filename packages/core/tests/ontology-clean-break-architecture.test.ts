@@ -236,7 +236,7 @@ describe("ontology clean-break architecture", () => {
     }
   })
 
-  test("keeps deferred CDC and semantic total-size ceilings out of the implementation", async () => {
+  test("keeps semantic total-size ceilings and dual-write paths out of the implementation", async () => {
     const roots = [
       join(coreSource, "materialization"),
       join(coreSource, "materializer"),
@@ -248,7 +248,7 @@ describe("ontology clean-break architecture", () => {
     const files = (await Promise.all(roots.map(typescriptFiles))).flat()
     await expectPatternAbsent(
       files,
-      /\b(?:MaterializationLimits|maxProjectionEntities|SourceDelta|readChanges|tombstone|dualWrite)\b/
+      /\b(?:MaterializationLimits|maxProjectionEntities|dualWrite)\b/
     )
   })
 

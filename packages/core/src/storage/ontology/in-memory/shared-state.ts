@@ -2,6 +2,7 @@ import { MaterializationValidationError } from "../../../materialization/errors"
 import type {
   LinkSlotOverride,
   OntologyMaterializationOrigin,
+  ProjectionEntityRef,
 } from "../../../materialization/model"
 import type { OntologyCommitOriginSelector, OntologyCommitRecord } from "../commits"
 import type {
@@ -11,9 +12,24 @@ import type {
   StoredObjectOverride,
 } from "../materializations"
 import type { OntologyOutboxRecord } from "../outbox"
-import type { OntologySourceRecord, StageSourceAssertion } from "../sources"
+import type {
+  OntologySourceRecord,
+  StageSourceAssertion,
+  StoredSourceAssertion,
+  StoredSourceLinkAssertion,
+} from "../sources"
+
+export interface InMemorySourceRoot {
+  readonly root: ProjectionEntityRef
+  readonly stagingOrdinal: number
+  readonly deleted: boolean
+  readonly entityKeys: Set<string>
+  active: boolean
+  retiredAt: string | null
+}
 
 export interface InMemorySourceMaterialization extends OntologySourceRecord {
+  readonly roots: Map<string, InMemorySourceRoot>
   readonly rowsByEntity: Map<string, StageSourceAssertion>
   readonly rootOrdinals: Map<string, number>
   readonly ordinalRoots: Map<number, string>
@@ -37,6 +53,10 @@ export interface InMemoryOntologyState {
   readonly commitIdByIdempotency: Map<string, string>
   readonly commitIdByOrigin: Map<string, string>
   readonly sourceMaterializations: Map<string, InMemorySourceMaterialization>
+  readonly activeSourceHeads: Map<string, string>
+  readonly activeSourceRoots: Map<string, Map<string, string>>
+  readonly activeSourceRows: Map<string, Map<string, StoredSourceAssertion>>
+  readonly activeSourceLinkScopes: Map<string, Map<string, StoredSourceLinkAssertion>>
   readonly objectOverrides: Map<string, InMemoryStoredObjectOverride>
   readonly linkOverrides: Map<string, InMemoryStoredLinkOverride>
   readonly linkSlotOverrides: Map<string, InMemoryStoredLinkSlotOverride>
@@ -57,6 +77,10 @@ export function createInMemoryOntologyState(): InMemoryOntologyState {
     commitIdByIdempotency: new Map(),
     commitIdByOrigin: new Map(),
     sourceMaterializations: new Map(),
+    activeSourceHeads: new Map(),
+    activeSourceRoots: new Map(),
+    activeSourceRows: new Map(),
+    activeSourceLinkScopes: new Map(),
     objectOverrides: new Map(),
     linkOverrides: new Map(),
     linkSlotOverrides: new Map(),
@@ -83,6 +107,7 @@ export function sourceMaterializationRecord(
     rowsByEntity: _rows,
     rootOrdinals: _roots,
     ordinalRoots: _ordinals,
+    roots: _sourceRoots,
     ...record
   } = materialization
   return structuredClone(record)
