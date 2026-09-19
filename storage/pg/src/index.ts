@@ -42,6 +42,7 @@ import { PgAiLimitStorage } from "./pg-ai-limit-storage"
 import { PgAiUsageStorage } from "./pg-ai-usage-storage"
 import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgExecutionStorage } from "./pg-execution-storage"
+import { PgFileUploadSessionStorage } from "./pg-file-upload-session-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
 import { PgRulesStorage } from "./pg-rules-storage"
@@ -158,6 +159,7 @@ export class PostgresStorage implements MigrationCapableStorage {
   readonly connectorConnections: PgConnectorConnectionStorage
   readonly shareGrants: PgShareGrantStorage
   readonly shareSessions: PgShareSessionStorage
+  readonly fileUploadSessions: PgFileUploadSessionStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -235,6 +237,7 @@ export class PostgresStorage implements MigrationCapableStorage {
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
     this.shareSessions = createOperationScopedFacade(stores.shareSessions, scope)
+    this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
     registerPostgresStorageTestingAdapter(this, (durationMs) =>
       stores.connectorConnections.advanceTimeForTesting(durationMs)
     )
@@ -371,6 +374,7 @@ function createPostgresStores(
     connectorConnections: new PgConnectorConnectionStorage(sql),
     shareGrants,
     shareSessions,
+    fileUploadSessions: new PgFileUploadSessionStorage(sql),
   }
 }
 
@@ -395,6 +399,7 @@ interface PostgresStoreSet {
   readonly connectorConnections: PgConnectorConnectionStorage
   readonly shareGrants: PgShareGrantStorage
   readonly shareSessions: PgShareSessionStorage
+  readonly fileUploadSessions: PgFileUploadSessionStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

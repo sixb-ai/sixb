@@ -405,6 +405,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("045-agent-thread-sandbox-state", agentThreadSandboxStateSql),
     pgSql("046-workflow-intervention-principals", workflowInterventionPrincipalsSql),
     pgSql("047-ontology-commit-attribution", ontologyCommitAttributionSql),
+    pgSql("048-file-upload-sessions", fileUploadSessionsSql),
   ],
 })
 
@@ -428,3 +429,4 @@ import outboxPublicationOrderSql from "./migrations/038-outbox-publication-order
 import connectorOptionalPkceSql from "./migrations/040-connector-optional-pkce.sql" with {
   type: "text",
 }
+import fileUploadSessionsSql from "./migrations/048-file-upload-sessions.sql" with { type: "text" }
