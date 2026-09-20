@@ -7,7 +7,7 @@ export interface OntologyMaintenanceOptions {
   readonly terminalSourceRetentionMs?: number
   /** Maximum deletions attempted per cleanup domain and pass. Defaults to 1,000. */
   readonly cleanupLimit?: number
-  /** Maximum time to wait for an active pass during shutdown. Defaults to 30 seconds. */
+  /** Warn after this shutdown grace period, then wait for active operations. Defaults to 30 seconds. */
   readonly shutdownTimeoutMs?: number
 }
 

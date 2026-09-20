@@ -6,6 +6,35 @@ import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontolog
 import { createMaterializerFixture } from "./materializer-fixture"
 
 describe("OntologyMaintenance", () => {
+  // Regression proof: return after settlesWithin times out; cleanup can then access closed storage.
+  test("shutdown warns after its grace period but waits for the active maintenance pass", async () => {
+    const storage = new InMemoryStorage()
+    const dispatcher = new DelayedDispatcher(storage)
+    const errors: unknown[] = []
+    const maintenance = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher,
+      options: { shutdownTimeoutMs: 5 },
+      onError: (error) => errors.push(error),
+    })
+    const handle = await maintenance.start()
+    await dispatcher.started
+    let stopped = false
+    const stopping = handle.stop().then(() => {
+      stopped = true
+    })
+    try {
+      await Bun.sleep(20)
+      expect(errors).toHaveLength(1)
+      expect(stopped).toBe(false)
+    } finally {
+      dispatcher.release()
+      await stopping
+    }
+    expect(maintenance.getSnapshot().running).toBe(false)
+  })
+
   test("does not start timers from construction and drains once when hosted", async () => {
     const storage = new InMemoryStorage()
     const broker = new InMemoryBroker()

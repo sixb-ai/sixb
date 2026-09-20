@@ -177,6 +177,10 @@ await sixb.objects(Invoice).upsert({
 
 Ontology events are delivered at least once. Handle duplicates using their stable event IDs.
 
+Healthy backlogs continue in bounded batches, yielding between batches so requests can run.
+Shutdown limits the broker grace period, then waits for active storage operations before closing
+connections. A slow database can therefore extend shutdown beyond that period.
+
 Broker failure delays subscribers but never rolls back or loses the committed ontology change.
 CDC/WAL change streams are not supported.
 

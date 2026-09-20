@@ -80,6 +80,7 @@ export interface OntologyOutboxSummary {
   readonly maxAttempts: number
 }
 
+/** Each method is atomic on its own, including validation of the entire lease batch. */
 export interface OntologyOutboxStorage {
   /** Selects each claimed batch deterministically; concurrent publishers may complete out of order. */
   claim(input: ClaimOntologyOutboxInput): Promise<readonly ClaimedOntologyOutboxRow[]>

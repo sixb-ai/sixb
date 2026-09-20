@@ -93,6 +93,9 @@ import shareSessionsSql from "./migrations/036-share-sessions.sql" with { type: 
 import projectionSourceRootsSql from "./migrations/038-projection-source-roots.sql" with {
   type: "text",
 }
+import outboxPublicationOrderSql from "./migrations/040-outbox-publication-order.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -187,6 +190,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("037-execution-requester-groups", executionRequesterGroupsSql),
     sqliteSql("038-projection-source-roots", projectionSourceRootsSql),
     sqliteSql("039-connector-optional-pkce", connectorOptionalPkceSql),
+    sqliteSql("040-outbox-publication-order", outboxPublicationOrderSql),
   ],
 })
 

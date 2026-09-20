@@ -176,9 +176,16 @@ export function insertBounded<T>(
   limit: number,
   compare: (left: T, right: T) => number
 ): void {
-  let index = values.findIndex((candidate) => compare(value, candidate) < 0)
-  if (index < 0) index = values.length
-  values.splice(index, 0, value)
+  if (limit <= 0) return
+  if (values.length >= limit && compare(value, values[values.length - 1]!) >= 0) return
+  let low = 0
+  let high = values.length
+  while (low < high) {
+    const middle = (low + high) >>> 1
+    if (compare(value, values[middle]!) < 0) high = middle
+    else low = middle + 1
+  }
+  values.splice(low, 0, value)
   if (values.length > limit) values.pop()
 }
 

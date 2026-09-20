@@ -93,6 +93,7 @@ export class OntologyMaintenance {
 
   /** Runs one coalesced pass. Exposed for deterministic hosting and tests. */
   runNow(): Promise<void> {
+    if (this.stopping) return this.stopping
     this.pass ??= this.runPass().finally(() => {
       this.pass = null
     })
@@ -244,12 +245,15 @@ export class OntologyMaintenance {
       this.timer = null
     }
     const activePass = this.pass ?? Promise.resolve()
-    const stopping = settlesWithin(activePass, this.shutdownTimeoutMs).then((settled) => {
+    const stopping = settlesWithin(activePass, this.shutdownTimeoutMs).then(async (settled) => {
       if (!settled) {
         this.reportError(
-          new Error(`[Sixb] Ontology maintenance did not stop within ${this.shutdownTimeoutMs}ms.`)
+          new Error(
+            `[Sixb] Ontology maintenance is still stopping after ${this.shutdownTimeoutMs}ms; waiting for active storage operations.`
+          )
         )
       }
+      await activePass
     })
     this.stopping = stopping.finally(() => {
       this.stopping = null

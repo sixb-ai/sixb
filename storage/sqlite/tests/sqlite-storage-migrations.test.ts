@@ -301,6 +301,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 39,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "040-outbox-publication-order",
+    status: "applied",
+    version: 40,
+  },
 ]
 
 afterEach(async () => {
