@@ -10,49 +10,51 @@ import { createLocalDuckLakeStorage } from "./test-utils"
 
 const roots = new WeakMap<DuckLakeStorage, string>()
 
-runLakeStorageContractSuite("DuckLakeStorage LakeStorage contract", {
-  schemaEvolution: "addNullableColumns",
-  missingVersionId: "ducklake:999999",
-  async createStorage() {
-    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-contract-"))
-    const storage = createLocalDuckLakeStorage(rootDir)
-    roots.set(storage, rootDir)
-    return storage
-  },
-  async teardown(storage) {
-    await storage.close()
+for (const catalog of ["duckdb", "sqlite"] as const) {
+  runLakeStorageContractSuite(`DuckLakeStorage ${catalog} LakeStorage contract`, {
+    schemaEvolution: "addNullableColumns",
+    missingVersionId: "ducklake:999999",
+    async createStorage() {
+      const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-contract-"))
+      const storage = createLocalDuckLakeStorage(rootDir, catalog)
+      roots.set(storage, rootDir)
+      return storage
+    },
+    async teardown(storage) {
+      await storage.close()
 
-    const rootDir = roots.get(storage)
-    if (rootDir) {
-      await rm(rootDir, { recursive: true, force: true })
-    }
-  },
-})
+      const rootDir = roots.get(storage)
+      if (rootDir) {
+        await rm(rootDir, { recursive: true, force: true })
+      }
+    },
+  })
 
-runLakeMergeStorageContractSuite("DuckLakeStorage merge contract", {
-  async reopen(storage: DuckLakeStorage) {
-    const rootDir = roots.get(storage)
-    if (!rootDir) throw new Error("Missing test root")
-    await storage.close()
-    const reopened = createLocalDuckLakeStorage(rootDir)
-    roots.set(reopened, rootDir)
-    return reopened
-  },
-  async createStorage() {
-    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-merge-contract-"))
-    const storage = createLocalDuckLakeStorage(rootDir)
-    roots.set(storage, rootDir)
-    return storage
-  },
-  async teardown(storage) {
-    await storage.close()
+  runLakeMergeStorageContractSuite(`DuckLakeStorage ${catalog} merge contract`, {
+    async reopen(storage: DuckLakeStorage) {
+      const rootDir = roots.get(storage)
+      if (!rootDir) throw new Error("Missing test root")
+      await storage.close()
+      const reopened = createLocalDuckLakeStorage(rootDir, catalog)
+      roots.set(reopened, rootDir)
+      return reopened
+    },
+    async createStorage() {
+      const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-merge-contract-"))
+      const storage = createLocalDuckLakeStorage(rootDir, catalog)
+      roots.set(storage, rootDir)
+      return storage
+    },
+    async teardown(storage) {
+      await storage.close()
 
-    const rootDir = roots.get(storage)
-    if (rootDir) {
-      await rm(rootDir, { recursive: true, force: true })
-    }
-  },
-})
+      const rootDir = roots.get(storage)
+      if (rootDir) {
+        await rm(rootDir, { recursive: true, force: true })
+      }
+    },
+  })
+}
 
 describe("DuckLakeStorage stable pinned reads", () => {
   test("preserves physical row order and offsets after reopening", async () => {

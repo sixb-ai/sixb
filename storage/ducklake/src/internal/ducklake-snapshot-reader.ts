@@ -642,7 +642,12 @@ export class DuckLakeSnapshotReader {
       return []
     }
 
-    const where: string[] = []
+    // A dataset cannot have a version before its table exists. Use the earliest table record:
+    // a rename may create a newer record with the same table id and must not hide older versions.
+    const ducklakeTable = duckLakeMetadataTableName(this.options, "ducklake_table")
+    const where = [
+      `snapshot.snapshot_id >= (SELECT min(begin_snapshot) FROM ${ducklakeTable} WHERE table_id = ${input.tableId})`,
+    ]
     if (input.exactSnapshotId !== undefined) {
       assertDuckLakeSnapshotId(input.exactSnapshotId)
       where.push(`snapshot.snapshot_id = ${input.exactSnapshotId}`)
@@ -652,7 +657,7 @@ export class DuckLakeSnapshotReader {
       where.push(`snapshot.snapshot_id < ${input.beforeSnapshotId}`)
     }
 
-    const whereSql = where.length === 0 ? "" : `WHERE ${where.join(" AND ")}`
+    const whereSql = `WHERE ${where.join(" AND ")}`
     const limitSql =
       input.limit === undefined ? "" : `LIMIT ${Math.max(0, Math.trunc(input.limit))}`
     const ducklakeSnapshot = duckLakeMetadataTableName(this.options, "ducklake_snapshot")

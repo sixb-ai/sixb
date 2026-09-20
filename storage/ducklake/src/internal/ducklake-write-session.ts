@@ -183,6 +183,7 @@ class DuckLakeWriteSession implements LakeWriteSession {
     }
 
     this.cleanedUp = true
+    this.stagedPrimaryKeys.clear()
     await this.dropStagingTable()
   }
 

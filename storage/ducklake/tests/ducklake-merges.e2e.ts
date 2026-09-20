@@ -20,7 +20,7 @@ interface DuckLakeStorageInternals {
   }
 }
 
-describe("DuckLakeStorage keyed merges", () => {
+describe.each(["duckdb", "sqlite"] as const)("DuckLakeStorage %s keyed merges", (catalog) => {
   let rootDir: string
   let options: DuckLakeStorageOptions
   let storage: DuckLakeStorage
@@ -36,8 +36,8 @@ describe("DuckLakeStorage keyed merges", () => {
 
   beforeEach(async () => {
     rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-merges-"))
-    options = localDuckLakeOptions(rootDir)
-    storage = createLocalDuckLakeStorage(rootDir)
+    options = localDuckLakeOptions(rootDir, catalog)
+    storage = createLocalDuckLakeStorage(rootDir, catalog)
     await storage.createDataset(invoices)
   })
 
@@ -111,7 +111,7 @@ describe("DuckLakeStorage keyed merges", () => {
     expect(await snapshotCount(storage, options)).toBe(snapshotsAfterSeed + 1)
 
     await storage.close()
-    storage = createLocalDuckLakeStorage(rootDir)
+    storage = createLocalDuckLakeStorage(rootDir, catalog)
 
     await expect(storage.getLatestVersion(invoices.id)).resolves.toMatchObject({
       versionId: result.version.versionId,

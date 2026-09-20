@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -7,7 +7,7 @@ import type { DuckLakeStorage } from "../src"
 import type { DuckDbQueryRuntime, DuckDbRuntime } from "../src/internal/duckdb-runtime"
 import { createDuckDbRuntime, setupDuckLake } from "../src/internal/duckdb-runtime"
 import { encodeDatasetTableName } from "../src/internal/names"
-import { quoteSqlString } from "../src/internal/sql"
+import { qualifiedTableName, quoteIdentifier, quoteSqlString } from "../src/internal/sql"
 import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from "./test-utils"
 
 interface DuckLakeStorageInternals {
@@ -39,6 +39,51 @@ describe("DuckLakeStorage versions and time travel", () => {
     await storage.close()
     await rm(rootDir, { recursive: true, force: true })
   })
+
+  for (const catalog of ["duckdb", "sqlite"] as const) {
+    test(`${catalog}: stops version searches at table creation and preserves history across renames`, async () => {
+      // Red check: remove the table-creation lower bound from querySnapshotCandidates.
+      // Resolving a new dataset then reads three pages of unrelated history instead of one.
+      await storage.close()
+      storage = createLocalDuckLakeStorage(await mkdtemp(join(rootDir, `${catalog}-`)), catalog)
+      const runtime = await (
+        storage as unknown as DuckLakeStorageInternals
+      ).connections.attachedRuntime()
+      await runtime.run("CREATE TABLE sixb_lake.noise(id INTEGER)")
+      for (let index = 0; index < 260; index++) {
+        await runtime.run("COMMENT ON TABLE sixb_lake.noise IS 'unrelated snapshot'")
+      }
+      const fresh = defineDataset("fresh.history", { schema: [col("id", "string")] })
+      await storage.createDataset(fresh)
+      const query = spyOn(runtime, "query")
+      try {
+        expect(await storage.getLatestVersion(fresh.id)).toBeNull()
+        expect(
+          query.mock.calls.filter(([sql]) => sql.includes("WITH candidate_snapshots"))
+        ).toHaveLength(1)
+      } finally {
+        query.mockRestore()
+      }
+
+      const seed = await storage.beginWrite({ dataset: fresh })
+      await seed.writeRows([{ id: "original" }])
+      const version = await seed.commit()
+      const attached = await (
+        storage as unknown as DuckLakeStorageInternals
+      ).connections.attachedRuntime()
+      const table = qualifiedTableName({}, encodeDatasetTableName(fresh.id))
+      await attached.run(`ALTER TABLE ${table} RENAME TO renamed_history`)
+      await attached.run(
+        `ALTER TABLE sixb_lake.renamed_history RENAME TO ${quoteIdentifier(encodeDatasetTableName(fresh.id))}`
+      )
+      expect((await storage.listVersions(fresh.id)).map((entry) => entry.versionId)).toEqual([
+        version.versionId,
+      ])
+      expect(
+        await collectRows(storage.readRows({ datasetId: fresh.id, versionId: version.versionId }))
+      ).toEqual([{ id: "original" }])
+    })
+  }
 
   test("hydrates versions and reads historical rows with DuckLake time travel", async () => {
     const snapshotWrite = await storage.beginWrite({

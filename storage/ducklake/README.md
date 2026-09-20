@@ -196,6 +196,10 @@ Local catalogs serialize commits within one process. PostgreSQL catalogs support
 writer processes; known snapshot-ID conflicts are retried from the retained staging table.
 Other provider/connection failures propagate without an automatic retry.
 
+SQLite reads commit metadata before the write transaction, then verifies the native snapshot
+has not changed. Preparation retries up to three times on a race; data writes are not replayed.
+The catalog's existing journal mode is preserved.
+
 Snapshot, append, and SQL-transform writes to keyed datasets also enforce unique keys so a later
 merge never starts from an ambiguous baseline. Application authors normally use
 `defineSync(..., { mode: "merge" })`; the sync worker stages those changes through this contract.

@@ -60,7 +60,7 @@ describe("DuckLake reader lifecycle", () => {
   })
 
   for (const catalog of ["duckdb", "sqlite"] as const) {
-    test(`${catalog}: consumer can query metadata and stage writes while its source stays pinned`, async () => {
+    test(`${catalog}: consumer can query metadata and commit writes while its source stays pinned`, async () => {
       await withLake({ catalog }, async (lake) => {
         const version = await seed(lake)
         const rows = lake.readRows({ datasetId: dataset.id })[Symbol.asyncIterator]()
@@ -72,19 +72,17 @@ describe("DuckLake reader lifecycle", () => {
           })
           const writer = await bounded(lake.beginWrite({ dataset, mode: "append" }))
           await bounded(writer.writeRows([{ id: "new", value: 42 }]))
-          if (catalog === "sqlite") {
-            await writer.abort()
-          } else {
-            const next = await bounded(writer.commit())
-            expect(next.versionId).not.toBe(version.versionId)
-          }
+          // Red check: restore the parent's write coordinator. SQLite fails at COMMIT because
+          // its direct metadata read holds a lock inside the DuckLake write transaction.
+          const next = await bounded(writer.commit())
+          expect(next.versionId).not.toBe(version.versionId)
           const ids = new Set([first.value?.id])
           for (let row = await rows.next(); !row.done; row = await rows.next())
             ids.add(row.value.id)
           expect(ids.size).toBe(rowCount)
           expect(ids.has("new")).toBe(false)
           expect((await collectRows(lake.readRows({ datasetId: dataset.id }))).length).toBe(
-            rowCount + (catalog === "sqlite" ? 0 : 1)
+            rowCount + 1
           )
         } finally {
           await rows.return?.()
