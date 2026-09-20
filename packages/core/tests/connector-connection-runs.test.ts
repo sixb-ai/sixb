@@ -14,6 +14,56 @@ import {
 const returnTo = "https://app.test/settings/connectors"
 
 describe("connector connection runs", () => {
+  test("recovers pending selection for the initiating user after a new session", async () => {
+    // Remove listPending or restore credential equality for run access to make recovery fail.
+    const harness = createHarness()
+    const started = await harness.process.startConnectionRun(
+      managementCommand(),
+      harness.connector.id,
+      {
+        owner: projectOwner,
+        slot: "social",
+        redirectUri: callbackUrl,
+        returnTo,
+      }
+    )
+    await expect(
+      harness.process.listPendingConnectionRuns(managementCommand(), harness.connector.id)
+    ).resolves.toEqual([])
+    await harness.process.callbackProcess.completeConnectionRun({
+      state: new URL(started.authorizationUrl).searchParams.get("state")!,
+      code: "code",
+      redirectUri: callbackUrl,
+      callbackBinding: started.callbackBinding.secret,
+    })
+    harness.setNow(new Date("2027-08-19T12:00:00.000Z"))
+    const renewed = managementCommand("new-session")
+    const pending = await harness.process.listPendingConnectionRuns(renewed, harness.connector.id)
+    expect(pending).toMatchObject([
+      { id: started.runId, status: "waiting", waitingFor: "account_selection" },
+    ])
+    expect(JSON.stringify(pending)).not.toContain("authorizationId")
+    const other = managementCommand("other-session", { principalId: "someone-else" })
+    await expect(
+      harness.process.listPendingConnectionRuns(other, harness.connector.id)
+    ).resolves.toEqual([])
+    await expect(
+      harness.process.selectConnectionRunAccount(other, harness.connector.id, {
+        runId: started.runId,
+        accountId: "account-a",
+      })
+    ).rejects.toBeInstanceOf(AuthorizationError)
+    await expect(
+      harness.process.selectConnectionRunAccount(renewed, harness.connector.id, {
+        runId: started.runId,
+        accountId: "account-a",
+      })
+    ).resolves.toMatchObject({ status: "succeeded" })
+    await expect(
+      harness.process.listPendingConnectionRuns(renewed, harness.connector.id)
+    ).resolves.toEqual([])
+  })
+
   test.each([
     undefined,
     "disabled",
@@ -222,7 +272,7 @@ describe("connector connection runs", () => {
     expectSixbError(terminalConflict, "connector.operation_conflict")
   })
 
-  test("automatically revokes an abandoned account-selection run", async () => {
+  test("does not expire or revoke an account-selection run", async () => {
     const harness = createHarness({
       accountSelectionTtlMs: 10,
       systemRuntimeClock: true,
@@ -259,11 +309,11 @@ describe("connector connection runs", () => {
         connectorId: harness.connector.id,
         authorizationId: waiting.authorizationId,
       })
-    ).resolves.toMatchObject({ status: "revoked", credentials: undefined })
+    ).resolves.toMatchObject({ status: "pending_selection" })
     await expect(
       harness.process.getConnectionRun(command, harness.connector.id, started.runId)
-    ).resolves.toMatchObject({ status: "expired" })
-    expect(harness.counts().revokeCount).toBe(1)
+    ).resolves.toMatchObject({ status: "waiting", waitingFor: "account_selection" })
+    expect(harness.counts().revokeCount).toBe(0)
     await harness.service.close()
   })
 })

@@ -45,6 +45,39 @@ export function registerConnectorConnectionRunRoutes(
   options: ConnectorConnectionRouteOptions
 ) {
   return app
+    .get(
+      "/api/connectors/:connectorId/connection-runs",
+      async (context) => {
+        const { params, set } = context
+        try {
+          const runtime = connectorRouteRuntime(
+            host,
+            requireRequestSixb(context),
+            params.connectorId
+          )
+          return (await runtime.listPendingConnectionRuns(params.connectorId)).map(
+            serializeConnectorConnectionRun
+          )
+        } catch (error) {
+          return handleConnectorRouteError(error, set)
+        }
+      },
+      {
+        params: ConnectorConnectionParamsSchema.pick({ connectorId: true }),
+        response: {
+          200: ConnectorConnectionRunSchema.array(),
+          400: ConnectorBadRequestResponseSchema,
+          403: ErrorResponseSchema,
+          404: ConnectorNotFoundResponseSchema,
+          500: ConnectorInternalErrorResponseSchema,
+        },
+        detail: {
+          summary: "List the initiating user's pending connector connection runs",
+          tags: [OPENAPI_TAGS.connectorConnectionRuns.name],
+          operationId: "listPendingConnectorConnectionRuns",
+        },
+      }
+    )
     .post(
       "/api/connectors/:connectorId/connection-runs",
       async (context) => {
@@ -282,7 +315,10 @@ export function registerConnectorConnectionRunRoutes(
     )
     .get(
       "/auth/connectors/callback",
-      async ({ request, set }) => {
+      async ({ request, set, server }) => {
+        // Provider deadlines bound this operation; preserve its callback response.
+        server?.timeout(request, 0)
+
         let callbackCookie: ReturnType<typeof readConnectorCallbackCookie> | undefined
         try {
           const parameters = new URL(request.url).searchParams

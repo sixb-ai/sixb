@@ -404,6 +404,10 @@ export function afterReady(
       await ready
       return process.addConnection(...args)
     },
+    async listPendingConnectionRuns(...args) {
+      await ready
+      return process.listPendingConnectionRuns(...args)
+    },
     async getConnectionRun(...args) {
       await ready
       return process.getConnectionRun(...args)

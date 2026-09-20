@@ -259,6 +259,23 @@ async function connectAccount(
 }
 
 describe("connector connection Headless API", () => {
+  test("lists pending selection only for its initiating user without a callback URL", async () => {
+    // Remove the pending-run route or actor filter to see the corresponding assertion fail.
+    const harness = await createHarness()
+    const started = await startRun(harness)
+    await completeRunAtProvider(harness, started.state, started.callbackCookie)
+    const path = "http://api.localhost/api/connectors/crm/connection-runs"
+    const list = (headers: HeadersInit) => harness.app.handle(new Request(path, { headers }))
+    const mine = await list(harness.session.readHeaders)
+    expect(mine.status).toBe(200)
+    expect(await mine.json()).toMatchObject([
+      { id: started.runId, status: "waiting", waitingFor: "account_selection" },
+    ])
+    const other = await seedSession(harness.storage, "other-manager", true)
+    expect(await (await list(other.readHeaders)).json()).toEqual([])
+    expect((await list({})).status).toBe(401)
+  })
+
   test.each(["state", "code"])("rejects repeated framework callback field %s", async (name) => {
     const harness = await createHarness()
     const started = await startRun(harness)

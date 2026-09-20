@@ -143,6 +143,16 @@ class SqliteConnectorConnectionPersistence implements ConnectorConnectionPersist
     }
   }
 
+  async listPendingConnectionRuns(): Promise<readonly ConnectorConnectionRunRecord[]> {
+    if (!this.scope.connectorId) return []
+    const rows = this.db
+      .query(`SELECT * FROM connector_connection_runs
+      WHERE project_id = ? AND connector_id = ?
+      AND (status = 'running' OR (status = 'waiting' AND waiting_for = 'account_selection'))`)
+      .all(this.scope.projectId, this.scope.connectorId) as SqliteConnectionRunRow[]
+    return rows.map(connectionRunFromRow)
+  }
+
   async getConnectionRun(id: string): Promise<ConnectorConnectionRunRecord | null> {
     const row = this.getById<SqliteConnectionRunRow>("connector_connection_runs", id)
     return row ? connectionRunFromRow(row) : null

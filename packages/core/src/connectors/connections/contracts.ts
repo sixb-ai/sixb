@@ -118,7 +118,6 @@ export type ConnectorConnectionRunView =
       readonly status: "waiting"
       readonly waitingFor: "account_selection"
       readonly accounts: readonly ConnectorAccountCandidate[]
-      readonly expiresAt: Date
     })
   | (ConnectorConnectionRunViewBase & {
       readonly status: "succeeded"
@@ -162,6 +161,10 @@ export interface ConnectorConnectionProcess {
     connectorId: string,
     input: AddConnectorConnectionInput
   ): Promise<ConnectorConnectionRunView>
+  listPendingConnectionRuns(
+    context: ConnectorConnectionCommandContext,
+    connectorId: string
+  ): Promise<readonly ConnectorConnectionRunView[]>
   getConnectionRun(
     context: ConnectorConnectionCommandContext,
     connectorId: string,

@@ -268,6 +268,7 @@ Its terminal record is secret-free and retained without automatic cleanup in V1.
 | Client operation | Effect |
 | --- | --- |
 | `listConnectorConnections()` | Lists known connections and their current lifecycle status. |
+| `listPendingConnectorConnectionRuns()` | Lists the initiating user's unfinished OAuth exchanges and account selections. |
 | `addConnectorConnection()` | Selects another account through an existing OAuth grant. |
 | `disconnectConnectorConnection()` | Disconnects one account; the last usage also schedules grant revocation. |
 | `reauthorizeConnectorConnection()` | Starts a new OAuth run for an existing grant. |

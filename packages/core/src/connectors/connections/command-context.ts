@@ -50,15 +50,32 @@ export function assertConnectorConnectionRunInitiator(
   current: ConnectorConnectionCommandActor,
   connectorId: string
 ): asserts execution is ExecutionRecord {
-  const initiating = execution
-    ? connectorConnectionActorFromExecution(execution, execution.projectId)
-    : null
-  if (!initiating || !sameConnectorConnectionCommandActor(initiating, current)) {
+  if (!isConnectorConnectionRunInitiator(execution, current)) {
     throw new AuthorizationError(
       `connection-run:connector:${connectorId}`,
       "[Sixb] This connector connection run can only be accessed by its initiating actor."
     )
   }
+}
+
+/** User-owned runs survive session renewal; access-token runs remain bound to their credential. */
+export function isConnectorConnectionRunInitiator(
+  execution: ExecutionRecord | null,
+  current: ConnectorConnectionCommandActor
+): boolean {
+  const initiating = execution
+    ? connectorConnectionActorFromExecution(execution, execution.projectId)
+    : null
+  if (!initiating) return false
+  if (
+    initiating.principal.type === "user" &&
+    current.principal.type === "user" &&
+    initiating.credential.type === "session" &&
+    current.credential.type === "session"
+  ) {
+    return initiating.principal.id === current.principal.id
+  }
+  return sameConnectorConnectionCommandActor(initiating, current)
 }
 
 function connectorConnectionActorFromExecution(

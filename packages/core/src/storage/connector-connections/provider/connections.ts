@@ -165,27 +165,13 @@ export class DurableConnectorConnections extends ConnectorConnectionOperations {
     input: PutConnectorConnectionInput,
     now: Date
   ): Promise<PutConnectorConnectionResult | CommittedConnectorConnectionError> {
-    let authorization = await persistence.getAuthorization(input.authorizationId)
+    const authorization = await persistence.getAuthorization(input.authorizationId)
     if (
       !authorization ||
       !isSelectable(authorization.status) ||
       authorization.credentialMutation?.kind === "reauthorization"
     ) {
       throw authorizationConflict()
-    }
-    if (
-      authorization.status === "pending_selection" &&
-      authorization.selectionExpiresAt!.getTime() <= now.getTime()
-    ) {
-      authorization = {
-        ...authorization,
-        status: "revocation_pending",
-        selectionExpiresAt: undefined,
-        revision: authorization.revision + 1,
-        updatedAt: now,
-      }
-      await persistence.updateAuthorization(authorization)
-      return { error: authorizationConflict() }
     }
     const account = authorization.accounts.find((candidate) => candidate.id === input.account.id)
     if (!account) {

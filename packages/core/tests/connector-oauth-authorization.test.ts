@@ -11,7 +11,6 @@ import {
   createHarness,
   encryptionKey,
   expectSixbError,
-  getAuthorization,
   managementCommand,
   managementScope,
   projectOwner,
@@ -330,29 +329,19 @@ describe("connector OAuth lifecycle", () => {
     expect(connectionSnapshot(harness.storage).attempts.size).toBe(attemptsBefore)
   })
 
-  test("expires unselected authorizations before they can create a connection", async () => {
+  test("allows organization selection long after OAuth authorization", async () => {
+    // Restore selectionExpiresAt enforcement in storage to make this fail.
     const harness = createHarness({ accountSelectionTtlMs: 1_000 })
     const authorization = await authorize(harness)
-    expect(
-      (await getAuthorization(harness.connectionStorage, authorization.authorizationId))?.status
-    ).toBe("pending_selection")
-
-    harness.setNow(new Date("2026-08-19T12:00:01.000Z"))
-    expectSixbError(
-      await rejectionOf(
-        harness.process.selectAccount(managementCommand(), harness.connector.id, {
-          authorizationId: authorization.authorizationId,
-          accountId: "account-a",
-          owner: projectOwner,
-          slot: "social",
-        })
-      ),
-      "connector.operation_conflict"
-    )
-    expect(
-      (await getAuthorization(harness.connectionStorage, authorization.authorizationId))?.status
-    ).toBe("revoked")
-
-    expect(harness.counts().revokeCount).toBe(1)
+    harness.setNow(new Date("2027-08-19T12:00:00.000Z"))
+    await expect(
+      harness.process.selectAccount(managementCommand(), harness.connector.id, {
+        authorizationId: authorization.authorizationId,
+        accountId: "account-a",
+        owner: projectOwner,
+        slot: "social",
+      })
+    ).resolves.toMatchObject({ status: "connected" })
+    expect(harness.counts().revokeCount).toBe(0)
   })
 })

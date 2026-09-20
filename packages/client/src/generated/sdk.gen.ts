@@ -276,6 +276,9 @@ import type {
   ListObjectsResponses,
   ListObjectTypesData,
   ListObjectTypesResponses,
+  ListPendingConnectorConnectionRunsData,
+  ListPendingConnectorConnectionRunsErrors,
+  ListPendingConnectorConnectionRunsResponses,
   ListPipelineRunsData,
   ListPipelineRunsErrors,
   ListPipelineRunsResponses,
@@ -1089,6 +1092,18 @@ export const revokeConnectorConnection = <ThrowOnError extends boolean = false>(
     url: "/api/connectors/{connectorId}/connections/{connectionId}/revoke",
     ...options,
   })
+
+/**
+ * List the initiating user's pending connector connection runs
+ */
+export const listPendingConnectorConnectionRuns = <ThrowOnError extends boolean = false>(
+  options: Options<ListPendingConnectorConnectionRunsData, ThrowOnError>
+) =>
+  (options.client ?? client).get<
+    ListPendingConnectorConnectionRunsResponses,
+    ListPendingConnectorConnectionRunsErrors,
+    ThrowOnError
+  >({ url: "/api/connectors/{connectorId}/connection-runs", ...options })
 
 /**
  * Start a connector connection run

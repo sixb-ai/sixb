@@ -413,6 +413,20 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     return structuredClone(finished)
   }
 
+  async listPendingConnectionRuns(
+    input: Parameters<ConnectorConnectionStorage["listPendingConnectionRuns"]>[0]
+  ): Promise<readonly ConnectorConnectionRunRecord[]> {
+    return [...this.connectionRuns.values()]
+      .filter(
+        (run) =>
+          run.projectId === input.projectId &&
+          run.connectorId === input.connectorId &&
+          (run.status === "running" ||
+            (run.status === "waiting" && run.waitingFor === "account_selection"))
+      )
+      .map((run) => structuredClone(run))
+  }
+
   async getConnectionRun(
     input: GetConnectorConnectionRunInput
   ): Promise<ConnectorConnectionRunRecord | null> {
@@ -855,26 +869,12 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     input: PutConnectorConnectionInput,
     now: Date
   ): PutConnectorConnectionResult {
-    let authorization = this.authorizations.get(input.authorizationId)
+    const authorization = this.authorizations.get(input.authorizationId)
     if (
       !sameAuthorizationScope(authorization, input) ||
       !isSelectable(authorization.status) ||
       authorization.credentialMutation?.kind === "reauthorization"
     ) {
-      throw authorizationConflict()
-    }
-    if (
-      authorization.status === "pending_selection" &&
-      authorization.selectionExpiresAt!.getTime() <= now.getTime()
-    ) {
-      authorization = {
-        ...authorization,
-        status: "revocation_pending",
-        selectionExpiresAt: undefined,
-        revision: authorization.revision + 1,
-        updatedAt: now,
-      }
-      this.authorizations.set(authorization.id, authorization)
       throw authorizationConflict()
     }
     const account = authorization.accounts.find((candidate) => candidate.id === input.account.id)
@@ -1078,6 +1078,7 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
     const run = this.connectionRuns.get(runId)
     if (!run || (run.status !== "waiting" && run.status !== "running")) return run
 
+    if (run.status === "waiting" && run.waitingFor === "account_selection") return run
     const now = this.now()
     if (run.expiresAt.getTime() > now.getTime()) return run
 
@@ -1086,9 +1087,6 @@ export class InMemoryConnectorConnectionStorage implements ConnectorConnectionSt
       if (attempt) this.attempts.delete(attempt.id)
     }
     if (run.status === "waiting") {
-      if (run.kind === "connect" && run.waitingFor === "account_selection") {
-        this.markPendingAuthorizationForCleanup(run.connectorId, run.authorizationId, now)
-      }
       const expired = expireConnectionRun(run, now)
       this.connectionRuns.set(run.id, expired)
       return expired

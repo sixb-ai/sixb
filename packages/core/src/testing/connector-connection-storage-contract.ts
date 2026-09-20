@@ -486,25 +486,25 @@ export function runConnectorConnectionStorageContractSuite<
       })
     })
 
-    test("commits expiry cleanup before rejecting account selection", async () => {
+    test("allows account selection after its legacy deadline", async () => {
       await withStorage(async (storage, root) => {
         const authorization = await createAuthorization(storage, "authorization-a", "account-a")
-        await options.advanceTime(root, 60_000)
+        await options.advanceTime(root, 365 * 24 * 60 * 60_000)
 
-        await expect(connect(storage, authorization, "connection-a", "account-a")).rejects.toThrow(
-          "selectable authorization"
-        )
+        await expect(
+          connect(storage, authorization, "connection-a", "account-a")
+        ).resolves.toMatchObject({ connection: { status: "connected" } })
         await expect(
           storage.getAuthorization(authorizationKey(authorization.id))
-        ).resolves.toMatchObject({ status: "revocation_pending" })
+        ).resolves.toMatchObject({ status: "active" })
       })
     })
 
-    test("commits lazy run expiry before rejecting a late selection", async () => {
+    test("keeps account-selection runs selectable after their legacy deadline", async () => {
       await withStorage(async (storage, root) => {
         const authorization = await createAuthorization(storage, "authorization-a", "account-a")
         await createSelectionRun(storage, authorization)
-        await options.advanceTime(root, 60_000)
+        await options.advanceTime(root, 365 * 24 * 60 * 60_000)
 
         await expect(
           storage.putConnectionFromRun({
@@ -515,13 +515,13 @@ export function runConnectorConnectionStorageContractSuite<
             account: { id: "account-a", label: "Account A" },
             replace: false,
           })
-        ).rejects.toThrow("invalid, expired, or already used")
+        ).resolves.toMatchObject({ run: { status: "succeeded" } })
         await expect(
           storage.getConnectionRun({ projectId, connectorId, runId: "run-a" })
-        ).resolves.toMatchObject({ status: "expired" })
+        ).resolves.toMatchObject({ status: "succeeded" })
         await expect(
           storage.getAuthorization(authorizationKey(authorization.id))
-        ).resolves.toMatchObject({ status: "revocation_pending" })
+        ).resolves.toMatchObject({ status: "active" })
       })
     })
 

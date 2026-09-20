@@ -97,6 +97,7 @@ import {
   listModels,
   listObjects,
   listObjectTypes,
+  listPendingConnectorConnectionRuns,
   listPipelineRuns,
   listPipelines,
   listProjectionRuns,
@@ -398,6 +399,9 @@ import type {
   ListObjectsResponse,
   ListObjectTypesData,
   ListObjectTypesResponse,
+  ListPendingConnectorConnectionRunsData,
+  ListPendingConnectorConnectionRunsError,
+  ListPendingConnectorConnectionRunsResponse,
   ListPipelineRunsData,
   ListPipelineRunsError,
   ListPipelineRunsResponse,
@@ -1866,6 +1870,34 @@ export const revokeConnectorConnectionMutation = (
   }
   return mutationOptions
 }
+
+export const listPendingConnectorConnectionRunsQueryKey = (
+  options: Options<ListPendingConnectorConnectionRunsData>
+) => createQueryKey("listPendingConnectorConnectionRuns", options)
+
+/**
+ * List the initiating user's pending connector connection runs
+ */
+export const listPendingConnectorConnectionRunsOptions = (
+  options: Options<ListPendingConnectorConnectionRunsData>
+) =>
+  queryOptions<
+    ListPendingConnectorConnectionRunsResponse,
+    ListPendingConnectorConnectionRunsError,
+    ListPendingConnectorConnectionRunsResponse,
+    ReturnType<typeof listPendingConnectorConnectionRunsQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await listPendingConnectorConnectionRuns({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: listPendingConnectorConnectionRunsQueryKey(options),
+  })
 
 /**
  * Start a connector connection run

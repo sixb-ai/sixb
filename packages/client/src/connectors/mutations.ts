@@ -9,6 +9,7 @@ import { useSixbProviderClient } from "../client-provider"
 import {
   getConnectorConnectionRunQueryKey,
   listConnectorConnectionsQueryKey,
+  listPendingConnectorConnectionRunsQueryKey,
 } from "../generated/@tanstack/react-query.gen"
 import type { Client } from "../generated/client"
 import {
@@ -201,7 +202,7 @@ export function selectConnectorAccountMutationOptions<TContext = unknown>(
     onSuccess: async (run, variables, context, mutation) => {
       const resolvedPath = path()
       queryClient?.setQueryData(getConnectorConnectionRunQueryKey({ path: resolvedPath }), run)
-      await invalidateConnectorConnections(queryClient, resolvedPath.connectorId)
+      await invalidateConnectorConnections(queryClient, resolvedPath.connectorId, client)
       await onSuccess?.(run, variables, context, mutation)
     },
   }
@@ -263,7 +264,7 @@ export function disconnectConnectorMutationOptions<TContext = unknown>(
       return data
     },
     onSuccess: async (result, variables, context, mutation) => {
-      await invalidateConnectorConnections(queryClient, normalizedConnectorId)
+      await invalidateConnectorConnections(queryClient, normalizedConnectorId, client)
       await onSuccess?.(result, variables, context, mutation)
     },
   }
@@ -310,7 +311,7 @@ export function revokeConnectorMutationOptions<TContext = unknown>(
       return data
     },
     onSuccess: async (result, variables, context, mutation) => {
-      await invalidateConnectorConnections(queryClient, normalizedConnectorId)
+      await invalidateConnectorConnections(queryClient, normalizedConnectorId, client)
       await onSuccess?.(result, variables, context, mutation)
     },
   }
@@ -408,9 +409,13 @@ function resolveReturnTo(value: string): string {
 
 async function invalidateConnectorConnections(
   queryClient: QueryClient | undefined,
-  connectorId: string
+  connectorId: string,
+  client: Client | undefined
 ): Promise<void> {
   if (!queryClient) return
+  await queryClient.invalidateQueries({
+    queryKey: listPendingConnectorConnectionRunsQueryKey({ client, path: { connectorId } }),
+  })
   await queryClient.invalidateQueries({
     queryKey: listConnectorConnectionsQueryKey({ path: { connectorId } }),
   })

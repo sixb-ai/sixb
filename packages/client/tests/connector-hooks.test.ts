@@ -7,6 +7,7 @@ import {
 import {
   getConnectorConnectionRunQueryKey,
   listConnectorConnectionsQueryKey,
+  listPendingConnectorConnectionRunsQueryKey,
 } from "../src/generated/@tanstack/react-query.gen"
 import { createClient, createConfig } from "../src/generated/client"
 import type {
@@ -46,7 +47,6 @@ const waitingRun: GetConnectorConnectionRunResponse = {
   status: "waiting",
   waitingFor: "account_selection",
   accounts: [{ id: "octocat", label: "Octocat" }],
-  expiresAt: "2026-08-24T12:10:00.000Z",
 }
 
 const additionalConnectionRun: AddConnectorConnectionResponse = {
@@ -362,6 +362,17 @@ describe("connector connection hooks", () => {
     const connectionsQueryKey = listConnectorConnectionsQueryKey({
       path: { connectorId: "github" },
     })
+    // Remove client from the pending-run invalidation key: this provider cache stays stale.
+    const pendingQueryKey = listPendingConnectorConnectionRunsQueryKey({
+      client,
+      path: { connectorId: "github" },
+    })
+    const globalPendingQueryKey = listPendingConnectorConnectionRunsQueryKey({
+      path: { connectorId: "github" },
+    })
+    expect(pendingQueryKey).not.toEqual(globalPendingQueryKey)
+    queryClient.setQueryData(pendingQueryKey, [waitingRun])
+    queryClient.setQueryData(globalPendingQueryKey, [])
     queryClient.setQueryData(runQueryKey, waitingRun)
     queryClient.setQueryData(connectionsQueryKey, [])
     const options = selectConnectorAccountMutationOptions({
@@ -393,6 +404,8 @@ describe("connector connection hooks", () => {
       queryClient.getQueryData<SelectConnectorConnectionRunAccountResponse>(runQueryKey)
     ).toEqual(succeededRun)
     expect(queryClient.getQueryState(connectionsQueryKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(pendingQueryKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(globalPendingQueryKey)?.isInvalidated).toBe(false)
   })
 })
 

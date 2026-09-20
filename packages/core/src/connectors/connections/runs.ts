@@ -16,6 +16,7 @@ import {
 } from "./authorizations"
 import {
   assertConnectorConnectionRunInitiator,
+  isConnectorConnectionRunInitiator,
   requireConnectorConnectionCommandActor,
 } from "./command-context"
 import type {
@@ -236,6 +237,42 @@ export class ConnectorConnectionRunService {
       const failed = await this.failRun(run, error, authorizationId)
       return { runId: failed.id, connectorId: failed.connectorId, returnTo }
     }
+  }
+
+  async listPending(
+    command: ConnectorConnectionCommandContext,
+    connectorId: string
+  ): Promise<readonly ConnectorConnectionRunView[]> {
+    const actor = requireConnectorConnectionCommandActor(command.execution, this.projectId)
+    const candidates = await withConnectorStorageBoundary(
+      "Pending connector connection runs could not be read.",
+      () =>
+        this.connectionStorage.listPendingConnectionRuns({ projectId: this.projectId, connectorId })
+    )
+    const runs: ConnectorConnectionRunView[] = []
+    for (const candidate of candidates) {
+      const initiating = await withConnectorStorageBoundary(
+        "Connector connection run initiating execution could not be read.",
+        () =>
+          this.storage.executions.getById({
+            projectId: this.projectId,
+            id: candidate.initiatedByExecutionId,
+          })
+      )
+      if (!isConnectorConnectionRunInitiator(initiating, actor)) continue
+      // Re-read through the normal expiry/cleanup path before exposing accounts.
+      const run = await this.get(command, connectorId, candidate.id)
+      if (
+        run &&
+        (run.status === "running" ||
+          (run.status === "waiting" && run.waitingFor === "account_selection"))
+      )
+        runs.push(run)
+    }
+    return runs.sort(
+      (left, right) =>
+        right.createdAt.getTime() - left.createdAt.getTime() || left.id.localeCompare(right.id)
+    )
   }
 
   async get(
@@ -581,7 +618,6 @@ export class ConnectorConnectionRunService {
         status: "waiting",
         waitingFor: "account_selection",
         accounts: authorization.accounts,
-        expiresAt: run.expiresAt,
       }
     }
     if (run.status === "succeeded") {
@@ -645,6 +681,7 @@ export class ConnectorConnectionRunService {
       : CLEANUP_RETRY_DELAY_MS
   ): void {
     this.cancelRunMaintenance(run.id)
+    if (run.status === "waiting" && run.waitingFor === "account_selection") return
     const timer = setTimeout(
       () => void this.maintainRun(run.connectorId, run.id),
       Math.min(delayMs, MAX_TIMER_DELAY_MS)

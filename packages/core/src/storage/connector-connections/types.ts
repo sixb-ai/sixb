@@ -58,6 +58,7 @@ export interface ConnectorConnectionRunAwaitingSelectionRecord extends Connector
   readonly status: "waiting"
   readonly waitingFor: "account_selection"
   readonly authorizationId: string
+  /** Legacy persistence field; account selection no longer expires. */
   readonly expiresAt: Date
 }
 
@@ -279,7 +280,7 @@ export interface ConnectorAuthorizationRecord {
   readonly scopes: readonly string[]
   readonly accounts: readonly ConnectorAccountCandidate[]
   readonly status: ConnectorAuthorizationStatus
-  /** Storage-authoritative deadline for the first account selection. */
+  /** Legacy persistence field; no longer enforced as a selection deadline. */
   readonly selectionExpiresAt?: Date
   readonly revision: number
   readonly credentialMutation?: ConnectorCredentialMutation
@@ -478,6 +479,9 @@ export interface ConnectorConnectionStorage {
   finishConnectionRun(
     input: FinishConnectorConnectionRunInput
   ): Promise<ConnectorConnectionRunRecord | null>
+  listPendingConnectionRuns(
+    input: ListConnectorConnectionsInput
+  ): Promise<readonly ConnectorConnectionRunRecord[]>
   getConnectionRun(
     input: GetConnectorConnectionRunInput
   ): Promise<ConnectorConnectionRunRecord | null>

@@ -1,5 +1,11 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { isSixbApiError } from "../api"
+import { useSixbProviderClient } from "../client-provider"
+import {
+  listPendingConnectorConnectionRunsOptions,
+  listPendingConnectorConnectionRunsQueryKey,
+} from "../generated/@tanstack/react-query.gen"
 import {
   useConnectConnector,
   useDisconnectConnector,
@@ -88,13 +94,35 @@ export function useConnectorConnection({
   returnTo,
 }: UseConnectorConnectionOptions): UseConnectorConnectionResult {
   const [callback, setCallback] = useState(readConnectorConnectionCallback)
+  const providerClient = useSixbProviderClient()
+  const queryClient = useQueryClient()
+  const [dismissedRunIds, setDismissedRunIds] = useState<readonly string[]>([])
   const connectInFlightRef = useRef<Promise<void> | null>(null)
   const callbackRunId = callback?.connectorId === connectorId ? callback.runId : null
+  const pendingRunsQuery = useQuery({
+    ...listPendingConnectorConnectionRunsOptions({ client: providerClient, path: { connectorId } }),
+    enabled: callbackRunId === null,
+    staleTime: 0,
+  })
+  const recoveryPending = callbackRunId === null && pendingRunsQuery.isPending
+  const recoveryError = callbackRunId === null ? pendingRunsQuery.error : null
   const connectionsQuery = useConnectorConnections({ connectorId })
   const connection = useMemo(
     () => connectionsQuery.data?.find((candidate) => candidate.slot === slot),
     [connectionsQuery.data, slot]
   )
+  const pendingRun = pendingRunsQuery.data?.find(
+    (run) => run.slot === slot && !dismissedRunIds.includes(run.id)
+  )
+  useEffect(() => {
+    if (
+      callbackRunId === null &&
+      !connectionsQuery.isPending &&
+      !connectionsQuery.error &&
+      pendingRun
+    )
+      setCallback({ connectorId, runId: pendingRun.id })
+  }, [callbackRunId, connectorId, pendingRun, connectionsQuery.isPending, connectionsQuery.error])
   const runQuery = useConnectorConnectionRun({
     connectorId,
     runId: callbackRunId,
@@ -131,12 +159,20 @@ export function useConnectorConnection({
       if (result.error || !expectedCallback || !canConsume()) return
       if (!result.data?.some((candidate) => candidate.slot === slot)) return
 
+      await queryClient.invalidateQueries({
+        queryKey: listPendingConnectorConnectionRunsQueryKey({
+          client: providerClient,
+          path: { connectorId },
+        }),
+      })
+      if (!canConsume()) return
+      setDismissedRunIds((current) => [...current, expectedCallback.runId])
       clearConnectorConnectionCallback(expectedCallback)
       setCallback((current) =>
         sameConnectorConnectionCallback(current, expectedCallback) ? null : current
       )
     },
-    [connectionsQuery.refetch, slot]
+    [connectionsQuery.refetch, slot, queryClient, connectorId, providerClient]
   )
 
   const completedRunId = resumedRun?.status === "succeeded" ? resumedRun.id : null
@@ -197,6 +233,7 @@ export function useConnectorConnection({
   }
 
   async function refresh(): Promise<void> {
+    if (callbackRunId === null) await pendingRunsQuery.refetch()
     let completedCallback: ConnectorConnectionCallback | undefined
     if (callbackRunId !== null) {
       const runResult = await runQuery.refetch()
@@ -217,6 +254,7 @@ export function useConnectorConnection({
 
   function dismiss(): void {
     if (!callback) return
+    setDismissedRunIds((current) => [...current, callback.runId])
     clearConnectorConnectionCallback(callback)
     setCallback(null)
     resetError()
@@ -232,8 +270,8 @@ export function useConnectorConnection({
 
   const status = connectionStatus({
     callbackRunId,
-    connectionsPending: connectionsQuery.isPending,
-    connectionsError: connectionsQuery.error,
+    connectionsPending: connectionsQuery.isPending || recoveryPending,
+    connectionsError: connectionsQuery.error ?? recoveryError,
     runPending: runQuery.isPending,
     runError: runQuery.error,
     run: resumedRun,
@@ -247,7 +285,7 @@ export function useConnectorConnection({
     revokeMutation.isPending
   const canConnect = connectorCanConnect({
     status,
-    connectionsError: connectionsQuery.error,
+    connectionsError: connectionsQuery.error ?? recoveryError,
     runError: runQuery.error,
     run: resumedRun,
     connection,
@@ -265,7 +303,7 @@ export function useConnectorConnection({
       mutationFailure("disconnect", disconnectMutation.error) ??
       mutationFailure("revoke", revokeMutation.error) ??
       runFailure(callbackRunId, resumedRun, runQuery.error) ??
-      mutationFailure("load", connectionsQuery.error),
+      mutationFailure("load", connectionsQuery.error ?? recoveryError),
     canConnect,
     isPending: status === "loading" || status === "authorizing" || mutationPending,
     selectedAccountId: selectMutation.variables?.accountId,
@@ -291,7 +329,7 @@ export function isConnectorReplacementRequired(error: unknown): boolean {
 
 function connectorCanConnect(input: {
   readonly status: ConnectorConnectionStatus
-  readonly connectionsError: Error | null
+  readonly connectionsError: unknown
   readonly runError: Error | null
   readonly run: ConnectorConnectionRun | undefined
   readonly connection: ConnectorConnection | undefined
@@ -308,7 +346,7 @@ function connectorCanConnect(input: {
 function connectionStatus(input: {
   readonly callbackRunId: string | null
   readonly connectionsPending: boolean
-  readonly connectionsError: Error | null
+  readonly connectionsError: unknown
   readonly runPending: boolean
   readonly runError: Error | null
   readonly run: ConnectorConnectionRun | undefined
