@@ -285,6 +285,35 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
     })
 
     describe("writes and reads", () => {
+      test("cancels reads before starting and between rows", async () => {
+        // Red check: remove readRows' signal checks in the provider under test.
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+          const write = await storage.beginWrite({ dataset: writeDataset, mode: "snapshot" })
+          await write.writeRows([
+            { orderId: "1", customerName: "first" },
+            { orderId: "2", customerName: "second" },
+          ])
+          await write.commit()
+          const controller = new AbortController()
+          const rows = storage
+            .readRows({ datasetId: writeDataset.id, signal: controller.signal })
+            [Symbol.asyncIterator]()
+          try {
+            expect((await rows.next()).done).toBe(false)
+            controller.abort(new Error("cancel dataset read"))
+            await expect(rows.next()).rejects.toThrow("cancel dataset read")
+            await expect(
+              collectRows(
+                storage.readRows({ datasetId: writeDataset.id, signal: controller.signal })
+              )
+            ).rejects.toThrow("cancel dataset read")
+          } finally {
+            await rows.return?.()
+          }
+        })
+      })
+
       test("keeps immutable-version row order and offsets stable", async () => {
         await withStorage(async (storage) => {
           await storage.createDataset(writeDataset)

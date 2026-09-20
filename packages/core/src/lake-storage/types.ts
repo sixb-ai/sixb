@@ -71,6 +71,8 @@ export interface ReadDatasetRowsInput {
   readonly columns?: readonly string[]
   readonly limit?: number
   readonly offset?: number
+  /** Cancel an active read or a read waiting for provider capacity. */
+  readonly signal?: AbortSignal
 }
 
 export interface ReadDatasetChangesInput {

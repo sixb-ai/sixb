@@ -37,7 +37,7 @@ export class DuckLakeMaintenance {
       )
     }
 
-    return this.connections.withExclusiveAttached(async (runtime) => {
+    return this.connections.withMaintenanceRuntime(async (runtime) => {
       const counts = await runMaintenanceProcedures(
         runtime,
         this.options,

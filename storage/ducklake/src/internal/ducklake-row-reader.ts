@@ -2,6 +2,7 @@ import type { DatasetColumnDefinition, DatasetRow } from "@sixb/core"
 import type { DatasetVersion, ReadDatasetRowsInput } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
+import type { DuckDbReader } from "./duckdb-reader"
 import { getBigIntLike } from "./duckdb-row"
 import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
@@ -11,10 +12,7 @@ import { normalizeReadValue } from "./schema"
 import { qualifiedTableName, quoteIdentifier } from "./sql"
 import { parseVersionId } from "./versions"
 
-// Large reads release the provider's single DuckDB queue slot between bounded pages. Besides
-// bounding converted-row memory, this lets a JavaScript pipeline feed one DuckLake dataset into
-// another: the destination appender can use the runtime after each page instead of waiting forever
-// behind its own still-open source stream.
+// Bounded fallback for catalogs whose metadata transactions cannot stay open during a read.
 const READ_PAGE_ROWS = 5_000
 const PHYSICAL_ROW_ID_ALIAS = "__sixb_physical_row_id"
 
@@ -33,78 +31,88 @@ export class DuckLakeRowReader {
   ) {}
 
   async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
-    this.connections.assertOpen()
-
-    // Keep the attachment lease across pages so local catalogs do not pay DETACH/ATTACH for every
-    // page. Individual query() calls still release the DuckDB queue before rows are yielded.
-    const lease = await this.connections.acquireAttachedRuntime()
+    const read = await this.connections.acquireRead(input.signal)
+    let reader: DuckDbReader | null = null
     try {
-      const runtime = lease.runtime
-      // Resolve latest exactly once so a paged read stays pinned even if another writer commits
-      // between pages. DuckLake snapshots are immutable; every page names this snapshot.
-      const tableRef = await resolveDatasetTableRef(this.options, runtime, input.datasetId)
-      if (!tableRef) {
-        throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.datasetId}'.`)
+      const prepared = await this.connections.withAttachedRuntime(async (runtime) => {
+        read.signal.throwIfAborted()
+        const tableRef = await resolveDatasetTableRef(this.options, runtime, input.datasetId)
+        if (!tableRef) {
+          throw new LakeStorageError(`[SixbDuckLake] Unknown dataset '${input.datasetId}'.`)
+        }
+        // Resolve latest once, before yielding any rows. Every query names the same snapshot.
+        const version = await this.resolveVersion(runtime, tableRef, input.versionId)
+        const columns = this.resolveReadColumns(tableRef.datasetId, version.schema, input.columns)
+        const names = new Set(version.schema.columns.map((column) => column.name.toLowerCase()))
+        const physicalOrder = !names.has("rowid") && !names.has(PHYSICAL_ROW_ID_ALIAS)
+        const relation = `${qualifiedTableName(this.options, tableRef.tableName)} AT (VERSION => ${parseVersionId(version.versionId)})`
+        const columnsSql = columns.map((column) => quoteIdentifier(column.name)).join(", ")
+        const offset = Math.max(0, Math.trunc(input.offset ?? 0))
+        const limit = input.limit === undefined ? undefined : Math.max(0, Math.trunc(input.limit))
+        const sql = `SELECT ${columnsSql} FROM ${relation}${physicalOrder ? " ORDER BY rowid" : ""}${limit === undefined ? "" : ` LIMIT ${limit}`}${offset > 0 ? ` OFFSET ${offset}` : ""}`
+        const cursor =
+          limit === undefined || limit > READ_PAGE_ROWS
+            ? await this.connections.openReader(runtime, sql, read.signal, read.release)
+            : null
+        const query = { columnsSql, relation, physicalOrder }
+        const firstPage =
+          cursor || limit === 0
+            ? []
+            : await runtime.query(
+                pageSql(query, Math.min(limit ?? READ_PAGE_ROWS, READ_PAGE_ROWS), offset, null)
+              )
+        return { columns, ...query, offset, limit, cursor, firstPage }
+      })
+      reader = prepared.cursor
+      // A paused paged reader owns no native query. Cancellation can release its read lease without
+      // waiting for the consumer to call next()/return(); native readers release after cleanup.
+      if (!reader) read.signal.addEventListener("abort", read.release, { once: true })
+      read.signal.throwIfAborted()
+      if (reader) {
+        yield* this.normalizeRows(reader.rows(), prepared.columns, read.signal)
+        return
       }
-      const version = await this.resolveVersion(runtime, tableRef, input.versionId)
-      const selectedColumns = this.resolveReadColumns(
-        tableRef.datasetId,
-        version.schema,
-        input.columns
-      )
-      const snapshotId = parseVersionId(version.versionId)
-      const columnsSql = selectedColumns.map((column) => quoteIdentifier(column.name)).join(", ")
-      const tableSql = qualifiedTableName(this.options, tableRef.tableName)
-      // A user column named `rowid` shadows DuckDB's virtual row id. In that edge case the
-      // connection-level invariant still preserves insertion order; otherwise make it explicit.
-      const schemaNames = new Set(version.schema.columns.map((column) => column.name.toLowerCase()))
-      const canUsePhysicalRowId =
-        !schemaNames.has("rowid") && !schemaNames.has(PHYSICAL_ROW_ID_ALIAS.toLowerCase())
-      const orderSql = canUsePhysicalRowId ? " ORDER BY rowid" : ""
-      const baseSql = `SELECT ${columnsSql} FROM ${tableSql} AT (VERSION => ${snapshotId})`
-      const requestedOffset = Math.max(0, Math.trunc(input.offset ?? 0))
-      let remaining = input.limit === undefined ? undefined : Math.max(0, Math.trunc(input.limit))
-      if (remaining === 0) return
 
-      // Materialize one bounded page and release its queue operation before yielding it. A
-      // consumer may enqueue another DuckLake operation while processing the yielded rows.
-      // Holding a native stream open here would make that operation wait behind itself.
-      let offset = requestedOffset
-      let physicalCursor: bigint | null = null
-      while (true) {
-        const pageRows =
-          remaining === undefined ? READ_PAGE_ROWS : Math.min(READ_PAGE_ROWS, remaining)
-        const pageSql = canUsePhysicalRowId
-          ? `SELECT rowid AS ${quoteIdentifier(PHYSICAL_ROW_ID_ALIAS)}, ${columnsSql}
-              FROM ${tableSql} AT (VERSION => ${snapshotId})
-              ${physicalCursor === null ? "" : `WHERE rowid > ${physicalCursor}`}
-              ORDER BY rowid LIMIT ${pageRows}
-              ${physicalCursor === null && offset > 0 ? `OFFSET ${offset}` : ""}`
-          : `${baseSql}${orderSql} LIMIT ${pageRows} OFFSET ${offset}`
-        const rows = await runtime.query(pageSql)
-        if (rows.length === 0) return
-
-        yield* this.normalizeRows(rows, selectedColumns)
+      // Each bounded query releases both the runtime queue and attachment lease before yielding.
+      // SQLite metadata locks and PostgreSQL pool slots are released before consumer operations.
+      let offset = prepared.offset
+      let remaining = prepared.limit
+      let cursor: bigint | null = null
+      let page: readonly Record<string, unknown>[] | undefined = prepared.firstPage
+      while (remaining !== 0) {
+        read.signal.throwIfAborted()
+        const pageSize = Math.min(remaining ?? READ_PAGE_ROWS, READ_PAGE_ROWS)
+        const rows: readonly Record<string, unknown>[] =
+          page ??
+          (await this.connections.withAttachedRuntime((runtime) =>
+            runtime.query(pageSql(prepared, pageSize, offset, cursor))
+          ))
+        page = undefined
+        read.signal.throwIfAborted()
+        yield* this.normalizeRows(rows, prepared.columns, read.signal)
+        if (remaining !== undefined) remaining -= rows.length
+        if (rows.length < pageSize) return
+        if (prepared.physicalOrder)
+          cursor = getBigIntLike(rows[rows.length - 1]!, PHYSICAL_ROW_ID_ALIAS)
         offset += rows.length
-        if (remaining !== undefined) {
-          remaining -= rows.length
-          if (remaining === 0) return
-        }
-        if (canUsePhysicalRowId) {
-          physicalCursor = getBigIntLike(rows[rows.length - 1]!, PHYSICAL_ROW_ID_ALIAS)
-        }
-        if (rows.length < pageRows) return
       }
     } finally {
-      await lease.release()
+      read.signal.removeEventListener("abort", read.release)
+      try {
+        await reader?.close()
+      } finally {
+        read.release()
+      }
     }
   }
 
   private async *normalizeRows(
     rows: Iterable<Record<string, unknown>> | AsyncIterable<Record<string, unknown>>,
-    selectedColumns: readonly DatasetColumnDefinition[]
+    selectedColumns: readonly DatasetColumnDefinition[],
+    signal: AbortSignal
   ): AsyncIterable<DatasetRow> {
     for await (const row of rows) {
+      signal.throwIfAborted()
       const output: Record<string, unknown> = {}
       for (const column of selectedColumns) {
         output[column.name] = normalizeReadValue(row[column.name], column)
@@ -164,4 +172,17 @@ export class DuckLakeRowReader {
       `[SixbDuckLake] No committed version found for dataset '${datasetId}'.`
     )
   }
+}
+
+function pageSql(
+  read: { readonly columnsSql: string; readonly relation: string; readonly physicalOrder: boolean },
+  limit: number,
+  offset: number,
+  cursor: bigint | null
+): string {
+  return read.physicalOrder
+    ? `SELECT rowid AS ${quoteIdentifier(PHYSICAL_ROW_ID_ALIAS)}, ${read.columnsSql}
+        FROM ${read.relation} ${cursor === null ? "" : `WHERE rowid > ${cursor}`}
+        ORDER BY rowid LIMIT ${limit} ${cursor === null && offset > 0 ? `OFFSET ${offset}` : ""}`
+    : `SELECT ${read.columnsSql} FROM ${read.relation} LIMIT ${limit} OFFSET ${offset}`
 }

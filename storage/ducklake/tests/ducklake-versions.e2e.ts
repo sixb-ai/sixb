@@ -187,7 +187,7 @@ describe("DuckLakeStorage versions and time travel", () => {
       storage as unknown as DuckLakeStorageInternals
     ).connections.attachedRuntime()
     const originalQuery = runtime.query.bind(runtime)
-    const originalStreamRows = runtime.streamRows.bind(runtime)
+    const originalOpenReader = runtime.openReader.bind(runtime)
     runtime.query = (async (sql, values) => {
       if (
         /\bduckdb_tables\s*\(/i.test(sql) ||
@@ -199,10 +199,10 @@ describe("DuckLakeStorage versions and time travel", () => {
 
       return originalQuery(sql, values)
     }) satisfies DuckDbQueryRuntime["query"]
-    runtime.streamRows = ((sql, values) => {
+    runtime.openReader = (async (sql, values) => {
       void values
       throw new Error(`Unexpected streaming row preview: ${sql}`)
-    }) satisfies DuckDbRuntime["streamRows"]
+    }) satisfies DuckDbRuntime["openReader"]
 
     try {
       await expect(
@@ -218,7 +218,7 @@ describe("DuckLakeStorage versions and time travel", () => {
       ])
     } finally {
       runtime.query = originalQuery
-      runtime.streamRows = originalStreamRows
+      runtime.openReader = originalOpenReader
     }
   })
 

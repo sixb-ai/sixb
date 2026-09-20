@@ -65,7 +65,7 @@ export async function executeRunStep(input: {
       runId: job.id,
       signal,
       logger,
-      inputs: createStepInputs(runtime.lakeStorage, resolvedInputs),
+      inputs: createStepInputs(runtime.lakeStorage, resolvedInputs, signal),
       output: {
         async writeRows(rows) {
           await write.writeRows(

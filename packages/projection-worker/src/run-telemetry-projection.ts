@@ -74,6 +74,7 @@ export async function runTelemetryProjection(input: {
   let attemptRowsRead = 0
 
   for await (const row of runtime.lakeStorage.readRows({
+    signal,
     datasetId: execution.run.identity.datasetVersion.datasetId,
     versionId: execution.run.identity.datasetVersion.versionId,
     columns: plan.readColumns,
