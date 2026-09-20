@@ -18,7 +18,7 @@ import {
   LakeStorageError,
   retryDatasetMergeCommit,
 } from "@sixb/core/lake-storage"
-import type { DuckLakeStorageOptions } from "../types"
+import type { DuckLakeCatalogOptions, DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
 import {
   type ApplyDatasetRowsResult,
@@ -330,13 +330,12 @@ export class DuckLakeWriteCoordinator {
     // which snapshot belongs to this transaction.
     const previousWriteSnapshotId = await this.lastCommittedSnapshotId(input.runtime)
 
-    await input.runtime.run("BEGIN TRANSACTION")
     let committed = false
     try {
       // Guarded Sixb commits need compare-and-swap semantics. DuckLake can
       // automatically retry non-conflicting commits, so guarded transactions
-      // disable retries and re-check the dataset head after BEGIN.
-      const latestVersion = await this.latestVersionForCommit(input)
+      // disable retries and validate a head belonging to the native write snapshot.
+      const latestVersion = await this.beginVersionTransaction(input)
       if (input.expectedLatestVersionId !== undefined) {
         this.assertExpectedLatestVersion({
           datasetId: input.dataset.id,
@@ -527,15 +526,16 @@ export class DuckLakeWriteCoordinator {
   private async ensureNoOpHasSnapshot(
     input: DuckLakeCommitVersionOutcomeRuntimeInput,
     changeResult: ApplyDatasetRowsResult,
-    knownLatestVersion: DuckLakeVersionSummary | null
+    knownLatestVersion: DuckLakeVersionSummary | null | undefined
   ): Promise<void> {
     if (changeResult.dataChangeExpected) {
       return
     }
 
     const latestVersion =
-      knownLatestVersion ??
-      (await this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset))
+      knownLatestVersion === undefined
+        ? await this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset)
+        : knownLatestVersion
     if (
       latestVersion
         ? input.mode === "merge" || !hasDatasetInputChanges(latestVersion.inputs, input.inputs)
@@ -582,14 +582,49 @@ export class DuckLakeWriteCoordinator {
     }
   }
 
-  private async latestVersionForCommit(
+  private async beginVersionTransaction(
     input: DuckLakeCommitVersionOutcomeRuntimeInput
-  ): Promise<DuckLakeVersionSummary | null> {
-    if (input.expectedLatestVersionId === undefined && input.mode !== "append") {
-      return null
+  ): Promise<DuckLakeVersionSummary | null | undefined> {
+    if (!isSqliteCatalog(this.options.catalog)) {
+      await input.runtime.run("BEGIN TRANSACTION")
+      if (input.expectedLatestVersionId === undefined && input.mode !== "append") {
+        return undefined
+      }
+      return this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset)
     }
 
-    return this.snapshots.getLatestVersionSummaryForDefinition(input.runtime, input.dataset)
+    // Direct metadata reads enlist a second SQLite transaction on the outer DuckDB connection.
+    // Its read lock blocks DuckLake's own metadata connection at COMMIT. Read in autocommit,
+    // then pin the native DuckLake snapshot and verify nothing changed in between. The summary
+    // is now valid for this write transaction, including null (no previous version).
+    // Only preparation can repeat: staged mutations and COMMIT are never replayed here.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      input.signal?.throwIfAborted()
+      const snapshotId = await this.currentSnapshotId(input.runtime)
+      const latestVersion = await this.snapshots.getLatestVersionSummaryForDefinition(
+        input.runtime,
+        input.dataset
+      )
+      await input.runtime.run("BEGIN TRANSACTION")
+      if ((await this.currentSnapshotId(input.runtime)) === snapshotId) {
+        return latestVersion
+      }
+      await input.runtime.run("ROLLBACK")
+    }
+
+    throw new LakeConcurrencyError(
+      `[SixbDuckLake] Catalog changed during three write preparations for dataset '${input.dataset.id}'. Retry the write.`
+    )
+  }
+
+  private async currentSnapshotId(runtime: DuckDbQueryRuntime): Promise<string> {
+    const [row] = await runtime.query(
+      `SELECT id FROM ${quoteIdentifier(duckLakeAlias(this.options))}.current_snapshot()`
+    )
+    if (row === undefined) {
+      throw new LakeStorageError("[SixbDuckLake] DuckLake did not return a current snapshot.")
+    }
+    return String(getBigIntLike(row, "id"))
   }
 
   private async lastCommittedSnapshotId(runtime: DuckDbQueryRuntime): Promise<string | null> {
@@ -681,15 +716,21 @@ export class DuckLakeWriteCoordinator {
   }
 }
 
+function isSqliteCatalog(catalog: DuckLakeCatalogOptions): boolean {
+  return (
+    catalog.type === "sqlite" ||
+    (catalog.type === "custom" && catalog.uri.toLowerCase().startsWith("sqlite:"))
+  )
+}
+
 function commitRowCount(
   input: Pick<DuckLakeCommitVersionOutcomeInput, "expectedLatestVersionId" | "mode">,
   changeResult: ApplyDatasetRowsResult,
-  latestVersion: DuckLakeVersionSummary | null
+  latestVersion: DuckLakeVersionSummary | null | undefined
 ): CommitRowCount {
   // Unguarded append commits can be retried by DuckLake after this transaction
   // read the previous latest version. In that case previousRowCount +
-  // sourceRowCount can underreport the committed snapshot, so omit metadata
-  // and let hydration count the exact committed snapshot instead.
+  // sourceRowCount can underreport the committed snapshot, so leave the count unknown.
   if (input.mode === "append" && input.expectedLatestVersionId === undefined) {
     return { kind: "unknown" }
   }

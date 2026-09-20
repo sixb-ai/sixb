@@ -18,7 +18,7 @@ interface DuckLakeStorageInternals {
   readonly snapshotReader: DuckLakeSnapshotReader
 }
 
-describe("DuckLake SQL transforms", () => {
+describe.each(["duckdb", "sqlite"] as const)("DuckLake %s SQL transforms", (catalog) => {
   let rootDir: string
   let storage: DuckLakeStorage
 
@@ -36,7 +36,7 @@ describe("DuckLake SQL transforms", () => {
 
   beforeEach(async () => {
     rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-sql-transforms-"))
-    storage = createLocalDuckLakeStorage(rootDir)
+    storage = createLocalDuckLakeStorage(rootDir, catalog)
 
     await storage.createDataset(customersDataset)
     await storage.createDataset(ordersDataset)

@@ -10,16 +10,22 @@ export async function collectRows(rows: AsyncIterable<DatasetRow>): Promise<Data
   return result
 }
 
-export function localDuckLakeOptions(rootDir: string): DuckLakeStorageOptions {
+export function localDuckLakeOptions(
+  rootDir: string,
+  catalog: "duckdb" | "sqlite" = "duckdb"
+): DuckLakeStorageOptions {
   return {
     catalog: {
-      type: "duckdb",
+      type: catalog,
       path: join(rootDir, "metadata.ducklake"),
     },
     dataPath: join(rootDir, "data"),
   }
 }
 
-export function createLocalDuckLakeStorage(rootDir: string): DuckLakeStorage {
-  return new DuckLakeStorage(localDuckLakeOptions(rootDir))
+export function createLocalDuckLakeStorage(
+  rootDir: string,
+  catalog: "duckdb" | "sqlite" = "duckdb"
+): DuckLakeStorage {
+  return new DuckLakeStorage(localDuckLakeOptions(rootDir, catalog))
 }
