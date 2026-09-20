@@ -49,6 +49,15 @@ with Sixb's `SameSite=Strict` cookies, use same-site app/API origins for embeddi
 
 ## API Routes
 
+### Connector OAuth callbacks
+
+`GET /auth/connectors/callback` disables Bun's socket idle timeout while preserving provider-operation
+deadlines. Reverse proxies must also allow enough time for provider processing.
+
+Organization selection has no time limit. The initiating user can resume pending runs through
+`GET /api/connectors/:connectorId/connection-runs`, with current connector-management permission.
+See [OAuth connection flows](../../docs/connectors/authentication.md#connect-an-oauth-account-from-an-app).
+
 ### REST Endpoints
 
 | Method | Path | Description |

@@ -31,6 +31,7 @@ export interface ConnectorConnectionPersistence {
   deleteAuthorizationAttempt(id: string): Promise<boolean>
 
   insertConnectionRun(record: ConnectorConnectionRunRecord): Promise<boolean>
+  listPendingConnectionRuns(): Promise<readonly ConnectorConnectionRunRecord[]>
   getConnectionRun(id: string): Promise<ConnectorConnectionRunRecord | null>
   updateConnectionRun(record: ConnectorConnectionRunRecord): Promise<void>
 
@@ -88,6 +89,7 @@ export async function currentConnectionRun(
   const run = await persistence.getConnectionRun(runId)
   if (!run || (run.status !== "waiting" && run.status !== "running")) return run
 
+  if (run.status === "waiting" && run.waitingFor === "account_selection") return run
   const now = await persistence.now()
   if (run.expiresAt.getTime() > now.getTime()) return run
 
@@ -96,9 +98,6 @@ export async function currentConnectionRun(
     if (attempt) await persistence.deleteAuthorizationAttempt(attempt.id)
   }
   if (run.status === "waiting") {
-    if (run.kind === "connect" && run.waitingFor === "account_selection") {
-      await markPendingAuthorizationForCleanup(persistence, run.authorizationId, now)
-    }
     const expired = expireConnectionRun(run, now)
     await persistence.updateConnectionRun(expired)
     return expired

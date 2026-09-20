@@ -76,7 +76,6 @@ export function serializeConnectorConnectionRun(
       status: "waiting",
       waitingFor: "account_selection",
       accounts: [...run.accounts],
-      expiresAt: toIsoString(run.expiresAt),
     }
   }
   if (run.status === "succeeded") {

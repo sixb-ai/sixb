@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from "bun:test"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient, QueryClientProvider, QueryObserver } from "@tanstack/react-query"
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react"
 import { Window } from "happy-dom"
 import type { PropsWithChildren } from "react"
@@ -11,6 +11,8 @@ import {
 import {
   getConnectorConnectionRunQueryKey,
   listConnectorConnectionsQueryKey,
+  listPendingConnectorConnectionRunsOptions,
+  listPendingConnectorConnectionRunsQueryKey,
 } from "../src/generated/@tanstack/react-query.gen"
 import { type Client, createClient, createConfig } from "../src/generated/client"
 import type {
@@ -72,7 +74,6 @@ const waitingRun: GetConnectorConnectionRunResponse = {
   status: "waiting",
   waitingFor: "account_selection",
   accounts: [{ id: "octocat", label: "Octocat" }],
-  expiresAt: "2026-08-24T12:10:00.000Z",
 }
 
 beforeAll(() => {
@@ -110,6 +111,103 @@ afterAll(async () => {
 })
 
 describe("useConnectorConnection", () => {
+  test("completion refreshes other pending-run consumers using the provider client", async () => {
+    // Remove providerClient from completion's invalidation key: the observer keeps waitingRun.
+    browserWindow.history.replaceState(
+      {},
+      "",
+      "/settings?connectionConnectorId=github&connectionRunId=ccr_1"
+    )
+    let pendingReads = 0
+    const { client } = createHookClient(
+      async () => Response.json([connection]),
+      () => {
+        pendingReads++
+        return Response.json([])
+      }
+    )
+    const queryClient = connectorQueryClient()
+    seedConnectorQueries(queryClient, succeededRun, [connection])
+    const options = listPendingConnectorConnectionRunsOptions({
+      client,
+      path: { connectorId: "github" },
+    })
+    const globalKey = listPendingConnectorConnectionRunsQueryKey({
+      path: { connectorId: "github" },
+    })
+    expect(options.queryKey).not.toEqual(globalKey)
+    queryClient.setQueryData(options.queryKey, [waitingRun])
+    queryClient.setQueryData(globalKey, [waitingRun])
+    const observer = new QueryObserver(queryClient, { ...options, staleTime: Infinity })
+    const unsubscribe = observer.subscribe(() => {})
+    try {
+      renderHook(() => useConnectorConnection({ connectorId: "github", slot: "default" }), {
+        wrapper: connectorWrapper(client, queryClient),
+      })
+      await waitFor(() => expect(observer.getCurrentResult().data).toEqual([]))
+      expect(pendingReads).toBeGreaterThan(0)
+      expect(queryClient.getQueryState(globalKey)?.isInvalidated).toBe(false)
+    } finally {
+      unsubscribe()
+    }
+  })
+
+  test("reopening Settings resumes pending company selection and completes without OAuth", async () => {
+    // Remove pending-run discovery from the hook: it never reaches selecting_account.
+    let selected = false
+    const { client, requests } = createHookClient(
+      async (request) => {
+        const path = new URL(request.url).pathname
+        if (path.endsWith("/selection")) {
+          selected = true
+          return Response.json(succeededRun)
+        }
+        if (path.endsWith("/connection-runs/ccr_1"))
+          return Response.json(selected ? succeededRun : waitingRun)
+        if (path.endsWith("/connections")) return Response.json(selected ? [connection] : [])
+        return Response.json({ error: "Unexpected request" }, { status: 500 })
+      },
+      () =>
+        Response.json(
+          selected ? [] : [{ ...waitingRun, id: "other-slot", slot: "other" }, waitingRun]
+        )
+    )
+    const rendered = renderHook(
+      () => useConnectorConnection({ connectorId: "github", slot: "default" }),
+      {
+        wrapper: connectorWrapper(client, connectorQueryClient()),
+      }
+    )
+    await waitFor(() => expect(rendered.result.current.status).toBe("selecting_account"))
+    expect(browserWindow.location.search).toBe("")
+    expect(rendered.result.current.accounts).toEqual(waitingRun.accounts)
+    expect(rendered.result.current.canConnect).toBe(false)
+    await act(async () => {
+      await rendered.result.current.selectAccount("octocat")
+    })
+    await waitFor(() => expect(rendered.result.current.status).toBe("connected"))
+    expect(
+      requests
+        .filter((request) => request.method === "POST")
+        .map((request) => new URL(request.url).pathname)
+    ).toEqual(["/api/connectors/github/connection-runs/ccr_1/selection"])
+  })
+
+  test("surfaces a failed recovery lookup before offering another authorization", async () => {
+    const { client } = createHookClient(
+      async () => Response.json([]),
+      () => Response.json({ error: "Unavailable" }, { status: 503 })
+    )
+    const rendered = renderHook(
+      () => useConnectorConnection({ connectorId: "github", slot: "default" }),
+      {
+        wrapper: connectorWrapper(client, connectorQueryClient()),
+      }
+    )
+    await waitFor(() => expect(rendered.result.current.status).toBe("error"))
+    expect(rendered.result.current.canConnect).toBe(false)
+  })
+
   test("consumes a completed callback after refresh recovers from a connection read failure", async () => {
     browserWindow.history.replaceState(
       {},
@@ -196,7 +294,7 @@ describe("useConnectorConnection", () => {
       { wrapper: connectorWrapper(client, queryClient) }
     )
 
-    expect(rendered.result.current.canConnect).toBe(true)
+    await waitFor(() => expect(rendered.result.current.canConnect).toBe(true))
     let first!: Promise<void>
     let second!: Promise<void>
     await act(async () => {
@@ -208,7 +306,7 @@ describe("useConnectorConnection", () => {
 
     try {
       expect(first).toBe(second)
-      expect(requests).toHaveLength(1)
+      expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
     } finally {
       await act(async () => {
         releaseRequest(Response.json({ error: "Temporary outage" }, { status: 503 }))
@@ -216,7 +314,7 @@ describe("useConnectorConnection", () => {
         await Bun.sleep(0)
       })
     }
-    expect(requests).toHaveLength(1)
+    expect(requests.filter((request) => request.method === "POST")).toHaveLength(1)
   })
 })
 
@@ -263,13 +361,18 @@ function connectorWrapper(client: Client, queryClient: QueryClient) {
   }
 }
 
-function createHookClient(handler: (request: Request) => Promise<Response>) {
+function createHookClient(
+  handler: (request: Request) => Promise<Response>,
+  pending: () => Response = () => Response.json([])
+) {
   const requests: Request[] = []
   const client = createClient(
     createConfig({
       baseUrl: "https://api.sixb.test",
       fetch: (async (request: Request) => {
         requests.push(request)
+        if (request.method === "GET" && new URL(request.url).pathname.endsWith("/connection-runs"))
+          return pending()
         return handler(request)
       }) as unknown as typeof fetch,
     })

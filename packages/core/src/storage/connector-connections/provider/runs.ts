@@ -360,6 +360,12 @@ export class DurableConnectorConnectionRuns extends ConnectorConnectionOperation
     })
   }
 
+  listPendingConnectionRuns(
+    input: Parameters<ConnectorConnectionStorage["listPendingConnectionRuns"]>[0]
+  ) {
+    return this.read(input, (persistence) => persistence.listPendingConnectionRuns())
+  }
+
   getConnectionRun(
     input: GetConnectorConnectionRunInput
   ): Promise<ConnectorConnectionRunRecord | null> {

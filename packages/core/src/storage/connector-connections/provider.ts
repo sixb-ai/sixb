@@ -77,6 +77,12 @@ export class DurableConnectorConnectionStorage implements ConnectorConnectionSto
     return this.runs.finishConnectionRun(...args)
   }
 
+  listPendingConnectionRuns(
+    ...args: Parameters<ConnectorConnectionStorage["listPendingConnectionRuns"]>
+  ) {
+    return this.runs.listPendingConnectionRuns(...args)
+  }
+
   async getConnectionRun(
     ...args: Parameters<ConnectorConnectionStorage["getConnectionRun"]>
   ): Promise<Awaited<ReturnType<ConnectorConnectionStorage["getConnectionRun"]>>> {

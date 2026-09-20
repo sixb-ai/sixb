@@ -119,7 +119,6 @@ export const ConnectorConnectionRunSchema = z.union([
     status: z.literal("waiting"),
     waitingFor: z.literal("account_selection"),
     accounts: z.array(ConnectorAccountSchema),
-    expiresAt: z.string().datetime(),
   }),
   ConnectorConnectionRunBaseSchema.extend({
     status: z.literal("succeeded"),

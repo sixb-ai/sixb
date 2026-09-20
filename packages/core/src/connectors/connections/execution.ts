@@ -31,6 +31,7 @@ export interface ConnectorConnectionsRuntime {
     connectorId: string,
     input: AddConnectorConnectionInput
   ): Promise<ConnectorConnectionRunView>
+  listPendingConnectionRuns(connectorId: string): Promise<readonly ConnectorConnectionRunView[]>
   getConnectionRun(connectorId: string, runId: string): Promise<ConnectorConnectionRunView | null>
   selectConnectionRunAccount(
     connectorId: string,
@@ -77,6 +78,8 @@ export function createConnectorConnectionsRuntime(
       process.startConnectionRun(contextFor(connectorId), connectorId, input),
     addConnection: (connectorId, input) =>
       process.addConnection(contextFor(connectorId), connectorId, input),
+    listPendingConnectionRuns: (connectorId) =>
+      process.listPendingConnectionRuns(contextFor(connectorId), connectorId),
     getConnectionRun: (connectorId, runId) =>
       process.getConnectionRun(contextFor(connectorId), connectorId, runId),
     selectConnectionRunAccount: (connectorId, input) =>

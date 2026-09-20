@@ -66,6 +66,7 @@ export interface ConnectorConnectionServiceOptions {
   readonly storage?: Storage
   readonly credentialProtector?: ConnectorCredentialProtector
   readonly authorizationAttemptTtlMs?: number
+  /** @deprecated Selection no longer expires; retained for legacy storage metadata only. */
   readonly accountSelectionTtlMs?: number
   readonly credentialMutationLeaseMs?: number
   readonly providerOperationTimeoutMs?: number
@@ -320,6 +321,11 @@ export class ConnectorConnectionService implements ConnectorConnectionProcess {
       slot: input.slot,
       authorizationId: authorization.id,
     })
+  }
+
+  listPendingConnectionRuns(command: ConnectorConnectionCommandContext, connectorId: string) {
+    this.requireOAuthDefinition(connectorId)
+    return this.runs.listPending(command, connectorId)
   }
 
   getConnectionRun(

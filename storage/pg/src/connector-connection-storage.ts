@@ -180,6 +180,16 @@ class PgConnectorConnectionPersistence implements ConnectorConnectionPersistence
     }
   }
 
+  async listPendingConnectionRuns(): Promise<readonly ConnectorConnectionRunRecord[]> {
+    if (!this.scope.connectorId) return []
+    const rows = await this.sql<PgConnectionRunRow[]>`
+      SELECT * FROM connector_connection_runs
+      WHERE project_id = ${this.scope.projectId} AND connector_id = ${this.scope.connectorId}
+      AND (status = 'running' OR (status = 'waiting' AND waiting_for = 'account_selection'))
+    `
+    return rows.map(connectionRunFromRow)
+  }
+
   async getConnectionRun(id: string): Promise<ConnectorConnectionRunRecord | null> {
     const rows = await this.runById(id)
     return rows[0] ? connectionRunFromRow(rows[0]) : null
