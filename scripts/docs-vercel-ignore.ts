@@ -31,7 +31,11 @@ const LOG_PREFIX = "[SixbDocs]"
 export const WATCHED_PATHS = [
   ":/docs", // the content — read from the repo root by apps/docs/src/docs/config.ts
   ":/apps/docs", // the site that renders it
-  ":/packages/ui", // its only workspace dependency
+  ":/packages/ui", // shared UI components
+  ":/packages/core", // workspace dependencies used by the site's examples
+  ":/packages/client",
+  ":/connectors/google",
+  ":/connectors/rest", // transitive dependency of the Google connector
   ":/bun.lock", // a next, shiki, or tailwind bump changes the rendered output
 ] as const
 
