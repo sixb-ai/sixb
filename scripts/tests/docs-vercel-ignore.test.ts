@@ -212,6 +212,8 @@ describe("the watched paths cover what the site is built from", () => {
   })
 
   test("every workspace package the site is built from lives under a watched path", () => {
+    // Removal proof: remove core/client/google/rest from WATCHED_PATHS; the site's
+    // current workspace dependency graph exposes all four missing deployment triggers.
     const dependencies = transitiveWorkspaceDependencies("apps/docs")
     expect(dependencies.length).toBeGreaterThan(0)
 
