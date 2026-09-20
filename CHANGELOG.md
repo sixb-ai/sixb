@@ -2,6 +2,57 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-19 — Framework 0.1.10
+
+### Highlights
+
+- Materialize only changed object and link projection roots with DuckLake and in-memory lake
+  storage, retaining complete replacement as a fallback. Show incremental changes read in Atlas
+  and expose the counter through the API and generated client.
+- Reduce projection, queue, PostgreSQL cardinality validation, and outbox overhead. Bound broker
+  consumer buffering, await asynchronous handlers, and retry runtime dispatch within the handler.
+- Support per-stream retention overrides in the in-memory, Redis, and NATS brokers.
+- Add OAuth callback parameters, encrypted provider authorization context, configurable PKCE,
+  and managed connection clients in webhook handlers. Adapt LinkedIn and TikTok OAuth handling.
+- Add Microsoft Graph subscriptions, Outlook mail subscription helpers, and verified webhook
+  delivery, including subscription validation and lifecycle notifications.
+- Introduce the QuickBooks Online Accounting connector with managed OAuth, queries, change data
+  capture, verified webhooks, and typed accounting reads and writes.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker and storage consumers, and the CLI to `0.1.10` together. Rebuild
+  Atlas assets to include incremental projection counters.
+- Apply PostgreSQL migrations 038–040 or SQLite migrations 038–039. These add projection source
+  root history and optional OAuth PKCE; PostgreSQL also adds an outbox publication-order index.
+  The source-root migration backfills existing materializations, and SQLite rebuilds the OAuth
+  authorization-attempt table. Stop old runtime roles and rehearse on a backup before migrating.
+  There is no database downgrade path; rollback requires the backup and matching old binaries.
+  For SQLite, migrate once before starting multiple runtime roles with `--no-migrate`.
+- Custom OAuth adapters must handle optional `codeChallenge`, `codeChallengeMethod`, and
+  `codeVerifier` fields. S256 remains the default; explicitly disable PKCE only for providers
+  that do not support it. Managed OAuth webhook handlers resolve clients through
+  `connections.forAccount(accountId)`.
+- Broker subscribers must return their processing promise to apply backpressure. Handler errors
+  do not request redelivery; reliable consumers must retry before returning. Retention overrides
+  apply when streams are created; existing streams keep their configuration.
+- QuickBooks is a first publication at `0.1.0`. The `next` release plan defers its bootstrap;
+  rehearse against a local registry before publishing it explicitly under `latest`.
+
+### Package versions
+
+- `0.1.10`: `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/cli`, `@sixb/client`, `@sixb/core`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/server`, `@sixb/sqlite`, `@sixb/sync-worker`,
+  `@sixb/workflow-worker`.
+- `0.1.9`: `@sixb/atlas`.
+- `0.1.6`: `@sixb/connector-linkedin`, `@sixb/ducklake`.
+- `0.1.5`: `@sixb/broker-redis`.
+- `0.1.4`: `@sixb/broker-nats`.
+- `0.1.3`: `@sixb/connector-tiktok`.
+- `0.1.1`: `@sixb/connector-microsoft`.
+- `0.1.0`: `@sixb/connector-quickbooks` (first publication).
+
 ## 2026-09-18 — Framework 0.1.9
 
 This release includes breaking API changes, a database migration, and a new minimum Bun version.

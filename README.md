@@ -245,7 +245,7 @@ independently against the same durable providers.
 
 ## Status
 
-Sixb core is currently `0.1.9`. Packages are versioned independently and publish only when they change.
+Sixb core is currently `0.1.10`. Packages are versioned independently and publish only when they change.
 Releases on the `0.1.x` line can include breaking API changes and database migrations. Review the
 [changelog](CHANGELOG.md) before updating, and deploy core and its exact runtime consumers together.
 
