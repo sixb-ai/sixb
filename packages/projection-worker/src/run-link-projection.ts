@@ -36,6 +36,7 @@ export function mapLinkProjectionEntries(input: {
   async function* entries(): AsyncIterable<ProjectionSourceEntry> {
     try {
       for await (const row of runtime.lakeStorage.readRows({
+        signal,
         datasetId: execution.run.identity.datasetVersion.datasetId,
         versionId: execution.run.identity.datasetVersion.versionId,
         columns,

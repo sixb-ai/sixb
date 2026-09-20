@@ -73,7 +73,8 @@ export async function resolveStepInputs(input: {
 
 export function createStepInputs(
   lakeStorage: PipelineWorkerContext["lakeStorage"],
-  resolved: readonly ResolvedStepInput[]
+  resolved: readonly ResolvedStepInput[],
+  signal: AbortSignal
 ): PipelineStepRunContext["inputs"] {
   const inputs: Record<string, PipelineStepInput> = {}
 
@@ -85,6 +86,7 @@ export function createStepInputs(
         // Step readers stay pinned even if newer versions commit while the handler runs.
         return lakeStorage.readRows({
           ...readInput,
+          signal: readInput.signal ? AbortSignal.any([signal, readInput.signal]) : signal,
           datasetId: input.dataset.id,
           versionId: input.version.versionId,
         })

@@ -367,6 +367,7 @@ export class InMemoryLakeStorage implements LakeStorage {
   }
 
   async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
+    input.signal?.throwIfAborted()
     const definition = this.datasets.get(input.datasetId)
     if (!definition) {
       throw new LakeStorageError(`[LakeStorage] Unknown dataset '${input.datasetId}'`)
@@ -390,6 +391,7 @@ export class InMemoryLakeStorage implements LakeStorage {
       ?.slice(offset, limit === undefined ? undefined : offset + limit)
 
     for (const row of rows ?? []) {
+      input.signal?.throwIfAborted()
       yield selectColumns(row, input.columns)
     }
   }

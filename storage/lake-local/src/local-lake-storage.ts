@@ -422,6 +422,7 @@ export class LocalLakeStorage implements LakeStorage {
   }
 
   async *readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {
+    input.signal?.throwIfAborted()
     const definition = await this.getDataset(input.datasetId)
     if (!definition) {
       throw new LakeStorageError(`[LakeLocal] Unknown dataset '${input.datasetId}'`)
@@ -439,7 +440,7 @@ export class LocalLakeStorage implements LakeStorage {
     }
 
     const rowsPath = this.rowsPath(input.datasetId, version.versionId)
-    const content = await readFile(rowsPath, "utf8")
+    const content = await readFile(rowsPath, { encoding: "utf8", signal: input.signal })
     const lines = content.length === 0 ? [] : content.split("\n")
 
     const offset = Math.max(0, input.offset ?? 0)
@@ -447,6 +448,7 @@ export class LocalLakeStorage implements LakeStorage {
     let seen = 0
     let yielded = 0
     for (const line of lines) {
+      input.signal?.throwIfAborted()
       if (!line) {
         continue
       }

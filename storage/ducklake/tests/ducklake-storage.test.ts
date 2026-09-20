@@ -5,6 +5,19 @@ import { DuckLakeStorage } from "../src"
 import { createDuckDbRuntime } from "../src/internal/duckdb-runtime"
 
 describe("DuckLakeStorage", () => {
+  test("rejects invalid streaming limits before opening the engine", () => {
+    // Red check: remove the maxStreamingReads validation in the connection manager.
+    for (const maxStreamingReads of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(
+        () =>
+          new DuckLakeStorage({
+            catalog: { type: "duckdb", path: ":memory:" },
+            maxStreamingReads,
+          })
+      ).toThrow("maxStreamingReads must be a positive integer")
+    }
+  })
+
   test("rejects schemaless dataset definitions", async () => {
     const storage = new DuckLakeStorage({
       catalog: {
@@ -152,18 +165,15 @@ describe("DuckLakeStorage", () => {
     }
   })
 
-  test("runtime withExclusive waits for active streams", async () => {
+  test("runtime withExclusive can write during an independent read", async () => {
     const runtime = await createDuckDbRuntime()
     const enteredExclusive = createDeferred<void>()
 
     try {
-      await runtime.run(
-        "CREATE TEMP TABLE stream_rows AS SELECT i::INTEGER AS id FROM range(3) AS t(i)"
-      )
+      await runtime.run("CREATE TABLE stream_rows AS SELECT i::INTEGER AS id FROM range(3) AS t(i)")
 
-      const iterator = runtime
-        .streamRows("SELECT id FROM stream_rows ORDER BY id")
-        [Symbol.asyncIterator]()
+      const reader = await runtime.openReader("SELECT id FROM stream_rows ORDER BY id")
+      const iterator = reader.rows()[Symbol.asyncIterator]()
       expect(await iterator.next()).toEqual({ done: false, value: { id: 0 } })
 
       const exclusive = runtime.withExclusive(async (exclusiveRuntime) => {
@@ -171,7 +181,7 @@ describe("DuckLakeStorage", () => {
         await exclusiveRuntime.run("INSERT INTO stream_rows VALUES (99)")
       })
 
-      expect(await resolvesWithin(enteredExclusive.promise, 25)).toBe(false)
+      await withTimeout(enteredExclusive.promise, "exclusive block did not start during the read")
       expect(await iterator.next()).toEqual({ done: false, value: { id: 1 } })
       expect(await iterator.next()).toEqual({ done: false, value: { id: 2 } })
       expect(await iterator.next()).toEqual({ done: true, value: undefined })

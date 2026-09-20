@@ -9,6 +9,18 @@ import type {
 import { DuckLakeConnectionManager } from "../src/internal/ducklake-connection-manager"
 
 describe("DuckLakeConnectionManager", () => {
+  test("closes the engine even when a reader reports a cleanup failure", async () => {
+    // Red check: remove closeRuntime's finally block; runtime.closed then remains false.
+    const runtime = new RecordingRuntime()
+    runtime.stopReaders = async () => {
+      throw new Error("reader cleanup failed")
+    }
+    const connections = new TestConnectionManager(() => runtime)
+    await connections.runtime()
+    await expect(connections.close()).rejects.toThrow("reader cleanup failed")
+    expect(runtime.closed).toBe(true)
+  })
+
   test("starts the shared runtime unattached and attaches only once", async () => {
     const runtime = new RecordingRuntime()
     const connections = new TestConnectionManager(() => runtime)
@@ -182,6 +194,13 @@ class TestConnectionManager extends DuckLakeConnectionManager {
 }
 
 class RecordingRuntime implements DuckDbRuntime {
+  openReader(): Promise<never> {
+    throw new Error("Not used in this test")
+  }
+  stopReaders(): Promise<void> {
+    return Promise.resolve()
+  }
+
   readonly statements: string[] = []
   closed = false
 
@@ -216,16 +235,6 @@ class RecordingRuntime implements DuckDbRuntime {
     void values
     this.assertOpen()
     return Promise.resolve([{ value: 1 }])
-  }
-
-  async *streamRows(
-    sql: string,
-    values?: readonly DuckDBValue[]
-  ): AsyncIterable<Record<string, unknown>> {
-    void sql
-    void values
-    this.assertOpen()
-    yield* []
   }
 
   withAppender<T>(
@@ -277,6 +286,13 @@ class RecordingExclusiveRuntime implements DuckDbExclusiveRuntime {
 }
 
 class PausedRefreshRuntime implements DuckDbRuntime {
+  openReader(): Promise<never> {
+    throw new Error("Not used in this test")
+  }
+  stopReaders(): Promise<void> {
+    return Promise.resolve()
+  }
+
   private readonly detachedDeferred = createDeferred<void>()
   private readonly resumeDetachDeferred = createDeferred<void>()
   private operations: Promise<void> = Promise.resolve()
@@ -330,17 +346,6 @@ class PausedRefreshRuntime implements DuckDbRuntime {
       this.assertAliasAttached()
       return [{ value: 1 }]
     })
-  }
-
-  async *streamRows(
-    sql: string,
-    values?: readonly DuckDBValue[]
-  ): AsyncIterable<Record<string, unknown>> {
-    void sql
-    void values
-    for (const row of await this.query("SELECT 1 AS value")) {
-      yield row
-    }
   }
 
   withAppender<T>(

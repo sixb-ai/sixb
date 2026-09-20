@@ -91,18 +91,24 @@ const report = await lakeStorage.runMaintenance({
 
 ### Read and Write Concurrency
 
-Reads, writes, SQL previews, and SQL transforms use the same DuckDB runtime and
-the same DuckLake PostgreSQL metadata pool. Work is serialized inside one
-`DuckLakeStorage` instance, so a queued DuckDB operation makes later operations
-wait. Only actual DuckDB work holds the runtime: bounded read pages, batch
-appends, commits, SQL transforms, and metadata reads.
+Large reads stream through dedicated connections in the same DuckDB engine, sharing its memory
+budget and PostgreSQL metadata pool. Metadata and writes remain available between yielded rows.
+Each read stays pinned to one immutable snapshot. Maintenance waits until no reads remain; it
+blocks new reads only while running, so continuous traffic can postpone it.
 
-Large `readRows(...)` calls materialize bounded pages, using a physical-row keyset when available,
-and release the DuckDB queue between pages. This also applies when an explicit limit exceeds one
-page. A JavaScript pipeline can therefore stream one DuckLake dataset directly into another on the
-same provider without buffering the complete input or deadlocking at the destination appender's
-first flush. The read remains pinned to one immutable snapshot and keeps its attachment lease until
-the iterator completes or closes.
+`maxStreamingReads` limits native streaming readers per provider (default: `4`); extra reads use
+bounded pages on the main connection. It does not limit pipeline inputs. Raise it when memory and
+catalog capacity allow. Finish the iterator, use `for await` with `break`, or pass `signal` to cancel
+it. Projection and pipeline workers propagate their cancellation automatically.
+
+Small previews, SQLite/custom catalogs, and PostgreSQL reads without sufficient pool headroom
+use bounded pages. PostgreSQL streaming admits at most `maxConnections - 4` cursors to leave
+headroom for metadata and writes. Parallel scans can exceed the pool's cache limit, so this does
+not guarantee a server-wide connection count.
+
+Every engine uses its own spill subdirectory under `duckdb.config.temp_directory` (default:
+`.tmp` for an in-memory engine). Closing it removes only that subdirectory. Sharing spill filenames
+between engines can corrupt results. An empty `temp_directory` still disables spilling.
 
 A write does not hold the runtime while its source iterable is producing rows.
 `writeRows(...)` validates and stages rows in bounded in-memory batches, then
@@ -110,18 +116,6 @@ takes a queue slot only to flush each batch into the staging table. Slow externa
 reads (pagination, APIs, SFTP, retries) run outside the queue, so other reads and
 write batches can interleave between a write's batches. Large in-memory writes
 also yield to the event loop between batches.
-
-```txt
-same provider instance:
-  read -> write -> read
-
-the operations run in order on one DuckDB runtime
-```
-
-This is the simplest and most predictable default, especially for small
-PostgreSQL plans. A future provider option could add a bounded read-runtime pool
-for deployments that have enough PostgreSQL capacity and need more concurrent
-read throughput.
 
 Datasets must declare a schema before they can be stored in DuckLake:
 
@@ -467,7 +461,7 @@ DuckLake metadata catalog.
 
 | Option | Use it for |
 | --- | --- |
-| `maxConnections` | Hard cap for DuckDB PostgreSQL extension connections. |
+| `maxConnections` | Pool cache limit; parallel scans can temporarily exceed it. |
 | `waitTimeoutMillis` | How long a request can wait for a pool connection. |
 | `idleTimeoutMillis` | How quickly unused pool connections are released. |
 | `maxLifetimeMillis` | Recycling long-lived PostgreSQL connections. |

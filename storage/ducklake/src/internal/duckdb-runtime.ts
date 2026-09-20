@@ -1,3 +1,5 @@
+import { mkdir, mkdtemp, rm } from "node:fs/promises"
+import { join, resolve } from "node:path"
 import {
   type DuckDBConnection,
   DuckDBInstance,
@@ -6,6 +8,7 @@ import {
 } from "@duckdb/node-api"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckDbRuntimeOptions, DuckLakeStorageOptions } from "../types"
+import { type DuckDbReader, type DuckDbReaderOptions, NodeDuckDbReader } from "./duckdb-reader"
 import { sixbDuckDbValueConverter } from "./duckdb-value-converter"
 import {
   buildAttachSql,
@@ -20,8 +23,8 @@ import {
  * Narrow adapter around `@duckdb/node-api`.
  *
  * Keeping the public provider behind this interface confines the driver types to
- * this module instead of leaking them into `DuckLakeStorage`. Calls on a runtime
- * are serialized through one queue because a runtime owns one DuckDB connection.
+ * this module instead of leaking them into `DuckLakeStorage`. Main-connection calls
+ * share one queue; readers use separate connections to the same DuckDB instance.
  */
 export interface DuckDbQueryRuntime {
   run(sql: string, values?: readonly DuckDBValue[]): Promise<void>
@@ -34,7 +37,8 @@ export interface DuckDbQueryRuntime {
 }
 
 export interface DuckDbRuntime extends DuckDbQueryRuntime {
-  streamRows(sql: string, values?: readonly DuckDBValue[]): AsyncIterable<Record<string, unknown>>
+  openReader(sql: string, options?: DuckDbReaderOptions): Promise<DuckDbReader>
+  stopReaders(): Promise<void>
   /**
    * Reserve the runtime queue for a multi-statement critical section.
    *
@@ -71,14 +75,42 @@ interface SetupDuckLakeOptions {
 class NodeDuckDbRuntime implements DuckDbRuntime {
   private closing = false
   private closed = false
-  // One DuckDBConnection is shared by the runtime. Serialize calls so request
-  // handlers cannot interleave statements or close/reset an active query.
+  // Serialize main-connection calls so transactions and staged writes cannot interleave.
   private operations: Promise<void> = Promise.resolve()
+  private readonly readers = new Set<DuckDbReader>()
+  private closePromise: Promise<void> | undefined
 
   constructor(
     private readonly instance: DuckDBInstance,
-    private readonly connection: DuckDBConnection
+    private readonly connection: DuckDBConnection,
+    private readonly temporaryDirectory?: string
   ) {}
+
+  async openReader(sql: string, options: DuckDbReaderOptions = {}): Promise<DuckDbReader> {
+    return this.enqueue(async () => {
+      this.assertAcceptingOperations()
+      const connection = await this.instance.connect()
+      if (this.closing) {
+        connection.closeSync()
+        this.assertAcceptingOperations()
+      }
+      const reader = new NodeDuckDbReader(connection, {
+        ...options,
+        onClose: async () => {
+          this.readers.delete(reader)
+          await options.onClose?.()
+        },
+      })
+      this.readers.add(reader)
+      try {
+        await reader.start(sql)
+        return reader
+      } catch (error) {
+        await reader.close()
+        throw error
+      }
+    })
+  }
 
   async run(sql: string, values?: readonly DuckDBValue[]): Promise<void> {
     await this.enqueue(async () => {
@@ -107,45 +139,6 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     })
   }
 
-  async *streamRows(
-    sql: string,
-    values?: readonly DuckDBValue[]
-  ): AsyncIterable<Record<string, unknown>> {
-    this.assertAcceptingOperations()
-
-    // A stream holds its queue slot until the consumer finishes or abandons the
-    // iterator. This keeps later writes from running while rows are still being
-    // read from the same DuckDB connection.
-    let releaseOperation: (() => void) | undefined
-    const operationFinished = new Promise<void>((resolve) => {
-      releaseOperation = resolve
-    })
-    const waitForTurn = this.operations.then(() => {
-      this.assertNotClosed()
-    })
-    this.operations = waitForTurn
-      .then(() => operationFinished)
-      .then(
-        () => {},
-        () => {}
-      )
-
-    try {
-      await waitForTurn
-      const result = await this.connection.stream(
-        sql,
-        values === undefined ? undefined : [...values]
-      )
-      for await (const batch of result.yieldConvertedRowObjects(sixbDuckDbValueConverter)) {
-        for (const row of batch) {
-          yield row as Record<string, unknown>
-        }
-      }
-    } finally {
-      releaseOperation?.()
-    }
-  }
-
   async withAppender<T>(
     tableName: string,
     useAppender: (appender: DuckDbAppender) => T | Promise<T>
@@ -168,18 +161,29 @@ class NodeDuckDbRuntime implements DuckDbRuntime {
     })
   }
 
-  async close(): Promise<void> {
-    if (this.closed) {
-      return
-    }
+  close(): Promise<void> {
+    this.closePromise ??= this.finish()
+    return this.closePromise
+  }
 
+  async stopReaders(): Promise<void> {
+    const results = await Promise.allSettled([...this.readers].map((reader) => reader.close()))
+    const failed = results.find((result) => result.status === "rejected")
+    if (failed?.status === "rejected") throw failed.reason
+  }
+
+  private async finish(): Promise<void> {
     this.closing = true
+    const results = await Promise.allSettled([...this.readers].map((reader) => reader.close()))
     // resetRuntime()/close() can run while an API read is still using this
     // runtime. Wait for accepted work before closing the native connection.
     await this.operations.catch(() => {})
     this.closed = true
     this.connection.closeSync()
     this.instance.closeSync()
+    if (this.temporaryDirectory) await rm(this.temporaryDirectory, { recursive: true, force: true })
+    const failed = results.find((result) => result.status === "rejected")
+    if (failed?.status === "rejected") throw failed.reason
   }
 
   private enqueue<T>(operation: () => T | Promise<T>): Promise<T> {
@@ -286,8 +290,28 @@ class NodeDuckDbAppenderAdapter implements DuckDbAppender {
 export async function createDuckDbRuntime(
   options: DuckDbRuntimeOptions = {}
 ): Promise<DuckDbRuntime> {
-  const instance = await DuckDBInstance.create(options.path ?? ":memory:", options.config ?? {})
-  return new NodeDuckDbRuntime(instance, await instance.connect())
+  const path = options.path ?? ":memory:"
+  const base = options.config?.temp_directory ?? (path === ":memory:" ? ".tmp" : `${path}.tmp`)
+  // DuckDB's default .tmp filenames collide between independent instances/processes. Keep the
+  // configured disk location, but give each runtime its own directory and cleanup ownership.
+  let temporaryDirectory: string | undefined
+  if (base !== "") {
+    const directory = resolve(base)
+    await mkdir(directory, { recursive: true })
+    temporaryDirectory = await mkdtemp(join(directory, "sixb-"))
+  }
+  let instance: DuckDBInstance | undefined
+  try {
+    instance = await DuckDBInstance.create(path, {
+      ...options.config,
+      ...(temporaryDirectory ? { temp_directory: temporaryDirectory } : {}),
+    })
+    return new NodeDuckDbRuntime(instance, await instance.connect(), temporaryDirectory)
+  } catch (error) {
+    instance?.closeSync()
+    if (temporaryDirectory) await rm(temporaryDirectory, { recursive: true, force: true })
+    throw error
+  }
 }
 
 /**

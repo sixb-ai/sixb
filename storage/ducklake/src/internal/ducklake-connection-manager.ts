@@ -1,6 +1,7 @@
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
 import { localCatalogCoordinationKey } from "./catalog-key"
+import type { DuckDbReader } from "./duckdb-reader"
 import {
   createDuckDbRuntime,
   type DuckDbExclusiveRuntime,
@@ -9,6 +10,7 @@ import {
   installDuckLakeExtensions,
   setupDuckLake,
 } from "./duckdb-runtime"
+import { DuckLakeReadGate } from "./ducklake-read-gate"
 import {
   buildAttachSql,
   buildConfigurePostgresMetadataPoolSql,
@@ -37,14 +39,89 @@ export class DuckLakeConnectionManager {
   // Local catalogs need DETACH/ATTACH to refresh metadata visibility. Keep
   // those attachment changes outside whole read operations so a read cannot
   // observe the DuckLake alias disappearing between its metadata queries.
-  private localAttachmentLock: Promise<void> = Promise.resolve()
+  private attachmentLock: Promise<void> = Promise.resolve()
   private observedLocalCatalogGeneration: number
   private attached = false
   private closed = false
+  private closePromise: Promise<void> | undefined
   private runtimePoisoned = false
+  private pinnedReaders = 0
+  private refreshRequested = false
+  private readonly shutdown = new AbortController()
+  private readonly reads = new DuckLakeReadGate()
+  private readonly maxStreamingReads: number
 
   constructor(private readonly options: DuckLakeStorageOptions) {
     this.observedLocalCatalogGeneration = currentLocalCatalogGeneration(options)
+    this.maxStreamingReads = options.maxStreamingReads ?? 4
+    if (!Number.isSafeInteger(this.maxStreamingReads) || this.maxStreamingReads < 1) {
+      throw new LakeStorageError("[SixbDuckLake] maxStreamingReads must be a positive integer.")
+    }
+  }
+
+  async acquireRead(signal?: AbortSignal): Promise<{
+    readonly signal: AbortSignal
+    readonly release: () => void
+  }> {
+    this.assertOpen()
+    const combined = signal ? AbortSignal.any([signal, this.shutdown.signal]) : this.shutdown.signal
+    return { signal: combined, release: await this.reads.acquire(combined) }
+  }
+
+  private async nativeReaderLimit(runtime: DuckDbRuntime): Promise<number> {
+    if (this.options.catalog.type === "duckdb") return this.maxStreamingReads
+    // SQLite metadata transactions keep a read lock for the native stream's lifetime.
+    // Unknown/custom catalogs use bounded queries too, without assuming their locking behavior.
+    if (this.options.catalog.type !== "postgres") return 0
+    const [setting] = await runtime.query(
+      "SELECT current_setting('pg_pool_max_connections') AS value"
+    )
+    const budget = Number(setting?.value)
+    // Reserve metadata/write headroom, including transient leases from bounded scans. A
+    // four-connection pool must stay paged: one paused native cursor can still starve an append.
+    // The extension can exceed its cache limit; this is not a server-wide connection guarantee.
+    return Number.isFinite(budget) ? Math.min(this.maxStreamingReads, Math.max(0, budget - 4)) : 0
+  }
+
+  /** Caller holds an attachment lease until this query has started. */
+  async openReader(
+    runtime: DuckDbRuntime,
+    sql: string,
+    signal: AbortSignal,
+    releaseRead: () => void
+  ): Promise<DuckDbReader | null> {
+    const limit = await this.nativeReaderLimit(runtime)
+    signal.throwIfAborted()
+    if (this.pinnedReaders >= limit) return null
+    this.pinnedReaders++
+    let starting = true
+    let released = false
+    const onClose = async () => {
+      if (released) return
+      released = true
+      this.pinnedReaders--
+      if (signal.aborted || this.closed || this.runtimePoisoned) releaseRead()
+      // On startup failure the caller still holds its lease and will detach on release.
+      if (starting || this.closed || this.runtimePoisoned) return
+      await this.withAttachmentLock(async () => {
+        if (this.pinnedReaders === 0 && this.refreshRequested) await this.resetRuntimeUnlocked()
+        await this.detachDuckDbCatalogAfterLease()
+      })
+    }
+    try {
+      return await runtime.openReader(sql, { signal, onClose })
+    } catch (error) {
+      await onClose()
+      throw error
+    } finally {
+      starting = false
+    }
+  }
+
+  async withMaintenanceRuntime<T>(
+    run: (runtime: DuckDbExclusiveRuntime) => Promise<T>
+  ): Promise<T> {
+    return this.reads.withMaintenance(this.shutdown.signal, () => this.withExclusiveAttached(run))
   }
 
   assertOpen(): void {
@@ -87,10 +164,9 @@ export class DuckLakeConnectionManager {
   async acquireAttachedRuntime(): Promise<DuckLakeAttachedRuntimeLease> {
     this.assertOpen()
 
-    // The lease is intentionally wider than one DuckDB queue operation. It
-    // covers the full Sixb read/commit boundary for local catalogs while
-    // remaining a no-op for PostgreSQL catalogs.
-    const releaseLock = await this.acquireLocalAttachmentLock()
+    // Keep attachment changes and native-query preparation outside each other's critical section.
+    // The lease ends before rows are yielded; an active reader only retains the attachment.
+    const releaseLock = await this.acquireAttachmentLock()
     let released = false
     const release = async () => {
       if (released) {
@@ -100,8 +176,8 @@ export class DuckLakeConnectionManager {
       released = true
       try {
         if (this.runtimePoisoned) {
-          this.runtimePoisoned = false
           await this.discardRuntimeUnlocked()
+          this.runtimePoisoned = false
         } else {
           await this.detachDuckDbCatalogAfterLease()
         }
@@ -168,7 +244,7 @@ export class DuckLakeConnectionManager {
   }
 
   async resetRuntime(): Promise<void> {
-    const releaseLock = await this.acquireLocalAttachmentLock()
+    const releaseLock = await this.acquireAttachmentLock()
     try {
       await this.resetRuntimeUnlocked()
     } finally {
@@ -177,6 +253,11 @@ export class DuckLakeConnectionManager {
   }
 
   private async resetRuntimeUnlocked(): Promise<void> {
+    if (this.pinnedReaders > 0) {
+      this.refreshRequested = true
+      return
+    }
+    this.refreshRequested = false
     const runtimePromise = this.runtimePromise
     if (runtimePromise === undefined) {
       return
@@ -226,7 +307,7 @@ export class DuckLakeConnectionManager {
 
     if (this.refreshPromise === undefined) {
       let refreshPromise: Promise<void>
-      refreshPromise = this.withLocalAttachmentLock(() =>
+      refreshPromise = this.withAttachmentLock(() =>
         this.refreshForExternalChangesUnlocked()
       ).finally(() => {
         if (this.refreshPromise === refreshPromise) {
@@ -253,8 +334,10 @@ export class DuckLakeConnectionManager {
     }
 
     try {
-      await runtime.run(`DETACH ${quoteIdentifier(duckLakeAlias(this.options))}`)
-      this.attached = false
+      if (this.pinnedReaders === 0) {
+        await runtime.run(`DETACH ${quoteIdentifier(duckLakeAlias(this.options))}`)
+        this.attached = false
+      }
     } catch {
       // The commit already succeeded. Keep the original write result and let a
       // later refresh/close retry detaching this local catalog if needed.
@@ -278,12 +361,14 @@ export class DuckLakeConnectionManager {
     return this.observedLocalCatalogGeneration !== currentLocalCatalogGeneration(this.options)
   }
 
-  async close(): Promise<void> {
-    if (this.closed) {
-      return
-    }
+  close(): Promise<void> {
+    this.closePromise ??= this.finishClose()
+    return this.closePromise
+  }
 
+  private async finishClose(): Promise<void> {
     this.closed = true
+    this.shutdown.abort(new LakeStorageError("[SixbDuckLake] DuckLakeStorage is closed."))
 
     const runtimePromise = this.runtimePromise
     this.runtimePromise = undefined
@@ -364,7 +449,7 @@ export class DuckLakeConnectionManager {
   }
 
   private async detachRuntime(): Promise<void> {
-    await this.withLocalAttachmentLock(() => this.detachRuntimeUnlocked())
+    await this.withAttachmentLock(() => this.detachRuntimeUnlocked())
   }
 
   /**
@@ -377,7 +462,7 @@ export class DuckLakeConnectionManager {
   }
 
   private async detachDuckDbCatalogAfterLease(): Promise<void> {
-    if (this.options.catalog.type !== "duckdb" || !this.attached) {
+    if (this.options.catalog.type !== "duckdb" || !this.attached || this.pinnedReaders > 0) {
       return
     }
 
@@ -403,6 +488,7 @@ export class DuckLakeConnectionManager {
   }
 
   private async detachRuntimeUnlocked(): Promise<void> {
+    if (this.pinnedReaders > 0) return
     if (this.attachPromise !== undefined) {
       await this.attachPromise
     }
@@ -416,8 +502,8 @@ export class DuckLakeConnectionManager {
     this.attached = false
   }
 
-  private async withLocalAttachmentLock<T>(run: () => Promise<T>): Promise<T> {
-    const releaseLock = await this.acquireLocalAttachmentLock()
+  private async withAttachmentLock<T>(run: () => Promise<T>): Promise<T> {
+    const releaseLock = await this.acquireAttachmentLock()
     try {
       return await run()
     } finally {
@@ -425,17 +511,13 @@ export class DuckLakeConnectionManager {
     }
   }
 
-  private async acquireLocalAttachmentLock(): Promise<() => void> {
-    if (this.options.catalog.type === "postgres") {
-      return () => {}
-    }
-
-    const previous = this.localAttachmentLock.catch(() => {})
+  private async acquireAttachmentLock(): Promise<() => void> {
+    const previous = this.attachmentLock.catch(() => {})
     let release!: () => void
     const current = new Promise<void>((resolve) => {
       release = resolve
     })
-    this.localAttachmentLock = previous.then(() => current)
+    this.attachmentLock = previous.then(() => current)
 
     await previous
 
@@ -475,16 +557,18 @@ export class DuckLakeConnectionManager {
     runtime: DuckDbRuntime,
     options: { readonly detach: boolean }
   ): Promise<void> {
-    if (options.detach) {
-      try {
-        await runtime.run(`DETACH ${quoteIdentifier(duckLakeAlias(this.options))}`)
-      } catch {
-        // The runtime may already be detached, partially initialized, or in an
-        // error state. Closing the native connection is still required.
+    try {
+      await runtime.stopReaders()
+      if (options.detach) {
+        try {
+          await runtime.run(`DETACH ${quoteIdentifier(duckLakeAlias(this.options))}`)
+        } catch {
+          // Detaching a partially initialized or failed catalog can fail; still close the engine.
+        }
       }
+    } finally {
+      await runtime.close()
     }
-
-    await runtime.close()
   }
 }
 

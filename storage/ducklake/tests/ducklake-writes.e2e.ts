@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { col, type DatasetRow, defineDataset } from "@sixb/core"
 import type { DuckLakeStorage } from "../src"
+import type { DuckDbRuntime } from "../src/internal/duckdb-runtime"
 import type { DuckLakeSnapshotReader } from "../src/internal/ducklake-snapshot-reader"
 import { duckLakeMetadataTableName } from "../src/internal/sql"
 import { parseCommitMetadata, parseVersionId } from "../src/internal/versions"
@@ -11,9 +12,7 @@ import { collectRows, createLocalDuckLakeStorage, localDuckLakeOptions } from ".
 
 interface DuckLakeStorageInternals {
   readonly connections: {
-    attachedRuntime(): Promise<{
-      query(sql: string, values?: readonly unknown[]): Promise<readonly Record<string, unknown>[]>
-    }>
+    attachedRuntime(): Promise<DuckDbRuntime>
   }
   readonly snapshotReader: {
     getLatestVersionForTableRef: DuckLakeSnapshotReader["getLatestVersionForTableRef"]
@@ -246,7 +245,13 @@ describe("DuckLakeStorage writes and latest reads", () => {
       storage as unknown as DuckLakeStorageInternals
     ).connections.attachedRuntime()
     const originalQuery = runtime.query
+    const originalOpenReader = runtime.openReader.bind(runtime)
     const rowPageQueries: string[] = []
+    const streamedQueries: string[] = []
+    runtime.openReader = async (sql, options) => {
+      streamedQueries.push(sql)
+      return originalOpenReader(sql, options)
+    }
     runtime.query = (sql, values) => {
       if (sql.includes(" AT (VERSION => ")) rowPageQueries.push(sql)
       return originalQuery.call(runtime, sql, values)
@@ -263,14 +268,14 @@ describe("DuckLakeStorage writes and latest reads", () => {
       ).resolves.toHaveLength(ROW_COUNT)
     } finally {
       runtime.query = originalQuery
+      runtime.openReader = originalOpenReader
     }
 
-    // Regression proof: restoring the one-shot explicit-limit query produces one LIMIT 5001
-    // statement here. The bounded path must release the runtime queue after each page.
-    expect(rowPageQueries).toHaveLength(2)
-    expect(rowPageQueries[0]).toContain("LIMIT 5000")
-    expect(rowPageQueries[1]).toContain("WHERE rowid >")
-    expect(rowPageQueries[1]).toContain("LIMIT 1")
+    // Red check: restore the parent's row reader. It issues two eager queries; large explicit
+    // limits now use one native stream with bounded conversion batches and no repeated scans.
+    expect(rowPageQueries).toHaveLength(0)
+    expect(streamedQueries).toHaveLength(1)
+    expect(streamedQueries[0]).toContain("LIMIT 5001")
   })
 
   test("streams one DuckLake dataset into another without deadlocking the shared runtime", async () => {

@@ -9,6 +9,38 @@ import { type DuckDbSecretOptions, DuckLakeStorage, type DuckLakeStorageOptions 
 import { collectRows } from "./test-utils"
 
 describe("DuckLakeStorage remote catalogs", () => {
+  for (const [budget, readers] of [
+    [4, 4],
+    [8, 4],
+    [32, 16],
+  ] as const) {
+    test(`keeps writes available with four threads and ${readers} readers (pool ${budget})`, async () => {
+      const options: DuckLakeStorageOptions = {
+        catalog: { ...postgresCatalog(), applicationName: `sixb_reader_${randomId()}` },
+        duckdb: { config: { threads: "4", memory_limit: "512MB" } },
+        maxStreamingReads: readers,
+        postgresPool: { maxConnections: budget, waitTimeoutMillis: 1_000 },
+      }
+      // Red check: reduce the connection reserve from four to three. The pool=4 fixture retains
+      // a metadata transaction; an immediate append can time out depending on driver cleanup.
+      const child = Bun.spawn(
+        [
+          process.execPath,
+          join(import.meta.dir, "fixtures/reader-postgres-budget.ts"),
+          JSON.stringify(options),
+          String(readers),
+        ],
+        { stdout: "pipe", stderr: "pipe", timeout: 15_000 }
+      )
+      const [code, output, error] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      expect({ code, output, error }).toEqual({ code: 0, output: "", error: "" })
+    }, 20_000)
+  }
+
   // Regression proof: remove the DuckLake snapshot-CAS error classification; one child fails COMMIT.
   for (const scenario of ["different keys", "same key", "existing key", "deletion"] as const)
     test(`rebases source changes across processes: ${scenario}`, async () => {
@@ -398,6 +430,37 @@ describe("DuckLakeStorage remote catalogs", () => {
         catalogConnectionBudget,
         "after read projected rows"
       )
+
+      const bulk = await storage.beginWrite({ dataset: projectionDataset, mode: "snapshot" })
+      await bulk.writeRows(Array.from({ length: 20_003 }, (_, i) => ({ orderId: `bulk_${i}` })))
+      await bulk.commit()
+      const controller = new AbortController()
+      // More inputs than both the default streaming cap and the role's connection limit.
+      const readers = Array.from({ length: 6 }, () =>
+        storage
+          .readRows({ datasetId: projectionDataset.id, signal: controller.signal })
+          [Symbol.asyncIterator]()
+      )
+      try {
+        // Red check: admit every native reader regardless of the PostgreSQL pool budget.
+        // Paused streams then exhaust the four-connection role and opening further readers times out.
+        await runBudgetStep("open concurrent readers", () =>
+          Promise.all(readers.map((r) => r.next()))
+        )
+        const concurrentWrite = await storage.beginWrite({ dataset, mode: "append" })
+        await concurrentWrite.writeRows([{ orderId: "ord_3" }])
+        await runBudgetStep("commit while readers are paused", () => concurrentWrite.commit())
+        await expectCatalogConnectionsAtMost(
+          adminSql,
+          roleName,
+          catalogConnectionBudget,
+          "during concurrent reads and writes"
+        )
+      } finally {
+        controller.abort()
+        await Promise.all(readers.map((reader) => reader.return?.()))
+      }
+      expect(await collectRows(storage.readRows({ datasetId: dataset.id }))).toHaveLength(3)
     } finally {
       try {
         await storage.close()
@@ -427,7 +490,7 @@ describe("DuckLakeStorage remote catalogs", () => {
   }, 60_000)
 })
 
-function postgresCatalog(): DuckLakeStorageOptions["catalog"] {
+function postgresCatalog(): Extract<DuckLakeStorageOptions["catalog"], { type: "postgres" }> {
   return {
     type: "postgres",
     host: process.env.SIXB_DUCKLAKE_POSTGRES_HOST ?? "127.0.0.1",

@@ -151,6 +151,8 @@ export interface DuckLakeStorageOptions {
   readonly alias?: string
   readonly duckdb?: DuckDbRuntimeOptions
   readonly postgresPool?: DuckLakePostgresPoolOptions
+  /** Maximum native streaming readers per provider; extra reads use pages. Default: 4. */
+  readonly maxStreamingReads?: number
   readonly secrets?: readonly DuckDbSecretOptions[]
   /** Runs after DuckLake/catalog extensions load and before ATTACH. */
   readonly setupSql?: readonly string[]
