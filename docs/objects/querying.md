@@ -17,7 +17,7 @@ const { objects } = await sixb
 `objects(Project).query()` starts from every `Project` and returns a builder. Each chained
 method narrows or reshapes the current object set; a terminal method runs it. A property is
 only filterable, sortable, searchable, or facetable if it declares that
-[query metadata](../ontology/search-metadata.md).
+[query metadata](../ontology/properties.md).
 
 ## Terminal Methods
 
@@ -344,9 +344,20 @@ text fields, and unsupported traversal shapes. Provider-capability issues — un
 relevance sorting or vector search — surface only when the query runs through a terminal
 method or the HTTP route.
 
+## How Metadata Drives Queries
+
+| Query call | Required metadata |
+| --- | --- |
+| `where((o) => o.p.status.eq(...))` | `status`: `searchable` + `filterable` |
+| `orderBy(Invoice.p.amount, "desc")` | `amount`: `searchable` + `sortable` |
+| `search("acme")` | `search.defaultText` fields with `searchable` + `text` |
+| `search("acme", { fields: [Customer.p.company] })` | `company`: `searchable` + `text` |
+| `facets([{ property: Invoice.p.status, limit }])` | `status`: `searchable` + `facet` (exact-matchable) |
+| vector search | embedding field: `searchable` + `vector`, plus `search.vector.property` |
+
 ## Related
 
-- [Search metadata](../ontology/search-metadata.md) — making fields filterable, sortable,
+- [Property query metadata](../ontology/properties.md#property-query-metadata) — making fields filterable, sortable,
   text-searchable, and facetable.
 - [Typed queries in the browser](../client/typed-queries.md) — the same builder via
   `@sixb/client/query` and TanStack Query hooks.

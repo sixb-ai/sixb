@@ -1,25 +1,10 @@
 # Server & API
 
-The Sixb server exposes a configured `SixbHost` through an
-[Elysia](https://elysiajs.com) HTTP + WebSocket API. It authenticates callers and enforces their
-grants across objects, telemetry, actions, automation runs, agents, and domain events under
-`/api/*` and `/ws/*`.
+The Sixb server gives your app and other services access to objects, actions, workflows, agents,
+and events over HTTP and WebSockets. It authenticates callers and enforces their permissions.
 
-Reach for it whenever a browser front-end or another service needs to talk to your runtime over the network. The server serves the API only — the built-in admin UI (**atlas**) and any custom app run as separate servers that call it over HTTP.
-
-## Mental model
-
-Sixb splits into three layers. The server is the middle one: it takes an already-built host and
-exposes its domain operations with authentication and authorization. It does **not** construct the
-host.
-
-| Layer      | You call                                | What it is                                                       |
-| ---------- | --------------------------------------- | --------------------------------------------------------------- |
-| Host       | `createSixb()`                          | Providers, definitions, and process lifecycle, in-process.     |
-| API        | `createSixbServer({ host, browser })`   | Authorized HTTP + WebSocket access to domain operations.       |
-| Front-ends | atlas + your app                        | Separate browser clients that call `/api` over HTTP.            |
-
-Data flows one direction: **front-ends → `/api` (cookies + CSRF) → server → runtime → storage**, with domain events streaming back out over `/ws/events`.
+The API, Atlas, and your custom app run as separate services. During development, `sixb dev`
+starts all three. Most projects use the CLI; the configuration below is for custom server setup.
 
 ## Starting the server
 
@@ -83,12 +68,12 @@ All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; se
 | Workflows      | `GET /api/workflows`, `/api/workflow-runs`, `/api/workflows/:id/runs`                | [Workflows](../workflows/overview.md)           |
 | Interventions  | `/api/workflow-interventions`, `.../:id/submit`, `.../:id/cancel`                    | [Interventions](../workflows/interventions.md)  |
 | Rules          | `GET /api/rules`, `GET /api/rule-states`                                             | [Rules](../rules/overview.md)                   |
-| Datasets       | `/api/datasets`, `.../versions`, `.../rows`                                          | [Datasets](../data/datasets.md)                 |
-| Syncs          | `/api/syncs`, `/api/sync-runs`, `/api/syncs/:id/runs`                                | [Syncs](../data/syncs.md)                       |
-| Pipelines      | `/api/pipelines`, `/api/pipeline-runs`, `/api/pipelines/:id/runs`                    | [Pipelines](../data/pipelines.md)               |
-| Projections    | `GET /api/projections`, `GET /api/projections/:projectionId`                         | [Projections](../data/projections.md)           |
-| Connectors     | `GET /api/connectors`, `GET /api/connectors/:connectorId`                            | [Connectors](../data/connectors.md)             |
-| Webhooks       | `POST /api/webhooks/:connectorId/:webhookId`, `GET /api/webhook-runs`               | [Connectors](../data/connectors.md)             |
+| Datasets       | `/api/datasets`, `.../versions`, `.../rows`                                          | [Datasets](../datasets/overview.md)                 |
+| Syncs          | `/api/syncs`, `/api/sync-runs`, `/api/syncs/:id/runs`                                | [Syncs](../syncs/overview.md)                       |
+| Pipelines      | `/api/pipelines`, `/api/pipeline-runs`, `/api/pipelines/:id/runs`                    | [Pipelines](../pipelines/overview.md)               |
+| Projections    | `GET /api/projections`, `GET /api/projections/:projectionId`                         | [Projections](../projections/overview.md)           |
+| Connectors     | `GET /api/connectors`, `GET /api/connectors/:connectorId`                            | [Connectors](../connectors/overview.md)             |
+| Webhooks       | `POST /api/webhooks/:connectorId/:webhookId`, `GET /api/webhook-runs`               | [Connectors](../connectors/overview.md)             |
 | Auth           | `/api/auth/session`, `/auth/sign-in`, `/auth/callback`, `/api/auth/...`              | [Auth](../auth/overview.md)                     |
 | Project/Status | `GET /api/project`, `GET /api/status`, `GET /health`, `GET /ready`                   | —                                               |
 

@@ -7,7 +7,7 @@ two messaging slots.
 | Slot | Option | Holds |
 | --- | --- | --- |
 | Storage | `storage` | Objects, links, telemetry, and run history |
-| Lake storage | `lakeStorage` | Versioned [datasets](../data/datasets.md) (the lake) |
+| Lake storage | `lakeStorage` | Versioned [datasets](../datasets/overview.md) (the lake) |
 | Blob storage | `blobStorage` | `fileRef` payloads (binary blobs) |
 | Broker | `broker` | The append-only [event log](../events/overview.md) |
 | Queues | `queues` | Background work lanes (actions, syncs, pipelines, projections, workflows) |
@@ -30,7 +30,7 @@ export const sixb = await createSixb({
 })
 ```
 
-`createSixb()` is async — always `await` it.
+The CLI awaits the exported configuration before starting the project.
 
 ## The three storage slots
 
@@ -40,82 +40,32 @@ its own provider.
 - **`storage`** — the operational store. Objects and their properties, links, appended
   telemetry, and run-history tables for actions, syncs, pipelines, projections, and
   workflows. This is the database behind `sixb.objects(...)` reads and writes.
-- **`lakeStorage`** — the versioned data lake. Holds [datasets](../data/datasets.md)
-  produced by [syncs](../data/syncs.md), [pipelines](../data/pipelines.md), and
-  [connectors](../data/connectors.md), with snapshots and version compatibility.
+- **`lakeStorage`** — the versioned data lake. Holds [datasets](../datasets/overview.md)
+  produced by [syncs](../syncs/overview.md), [pipelines](../pipelines/overview.md), and
+  [connectors](../connectors/overview.md), with snapshots and version compatibility.
 - **`blobStorage`** — content-addressed binary blobs. When a property or dataset column is a
   `fileRef`, the bytes live here and the other stores keep only the reference.
 
-## Broker vs queues
+## Events and background jobs
 
-The two messaging slots are **not** the same thing — keep them distinct.
+The broker delivers events to subscribers. Queues distribute background jobs to workers.
+Use durable, shared providers for production: Redis Streams for events and BullMQ for jobs.
+In-memory providers are intended for local development and tests.
 
-| | Broker | Queues |
-| --- | --- | --- |
-| Shape | Append-only event log | Lease-based work lanes |
-| Purpose | Records what happened, fans out to subscribers | Dispatches and retries background jobs |
-| Operations | `append`, `read`, `latestCursor`, `subscribe` | `enqueue`, `claim`, `complete`, `retry`, `fail`, `renewLease` |
-| Carries | Domain [events](../events/overview.md) (`object.created`, `object.updated`, `telemetry.appended`, `link.created`, `action.requested`, …) | Run requests, one per lane |
-| Replayable | Yes — retained, ordered history | No — jobs are consumed |
+## Existing data
 
-For ontology facts, the operational database is authoritative: the Materializer writes
-`ontology_commits` and `ontology_outbox` atomically before best-effort broker publication. The
-broker is the retained delivery/read surface, while queues turn requested work into running work
-with leases and retries. The `queues` provider
-exposes one lane per kind of background work:
-
-```ts
-sixb.queues.actions
-sixb.queues.syncRuns
-sixb.queues.pipelines
-sixb.queues.projections
-sixb.queues.workflows
-```
-
-Storage providers must preserve bounded outbox claims, lease-fenced settlement, retry summaries,
-published-row retention, and child-first cleanup of terminal source materializations. Pending rows,
-nonterminal sources, and `ontology_commits` are never removed by age.
-
-`ObjectStorage` and `TimeseriesStorage` are read models. Actions, runtime CRUD, projections, and
-telemetry all write through the Materializer and its private `OntologyStorage.materializations`
-protocol. Providers must not expose an event-to-row writer or interpret domain events as storage
-commands.
-
-The required `storage.ping()` readiness check must be lightweight and read-only. It must not open a
-write transaction, run migrations, or acquire a migration/advisory lock. Schema validation is a
-separate cached check and retries failures with a cooldown.
-
-## Storage schema boundary
-
-The initial SQLite and PostgreSQL schemas are the only supported ontology schema. They intentionally
-contain no compatibility importer or upgrade path from earlier unpublished schemas. Before switching
-an existing environment:
-
-```text
-freeze writers and drain jobs
-  -> export retained project-owned data
-  -> create fresh Sixb storage
-  -> run normal syncs and replacement projections
-  -> replay source-less state through Actions or runtime CRUD
-  -> verify, then switch configuration
-```
-
-Project-specific mappings and migration scripts stay outside the framework.
+There is no automatic importer for earlier unpublished storage schemas. Export project-owned data,
+create fresh storage, then re-import through syncs, projections, actions, or the runtime API.
+Keep project-specific migration scripts with your application.
 
 ## Retention
 
-The API role purges expired rows every 60 seconds, in the same maintenance pass that
-catches the outbox up.
+Sixb periodically cleans up delivered events and completed projection staging data. Both are kept
+for 24 hours by default; pending work is retained. The commit history is not automatically purged,
+so plan disk capacity accordingly. At least one API process must be running for cleanup and event
+recovery to work.
 
-| Table                  | Purged                                     | Default |
-| ---------------------- | ------------------------------------------ | ------- |
-| `ontology_outbox`      | published rows                             | 24 h    |
-| `ontology_source_rows` | the rows of a terminal materialization     | 24 h    |
-| `ontology_sources`     | its manifest, once those rows are gone     | 24 h    |
-| `ontology_commits`     | **nothing** — it grows with every commit   | —       |
-
-Pending outbox rows and nonterminal sources are live data and are never purged by age.
-Size the disk with `ontology_commits` in mind: the pre-0.1 line has no purge for it.
+Override the defaults only when you need a different retention window:
 
 ```ts
 export const sixb = await createSixb({
@@ -156,33 +106,10 @@ need no extra install — they are for development and tests only, never product
 `sixb.logs`, and the client `logs` builder); add a `LoggerProvider` such as `PinoLogger` to also
 emit process-level output. See [Logging](../logging/overview.md).
 
-## Production example
+## Production configuration
 
-A durable multi-process setup pairs PostgreSQL, DuckLake, S3 blobs, and Redis-backed
-messaging:
-
-```ts
-import { createSixb } from "@sixb/core"
-import { PostgresStorage } from "@sixb/pg"
-import { DuckLakeStorage } from "@sixb/ducklake"
-import { S3BlobStorage } from "@sixb/blob-s3"
-import { RedisBroker } from "@sixb/broker-redis"
-import { BullMqQueues } from "@sixb/queues-bullmq"
-
-export const sixb = await createSixb({
-  id: "acme-corp",
-  storage: new PostgresStorage({ connectionString: process.env.DATABASE_URL! }),
-  lakeStorage: new DuckLakeStorage({
-    catalog: { type: "postgres", host: "localhost", database: "lake", user: "sixb", password: "secret" },
-    dataPath: "s3://acme-lake/data",
-  }),
-  blobStorage: new S3BlobStorage({ bucket: "acme-lake", region: "us-east-1", basePath: "sixb" }),
-  broker: new RedisBroker({ connection: { url: "redis://localhost:6379" } }),
-  queues: new BullMqQueues({ connection: "redis://localhost:6379" }),
-})
-```
-
-See [Deployment](../deployment/overview.md) for running this in production.
+See [Runtime](../runtime/overview.md#configure-your-project) for a complete PostgreSQL, DuckLake,
+S3, and Redis configuration, then [Deployment](../deployment/overview.md) for the process layout.
 
 ## Migrations
 

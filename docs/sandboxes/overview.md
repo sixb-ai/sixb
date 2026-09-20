@@ -1,136 +1,21 @@
 # Sandboxes
 
 A sandbox is an isolated environment where an agent reads files and runs Bash commands. Reach for
-one whenever the [built-in Agent](../models/built-in-agent.md) needs file work, scripts, or the `sixb` CLI. The
-sandbox keeps that work off your host — its filesystem, network, and processes are walled off from
-the machine the runtime runs on.
+one whenever an [agent](../models/built-in-agent.md) needs file work, scripts, or the `sixb` CLI. The
+degree of filesystem, network, and process isolation depends on the provider you choose.
 
 You pick a provider once and wire it into `createSixb`. Everything above the sandbox — the agent,
 its sandbox tools, its run lifecycle — is written against one provider-agnostic contract, so
 swapping providers never touches agent code.
 
-## The contract
+## Runtime requirements
 
-Two interfaces define the whole surface. A **`SandboxFactory`** holds the provider's defaults and is
-passed once to `createSixb`. A **`Sandbox`** is one isolated environment that runs commands.
+For agent use, the environment needs Bash, standard file utilities, CA certificates, and Bun 1.3+
+or Node 22+. Sixb checks these requirements before running agent commands. Custom images should
+include their dependencies ahead of time.
 
-```ts
-interface SandboxFactory {
-  create(options?: CreateSandboxOptions): Promise<Sandbox>
-  resume?(name: string, options?: ResumeSandboxOptions): Promise<Sandbox>
-}
-
-interface Sandbox {
-  readonly id: string
-  readonly provider: string // "local" | "apple-container" | "smolvm" | "vercel"
-  readonly status: "running" | "stopped" | "failed"
-  readonly workingDirectory: string
-
-  runCommand(
-    command: string,
-    args?: readonly string[],
-    options?: RunCommandOptions
-  ): Promise<CommandResult>
-
-  // Materialize files into the sandbox; a later runCommand can read them. Parent dirs are created.
-  writeFiles(files: readonly SandboxFileRecord[]): Promise<void>
-
-  stop(): Promise<void> // mark stopped; later runCommand rejects. Idempotent.
-  destroy(): Promise<void> // stop and reclaim provider resources. Idempotent.
-}
-```
-
-The worker calls `factory.create()` once per agent run, `writeFiles(...)` to install the CLI, skill,
-and run context, and `runCommand(...)` per command. It calls `destroy()` on teardown.
-
-### Optional filesystem persistence
-
-Persistence is requested at creation with `persistence: { name }`. Providers supporting it expose
-`factory.resume`; currently only Vercel does. Unsupported providers reject persistence before
-provisioning, never silently falling back to an ephemeral sandbox.
-
-```ts
-if (!factory.resume) {
-  throw new Error("This task requires persistent sandbox support.")
-}
-
-const first = await factory.create({ persistence: { name: "project-thread-workspace" } })
-await first.writeFiles([{ path: "draft.txt", contents: "Uncommitted work" }])
-await first.stop() // Resolves only after the provider confirms preservation.
-
-const next = await factory.resume("project-thread-workspace")
-await next.runCommand("cat", ["draft.txt"])
-await next.stop()
-```
-
-Creation rejects an existing name. Resume requires stopped, existing state: an expired/deleted
-snapshot throws `SandboxStateUnavailableError`, never an empty replacement. Retention belongs to
-the provider configuration. Files are preserved, not running processes; this is not an independent
-durable file store. Handles must not automatically boot another VM while running a command.
-
-The caller owns namespacing and exclusive lifecycle access. This API is not a distributed lock:
-serialize the whole operation, not just individual calls. Runtime options (`env`, `network`,
-`workingDirectory`, command timeout) must be supplied on each acquisition. `ResumeSandboxOptions`
-accepts only these session options, not `persistence` or creation settings. Persisted files are
-untrusted and never establish execution authority. `destroy()` is an explicit permanent deletion
-requiring exclusive ownership of the name, not routine teardown after a persistent run.
-
-This is a provider capability only. Conversational agents, workflow nodes and subagents still use
-the existing per-run ephemeral lifecycle; configuring snapshot retention does not opt them in.
-
-### File materialization
-
-`writeFiles` is how bytes get into a sandbox — the worker never writes to the host filesystem
-directly. Each provider decides how a `SandboxFileRecord` (`{ path, contents, mode? }`) reaches the
-guest: the local provider writes straight to the host filesystem it shares with the guest, while
-smolvm executes an in-guest script that decodes the payload inside the VM. The only guarantee the
-contract makes is observable: after `writeFiles`, the files exist at their paths for a subsequent
-`runCommand`.
-
-`runCommand` resolves with a `CommandResult` rather than throwing on a non-zero exit — a failed
-command is data, not an exception:
-
-| Field | Meaning |
-| --- | --- |
-| `exitCode` | Process exit code (`0` on success) |
-| `stdout` | Captured standard output |
-| `stderr` | Captured standard error |
-| `durationMs` | Wall-clock run time |
-| `timedOut` | `true` when the command was killed for exceeding its timeout |
-
-`RunCommandOptions` overrides the sandbox-level defaults for a single call:
-
-| Option | Meaning |
-| --- | --- |
-| `cwd` | Working directory for this command |
-| `env` | Env merged on top of the sandbox env; per-call wins on collision |
-| `timeout` | Timeout in milliseconds; on expiry the command is killed and `timedOut` is set |
-| `signal` | An `AbortSignal` to cancel an in-flight command |
-
-`CreateSandboxOptions` sets the per-run defaults at `create()` time: `workingDirectory`, `env`,
-`timeout`, and `network`.
-
-### Agent runtime profile
-
-The generic `Sandbox` contract remains command-agnostic. The agent worker separately validates the
-concrete provisioned environment against `sixb-agent-runtime/v1` before any model-issued sandbox
-command can run. The profile requires behavior, not an `agentReady` provider flag:
-
-- Bash must load the worker's `BASH_ENV` bootstrap.
-- Standard file utilities must support bounded reads and output collection, including `realpath`,
-  `tail`, `head`, `base64`, `find`, `wc`, and `tr`.
-- Bun 1.3+ or Node 22+ must execute the portable `sixb` CLI.
-- CA certificates must allow the CLI to reach an HTTPS API gateway.
-- The installed CLI, file modes, `PATH`, and run environment must be correct.
-- The CLI must reach and identify the run-scoped API gateway.
-
-`curl` and `jq` are not runtime-profile dependencies because the production CLI uses the JavaScript
-runtime's native fetch and JSON support. The worker performs one network-free behavioral probe
-after materializing its files, then runs `sixb doctor` to verify the installed CLI contract and
-project identity through the gateway. An incompatible environment cannot execute a sandbox
-command. Its failure records the provider, profile, failed check, and safe failure classification
-without recording raw command output or the gateway capability URL. Bake shared dependencies into
-versioned images or snapshots; never install packages during an individual run.
+Isolation and network enforcement depend on the provider. Check the table below before choosing
+one, especially for untrusted code.
 
 ## Wiring
 
@@ -192,22 +77,12 @@ restricted HTTPS origins to Vercel's TLS/SNI firewall and IP origins to CIDR rul
 `none` blocks outbound network, any other mode allows host/default network. The contract is the same;
 read each provider page for what it actually enforces.
 
-## How agents use a sandbox
+## Lifecycle
 
-You rarely call `runCommand` yourself. The agent worker does it:
-
-1. When a run starts, the worker calls `factory.create(...)` with a **restricted** network policy
-   whose only allowed origin is the sixb API gateway. The agent can reach the gateway and nothing
-   else.
-2. Sandbox boot overlaps the model's first response — it is provisioned concurrently and each
-   sandbox tool awaits it lazily on first use, so boot latency does not block the turn.
-3. Each `read` call runs a fixed, bounded script with model input passed as command arguments. Each
-   `bash` call becomes `runCommand("bash", ["-lc", script], ...)`.
-4. On run teardown the worker calls `destroy()`.
-
-Because egress is locked to the gateway, the agent's only way to read or write app data is through
-that gateway — there is no open internet. See
-[Tools and Authorization](../models/tools-and-authorization.md) for what the gateway exposes.
+Sixb creates a sandbox for each agent run, installs its CLI and project skills, then destroys it
+when the run ends. Export files you need to keep through the agent's file tools.
+The default agent network policy allows access to the Sixb API gateway only; enforcement depends
+on the provider.
 
 ## Choosing a provider
 
@@ -230,5 +105,14 @@ Vercel gives you remote managed microVMs, but the Sixb API gateway must be reach
 - [Apple Container sandbox](./apple-container.md) — local Apple Container-backed sandboxes
 - [smolvm sandbox](./smolvm.md) — hardware-isolated microVMs
 - [Vercel sandbox](./vercel.md) — managed Vercel-hosted microVMs
-- [Tools and Authorization](../models/tools-and-authorization.md) — how sandbox tools reach files
+- [Agent tools and the gateway](../models/tools-and-authorization.md) — how sandbox tools reach files
   and the API gateway
+
+## Optional filesystem persistence
+
+The Vercel provider can preserve files between sandbox sessions with `persistence: { name }`
+and `factory.resume(name)`. Other providers reject this option. Files survive; running processes do not.
+See [Vercel persistence](vercel.md) for configuration and lifecycle requirements.
+
+This capability does not change the built-in Agent, workflow nodes, or subagents: they still use
+a fresh sandbox per run. Configuring snapshot retention alone does not enable a persistent workspace.

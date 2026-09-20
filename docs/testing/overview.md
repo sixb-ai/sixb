@@ -1,31 +1,19 @@
 # Testing
 
-You test a Sixb project with `bun:test` against a real `SixbHost` wired from in-memory providers.
-Bind it with `createTestSixb(...)` to get the same execution-bound domain SDK that handlers receive,
-then drive its typed APIs and assert on the results.
+Test your application with `bun:test` and Sixb’s in-memory providers. `createTestSixb(...)` gives
+your test the same typed APIs available inside handlers, so you can read objects, run actions, and
+check their results.
 
-## Test kinds
+## Run a test
 
-Tests live under `<package>/tests/` and split into two tiers by filename.
-
-| Pattern | Tier | Runner | Use for |
-| --- | --- | --- | --- |
-| `*.test.ts` | Fast | `bun run test` | Pure logic, in-memory runtimes, wiring checks |
-| `*.e2e.ts` | End-to-end | `bun run test:e2e` | Real backends, live HTTP servers, slow setup |
+Use Bun's test runner for your application:
 
 ```bash
-bun run test        # fast *.test.ts only
-bun run test:e2e    # *.e2e.ts (package-scoped matrix)
-bun run test:all    # both
+bun test tests/
 ```
 
-Run targeted files first while iterating, then widen when you touch shared
-behavior:
-
-```bash
-bun test examples/northline/tests/scenario.test.ts
-bun test examples/northline/tests/
-```
+Start with a small test of a query or action. Use in-memory providers for fast feedback and a
+separate integration suite when the behavior depends on a real database or HTTP server.
 
 ## In-memory providers as fixtures
 
@@ -296,27 +284,6 @@ test("list() returns the same objects as the server runtime", async () => {
   )
 })
 ```
-
-For a lighter check that skips HTTP, compare query IR directly — the client and
-runtime builders must produce identical IR for the same query:
-
-```ts
-expect(objects(Project).query().where((p) => p.p.status.eq("active")).ir).toEqual(
-  sixb.objects(Project).query().where((p) => p.p.status.eq("active")).ir
-)
-```
-
-## Provider contract suites
-
-If you author a backend provider (storage, broker, queue, lake, blob storage,
-sandbox, or agent/auth storage), `@sixb/core/testing` exports conformance suites —
-`runObjectQueryProviderContractSuite`, `runBrokerContractSuite`,
-`runQueueContractSuite`, `runLakeStorageContractSuite`,
-`runLakeMergeStorageContractSuite`,
-`runBlobStorageContractSuite`, `runAgentStorageContractSuite`,
-`runAiUsageStorageContractSuite`, `runAuthStorageContractSuite`, and
-`runSandboxesContractSuite` — that assert your implementation satisfies the provider
-contract. This is only relevant when building an integration, not when testing an app.
 
 ## Related
 

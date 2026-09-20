@@ -10,8 +10,8 @@ hooks, live WebSocket event hooks, or the browser auth bootstrap.
 
 ## Mental model
 
-Every subpath calls the same shared transport: a single generated `client`
-instance (a [hey-api](https://heyapi.dev) fetch client). You configure it once —
+Every subpath calls the same shared transport: a shared `client`
+instance. You configure it once —
 base URL, credentials, auth interceptors — and all SDK calls, query builders,
 hooks, and the events WebSocket inherit that configuration.
 

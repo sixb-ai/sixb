@@ -16,16 +16,10 @@ createSixb({ sandboxes: new SmolvmSandboxFactory() })
 It implements the same `Sandbox` / `SandboxFactory` contract as every provider — see the
 [overview](./overview.md). Swapping in this factory is the only code change.
 
-## How a run works
+## Isolation
 
-Per agent run the factory creates a machine, boots it from an image, runs the agent's tools through
-`smolvm machine exec`, then stops and deletes the machine on teardown. The guest filesystem is fully
-isolated from the host — there is no bind mount. Files the worker needs in the guest (skills, run
-context) are materialized **in-guest** by `writeFiles`, which executes a short script inside the VM
-that base64-decodes each payload into place under the working directory.
-
-Boot is fast (well under the model's first-response latency), so the VM is ready before the agent
-asks for it.
+Each agent run gets its own VM, with no host filesystem bind mount. Sixb transfers the required
+files into the VM and deletes the machine when the run ends.
 
 ## Preflight requirements
 

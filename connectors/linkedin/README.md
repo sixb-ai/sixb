@@ -331,5 +331,5 @@ the served region.
 - [LinkedIn third-party application removal](https://www.linkedin.com/help/linkedin/answer/a519947/third-party-applications-data-use)
 - [LinkedIn programmatic refresh tokens](https://learn.microsoft.com/en-us/linkedin/shared/authentication/programmatic-refresh-tokens)
 - [LinkedIn native PKCE flow](https://learn.microsoft.com/en-us/linkedin/shared/authentication/authorization-code-flow-native)
-- [Sixb connectors](https://docs.sixb.ai/data/connectors)
+- [Sixb connectors](https://docs.sixb.ai/connectors)
 - [Sixb managed OAuth implementation](https://github.com/sixb-ai/sixb/issues/384)

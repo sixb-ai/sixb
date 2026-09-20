@@ -1,9 +1,7 @@
 # Value Types & Interfaces
 
-Three mechanisms compose the building blocks from [Object Types](object-types.md),
-[Properties](properties.md), and [Links](links.md): **value types** share a property shape and
-**extends** inherits a parent's structure — both real reuse — while **interfaces** classify a type
-by the cross-cutting roles it plays (a label, not reuse).
+Use **value types** to reuse a property schema. Use **interfaces** to label shared roles across
+object types. To inherit properties and links, see [object-type inheritance](object-types.md#extends-inheritance).
 
 ## Value Types
 
@@ -51,6 +49,7 @@ export const Project = defineObjectType({
   id: "Project",
   name: "Project",
   properties: [
+    prop("id", "string", { required: true, primary: true }),
     // 1. Pass the value type — schema resolves inline, no registry lookup
     prop("budget", valueTypeRef(MoneyAmount)),
     // 2. Reference by id — resolved from the registered value types
@@ -76,7 +75,12 @@ An interface **classifies** the cross-cutting roles a type plays — "is auditab
 that don't fit a single inheritance chain. Unlike value types and `extends`, an interface does
 **not** add structure: it is declarative classification metadata, not code reuse.
 
-Define the role, and optionally document the shape you expect it to carry:
+For example, `Invoice` and `Campaign` may both be labeled `auditable` without sharing a parent.
+Unlike a TypeScript interface, `defineInterface` does not enforce a contract: declaring
+`implements: ["auditable"]` neither adds fields nor checks that they exist.
+Use [`extends`](object-types.md#extends-inheritance) when you need inherited fields.
+
+Define the role and optionally document its expected fields:
 
 ```ts
 import { defineInterface, prop, link } from "@sixb/core/ontology"
@@ -117,57 +121,8 @@ export const Invoice = defineObjectType({
 `implements` is a plain list of ids recorded on the object type, so one type can carry several
 roles: `implements: ["auditable", "billable"]`. Because it is classification only, the interface's
 `createdAt`/`updatedAt`/`createdBy` members must still be declared on each implementing type (or
-inherited via [`extends`](#inheritance-with-extends)). Reach for an interface when you want a shared
+inherited via [`extends`](object-types.md#extends-inheritance)). Reach for an interface when you want a shared
 **label**; reach for `extends` when you want shared **structure**.
-
-## Inheritance with `extends`
-
-`extends` makes an object type inherit the properties and links of a parent. Pass
-the parent **object** (recommended — properties and links merge at build time) or
-its **id string**.
-
-```ts
-import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
-import { Employee } from "./employee"
-import { Project } from "./project"
-
-export const Document = defineObjectType({
-  id: "Document",
-  name: "Document",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("title", "string", { required: true }),
-    prop("type", stringEnum(["proposal", "contract", "specification", "report"])),
-    prop("createdAt", "timestamp"),
-  ],
-  links: [
-    link("project", Project, { cardinality: "one" }),
-    link("author", Employee, { cardinality: "one" }),
-  ],
-})
-
-// Inherits all Document properties and links, then adds its own.
-export const Contract = defineObjectType({
-  id: "Contract",
-  name: "Contract",
-  extends: Document,
-  properties: [prop("signedAt", "timestamp"), prop("value", "double")],
-})
-```
-
-`Contract.properties` is the merged set: `id`, `title`, `type`, `createdAt`,
-`signedAt`, and `value`. Merge is by id, so an own definition overrides an
-inherited one with the same id.
-
-### `extends` vs `parents`
-
-| Field     | Type                   | Purpose                                                            |
-| --------- | ---------------------- | ----------------------------------------------------------------- |
-| `extends` | `string \| ObjectType` | The primary structural parent. Its properties and links merge in. |
-| `parents` | `string[]`             | Extra parent ids for multi-parent classification (no merge).      |
-
-Passing an object to `extends` also records its id in `parents`. Use `parents`
-when a type belongs to several classifications but inherits structure from one.
 
 ## Choosing between them
 

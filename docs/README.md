@@ -146,8 +146,8 @@ type, the materialized object, and the runs that produced it.
 - [Organizing your project](fundamentals/organizing-your-project.md) — examples of how to group code
   as your project grows
 - [Ontology](ontology/overview.md) — model your own domain
-- [Syncs](data/syncs.md), [datasets](data/datasets.md), and
-  [projections](data/projections.md) — follow the complete data path
+- [Syncs](syncs/overview.md), [datasets](datasets/overview.md), and
+  [projections](projections/overview.md) — follow the complete data path
 - [Objects](objects/overview.md) — read, write, and query materialized objects
 - [Building apps](apps/overview.md) — build a typed interface on the same model
 - [Actions](actions/overview.md) — add controlled commands that change object state

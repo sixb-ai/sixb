@@ -90,7 +90,7 @@ Each item accepts:
 | `at` | No | Instant for every property in the item. Defaults to now. |
 
 Every value is validated and every required unit is checked before any point is written. To record
-points from table data instead of code, use a [telemetry projection](../data/projections.md).
+points from table data instead of code, use a [telemetry projection](../projections/overview.md).
 
 ## Identity: (series, at)
 
@@ -193,9 +193,8 @@ Subscribe to it to react to new readings — drive [rules](../rules/overview.md)
 to the UI, or fan out to a broker. See [events](../events/overview.md) for how to consume domain
 events.
 
-Point storage, the latest object value, the durable ontology commit, and stable event envelopes are
-one atomic Materializer commit. Publication happens afterward with at-least-once delivery; a broker
-outage delays the event but does not lose or roll back the telemetry point.
+The point and the latest object value are saved together. Events are delivered afterward and may
+arrive more than once. A broker outage can delay delivery without losing the saved point.
 
 A point also refreshes the object's latest value for that property, so an append emits an
 `object.updated` event alongside `telemetry.appended`.
@@ -204,5 +203,5 @@ A point also refreshes the object's latest value for that property, so an append
 
 - [Properties](../ontology/properties.md) — declaring `mode: "telemetry"` on a property.
 - [Units and semantics](../ontology/units-and-semantics.md) — semantic types and valid units.
-- [Projections](../data/projections.md) — appending telemetry from dataset rows.
+- [Projections](../projections/overview.md) — appending telemetry from dataset rows.
 - [Querying objects](./querying.md) — reading object records and their latest values.

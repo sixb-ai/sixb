@@ -42,7 +42,7 @@ export const Customer = defineObjectType({
 | `description` | No | Human-readable context for the type |
 | `properties` | No | An array of `prop(...)` definitions. Defaults to `[]`. |
 | `links` | No | An array of `link(...)` definitions. Defaults to `[]`. |
-| `search` | No | A search profile for this type. See [search metadata](./search-metadata.md). |
+| `search` | No | A search profile for this type. See [search profile](#object-type-search-profile). |
 | `extends` | No | A parent object type (or its id) to inherit properties and links from |
 | `parents` | No | Additional parent type ids for multi-parent classification |
 | `implements` | No | Interface role ids this type is classified under. See [Interfaces](./value-types.md#interfaces). |
@@ -67,7 +67,7 @@ Mark it with `{ required: true, primary: true }` on a `"string"` property:
 prop("id", "string", { required: true, primary: true })
 ```
 
-There is no "explicitly not primary" value — non-primary properties simply omit the flag. See
+Omit the flag on other properties. See
 [properties](./properties.md) for the full `prop(...)` reference, including static vs. telemetry
 values, enums, and per-property `query` metadata.
 
@@ -101,9 +101,10 @@ export const Project = defineObjectType({
 
 Targets, cardinality, and link properties are covered in full on the [links](./links.md) page.
 
-## Search
+## Object-Type Search Profile
 
-The optional `search` field declares which fields a global or type-scoped search uses.
+`search` tells Sixb where to look when someone searches for text. For example, searching for
+`"Acme"` on `Customer` checks `company`, `name`, and `industry` with this configuration:
 
 ```ts
 search: {
@@ -113,16 +114,36 @@ search: {
 }
 ```
 
-| Field | Expected | Meaning |
-| --- | --- | --- |
-| `title` | `string` | Display/title property used in search results |
-| `defaultText` | `string[]` | Default keyword-search fields for this type |
-| `exact` | `string[]` | Exact-match fields such as ids, slugs, or emails |
-| `vector` | `{ property, source }` | Vector-search configuration for semantic retrieval |
+The same profile applies whether you search only `Customer` objects or search across several
+object types. Each type supplies its own fields. It does not change which fields are returned.
 
-Per-property indexing flags (`searchable`, `filterable`, `exact`, `facet`, and others) live on
-each property's `query` option. The full surface is documented in
-[search metadata](./search-metadata.md).
+| Field | Type | Purpose |
+| --- | --- | --- |
+| `title` | `string` | Display/title property shown in search results. Must be string-like. |
+| `defaultText` | `string[]` | Default keyword-search fields when `search("...")` is called without `fields`. |
+| `exact` | `string[]` | Exact-match fields such as external ids, emails, or invoice numbers. |
+| `vector` | `{ property, source }` | Vector search: `property` stores the embedding, `source` lists the text fields used to produce it. |
+
+Configure [query flags](properties.md#property-query-metadata) on each referenced property.
+Every field a profile references must carry the matching property flag:
+
+- `defaultText` fields need `text: true`
+- `exact` fields need `exact: true` (the primary id is always exact-matchable, so it's exempt)
+- `vector.property` needs `vector: true`, and each `vector.source` field needs `text: true`
+
+Search profiles can only reference **static** properties — telemetry properties (such as
+`Project.progress`) are not object-query indexed and will fail validation here.
+
+For vector search, add an embedding property (a numeric array carrying `query.vector: true`) and
+point `search.vector` at it. The `source` fields must each carry `text: true`.
+
+```ts
+search: {
+  title: "name",
+  defaultText: ["name", "description"],
+  vector: { property: "embedding", source: ["name", "description"] },
+}
+```
 
 ## extends (inheritance)
 
@@ -151,39 +172,9 @@ the parent object type (as above) or its id string. The parent id is recorded on
 `parents` directly to record additional parent types for multi-parent classification without
 merging their fields.
 
-## Registration
+## File location
 
-### By convention
-
-Put each object type in `ontology/` and export it. `createSixb()` discovers exported object
-types automatically — this is the normal registration model.
-
-```txt
-your-project/
-  ontology/
-    customer.ts
-    employee.ts
-    invoice.ts
-    project.ts
-  sixb.config.ts
-```
-
-### Explicit array
-
-You can also register object types explicitly with the `ontologies` option:
-
-```ts
-import { createSixb } from "@sixb/core"
-import { Customer } from "./ontology/customer"
-import { Invoice } from "./ontology/invoice"
-
-export const sixb = await createSixb({
-  ontologies: [Customer, Invoice],
-})
-```
-
-`createSixb()` is async — `await` it. See the [runtime overview](../runtime/overview.md) for how
-discovery and `createSixb()` fit together.
+Export definitions from `ontology/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.
 
 ## Use the object type
 
@@ -215,5 +206,4 @@ and links, see [objects](../objects/overview.md).
 
 - [Properties](./properties.md) — the `prop(...)` reference, telemetry, and query metadata
 - [Links](./links.md) — relationships, cardinality, and link properties
-- [Search metadata](./search-metadata.md) — per-property indexing and search profiles
 - [Objects](../objects/overview.md) — CRUD, querying, and telemetry on registered types

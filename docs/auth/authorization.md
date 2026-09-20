@@ -90,17 +90,18 @@ family.
 | --- | --- | --- | --- |
 | `access:application` | `can.access(...)` | Open a grant-controlled browser application | `applications.atlas`, `applications.app` |
 | `view:object` | `can.view(...)` | Read objects: `get`, `list`, `query`, telemetry, related events | [Object types](../ontology/object-types.md) |
-| `view:dataset` | `can.view(...)` | Read datasets and their versions | [Datasets](../data/datasets.md) |
+| `view:dataset` | `can.view(...)` | Read datasets and their versions | [Datasets](../datasets/overview.md) |
 | `edit:object` | `can.edit(...)` | Write objects: properties, links, `delete`, `restore` | [Object types](../ontology/object-types.md) |
 | `append:telemetry` | `can.append(...)` | Append telemetry points | [Object types](../ontology/object-types.md) |
 | `apply:action` | `can.apply(...)` | Request actions | [Actions](../actions/overview.md) |
 | `share:share` | `can.share(...)` | Issue, list, and revoke grants from Share definitions | [Shared access](#shared-access) |
 | `run:workflow` | `can.run(...)` | Start workflows | [Workflows](../workflows/overview.md) |
-| `run:sync` | `can.run(...)` | Run syncs | [Syncs](../data/syncs.md) |
-| `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../data/pipelines.md) |
+| `run:sync` | `can.run(...)` | Run syncs | [Syncs](../syncs/overview.md) |
+| `run:pipeline` | `can.run(...)` | Run pipelines | [Pipelines](../pipelines/overview.md) |
 | `run:agent` | `can.run(agent)` | Run the project Agent and read its threads | [Built-in Agent](../models/built-in-agent.md) |
-| `manage:connector` | `can.manage(...)` | Authorize, select, disconnect, and revoke OAuth connector accounts | [Connectors](../data/connectors.md) |
+| `manage:connector` | `can.manage(...)` | Authorize, select, disconnect, and revoke OAuth connector accounts | [Connectors](../connectors/overview.md) |
 | `manage:aiUsage` | `can.manage(agent.usage)` | Create, edit, disable, and delete AI usage limits | [Usage and limits](../models/usage-and-limits.md) |
+
 | `observe:logs` | `can.observe("logs")` | Read captured run logs | [Logging](../logging/overview.md) |
 | `observe:aiUsage` | `can.observe(agent.usage)` | Read project AI accounting and limit status | [Usage and limits](../models/usage-and-limits.md) |
 
@@ -360,8 +361,8 @@ membership policy above) can then invite and manage the rest of the team. See
 
 ## How grants are enforced
 
-Grants are enforced through the `Sixb` SDK. `SixbHost` owns providers, definitions, and lifecycle;
-it does not expose a privileged version of protected domain operations.
+Grants apply to the SDK as well as the HTTP API. Calling an operation from a handler does not
+bypass the current user’s permissions.
 
 The server and workers provide the appropriate SDK before application code runs:
 
@@ -379,8 +380,7 @@ and listing APIs return only the definitions the principal can reach.
 ### Protected SDK surface
 
 The SDK exposes only operations whose grants are enforceable end to end. Catalog and
-read methods are filtered to what the principal may reach. Auth administration, infrastructure
-handles, and process lifecycle stay on `SixbHost`.
+read methods are filtered to what the principal may reach. Project configuration and process administration are separate from these application operations.
 
 | Method | Gated by |
 | --- | --- |
@@ -402,9 +402,7 @@ handles, and process lifecycle stay on `SixbHost`.
 
 ### Why writing needs the read grant too
 
-An upsert answers with the **merged** row: the Materializer reconciles your write against whatever
-else asserts that object — a [projection](../data/projections.md), an action — so the response can
-carry properties you never sent. `edit:object` therefore takes effect only alongside
+An upsert returns the **merged** object, including existing properties you did not send. `edit:object` therefore takes effect only alongside
 `view:object`.
 
 `append:telemetry` is the exception, and deliberately so. An append answers `{ success: true }` and
@@ -462,45 +460,9 @@ const context = resolveAuthorizationContext({ principal, groupIds, roles })
 const sixb = createTestSixb(host, { authorization: context })
 ```
 
-## Convention
+## File location
 
-Put security definitions under `security/`, split by kind, and export them.
-
-```txt
-your-project/
-  ontology/
-    invoice.ts
-    customer.ts
-  actions/
-    sendReminder.ts
-  security/
-    groups/
-      team-members.ts
-      finance-admins.ts
-    roles/
-      billing-access.ts
-    policies/
-      member-administration.ts
-  sixb.config.ts
-```
-
-`createSixb()` discovers exported definitions from `security/groups/`, `security/roles/`, and
-`security/policies/` automatically. See
-[Project structure](../fundamentals/project-structure.md). You can also register them explicitly:
-
-```ts
-import { createSixb } from "@sixb/core"
-import { financeAdmins } from "./security/groups/finance-admins"
-import { teamMembers } from "./security/groups/team-members"
-import { memberAdministration } from "./security/policies/member-administration"
-import { financeAdminFullAccess, teamMemberBillingAccess } from "./security/roles/billing-access"
-
-export const sixb = createSixb({
-  groups: [teamMembers, financeAdmins],
-  roles: [teamMemberBillingAccess, financeAdminFullAccess],
-  membershipPolicies: [memberAdministration],
-})
-```
+Export groups, roles, and membership policies from `security/groups/`, `security/roles/`, and `security/policies/`. See [Project structure](../fundamentals/project-structure.md).
 
 ## How to model authorization
 

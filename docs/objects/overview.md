@@ -128,7 +128,7 @@ Traverse links in reads with the [query builder](./querying.md), and read raw
 link rows with `byId(id).listLinks(...)`. Links are also exposed over HTTP — see
 the [HTTP reference](./http-reference.md).
 
-## Footgun: runtime `objects()` vs action `objects()`
+## Writing inside an action
 
 Two `objects(Type)` APIs look almost identical. Picking the wrong one is the
 most common mistake.

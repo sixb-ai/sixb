@@ -189,10 +189,8 @@ Each handler receives a context object. Every phase gets `params` (validated), `
 Sixb emits the domain events for those changes itself, so drive notifications and fan-out from
 `changes` instead of appending mutation events by hand.
 
-The ontology write, Action commit-ledger entry, and mutation-event envelopes land in one database
-transaction. `effects` starts only after that commit exists and receives its persisted identity;
-retries resolve the same Action-origin commit and never re-commit edits. Broker delivery is
-post-commit and at-least-once.
+`effects` runs after the edits are committed. Retrying post-commit work does not apply those edits
+again. Events may arrive more than once; make external effects safe to retry.
 
 `writeback` runs an external call before the local commit, and its return value flows into `edits`
 and `effects` as `writeback` (see the `markPaid` example above, which carries the ERP receipt id
@@ -303,7 +301,7 @@ for a new one. Both return a handle with the rest of the edits:
 })
 ```
 
-By default, when a [projection](../data/projections.md) also writes an object, values your actions set
+By default, when a [projection](../projections/overview.md) also writes an object, values your actions set
 win over the projected ones. A projection configured with `mostRecent` can instead make a newer
 source value effective. `reset(...)` drops the action's value in either case so the projected value
 becomes visible again — use it to hand a field back to the projection.

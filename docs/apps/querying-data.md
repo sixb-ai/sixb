@@ -74,12 +74,11 @@ Rows are `TwinObject` values: each has `primaryId`, `objectTypeId`, `properties`
 `updatedAt`. The `properties` shape is inferred from the object type, so `invoice.properties.number`
 and `invoice.properties.status` are typed — no string keys, no casts.
 
-Hooks key the cache on the normalized query IR, so identical queries share cache entries and inline
-builders are safe to construct on every render.
+Identical queries share cached results, so you can build a query directly inside a component.
 
 ## App Hooks
 
-Each hook accepts a built query (anything carrying a normalized `.ir`). The list/count/exists/facets
+Each hook accepts a query built with `objects(Type).query()`. The list/count/exists/facets
 hooks take an optional second argument for common TanStack options such as `enabled`, `staleTime`,
 `gcTime`, and `refetchInterval`. `useObjectsInfinite` instead takes a required second argument
 carrying `pageSize` (those same TanStack options are also accepted there).

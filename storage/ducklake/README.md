@@ -196,7 +196,7 @@ Snapshot syncs use `commit({ createInitialVersion: true })` to make a first empt
 addressable. Later no-op commits reuse the current version, including after a concurrent write.
 Use `commit({ retryOnConflict: true })` to rebase retained changes, with at most 3 attempts.
 Explicit `expectedLatestVersionId` guards are never relaxed.
-See [source ordering](../../docs/data/datasets.md#source-ordering).
+See [source ordering](../../docs/datasets/source-ordering.md).
 
 Local catalogs serialize commits within one process. PostgreSQL catalogs support concurrent
 writer processes; known snapshot-ID conflicts are retried from the retained staging table.

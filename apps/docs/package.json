@@ -19,7 +19,10 @@
     "lucide-react": "^0.562.0",
     "next": "^16.2.10",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "@sixb/core": "workspace:*",
+    "@sixb/client": "workspace:*",
+    "@sixb/connector-google": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.2",

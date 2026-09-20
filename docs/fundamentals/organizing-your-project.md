@@ -1,32 +1,8 @@
 # Organizing Your Project
 
-Sixb discovers definitions recursively within its convention directories. Inside those directories,
-you can organize files to suit your project.
-
-This guide shows an approach we use in our own projects, with examples of how the structure can
-evolve as the codebase grows. Adopt the parts that help your team; filenames and intermediate
-directories are yours to choose.
-
-## How discovery shapes the layout
-
-[Project Structure](project-structure.md) lists the directories recognized by `createSixb()` and the
-definitions each one accepts. Within those directories, discovery matches exported values. File
-names and nesting do not determine a definition's ID or execution order.
-
-There are a few practical consequences when organizing backend code:
-
-- A definition can move within its primitive's directory without changing its ID. Keeping the ID
-  preserves its identity; changing it is a separate change from reorganizing files. Update imports
-  that refer to the old path.
-- Sixb imports every supported module in the discovered directories, including helper modules.
-  Helper exports that are not definitions are ignored, but code at module scope still executes.
-  Helpers kept here should have no import-time side effects.
-- Tests and scripts belong outside backend discovery directories so they are not loaded at startup.
-  Root-level `tests/` and `scripts/` are convenient places for them; naming a nested directory
-  `tests/` or prefixing it with `_` does not exclude it from backend discovery.
-
-The `app/` directory uses separate [routing conventions](../apps/overview.md). It is not part of
-backend discovery.
+Start with one file per definition. Add subdirectories when a business domain or process becomes
+large enough to need them. The examples below are suggestions, not required layouts.
+See [Project structure](project-structure.md) for the discovery rules shared by every primitive.
 
 ## Workflows
 
@@ -71,7 +47,7 @@ actions/
 
 ## Connectors
 
-Grouping [connectors](../data/connectors.md) by external system makes integration code easy to
+Grouping [connectors](../connectors/overview.md) by external system makes integration code easy to
 find. An additional product level can help when one provider exposes several products. A custom
 connector can have its own directory when its definition, client, and types benefit from separate
 files.
@@ -92,7 +68,7 @@ connectors/
 
 ## Datasets
 
-For ingested data, grouping [datasets](../data/datasets.md) by source makes their origin visible.
+For ingested data, grouping [datasets](../datasets/overview.md) by source makes their origin visible.
 For derived data, a business domain often gives a more useful grouping. A dataset file describes
 a table's contract; retrieval and transformation live in syncs and pipelines.
 
@@ -109,7 +85,7 @@ datasets/
 
 ## Syncs
 
-Matching [sync](../data/syncs.md) paths to the datasets they populate makes it easier to move
+Matching [sync](../syncs/overview.md) paths to the datasets they populate makes it easier to move
 between a table's contract and its ingestion code. Reading and mapping can stay in the sync file
 until their complexity makes separate helpers useful.
 
@@ -128,7 +104,7 @@ syncs/
 ## Pipelines
 
 Source-based grouping works well for provider-specific transformations; domain-based grouping
-works well for business processing. A short [pipeline](../data/pipelines.md) can keep its steps
+works well for business processing. A short [pipeline](../pipelines/overview.md) can keep its steps
 and SQL in one file. Larger queries can be easier to maintain as separate SQL files, with a
 `sql.ts` helper to load or compose them when needed.
 
@@ -167,7 +143,7 @@ ontology/
 
 ## Projections
 
-Following the ontology's organization makes [projections](../data/projections.md) easy to find
+Following the ontology's organization makes [projections](../projections/overview.md) easy to find
 from their target business object. Foreign-key links can stay within the object projection using
 `.withLinks(...)`. Dedicated files help distinguish separate link or telemetry projections from
 the projection that materializes the object itself.
@@ -186,10 +162,8 @@ projections/
 
 ## Security
 
-Sixb discovers security definitions in `security/groups/`, `security/roles/`, and
-`security/policies/`. Groups collect principals, roles define access grants, and membership
-policies define who can administer group membership. These directories have framework-defined
-roles; filenames and further grouping within them are up to the project.
+Group security files by team or business domain. Groups collect users and service accounts, roles
+grant access, and membership policies control who can administer a group.
 
 Example:
 

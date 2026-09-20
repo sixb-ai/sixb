@@ -193,40 +193,9 @@ Syncs and pipelines use the same schedule definition without a mapper:
 definePipeline("normalize-invoices").when(invoicesUpdated).then(normalizeInvoices)
 ```
 
-## Register schedules
+## File location
 
-`createSixb()` discovers exported schedule definitions from `schedules/` automatically:
-
-```txt
-your-project/
-  ontology/
-    invoice.ts
-    payment.ts
-  schedules/
-    invoices.ts
-  workflows/
-    review-high-value-payment.ts
-  sixb.config.ts
-```
-
-To register schedules explicitly, pass them to `createSixb()`:
-
-```ts
-import { createSixb } from "@sixb/core"
-import { Invoice } from "./ontology/invoice"
-import { Payment } from "./ontology/payment"
-import { highValuePaymentLinked } from "./schedules/invoices"
-import { reviewHighValuePayment } from "./workflows/review-high-value-payment"
-
-const host = await createSixb({
-  ontologies: [Invoice, Payment],
-  schedules: [highValuePaymentLinked],
-  workflows: [reviewHighValuePayment],
-})
-```
-
-Inspect registered schedules with `host.definitions.schedules.list()` and
-`host.definitions.schedules.getById(id)`.
+Export definitions from `schedules/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.
 
 ## Event schedule vs rule
 

@@ -18,7 +18,7 @@ define the important objects once, and that definition does work everywhere:
 - TypeScript catches property and link mistakes at compile time
 - Sixb validates every write before it becomes app state
 
-Use an ontology for the objects people interact with. Use [datasets](../data/datasets.md) for
+Use an ontology for the objects people interact with. Use [datasets](../datasets/overview.md) for
 raw rows and table-shaped data.
 
 ## Core terms
@@ -71,9 +71,9 @@ Import ontology builders from `@sixb/core/ontology` so they stay safe to use in 
 code. The runtime (`createSixb`) is imported from `@sixb/core`.
 
 > A property is only queryable if it declares `query` metadata. Filter, sort, or facet only on
-> properties that opt in. See [search metadata](./search-metadata.md).
+> properties that opt in. See [property query metadata](properties.md#property-query-metadata).
 
-## The `.p` and `.l` token model
+## Refer to properties and links
 
 Every registered object type carries two typed token maps so runtime and client APIs can target
 properties and links without raw string ids:
@@ -140,35 +140,9 @@ export const Invoice = defineObjectType({
 Physical readings (temperature, pressure) are the one case for unit-aware numbers — see
 [units and semantics](./units-and-semantics.md).
 
-## Discovery and registration
+## File location
 
-Put object types in `ontology/` and export them:
-
-```txt
-your-project/
-  ontology/
-    customer.ts
-    employee.ts
-    invoice.ts
-    project.ts
-  sixb.config.ts
-```
-
-`createSixb()` discovers exported object types from `ontology/` automatically. You can also
-register them explicitly with the `ontologies` option:
-
-```ts
-import { createSixb } from "@sixb/core"
-import { Customer } from "./ontology/customer"
-import { Invoice } from "./ontology/invoice"
-
-export const sixb = await createSixb({
-  ontologies: [Customer, Invoice],
-})
-```
-
-`createSixb()` is async — always `await` it. See the [runtime overview](../runtime/overview.md)
-for the full discovery model.
+Export definitions from `ontology/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.
 
 ## How to model your domain
 
@@ -193,4 +167,3 @@ better names than implementation details.
 | [Links](./links.md) | Relationships, cardinality, link properties |
 | [Value types](./value-types.md) | Reusable named value shapes with `defineValueType` |
 | [Units and semantics](./units-and-semantics.md) | Quantitative types and unit-aware numbers |
-| [Search metadata](./search-metadata.md) | Making types and properties queryable |

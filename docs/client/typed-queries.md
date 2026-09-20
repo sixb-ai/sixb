@@ -4,9 +4,8 @@
 runtime uses, wired to the HTTP API. Reach for it when you query objects from a custom app
 or React frontend and want compile-time-checked property names and predicate values.
 
-`objects(Type)` builds the identical query IR as the runtime and runs it through the
-generated SDK, so auth and CSRF come from your existing client config. React apps add
-TanStack Query hooks (`@sixb/client/hooks`) keyed on the normalized query IR.
+`objects(Type)` uses your existing client configuration for authentication. React apps can add
+caching with the hooks in `@sixb/client/hooks`.
 
 For the full builder reference — filters, traversal, search, ordering — see
 [/objects/querying](../objects/querying.md). For SDK setup, see [/client](overview.md).
@@ -86,7 +85,7 @@ links and `.expand()` still work at runtime, but their row types degrade to a lo
 
 Hooks come from `@sixb/client/hooks` and take a built query directly — any query from the
 docs, the server runtime, or an event handler works unchanged. They key the cache on the
-normalized query IR, so identical queries share cache entries and inline builders are safe
+query contents, so identical queries share cache entries and inline builders are safe
 to construct on every render.
 
 | Hook                 | Query terminal | Result type                |
@@ -159,7 +158,7 @@ compose the option factories below with `useQuery` directly.
 
 Queries are plain values, so define them once in a module and refine them at the call site.
 Each refinement (`.where(…)`, `.limit(…)`) returns a new query value, and the cache key
-follows the resulting IR.
+follows the resulting query.
 
 ```tsx
 // queries/projects.ts
@@ -180,7 +179,7 @@ const { data: openCount } = useObjectsCount(openProjects)
 
 For router loaders, prefetching, SSR, or full TanStack control, use the option factories
 instead of the hooks. Each returns a TanStack `queryOptions`/`infiniteQueryOptions` object
-keyed on the normalized IR, so it shares cache entries with the matching hook.
+keyed on the query contents, so it shares cache entries with the matching hook.
 
 | Factory                      | Pairs with           | Arguments               |
 | ---------------------------- | -------------------- | ----------------------- |
@@ -227,7 +226,7 @@ commits edits.
 
 ## Transport overrides
 
-Hooks execute the query IR through the global SDK client (`client`, exported from
+Hooks execute the query through the global SDK client (`client`, exported from
 `@sixb/client`). Wrap a subtree in `SixbProvider` to override the transport — base URL,
 auth, fetch — for every hook beneath it. `SixbProvider` takes a hey-api `Client` instance:
 

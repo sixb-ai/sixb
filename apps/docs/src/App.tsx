@@ -22,6 +22,7 @@ import {
   Blocks,
   BookOpen,
   Boxes,
+  Cable,
   Check,
   ChevronDown,
   ChevronRight,
@@ -35,6 +36,7 @@ import {
   FileText,
   FlaskConical,
   Gauge,
+  LaptopMinimal,
   Layers,
   LayoutDashboard,
   Lock,
@@ -42,6 +44,7 @@ import {
   Menu,
   Microchip,
   Network,
+  RefreshCw,
   Rocket,
   ScrollText,
   Search,
@@ -52,9 +55,13 @@ import {
 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { ConnectorLibrary } from "./components/ConnectorLibrary"
+import { DataFlow } from "./components/DataFlow"
+import { HomeWalkthrough } from "./components/HomeWalkthrough"
+import { ProjectExplorer } from "./components/ProjectExplorer"
+import { legacySections } from "./docs/legacySections"
 import { searchDocs } from "./docs/search"
 import { docs } from "./generated/docs"
-import { heroSnippets } from "./generated/snippets"
 
 type Doc = (typeof docs)[number]
 type Navigate = (href: string) => void
@@ -62,9 +69,15 @@ type Navigate = (href: string) => void
 interface NavGroup {
   readonly title: string
   readonly items: Doc[]
+  readonly children?: NavGroup[]
 }
 
-const sectionIcons: Record<string, LucideIcon> = {
+const sectionIcons: Record<string, LucideIcon | undefined> = {
+  "Data integration": Database,
+  Build: Code,
+  "Run & deploy": Cloud,
+  Apps: LayoutDashboard,
+  Agents: Microchip,
   "Get Started": Rocket,
   Fundamentals: Blocks,
   Runtime: Cpu,
@@ -72,7 +85,11 @@ const sectionIcons: Record<string, LucideIcon> = {
   Objects: Boxes,
   Actions: Zap,
   Schedules: Clock,
-  Data: Database,
+  Connectors: Cable,
+  Datasets: Database,
+  Syncs: RefreshCw,
+  Pipelines: Layers,
+  Projections: Boxes,
   Rules: Gauge,
   Workflows: Workflow,
   Models: Microchip,
@@ -106,12 +123,75 @@ function groupDocs(): NavGroup[] {
   return groups
 }
 
+function sidebarGroups(groups: NavGroup[]): NavGroup[] {
+  const section = (title: string): NavGroup =>
+    groups.find((group) => group.title === title) ?? { title, items: [] }
+  const parent = (title: string, children: NavGroup[]): NavGroup => ({
+    title,
+    children,
+    items: children.flatMap((child) => child.items),
+  })
+  const models = section("Models")
+  const agentPages = models.items.filter((doc) => doc.routePath === "/models/built-in-agent")
+  return [
+    section("Get Started"),
+    section("Fundamentals"),
+    section("Ontology"),
+    { title: "Data integration", items: [] },
+    ...["Connectors", "Datasets", "Syncs", "Pipelines", "Projections"].map(section),
+    parent("Build", [
+      parent("Apps", [
+        ...section("Building Apps").items.map((doc) => ({
+          title: doc.isOverview ? "Overview" : doc.title,
+          items: [doc],
+        })),
+        section("Client SDK"),
+      ]),
+      section("Objects"),
+      section("Actions"),
+      section("Workflows"),
+      { title: "Agents", items: agentPages },
+      { title: "Models", items: models.items.filter((doc) => !agentPages.includes(doc)) },
+      section("Schedules"),
+      section("Rules"),
+    ]),
+    parent(
+      "Run & deploy",
+      [
+        "Runtime",
+        "Infrastructure",
+        "Deployment",
+        "Auth",
+        "Logging",
+        "Testing",
+        "Server & API",
+        "Events & Webhooks",
+        "Sandboxes",
+      ].map(section)
+    ),
+    section("Examples"),
+  ]
+}
+
 function intercept(navigate: Navigate, href: string) {
   return (event: MouseEvent) => {
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return
     event.preventDefault()
     navigate(href)
   }
+}
+
+// The shared theme provider reads localStorage during initialization.
+// Keep the server and first client render identical until it has mounted.
+function DocsThemeSwitcher() {
+  const [mounted, setMounted] = useState(false)
+  useEffect(() => setMounted(true), [])
+  if (mounted) return <ThemeSwitcher />
+  return (
+    <Button type="button" variant="outline" size="icon-sm" aria-label="Theme" disabled>
+      <LaptopMinimal />
+    </Button>
+  )
 }
 
 function RawHtml({
@@ -175,6 +255,11 @@ export function App({ initialPath }: { initialPath: string }) {
     },
     [router]
   )
+
+  useEffect(() => {
+    const destination = legacySections[path]?.[window.location.hash.slice(1)]
+    if (destination) router.replace(destination)
+  }, [path, router])
 
   const current = docs.find((doc) => doc.routePath === path)
 
@@ -286,7 +371,7 @@ function TopBar({
         >
           <Search />
         </Button>
-        <ThemeSwitcher />
+        <DocsThemeSwitcher />
       </div>
     </header>
   )
@@ -304,7 +389,7 @@ function DesktopSidebar({
   return (
     <aside className="hidden w-64 shrink-0 lg:block">
       <div className="sticky top-14 max-h-[calc(100vh-3.5rem)] overflow-y-auto px-3 pt-4 pb-8 lg:px-4">
-        <SidebarNav groups={groups} path={path} navigate={navigate} />
+        <SidebarNav groups={sidebarGroups(groups)} path={path} navigate={navigate} />
       </div>
     </aside>
   )
@@ -327,7 +412,7 @@ function MobileSidebar({
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetContent side="left" className="w-72 overflow-y-auto p-6">
         <SheetTitle className="mb-6 text-base font-semibold">Sixb Docs</SheetTitle>
-        <SidebarNav groups={groups} path={path} navigate={navigate} />
+        <SidebarNav groups={sidebarGroups(groups)} path={path} navigate={navigate} />
       </SheetContent>
     </Sheet>
   )
@@ -337,10 +422,12 @@ function SidebarNav({
   groups,
   path,
   navigate,
+  depth = 0,
 }: {
   groups: NavGroup[]
   path: string
   navigate: Navigate
+  depth?: number
 }) {
   const activeTitle = groups.find((group) =>
     group.items.some((doc) => doc.routePath === path)
@@ -352,14 +439,24 @@ function SidebarNav({
   }, [activeTitle])
 
   return (
-    <nav className="flex flex-col gap-0.5">
+    <nav aria-label={depth === 0 ? "Documentation" : undefined} className="flex flex-col gap-0.5">
       {groups.map((group) => {
+        if (group.items.length === 0) {
+          return (
+            <p
+              key={group.title}
+              className="mt-5 mb-1 px-3 text-[11px] font-medium text-muted-foreground/70"
+            >
+              {group.title}
+            </p>
+          )
+        }
         const Icon = sectionIcons[group.title]
         const expanded = openSection === group.title
         const sectionActive = group.title === activeTitle
 
         // Single-page sections collapse to a direct link — no empty disclosure.
-        if (group.items.length === 1) {
+        if (group.items.length === 1 && !group.children) {
           const doc = group.items[0]
           if (!doc) return null
           const active = doc.routePath === path
@@ -371,12 +468,13 @@ function SidebarNav({
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
+                depth === 0 && group.title === "Examples" && "mt-5 border-t border-border pt-4",
                 active
                   ? "bg-accent text-foreground"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
               )}
             >
-              {Icon ? <Icon className="size-4 shrink-0" /> : null}
+              {Icon && depth === 0 ? <Icon className="size-4 shrink-0" /> : null}
               {group.title}
             </a>
           )
@@ -393,7 +491,7 @@ function SidebarNav({
                 sectionActive ? "text-foreground" : "text-muted-foreground"
               )}
             >
-              {Icon ? <Icon className="size-4 shrink-0" /> : null}
+              {Icon && depth === 0 ? <Icon className="size-4 shrink-0" /> : null}
               <span className="flex-1">{group.title}</span>
               <ChevronRight
                 className={cn(
@@ -416,27 +514,36 @@ function SidebarNav({
                 )}
               >
                 <div className="mt-0.5 mb-1 ml-[1.45rem] flex flex-col border-l border-border">
-                  {group.items.map((doc) => {
-                    const active = doc.routePath === path
-                    const label =
-                      doc.isOverview && doc.title === group.title ? "Overview" : doc.title
-                    return (
-                      <a
-                        key={doc.routePath}
-                        href={doc.routePath}
-                        onClick={intercept(navigate, doc.routePath)}
-                        aria-current={active ? "page" : undefined}
-                        className={cn(
-                          "-ml-px border-l-2 py-1.5 pl-4 text-[14px] transition-colors",
-                          active
-                            ? "border-[color:var(--docs-accent)] font-medium text-[color:var(--docs-accent)]"
-                            : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
-                        )}
-                      >
-                        {label}
-                      </a>
-                    )
-                  })}
+                  {group.children ? (
+                    <SidebarNav
+                      groups={group.children}
+                      path={path}
+                      navigate={navigate}
+                      depth={depth + 1}
+                    />
+                  ) : (
+                    group.items.map((doc) => {
+                      const active = doc.routePath === path
+                      const label =
+                        doc.isOverview && doc.title === group.title ? "Overview" : doc.title
+                      return (
+                        <a
+                          key={doc.routePath}
+                          href={doc.routePath}
+                          onClick={intercept(navigate, doc.routePath)}
+                          aria-current={active ? "page" : undefined}
+                          className={cn(
+                            "-ml-px border-l-2 py-1.5 pl-4 text-[14px] transition-colors",
+                            active
+                              ? "border-[color:var(--docs-accent)] font-medium text-[color:var(--docs-accent)]"
+                              : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+                          )}
+                        >
+                          {label}
+                        </a>
+                      )
+                    })
+                  )}
                 </div>
               </div>
             </div>
@@ -493,7 +600,7 @@ function DocPage({ doc, navigate }: { doc: Doc; navigate: Navigate }) {
           <CopyMarkdownButton markdownPath={doc.markdownPath} />
         </div>
       )}
-      <RawHtml className="prose" onClick={onClick} html={doc.html} />
+      <DocContent html={doc.html} onClick={onClick} />
       {prev || next ? (
         <nav className="mt-16 grid gap-3 border-t border-border pt-8 sm:grid-cols-2">
           {prev ? <Pager doc={prev} dir="Previous" navigate={navigate} /> : <span />}
@@ -688,8 +795,8 @@ const landingGroups: ReadonlyArray<{
     title: "Bring in live data",
     cards: [
       {
-        section: "Data",
-        description: "Sync external systems into datasets and project them into objects.",
+        section: "Connectors",
+        description: "Connect external systems and bring their data into your project.",
       },
       {
         section: "Schedules",
@@ -724,15 +831,6 @@ function sectionRoute(section: string): string {
   return docs.find((doc) => doc.section === section && doc.isOverview)?.routePath ?? "/"
 }
 
-function onHeroCopy(event: MouseEvent<HTMLDivElement>) {
-  const copy = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-copy]")
-  if (!copy) return
-  const code = copy.closest(".code-block")?.querySelector("pre")?.textContent ?? ""
-  navigator.clipboard.writeText(code)
-  copy.classList.add("is-copied")
-  window.setTimeout(() => copy.classList.remove("is-copied"), 1500)
-}
-
 function LandingLink({
   href,
   navigate,
@@ -754,87 +852,33 @@ function LandingLink({
 }
 
 function Landing({ navigate }: { navigate: Navigate }) {
-  const [tab, setTab] = useState(0)
-  const html = (heroSnippets[tab] ?? heroSnippets[0])?.html ?? ""
-
   return (
     <div className="mx-auto w-full max-w-[1080px]">
-      <section className="grid items-start gap-10 lg:grid-cols-[1fr_1.05fr] lg:gap-12">
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">Documentation</p>
-          <h1 className="mt-3 text-4xl font-bold tracking-tight sm:text-[2.8rem] sm:leading-[1.08]">
-            Build operational software, end to end
-          </h1>
-          <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
-            Sixb is the TypeScript framework for operational software. One typed ontology powers
-            your data, APIs, and apps.
-          </p>
-          <div className="mt-7 flex flex-wrap gap-3">
-            <Button asChild>
-              <a href="/get-started" onClick={intercept(navigate, "/get-started")}>
-                Get started
-              </a>
-            </Button>
-            <Button asChild variant="outline">
-              <a
-                href="/fundamentals/project-structure"
-                onClick={intercept(navigate, "/fundamentals/project-structure")}
-              >
-                Project structure
-              </a>
-            </Button>
-            <Button asChild variant="outline">
-              <a href="/examples" onClick={intercept(navigate, "/examples")}>
-                Examples
-              </a>
-            </Button>
-          </div>
-        </div>
-        <div className="min-w-0">
-          <div className="mb-2 flex items-center gap-5 border-b border-border">
-            {heroSnippets.map((entry, index) => (
-              <button
-                key={entry.label}
-                type="button"
-                onClick={() => setTab(index)}
-                className={cn(
-                  "-mb-px border-b-2 px-0.5 py-2 text-sm font-medium transition-colors",
-                  index === tab
-                    ? "border-[color:var(--docs-accent)] text-foreground"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {entry.label}
-              </button>
-            ))}
-          </div>
-          <RawHtml className="prose hero-code" onClick={onHeroCopy} html={html} />
+      <section className="home-intro">
+        <p className="text-sm font-medium text-muted-foreground">Sixb documentation</p>
+        <h1>
+          Your data. Your app. Your AI.
+          <br />
+          One TypeScript framework.
+        </h1>
+        <p className="home-intro-copy">
+          Connect your tools, model your business, and build apps, workflows, and agents on the same
+          data.
+        </p>
+        <div className="mt-6 flex flex-wrap gap-3">
+          <Button asChild>
+            <a href="/get-started" onClick={intercept(navigate, "/get-started")}>
+              Get started
+            </a>
+          </Button>
+          <Button asChild variant="outline">
+            <a href="/examples" onClick={intercept(navigate, "/examples")}>
+              Explore examples
+            </a>
+          </Button>
         </div>
       </section>
-
-      <p className="mt-16 max-w-2xl text-base leading-relaxed text-muted-foreground">
-        Define a type once and it flows through the whole system. The same{" "}
-        <code className="rounded bg-muted px-1.5 py-0.5 font-mono text-[0.85em] text-foreground">
-          Customer
-        </code>{" "}
-        powers your{" "}
-        <LandingLink href="/objects/querying" navigate={navigate}>
-          queries
-        </LandingLink>
-        ,{" "}
-        <LandingLink href="/server" navigate={navigate}>
-          API
-        </LandingLink>
-        ,{" "}
-        <LandingLink href="/client" navigate={navigate}>
-          client
-        </LandingLink>
-        , and{" "}
-        <LandingLink href="/apps" navigate={navigate}>
-          app
-        </LandingLink>
-        .
-      </p>
+      <HomeWalkthrough />
 
       {landingGroups.map((group) => (
         <section key={group.title} className="mt-12">
@@ -948,4 +992,44 @@ function SearchPalette({
       </CommandList>
     </CommandDialog>
   )
+}
+
+function DocContent({
+  html,
+  onClick,
+}: {
+  html: string
+  onClick: (event: MouseEvent<HTMLDivElement>) => void
+}) {
+  const [selectedFile, setSelectedFile] = useState("connectors/google-ads.ts")
+  useEffect(() => {
+    const file = new URLSearchParams(window.location.search).get("file")
+    if (file) setSelectedFile(file)
+  }, [])
+  const parts = html.split(
+    /(<div data-(?:project-explorer|data-flow|connector-library|code-explorer="(?:data|pipeline)")><\/div>)/g
+  )
+  const renderCode = (code: string) => <RawHtml className="prose" onClick={onClick} html={code} />
+  return parts.map((part, index) => {
+    // Content and widget positions are fixed for the lifetime of a document.
+    const key = `${index}-${part.slice(0, 50)}`
+    if (part === "<div data-project-explorer></div>")
+      return <ProjectExplorer key={key} renderCode={renderCode} />
+    if (part === "<div data-connector-library></div>") return <ConnectorLibrary key={key} />
+    if (part === "<div data-data-flow></div>") return <DataFlow key={key} />
+    if (part === '<div data-code-explorer="data"></div>')
+      return (
+        <div id="data-code-example" key={key}>
+          <ProjectExplorer
+            project="data"
+            selectedFile={selectedFile}
+            onSelect={setSelectedFile}
+            renderCode={renderCode}
+          />
+        </div>
+      )
+    if (part === '<div data-code-explorer="pipeline"></div>')
+      return <ProjectExplorer key={key} project="pipeline" renderCode={renderCode} />
+    return <RawHtml key={key} className="prose" onClick={onClick} html={part} />
+  })
 }

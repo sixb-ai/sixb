@@ -12,9 +12,9 @@ structured output), **action nodes**, and **interventions** (human decisions —
 
 | Need | Use |
 | --- | --- |
-| Move data from an external system | [Sync](../data/syncs.md) |
-| Clean or join table data | [Pipeline](../data/pipelines.md) |
-| Turn rows into objects | [Projection](../data/projections.md) |
+| Move data from an external system | [Sync](../syncs/overview.md) |
+| Clean or join table data | [Pipeline](../pipelines/overview.md) |
+| Turn rows into objects | [Projection](../projections/overview.md) |
 | Watch whether an object needs attention | [Rule](../rules/overview.md) |
 | Perform one command on one object | [Action](../actions/overview.md) |
 | Run a multi-step business process | Workflow |
@@ -259,11 +259,8 @@ await sixb.workflows.requestById({
 })
 ```
 
-The name is uniform; the guarantee is not, and the return type says so. A workflow run row exists as
-soon as `workflows.requestById` resolves, which is what lets it report `created`. Sync and pipeline runs
-are created by the worker that claims the job, so those two verbs report only that the request was
-accepted — passing the same `runId` twice still produces one run, but the second call cannot tell you
-it was a duplicate.
+Workflow requests report whether a run was created. Sync and pipeline requests acknowledge
+acceptance only. Reusing the same `runId` does not create another run.
 
 ### Start from a schedule
 
@@ -319,47 +316,18 @@ A run moves through these statuses, recorded per run and per node so you can ins
 Nodes run sequentially. Step `input` and `output` are validated against their schemas at runtime, so
 a malformed shape fails the run rather than passing bad data downstream.
 
-`GET /api/workflows` carries a `latestRun` per workflow. It is `null` when the workflow has never
-run, and also when the `storage` provider keeps no run history — every published provider does, so
-only a partial custom provider hits that second case.
+`GET /api/workflows` includes `latestRun`, or `null` when no run history is available.
 
-## Register and run
+## Run locally or in production
 
-Put workflow definitions under `workflows/` and export them. `createSixb()` discovers them
-automatically, along with the actions and ontology they reference.
-
-```txt
-your-project/
-  actions/
-    send-reminder.ts
-  ontology/
-    invoice.ts
-  workflows/
-    invoice-reminder.ts
-  sixb.config.ts
-```
-
-You can also register them explicitly. `createSixb()` is async:
-
-```ts
-import { createSixb } from "@sixb/core"
-import { sendReminder } from "./actions/send-reminder"
-import { Invoice } from "./ontology/invoice"
-import { invoiceReminder } from "./workflows/invoice-reminder"
-
-export const sixb = await createSixb({
-  ontologies: [Invoice],
-  actions: [sendReminder],
-  workflows: [invoiceReminder],
-})
-```
-
-`sixb dev` runs workflow workers automatically when workflows are registered. For a dedicated worker
-process in production, run:
+Export workflows from `workflows/` and their actions from `actions/`.
+`sixb dev` starts the workers for you. For a separate production process:
 
 ```bash
 sixb worker workflow
 ```
+
+See [Deployment](../deployment/overview.md) for provider and process configuration.
 
 ## Related
 

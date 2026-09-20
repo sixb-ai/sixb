@@ -76,23 +76,14 @@ Pass an IANA zone to `.cron(...)` (e.g. `"Europe/Paris"`, `"America/New_York"`) 
 must fire relative to a specific wall clock — say, an invoice rollup that runs at local
 midnight. Without it, the expression is evaluated against the host machine's local time.
 
-## Discovery
+## File location
 
-`createSixb()` auto-discovers exported `ScheduleDefinition`s from the `schedules/` folder. A
-schedule takes effect only through the sync, pipeline, or workflow that references it with
-`.when(...)`.
-
-```txt
-my-project/
-  schedules/
-    erp.ts       # defineSchedule(...).cron(...)
-    invoices.ts  # defineSchedule(...).on(events.*)
-```
+Export schedules from `schedules/`. A schedule runs only when a sync, pipeline, or workflow references it with `.when(...)`. See [Project structure](../fundamentals/project-structure.md).
 
 ## Related
 
-- [Syncs](../data/syncs.md) — pull external data on a schedule
-- [Pipelines](../data/pipelines.md) — transform datasets on a schedule
+- [Syncs](../syncs/overview.md) — pull external data on a schedule
+- [Pipelines](../pipelines/overview.md) — transform datasets on a schedule
 - [Workflows](../workflows/overview.md) — run multi-step processes on a schedule
 - [Event schedules](./events.md) — react to typed domain events
 - [Project structure](../fundamentals/project-structure.md) — the full folder layout

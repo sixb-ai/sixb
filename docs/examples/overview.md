@@ -40,10 +40,10 @@ alarm -> coverage -> dispatch -> diagnosis -> quote -> repair -> recovery -> clo
 | Path | Demonstrates |
 | --- | --- |
 | `ontology/` | Eleven focused object types including `Equipment`, `ServiceCase`, `WorkOrder`, `ServiceVisit`, and `Quote` — see [Ontology](../ontology/overview.md) |
-| `lib/sources/`, `connectors/` | Validated, atomic file-backed source clients behind three typed connectors — see [Connectors](../data/connectors.md) |
-| `datasets/`, `syncs/`, `schedules/` | Source-shaped business, field-service, and controls ingestion — see [Datasets](../data/datasets.md) and [Syncs](../data/syncs.md) |
-| `pipelines/` | DuckDB SQL for reading normalization, equipment-health derivation, and alarm context assembly — see [Pipelines](../data/pipelines.md) |
-| `projections/` | Object, link, and physical telemetry materialization — see [Projections](../data/projections.md) |
+| `lib/sources/`, `connectors/` | Validated, atomic file-backed source clients behind three typed connectors — see [Connectors](../connectors/overview.md) |
+| `datasets/`, `syncs/`, `schedules/` | Source-shaped business, field-service, and controls ingestion — see [Datasets](../datasets/overview.md) and [Syncs](../syncs/overview.md) |
+| `pipelines/` | DuckDB SQL for reading normalization, equipment-health derivation, and alarm context assembly — see [Pipelines](../pipelines/overview.md) |
+| `projections/` | Object, link, and physical telemetry materialization — see [Projections](../projections/overview.md) |
 | `actions/` | Contract-aware lifecycle commands with idempotent source writeback — see [Actions](../actions/overview.md) |
 | `rules/` | Dispatch, SLA, assignment, and recovery attention state — see [Rules](../rules/overview.md) |
 | `workflows/` | Deterministic dispatch and repair-quote reviews with human interventions — see [Workflows](../workflows/overview.md) |

@@ -185,7 +185,7 @@ const overdue = await invoices
   .list()
 ```
 
-Only properties that declare [query metadata](../ontology/search-metadata.md) can be filtered or
+Only properties that declare [query metadata](../ontology/properties.md) can be filtered or
 sorted. See [Querying](./querying.md) for the full builder.
 
 ## The byId handle

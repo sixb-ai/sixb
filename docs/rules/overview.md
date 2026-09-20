@@ -95,7 +95,7 @@ list.
 
 The event only wakes evaluation: Rules always read current committed object/link state. A startup
 and periodic reconciliation repairs events missed while the worker was offline and resolves active
-state for deleted objects. Live evaluation and reconciliation share one serialized coordinator.
+state for deleted objects.
 
 The pre-0.1 line supports one active Rules worker per project. Rule notifications are at-least-once,
 so consumers must tolerate a duplicate around process failure.
@@ -117,36 +117,9 @@ export const onCollectionRisk = defineSchedule("invoice.collection-risk-triggere
 Attach `onCollectionRisk` to a workflow with `.when(...)` to act on it. In an app, subscribe to the
 same signal live with the client `events.rules()` builder — see [client events](../client/events.md).
 
-## Register rules
+## File location
 
-`createSixb()` discovers exported rule definitions from `rules/` automatically:
-
-```txt
-your-project/
-  ontology/
-    invoice.ts
-    project.ts
-  rules/
-    business-health.ts
-  sixb.config.ts
-```
-
-To register rules explicitly instead, pass them to `createSixb()` (note: it is async):
-
-```ts
-import { createSixb } from "@sixb/core"
-import { Invoice } from "./ontology/invoice"
-import { Project } from "./ontology/project"
-import { overdueInvoices, atRiskProjects } from "./rules/business-health"
-
-const host = await createSixb({
-  ontologies: [Invoice, Project],
-  rules: [overdueInvoices, atRiskProjects],
-})
-```
-
-Inspect registered rules with `host.definitions.rules.list()` and
-`host.definitions.rules.getById(ruleId)`.
+Export definitions from `rules/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.
 
 ## Rule vs workflow
 
@@ -157,8 +130,8 @@ Rules decide *if* something is true; [workflows](../workflows/overview.md) decid
 | Know whether an object needs attention | Rule |
 | Emit a triggered / resolved signal | Rule |
 | Run a multi-step process | [Workflow](../workflows/overview.md) |
-| Fetch source data | [Sync](../data/syncs.md) |
-| Clean or join table data | [Pipeline](../data/pipelines.md) |
+| Fetch source data | [Sync](../syncs/overview.md) |
+| Clean or join table data | [Pipeline](../pipelines/overview.md) |
 
 ## Notes
 

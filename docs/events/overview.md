@@ -6,7 +6,7 @@ provider.
 
 - **Domain events** — an append-only log of everything the runtime does (objects changed,
   telemetry appended, runs started and finished, and so on). Access them through `sixb.events`.
-- **Webhooks** — inbound HTTP endpoints owned by a [connector](../data/connectors.md) that
+- **Webhooks** — inbound HTTP endpoints owned by a [connector](../connectors/overview.md) that
   receive provider deliveries and run a handler.
 
 > The event log API is an **observability surface, not a trigger API**. Appending an event does
@@ -165,8 +165,7 @@ await sixb.events.append({
 ```
 
 Ontology facts are not appendable. `object.*`, `link.*`, and `telemetry.*` are not in the parameter
-type, so they do not compile, and the runtime throws for a caller that reached it untyped. The
-Materializer emits them itself once the ontology commit succeeds — write through the ontology and
+type, so they do not compile, and the runtime throws for a caller that reached it untyped. Sixb emits them after the write succeeds — write through the ontology and
 the event follows:
 
 ```ts
@@ -176,15 +175,10 @@ await sixb.objects(Invoice).upsert({
 })
 ```
 
-Ontology facts use at-least-once broker delivery:
-
-```text
-ontology transaction -> durable ontology_outbox -> immediate drain -> 60s recovery catch-up
-```
+Ontology events are delivered at least once. Handle duplicates using their stable event IDs.
 
 Broker failure delays subscribers but never rolls back or loses the committed ontology change.
-Consumers deduplicate with stable event IDs when required. CDC/WAL change streams are not part of
-the pre-0.1 line.
+CDC/WAL change streams are not supported.
 
 An envelope that the broker repeatedly rejects remains durable and retryable; it is never silently
 dropped. After repeated failures `/api/status` stays `degraded` until delivery succeeds. The
@@ -212,7 +206,7 @@ caller with no permission gets `403`.
 
 ## Webhooks
 
-A webhook is an inbound HTTP endpoint defined on a [connector](../data/connectors.md). The
+A webhook is an inbound HTTP endpoint defined on a [connector](../connectors/overview.md). The
 server owns route registration and dispatch; you own verification, parsing, and handling.
 
 Define one with `defineWebhook(id)` and attach it to the connector's `webhooks` array.
@@ -277,7 +271,7 @@ provider retries reuse the same run and execution; without one, each accepted re
 
 ## Related
 
-- [Connectors](../data/connectors.md) — where webhooks live
+- [Connectors](../connectors/overview.md) — where webhooks live
 - [Client events](../client/events.md) — event builders and React hooks for apps
 - [Event schedules](../schedules/events.md) — start work from typed events
 - [Rules](../rules/overview.md) and [Workflows](../workflows/overview.md) — declarative state

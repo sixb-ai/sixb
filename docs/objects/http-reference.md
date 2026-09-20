@@ -7,7 +7,6 @@ HTTP routes directly, use a generated client, or build queries outside TypeScrip
 The browser builder in `@sixb/client/query` produces this exact IR and posts it to these routes
 for you. See [typed queries](../client/typed-queries.md) for the type-checked path.
 
-
 ## Routes
 
 Every route accepts a JSON body with a top-level `query` node and validates it against the
@@ -30,7 +29,6 @@ reads the result fields above. Validation and planning failures return HTTP 400 
 
 The links terminal has its own edge-page contract and therefore does not return an object-query
 plan.
-
 
 ## Raw Query JSON
 
@@ -83,7 +81,6 @@ Each object in the response carries its primary id, type, properties, and timest
 }
 ```
 
-
 ## Exact Object References
 
 Use a `refs` source when object identities are already known. References can be heterogeneous,
@@ -107,7 +104,6 @@ removed. Results use canonical identity order by `objectTypeId` and `primaryId`:
 PostgreSQL, and the in-memory provider execute it natively, so it composes with traversal, sets,
 filtering, projection, expansion, and pagination. Providers without native support use the storage
 batch identity primitive for the bounded core fallback.
-
 
 ## Querying Physical Links
 
@@ -201,8 +197,7 @@ The response returns one result per requested property:
 ```
 
 A faceted property must declare `query.searchable: true` and `query.facet: true` in the ontology
-(`Invoice.status` does). See [search metadata](../ontology/search-metadata.md).
-
+(`Invoice.status` does). See [property query metadata](../ontology/properties.md#property-query-metadata).
 
 ## Page Tokens
 
@@ -239,7 +234,6 @@ page requests — only `pageToken` changes:
   }
 }
 ```
-
 
 ## Expanding Links
 
@@ -304,7 +298,6 @@ relationship's edge fields:
 }
 ```
 
-
 ## Node Reference
 
 | Node | Fields | Purpose |
@@ -330,7 +323,6 @@ Raw queries can traverse wildcard links that the fluent builder cannot (the resu
 inferred). When several types declare a link with the same `linkId`, omit `sourceObjectTypeId` on
 an incoming `traverse` to match the union of all of them, or set it to pin one source type.
 
-
 ## Predicate Shapes
 
 Inside a `filter` node, `predicate` is a predicate tree.
@@ -347,7 +339,6 @@ Inside a `filter` node, `predicate` is a predicate tree.
 Set `value: false` on `exists` to match a missing property. Values are checked against the property
 schema; ordered comparisons (`lt`/`gte`/sorting) require an orderable schema — string, number,
 date, timestamp, uuid, or enum. See [querying](./querying.md) for null-versus-missing semantics.
-
 
 ## Calling A Route
 
@@ -370,7 +361,6 @@ curl -X POST http://localhost:3000/api/objects/query \
 Authentication and CSRF handling follow your server configuration; see
 [authentication](../auth/authentication.md).
 
-
 ## Provider Support
 
 SQLite and PostgreSQL object storage cover the common graph workflow: exact reference sets,
@@ -387,9 +377,8 @@ or approximate result. For simple bounded filters and sorts, Sixb can sometimes 
 in the core runtime when a provider lacks native support — but treat text search, traversal, set
 operations, vector search, and relevance sorting as provider-backed.
 
-
 ## Related
 
 - [Querying](./querying.md) — the fluent builder these routes mirror
 - [Typed queries](../client/typed-queries.md) — type-checked browser client
-- [Search metadata](../ontology/search-metadata.md) — query metadata that makes properties queryable
+- [Property query metadata](../ontology/properties.md#property-query-metadata) — query metadata that makes properties queryable

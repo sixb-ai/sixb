@@ -206,4 +206,4 @@ The sandbox's `sixb` CLI uses a run-scoped gateway. Access lasts only while the 
 
 Generic object/link writes, telemetry append, administration, and workflow cancellation/interventions are outside the gateway. Domain-changing actions/workflows require confirmation; workflow agent tasks cannot start another workflow.
 
-See [Authorization](../auth/authorization.md) for defining data grants and [Connectors](../data/connectors.md) for host-side integrations.
+See [Authorization](../auth/authorization.md) for defining data grants and [Connectors](../connectors/overview.md) for host-side integrations.

@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises"
 import { join } from "node:path"
 import { docs } from "../generated/docs"
 import { docsConfig } from "./config"
+import { exportMarkdown } from "./exportMarkdown"
 
 // Public origin of the hosted docs. Defaults to production; override at build time with
 // `DOCS_BASE_URL=https://preview.example.com bun run build` for previews.
@@ -40,7 +41,7 @@ let full = `# Sixb Documentation\n\n> ${tagline}\n\n`
 for (const doc of docs) {
   const sourcePath = sourceByMarkdownPath.get(doc.markdownPath)
   if (!sourcePath) continue
-  const markdown = await readFile(sourcePath, "utf-8")
+  const markdown = exportMarkdown(await readFile(sourcePath, "utf-8"))
   full += `${markdown.trim()}\n\n---\n\n`
 }
 

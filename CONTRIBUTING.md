@@ -286,3 +286,9 @@ credentials, point `--registry` at a local registry.
 Clear ideas. Easy claims. Small PRs. Fast feedback. Small merges. No silent waiting.
 
 That is the experience we are aiming for: steady flow, shared ownership, and a contribution process that feels calm, clear, and energizing.
+
+## Implementation references
+
+Public documentation in `docs/` explains how to build and operate an application. Keep persistence
+protocols, worker internals, provider conformance, and framework-only test guidance with the package
+that owns them. Start with [Core contributor references](packages/core/docs/README.md).

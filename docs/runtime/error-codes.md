@@ -1,15 +1,15 @@
-# Runtime error codes
+# Runtime errors
 
 Sixb failures have two identities:
 
 - `code` is stable and intended for programmatic decisions.
 - `message` is written for humans and must not be parsed.
 
-Unknown legacy exceptions use `internal.unexpected` until their call site receives a specific code.
+Unclassified errors use `internal.unexpected`.
 
 ## API errors
 
-HTTP errors expose an optional `code` while endpoints migrate. The client copies it to
+HTTP errors may include a `code`. The client exposes it as
 `SixbApiError.code`.
 
 Always tolerate unknown codes: a newer server may introduce one before the client is upgraded.
@@ -37,56 +37,43 @@ interface SixbFailure<TCode extends SixbErrorCode = SixbErrorCode> {
 }
 ```
 
-`code` stays stable. `message` adds recognized HTTP, network, or Sixb information from the
-error's causal chain. `httpStatus` is the upstream response status, not Sixb's API response status.
-Unknown exceptions keep the generic message. No connector changes are required.
+Use `code` for programmatic decisions and `message` for display. `httpStatus` describes the
+upstream response, not the status returned by Sixb. `retryable` indicates whether retrying may help;
+it does not guarantee that a run can safely be replayed after external side effects.
 
-Native exception messages, stacks, and provider payloads are not copied. Selected context is
-credential-filtered before storage and on read; `redacted` signals masking and `truncated` signals
-omitted data. Filtering cannot identify every opaque secret: never put credentials in `details`.
-The native exception remains available to `onError`, whose logging must protect it separately.
+`redacted` and `truncated` indicate filtered or shortened details. Never put credentials in
+`details`. The original exception is available to `onError` for diagnostics.
 
-Existing records remain readable without migration. Read filtering does not rewrite historical
-rows or recover causes that were never stored.
+## Failure notifications
 
-`retryable` is the policy attached to the code. It does not override a worker's safety rules; a
-worker may still refuse to replay work that has already produced side effects.
+Add `onError` to `sixb.config.ts` to send failures to your monitoring service:
 
-## Contracts by boundary
+```ts
+export const sixb = createSixb({
+  // ...providers
+  onError(error, context) {
+    console.error(context.type, context.failure.code, error)
+  },
+})
+```
 
-Each boundary exposes only the codes it can persist.
+Without this callback, Sixb logs failures to `console.error`. The callback replaces that default.
 
-| Boundary | Allowed codes |
+| `context.type` | What failed |
 | --- | --- |
-| Action run or phase | `action.phase_failed`, `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled` |
-| Sync run | `internal.unexpected`, `queue.enqueue_failed`, `runtime.cancelled`, `sync.execution_failed` |
-| Agent execution | `agent.execution_failed`, `ai.usage_limit_exceeded`, `ai.usage_limit_unavailable`, `internal.unexpected`, `runtime.cancelled` |
-| Connector connection run | `connector.adapter_invalid`, `connector.authorization_invalid`, `connector.authorization_required`, `connector.credentials_unavailable`, `connector.not_found`, `connector.operation_conflict`, `connector.operation_in_progress`, `connector.provider_failed`, `connector.provider_unavailable`, `internal.unexpected` |
-| Projection run | `internal.unexpected`, `projection.execution_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
-| Pipeline run or step | `internal.unexpected`, `pipeline.step_failed`, `queue.enqueue_failed`, `runtime.cancelled` |
-| Workflow run or node | `ai.usage_limit_exceeded`, `ai.usage_limit_unavailable`, `internal.unexpected`, `runtime.cancelled`, `workflow.node_failed` |
-| Webhook run | `internal.unexpected`, `webhook.delivery_failed`, `webhook.delivery_rejected` |
-| Ontology outbox | `event.delivery_failed` |
+| `run.failed` | An action, agent, sync, pipeline, projection, workflow, or webhook run |
+| `action.phase.failed` | Post-commit action effects; the action's data remains committed |
+| `event.delivery.failed` | Event delivery; persisted events remain queued for retry |
+| `rule.evaluation.failed` | Rule evaluation; `source` identifies live evaluation or reconciliation |
 
-Additional rules:
+For `run.failed`, inspect `context.runKind` and `context.run.runId`. Use `context.notificationId`
+as a deduplication key when forwarding alerts. A failed rule reconciliation deserves attention:
+it is the recovery path for missed live evaluations.
 
-- Action failures require `{ actionId, runId, phase }` in `details`.
-- Agent, Pipeline, Sync, and Workflow completion events reuse the failure stored on the run.
-- `agent.run.finished.error` reuses the failure stored on the Agent run.
-- Webhook retryability is carried by the persisted failure: retryable outcomes use
-  `webhook.delivery_failed`; terminal handler responses use `webhook.delivery_rejected`.
-- The outbox retains `event.delivery_failed` while publication is retried.
-
-## Reporting
-
-- `context.failure` is the same record written to durable storage when one exists.
-- `error` remains the native error for stacks and monitoring integrations.
-- Failures without durable storage are normalized once at the reporting boundary.
-
-## Normalization
-
-- Coded errors receive their `details` where they are created.
-- Native or out-of-contract errors use one typed capture policy at the boundary.
+Notifications are best-effort. A crash can prevent delivery; callbacks may be repeated and should
+be idempotent. A failing callback cannot change a run's outcome. Successes, cancellations, recoverable
+retries, and routine webhook 4xx responses do not trigger notifications. Synchronous connector
+errors reach their caller; if they fail a run, that run produces the notification.
 
 ## Error catalog
 

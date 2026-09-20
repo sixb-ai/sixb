@@ -39,23 +39,10 @@ export const Customer = defineObjectType({
 | `primary` | `true` | Marks the property as the object identifier. |
 | `mode` | `"static"` \| `"telemetry"` | How the value is stored over time. Defaults to `"static"`. |
 | `semanticType` | Quantitative type id | Unit family for physical numeric readings. See [units and semantics](./units-and-semantics.md). |
-| `query` | `PropertyQueryMetadata` | Search, filter, and sort flags. See [search metadata](./search-metadata.md). |
+| `query` | `PropertyQueryMetadata` | Search, filter, and sort flags. See [query metadata](#property-query-metadata). |
 
 Each object type must have exactly one primary property, declared with
-`{ required: true, primary: true }` and a `"string"` schema. Only `true` is
-accepted for `primary` — there is no "explicitly not primary" value.
-
-A property is only queryable if it declares `query` metadata. Without it, you
-can't filter, sort, or search on that property.
-
-```ts
-prop("status", stringEnum(["draft", "sent", "paid", "overdue", "cancelled"]), {
-  query: { searchable: true, filterable: true, exact: true, facet: true },
-})
-prop("amount", "double", {
-  query: { searchable: true, filterable: true, sortable: true },
-})
-```
+`{ required: true, primary: true }` and a `"string"` schema. Omit `primary` on the other properties.
 
 ## Schema forms
 
@@ -68,7 +55,28 @@ The `schema` argument is one of these forms:
 | Identifier | `"uuid"` | String identifiers treated as UUIDs |
 | File reference | `"fileRef"` | Blob-backed documents, images, and attachments |
 | Enum | `stringEnum([...])`, `integerEnum([...])` | A fixed set of string or integer values |
+| Array | `{ type: "array", items: "string" }` | Ordered lists |
+| Object | `{ type: "object", properties: { … } }` | Structured values with known fields |
+| Map | `{ type: "map", keySchema: "string", valueSchema: "double" }` | Dictionaries with dynamic keys |
 | Value type ref | `valueTypeRef("...")` | Reusing a named value shape |
+
+There is no `"json"` property schema. Use an `object`, `array`, or `map` to describe structured
+values. Dataset columns have a separate [`json` type](../datasets/overview.md#column-types).
+
+```ts
+prop("tags", { type: "array", items: "string" })
+prop("address", {
+  type: "object",
+  properties: {
+    city: { schema: "string", required: true },
+    postcode: { schema: "string" },
+  },
+})
+prop("scores", { type: "map", keySchema: "string", valueSchema: "double" })
+```
+
+Nested fields support `required`, `nullable`, `description`, and numeric `semanticType`.
+Array items and map values accept any schema, including other structured shapes.
 
 Enum helpers constrain a property to a fixed set of values:
 
@@ -128,15 +136,59 @@ Appending and reading telemetry values is covered in
 
 ## Keep properties shallow
 
-Avoid complex nested shapes — object fields holding arrays, arrays of objects, or
-deeply nested records. When a value starts to behave like another thing in your
-domain, model it as a separate [object type](./object-types.md) and connect it
+Arrays, objects, and maps work well for values that belong to one object. When a value needs
+its own identity, lifecycle, or relationships, model it as a separate [object type](./object-types.md) and connect it
 with a [link](./links.md) instead.
+
+## Property Query Metadata
+
+Set `query` on a property to expose it to queries. `searchable` is the gate: every other flag
+(and `weight`) requires `searchable: true` on the same property, or `validate()` rejects the
+ontology.
+
+A property is only queryable if it declares `query` metadata. Without it, you
+can't filter, sort, or search on that property.
+
+```ts
+prop("status", stringEnum(["draft", "sent", "paid", "overdue", "cancelled"]), {
+  query: { searchable: true, filterable: true, exact: true, facet: true },
+})
+prop("amount", "double", {
+  query: { searchable: true, filterable: true, sortable: true },
+})
+```
+
+| Flag | Type | Enables |
+| --- | --- | --- |
+| `searchable` | `boolean` | Required gate. Must be `true` before any other flag (or `weight`) applies. |
+| `filterable` | `boolean` | `where(...)` predicates: `eq`, `neq`, ranges, `in`, `exists`, `contains`. |
+| `sortable` | `boolean` | `orderBy(...)` on the property. |
+| `text` | `boolean` | Keyword search over the property via `search(...)`. String-like schemas only. |
+| `exact` | `boolean` | Exact-match search profiles such as `search.exact`. |
+| `facet` | `boolean` | `facets(...)` bucket counts. Field must also be exact-matchable. |
+| `vector` | `boolean` | Vector search on numeric-array embedding fields, when the provider supports it. |
+| `weight` | `number` | Positive relative weight for text ranking. Only valid with `text: true`. |
+
+### Which schemas support which flag
+
+Each flag is checked against the property's schema at validation time:
+
+| Flag | Allowed schemas |
+| --- | --- |
+| `filterable` | exact-matchable schemas, plus `array` and `map` |
+| `sortable` | `string`, `uuid`, `integer`, `double`, `decimal`, `date`, `timestamp`, enums |
+| `text` | `string` and string enums |
+| `exact` | any primitive schema except `fileRef` (so not `object`/`array`/`map`), plus enums |
+| `facet` | same as `exact` |
+| `vector` | numeric arrays (`integer`, `double`, or `decimal` items) |
+
+Predicate values are checked against the property schema when the query runs.
+
+For the calls these flags enable, see [Querying objects](../objects/querying.md).
 
 ## Related
 
 - [Object types](./object-types.md) — the container properties live on
 - [Links](./links.md) — model relationships instead of nested values
 - [Value types](./value-types.md) — reusable named value shapes
-- [Search metadata](./search-metadata.md) — make a property queryable
 - [Objects / telemetry](../objects/telemetry.md) — append and read telemetry

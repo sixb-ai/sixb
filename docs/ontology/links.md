@@ -147,71 +147,31 @@ link with properties is rejected with an `OntologyValidationError`.
 
 ## Create and remove links
 
-Once a type is registered, write links through the typed API on a `byId(...)` handle. The link
-token comes from the object type as `Type.l.<linkId>`.
+Use the link token and a target reference (`objectTypeId` + `primaryId`):
 
 ```ts
-const projects = sixb.objects(Project)
+const project = sixb.objects(Project).byId("proj-001")
+const employee = { objectTypeId: "Employee", primaryId: "emp-014" } as const
 
-// Link to a target by object reference
-await projects.byId("proj-001").link(Project.l.members, {
-  objectTypeId: "Employee",
-  primaryId: "emp-014",
+await project.link(Project.l.members, employee, {
+  properties: { role: "backend", allocatedAt: new Date() },
 })
 
-// With link properties
-await projects.byId("proj-001").link(
-  Project.l.members,
-  { objectTypeId: "Employee", primaryId: "emp-014" },
-  { properties: { role: "backend", allocatedAt: new Date() } }
-)
-
-// Remove a link
-await projects.byId("proj-001").unlink(Project.l.members, {
-  objectTypeId: "Employee",
-  primaryId: "emp-014",
-})
+await project.unlink(Project.l.members, employee)
 ```
 
-Each `link(...)` call writes the complete property set for that relationship: properties you leave out
-are cleared, and required link properties must be present every time.
+- TypeScript checks the target type against the link definition.
+- `link(...)` replaces all relationship properties; include required ones on every call.
+- For a `many` link, `unlink(...)` removes only the specified relationship.
+- For a `one` link, remove the current target before linking a different one. Use `listLinks(...)`
+  to find it. Linking the same target updates its properties.
 
-The target is an `ObjectRef` (`{ objectTypeId, primaryId }`). TypeScript checks it against the
-link's declared target, so linking `members` to a `Customer` is a compile error.
+For relationships populated by a projection, an app edit remains authoritative: removing a
+`one` link also keeps later projected targets hidden. In an [action](../actions/overview.md),
+`resetLink(...)` restores the projected relationship. An action can unlink and link together
+in one `.edits(...)` transaction.
 
-Sixb distinguishes an exact link **edge**, identified by `(source, linkId, target)`, from a single-valued link **slot**, identified by `(source, linkId)`. Cardinality-many overrides own edges; cardinality-one overrides own slots and select at most one target.
-
-For a `cardinality: "one"` link, `link(...)` is not a setter. Calling `link(...)` with the same
-target updates that relationship's properties, but calling it with a different target while one is
-already present is rejected. Reassign by removing the current target, then linking the new one:
-
-```ts
-const [currentLead] = await sixb.objects(Project).byId("proj-001").listLinks(Project.l.lead)
-
-if (currentLead) {
-  await projects.byId("proj-001").unlink(Project.l.lead, {
-    objectTypeId: currentLead.targetTypeId,
-    primaryId: currentLead.targetId,
-  })
-}
-
-await projects.byId("proj-001").link(Project.l.lead, {
-  objectTypeId: "Employee",
-  primaryId: "emp-027",
-})
-```
-
-For `cardinality: "many"`, `unlink(...)` removes one exact relationship row. For `cardinality: "one"`, it clears the whole `(source, linkId)` slot: the target remains required as
-the operation anchor, but a later projected target stays hidden instead of appearing beside the managed decision. When you only know the `linkId`, read the current target first with
-`listLinks(Project.l.lead)`.
-
-Inside an action's staged `.edits(...)` facade the same `link(...)` and `unlink(...)` shapes apply,
-plus `resetLink(...)` to forget a relationship the action added so a projected one shows again. An
-action reassigns a cardinality-one link the same way — unlink the current target and link the new one
-— and both edits land together. See [Actions](../actions/overview.md).
-
-Writing a new link emits `link.created`; changing an existing link emits `link.updated`.
-Removing one emits `link.deleted`. See [Events](../events/overview.md).
+Changes emit [`link.created`, `link.updated`, or `link.deleted`](../events/overview.md).
 
 ## List links from an object
 

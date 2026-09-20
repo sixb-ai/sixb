@@ -110,7 +110,7 @@ Snapshot syncs use `commit({ createInitialVersion: true })` to make a first empt
 addressable. Later no-op commits reuse the current version, including after a concurrent write.
 Use `commit({ retryOnConflict: true })` to rebase retained changes, with at most 3 attempts.
 Explicit `expectedLatestVersionId` guards are never relaxed.
-See [source ordering](../../docs/data/datasets.md#source-ordering).
+See [source ordering](../../docs/datasets/source-ordering.md).
 
 Concurrent commits are serialized across instances in **one process**, including symlinked paths.
 Multiple writer processes sharing a LocalLake directory are not supported; use a DuckLake
