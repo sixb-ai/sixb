@@ -677,7 +677,10 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
       })
     })
 
-    test("keeps batch outbox settlement atomic when callers catch a stale lease", async () => {
+    test.each([
+      "root",
+      "transaction",
+    ] as const)("keeps %s batch outbox settlement atomic when callers catch a stale lease", async (boundary) => {
       await withStorage(async (storage) => {
         await commitExactObject(storage, "lease-atomic-a")
         await commitExactObject(storage, "lease-atomic-b")
@@ -699,7 +702,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         const untouched = claimed.find((row) => row.envelope.id !== reclaimed!.envelope.id)!
 
         let conflict: unknown
-        await storage.transaction(async (tx) => {
+        const settle = async (tx: OntologyContractStorage) => {
           try {
             await tx.ontology.outbox.markPublished({
               projectId: "contract-project",
@@ -710,7 +713,9 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           } catch (error) {
             conflict = error
           }
-        })
+        }
+        if (boundary === "transaction") await storage.transaction(settle)
+        else await settle(storage)
         expect(conflict).toMatchObject({ kind: "outbox-lease" })
 
         await storage.ontology.outbox.markPublished({

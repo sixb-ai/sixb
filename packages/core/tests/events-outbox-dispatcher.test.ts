@@ -8,6 +8,7 @@ import {
 import { DomainEventService, OntologyOutboxDispatcher, type StoredDomainEvent } from "../src/events"
 import type { OntologyMaterializationEvent, OntologyOutboxFailure } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
+import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createMaterializerFixture } from "./materializer-fixture"
 
 const NOW = new Date("2026-01-02T03:04:05.000Z")
@@ -42,13 +43,14 @@ describe("DomainEventService stable envelope publication", () => {
 })
 
 describe("OntologyOutboxDispatcher", () => {
-  test("claims in a short transaction, publishes outside it, and acknowledges the lease", async () => {
+  test("uses atomic outbox operations without copying unrelated storage in a global transaction", async () => {
     const storage = new TransactionTrackingStorage()
     const broker = new OutsideTransactionBroker(storage)
     const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-1", "one")
     const [outboxRow] = outboxRows(storage)
+    const transactionsBefore = storage.transactionCount
 
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -62,7 +64,8 @@ describe("OntologyOutboxDispatcher", () => {
 
     expect((await events.read()).map((event) => event.id)).toEqual([outboxRow?.envelope.id])
     expect(broker.publicationTransactionDepths).toEqual([0])
-    expect(storage.transactionCount).toBeGreaterThanOrEqual(2)
+    // Regression proof: wrap outbox operations in storage.transaction again; this count increases.
+    expect(storage.transactionCount).toBe(transactionsBefore)
     expect(outboxRows(storage)[0]).toMatchObject({
       leaseId: null,
       leaseExpiresAt: null,
@@ -429,12 +432,21 @@ describe("OntologyOutboxDispatcher", () => {
     await seedObjectCreated(materializer, "request-burst", "burst")
 
     const dispatcher = new OntologyOutboxDispatcher({ projectId: "project", storage, events })
-    const before = storage.transactionCount
+    let claims = 0
+    const restore = decorateOperationScopedMethodForTesting(
+      storage.ontology.outbox,
+      "claim",
+      (run) => async (input) => {
+        claims++
+        return run(input)
+      }
+    )
     await Promise.all(Array.from({ length: 20 }, () => dispatcher.drain()))
 
     // One pass for the first caller plus one shared follow-up for everyone who arrived during it.
-    expect(storage.transactionCount - before).toBeLessThanOrEqual(4)
+    expect(claims).toBe(2)
     expect(outboxRows(storage)[0]?.publishedAt).not.toBeNull()
+    restore()
   })
 
   test("waits for bounded in-flight publication during graceful stop", async () => {

@@ -43,19 +43,37 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
         )
       }
 
+      // Probe at most one page plus a sentinel through the eligibility index. Sparse retries
+      // avoid scanning delayed rows; overflowing backlogs use publication order without a sort.
+      const eligible = this.db
+        .query(
+          `SELECT CAST(rowid AS TEXT) AS rowId
+           FROM ontology_outbox INDEXED BY idx_ontology_outbox_claim
+           WHERE project_id = ? AND published_at IS NULL AND available_at <= ?
+             AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+           LIMIT ?`
+        )
+        .all(input.projectId, input.now, input.now, input.limit + 1) as { rowId: string }[]
+      if (eligible.length === 0) return []
+      const selected =
+        eligible.length <= input.limit
+          ? eligible
+          : (this.db
+              .query(
+                `SELECT CAST(rowid AS TEXT) AS rowId
+                 FROM ontology_outbox INDEXED BY idx_ontology_outbox_publication_order
+                 WHERE project_id = ? AND published_at IS NULL AND available_at <= ?
+                   AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
+                 ORDER BY created_at, commit_id, commit_ordinal
+                 LIMIT ?`
+              )
+              .all(input.projectId, input.now, input.now, input.limit) as { rowId: string }[])
       const rows = this.db
         .query(
           `
             UPDATE ontology_outbox
             SET attempts = attempts + 1, lease_id = ?, lease_expires_at = ?
-            WHERE rowid IN (
-              SELECT rowid
-              FROM ontology_outbox
-              WHERE project_id = ? AND published_at IS NULL AND available_at <= ?
-                AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-              ORDER BY created_at, commit_id, commit_ordinal
-              LIMIT ?
-            )
+            WHERE rowid IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
             RETURNING envelope, available_at, attempts, lease_id, lease_expires_at,
               published_at, last_failure, created_at
           `
@@ -63,10 +81,7 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
         .all(
           input.leaseId,
           input.leaseExpiresAt,
-          input.projectId,
-          input.now,
-          input.now,
-          input.limit
+          JSON.stringify(selected.map((row) => row.rowId))
         ) as SqliteOntologyOutboxRow[]
       return rows
         .map((row) => outboxRecord(row))
@@ -98,8 +113,9 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
             WITH requested(id) AS MATERIALIZED (
               SELECT CAST(value AS TEXT) FROM json_each(?)
             ), leased(id) AS MATERIALIZED (
-              SELECT outbox.id FROM ontology_outbox AS outbox
-              JOIN requested USING (id)
+              -- Drive validation from the bounded ID list even before ANALYZE.
+              SELECT outbox.id FROM requested
+              CROSS JOIN ontology_outbox AS outbox USING (id)
               WHERE outbox.project_id = ? AND outbox.lease_id = ?
                 AND outbox.lease_expires_at IS NOT NULL
             ), eligible(id) AS (
@@ -139,8 +155,9 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
             WITH requested(id) AS MATERIALIZED (
               SELECT CAST(value AS TEXT) FROM json_each(?)
             ), leased(id) AS MATERIALIZED (
-              SELECT outbox.id FROM ontology_outbox AS outbox
-              JOIN requested USING (id)
+              -- Drive validation from the bounded ID list even before ANALYZE.
+              SELECT outbox.id FROM requested
+              CROSS JOIN ontology_outbox AS outbox USING (id)
               WHERE outbox.project_id = ? AND outbox.lease_id = ?
                 AND outbox.lease_expires_at IS NOT NULL
             ), eligible(id) AS (

@@ -46,6 +46,7 @@ export interface OntologyOutboxDispatcherOptions {
   readonly maxIsolationAttempts?: number
   /** Maximum claimed batches handled by one drain pass. */
   readonly maxClaimsPerDrain?: number
+  /** Broker grace period. Shutdown still waits for outstanding storage operations afterward. */
   readonly shutdownTimeoutMs?: number
   readonly now?: () => Date
   readonly random?: () => number
@@ -100,10 +101,10 @@ export class OntologyOutboxDispatcher {
   private readonly createLeaseId: () => string
   private readonly onDeliveryFailure?: OntologyOutboxDispatcherOptions["onDeliveryFailure"]
   private readonly onError: (error: unknown) => void
-  private readonly inFlight = new Set<ClaimedBatch>()
   private draining: Promise<void> | null = null
   private pendingDrain: Promise<void> | null = null
   private stopping: Promise<void> | null = null
+  private closing = false
   private stopRequested = false
   private readonly forcedStop = new AbortController()
 
@@ -166,7 +167,7 @@ export class OntologyOutboxDispatcher {
    * mutation.
    */
   drain(): Promise<void> {
-    if (this.stopRequested) return Promise.resolve()
+    if (this.closing || this.stopRequested) return Promise.resolve()
     if (!this.draining) return this.startDrainPass()
 
     this.pendingDrain ??= settled(this.draining).then(() => {
@@ -178,7 +179,7 @@ export class OntologyOutboxDispatcher {
 
   /** Starts a tracked, best-effort drain without extending mutation latency. */
   notify(): void {
-    if (this.stopRequested) return
+    if (this.closing || this.stopRequested) return
     void this.drain().catch((error) => this.reportError(error))
   }
 
@@ -193,19 +194,16 @@ export class OntologyOutboxDispatcher {
     // Include one final bounded pass so commits whose notifications were coalesced immediately
     // before shutdown are not left pending merely because the process is stopping.
     const gracefulDrain = this.drain().catch((error) => this.reportError(error))
-    if (await settlesWithin(gracefulDrain, this.shutdownTimeoutMs)) {
-      this.stopRequested = true
-      return
-    }
-
+    this.closing = true
+    const finished = await settlesWithin(gracefulDrain, this.shutdownTimeoutMs)
     this.stopRequested = true
-    this.forcedStop.abort()
-    await settlesWithin(
-      this.rescheduleUnsettledForShutdown(),
-      Math.min(this.shutdownTimeoutMs, 1_000)
-    )
-    this.draining = null
-    this.pendingDrain = null
+    if (!finished) this.forcedStop.abort()
+    // Storage operations cannot be cancelled by this contract. A late claim must release its
+    // lease, and an acknowledgement already started must finish before callers close storage.
+    // publishClaim owns settlement, including forced stop; never race a second cleanup against it.
+    await gracefulDrain
+    if (this.draining) await settled(this.draining)
+    if (this.pendingDrain) await settled(this.pendingDrain)
   }
 
   private startDrainPass(): Promise<void> {
@@ -224,11 +222,14 @@ export class OntologyOutboxDispatcher {
       if (rows.length === 0) return
       const publishedCount = await this.publishClaim(rows)
       if (this.stopRequested || publishedCount === 0 || rows.length < this.batchSize) return
+      // In-memory/SQLite can resolve without I/O. Yield between full batches so catch-up cannot
+      // monopolize the event loop, while keeping small post-commit deliveries immediate.
+      await new Promise<void>((resolve) => setImmediate(resolve))
     }
 
     // A healthy full slice means more due rows may remain. Reuse the existing coalescing path so
     // catch-up continues without recursion, an idle polling loop, or an unbounded individual pass.
-    if (!this.stopRequested) this.notify()
+    if (!this.closing && !this.stopRequested) this.notify()
   }
 
   private claimBatch(): Promise<readonly ClaimedOntologyOutboxRow[]> {
@@ -247,7 +248,6 @@ export class OntologyOutboxDispatcher {
   private async publishClaim(rows: readonly ClaimedOntologyOutboxRow[]): Promise<number> {
     const claim = new ClaimedBatch(rows)
     const failures = new DeliveryFailureAccumulator()
-    this.inFlight.add(claim)
     const pending: PublicationGroup[] = [{ rows }]
     let publishAttempts = 0
     let publishedCount = 0
@@ -288,7 +288,6 @@ export class OntologyOutboxDispatcher {
       if (this.stopRequested) {
         await this.rescheduleClaimedForShutdown(claim.close())
       }
-      this.inFlight.delete(claim)
       for (const failure of failures.list()) {
         this.reportDeliveryFailure(failure.error, failure.context)
       }
@@ -378,15 +377,10 @@ export class OntologyOutboxDispatcher {
     }
   }
 
-  private async rescheduleUnsettledForShutdown(): Promise<void> {
-    for (const claim of [...this.inFlight]) {
-      await this.rescheduleClaimedForShutdown(claim.close())
-      this.inFlight.delete(claim)
-    }
-  }
-
   private withOutbox<T>(run: (outbox: OntologyOutboxStorage) => Promise<T> | T): Promise<T> {
-    return this.storage.transaction((tx) => run(tx.ontology.outbox))
+    // Every outbox method owns its atomic provider operation. A framework-wide transaction
+    // adds no guarantee here and copies the entire InMemoryStorage state for every batch.
+    return Promise.resolve(run(this.storage.ontology.outbox))
   }
 
   private reportDeliveryFailure(error: unknown, failure: OntologyOutboxDeliveryFailure): void {
