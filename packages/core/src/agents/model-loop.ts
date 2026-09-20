@@ -255,6 +255,13 @@ export async function runModelLoop(
     }
 
     const localCalls = response.toolCalls.filter((call) => call.part.providerExecuted !== true)
+    // Closed tool arguments are not proof of a successful response. In particular,
+    // providers can close valid JSON before reporting truncation or content filtering.
+    if (localCalls.length > 0 && !["stop", "tool-calls", "pause"].includes(response.finishReason)) {
+      throw new ModelStreamError(
+        `[SixbModels] Cannot execute local tools after '${response.finishReason}'.`
+      )
+    }
     if (
       input.rejectLocalToolCalls &&
       (localCalls.length > 0 || response.finishReason === "tool-calls")

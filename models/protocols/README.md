@@ -47,6 +47,8 @@ import {
 | `responsesUsage(raw)` | Preserve reported counters and raw usage; missing counters stay unknown. |
 
 - **Completion:** requires a terminal response event, such as `response.completed`.
+- **Interrupted responses:** retain their truncation/filter reason even after tool arguments close;
+  Sixb's model loop rejects local tool execution on unsuccessful finishes while retaining usage.
 - **Replay:** retains ordered native items under the calling provider's ID.
 - **Hooks:** `ResponsesStreamOptions` supports usage normalization, provider IDs, and finish metadata
   (provider data, reported cost, route). Event parsing stays in the decoder.

@@ -472,11 +472,12 @@ function providerItemData(providerId: string, item: JsonObject): ProviderData {
 }
 
 function finishReason(response: JsonObject, sawToolCall: boolean): ModelFinishReason {
-  if (sawToolCall) return "tool-calls"
   const reason = incompleteReason(response)
   if (reason.includes("max_output") || reason.includes("length")) return "length"
   if (reason.includes("content_filter")) return "content-filter"
   if (string(response.status) === "failed") return "error"
+  if (string(response.status) === "incomplete") return "other"
+  if (sawToolCall) return "tool-calls"
   return string(response.status) === "completed" ? "stop" : "other"
 }
 

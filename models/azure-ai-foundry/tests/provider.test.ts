@@ -11,6 +11,63 @@ import { foundryEstimator, foundryUsage } from "../src/accounting"
 import { createAzureAIFoundry } from "./provider-fixture"
 
 const endpoint = "https://resource.services.ai.azure.com/api/projects/test"
+
+// Removal proof: restore tool-calls precedence in Responses finishReason, or remove
+// the unsuccessful-finish guard from runModelLoop. This valid tool then executes.
+test("does not execute an incomplete Responses tool and retains its usage", async () => {
+  const item = { id: "fc", type: "function_call", call_id: "call", name: "act", arguments: "{}" }
+  let executed = 0
+  let accounted: ModelUsage | undefined
+  const provider = createAzureAIFoundry({
+    endpoint,
+    apiKey: "key",
+    fetch: async () =>
+      sse([
+        {
+          type: "response.output_item.added",
+          item: { ...item, status: "in_progress", arguments: "" },
+        },
+        { type: "response.function_call_arguments.done", item_id: "fc", arguments: "{}" },
+        { type: "response.output_item.done", item: { ...item, status: "incomplete" } },
+        {
+          type: "response.incomplete",
+          response: {
+            status: "incomplete",
+            incomplete_details: { reason: "max_output_tokens" },
+            usage: { input_tokens: 1, output_tokens: 2 },
+          },
+        },
+      ]),
+  })
+  await expect(
+    runModelLoop({
+      model: provider.responses("deployment", {
+        definition: { capabilities: { localTools: true } },
+      }),
+      messages: [],
+      maxSteps: 1,
+      signal: new AbortController().signal,
+      tools: [
+        {
+          name: "act",
+          description: "Act",
+          inputSchema: { type: "object", properties: {} },
+          parseInput: (input) => input,
+          execute: async () => {
+            executed++
+            return "ok"
+          },
+          errorText: String,
+        },
+      ],
+      onModelCallEnd: (event) => {
+        accounted = event.usage
+      },
+    })
+  ).rejects.toThrow("Cannot execute local tools after 'length'")
+  expect(executed).toBe(0)
+  expect(accounted).toMatchObject({ inputTokens: 1, outputTokens: 2 })
+})
 const definition = {
   maxOutputTokens: 100,
   capabilities: {

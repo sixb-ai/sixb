@@ -53,6 +53,71 @@ const record = (cost = 2, tools = true) => ({
 const page = (value = record()) => Response.json({ azure: { models: { "new-model": value } } })
 const usage = { inputTokens: 10, uncachedInputTokens: 10, cacheReadInputTokens: 0, outputTokens: 2 }
 
+// Removal proof: remove the catalog-only fallback in FoundryModel.resolve. Both explicit
+// resolution and the first direct stream fail before reaching healthy Azure inference.
+test("uses explicit definitions during a public catalog outage without bypassing Azure discovery", async () => {
+  let inferenceCalls = 0
+  let missing = false
+  let malformed = false
+  const provider = create({
+    endpoint,
+    apiKey: "key",
+    fetch: async (url) => {
+      if (String(url).includes("/deployments?"))
+        return Response.json({
+          value: missing
+            ? []
+            : [
+                {
+                  type: "ModelDeployment",
+                  name: "production",
+                  modelName: "new-model",
+                  modelVersion: "1",
+                  modelPublisher: "partner",
+                  capabilities: { responses: "true" },
+                  sku: { name: "GlobalStandard" },
+                },
+              ],
+        })
+      inferenceCalls++
+      return new Response(
+        'data: {"type":"response.completed","response":{"status":"completed"}}\n\n'
+      )
+    },
+    catalog: {
+      fetch: async () => {
+        if (malformed) return Response.json({ azure: {} })
+        throw new Error("outage")
+      },
+    },
+  })
+  const options = {
+    definition: { contextWindow: 10000, maxOutputTokens: 100, capabilities: {} },
+    rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "2" } as const,
+  }
+  const model = await provider.responses("production", options).resolve()
+  expect(model.definition.contextWindow).toBe(10000)
+  expect(model.metadata.catalog).toBeUndefined()
+  expect(model.costEstimator.estimate({ usage })).toMatchObject({ status: "rated" })
+  const stream = await provider.responses("production", options).stream({
+    callId: "test",
+    messages: [],
+    tools: [],
+    signal: new AbortController().signal,
+  })
+  for await (const event of stream.events) expect(event.type).not.toBe("error")
+  expect(inferenceCalls).toBe(1)
+  await expect(provider("production").resolve()).rejects.toBeInstanceOf(
+    ModelCatalogUnavailableError
+  )
+  malformed = true
+  await expect(provider.responses("production", options).resolve()).rejects.toThrow("azure.models")
+  missing = true
+  expect(await provider.catalog.refresh()).toEqual([])
+  await expect(provider.responses("production", options).resolve()).rejects.toThrow("not found")
+  expect(inferenceCalls).toBe(1)
+})
+
 // Removal proof: remove Foundry's publisher mapping; Azure models lose their author,
 // and Fireworks models display the host instead of the catalog family's publisher.
 test("publishes model authors from Azure or Fireworks catalog families with explicit overrides", async () => {
@@ -471,7 +536,8 @@ test("expires/coalesces lookups, preserves offline snapshots on outages and reje
   await Promise.all([binding.resolve(), binding.resolve()])
   expect(calls).toBe(2)
   broken = true
-  await expect(binding.resolve()).rejects.toBeInstanceOf(ModelCatalogUnavailableError)
+  // Removal proof: remove the catalog-only fallback in FoundryModel.resolve.
+  expect((await binding.resolve()).definition.contextWindow).toBe(100000)
   expect((await binding.resolve({ offline: true })).definition.contextWindow).toBe(100000)
   const malformed = createAzureAIFoundry({
     endpoint,

@@ -15,6 +15,28 @@ const providerFixture = (options: Parameters<typeof create>[0]) =>
   })
 const endpoint = "https://resource.services.ai.azure.com/api/projects/example"
 
+// Removal proof: remove the Messages fallback in resolveModel, or its BOOLEAN_KEYS entry.
+test("routes uncataloged Messages deployments and validates their eligibility", async () => {
+  let messages = "true"
+  const provider = providerFixture({
+    endpoint,
+    apiKey: "key",
+    fetch: async () =>
+      Response.json({
+        value: [
+          {
+            ...deployment("production", { messages, responses: "false", chat_completion: "false" }),
+            connectionName: undefined,
+          },
+        ],
+      }),
+  })
+  expect((await provider("production").resolve()).protocol).toBe("messages")
+  expect((await provider.catalog.list()).map((entry) => entry.modelId)).toEqual(["production"])
+  messages = "invalid"
+  await expect(provider.catalog.refresh()).rejects.toThrow("capability 'messages'")
+})
+
 function deployment(
   name = "production",
   capabilities: JsonObject = {
