@@ -8,6 +8,7 @@ import {
   type LanguageModelRequest,
   type LanguageModelStream,
   type LanguageModelStreamEvent,
+  ModelCatalogUnavailableError,
   type ModelCostEstimator,
   ModelProviderError,
   UnsupportedModelFeatureError,
@@ -274,6 +275,16 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
   async resolve(options?: { readonly offline?: boolean }): Promise<FoundryModel<Protocol>> {
     if (this.resolution) return this
     const resolution = await this.deployments.resolve(this.modelId, options?.offline === true)
+    let catalogModel: CatalogModel | undefined
+    try {
+      catalogModel = await this.modelCatalog.get(resolution.deployment.modelName, options?.offline)
+    } catch (error) {
+      if (!(error instanceof ModelCatalogUnavailableError)) throw error
+      // Azure identity was verified above. Only public enrichment may fall back to
+      // cached facts or an explicit definition; malformed metadata still fails.
+      catalogModel = await this.modelCatalog.get(resolution.deployment.modelName, true)
+      if (!catalogModel && !this.options.definition) throw error
+    }
     return new FoundryModel(
       this.requestedProtocol,
       this.transport,
@@ -284,10 +295,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       this.modelCatalog,
       {
         ...resolution,
-        catalogModel: await this.modelCatalog.get(
-          resolution.deployment.modelName,
-          options?.offline
-        ),
+        catalogModel,
       }
     )
   }

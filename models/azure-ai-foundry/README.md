@@ -36,6 +36,9 @@ Model resolution always follows this sequence:
 Construction is network-free. `resolve()` returns a pinned model for worker admission and
 execution. A direct `stream()` resolves and pins the handle before inference. Discovery failures
 and missing deployments stop resolution; they never fall back to guessing the model identity.
+If models.dev is unavailable after successful Azure discovery, resolution uses cached catalog
+facts or an explicit `definition`. Without either, it fails. Malformed catalog data still fails;
+missing capabilities and prices remain unknown. Catalog listings and refresh report outages.
 
 ## Stream a response
 
@@ -93,7 +96,7 @@ Use `definition.publisher` to override the displayed author for an unrecognized 
 ## Protocols and controls
 
 ```ts
-foundry("production")           // Catalog protocol → deployment flags → Responses.
+foundry("production")           // Catalog protocol → Responses/Chat/Messages flags → Responses.
 foundry.responses("production")
 foundry.chat("production")
 foundry.messages("claude-production")

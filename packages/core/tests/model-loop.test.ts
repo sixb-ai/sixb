@@ -76,6 +76,49 @@ const echo: ModelTool<{ value: string }> = {
 }
 
 describe("runModelLoop", () => {
+  // Removal proof: remove the unsuccessful-finish guard before executeToolCall.
+  // Complete, valid JSON must not make an interrupted response executable.
+  test.each([
+    "length",
+    "content-filter",
+    "error",
+    "other",
+    "unknown",
+  ] as const)("does not execute tools after %s, but retains call accounting", async (finishReason) => {
+    let executed = 0
+    const accounting: ModelCallEndEvent[] = []
+    const model = modelFromCalls([
+      [
+        { type: "stream-start" },
+        { type: "tool-call", toolCallId: "call", toolName: "echo", input: '{"value":"ok"}' },
+        { type: "finish", finishReason, usage: USAGE },
+      ],
+    ])
+    await expect(
+      runModelLoop({
+        model,
+        messages: [],
+        maxSteps: 1,
+        signal: new AbortController().signal,
+        tools: [
+          {
+            ...echo,
+            execute: async () => {
+              executed++
+              return "executed"
+            },
+          },
+        ],
+        onModelCallEnd: (event) => {
+          accounting.push(event)
+        },
+      })
+    ).rejects.toThrow("Cannot execute local tools")
+    expect(executed).toBe(0)
+    expect(accounting).toHaveLength(1)
+    expect(accounting[0]?.usage).toEqual(USAGE)
+  })
+
   test("normalizes metadata before completed steps, partial traces, and continuation requests", async () => {
     // Regression proof: return data unchanged in captureProviderData; undefined metadata then
     // either fails ingestion or survives the strict equality checks below.

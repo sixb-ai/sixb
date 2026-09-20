@@ -309,6 +309,7 @@ export class FoundryDeployments {
 
 const BOOLEAN_KEYS = [
   "responses",
+  "messages",
   "chatCompletion",
   "chat_completion",
   "completion",

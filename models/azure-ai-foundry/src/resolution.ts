@@ -48,7 +48,9 @@ export function resolveModel(input: {
       : deployment?.capabilities.chatCompletion === "true" ||
           deployment?.capabilities.chat_completion === "true"
         ? "chat"
-        : "responses")
+        : deployment?.capabilities.messages === "true"
+          ? "messages"
+          : "responses")
   if (protocol === "messages" && deployment?.connectionName)
     throw new UnsupportedModelFeatureError(
       `${PREFIX} Native Messages cannot route a deployment from a project connection; use the owning resource's project URL and API key.`

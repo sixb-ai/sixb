@@ -14,6 +14,40 @@ function stream(events: readonly JsonObject[]): ReadableStream<Uint8Array> {
   })
 }
 
+// Removal proof: prioritize sawToolCall over response status in finishReason.
+test.each([
+  ["max_output_tokens", "length"],
+  ["content_filter", "content-filter"],
+  ["future_reason", "other"],
+])("preserves incomplete response reason %s even after tool arguments close", async (reason, expected) => {
+  const events = []
+  for await (const event of responsesEvents(
+    stream([
+      {
+        type: "response.output_item.added",
+        item: { id: "tool", type: "function_call", call_id: "call", name: "act", arguments: "" },
+      },
+      { type: "response.function_call_arguments.done", item_id: "tool", arguments: "{}" },
+      {
+        type: "response.incomplete",
+        response: {
+          status: "incomplete",
+          incomplete_details: { reason },
+          usage: { input_tokens: 1, output_tokens: 2 },
+        },
+      },
+    ]),
+    new AbortController().signal,
+    { providerId: "test", modelId: "test", errorPrefix: "[Test]" }
+  ))
+    events.push(event)
+  expect(events.at(-1)).toMatchObject({
+    type: "finish",
+    finishReason: expected,
+    usage: { inputTokens: 1, outputTokens: 2 },
+  })
+})
+
 // Regression proof: remove the providerId checks in responses/input.ts. Foreign encrypted
 // state then enters the request and this test fails. No Azure/Gateway credentials are involved.
 test("round-trips encrypted reasoning and phases under independent provider identities", async () => {
