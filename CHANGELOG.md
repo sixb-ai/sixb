@@ -2,6 +2,62 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-20 — Framework 0.1.11
+
+### Highlights
+
+- Add Azure AI Foundry deployment discovery, model capabilities and pricing, publisher display,
+  and Responses, Chat, and Messages inference through shared model protocol implementations.
+  Move Anthropic and Vercel AI Gateway onto those protocols and guard interrupted tool calls.
+- Introduce Azure Blob Storage with verified multipart uploads and an Azure Container Apps
+  sandbox provider for ephemeral agent execution.
+- Expose browser-safe `SIXB_PUBLIC_` runtime environment values through `publicEnv` in custom apps,
+  and allow file navigation to authenticate with the app session.
+- Preserve OAuth callback redirects and let users resume pending connector account selection
+  after returning to the application, without an account-selection deadline.
+- Accelerate outbox delivery, drain safely during shutdown, and recover failed Redis command
+  connections. Add an indexed, bounded SQLite outbox claim path.
+- Stream large DuckLake reads with bounded concurrency, fix SQLite catalog writes, and bound
+  dataset version scans used by pipelines, projections, and maintenance.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker and storage consumers, and the CLI to `0.1.11` together. Rebuild
+  custom-app assets with the updated app and client packages.
+- Apply SQLite migration 040 before deployment; it adds the outbox publication-order index.
+  PostgreSQL has no new migration since `0.1.10`. Rehearse on a backup; there is no database
+  downgrade path. For SQLite, migrate once before starting runtime roles with `--no-migrate`.
+- Account-selection run responses no longer contain `expiresAt`. Update custom connection UIs
+  that rely on that field; OAuth authorization deadlines still apply before account selection.
+- Only put browser-safe values in `SIXB_PUBLIC_` variables: they are visible to every app user.
+  Restart the app server to pick up changes; rebuilding the app is unnecessary for value changes.
+- Foundry requires a full Azure project URL and an API key with deployment-discovery and inference
+  access. Azure sandboxes require an existing sandbox group and support ephemeral execution only;
+  named persistence and resume are unsupported.
+- Four packages require first publication: `@sixb/model-protocols`, `@sixb/azure-ai-foundry`,
+  `@sixb/blob-azure`, and `@sixb/sandboxes-azure`. Preserve their existing manifest versions below.
+  Rehearse their bootstrap against a local registry before explicitly publishing them under
+  `latest`. The normal `next` plan is blocked until `@sixb/model-protocols@0.1.1` is available,
+  because the updated Anthropic and Vercel AI Gateway providers require it exactly. Stage core
+  `0.1.11` under `next` first to satisfy the new packages' packed dependency floors. Bootstrap
+  model protocols before Foundry, then stage the remaining existing-package updates under `next`,
+  verify them, and promote the same artifacts to `latest`.
+
+### Package versions
+
+- `0.1.11`: `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/cli`, `@sixb/client`, `@sixb/core`,
+  `@sixb/orchestrator`, `@sixb/pg`, `@sixb/pipeline-worker`, `@sixb/projection-worker`,
+  `@sixb/rules-worker`, `@sixb/server`, `@sixb/sqlite`, `@sixb/sync-worker`,
+  `@sixb/workflow-worker`.
+- `0.1.8`: `@sixb/app`.
+- `0.1.7`: `@sixb/ducklake`.
+- `0.1.6`: `@sixb/broker-redis`.
+- `0.1.5`: `@sixb/lake-local`.
+- `0.1.3`: `@sixb/anthropic`, `@sixb/vercel-ai-gateway`.
+- `0.1.1`: `@sixb/azure-ai-foundry`, `@sixb/blob-azure`, `@sixb/model-protocols`
+  (first publications).
+- `0.1.0`: `@sixb/sandboxes-azure` (first publication).
+
 ## 2026-09-19 — Framework 0.1.10
 
 ### Highlights

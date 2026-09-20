@@ -1,6 +1,6 @@
 {
   "name": "@sixb/projection-worker",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "description": "Worker that runs Sixb projections",
   "keywords": [
     "sixb",
