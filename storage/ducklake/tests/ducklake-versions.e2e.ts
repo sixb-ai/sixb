@@ -44,6 +44,8 @@ describe("DuckLakeStorage versions and time travel", () => {
     test(`${catalog}: stops version searches at table creation and preserves history across renames`, async () => {
       // Red check: remove the table-creation lower bound from querySnapshotCandidates.
       // Resolving a new dataset then reads three pages of unrelated history instead of one.
+      // Creating 260 committed snapshots can exceed Bun's 5s default on CI runners.
+      // Allow 30s for setup; the query-count assertion enforces the performance bound.
       await storage.close()
       storage = createLocalDuckLakeStorage(await mkdtemp(join(rootDir, `${catalog}-`)), catalog)
       const runtime = await (
@@ -82,7 +84,7 @@ describe("DuckLakeStorage versions and time travel", () => {
       expect(
         await collectRows(storage.readRows({ datasetId: fresh.id, versionId: version.versionId }))
       ).toEqual([{ id: "original" }])
-    })
+    }, 30_000)
   }
 
   test("hydrates versions and reads historical rows with DuckLake time travel", async () => {
