@@ -39,10 +39,10 @@ export async function generateMetadata({ params }: DocPageProps): Promise<Metada
       description,
       images: [
         {
-          url: "/opengraph-image",
+          url: "/opengraph-image?v=2",
           width: 1200,
           height: 630,
-          alt: "Sixb Docs — Build operational software, end to end",
+          alt: "Sixb Docs — Your data. Your app. Your AI. One TypeScript framework.",
         },
       ],
     },
@@ -52,8 +52,8 @@ export async function generateMetadata({ params }: DocPageProps): Promise<Metada
       description,
       images: [
         {
-          url: "/opengraph-image",
-          alt: "Sixb Docs — Build operational software, end to end",
+          url: "/opengraph-image?v=2",
+          alt: "Sixb Docs — Your data. Your app. Your AI. One TypeScript framework.",
         },
       ],
     },

@@ -1,6 +1,6 @@
 import { ImageResponse } from "next/og"
 
-export const alt = "Sixb Docs — Build operational software, end to end"
+export const alt = "Sixb Docs — Your data. Your app. Your AI. One TypeScript framework."
 export const size = {
   width: 1200,
   height: 630,
@@ -47,16 +47,20 @@ export default function OpenGraphImage() {
       <div style={{ display: "flex", flexDirection: "column", gap: 24, maxWidth: 930 }}>
         <div
           style={{
-            fontSize: 72,
+            display: "flex",
+            flexDirection: "column",
+            fontSize: 64,
             fontWeight: 700,
             letterSpacing: "-0.045em",
             lineHeight: 1.05,
           }}
         >
-          Build operational software, end to end
+          <span>Your data. Your app. Your AI.</span>
+          <span>One TypeScript framework.</span>
         </div>
         <div style={{ color: "#62615d", fontSize: 28, lineHeight: 1.4 }}>
-          One typed ontology powers your data, APIs, automations, and apps.
+          Connect your tools, model your business, and build apps, workflows, and agents on the same
+          data.
         </div>
       </div>
 
@@ -71,7 +75,7 @@ export default function OpenGraphImage() {
           paddingTop: 26,
         }}
       >
-        <span>TypeScript framework for operational software</span>
+        <span>Connect. Model. Build.</span>
         <span style={{ color: "#2463eb", fontWeight: 600 }}>docs.sixb.ai</span>
       </div>
     </div>,
