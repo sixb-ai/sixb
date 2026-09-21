@@ -18,6 +18,7 @@ export interface AzureAIFoundryCatalogOptions {
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
 }
 export interface CatalogModel {
+  readonly kind: "language"
   readonly catalogProvider: "azure" | "fireworks-ai"
   readonly modelName: string
   readonly protocol?: FoundryProtocol
@@ -25,11 +26,20 @@ export interface CatalogModel {
   readonly rateCard?: LanguageModelRateCard
 }
 
+export interface CatalogEmbeddingModel {
+  readonly kind: "embedding"
+  readonly catalogProvider: "azure" | "fireworks-ai"
+  readonly modelName: string
+  readonly rateCard?: LanguageModelRateCard
+}
+
+type CatalogEntry = CatalogModel | CatalogEmbeddingModel
+
 /** Provider-scoped models.dev snapshot. Construction and offline reads never perform I/O. */
 export class RemoteModelsDevCatalog {
-  private snapshot: readonly CatalogModel[] = []
+  private snapshot: readonly CatalogEntry[] = []
   private loadedAt = 0
-  private pending?: Promise<readonly CatalogModel[]>
+  private pending?: Promise<readonly CatalogEntry[]>
   private readonly options: AzureAIFoundryCatalogOptions
   constructor(options: AzureAIFoundryCatalogOptions = {}) {
     this.options = { ...options }
@@ -49,9 +59,21 @@ export class RemoteModelsDevCatalog {
   async get(name: string, offline = false): Promise<CatalogModel | undefined> {
     return (await this.lookup(offline))(name)
   }
+  async getEmbedding(name: string, offline = false): Promise<CatalogEmbeddingModel | undefined> {
+    const models = offline ? this.snapshot : await this.load()
+    const matches = models.filter(
+      (m): m is CatalogEmbeddingModel =>
+        m.kind === "embedding" &&
+        m.catalogProvider === "azure" &&
+        m.modelName.toLowerCase() === name.toLowerCase()
+    )
+    return matches.length === 1 ? matches[0] : undefined
+  }
   /** Capture one snapshot so a batch of lookups cannot expire between deployments. */
   async lookup(offline = false): Promise<(name: string) => CatalogModel | undefined> {
-    const models = offline ? this.snapshot : await this.load()
+    const models = (offline ? this.snapshot : await this.load()).filter(
+      (m): m is CatalogModel => m.kind === "language"
+    )
     return (name) => {
       // Azure deployment names preserve publisher casing; models.dev IDs are lowercase.
       // Only a unique exact case-insensitive ID match is accepted, never fuzzy name matching.
@@ -126,11 +148,27 @@ export class RemoteModelsDevCatalog {
       const models = object(object(providerData)?.models)
       if (!models)
         throw new TypeError(`${PREFIX} models.dev response is missing ${catalogProvider}.models.`)
-      return Object.entries(models).flatMap(([id, value]) => {
+      return Object.entries(models).flatMap<CatalogEntry>(([id, value]) => {
         const raw = object(value)
         if (!raw || raw.id !== id)
           throw new TypeError(`${PREFIX} Invalid models.dev model identity.`)
         const modalities = object(raw.modalities)
+        if (
+          raw.type === "embedding" ||
+          raw.family === "text-embedding" ||
+          raw.family === "cohere-embed" ||
+          /^(text-embedding-|cohere-embed)/i.test(id) ||
+          strings(modalities?.output).includes("embedding")
+        ) {
+          return [
+            {
+              kind: "embedding",
+              catalogProvider,
+              modelName: id,
+              rateCard: rates(object(raw.cost), undefined),
+            },
+          ]
+        }
         if (!strings(modalities?.output).includes("text")) return []
         const limits = object(raw.limit)
         const provider = object(raw.provider)
@@ -144,6 +182,7 @@ export class RemoteModelsDevCatalog {
                 : undefined
         return [
           {
+            kind: "language",
             catalogProvider,
             modelName: id,
             protocol,

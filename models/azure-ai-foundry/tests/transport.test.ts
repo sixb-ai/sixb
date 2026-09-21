@@ -3,7 +3,7 @@ import { FoundryTransport } from "../src/transport"
 
 // Regression proof: remove redirect: "error" from post() and run this file.
 // The redirect destination receives credentials (and the body for 307/308).
-for (const protocol of ["responses", "chat", "messages"] as const) {
+for (const protocol of ["responses", "chat", "messages", "embeddings"] as const) {
   test.each([
     301, 302, 303, 307, 308,
   ])(`${protocol} rejects HTTP %s redirects without forwarding credentials or prompts`, async (status) => {
@@ -36,10 +36,16 @@ for (const protocol of ["responses", "chat", "messages"] as const) {
         },
       })
       try {
-        const transport = new FoundryTransport({
-          endpoint: `${origin.url.origin}/api/projects/test`,
-          apiKey: "private-key",
-        })
+        const transport = new FoundryTransport(
+          {
+            endpoint:
+              protocol === "embeddings"
+                ? origin.url.origin
+                : `${origin.url.origin}/api/projects/test`,
+            apiKey: "private-key",
+          },
+          protocol === "embeddings" ? "resource" : "project"
+        )
         const result = await transport
           .post(body, AbortSignal.timeout(2_000), "provider", "model", protocol)
           .then(

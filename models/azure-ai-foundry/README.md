@@ -26,7 +26,7 @@ The full project URL and API key are required. The provider uses the same key to
 deployments and call inference. Keys may be strings or synchronous/asynchronous functions;
 functions receive an abort signal and are evaluated for each Azure HTTP attempt.
 
-Model resolution always follows this sequence:
+Language model resolution follows this sequence:
 
 1. Find the deployment in the Azure project and read its model name, version, and publisher.
 2. Look up the underlying model in models.dev.
@@ -39,6 +39,45 @@ and missing deployments stop resolution; they never fall back to guessing the mo
 If models.dev is unavailable after successful Azure discovery, resolution uses cached catalog
 facts or an explicit `definition`. Without either, it fails. Malformed catalog data still fails;
 missing capabilities and prices remain unknown. Catalog listings and refresh report outages.
+
+## Embeddings
+
+Configure the resource endpoint separately: Foundry project endpoints do not route embeddings.
+
+```ts
+const foundry = createAzureAIFoundry({
+  endpoint: "https://my-resource.services.ai.azure.com/api/projects/my-project",
+  apiKey: () => process.env.AZURE_AI_FOUNDRY_API_KEY,
+  embeddings: {
+    endpoint: "https://my-resource.openai.azure.com/openai/v1",
+    apiKey: () => process.env.AZURE_OPENAI_API_KEY,
+  },
+})
+
+export const productEmbedding = foundry.embedding("product-embedding", {
+  dimensions: 1536,
+})
+```
+
+Register this binding under `models.embedding` and use it in an ObjectType's vector profile.
+The deployment name must exist in the project and refer to the same deployment on the configured
+resource. For connected deployments, supply the owning resource's endpoint and key.
+
+| Deployed model | Dimensions |
+| --- | --- |
+| `text-embedding-3-small` | 1–1536 |
+| `text-embedding-3-large` | 1–3072 |
+| `text-embedding-ada-002` | Exactly 1536 |
+
+Text batches accept up to 2048 nonempty strings; Azure enforces token limits. Other model families,
+including Cohere, are rejected. Calls return vectors in input order and propagate cancellation.
+
+Sixb object indexing and text search apply [usage accounting and limits](../../docs/models/usage-and-limits.md).
+Direct `productEmbedding.embed({ texts: ["running shoes"] })` bypasses Sixb accounting.
+Reference prices come from models.dev; use `rateCard` or `costEstimator` for deployment-specific
+pricing. Missing pricing remains unknown and blocks cost-limited calls before inference.
+
+See [embedding internals](./docs/embeddings.md) for resolution, transport, and failure handling.
 
 ## Stream a response
 
@@ -79,7 +118,7 @@ const cached = await model.resolve({ offline: true })
 
 | Behavior | Rule |
 | --- | --- |
-| Catalog listings | Supported project deployments |
+| Catalog listings | Supported language deployments |
 | Azure matching | Unique case-insensitive model ID match |
 | `FW-` fallback | Unique normalized match in the models.dev Fireworks catalog |
 | Fireworks normalization | Removes namespace/`FW-`; normalizes casing and numeric `5p3` → `5.3` |
