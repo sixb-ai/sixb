@@ -504,34 +504,6 @@
           },
           {
             "type": "object",
-            "required": ["kind", "input", "vector", "propertyId", "k"],
-            "additionalProperties": false,
-            "properties": {
-              "kind": {
-                "type": "string",
-                "enum": ["vector"]
-              },
-              "input": {
-                "$ref": "#/components/schemas/ObjectQuery"
-              },
-              "vector": {
-                "type": "array",
-                "items": {
-                  "type": "number"
-                }
-              },
-              "propertyId": {
-                "type": "string",
-                "minLength": 1
-              },
-              "k": {
-                "type": "integer",
-                "minimum": 1
-              }
-            }
-          },
-          {
-            "type": "object",
             "required": ["kind", "input", "vector", "profile", "k"],
             "additionalProperties": false,
             "properties": {
@@ -24472,9 +24444,6 @@
                                 "facet": {
                                   "type": "boolean"
                                 },
-                                "vector": {
-                                  "type": "boolean"
-                                },
                                 "weight": {
                                   "type": "number"
                                 }
@@ -24537,22 +24506,6 @@
                               "required": ["source", "model"],
                               "additionalProperties": false
                             }
-                          },
-                          "vector": {
-                            "type": "object",
-                            "properties": {
-                              "property": {
-                                "type": "string"
-                              },
-                              "source": {
-                                "type": "array",
-                                "items": {
-                                  "type": "string"
-                                }
-                              }
-                            },
-                            "required": ["property", "source"],
-                            "additionalProperties": false
                           }
                         },
                         "additionalProperties": false
@@ -24638,9 +24591,6 @@
                                         "type": "boolean"
                                       },
                                       "facet": {
-                                        "type": "boolean"
-                                      },
-                                      "vector": {
                                         "type": "boolean"
                                       },
                                       "weight": {
@@ -24820,9 +24770,6 @@
                               "facet": {
                                 "type": "boolean"
                               },
-                              "vector": {
-                                "type": "boolean"
-                              },
                               "weight": {
                                 "type": "number"
                               }
@@ -24885,22 +24832,6 @@
                             "required": ["source", "model"],
                             "additionalProperties": false
                           }
-                        },
-                        "vector": {
-                          "type": "object",
-                          "properties": {
-                            "property": {
-                              "type": "string"
-                            },
-                            "source": {
-                              "type": "array",
-                              "items": {
-                                "type": "string"
-                              }
-                            }
-                          },
-                          "required": ["property", "source"],
-                          "additionalProperties": false
                         }
                       },
                       "additionalProperties": false
@@ -24986,9 +24917,6 @@
                                       "type": "boolean"
                                     },
                                     "facet": {
-                                      "type": "boolean"
-                                    },
-                                    "vector": {
                                       "type": "boolean"
                                     },
                                     "weight": {

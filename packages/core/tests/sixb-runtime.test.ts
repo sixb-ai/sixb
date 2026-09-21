@@ -83,13 +83,12 @@ const SearchCustomer = defineObjectType({
       "embedding",
       { type: "array", items: "double" },
       {
-        query: { searchable: true, vector: true },
+        query: { searchable: true },
       }
     ),
   ],
   search: {
     defaultText: ["name", "email"],
-    vector: { property: "embedding", source: ["name", "email"] },
   },
 })
 
@@ -217,7 +216,6 @@ describe("SixbHost runtime", () => {
       .query()
       .where((r) => r.and(r.p.status.eq("active"), r.p.name.contains("Acme")))
       .search("acme", { fields: [SearchCustomer.p.name, SearchCustomer.p.email] })
-      .vector(SearchCustomer.p.embedding, [0.1, 0.2, 0.3], { k: 5 })
       .orderByRelevance()
       .orderBy(SearchCustomer.p.name, "asc")
       .limit(10)
@@ -241,7 +239,6 @@ describe("SixbHost runtime", () => {
       .query()
       .where((r) => r.and(r.p.status.eq("active"), r.p.name.contains("Acme")))
       .search("acme", { fields: [SearchCustomer.p.name, SearchCustomer.p.email] })
-      .vector(SearchCustomer.p.embedding, [0.1, 0.2, 0.3], { k: 5 })
       .orderByRelevance()
       .orderBy(SearchCustomer.p.name, "asc")
       .limit(10)
@@ -252,7 +249,6 @@ describe("SixbHost runtime", () => {
       .query()
       .where((r) => r.and(r.p.status.eq("active"), r.p.name.contains("Acme")))
       .search("acme", { fields: [SearchCustomer.p.name, SearchCustomer.p.email] })
-      .vector(SearchCustomer.p.embedding, [0.1, 0.2, 0.3], { k: 5 })
       .orderByRelevance()
       .orderBy(SearchCustomer.p.name, "asc")
       .limit(10)
@@ -263,7 +259,6 @@ describe("SixbHost runtime", () => {
         .query()
         .where((r) => r.and(r.p.status.eq("active"), r.p.name.contains("Acme")))
         .search("acme", { fields: [SearchCustomer.p.name, SearchCustomer.p.email] })
-        .vector(SearchCustomer.p.embedding, [0.1, 0.2, 0.3], { k: 5 })
         .orderByRelevance()
         .orderBy(SearchCustomer.p.name, "asc")
         .limit(10)

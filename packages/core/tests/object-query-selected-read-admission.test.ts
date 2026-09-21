@@ -37,21 +37,12 @@ const LineItem = defineObjectType({
     prop("cost", "double", {
       query: { searchable: true, filterable: true, sortable: true },
     }),
-    prop(
-      "embedding",
-      { type: "array", items: "double" },
-      { query: { searchable: true, vector: true } }
-    ),
-    prop(
-      "privateEmbedding",
-      { type: "array", items: "double" },
-      { query: { searchable: true, vector: true } }
-    ),
+    prop("embedding", { type: "array", items: "double" }, { query: { searchable: true } }),
+    prop("privateEmbedding", { type: "array", items: "double" }, { query: { searchable: true } }),
   ],
   links: [link("product", Product)],
   search: {
     defaultText: ["name"],
-    vector: { property: "embedding", source: ["name"] },
   },
 })
 
@@ -68,7 +59,37 @@ const Proposal = defineObjectType({
     }),
   ],
   links: [link("items", LineItem), link("reviewers", LineItem)],
-  search: { defaultText: ["title", "secret"] },
+  search: {
+    defaultText: ["title", "secret"],
+    vectors: {
+      content: {
+        source: ["title"],
+        model: {
+          providerId: "test",
+          modelId: "embedding",
+          definition: {
+            kind: "embedding",
+            providerId: "test",
+            modelId: "embedding",
+            dimensions: 1,
+          },
+        },
+      },
+      private: {
+        source: ["title", "secret"],
+        model: {
+          providerId: "test",
+          modelId: "embedding",
+          definition: {
+            kind: "embedding",
+            providerId: "test",
+            modelId: "embedding",
+            dimensions: 1,
+          },
+        },
+      },
+    },
+  },
 })
 
 const Asset = defineObjectType({
@@ -246,15 +267,15 @@ describe("selected object query admission", () => {
 
     expectAuthorized({
       kind: "vector",
-      input: traverse("items", start(Proposal.id)),
-      propertyId: "embedding",
+      input: start(Proposal.id),
+      profile: "content",
       vector: [1],
       k: 1,
     })
     expectDenied({
       kind: "vector",
-      input: start(LineItem.id),
-      propertyId: "embedding",
+      input: start(Proposal.id),
+      profile: "private",
       vector: [1],
       k: 1,
     })

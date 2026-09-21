@@ -177,13 +177,6 @@ export type ObjectQuery =
       kind: "vector"
       input: ObjectQuery
       vector: Array<number>
-      propertyId: string
-      k: number
-    }
-  | {
-      kind: "vector"
-      input: ObjectQuery
-      vector: Array<number>
       profile: string
       k: number
     }
@@ -8178,7 +8171,6 @@ export type ListObjectTypesResponses = {
         text?: boolean
         exact?: boolean
         facet?: boolean
-        vector?: boolean
         weight?: number
       }
     }>
@@ -8195,10 +8187,6 @@ export type ListObjectTypesResponses = {
             dimensions: number
           }
         }
-      }
-      vector?: {
-        property: string
-        source: Array<string>
       }
     }
     links: Array<{
@@ -8224,7 +8212,6 @@ export type ListObjectTypesResponses = {
           text?: boolean
           exact?: boolean
           facet?: boolean
-          vector?: boolean
           weight?: number
         }
       }>
@@ -8295,7 +8282,6 @@ export type GetObjectTypeResponses = {
         text?: boolean
         exact?: boolean
         facet?: boolean
-        vector?: boolean
         weight?: number
       }
     }>
@@ -8312,10 +8298,6 @@ export type GetObjectTypeResponses = {
             dimensions: number
           }
         }
-      }
-      vector?: {
-        property: string
-        source: Array<string>
       }
     }
     links: Array<{
@@ -8341,7 +8323,6 @@ export type GetObjectTypeResponses = {
           text?: boolean
           exact?: boolean
           facet?: boolean
-          vector?: boolean
           weight?: number
         }
       }>

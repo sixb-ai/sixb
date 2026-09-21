@@ -80,7 +80,7 @@ test("HTTP publishes named profile metadata and preserves cosine scores", async 
   expect(text).toContain('"dimensions":2')
 })
 
-test("wire vector queries require exactly one selector and reject internal stamps", () => {
+test("wire vector queries require a named profile and reject internal stamps", () => {
   const query = {
     kind: "vector",
     input: { kind: "start", objectTypeId: Product.id },
@@ -92,4 +92,8 @@ test("wire vector queries require exactly one selector and reject internal stamp
   expect(ObjectQuerySchema.safeParse({ ...query, propertyId: "raw" }).success).toBe(false)
   expect(ObjectQuerySchema.safeParse({ ...query, configuration: "forged" }).success).toBe(false)
   expect(ObjectQuerySchema.safeParse({ ...query, profile: undefined }).success).toBe(false)
+  // Restoring the old property selector makes this assertion fail.
+  expect(
+    ObjectQuerySchema.safeParse({ ...query, profile: undefined, propertyId: "raw" }).success
+  ).toBe(false)
 })

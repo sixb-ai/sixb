@@ -394,7 +394,6 @@ function snapshotPropertyQuery(
     text: query.text,
     exact: query.exact,
     facet: query.facet,
-    vector: query.vector,
     weight: query.weight,
   }
 }
@@ -413,12 +412,6 @@ function projectSearch(
   const defaultText =
     options.preserveEmpty || selectedDefaultText?.length ? selectedDefaultText : undefined
   const exact = options.preserveEmpty || selectedExact?.length ? selectedExact : undefined
-  const vector =
-    search.vector &&
-    visiblePropertyIds.has(search.vector.property) &&
-    search.vector.source.every((propertyId) => visiblePropertyIds.has(propertyId))
-      ? { property: search.vector.property, source: [...search.vector.source] }
-      : undefined
   const vectors =
     search.vectors === undefined
       ? undefined
@@ -434,7 +427,6 @@ function projectSearch(
     ...(title === undefined ? {} : { title }),
     ...(defaultText === undefined ? {} : { defaultText }),
     ...(exact === undefined ? {} : { exact }),
-    ...(vector === undefined ? {} : { vector }),
   }
   return Object.keys(projected).length > 0 || options.preserveEmpty ? projected : undefined
 }

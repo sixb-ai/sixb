@@ -70,11 +70,7 @@ const Proposal = defineObjectType({
     }),
     prop("rank", "double", { query: { searchable: true, filterable: true, sortable: true } }),
     prop("category", "string", { query: { searchable: true, filterable: true, facet: true } }),
-    prop(
-      "embedding",
-      { type: "array", items: "double" },
-      { query: { searchable: true, vector: true } }
-    ),
+    prop("embedding", { type: "array", items: "double" }, { query: { searchable: true } }),
     prop("secret", "string", { query: { searchable: true, filterable: true, facet: true } }),
   ],
   links: [

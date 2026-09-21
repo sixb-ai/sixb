@@ -73,7 +73,7 @@ const Customer = defineObjectType({
       "embedding",
       { type: "array", items: "double" },
       {
-        query: { searchable: true, vector: true },
+        query: { searchable: true },
       }
     ),
   ],
@@ -82,7 +82,21 @@ const Customer = defineObjectType({
     title: "name",
     defaultText: ["name", "email"],
     exact: ["id", "email"],
-    vector: { property: "embedding", source: ["name", "email"] },
+    vectors: {
+      content: {
+        source: ["name", "email"],
+        model: {
+          providerId: "test",
+          modelId: "embedding",
+          definition: {
+            kind: "embedding",
+            providerId: "test",
+            modelId: "embedding",
+            dimensions: 3,
+          },
+        },
+      },
+    },
   },
 })
 
@@ -104,20 +118,26 @@ const SearchProfileCustomer = defineObjectType({
     prop("notes", "string", {
       query: { searchable: true, text: true },
     }),
-    prop(
-      "embedding",
-      { type: "array", items: "double" },
-      { query: { searchable: true, vector: true } }
-    ),
-    prop(
-      "altEmbedding",
-      { type: "array", items: "double" },
-      { query: { searchable: true, vector: true } }
-    ),
+    prop("embedding", { type: "array", items: "double" }, { query: { searchable: true } }),
+    prop("altEmbedding", { type: "array", items: "double" }, { query: { searchable: true } }),
   ],
   search: {
     defaultText: ["name", "notes"],
-    vector: { property: "embedding", source: ["name"] },
+    vectors: {
+      content: {
+        source: ["name"],
+        model: {
+          providerId: "test",
+          modelId: "embedding",
+          definition: {
+            kind: "embedding",
+            providerId: "test",
+            modelId: "embedding",
+            dimensions: 3,
+          },
+        },
+      },
+    },
   },
 })
 
@@ -714,7 +734,7 @@ describe("object query validation", () => {
       {
         kind: "vector",
         vector: [0.1, 0.2, 0.3],
-        propertyId: "embedding",
+        profile: "content",
         k: 5,
         input: { kind: "start", objectTypeId: "Customer" },
       },
@@ -851,8 +871,8 @@ describe("object query validation", () => {
     const vectorProfileIssues = collectObjectQueryValidationIssues(
       {
         kind: "vector",
-        propertyId: "altEmbedding",
-        vector: [1, 0],
+        profile: "unknown",
+        vector: [1, 0, 0],
         k: 2,
         input: { kind: "start", objectTypeId: "SearchProfileCustomer" },
       },
@@ -869,7 +889,7 @@ describe("object query validation", () => {
     }
     expect(explicitText.result.objectTypeIds).toEqual(["TextNoDefault"])
     expect(missingDefaultIssues.map((issue) => issue.code)).toContain("missing_text_fields")
-    expect(vectorProfileIssues.map((issue) => issue.code)).toContain("vector_profile_missing")
+    expect(vectorProfileIssues.map((issue) => issue.code)).toContain("unknown_vector_profile")
   })
 })
 
@@ -2018,8 +2038,8 @@ describe("object query planner and executor", () => {
         limit: 5,
         input: {
           kind: "vector",
-          propertyId: "embedding",
-          vector: [1, 0],
+          profile: "content",
+          vector: [1, 0, 0],
           k: 2,
           input: { kind: "start", objectTypeId: "Customer" },
         },

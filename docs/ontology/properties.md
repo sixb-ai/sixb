@@ -166,7 +166,6 @@ prop("amount", "double", {
 | `text` | `boolean` | Keyword search over the property via `search(...)`. String-like schemas only. |
 | `exact` | `boolean` | Exact-match search profiles such as `search.exact`. |
 | `facet` | `boolean` | `facets(...)` bucket counts. Field must also be exact-matchable. |
-| `vector` | `boolean` | Vector search on numeric-array embedding fields, when the provider supports it. |
 | `weight` | `number` | Positive relative weight for text ranking. Only valid with `text: true`. |
 
 ### Which schemas support which flag
@@ -180,7 +179,6 @@ Each flag is checked against the property's schema at validation time:
 | `text` | `string` and string enums |
 | `exact` | any primitive schema except `fileRef` (so not `object`/`array`/`map`), plus enums |
 | `facet` | same as `exact` |
-| `vector` | numeric arrays (`integer`, `double`, or `decimal` items) |
 
 Predicate values are checked against the property schema when the query runs.
 

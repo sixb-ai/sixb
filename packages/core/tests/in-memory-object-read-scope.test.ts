@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { defineObjectType, type EmbeddingModel, prop } from "../src"
 import type { JsonValue } from "../src/json"
 import { compileSelectedObjectReadScope, linkBatchKey } from "../src/storage"
 import { InMemoryStorage } from "../src/storage/in-memory"
@@ -6,11 +7,8 @@ import {
   getInMemoryObjectMaterializerAdapter,
   InMemoryObjectStorage,
 } from "../src/storage/objects/in-memory"
-import {
-  createMaterializerTestFixture,
-  objectReadScopeContractOntology,
-  runObjectReadScopeContractSuite,
-} from "../src/testing"
+import { createTestSixb, runObjectReadScopeContractSuite } from "../src/testing"
+import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 runObjectReadScopeContractSuite("InMemoryStorage selected object-read scope contract", {
   createHarness: () => {
@@ -62,34 +60,44 @@ describe("InMemoryObjectStorage selected read behavior", () => {
   })
 
   test("constrains identity and properties before vector top-k", async () => {
-    const storage = new InMemoryStorage()
-    const fixture = createMaterializerTestFixture({
-      projectId: "in-memory-vector-scope",
-      ontology: objectReadScopeContractOntology,
-      storage,
-    })
-    await fixture.seed({
-      objects: [
-        {
-          ref: { objectTypeId: "ScopeProposal", primaryId: "visible" },
-          properties: { id: "visible", title: "Visible", embedding: [0, 1] },
-        },
-        {
-          ref: { objectTypeId: "ScopeProposal", primaryId: "hidden" },
-          properties: { id: "hidden", title: "Hidden", embedding: [1, 0] },
-        },
+    const model: EmbeddingModel = {
+      providerId: "test",
+      modelId: "scope",
+      definition: { kind: "embedding", providerId: "test", modelId: "scope", dimensions: 2 },
+      async embed({ texts }) {
+        return { vectors: texts.map((text) => (text.includes("Visible") ? [0, 1] : [1, 0])) }
+      },
+    }
+    const Proposal = defineObjectType({
+      id: "ScopeProposal",
+      name: "Proposal",
+      properties: [
+        prop("id", "string", { primary: true, required: true }),
+        prop("title", "string"),
       ],
+      search: { vectors: { content: { source: ["title"], model } } },
     })
+    const deps = createTestRuntimeDeps()
+    const sixb = createTestSixb({ ontology: [Proposal], models: { embedding: [model] }, ...deps })
+    const { storage } = deps
+    const projectId = sixb.execution.projectId
+    for (const [id, title] of [
+      ["visible", "Visible"],
+      ["hidden", "Hidden"],
+    ] as const) {
+      await sixb.objects(Proposal).upsert({ properties: { id, title } })
+      await sixb.objects(Proposal).byId(id).vector("content").index()
+    }
 
     const reader = storage.objects.createSelectedReadScope({
-      projectId: "in-memory-vector-scope",
+      projectId,
       scope: compileSelectedObjectReadScope({
         kind: "selected",
         roots: [
           {
             anchor: { objectTypeId: "ScopeProposal", primaryId: "visible" },
             node: {
-              objects: [{ objectTypeId: "ScopeProposal", propertyIds: ["id", "embedding"] }],
+              objects: [{ objectTypeId: "ScopeProposal", propertyIds: ["id", "title"] }],
               links: [],
             },
           },
@@ -98,14 +106,8 @@ describe("InMemoryObjectStorage selected read behavior", () => {
       limits: { maxTraversalFacts: 10, maxOutputJsonBytes: 10_000 },
     })
     const result = await reader.queryObjects?.({
-      projectId: "in-memory-vector-scope",
-      query: {
-        kind: "vector",
-        input: { kind: "start", objectTypeId: "ScopeProposal" },
-        propertyId: "embedding",
-        vector: [1, 0],
-        k: 1,
-      },
+      projectId,
+      query: sixb.objects(Proposal).query().vector("content", [1, 0], { k: 1 }).validate().query,
     })
 
     expect(result?.objects.map((row) => row.primaryId)).toEqual(["visible"])

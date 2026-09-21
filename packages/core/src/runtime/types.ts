@@ -849,9 +849,9 @@ export interface ObjectQueryBuilder<
     options?: { fields?: readonly ObjectSetQueryPropertyToken<TObjectType>[] }
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
 
-  /** Search a vector property at the current object type. */
+  /** Search a named vector profile at the current object type. */
   vector(
-    property: ObjectSetQueryPropertyToken<TObjectType> | VectorProfileName<TObjectType>,
+    profile: VectorProfileName<TObjectType>,
     vector: readonly number[],
     options: { k: number }
   ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>

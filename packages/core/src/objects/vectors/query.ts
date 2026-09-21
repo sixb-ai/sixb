@@ -1,7 +1,7 @@
 import type { ObjectQuery } from "../query/ir"
 
 export function hasVectorProfile(query: ObjectQuery): boolean {
-  if (query.kind === "vector" && query.profile !== undefined) return true
+  if (query.kind === "vector") return true
   if (query.kind === "set") return query.inputs.some(hasVectorProfile)
   return "input" in query && hasVectorProfile(query.input)
 }

@@ -29,3 +29,6 @@ profile.index()
 profile.prepare()
 // @ts-expect-error raw writes are internal
 profile.write({}, [1, 0])
+
+// @ts-expect-error Vector queries accept profile names, not business property tokens.
+sixb.objects(Product).query().vector(Product.p.title, [1, 0], { k: 1 })

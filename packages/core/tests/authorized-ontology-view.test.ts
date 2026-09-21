@@ -527,13 +527,27 @@ describe("authorized ontology view", () => {
           "embedding",
           { type: "array", items: "double" },
           {
-            query: { searchable: true, vector: true },
+            query: { searchable: true },
           }
         ),
       ],
       search: {
         title: "title",
-        vector: { property: "embedding", source: ["title", "secret"] },
+        vectors: {
+          content: {
+            source: ["title", "secret"],
+            model: {
+              providerId: "test",
+              modelId: "embedding",
+              definition: {
+                kind: "embedding",
+                providerId: "test",
+                modelId: "embedding",
+                dimensions: 2,
+              },
+            },
+          },
+        },
       },
     })
     const ontology = new OntologyRegistry({ sources: [CatalogOntology, SearchDocument] })

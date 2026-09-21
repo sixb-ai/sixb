@@ -2,16 +2,9 @@ import { assertEmbeddingModelRef } from "../../models/embedding-model"
 import type { ObjectType, Property, Schema, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
 
-type QueryFeature = "filterable" | "sortable" | "text" | "exact" | "facet" | "vector"
+type QueryFeature = "filterable" | "sortable" | "text" | "exact" | "facet"
 
-const queryFeatures: readonly QueryFeature[] = [
-  "filterable",
-  "sortable",
-  "text",
-  "exact",
-  "facet",
-  "vector",
-]
+const queryFeatures: readonly QueryFeature[] = ["filterable", "sortable", "text", "exact", "facet"]
 
 export function validateQueryMetadata(
   objectTypesById: ReadonlyMap<string, ObjectType>,
@@ -47,6 +40,11 @@ function validatePropertyQueryMetadata(
 ): void {
   const query = property.query
   if (!query) return
+  if ("vector" in query) {
+    throw new OntologyValidationError(
+      `[Sixb] Property '${property.id}' on '${ownerPath}' uses removed query.vector metadata. Declare search.vectors on the object type instead.`
+    )
+  }
 
   const enabledFeatures = queryFeatures.filter((feature) => query[feature] === true)
   if ((enabledFeatures.length > 0 || query.weight !== undefined) && query.searchable !== true) {
@@ -101,12 +99,6 @@ function validatePropertyQueryMetadata(
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables faceting, but its schema cannot be faceted`
     )
   }
-
-  if (query.vector && !isVectorSchema(schema, valueTypesById)) {
-    throw new OntologyValidationError(
-      `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables vector search, but its schema is not a numeric array`
-    )
-  }
 }
 
 function validateObjectSearchMetadata(
@@ -116,6 +108,11 @@ function validateObjectSearchMetadata(
 ): void {
   const search = objectType.search
   if (!search) return
+  if ("vector" in search) {
+    throw new OntologyValidationError(
+      `[Sixb] Object type '${typeId}' uses removed search.vector metadata. Declare named profiles in search.vectors instead.`
+    )
+  }
 
   for (const [name, profile] of Object.entries(search.vectors ?? {})) {
     if (!/^[a-zA-Z][a-zA-Z0-9_]*$/.test(name))
@@ -162,34 +159,6 @@ function validateObjectSearchMetadata(
     assertStaticSearchProfileProperty(typeId, property, "search.exact")
     if (property.id !== primaryPropertyId) {
       assertPropertyQueryFlag(typeId, property, "exact", "search.exact")
-    }
-  }
-
-  if (search.vector) {
-    const vectorProperty = requireObjectProperty(
-      typeId,
-      objectType,
-      search.vector.property,
-      "search.vector.property"
-    )
-    assertStaticSearchProfileProperty(typeId, vectorProperty, "search.vector.property")
-    assertPropertyQueryFlag(typeId, vectorProperty, "vector", "search.vector.property")
-
-    if (search.vector.source.length === 0) {
-      throw new OntologyValidationError(
-        `[Sixb] Object type '${typeId}' search.vector.source must include at least one source property`
-      )
-    }
-
-    for (const sourceId of search.vector.source) {
-      const sourceProperty = requireObjectProperty(
-        typeId,
-        objectType,
-        sourceId,
-        "search.vector.source"
-      )
-      assertStaticSearchProfileProperty(typeId, sourceProperty, "search.vector.source")
-      assertPropertyQueryFlag(typeId, sourceProperty, "text", "search.vector.source")
     }
   }
 }
@@ -311,12 +280,4 @@ function isSortableSchema(schema: Schema): boolean {
 
 function isFacetSchema(schema: Schema): boolean {
   return isExactSearchableSchema(schema)
-}
-
-function isVectorSchema(schema: Schema, valueTypesById: ReadonlyMap<string, ValueType>): boolean {
-  if (typeof schema === "string") return false
-  if (schema.type !== "array") return false
-
-  const itemSchema = resolveSchema(schema.items, valueTypesById, "vector item")
-  return itemSchema === "integer" || itemSchema === "double" || itemSchema === "decimal"
 }
