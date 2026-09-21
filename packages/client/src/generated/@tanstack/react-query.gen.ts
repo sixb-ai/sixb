@@ -117,7 +117,7 @@ import {
   queryObjects,
   reactivateAuthMember,
   reauthorizeConnectorConnection,
-  recreateAgentThreadWorkspace,
+  recreateAgentThreadSandbox,
   removeObjectLink,
   requestAction,
   requestPipelineRun,
@@ -452,9 +452,9 @@ import type {
   ReauthorizeConnectorConnectionData,
   ReauthorizeConnectorConnectionError,
   ReauthorizeConnectorConnectionResponse,
-  RecreateAgentThreadWorkspaceData,
-  RecreateAgentThreadWorkspaceError,
-  RecreateAgentThreadWorkspaceResponse,
+  RecreateAgentThreadSandboxData,
+  RecreateAgentThreadSandboxError,
+  RecreateAgentThreadSandboxResponse,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -4095,20 +4095,20 @@ export const getAgentThreadOptions = (options: Options<GetAgentThreadData>) =>
 /**
  * Explicitly recreate an unavailable or uncertain workspace without deleting its previous state
  */
-export const recreateAgentThreadWorkspaceMutation = (
-  options?: Partial<Options<RecreateAgentThreadWorkspaceData>>
+export const recreateAgentThreadSandboxMutation = (
+  options?: Partial<Options<RecreateAgentThreadSandboxData>>
 ): UseMutationOptions<
-  RecreateAgentThreadWorkspaceResponse,
-  RecreateAgentThreadWorkspaceError,
-  Options<RecreateAgentThreadWorkspaceData>
+  RecreateAgentThreadSandboxResponse,
+  RecreateAgentThreadSandboxError,
+  Options<RecreateAgentThreadSandboxData>
 > => {
   const mutationOptions: UseMutationOptions<
-    RecreateAgentThreadWorkspaceResponse,
-    RecreateAgentThreadWorkspaceError,
-    Options<RecreateAgentThreadWorkspaceData>
+    RecreateAgentThreadSandboxResponse,
+    RecreateAgentThreadSandboxError,
+    Options<RecreateAgentThreadSandboxData>
   > = {
     mutationFn: async (fnOptions) => {
-      const { data } = await recreateAgentThreadWorkspace({
+      const { data } = await recreateAgentThreadSandbox({
         ...options,
         ...fnOptions,
         throwOnError: true,

@@ -157,7 +157,7 @@ export function AgentChat({
             <WorkspaceRecovery
               pending={conversation.recreatingWorkspace}
               error={conversation.workspaceRecoveryError}
-              onRecreate={conversation.recreateWorkspace}
+              onRecreate={conversation.recreateSandbox}
             />
           ) : undefined
         }

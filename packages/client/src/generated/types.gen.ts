@@ -10059,7 +10059,7 @@ export type GetAgentThreadResponses = {
 
 export type GetAgentThreadResponse = GetAgentThreadResponses[keyof GetAgentThreadResponses]
 
-export type RecreateAgentThreadWorkspaceData = {
+export type RecreateAgentThreadSandboxData = {
   body: {
     expectedGeneration: string
   }
@@ -10067,10 +10067,10 @@ export type RecreateAgentThreadWorkspaceData = {
     threadId: string
   }
   query?: never
-  url: "/api/agent-threads/{threadId}/workspace/recreate"
+  url: "/api/agent-threads/{threadId}/sandbox/recreate"
 }
 
-export type RecreateAgentThreadWorkspaceErrors = {
+export type RecreateAgentThreadSandboxErrors = {
   /**
    * Response for status 400
    */
@@ -10091,10 +10091,10 @@ export type RecreateAgentThreadWorkspaceErrors = {
   }
 }
 
-export type RecreateAgentThreadWorkspaceError =
-  RecreateAgentThreadWorkspaceErrors[keyof RecreateAgentThreadWorkspaceErrors]
+export type RecreateAgentThreadSandboxError =
+  RecreateAgentThreadSandboxErrors[keyof RecreateAgentThreadSandboxErrors]
 
-export type RecreateAgentThreadWorkspaceResponses = {
+export type RecreateAgentThreadSandboxResponses = {
   /**
    * Response for status 200
    */
@@ -10111,18 +10111,16 @@ export type RecreateAgentThreadWorkspaceResponses = {
       id: string
     }
     title?: string
-    workspace?: {
-      params: {
-        [key: string]:
-          | string
-          | number
-          | boolean
-          | Array<unknown>
-          | {
-              [key: string]: unknown
-            }
-          | null
-      }
+    sandbox?: {
+      [key: string]:
+        | string
+        | number
+        | boolean
+        | Array<unknown>
+        | {
+            [key: string]: unknown
+          }
+        | null
     }
     status: "active" | "archived"
     activeRunId: string | null
@@ -10133,8 +10131,8 @@ export type RecreateAgentThreadWorkspaceResponses = {
   }
 }
 
-export type RecreateAgentThreadWorkspaceResponse =
-  RecreateAgentThreadWorkspaceResponses[keyof RecreateAgentThreadWorkspaceResponses]
+export type RecreateAgentThreadSandboxResponse =
+  RecreateAgentThreadSandboxResponses[keyof RecreateAgentThreadSandboxResponses]
 
 export type ListAgentThreadMessagesData = {
   body?: never

@@ -136,7 +136,7 @@ export function createSandboxDefinition<TParams extends ParamsConfig>(
 }
 
 /** Capture declarative data only; never retain caller-owned objects or include values in errors. */
-function captureEnvironment(value: unknown): SandboxEnvironment {
+export function captureEnvironment(value: unknown): SandboxEnvironment {
   if (
     !isPlainRecord(value) ||
     Object.keys(value).some((key) => !["source", "setup", "env", "network"].includes(key))

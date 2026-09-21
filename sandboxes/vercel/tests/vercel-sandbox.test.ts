@@ -278,4 +278,33 @@ describe("VercelSandboxFactory", () => {
     const factory = new VercelSandboxFactory({ snapshotId: "snap_1", image: "agent:latest" })
     await expect(factory.create()).rejects.toThrow("snapshotId cannot be combined")
   })
+
+  test("prepares a resolved environment exactly once after session settings, without native cloning", async () => {
+    // Regression proof: pass defaults.source into buildCreateParams for a managed environment.
+    const client = new FakeVercelClient()
+    let received: Parameters<VercelCreateSandbox>[0] | undefined
+    const factory = new VercelSandboxFactory(
+      { source: { type: "git", url: "https://example.com/static.git" } },
+      async (params) => {
+        received = params
+        return client
+      }
+    )
+    const sandbox = await factory.create({
+      environment: {
+        source: { type: "git", url: "https://example.com/resolved.git" },
+        setup: ["prepare"],
+      },
+      env: { APP_SETTING: "current" },
+      network: { mode: "all" },
+    })
+    expect(received).not.toHaveProperty("source")
+    expect(sandbox.workingDirectory).toBe("/vercel/sandbox/repository")
+    expect(client.commands.map((command) => [command.cmd, command.args])).toEqual([
+      ["git", ["clone", "--", "https://example.com/resolved.git", "repository"]],
+      ["bash", ["-lc", "prepare"]],
+    ])
+    expect(client.commands.every((command) => command.env?.APP_SETTING === "current")).toBe(true)
+    await sandbox.destroy()
+  })
 })

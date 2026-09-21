@@ -29761,10 +29761,10 @@
         }
       }
     },
-    "/api/agent-threads/{threadId}/workspace/recreate": {
+    "/api/agent-threads/{threadId}/sandbox/recreate": {
       "post": {
         "summary": "Explicitly recreate an unavailable or uncertain workspace without deleting its previous state",
-        "operationId": "recreateAgentThreadWorkspace",
+        "operationId": "recreateAgentThreadSandbox",
         "tags": ["Agent Threads"],
         "security": [
           {
@@ -29875,38 +29875,31 @@
                     "title": {
                       "type": "string"
                     },
-                    "workspace": {
+                    "sandbox": {
                       "type": "object",
-                      "properties": {
-                        "params": {
-                          "type": "object",
-                          "additionalProperties": {
-                            "description": "Any JSON-compatible value.",
-                            "nullable": true,
-                            "anyOf": [
-                              {
-                                "type": "string"
-                              },
-                              {
-                                "type": "number"
-                              },
-                              {
-                                "type": "boolean"
-                              },
-                              {
-                                "type": "array",
-                                "items": {}
-                              },
-                              {
-                                "type": "object",
-                                "additionalProperties": true
-                              }
-                            ]
+                      "additionalProperties": {
+                        "description": "Any JSON-compatible value.",
+                        "nullable": true,
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "boolean"
+                          },
+                          {
+                            "type": "array",
+                            "items": {}
+                          },
+                          {
+                            "type": "object",
+                            "additionalProperties": true
                           }
-                        }
-                      },
-                      "required": ["params"],
-                      "additionalProperties": false
+                        ]
+                      }
                     },
                     "status": {
                       "type": "string",

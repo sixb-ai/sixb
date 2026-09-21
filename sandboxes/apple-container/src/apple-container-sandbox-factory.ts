@@ -5,7 +5,12 @@ import type {
   SandboxNetworkPolicy,
 } from "@sixb/core"
 import { SandboxError, SandboxIsolationUnavailableError } from "@sixb/core"
-import { type ParamsConfig, type SandboxConfig, sandboxConfig } from "@sixb/core/sandboxes"
+import {
+  initializeSandboxEnvironment,
+  type ParamsConfig,
+  type SandboxConfig,
+  sandboxConfig,
+} from "@sixb/core/sandboxes"
 import { AppleContainerSandbox } from "./apple-container-sandbox"
 import {
   type AppleContainerCliConfig,
@@ -77,7 +82,7 @@ export class AppleContainerSandboxFactory<const TParams extends ParamsConfig = R
     }
     const cli = this.resolveCli()
     this.ensureAvailable(cli)
-    return await AppleContainerSandbox.create({
+    const sandbox = await AppleContainerSandbox.create({
       cli,
       defaultNetworkName: this.defaults.defaultNetworkName,
       internalNetworkPrefix: this.defaults.internalNetworkPrefix,
@@ -87,6 +92,14 @@ export class AppleContainerSandboxFactory<const TParams extends ParamsConfig = R
       env: { ...(this.defaults.env ?? {}), ...(options.env ?? {}) },
       workingDirectory: options.workingDirectory,
     })
+    try {
+      return options.environment
+        ? await initializeSandboxEnvironment(sandbox, options.environment, options.signal)
+        : sandbox
+    } catch (error) {
+      await sandbox.destroy()
+      throw error
+    }
   }
 
   private resolveCli(): AppleContainerCliConfig {

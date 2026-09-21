@@ -1,8 +1,7 @@
 import { createHash, randomUUID } from "node:crypto"
-import { posix } from "node:path"
-import type { AgentWorkspaceDefinition, Sandbox, Sixb } from "@sixb/core"
+import type { Sandbox, SandboxDefinition, Sixb } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
-import { SandboxStateUnavailableError } from "@sixb/core/sandboxes"
+import { SandboxStateUnavailableError, sandboxProjectDirectory } from "@sixb/core/sandboxes"
 import type {
   AgentThreadRecord,
   AgentWorkspaceState,
@@ -29,21 +28,21 @@ function workspaceError(message: string): Error {
 export async function openAgentWorkspace(input: {
   readonly context: AgentExecutionContext
   readonly sixb: Sixb
-  readonly definition?: AgentWorkspaceDefinition
+  readonly definition?: SandboxDefinition
   readonly thread: AgentThreadRecord
   readonly run: ConversationAgentRunRecord
   readonly signal: AbortSignal
 }): Promise<AgentWorkspaceLifecycle> {
   const { context, thread, run, signal } = input
   const factory = context.sandboxes
-  if (!input.definition || !thread.workspace || typeof factory.resume !== "function") {
+  if (!input.definition || !thread.sandbox || typeof factory.resume !== "function") {
     throw workspaceError("requires a configured recipe and persistent sandbox provider.")
   }
   const recipe = structuredClone(
     await waitForAbort(
       bounded(
         input.definition.resolve({
-          params: thread.workspace.params,
+          params: thread.sandbox,
           sixb: input.sixb,
         })
       ),
@@ -51,53 +50,22 @@ export async function openAgentWorkspace(input: {
     )
   )
   signal.throwIfAborted()
-  // Only credential-free HTTPS repositories are supported before the Git auth slice.
-  let url: URL
-  try {
-    url = new URL(recipe.source.url)
-  } catch {
-    throw workspaceError("source URL is invalid.")
-  }
-  if (
-    recipe.source.type !== "git" ||
-    url.protocol !== "https:" ||
-    url.username ||
-    url.password ||
-    url.search ||
-    url.hash ||
-    !url.pathname ||
-    url.pathname === "/"
-  ) {
-    throw workspaceError("source must be a credential-free HTTPS Git repository.")
-  }
-  if (
-    recipe.source.revision !== undefined &&
-    (!recipe.source.revision ||
-      recipe.source.revision.startsWith("-") ||
-      /[\x00-\x1f]/.test(recipe.source.revision))
-  ) {
-    throw workspaceError("source revision is invalid.")
-  }
-  if (recipe.setup?.some((command) => typeof command !== "string" || !command.trim())) {
-    throw workspaceError("setup commands must be non-empty strings.")
-  }
-  if (
-    recipe.env &&
-    Object.entries(recipe.env).some(
-      ([key, value]) =>
-        !/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || typeof value !== "string" || value.includes("\0")
-    )
-  )
-    throw workspaceError("environment must contain valid names and string values.")
+  const url = recipe.source ? new URL(recipe.source.url) : undefined
   const options = {
-    network: workspaceNetwork(recipe.network, new URL(context.apiBaseUrl).origin, url.origin),
+    env: recipe.env,
+    network: workspaceNetwork(
+      recipe.network,
+      new URL(context.apiBaseUrl).origin,
+      url?.origin,
+      !thread.workspaceState?.initialized
+    ),
   }
   // Compare recipe identity, not the mutable branch/remote in the guest.
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
-        url: url.href,
-        revision: recipe.source.revision ?? null,
+        url: url?.href ?? null,
+        revision: recipe.source?.revision ?? null,
       })
     )
     .digest("hex")
@@ -162,28 +130,22 @@ export async function openAgentWorkspace(input: {
       bounded(
         initialized
           ? factory.resume(name, options)
-          : factory.create({ ...options, persistence: { name } })
+          : factory.create({
+              ...options,
+              signal,
+              environment: { source: recipe.source, setup: recipe.setup },
+              persistence: { name },
+            })
       ),
       signal
     )
-    // Stay inside the provider's writable root; never assume the guest can create /sixb.
-    sandbox = repositorySandbox(acquired)
+    sandbox = initialized
+      ? sandboxProjectDirectory(acquired, recipe.source !== undefined)
+      : acquired
     await assertOwner()
     signal.throwIfAborted()
-    if (!initialized) {
-      await checkedCommand(acquired, "git", ["clone", "--", url.href, "repository"], { signal })
-      if (recipe.source.revision) {
-        await checkedCommand(sandbox, "git", ["checkout", recipe.source.revision, "--"], {
-          signal,
-        })
-      }
-      for (const command of recipe.setup ?? []) {
-        await assertOwner()
-        await checkedCommand(sandbox, "bash", ["-lc", command], { signal, env: recipe.env })
-      }
-      initialized = true
-    }
-    await cleanRunFiles(sandbox)
+    initialized = true
+    await cleanRunFiles(sandbox, recipe.source !== undefined)
     await assertOwner()
     signal.throwIfAborted()
   } catch (error) {
@@ -265,7 +227,7 @@ export async function openAgentWorkspace(input: {
           await bounded(Promise.allSettled([...pending]))
           await assertOwner()
           if (uncertainOperation) throw workspaceError("has an unconfirmed sandbox operation.")
-          await cleanRunFiles(session)
+          await cleanRunFiles(session, recipe.source !== undefined)
           await assertOwner()
           stopAttempted = true
           await bounded(session.stop())
@@ -304,38 +266,14 @@ async function checkedCommand(
 }
 
 /** Remove only framework-owned transient files. Refuse a redirected parent directory. */
-async function cleanRunFiles(sandbox: Sandbox): Promise<void> {
+async function cleanRunFiles(sandbox: Sandbox, hasSource: boolean): Promise<void> {
+  const checks = hasSource
+    ? ["git rev-parse --git-dir >/dev/null", 'test -z "$(git ls-files -- .sixb/agent)"']
+    : []
   await checkedCommand(sandbox, "bash", [
     "-c",
-    'git rev-parse --git-dir >/dev/null && test ! -L .sixb && test -z "$(git ls-files -- .sixb/agent)" && rm -rf -- .sixb/agent',
+    [...checks, "test ! -L .sixb", "rm -rf -- .sixb/agent"].join(" && "),
   ])
-}
-
-/** Keep checkout-relative commands/files inside the provider-owned writable directory. */
-function repositorySandbox(session: Sandbox): Sandbox {
-  const workingDirectory = posix.join(session.workingDirectory, "repository")
-  return {
-    id: session.id,
-    provider: session.provider,
-    get status() {
-      return session.status
-    },
-    workingDirectory,
-    runCommand: (command, args, options) =>
-      session.runCommand(command, args, {
-        ...options,
-        cwd: options?.cwd ?? workingDirectory,
-      }),
-    writeFiles: (files) =>
-      session.writeFiles(
-        files.map((file) => ({
-          ...file,
-          path: posix.isAbsolute(file.path) ? file.path : posix.join(workingDirectory, file.path),
-        }))
-      ),
-    stop: () => session.stop(),
-    destroy: () => session.destroy(),
-  }
 }
 
 function bounded<T>(operation: Promise<T>): Promise<T> {

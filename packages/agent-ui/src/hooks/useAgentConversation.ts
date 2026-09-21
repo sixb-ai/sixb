@@ -12,7 +12,7 @@ import {
   listAgentThreadsQueryKey,
   listModelsOptions,
   postAgentThreadMessageMutation,
-  recreateAgentThreadWorkspaceMutation,
+  recreateAgentThreadSandboxMutation,
   retryAgentRunMutation,
   useAgentActivityStream,
 } from "@sixb/client/hooks"
@@ -201,7 +201,7 @@ export function useAgentConversation({
   const postMessage = useMutation(postAgentThreadMessageMutation())
   const cancelRun = useMutation(cancelAgentRunMutation())
   const retryRun = useMutation(retryAgentRunMutation())
-  const recreateWorkspace = useMutation(recreateAgentThreadWorkspaceMutation())
+  const recreateSandbox = useMutation(recreateAgentThreadSandboxMutation())
 
   const presentation = presentActiveTurn({
     activeRunId,
@@ -340,9 +340,9 @@ export function useAgentConversation({
     void send("Continue from where you left off.", [], [])
   }
 
-  const handleRecreateWorkspace = () => {
+  const handleRecreateSandbox = () => {
     if (!thread?.workspaceState || isRunning) return
-    recreateWorkspace.mutate(
+    recreateSandbox.mutate(
       {
         path: { threadId: thread.id },
         body: { expectedGeneration: thread.workspaceState.generation },
@@ -399,9 +399,9 @@ export function useAgentConversation({
   return {
     agentLoading: agentQuery.isLoading,
     workspaceRecovery,
-    recreatingWorkspace: recreateWorkspace.isPending,
-    workspaceRecoveryError: recreateWorkspace.isError,
-    recreateWorkspace: handleRecreateWorkspace,
+    recreatingWorkspace: recreateSandbox.isPending,
+    workspaceRecoveryError: recreateSandbox.isError,
+    recreateSandbox: handleRecreateSandbox,
     agentError: agentQuery.isError,
     models,
     modelsLoading: modelsQuery.isLoading,

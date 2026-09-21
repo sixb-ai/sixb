@@ -245,7 +245,7 @@ describe("agent routes", () => {
       generation: "old-generation",
       sourceFingerprint: "a".repeat(64),
     })
-    const path = "/api/agent-threads/recovery/workspace/recreate"
+    const path = "/api/agent-threads/recovery/sandbox/recreate"
     const body = { expectedGeneration: "old-generation" }
     expect((await app.fetch(jsonRequest(path, "POST", body, stranger.csrfHeaders))).status).toBe(
       404

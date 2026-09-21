@@ -54,7 +54,7 @@ export type CreateExecutionAgentThreadInput<
 export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
   {
     /** Start fresh after an uncertain/expired workspace; never deletes the old generation. */
-    recreateWorkspace(
+    recreateSandbox(
       threadId: string,
       input: { readonly expectedGeneration: string }
     ): Promise<AgentThreadRecord>
@@ -152,7 +152,7 @@ export function createAgentRuntime<
   return {
     get: getAgent,
     threads: {
-      recreateWorkspace: async (threadId, input) => {
+      recreateSandbox: async (threadId, input) => {
         const thread = await getVisibleThreadRecord(threadId)
         if (!thread)
           throw new AgentRequestError("thread_not_found", "[Sixb] Agent thread not found.")
