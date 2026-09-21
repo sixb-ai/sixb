@@ -27,6 +27,12 @@ export class ModelExecutionSession {
     return signal ? AbortSignal.any([binding.signal, signal]) : binding.signal
   }
 
+  async admitEmbeddingCall(admit: () => Promise<void>): Promise<void> {
+    const admission = this.requireBinding().embeddingAdmission
+    if (admission) await admission(admit)
+    else await admit()
+  }
+
   accounting(): Promise<AiModelCallRecorder> {
     this.requireBinding()
     this.recorder ??= this.createRecorder()

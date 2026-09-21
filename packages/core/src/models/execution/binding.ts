@@ -3,6 +3,8 @@ import type { ModelsRuntime } from "../generation-types"
 export interface ModelExecutionAttempt {
   readonly attempt: number
   readonly signal: AbortSignal
+  /** Internal durable fence around admission; it must invoke admit exactly once to proceed. */
+  readonly embeddingAdmission?: (admit: () => Promise<void>) => Promise<void>
 }
 
 const bindings = new WeakMap<ModelsRuntime, (input: ModelExecutionAttempt) => void>()

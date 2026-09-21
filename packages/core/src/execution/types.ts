@@ -26,10 +26,9 @@ export interface SharedAccessDelegationRef {
   readonly sessionId: string
 }
 
-export type KernelOperation = {
-  readonly type: "ontology.recover"
-  readonly recoveryId: string
-}
+export type KernelOperation =
+  | { readonly type: "ontology.recover"; readonly recoveryId: string }
+  | { readonly type: "ontology.indexVectors"; readonly indexingId: string }
 
 /** Workload currently executing. This is provenance and never grants authority by itself. */
 export type ExecutionExecutor =
@@ -49,6 +48,7 @@ export type ExecutionExecutor =
  * An `execution` source is the single logical parent of a nested execution.
  */
 export type ExecutionSource =
+  | { readonly type: "ontologyCommit"; readonly commitId: string }
   | { readonly type: "http"; readonly requestId: string }
   | { readonly type: "webhook"; readonly deliveryId: string }
   | { readonly type: "schedule"; readonly eventId: string }

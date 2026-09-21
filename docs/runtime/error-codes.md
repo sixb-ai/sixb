@@ -65,6 +65,7 @@ Without this callback, Sixb logs failures to `console.error`. The callback repla
 | `action.phase.failed` | Post-commit action effects; the action's data remains committed |
 | `event.delivery.failed` | Event delivery; persisted events remain queued for retry |
 | `rule.evaluation.failed` | Rule evaluation; `source` identifies live evaluation or reconciliation |
+| `vector.indexing.failed` | Automatic vector indexing; identifies the object and profile |
 
 For `run.failed`, inspect `context.runKind` and `context.run.runId`. Use `context.notificationId`
 as a deduplication key when forwarding alerts. A failed rule reconciliation deserves attention:
@@ -110,6 +111,9 @@ errors reach their caller; if they fail a run, that run produces the notificatio
 | `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry the unchanged request while the durable run remains in its enqueue phase. |
 | `runtime.cancelled` | No | Work was cancelled before completion. | Confirm the cancellation before requesting another run. |
 | `sync.execution_failed` | No | A Sync failed while reading, validating, or writing its dataset. | Inspect the `onError` report, fix the source or data, then request a new run. |
+| `vector.model_unavailable` | No | The profile's embedding model is unavailable or incompatible. | Check model registration and dimensions, then index the profile again. |
+| `vector.response_invalid` | No | The model returned unusable vectors. | Check the provider response and profile dimensions before indexing again. |
+| `vector.outcome_unknown` | No | An interrupted call may already have been billed. | Inspect the provider outcome before explicitly indexing again. |
 | `webhook.delivery_failed` | Yes | A claimed webhook delivery failed retryably. | Let the provider retry; inspect the handler if it persists. |
 | `webhook.delivery_rejected` | No | A webhook handler returned a terminal non-success response. | Inspect the handler response and provider payload before sending a new delivery. |
 | `workflow.node_failed` | No | A node failed during preparation or execution. | Inspect its identity and the native error reported to `onError`. |

@@ -6,6 +6,7 @@ import { PgOntologyMaterializationStorage } from "./materializations"
 import { PgOntologyOutboxStorage } from "./outbox"
 import type { PgRootOperation } from "./shared"
 import { PgOntologySourceStorage } from "./sources"
+import { PgVectorIndexingStorage } from "./vector-indexing"
 import { PgOntologyVectorStorage } from "./vectors"
 
 export class PgOntologyStorage implements OntologyStorage {
@@ -13,6 +14,7 @@ export class PgOntologyStorage implements OntologyStorage {
   readonly sources: PgOntologySourceStorage
   readonly materializations: PgOntologyMaterializationStorage
   readonly outbox: PgOntologyOutboxStorage
+  readonly vectorIndexing: PgVectorIndexingStorage
   readonly vectors: PgOntologyVectorStorage
 
   constructor(input: {
@@ -27,6 +29,11 @@ export class PgOntologyStorage implements OntologyStorage {
       input.transactionContext
     )
     this.outbox = new PgOntologyOutboxStorage(input.runRootOperation)
+    this.vectorIndexing = new PgVectorIndexingStorage(
+      input.sql,
+      input.runRootOperation,
+      (session, projectId) => this.materializations.assertVectorSession(session, projectId)
+    )
     this.vectors = new PgOntologyVectorStorage(
       input.sql,
       input.runRootOperation,

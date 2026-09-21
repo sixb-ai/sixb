@@ -30,7 +30,7 @@ export interface EmbeddingModelResult extends EmbeddingModelResponseMetadata {
   readonly vectors: readonly (readonly number[])[]
 }
 
-/** Provider contract. Calling it is explicit; declaring a profile never invokes a model. */
+/** Serializable profile reference; executable providers stay on the server. */
 export interface EmbeddingModelRef {
   readonly providerId: string
   readonly modelId: string

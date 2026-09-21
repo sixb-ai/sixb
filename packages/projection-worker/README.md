@@ -39,6 +39,17 @@ await worker.start()
 - Retryable failures use capped exponential backoff and remain retryable without an attempt limit.
 - Semantic outcomes live in `ontology_commits`; run records contain lifecycle and physical progress.
 
+## Vector indexing
+
+When vector profiles are declared, the same process hosts a separate `queues.vectorIndexing`
+consumer. `vectorConcurrency` bounds its concurrent calls (default 1), independently of projection
+`concurrency`. No extra worker command is needed. Both consumers participate in start/stop/wait.
+
+The Materializer records coalesced intent with each effective source change. The dispatcher scans
+that intent in bounded pages and idempotently enqueues its generation id; a crash between the object
+commit and enqueue cannot lose work. It never scans historical objects. See the
+[internal indexing contract](../core/src/objects/vectors/README.md).
+
 ## Development
 
 ```bash

@@ -73,15 +73,17 @@ async function executeEmbedding(
     (sum, text) => sum + Math.ceil(new TextEncoder().encode(text).byteLength / 4),
     0
   )
-  await accounting.admitCall({
-    callId,
-    providerId: model.providerId,
-    modelId: model.modelId,
-    costEstimator: model.costEstimator,
-    inputTokens: { status: "estimated", tokens, method: "utf8BytesDividedByFour" },
-    outputTokenAllowance: 0,
-    estimatedTotalTokens: tokens,
-  })
+  await session.admitEmbeddingCall(() =>
+    accounting.admitCall({
+      callId,
+      providerId: model.providerId,
+      modelId: model.modelId,
+      costEstimator: model.costEstimator,
+      inputTokens: { status: "estimated", tokens, method: "utf8BytesDividedByFour" },
+      outputTokenAllowance: 0,
+      estimatedTotalTokens: tokens,
+    })
+  )
 
   let result: EmbeddingModelResult
   try {

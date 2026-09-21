@@ -1,6 +1,7 @@
 import type { SixbFailure } from "../errors/types"
 import type { ActionRunFailure } from "../storage/action-runs"
 import type { AgentRunFailureCode } from "../storage/agents"
+import type { VectorIndexingFailureCode } from "../storage/ontology/vector-indexing"
 import type { PipelineRunFailureCode } from "../storage/pipeline-runs"
 import type { ProjectionRunFailureCode } from "../storage/projection-runs"
 import type { SyncRunFailureCode } from "../storage/sync-runs"
@@ -166,12 +167,22 @@ export interface SixbRuleEvaluationFailedContext
   readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
 }
 
+/** A terminal automatic-indexing failure, correlated with its persisted request and profile. */
+export interface SixbVectorIndexingFailedContext
+  extends SixbFailureContext<"vector.indexing.failed"> {
+  readonly failure: SixbFailure<VectorIndexingFailureCode>
+  readonly indexingId: string
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly profile: string
+}
+
 /**
  * Context supplied to the global Sixb error handler, discriminated by `type`.
- *
  * Failure notifications never change the outcome of the operation they observe.
  */
 export type SixbErrorContext =
+  | SixbVectorIndexingFailedContext
   | SixbActionPhaseFailedContext
   | SixbRunFailedContext
   | SixbEventDeliveryFailedContext

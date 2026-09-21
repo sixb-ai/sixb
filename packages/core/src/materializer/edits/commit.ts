@@ -34,6 +34,7 @@ import { compileEditExecutionUnits, type EditExecutionUnit } from "./execution-u
 import { loadEditWorkingState } from "./load-state"
 import { applyEditOperation, type EditUndoJournal, undoEditJournal } from "./operations"
 import { stageEditPlan } from "./plan"
+import { authorizeVectorIndexingCommit } from "./vector-authority"
 import { commitVectorWrites } from "./vectors"
 import type { EditWorkingState } from "./working-state"
 
@@ -107,6 +108,7 @@ async function validateMutationExecution(
   input: NormalizedEditCommit,
   execution: MaterializerExecution
 ): Promise<void> {
+  if (await authorizeVectorIndexingCommit(storage, projectId, input, execution)) return
   if (input.source.kind !== "action") {
     assertRuntimeMutationExecution(execution)
     return
@@ -183,7 +185,7 @@ async function executeEditTransaction(
     workingState,
     editPlanContext(command)
   )
-  await drainStagedWork(context, storage.ontology, session)
+  await drainStagedWork(context, storage, session)
   await commitVectorWrites(context, storage, command.input, command.identity.commitId, session)
   const eventCount = await drainStagedEvents(
     context,

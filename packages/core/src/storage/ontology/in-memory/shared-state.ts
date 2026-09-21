@@ -18,6 +18,7 @@ import type {
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
 } from "../sources"
+import type { VectorIndexingWork } from "../vector-indexing"
 import type { StoredObjectVector } from "../vectors"
 
 export interface InMemorySourceRoot {
@@ -50,6 +51,10 @@ export interface InMemoryStoredLinkSlotOverride extends Omit<StoredLinkSlotOverr
 }
 
 export interface InMemoryOntologyState {
+  readonly vectorIndexing: Map<
+    string,
+    VectorIndexingWork & { projectId: string; dispatchAt: string }
+  >
   readonly vectors: Map<string, Map<string, StoredObjectVector>>
   readonly commitsById: Map<string, OntologyCommitRecord>
   readonly commitIdByIdempotency: Map<string, string>
@@ -76,6 +81,7 @@ export interface InMemoryOntologyStorageTestHooks {
 export function createInMemoryOntologyState(): InMemoryOntologyState {
   return {
     vectors: new Map(),
+    vectorIndexing: new Map(),
     commitsById: new Map(),
     commitIdByIdempotency: new Map(),
     commitIdByOrigin: new Map(),

@@ -152,8 +152,6 @@ Register the same `EmbeddingModel` in `models.embedding: [productEmbedding]`; la
 are optional. Vercel Gateway provides `gateway.embedding(modelId, { dimensions })`.
 
 ```ts
-await sixb.objects(Product).byId("product-1").vector("content").index()
-
 const { objects } = await sixb.objects(Product)
   .query()
   .vector("content", "lightweight running shoes", { k: 10 })
@@ -162,9 +160,13 @@ const { objects } = await sixb.objects(Product)
 // objects[i].score: cosine similarity, highest first.
 ```
 
-Profile names are autocompleted. `index()` reads the sources, calls the configured model outside
-any transaction, then conditionally stores the result. A concurrent object edit or reindex rejects
-the stale result; call `index()` again to recompute. There are no automatic jobs or provider retries.
+During projections, Sixb automatically generates and updates embeddings when a profile's source
+properties change. Generation runs in the background; updated objects become searchable through
+that profile once their embedding is ready. Profile names are autocompleted.
+
+Adding or changing a profile does not reindex existing objects. To explicitly index or retry an
+object, use `await sixb.objects(Product).byId("product-1").vector("content").index()`.
+
 The same query works with `objects(Product)` from `@sixb/client/query`: text is embedded on the
 server with the profile's registered model, after validation and authorization. Each terminal
 execution makes one embedding call; `validate()` and `explain()` make none. Query embeddings are

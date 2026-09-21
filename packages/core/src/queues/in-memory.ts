@@ -20,6 +20,7 @@ import type {
   SubagentQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
+  VectorIndexingQueueJob,
   WorkflowQueueJob,
   WorkflowQueueJobFailureCode,
 } from "./types"
@@ -402,6 +403,10 @@ export class InMemoryQueues implements Queues {
   readonly scope = "process" as const
   private readonly store = new InMemoryQueueStore()
 
+  readonly vectorIndexing = new InMemoryQueue<
+    VectorIndexingQueueJob,
+    "internal.unexpected" | "runtime.cancelled"
+  >(this.store, "vector.indexing")
   readonly syncRuns = new InMemoryQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>(
     this.store,
     "sync.runs"

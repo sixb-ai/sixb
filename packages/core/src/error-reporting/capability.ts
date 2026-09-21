@@ -4,10 +4,12 @@ import {
   type ReportEventDeliveryFailureInput,
   type ReportRuleEvaluationFailureInput,
   type ReportRunFailureInput,
+  type ReportVectorIndexingFailureInput,
   reportActionPhaseFailure as reportActionPhaseFailureWith,
   reportEventDeliveryFailure as reportEventDeliveryFailureWith,
   reportRuleEvaluationFailure as reportRuleEvaluationFailureWith,
   reportRunFailure as reportRunFailureWith,
+  reportVectorIndexingFailure as reportVectorIndexingFailureWith,
 } from "./reports"
 import type { SixbErrorHandler } from "./types"
 
@@ -48,6 +50,7 @@ export type {
   ReportEventDeliveryFailureInput,
   ReportRuleEvaluationFailureInput,
   ReportRunFailureInput,
+  ReportVectorIndexingFailureInput,
 }
 
 export function reportActionPhaseFailure(
@@ -84,4 +87,12 @@ export function reportRuleEvaluationFailure(
 
 export async function flushSixbErrors(host: unknown, timeoutMs?: number): Promise<void> {
   await resolveSixbErrorReporter(host).flush(timeoutMs)
+}
+
+export function reportVectorIndexingFailure(
+  host: object,
+  error: unknown,
+  input: ReportVectorIndexingFailureInput
+): void {
+  reportVectorIndexingFailureWith(resolveSixbErrorReporter(host), error, input)
 }

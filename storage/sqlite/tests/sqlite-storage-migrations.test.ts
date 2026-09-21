@@ -322,6 +322,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 42,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "043-vector-indexing",
+    status: "applied",
+    version: 43,
+  },
 ]
 
 afterEach(async () => {

@@ -130,6 +130,18 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Execution was cancelled.",
     retryable: false,
   },
+  "vector.model_unavailable": {
+    publicMessage: "The embedding model configured for this vector profile is unavailable.",
+    retryable: false,
+  },
+  "vector.response_invalid": {
+    publicMessage: "The embedding response is invalid for this vector profile.",
+    retryable: false,
+  },
+  "vector.outcome_unknown": {
+    publicMessage: "The embedding call was interrupted; its outcome and charges may be unknown.",
+    retryable: false,
+  },
   "sync.execution_failed": {
     publicMessage: "Sync execution failed.",
     retryable: false,

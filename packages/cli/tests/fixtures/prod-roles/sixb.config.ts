@@ -81,6 +81,9 @@ class SharedQueues implements Queues {
     return this.inner.health()
   }
 
+  get vectorIndexing() {
+    return this.inner.vectorIndexing
+  }
   get syncRuns() {
     return this.inner.syncRuns
   }

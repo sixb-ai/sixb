@@ -197,6 +197,8 @@ function sourceIdentifier(source: ExecutionSource): {
   readonly value: string
 } {
   switch (source.type) {
+    case "ontologyCommit":
+      return { label: "Execution source commit id", value: source.commitId }
     case "http":
       return { label: "Execution source request id", value: source.requestId }
     case "webhook":

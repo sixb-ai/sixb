@@ -556,6 +556,13 @@ export type {
 } from "./ontology"
 export { ONTOLOGY_OUTBOX_FAILURE_CODES } from "./ontology"
 export type {
+  OntologyVectorIndexingStorage,
+  VectorIndexingFailureCode,
+  VectorIndexingRequest,
+  VectorIndexingWork,
+} from "./ontology/vector-indexing"
+export { VECTOR_INDEXING_FAILURE_CODES } from "./ontology/vector-indexing"
+export type {
   FinishPipelineRunInput,
   FinishPipelineStepRunInput,
   ListLatestPipelineRunsInput,
@@ -671,7 +678,6 @@ export type {
   TimeseriesPoint,
   TimeseriesStorage,
 } from "./timeseries"
-
 export type { Storage, StorageTransactionOptions } from "./types"
 export type {
   FinishWebhookRunInput,

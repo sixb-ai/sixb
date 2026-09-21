@@ -54,6 +54,37 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
   }
 
   describe(label, () => {
+    test("vector indexing has independent delivery capacity and idempotent generation ids", async () => {
+      await withQueues(async (queues) => {
+        const jobs = [
+          {
+            id: "generation-1",
+            type: "vector.index.requested" as const,
+            payload: { indexingId: "generation-1" },
+          },
+        ]
+        await queues.vectorIndexing.enqueue({ projectId: "project-a", jobs })
+        await queues.vectorIndexing.enqueue({ projectId: "project-a", jobs })
+        expect(
+          await queues.projections.claim({ projectId: "project-a", workerId: "projection" })
+        ).toHaveLength(0)
+        const claimed = await queues.vectorIndexing.claim({
+          projectId: "project-a",
+          workerId: "indexing",
+          limit: 2,
+        })
+        expect(claimed).toHaveLength(1)
+        expect(claimed[0]!.job.payload).toEqual({ indexingId: "generation-1" })
+        await queues.vectorIndexing.complete({
+          projectId: "project-a",
+          jobId: claimed[0]!.job.id,
+          leaseId: claimed[0]!.leaseId,
+        })
+        expect(
+          await queues.vectorIndexing.claim({ projectId: "project-a", workerId: "indexing" })
+        ).toHaveLength(0)
+      })
+    })
     describe("enqueue", () => {
       test("returns envelopes with generated id, createdAt, availableAt, attempt=0", async () => {
         await withQueues(async (queues) => {

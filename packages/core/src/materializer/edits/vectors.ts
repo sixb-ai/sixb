@@ -83,5 +83,13 @@ export async function commitVectorWrites(
         lastCommitId: commitId,
       },
     })
+    await storage.ontology.vectorIndexing?.complete({
+      session,
+      projectId: context.projectId,
+      ref: prepared.ref,
+      profile: prepared.profile,
+      configuration: prepared.configuration,
+      sourceFingerprint: prepared.sourceFingerprint,
+    })
   }
 }
