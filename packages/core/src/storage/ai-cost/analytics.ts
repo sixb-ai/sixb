@@ -1,9 +1,4 @@
-import {
-  type AiModelCallUsage,
-  type AiModelCallUsageRecord,
-  aggregateAiModelCallUsage,
-  normalizeAiModelCallUsage,
-} from "../ai-usage"
+import { type AiModelCallUsageRecord, normalizeAiModelCallUsage } from "../ai-usage"
 import type {
   AiAccountingAgentBreakdown,
   AiAccountingAggregate,
@@ -65,6 +60,7 @@ export interface AiAccountingAggregateFragment {
   readonly modelCallCount: string
   readonly usage: {
     readonly reportedCallCount: string
+    readonly completeCallCount: string
     readonly inputTokens: AiAccountingUsageMeterFragment
     readonly outputTokens: AiAccountingUsageMeterFragment
     readonly uncachedInputTokens: AiAccountingUsageMeterFragment
@@ -358,9 +354,21 @@ export function aiAccountingBucketStart(at: Date, bucket: AiAccountingBucket): D
 function aggregateAccountingItems(
   items: readonly AiAccountingRecordSetItem[]
 ): AiAccountingAggregate {
+  const value = aggregateFragmentAccumulator()
+  value.modelCallCount = BigInt(items.length)
+  for (const item of items) {
+    const usage = normalizeAiModelCallUsage(item.usage.usage)
+    if (usage.reportingStatus !== "unavailable") value.reportedUsageCallCount += 1n
+    if (usage.reportingStatus === "complete") value.completeUsageCallCount += 1n
+    for (const field of AGGREGATE_USAGE_FIELDS) {
+      if (usage[field] === undefined) continue
+      value.usage[field].presentCallCount += 1n
+      value.usage[field].total += BigInt(usage[field])
+    }
+  }
   return {
     modelCallCount: items.length,
-    usage: aggregateAiModelCallUsage(items.map((item) => item.usage.usage)),
+    ...finishAggregateUsage(value),
     costs: aggregateCosts(items),
   }
 }
@@ -405,6 +413,7 @@ type AggregateUsageField = (typeof AGGREGATE_USAGE_FIELDS)[number]
 interface AggregateFragmentAccumulator {
   modelCallCount: bigint
   reportedUsageCallCount: bigint
+  completeUsageCallCount: bigint
   usage: Record<AggregateUsageField, { presentCallCount: bigint; total: bigint }>
   amounts: Map<string, bigint>
   ratedCallCount: bigint
@@ -416,6 +425,7 @@ function aggregateFragmentAccumulator(): AggregateFragmentAccumulator {
   return {
     modelCallCount: 0n,
     reportedUsageCallCount: 0n,
+    completeUsageCallCount: 0n,
     usage: Object.fromEntries(
       AGGREGATE_USAGE_FIELDS.map((field) => [field, { presentCallCount: 0n, total: 0n }])
     ) as AggregateFragmentAccumulator["usage"],
@@ -446,6 +456,10 @@ function appendAggregateFragment(
     fragment.usage.reportedCallCount,
     "reported usage call count"
   )
+  target.completeUsageCallCount += naturalBigInt(
+    fragment.usage.completeCallCount,
+    "complete usage call count"
+  )
   for (const field of AGGREGATE_USAGE_FIELDS) {
     const source = fragment.usage[field]
     const presentCallCount = naturalBigInt(source.presentCallCount, `${field} call count`)
@@ -473,6 +487,7 @@ function finishAggregateFragment(value: AggregateFragmentAccumulator): AiAccount
   if (
     classifiedCallCount !== value.modelCallCount ||
     value.reportedUsageCallCount > value.modelCallCount ||
+    value.completeUsageCallCount > value.reportedUsageCallCount ||
     AGGREGATE_USAGE_FIELDS.some(
       (field) => value.usage[field].presentCallCount > value.modelCallCount
     )
@@ -480,22 +495,9 @@ function finishAggregateFragment(value: AggregateFragmentAccumulator): AiAccount
     throw new TypeError("[Sixb] AI accounting SQL aggregate counts are inconsistent.")
   }
   const modelCallCount = safeAggregateNumber(value.modelCallCount, "model-call count")
-  const usageInput: Partial<Record<AggregateUsageField, number>> = {}
-  if (value.modelCallCount > 0n) {
-    for (const field of AGGREGATE_USAGE_FIELDS) {
-      const aggregate = value.usage[field]
-      if (aggregate.presentCallCount === value.modelCallCount) {
-        usageInput[field] = safeAggregateNumber(aggregate.total, field)
-      }
-    }
-  }
-  let usage: AiModelCallUsage = normalizeAiModelCallUsage(usageInput)
-  if (usage.reportingStatus === "unavailable" && value.reportedUsageCallCount > 0n) {
-    usage = { ...usage, reportingStatus: "partial" }
-  }
   return {
     modelCallCount,
-    usage,
+    ...finishAggregateUsage(value),
     costs: {
       amounts: [...value.amounts]
         .sort(([left], [right]) => left.localeCompare(right))
@@ -506,6 +508,42 @@ function finishAggregateFragment(value: AggregateFragmentAccumulator): AiAccount
         "unpriceable call count"
       ),
       unvaluedCallCount: safeAggregateNumber(value.unvaluedCallCount, "unvalued call count"),
+    },
+  }
+}
+
+function finishAggregateUsage(
+  value: AggregateFragmentAccumulator
+): Pick<AiAccountingAggregate, "usage" | "usageCoverage"> {
+  const counts: Partial<Record<AggregateUsageField | "totalTokens", number>> = {}
+  const fieldCallCounts = {} as Record<AggregateUsageField, number>
+  for (const field of AGGREGATE_USAGE_FIELDS) {
+    const aggregate = value.usage[field]
+    fieldCallCounts[field] = safeAggregateNumber(aggregate.presentCallCount, `${field} call count`)
+    if (aggregate.presentCallCount > 0n) {
+      counts[field] = safeAggregateNumber(aggregate.total, field)
+    }
+  }
+  // Only the top-level meters contribute: cache/reasoning partitions overlap them.
+  if (counts.inputTokens !== undefined || counts.outputTokens !== undefined) {
+    counts.totalTokens = safeAggregateNumber(
+      value.usage.inputTokens.total + value.usage.outputTokens.total,
+      "totalTokens"
+    )
+  }
+  return {
+    usage: {
+      ...counts,
+      reportingStatus:
+        value.reportedUsageCallCount === 0n
+          ? "unavailable"
+          : value.completeUsageCallCount === value.modelCallCount
+            ? "complete"
+            : "partial",
+    },
+    usageCoverage: {
+      completeCallCount: safeAggregateNumber(value.completeUsageCallCount, "complete call count"),
+      fieldCallCounts,
     },
   }
 }

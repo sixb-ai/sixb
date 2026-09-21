@@ -41,7 +41,25 @@ export const AiCostSummarySchema = z.object({
 
 const AiAccountingAggregateSchema = z.object({
   modelCallCount: z.number().int().nonnegative(),
-  usage: AiUsageSummarySchema,
+  usage: AiUsageSummarySchema.describe(
+    "Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete."
+  ),
+  usageCoverage: z.object({
+    completeCallCount: z
+      .number()
+      .int()
+      .nonnegative()
+      .describe("Calls reporting both inputTokens and outputTokens."),
+    fieldCallCounts: z.object({
+      inputTokens: z.number().int().nonnegative(),
+      outputTokens: z.number().int().nonnegative(),
+      uncachedInputTokens: z.number().int().nonnegative(),
+      cacheReadInputTokens: z.number().int().nonnegative(),
+      cacheWriteInputTokens: z.number().int().nonnegative(),
+      textOutputTokens: z.number().int().nonnegative(),
+      reasoningOutputTokens: z.number().int().nonnegative(),
+    }),
+  }),
   costs: AiCostSummarySchema,
 })
 

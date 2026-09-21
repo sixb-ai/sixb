@@ -342,12 +342,18 @@ export function AiUsagePage() {
             <AiUsageMetricCard
               label="Total tokens"
               value={formatOptionalTokens(totals.usage.totalTokens)}
-              description={reportingDescription(totals.usage.reportingStatus)}
+              description={reportingDescription(totals)}
               icon={<DatabaseZap className="size-4" />}
-              sparkline={overview.series.map((period) => ({
-                timestamp: period.start,
-                value: period.usage.totalTokens ?? 0,
-              }))}
+              sparkline={
+                overview.series.every(
+                  (period) => bucketTokenValue(period, "totalTokens") !== undefined
+                )
+                  ? overview.series.map((period) => ({
+                      timestamp: period.start,
+                      value: bucketTokenValue(period, "totalTokens")!,
+                    }))
+                  : undefined
+              }
             />
             <AiUsageMetricCard
               label="Model calls"
@@ -420,7 +426,7 @@ export function AiUsagePage() {
             <ChartCard
               className="xl:col-span-2"
               title="Token usage"
-              description="Input and output tokens reported by providers"
+              description={`Known input and output tokens. ${reportingDescription(totals)}`}
             >
               <AiUsageTimeSeries
                 data={tokenSeries}
@@ -443,6 +449,17 @@ export function AiUsagePage() {
                 xFormatter={(value) => formatBucketLabel(value, bucket)}
                 valueFormatter={(value) => formatCompactNumber(value)}
                 ariaLabel="Input and output token usage by period"
+                tooltipLabelFormatter={(value) => {
+                  const period = overview.series.find((period) => period.start === value)
+                  return (
+                    <span className="block max-w-56 whitespace-normal">
+                      {formatBucketLabel(value, bucket)}
+                      {period ? (
+                        <span className="mt-1 block">{reportingDescription(period)}</span>
+                      ) : null}
+                    </span>
+                  )
+                }}
               />
             </ChartCard>
             <AccountingInsights
@@ -528,7 +545,9 @@ function AccountingQualityNotice({
 }) {
   const messages: string[] = []
   if (overview.totals.usage.reportingStatus !== "complete") {
-    messages.push("Some providers did not report a complete token partition")
+    messages.push(
+      `${reportingDescription(overview.totals)}; token totals include only known counts`
+    )
   }
   if (coverage < 100) {
     messages.push(
@@ -573,8 +592,8 @@ function AccountingInsights({
   valuationBreakdown: readonly { key: string; label: string; value: number }[]
 }) {
   const usage = overview.totals.usage
-  const cacheHitRate = percentageOf(usage.cacheReadInputTokens, usage.inputTokens)
-  const reasoningShare = percentageOf(usage.reasoningOutputTokens, usage.outputTokens)
+  const cacheHitRate = usagePercentage(overview.totals, "cacheReadInputTokens", "inputTokens")
+  const reasoningShare = usagePercentage(overview.totals, "reasoningOutputTokens", "outputTokens")
   const totalCalls = overview.totals.modelCallCount
 
   return (
@@ -589,11 +608,13 @@ function AccountingInsights({
           <InsightMetric
             label="Cached input"
             value={formatOptionalTokens(usage.cacheReadInputTokens)}
+            description={reportingDescription(overview.totals, "cacheReadInputTokens")}
           />
           <InsightMetric label="Reasoning share" value={formatOptionalPercentage(reasoningShare)} />
           <InsightMetric
             label="Reasoning tokens"
             value={formatOptionalTokens(usage.reasoningOutputTokens)}
+            description={reportingDescription(overview.totals, "reasoningOutputTokens")}
           />
         </div>
 
@@ -634,11 +655,20 @@ function AccountingInsights({
   )
 }
 
-function InsightMetric({ label, value }: { label: string; value: string }) {
+function InsightMetric({
+  label,
+  value,
+  description,
+}: {
+  label: string
+  value: string
+  description?: string
+}) {
   return (
     <div>
       <p className="text-xs text-muted-foreground">{label}</p>
       <p className="mt-1 text-lg font-semibold tracking-tight tabular-nums">{value}</p>
+      {description ? <p className="mt-1 text-xs text-muted-foreground">{description}</p> : null}
     </div>
   )
 }
@@ -780,6 +810,7 @@ function amountForCurrency(
 function bucketTokenValue(
   period: Overview["series"][number],
   key:
+    | "totalTokens"
     | "inputTokens"
     | "outputTokens"
     | "cacheReadInputTokens"
@@ -791,7 +822,19 @@ function bucketTokenValue(
   return period.modelCallCount === 0 ? 0 : period.usage[key]
 }
 
-function percentageOf(numerator: number | undefined, denominator: number | undefined) {
+function usagePercentage(
+  aggregate: Overview["totals"],
+  numeratorField: keyof Overview["totals"]["usageCoverage"]["fieldCallCounts"],
+  denominatorField: keyof Overview["totals"]["usageCoverage"]["fieldCallCounts"]
+) {
+  const { fieldCallCounts } = aggregate.usageCoverage
+  if (
+    fieldCallCounts[numeratorField] !== aggregate.modelCallCount ||
+    fieldCallCounts[denominatorField] !== aggregate.modelCallCount
+  )
+    return undefined
+  const numerator = aggregate.usage[numeratorField]
+  const denominator = aggregate.usage[denominatorField]
   if (numerator === undefined || denominator === undefined || denominator === 0) return undefined
   return (numerator / denominator) * 100
 }
@@ -824,10 +867,20 @@ function formatCompactNumber(value: number): string {
   )
 }
 
-function reportingDescription(status: Overview["totals"]["usage"]["reportingStatus"]): string {
-  if (status === "complete") return "Complete provider reporting"
-  if (status === "partial") return "Partial provider reporting"
-  return "Token counts unavailable"
+function reportingDescription(
+  aggregate: Overview["totals"],
+  field?: keyof Overview["totals"]["usageCoverage"]["fieldCallCounts"]
+): string {
+  if (aggregate.modelCallCount === 0) return "No model calls"
+  const count = field
+    ? aggregate.usageCoverage.fieldCallCounts[field]
+    : aggregate.usageCoverage.completeCallCount
+  const available = field
+    ? aggregate.usage[field] !== undefined
+    : aggregate.usage.totalTokens !== undefined
+  const status =
+    count === aggregate.modelCallCount ? "Complete" : available ? "Partial" : "Unavailable"
+  return `${status} — ${field ? "usage" : "complete usage"} reported for ${count.toLocaleString()} of ${aggregate.modelCallCount.toLocaleString()} calls`
 }
 
 function formatBucketLabel(value: string, bucket: Overview["bucket"]): string {

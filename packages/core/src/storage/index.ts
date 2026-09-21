@@ -118,6 +118,7 @@ export type {
   AiAccountingOverview,
   AiAccountingRange,
   AiAccountingTimeBucket,
+  AiAccountingUsage,
   AiAccountingWorkflowBreakdown,
   AiBillableMeter,
   AiBillingIdentity,

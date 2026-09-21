@@ -1782,6 +1782,9 @@ export type GetAiAccountingOverviewResponses = {
     bucket: "hour" | "day" | "week"
     totals: {
       modelCallCount: number
+      /**
+       * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+       */
       usage: {
         inputTokens?: number
         outputTokens?: number
@@ -1792,6 +1795,21 @@ export type GetAiAccountingOverviewResponses = {
         textOutputTokens?: number
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      usageCoverage: {
+        /**
+         * Calls reporting both inputTokens and outputTokens.
+         */
+        completeCallCount: number
+        fieldCallCounts: {
+          inputTokens: number
+          outputTokens: number
+          uncachedInputTokens: number
+          cacheReadInputTokens: number
+          cacheWriteInputTokens: number
+          textOutputTokens: number
+          reasoningOutputTokens: number
+        }
       }
       costs: {
         amounts: Array<{
@@ -1805,6 +1823,9 @@ export type GetAiAccountingOverviewResponses = {
     }
     series: Array<{
       modelCallCount: number
+      /**
+       * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+       */
       usage: {
         inputTokens?: number
         outputTokens?: number
@@ -1815,6 +1836,21 @@ export type GetAiAccountingOverviewResponses = {
         textOutputTokens?: number
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      usageCoverage: {
+        /**
+         * Calls reporting both inputTokens and outputTokens.
+         */
+        completeCallCount: number
+        fieldCallCounts: {
+          inputTokens: number
+          outputTokens: number
+          uncachedInputTokens: number
+          cacheReadInputTokens: number
+          cacheWriteInputTokens: number
+          textOutputTokens: number
+          reasoningOutputTokens: number
+        }
       }
       costs: {
         amounts: Array<{
@@ -1830,6 +1866,9 @@ export type GetAiAccountingOverviewResponses = {
     }>
     models: Array<{
       modelCallCount: number
+      /**
+       * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+       */
       usage: {
         inputTokens?: number
         outputTokens?: number
@@ -1840,6 +1879,21 @@ export type GetAiAccountingOverviewResponses = {
         textOutputTokens?: number
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      usageCoverage: {
+        /**
+         * Calls reporting both inputTokens and outputTokens.
+         */
+        completeCallCount: number
+        fieldCallCounts: {
+          inputTokens: number
+          outputTokens: number
+          uncachedInputTokens: number
+          cacheReadInputTokens: number
+          cacheWriteInputTokens: number
+          textOutputTokens: number
+          reasoningOutputTokens: number
+        }
       }
       costs: {
         amounts: Array<{
@@ -1856,6 +1910,9 @@ export type GetAiAccountingOverviewResponses = {
     agents: Array<
       | {
           modelCallCount: number
+          /**
+           * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+           */
           usage: {
             inputTokens?: number
             outputTokens?: number
@@ -1866,6 +1923,21 @@ export type GetAiAccountingOverviewResponses = {
             textOutputTokens?: number
             reasoningOutputTokens?: number
             reportingStatus: "complete" | "partial" | "unavailable"
+          }
+          usageCoverage: {
+            /**
+             * Calls reporting both inputTokens and outputTokens.
+             */
+            completeCallCount: number
+            fieldCallCounts: {
+              inputTokens: number
+              outputTokens: number
+              uncachedInputTokens: number
+              cacheReadInputTokens: number
+              cacheWriteInputTokens: number
+              textOutputTokens: number
+              reasoningOutputTokens: number
+            }
           }
           costs: {
             amounts: Array<{
@@ -1880,6 +1952,9 @@ export type GetAiAccountingOverviewResponses = {
         }
       | {
           modelCallCount: number
+          /**
+           * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+           */
           usage: {
             inputTokens?: number
             outputTokens?: number
@@ -1890,6 +1965,21 @@ export type GetAiAccountingOverviewResponses = {
             textOutputTokens?: number
             reasoningOutputTokens?: number
             reportingStatus: "complete" | "partial" | "unavailable"
+          }
+          usageCoverage: {
+            /**
+             * Calls reporting both inputTokens and outputTokens.
+             */
+            completeCallCount: number
+            fieldCallCounts: {
+              inputTokens: number
+              outputTokens: number
+              uncachedInputTokens: number
+              cacheReadInputTokens: number
+              cacheWriteInputTokens: number
+              textOutputTokens: number
+              reasoningOutputTokens: number
+            }
           }
           costs: {
             amounts: Array<{
@@ -1907,6 +1997,9 @@ export type GetAiAccountingOverviewResponses = {
     >
     workflows: Array<{
       modelCallCount: number
+      /**
+       * Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete.
+       */
       usage: {
         inputTokens?: number
         outputTokens?: number
@@ -1917,6 +2010,21 @@ export type GetAiAccountingOverviewResponses = {
         textOutputTokens?: number
         reasoningOutputTokens?: number
         reportingStatus: "complete" | "partial" | "unavailable"
+      }
+      usageCoverage: {
+        /**
+         * Calls reporting both inputTokens and outputTokens.
+         */
+        completeCallCount: number
+        fieldCallCounts: {
+          inputTokens: number
+          outputTokens: number
+          uncachedInputTokens: number
+          cacheReadInputTokens: number
+          cacheWriteInputTokens: number
+          textOutputTokens: number
+          reasoningOutputTokens: number
+        }
       }
       costs: {
         amounts: Array<{
