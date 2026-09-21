@@ -38,6 +38,7 @@ import {
   routeOntologyGraph,
   routeOntologyOverviewGraph,
 } from "../lib/ontologyGraphLayout"
+import { isMultiTypeLink, ontologyGraphLinkTargets } from "../lib/ontologyGraphLinks"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
 import { ObjectTypeDetail } from "./ObjectTypeDetail"
 
@@ -61,6 +62,7 @@ interface OntologyNodeData extends Record<string, unknown> {
   objectCount: number
   propertyCount: number
   linkCount: number
+  multiTypeLinkCount: number
   sourceHandles: GraphHandleLayout[]
   targetHandles: GraphHandleLayout[]
   searchMatch: boolean
@@ -105,7 +107,7 @@ interface InspectorRelationship {
 
 const PROPERTY_PREVIEW_LIMIT = 4
 const GRAPH_NODE_WIDTH = 216
-const GRAPH_NODE_HEIGHT = 82
+const GRAPH_NODE_HEIGHT = 100
 const GRAPH_LAYOUT_DURATION = 280
 const ontologyCollectionViewOptions = [
   { value: "graph", label: "Graph" },
@@ -338,8 +340,8 @@ function OntologyGraph({
   onViewportChange: (viewport: OntologyGraphViewport) => void
 }) {
   const topology = useMemo(
-    () => buildOntologyTopology(objectTypes, objectTypeCounts),
-    [objectTypeCounts, objectTypes]
+    () => buildOntologyTopology(objectTypes, objectTypeCounts, selectedTypeId),
+    [objectTypeCounts, objectTypes, selectedTypeId]
   )
   const layout = useMemo(() => layoutOntology(topology, selectedTypeId), [selectedTypeId, topology])
   const [hoveredTypeId, setHoveredTypeId] = useState<string | null>(null)
@@ -518,6 +520,14 @@ function OntologyGraph({
       >
         <Background variant={BackgroundVariant.Dots} gap={22} size={1} />
         <Controls position="bottom-left" showInteractive={false} />
+        {topology.nodes.some((node) => node.data.multiTypeLinkCount > 0) && (
+          <Panel position="top-left" className="!m-3 max-w-[260px]">
+            <p className="rounded-lg border border-border/80 bg-card/95 px-3 py-2 text-xs text-muted-foreground shadow-sm">
+              Multi-type links are grouped in cards. Select a target type to show its incoming
+              links, or a source type to browse all its targets in the inspector.
+            </p>
+          </Panel>
+        )}
         <Panel position="bottom-center" className="!m-3 w-[calc(100%-1.5rem)] max-w-[720px]">
           <div className="flex items-center gap-1.5 rounded-2xl border border-border/80 bg-card/95 p-1.5 shadow-xl transition-colors focus-within:border-ring/50 backdrop-blur-xl supports-[backdrop-filter]:bg-card/88">
             <div className="relative min-w-0 flex-1">
@@ -741,7 +751,8 @@ function presentOntologyLayout(
 
 function buildOntologyTopology(
   objectTypes: ObjectTypeSummary[],
-  objectTypeCounts: ReadonlyMap<string, number>
+  objectTypeCounts: ReadonlyMap<string, number>,
+  selectedTypeId: string | null
 ): { nodes: OntologyNode[]; edges: OntologyEdge[] } {
   const typeIds = new Set(objectTypes.map((type) => type.id))
 
@@ -757,6 +768,8 @@ function buildOntologyTopology(
       objectCount: objectTypeCounts.get(type.id) ?? 0,
       propertyCount: type.properties.length,
       linkCount: type.links.length,
+      multiTypeLinkCount: type.links.filter((link) => isMultiTypeLink(link.targetObjectTypeId))
+        .length,
       sourceHandles: [],
       targetHandles: [],
       searchMatch: true,
@@ -778,11 +791,8 @@ function buildOntologyTopology(
       )
     }
     for (const link of type.links) {
-      const targets = Array.isArray(link.targetObjectTypeId)
-        ? link.targetObjectTypeId
-        : [link.targetObjectTypeId]
+      const targets = ontologyGraphLinkTargets(link.targetObjectTypeId, typeIds, selectedTypeId)
       for (const target of targets) {
-        if (!typeIds.has(target)) continue
         edges.push(
           createOntologyEdge({
             id: `link:${type.id}:${link.id}:${target}`,
@@ -1065,7 +1075,7 @@ function OntologyGraphCard({ data, selected }: NodeProps<OntologyNode>) {
   return (
     <div
       className={cn(
-        "flex h-[82px] w-[216px] cursor-pointer flex-col justify-center rounded-xl bg-card px-3.5 shadow-sm transition-[transform,border-color,box-shadow,opacity] duration-200 hover:-translate-y-0.5 hover:border-foreground/30 hover:shadow-md",
+        "flex h-[100px] w-[216px] cursor-pointer flex-col justify-center rounded-xl bg-card px-3.5 shadow-sm transition-[transform,border-color,box-shadow,opacity] duration-200 hover:-translate-y-0.5 hover:border-foreground/30 hover:shadow-md",
         selected ? "border-2 border-foreground shadow-md" : "border border-border",
         data.relationshipState === "unrelated" && "opacity-55 hover:opacity-85",
         !data.searchMatch && "opacity-20 hover:opacity-55"
@@ -1087,6 +1097,11 @@ function OntologyGraphCard({ data, selected }: NodeProps<OntologyNode>) {
             </span>
             {countLabel(data.linkCount, "link")}
           </p>
+          {data.multiTypeLinkCount > 0 && (
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {countLabel(data.multiTypeLinkCount, "multi-type link")}
+            </p>
+          )}
         </div>
       </div>
     </div>
