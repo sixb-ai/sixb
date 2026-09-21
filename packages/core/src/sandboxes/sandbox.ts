@@ -6,6 +6,9 @@
  * SandboxFactory.
  */
 
+import type { ParamsConfig } from "../shared/params/types"
+import type { SandboxConfig } from "./configuration"
+
 export type SandboxStatus = "running" | "stopped" | "failed"
 
 /**
@@ -135,7 +138,9 @@ export interface Sandbox {
  * Callers own namespacing and must serialize the entire create/resume/use/stop/destroy lifecycle.
  * Credentials and current authority must be supplied again, never inferred from saved files.
  */
-export interface SandboxFactory {
+export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConfig> {
+  /** Common host-side environment recipe. Never a discovered Agent definition. */
+  readonly configuration?: SandboxConfig<TParams>
   /** Create an ephemeral sandbox unless persistence is requested. Existing names must fail,
    * never attach or overwrite. Unsupported providers must reject persistence before provisioning.
    * A persistent handle targets one session; operations must not automatically resume another VM.

@@ -11,7 +11,7 @@ import type {
   AgentMessageRecord,
   AgentRunRecord,
   AgentThreadRecord,
-  AgentThreadWorkspace,
+  AgentThreadSandbox,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
@@ -19,19 +19,15 @@ import type {
   SubagentRunResult,
 } from "./types"
 
-/** Keep caller-controlled binding data separate from future worker-owned workspace state. */
-export function snapshotAgentThreadWorkspace(value: unknown): AgentThreadWorkspace {
-  if (
-    !isPlainRecord(value) ||
-    Object.keys(value).some((key) => key !== "params") ||
-    !isJsonObject(value.params)
-  ) {
+/** Keep caller-controlled binding data separate from future worker-owned sandbox state. */
+export function snapshotAgentThreadSandbox(value: unknown): AgentThreadSandbox {
+  if (!isPlainRecord(value) || !isJsonObject(value)) {
     throw new AgentStorageError(
       "invalid_input",
-      "[Sixb] Thread workspace must contain only JSON params."
+      "[Sixb] Thread sandbox must contain only JSON params."
     )
   }
-  return { params: structuredClone(value.params) }
+  return structuredClone(value)
 }
 
 /** Validate the provider-neutral model selection captured for a conversational turn. */

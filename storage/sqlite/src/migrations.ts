@@ -96,7 +96,7 @@ import projectionSourceRootsSql from "./migrations/038-projection-source-roots.s
 import outboxPublicationOrderSql from "./migrations/040-outbox-publication-order.sql" with {
   type: "text",
 }
-import agentThreadWorkspacesSql from "./migrations/037-agent-thread-workspaces.sql" with {
+import agentThreadWorkspacesSql from "./migrations/041-agent-thread-workspaces.sql" with {
   type: "text",
 }
 
@@ -194,7 +194,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("038-projection-source-roots", projectionSourceRootsSql),
     sqliteSql("039-connector-optional-pkce", connectorOptionalPkceSql),
     sqliteSql("040-outbox-publication-order", outboxPublicationOrderSql),
-    sqliteSql("037-agent-thread-workspaces", agentThreadWorkspacesSql),
+    sqliteSql("041-agent-thread-workspaces", agentThreadWorkspacesSql),
   ],
 })
 

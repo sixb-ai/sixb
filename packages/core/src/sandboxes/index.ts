@@ -1,3 +1,11 @@
+export type { InferParams, ParamsConfig } from "../shared/params/types"
+export { sandboxConfig } from "./config"
+export type {
+  SandboxConfig,
+  SandboxEnvironment,
+  SandboxResolveContext,
+  SandboxSource,
+} from "./configuration"
 export {
   SandboxError,
   SandboxIsolationUnavailableError,

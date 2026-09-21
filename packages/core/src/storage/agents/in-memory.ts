@@ -14,7 +14,7 @@ import {
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
-  snapshotAgentThreadWorkspace,
+  snapshotAgentThreadSandbox,
   subagentRunMatchesCreateInput,
 } from "./provider"
 import type {
@@ -120,8 +120,8 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
   constructor(private readonly state: AgentStoreState) {}
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
-    const workspace =
-      input.workspace === undefined ? undefined : snapshotAgentThreadWorkspace(input.workspace)
+    const sandbox =
+      input.sandbox === undefined ? undefined : snapshotAgentThreadSandbox(input.sandbox)
     const threadKey = key(input.projectId, input.id)
     if (this.state.threads.has(threadKey)) {
       throw new AgentStorageError(
@@ -135,7 +135,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       id: input.id,
       projectId: input.projectId,
       ownerPrincipal: clone(input.ownerPrincipal),
-      ...(workspace === undefined ? {} : { workspace }),
+      ...(sandbox === undefined ? {} : { sandbox }),
       ...(input.title === undefined ? {} : { title: input.title }),
       status: input.status ?? "active",
       activeRunId: null,

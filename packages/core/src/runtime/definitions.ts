@@ -1,6 +1,5 @@
 import type { ActionDefinitionCatalog } from "../actions"
 import type { AgentToolCatalog } from "../agents"
-import type { AgentWorkspaceDefinition } from "../agents/workspace"
 import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ModelCatalog } from "../models"
@@ -22,7 +21,6 @@ export interface DefinitionCatalog<TDefinition> {
 
 /** Definitions resolved and cross-validated while composing a {@link SixbHost}. */
 export interface SixbDefinitions {
-  readonly agentWorkspace?: AgentWorkspaceDefinition
   readonly ontology: OntologyDefinitionCatalog
   readonly actions: ActionDefinitionCatalog
   readonly tools: AgentToolCatalog

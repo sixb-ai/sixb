@@ -7,13 +7,15 @@ import {
   SandboxIsolationUnavailableError,
   type SandboxNetworkPolicy,
 } from "@sixb/core"
+import { type ParamsConfig, type SandboxConfig, sandboxConfig } from "@sixb/core/sandboxes"
 import { defaultAgentImageCandidates, defaultAgentImagePath } from "./agent-image"
 import { isLocalImageArchive, type SmolvmCliConfig } from "./cli"
 import { DOCKER_HUB_REGISTRY_HOSTS } from "./network"
 import { probeSmolvm, type SmolvmProbe } from "./preflight"
 import { SmolvmSandbox } from "./smolvm-sandbox"
 
-export interface SmolvmSandboxFactoryOptions {
+export interface SmolvmSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+  extends SandboxConfig<TParams> {
   /**
    * Image the VM boots from. Defaults to the managed agent archive built by
    * `bunx -p @sixb/sandboxes-smolvm sixb-agent-image` (offline, fast, strict egress); a cross-built
@@ -51,11 +53,16 @@ const DEFAULT_BIN = "smolvm"
  * and call create(options) for each run. Host availability is probed once,
  * lazily, on the first create.
  */
-export class SmolvmSandboxFactory implements SandboxFactory {
+export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
+  implements SandboxFactory<TParams>
+{
+  readonly configuration: SandboxConfig<TParams>
   private cli: SmolvmCliConfig | undefined
   private probe: SmolvmProbe | undefined
 
-  constructor(private readonly defaults: SmolvmSandboxFactoryOptions = {}) {}
+  constructor(private readonly defaults: SmolvmSandboxFactoryOptions<TParams> = {}) {
+    this.configuration = sandboxConfig<TParams>(defaults)
+  }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
     if (options.persistence !== undefined) {

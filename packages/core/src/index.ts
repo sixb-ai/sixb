@@ -1067,16 +1067,17 @@ export {
   MAX_AGENT_CONTEXT_ENTRIES,
 } from "./agents"
 export type {
-  AgentWorkspaceConfig,
-  AgentWorkspaceDefinition,
-  AgentWorkspaceResolveContext,
-  ResolvedAgentWorkspace,
-} from "./agents/workspace"
+  SandboxConfig,
+  SandboxDefinition,
+  SandboxEnvironment,
+  SandboxResolveContext,
+  SandboxSource,
+} from "./sandboxes/configuration"
 export type { ParamOptions } from "./shared/params/builders"
 export type { InferParams, ParamConfig, ParamsConfig } from "./shared/params/types"
 export type {
   AgentThreadRecord,
-  AgentThreadWorkspace,
+  AgentThreadSandbox,
   ListAgentThreadsResult,
 } from "./storage/agents"
 

@@ -22,6 +22,7 @@ import { createObjectsRuntime, type ObjectsRuntime } from "../objects/execution"
 import { createPipelinesRuntime, type PipelinesRuntime } from "../pipelines/execution"
 import { createProjectionsRuntime, type ProjectionsRuntime } from "../projections/execution"
 import { createRulesRuntime, type RulesRuntime } from "../rules/execution"
+import type { SandboxDefinition } from "../sandboxes/configuration"
 import { createSchedulesRuntime, type SchedulesRuntime } from "../schedules/execution"
 import { createSharesRuntime, type SharesRuntime } from "../shares/execution"
 import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
@@ -58,6 +59,10 @@ export interface Sixb<
 const boundSixbInstances = new WeakSet<object>()
 
 export interface SixbDependencies {
+  readonly sandbox?: {
+    readonly definition: SandboxDefinition
+    readonly supportsPersistence: boolean
+  }
   readonly definitions: SixbDefinitions
   readonly logging: LoggingService
   readonly connectorService: ConnectorService
@@ -132,7 +137,7 @@ function createExecutionFacades<
       runtime,
       execution,
       dependencies.definitions.models,
-      dependencies.definitions.agentWorkspace
+      dependencies.sandbox
     ),
     models: createModelsRuntime(runtime, execution, dependencies.definitions.models),
     aiUsage: createAiUsageRuntime(runtime, dependencies.definitions.security),

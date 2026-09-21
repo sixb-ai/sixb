@@ -8,8 +8,6 @@
 import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentToolDefinition } from "../agents"
-import { AgentDefinitionError } from "../agents/errors"
-import { type AgentWorkspaceConfig, createAgentWorkspaceDefinition } from "../agents/workspace"
 import {
   AuthRuntime,
   AuthRuntimeError,
@@ -61,6 +59,11 @@ import type { ProjectionDefinition } from "../projections/types"
 import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
+import {
+  createSandboxDefinition,
+  type InferSandboxParams,
+  type SandboxDefinition,
+} from "../sandboxes/configuration"
 import { type SchedulerController, SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
 import type {
@@ -69,7 +72,7 @@ import type {
   RoleDefinition,
   SecurityDefinitionCatalog,
 } from "../security"
-import type { InferParams, ParamsConfig } from "../shared/params/types"
+import type { ParamsConfig } from "../shared/params/types"
 import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
 import type { SyncDefinition } from "../syncs"
@@ -88,7 +91,7 @@ import type { OntologySource, SixbHostContext, SixbRuntimeContext } from "./type
 
 export interface SixbHostOptions<
   TOntologySources extends readonly OntologySource[],
-  TParams extends ParamsConfig = ParamsConfig,
+  in out TParams extends ParamsConfig = ParamsConfig,
 > {
   id?: string
   ontology: TOntologySources
@@ -97,8 +100,7 @@ export interface SixbHostOptions<
   lakeStorage: LakeStorage
   blobStorage: BlobStorage
   queues: Queues
-  sandboxes?: SandboxFactory
-  agentWorkspace?: AgentWorkspaceConfig<TParams>
+  sandboxes?: SandboxFactory<TParams>
   /** Optional process-level output provider. Omit for broker-only logging. */
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
@@ -143,6 +145,7 @@ export class SixbHost<
   private readonly storageReadiness: StorageReadiness
   private readonly connectorService: ConnectorService
   private readonly materializer: OntologyMaterializerContract
+  readonly sandboxDefinition?: SandboxDefinition
   readonly definitions: SixbDefinitions
   readonly broker: Broker
   readonly events: DomainEventLog
@@ -151,7 +154,7 @@ export class SixbHost<
   readonly lakeStorage: LakeStorage
   readonly blobStorage: BlobStorage
   readonly queues: Queues
-  readonly sandboxes?: SandboxFactory
+  readonly sandboxes?: Pick<SandboxFactory, "create" | "resume">
   readonly projectRoot: string
   readonly scheduler: SchedulerController
   readonly auth: AuthRuntime
@@ -181,22 +184,11 @@ export class SixbHost<
     this.projectRoot = resolve(options.projectRoot ?? process.cwd())
 
     const definitions = resolveDefinitions(options)
-    if (options.agentWorkspace !== undefined && typeof options.sandboxes?.resume !== "function") {
-      throw new AgentDefinitionError(
-        "[Sixb] agentWorkspace requires a sandbox provider with persistence support."
-      )
-    }
-    this.definitions = Object.freeze({
-      ...definitions,
-      ...(options.agentWorkspace === undefined
-        ? {}
-        : {
-            agentWorkspace: createAgentWorkspaceDefinition<TParams>(
-              options.agentWorkspace,
-              definitions.ontology
-            ),
-          }),
-    })
+    this.definitions = definitions
+    this.sandboxDefinition =
+      options.sandboxes?.configuration === undefined
+        ? undefined
+        : createSandboxDefinition(options.sandboxes.configuration, definitions.ontology)
     registerProjectionRegistry(this, definitions.projections)
 
     this.auth = new AuthRuntime({
@@ -266,7 +258,7 @@ export class SixbHost<
   }
 
   /** Bind an existing opaque scope. This method never creates or escalates authority. */
-  withScope(scope: ExecutionScope): Sixb<TOntologySources, InferParams<TParams>> {
+  withScope(scope: ExecutionScope): Sixb<TOntologySources, InferSandboxParams<TParams>> {
     const capturedScope = captureExecutionScope(scope)
     const authorization = resolveExecutionScopeAuthorization(this.projectId, capturedScope)
     if (authorization.type === "unrestricted" && authorization.ref.type === "kernel") {
@@ -292,7 +284,7 @@ export class SixbHost<
         notifyCommittedFacts: () => this.committedFacts.notify(),
       })
     )
-    return createBoundSixb<TOntologySources, InferParams<TParams>>(
+    return createBoundSixb<TOntologySources, InferSandboxParams<TParams>>(
       runtime,
       this.sixbDependencies(),
       capturedScope.execution
@@ -352,6 +344,10 @@ export class SixbHost<
   private sixbDependencies(): SixbDependencies {
     return {
       definitions: this.definitions,
+      sandbox: this.sandboxDefinition && {
+        definition: this.sandboxDefinition,
+        supportsPersistence: typeof this.sandboxes?.resume === "function",
+      },
       logging: this.logging,
       connectorService: this.connectorService,
       ...(this.connectorService.connectionProcess === undefined

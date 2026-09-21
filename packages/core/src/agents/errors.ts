@@ -40,9 +40,9 @@ export type AgentRequestErrorCode =
   | "authority_not_inheritable"
   | "invalid_context"
   | "storage_unavailable"
-  | "workspace_not_configured"
-  | "invalid_workspace_params"
-  | "workspace_execution_unavailable"
+  | "sandbox_not_configured"
+  | "invalid_sandbox_params"
+  | "sandbox_execution_unavailable"
 
 /**
  * Raised by {@link requestAgentRun} (the trigger). Callers branch on `code` rather than message text

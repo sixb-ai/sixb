@@ -1965,8 +1965,8 @@ function hangingCompactionModel(): WorkerTestModel {
 }
 
 describe("AgentWorker", () => {
-  test("refuses a stored workspace before model or sandbox work", async () => {
-    // Regression proof: remove the workspace guard in worker.ts after ownership confirmation.
+  test("refuses a stored sandbox before model or sandbox work", async () => {
+    // Regression proof: remove the sandbox guard in worker.ts after ownership confirmation.
     let modelCalls = 0
     const factory = new RecordingSandboxFactory()
     const model = answerModel(() => {
@@ -1976,30 +1976,29 @@ describe("AgentWorker", () => {
     attachSixbErrorReporter(sixb, () => {})
     const thread = await agentStorageOf(sixb).threads.create({
       projectId: PROJECT_ID,
-      id: "workspace-thread",
+      id: "sandbox-thread",
       ownerPrincipal: { type: "system", id: "system" },
-      workspace: { params: { clientId: "acme" } },
+      sandbox: { clientId: "acme" },
     })
     const executionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
-      runId: "workspace-run",
+      runId: "sandbox-run",
       authority: "inherited",
     })
     await agentStorageOf(sixb).messages.append({
       projectId: PROJECT_ID,
-      id: "workspace-message",
+      id: "sandbox-message",
       threadId: thread.id,
       runId: null,
       role: "user",
       parts: [{ type: "text", text: "Already queued" }],
     })
     const run = await agentStorageOf(sixb).runs.create({
-      id: "workspace-run",
+      id: "sandbox-run",
       projectId: PROJECT_ID,
       threadId: thread.id,
       executionId,
-      triggerMessageId: "workspace-message",
-      requesterGroupIds: [],
+      triggerMessageId: "sandbox-message",
       spec: { model: { provider: model.providerId, modelId: model.modelId } },
     })
     await sixb.queues.agents.enqueue({

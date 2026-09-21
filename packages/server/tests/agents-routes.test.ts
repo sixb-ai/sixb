@@ -117,7 +117,7 @@ const agentOnlyRunner = defineRole("agent-only.runner", {
   grants: [can.run(agent)],
 })
 
-function createRuntime(options: { readonly auth?: boolean; readonly workspace?: boolean } = {}) {
+function createRuntime(options: { readonly auth?: boolean; readonly sandbox?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const queues = new InMemoryQueues()
   const sixb = new SixbHost<readonly OntologySource[]>({
@@ -129,7 +129,7 @@ function createRuntime(options: { readonly auth?: boolean; readonly workspace?: 
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues,
-    ...(options.workspace
+    ...(options.sandbox
       ? {
           sandboxes: {
             create: async () => {
@@ -138,11 +138,11 @@ function createRuntime(options: { readonly auth?: boolean; readonly workspace?: 
             resume: async () => {
               throw new Error("Must not resume a sandbox")
             },
-          },
-          agentWorkspace: {
-            params: { clientId: param("string") },
-            resolve: async () => {
-              throw new Error("Must not resolve on thread creation")
+            configuration: {
+              params: { clientId: param("string") },
+              resolve: async () => {
+                throw new Error("Must not resolve on thread creation")
+              },
             },
           },
         }
@@ -155,7 +155,7 @@ function createRuntime(options: { readonly auth?: boolean; readonly workspace?: 
   return { sixb, storage, queues }
 }
 
-function createApp(options: { readonly auth?: boolean; readonly workspace?: boolean } = {}) {
+function createApp(options: { readonly auth?: boolean; readonly sandbox?: boolean } = {}) {
   const { sixb, storage, queues } = createRuntime(options)
   const app = createSixbApi(
     new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
@@ -218,52 +218,48 @@ function jsonRequest(
 }
 
 describe("agent routes", () => {
-  test("round-trips validated workspace bindings and rejects runs without writing messages", async () => {
-    const { app, storage, sixb } = createApp({ workspace: true })
+  test("round-trips validated sandbox bindings and rejects runs without writing messages", async () => {
+    const { app, storage, sixb } = createApp({ sandbox: true })
     const created = await app.fetch(
       jsonRequest("/api/agent-threads", "POST", {
-        threadId: "workspace-thread",
-        workspace: { params: { clientId: "acme" } },
+        threadId: "sandbox-thread",
+        sandbox: { clientId: "acme" },
       })
     )
     expect(created.status).toBe(201)
     expect(await created.json()).toMatchObject({
-      thread: { workspace: { params: { clientId: "acme" } } },
+      thread: { sandbox: { clientId: "acme" } },
     })
     const list = await app.fetch(new Request("http://localhost/api/agent-threads"))
     expect(await list.json()).toMatchObject({
-      threads: [{ workspace: { params: { clientId: "acme" } } }],
+      threads: [{ sandbox: { clientId: "acme" } }],
     })
     const run = await app.fetch(
-      jsonRequest("/api/agent-threads/workspace-thread/messages", "POST", { text: "Work" })
+      jsonRequest("/api/agent-threads/sandbox-thread/messages", "POST", { text: "Work" })
     )
     expect(run.status).toBe(409)
     expect(
-      (await storage.agents.messages.list({ projectId: sixb.id, threadId: "workspace-thread" }))
+      (await storage.agents.messages.list({ projectId: sixb.id, threadId: "sandbox-thread" }))
         .messages
     ).toHaveLength(0)
   })
 
-  test("validates dynamic workspace params and rejects runtime fields", async () => {
-    const { app, storage, sixb } = createApp({ workspace: true })
-    for (const workspace of [
-      { params: {} },
-      { params: { clientId: 42 } },
-      { params: { clientId: "acme", other: true } },
+  test("validates dynamic sandbox params and rejects runtime fields", async () => {
+    const { app, storage, sixb } = createApp({ sandbox: true })
+    for (const sandbox of [
+      {},
+      { clientId: 42 },
+      { clientId: "acme", other: true },
       { params: { clientId: "acme" }, env: { TOKEN: "secret" } },
     ]) {
-      const response = await app.fetch(jsonRequest("/api/agent-threads", "POST", { workspace }))
+      const response = await app.fetch(jsonRequest("/api/agent-threads", "POST", { sandbox }))
       expect(response.status).toBeGreaterThanOrEqual(400)
       expect(response.status).toBeLessThan(500)
     }
     expect((await storage.agents.threads.list({ projectId: sixb.id })).total).toBe(0)
     const disabled = createApp()
     expect(
-      (
-        await disabled.app.fetch(
-          jsonRequest("/api/agent-threads", "POST", { workspace: { params: {} } })
-        )
-      ).status
+      (await disabled.app.fetch(jsonRequest("/api/agent-threads", "POST", { sandbox: {} }))).status
     ).toBe(400)
   })
   test("rejects legacy selectors instead of silently retargeting a request", async () => {

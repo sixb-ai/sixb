@@ -265,10 +265,10 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         projectId: context.id,
         id: run.threadId,
       })
-      if (thread?.workspace !== undefined) {
+      if (thread?.sandbox !== undefined) {
         throw createSixbError(
           "agent.execution_failed",
-          "[SixbAgentWorker] Persistent workspace execution is not available in this release."
+          "[SixbAgentWorker] Persistent sandbox execution is not available in this release."
         )
       }
 

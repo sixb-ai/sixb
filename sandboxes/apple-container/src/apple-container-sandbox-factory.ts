@@ -5,6 +5,7 @@ import type {
   SandboxNetworkPolicy,
 } from "@sixb/core"
 import { SandboxError, SandboxIsolationUnavailableError } from "@sixb/core"
+import { type ParamsConfig, type SandboxConfig, sandboxConfig } from "@sixb/core/sandboxes"
 import { AppleContainerSandbox } from "./apple-container-sandbox"
 import {
   type AppleContainerCliConfig,
@@ -15,7 +16,8 @@ import {
 } from "./cli"
 import { type AppleContainerProbe, probeAppleContainer } from "./preflight"
 
-export interface AppleContainerSandboxFactoryOptions {
+export interface AppleContainerSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+  extends SandboxConfig<TParams> {
   /** For agent use, the image must include the worker's CLI runtime and shell utilities. */
   readonly image?: string
   /** Apple Container CLI binary name or absolute path. Defaults to "container". */
@@ -58,11 +60,16 @@ const DEFAULT_BIN = "container"
  * Pluggable factory for Apple Container-backed Sixb sandboxes. Host availability is probed once,
  * lazily, on first create.
  */
-export class AppleContainerSandboxFactory implements SandboxFactory {
+export class AppleContainerSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
+  implements SandboxFactory<TParams>
+{
+  readonly configuration: SandboxConfig<TParams>
   private cli: AppleContainerCliConfig | undefined
   private probe: AppleContainerProbe | undefined
 
-  constructor(private readonly defaults: AppleContainerSandboxFactoryOptions = {}) {}
+  constructor(private readonly defaults: AppleContainerSandboxFactoryOptions<TParams> = {}) {
+    this.configuration = sandboxConfig<TParams>(defaults)
+  }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
     if (options.persistence !== undefined) {
