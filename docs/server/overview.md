@@ -129,11 +129,11 @@ content-aware URL changes when a refetched property changes, prompting an existi
 image element to load the new file. The optional `v` query parameter is only a client
 cache key; it does not select an old blob or enable immutable caching.
 
-> **Pre-0.1 limit — upload sessions are in-memory.** Neither `@sixb/pg` nor `@sixb/sqlite`
-> implements `fileUploadSessions`, so every session opened by `POST /api/files/uploads` lives in
-> the serving process: it does not survive a restart and is not shared across replicas. Route a
-> session's requests to one instance, supply your own store on `host.storage.fileUploadSessions`,
-> or use single-request `POST /api/files`, which is unaffected.
+Upload sessions opened by `POST /api/files/uploads` are stored by the configured storage
+provider, so `@sixb/pg` and `@sixb/sqlite` keep them across restarts and API replicas. The API
+role's maintenance pass aborts the provider-side upload of any session that expires unfinished,
+then deletes the session. A custom `Storage` without `fileUploadSessions` falls back to an
+in-memory store and logs a warning at startup.
 
 ## Real-time events
 

@@ -222,6 +222,7 @@ export class SixbHost<
       projectId: this.projectId,
       storage: this.storage,
       dispatcher: this.committedFacts,
+      blobStorage: this.blobStorage,
       options: options.ontologyMaintenance,
     })
 

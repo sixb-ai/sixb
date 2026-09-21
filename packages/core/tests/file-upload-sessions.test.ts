@@ -137,6 +137,44 @@ describe("InMemoryFileUploadSessions", () => {
     })
   })
 
+  test("an unswept store drops abandoned sessions on create; a swept one keeps them", async () => {
+    const abandoned = {
+      id: "upload_abandoned",
+      projectId: "test-project",
+      principal,
+      strategy: "multipart" as const,
+      expiresAt: new Date(Date.now() - 60_000),
+      providerUpload: {
+        strategy: "multipart" as const,
+        uploadId: "upload_abandoned",
+        partSizeBytes: 5 * 1024 * 1024,
+        expiresAt: futureDate(60_000),
+        stagingKey: "staging/upload_abandoned",
+        providerUploadId: "provider-upload_abandoned",
+      },
+    }
+    const next = {
+      ...abandoned,
+      id: "upload_next",
+      providerUpload: undefined,
+      strategy: "server" as const,
+      expiresAt: futureDate(60_000),
+    }
+    const list = (store: InMemoryFileUploadSessions) =>
+      store.listAbandoned({ projectId: "test-project", now: new Date(), limit: 10 })
+
+    // No maintenance pass sees the files.ts fallback, so it must bound its own memory.
+    const unswept = new InMemoryFileUploadSessions({ unswept: true })
+    await unswept.create(abandoned)
+    await unswept.create(next)
+    expect(await list(unswept)).toEqual([])
+
+    const swept = new InMemoryFileUploadSessions()
+    await swept.create(abandoned)
+    await swept.create(next)
+    expect((await list(swept)).map((session) => session.id)).toEqual(["upload_abandoned"])
+  })
+
   test("rolls back upload sessions with in-memory storage transactions", async () => {
     const storage = new InMemoryStorage()
 

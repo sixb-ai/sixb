@@ -24,12 +24,33 @@ export function isFileUploadSessionExpired(
   return session.status === "pending" && session.expiresAt.getTime() <= nowMs
 }
 
-export function shouldDeleteFileUploadSession(session: FileUploadSession, nowMs: number): boolean {
-  if (isFileUploadSessionExpired(session, nowMs)) {
-    return true
+/** Expired, still `pending`, and holding a provider upload only `abortUpload` can release. */
+export function isAbandonedFileUploadSession(
+  session: FileUploadSession,
+  nowMs = Date.now()
+): boolean {
+  return session.providerUpload !== undefined && isFileUploadSessionExpired(session, nowMs)
+}
+
+/**
+ * When a session may be deleted, or null when only a state change can make it deletable.
+ * This is the single retention rule: durable providers persist it as `reap_at` and delete
+ * `reap_at <= now`, so SQL never restates it.
+ */
+export function fileUploadSessionReapAt(session: FileUploadSession): Date | null {
+  if (session.status === "pending") {
+    return session.providerUpload === undefined ? session.expiresAt : null
   }
 
-  return isTerminalFileUploadSessionExpired(session, nowMs)
+  const terminalAt = session.completedAt ?? session.abortedAt
+  return terminalAt
+    ? new Date(terminalAt.getTime() + DEFAULT_FILE_UPLOAD_TERMINAL_SESSION_TTL_MS)
+    : null
+}
+
+export function shouldDeleteFileUploadSession(session: FileUploadSession, nowMs: number): boolean {
+  const reapAt = fileUploadSessionReapAt(session)
+  return reapAt !== null && reapAt.getTime() <= nowMs
 }
 
 export function isTerminalFileUploadSessionExpired(
