@@ -88,7 +88,7 @@ async function fixture(migrate = true) {
       path: sqliteStoragePath(path),
       migrations: defineMigrations({
         adapterId: sqliteStorageMigrations.adapterId,
-        steps: sqliteStorageMigrations.steps.slice(0, -1),
+        steps: sqliteStorageMigrations.steps.filter((step) => step.version < 41),
       }),
     }).migrate()
   }

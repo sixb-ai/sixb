@@ -33,7 +33,11 @@ type _actionFailureKeepsItsPhase = Expect<
 type _errorContextIsDiscriminated = Expect<
   Equal<
     SixbErrorContext["type"],
-    "action.phase.failed" | "run.failed" | "event.delivery.failed" | "rule.evaluation.failed"
+    | "action.phase.failed"
+    | "run.failed"
+    | "event.delivery.failed"
+    | "rule.evaluation.failed"
+    | "vector.indexing.failed"
   >
 >
 type _errorContextAlwaysDeduplicable = Expect<Equal<SixbErrorContext["notificationId"], string>>

@@ -898,6 +898,7 @@ export type {
   SixbRunFailedContext,
   SixbRunFailureByKind,
   SixbRunIdentityByKind,
+  SixbVectorIndexingFailedContext,
 } from "./error-reporting/types"
 export type { SixbErrorCode, SixbFailure } from "./errors/types"
 export type { EventsRuntime } from "./events/execution"
@@ -995,6 +996,7 @@ export type {
   WebhookRunFailureCode,
   WorkflowRunFailureCode,
 } from "./storage"
+export type { VectorIndexingFailureCode } from "./storage/ontology/vector-indexing"
 export type { SyncRunsRuntime, SyncsRuntime } from "./syncs/execution"
 export type {
   LatestWorkflowRunListResult,

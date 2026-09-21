@@ -2,6 +2,7 @@ import type { OntologyCommitStorage } from "./commits"
 import type { OntologyMaterializationStorage } from "./materializations"
 import type { OntologyOutboxStorage } from "./outbox"
 import type { OntologySourceStorage } from "./sources"
+import type { OntologyVectorIndexingStorage } from "./vector-indexing"
 import type { OntologyVectorStorage } from "./vectors"
 
 export type { ProjectionExecution } from "../../materialization/model"
@@ -123,9 +124,17 @@ export type {
 export type { ObjectVectorState, OntologyVectorStorage, StoredObjectVector } from "./vectors"
 
 export interface OntologyStorage {
+  readonly vectorIndexing?: OntologyVectorIndexingStorage
   readonly vectors?: OntologyVectorStorage
   readonly commits: OntologyCommitStorage
   readonly sources: OntologySourceStorage
   readonly materializations: OntologyMaterializationStorage
   readonly outbox: OntologyOutboxStorage
 }
+
+export type {
+  OntologyVectorIndexingStorage,
+  VectorIndexingFailureCode,
+  VectorIndexingRequest,
+  VectorIndexingWork,
+} from "./vector-indexing"

@@ -37,6 +37,7 @@ export type {
   SubagentRunRequestedQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
+  VectorIndexingQueueJob,
   WorkflowQueueJob,
   WorkflowQueueJobFailureCode,
   WorkflowRunRequestedQueueJob,

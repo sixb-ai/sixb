@@ -30,10 +30,12 @@ interface InMemoryOntologyStorageOptions {
   readonly executionExists: (projectId: string, executionId: string) => Promise<boolean>
 }
 
+import { InMemoryVectorIndexingStorage } from "./vector-indexing"
 import { InMemoryOntologyVectorStorage, vectorObjectKey } from "./vectors"
 
 export class InMemoryOntologyStorage implements OntologyStorage {
   private readonly state = createInMemoryOntologyState()
+  readonly vectorIndexing: InMemoryVectorIndexingStorage
   readonly vectors: InMemoryOntologyVectorStorage
   readonly commits: InMemoryOntologyCommitStorage
   readonly sources: InMemoryOntologySourceStorage
@@ -50,6 +52,11 @@ export class InMemoryOntologyStorage implements OntologyStorage {
     timeseries: InMemoryTimeseriesStorage,
     options: InMemoryOntologyStorageOptions
   ) {
+    this.vectorIndexing = new InMemoryVectorIndexingStorage(
+      this.state.vectorIndexing,
+      (session, projectId) => this.materializations.assertVectorSession(session, projectId),
+      options.runRootOperation
+    )
     this.vectors = new InMemoryOntologyVectorStorage(
       this.state.vectors,
       (session, projectId, commitId) =>

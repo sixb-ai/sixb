@@ -14,6 +14,7 @@ import type {
   CompiledSelectedObjectReadScope,
   SelectedObjectReadScope,
 } from "../storage/objects/types"
+import { kernelOperationFromId, kernelOperationId } from "./kernel-operation"
 import {
   type AuthorizablePrincipal,
   type AuthorizationRef,
@@ -443,7 +444,8 @@ function assertResolvedAuthorizationMatchesExecution(
         resolved.ref.type !== "kernel" ||
         execution.requestedBy !== undefined ||
         resolved.ref.operation.type !== execution.executor.operation.type ||
-        resolved.ref.operation.recoveryId !== execution.executor.operation.recoveryId
+        kernelOperationId(resolved.ref.operation) !==
+          kernelOperationId(execution.executor.operation)
       ) {
         throw invalidExecutionAuthority(
           execution.id,
@@ -546,6 +548,9 @@ function snapshotExecutionExecutor(
 
 function snapshotExecutionSource(source: ExecutionContext["source"]): ExecutionContext["source"] {
   switch (source.type) {
+    case "ontologyCommit":
+      assertNonEmpty(source.commitId, "Execution source commit id")
+      return Object.freeze({ type: source.type, commitId: source.commitId })
     case "http":
       assertNonEmpty(source.requestId, "Execution source request id")
       return Object.freeze({ type: "http", requestId: source.requestId })
@@ -704,11 +709,13 @@ function snapshotTrustedPrimitive(primitive: TrustedPrimitiveRef): TrustedPrimit
 }
 
 function snapshotKernelOperation(operation: KernelOperation): KernelOperation {
-  if (operation.type !== "ontology.recover") {
-    throw new Error(`[Sixb] Unknown kernel operation '${operation.type}'.`)
+  if (operation.type !== "ontology.recover" && operation.type !== "ontology.indexVectors") {
+    throw new Error(
+      `[Sixb] Unknown kernel operation '${String((operation as { type?: unknown }).type)}'.`
+    )
   }
-  assertNonEmpty(operation.recoveryId, "Kernel recovery id")
-  return Object.freeze({ type: operation.type, recoveryId: operation.recoveryId })
+  assertNonEmpty(kernelOperationId(operation), "Kernel operation id")
+  return Object.freeze(kernelOperationFromId(operation.type, kernelOperationId(operation)))
 }
 
 /** Validate, bound, and detach exact delegated Action targets before registering authority. */

@@ -224,6 +224,7 @@ describe("Postgres storage migrations", () => {
             "040-connector-optional-pkce",
             "041-agent-thread-workspaces",
             "042-vector-profiles",
+            "043-vector-indexing",
           ],
         },
       ])
@@ -521,6 +522,13 @@ describe("Postgres storage migrations", () => {
           id: "042-vector-profiles",
           status: "applied",
           version: 42,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "043-vector-indexing",
+          status: "applied",
+          version: 43,
         },
       ])
     })
@@ -2287,6 +2295,13 @@ describe("Postgres storage migrations", () => {
           id: "042-vector-profiles",
           status: "applied",
           version: 42,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "043-vector-indexing",
+          status: "applied",
+          version: 43,
         },
       ])
     } finally {

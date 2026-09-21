@@ -307,7 +307,7 @@ describe("PostgreSQL vector storage", () => {
         schemaName: f.schemaName,
         migrations: defineMigrations({
           adapterId: postgresStorageMigrations.adapterId,
-          steps: postgresStorageMigrations.steps.slice(0, -1),
+          steps: postgresStorageMigrations.steps.filter((step) => step.version < 41),
         }),
       }).migrate()
       // Seed an actual pre-migration row; the old schema has no vector capability/table.

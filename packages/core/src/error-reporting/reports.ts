@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto"
 import { captureSixbFailure } from "../errors/internal"
 import type { SixbFailure } from "../errors/types"
 import type { ActionRunFailure } from "../storage/action-runs"
+import type { VectorIndexingFailureCode } from "../storage/ontology/vector-indexing"
 import type { ErrorReporter } from "./reporter"
 import type { SixbFailedRun } from "./types"
 
@@ -168,5 +169,27 @@ export function reportRuleEvaluationFailure(
     eventIds,
     ...(input.ruleId === undefined ? {} : { ruleId: input.ruleId }),
     ...(input.subject === undefined ? {} : { subject: input.subject }),
+  })
+}
+
+export interface ReportVectorIndexingFailureInput {
+  readonly projectId: string
+  readonly indexingId: string
+  readonly failure: SixbFailure<VectorIndexingFailureCode>
+  readonly objectTypeId: string
+  readonly primaryId: string
+  readonly profile: string
+}
+
+export function reportVectorIndexingFailure(
+  reporter: ErrorReporter,
+  error: unknown,
+  input: ReportVectorIndexingFailureInput
+): void {
+  reporter.report(error, {
+    ...input,
+    type: "vector.indexing.failed",
+    occurredAt: input.failure.at,
+    notificationId: `vector-indexing:${input.projectId}:${input.indexingId}`,
   })
 }

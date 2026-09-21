@@ -151,12 +151,15 @@ A completed call counts toward usage even if its vector is invalid or the object
 the vector is saved. Missing usage or pricing remains unknown, never zero.
 
 From a webhook handler, dispatch an action to index or search vectors. Calling a provider's
-`model.embed()` directly bypasses Sixb accounting. Declaring a vector profile does not index objects
-automatically; call `index()` explicitly.
+`model.embed()` directly bypasses Sixb accounting.
+
+Embeddings generated during projections count toward the project's AI budgets. When a budget is
+exhausted, embedding generation pauses while projections continue.
 
 ## Recovery
 
-Usage, valuation, actuals, and reservation reconciliation are written atomically. Recovery replays are idempotent.
+Run the recovery consumer to finish accounting after temporary storage failures. Recovery never
+repeats a model call.
 
 | Deployment | Recovery consumer |
 | --- | --- |
@@ -174,6 +177,6 @@ await worker.start()
 await worker.stop()
 ```
 
-Recovery jobs share `queues.agents` with agent work. Generation, indexing, and search call providers directly; only deferred accounting enters the queue. See [Built-in Agent](./built-in-agent.md) for worker setup.
+See [Built-in Agent](./built-in-agent.md) for worker setup.
 
 For language models, the ledger covers accepted streams. For embeddings, failed attempts are recorded with unknown usage when no response is available. Process crashes before recording can still leave billing outside these guarantees. Sixb limits are admission controls, not provider-invoice hard stops.

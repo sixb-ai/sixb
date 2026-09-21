@@ -122,6 +122,7 @@ class SharedQueues implements Queues {
     return this.inner.health()
   }
 
+  readonly vectorIndexing = this.inner.vectorIndexing
   readonly syncRuns = claimLoggingQueue(this.inner.syncRuns, "sync")
   readonly pipelines = claimLoggingQueue(this.inner.pipelines, "pipeline")
   readonly projections = claimLoggingQueue(this.inner.projections, "projection")

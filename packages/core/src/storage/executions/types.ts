@@ -17,6 +17,7 @@ export type DurableExecutionExecutor =
  * is attempt transport and is never persisted here.
  */
 export type DurableExecutionSource =
+  | { readonly type: "ontologyCommit"; readonly commitId: string }
   | { readonly type: "http"; readonly requestId: string }
   | { readonly type: "webhook"; readonly deliveryId: string }
   | { readonly type: "schedule"; readonly eventId: string }

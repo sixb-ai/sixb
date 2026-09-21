@@ -11,6 +11,7 @@ import type {
   SubagentQueueJob,
   SyncQueueJobFailureCode,
   SyncRunRequestedQueueJob,
+  VectorIndexingQueueJob,
   WorkflowQueueJob,
   WorkflowQueueJobFailureCode,
 } from "@sixb/core/queues"
@@ -76,6 +77,10 @@ export interface BullMqQueuesOptions {
  */
 export class BullMqQueues implements Queues {
   readonly scope = "shared" as const
+  readonly vectorIndexing: BullMqQueue<
+    VectorIndexingQueueJob,
+    "internal.unexpected" | "runtime.cancelled"
+  >
   readonly syncRuns: BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
   readonly pipelines: BullMqQueue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: BullMqQueue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>
@@ -99,6 +104,7 @@ export class BullMqQueues implements Queues {
       removeOnFail: options.removeOnFail ?? DEFAULT_REMOVE_ON_FAIL,
     }
 
+    this.vectorIndexing = new BullMqQueue(shared, "vector.indexing")
     this.syncRuns = new BullMqQueue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>(
       shared,
       "sync.runs"
@@ -140,6 +146,7 @@ export class BullMqQueues implements Queues {
       this.actions.close(),
       this.agents.close(),
       this.agentChildren.close(),
+      this.vectorIndexing.close(),
     ])
     // Short grace so a just-dispatched Redis command (typically the final stalled-check tick)
     // can settle on the socket before owned IORedis handles are quit. No-op when connections

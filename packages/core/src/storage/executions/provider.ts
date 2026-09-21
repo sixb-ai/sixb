@@ -1,4 +1,5 @@
-import type { TrustedPrimitiveKind } from "../../execution/types"
+import { kernelOperationFromId, kernelOperationId } from "../../execution/kernel-operation"
+import type { KernelOperation, TrustedPrimitiveKind } from "../../execution/types"
 import { ExecutionStorageError } from "./errors"
 import type { CreateExecutionInput, ExecutionRecord } from "./types"
 import { normalizeExecutionRecord } from "./validation"
@@ -16,7 +17,14 @@ export interface ExecutionStorageRow {
   readonly id: string
   readonly executorKind: "agent" | "kernel" | "request" | TrustedPrimitiveKind
   readonly executorId: string
-  readonly sourceKind: "datasetVersion" | "event" | "execution" | "http" | "schedule" | "webhook"
+  readonly sourceKind:
+    | "ontologyCommit"
+    | "datasetVersion"
+    | "event"
+    | "execution"
+    | "http"
+    | "schedule"
+    | "webhook"
   readonly sourceId: string
   readonly requestedByUserId: string | null
   readonly requestedByServiceAccountId: string | null
@@ -31,7 +39,7 @@ export interface ExecutionStorageRow {
   readonly authorityAccessTokenId: string | null
   readonly authorityPrimitiveKind: TrustedPrimitiveKind | null
   readonly authorityPrimitiveId: string | null
-  readonly authorityKernelOperation: "ontology.recover" | null
+  readonly authorityKernelOperation: KernelOperation["type"] | null
   readonly authorityDelegationKind: "share" | null
   readonly authorityDelegationId: string | null
   readonly authorityDelegationSessionId: string | null
@@ -108,7 +116,7 @@ function flattenExecutor(
     case "agent":
       return { executorKind: "agent", executorId: record.executor.runId }
     case "kernel":
-      return { executorKind: "kernel", executorId: record.executor.operation.recoveryId }
+      return { executorKind: "kernel", executorId: kernelOperationId(record.executor.operation) }
   }
 }
 
@@ -116,6 +124,8 @@ function flattenSource(
   record: ExecutionRecord
 ): Pick<ExecutionStorageRow, "sourceId" | "sourceKind"> {
   switch (record.source.type) {
+    case "ontologyCommit":
+      return { sourceKind: "ontologyCommit", sourceId: record.source.commitId }
     case "http":
       return { sourceKind: "http", sourceId: record.source.requestId }
     case "webhook":
@@ -219,10 +229,10 @@ function inflateExecutor(row: ExecutionStorageRow): CreateExecutionInput["execut
     case "kernel":
       return {
         type: "kernel",
-        operation: {
-          type: requireValue(row.authorityKernelOperation, "authority kernel operation"),
-          recoveryId: row.executorId,
-        },
+        operation: kernelOperationFromId(
+          requireValue(row.authorityKernelOperation, "authority kernel operation"),
+          row.executorId
+        ),
       }
     default:
       return { type: "primitive", kind: row.executorKind, runId: row.executorId }
@@ -231,6 +241,8 @@ function inflateExecutor(row: ExecutionStorageRow): CreateExecutionInput["execut
 
 function inflateSource(row: ExecutionStorageRow): CreateExecutionInput["source"] {
   switch (row.sourceKind) {
+    case "ontologyCommit":
+      return { type: "ontologyCommit", commitId: row.sourceId }
     case "http":
       return { type: "http", requestId: row.sourceId }
     case "webhook":
@@ -307,10 +319,10 @@ function inflateAuthority(row: ExecutionStorageRow): CreateExecutionInput["autho
     case "kernel":
       return {
         type: "kernel",
-        operation: {
-          type: requireValue(row.authorityKernelOperation, "authority kernel operation"),
-          recoveryId: row.executorId,
-        },
+        operation: kernelOperationFromId(
+          requireValue(row.authorityKernelOperation, "authority kernel operation"),
+          row.executorId
+        ),
       }
     case "disabled":
       return { type: "disabled" }

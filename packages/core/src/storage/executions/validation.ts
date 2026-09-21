@@ -1,5 +1,6 @@
 import { isDeepStrictEqual } from "node:util"
 import { normalizeRequesterGroupIds, snapshotRequesterGroupIds } from "../../auth/attribution"
+import { kernelOperationId } from "../../execution/kernel-operation"
 import type {
   AuthorizablePrincipal,
   AuthorizationRef,
@@ -134,6 +135,9 @@ function assertExecutor(executor: DurableExecutionExecutor): void {
 
 function assertSource(source: DurableExecutionSource): void {
   switch (source.type) {
+    case "ontologyCommit":
+      assertNonBlank(source.commitId, "Execution source commit id")
+      return
     case "http":
       assertNonBlank(source.requestId, "Execution source request id")
       return
@@ -427,10 +431,10 @@ function assertPrincipal(principal: AuthorizablePrincipal, label: string): void 
 }
 
 function assertKernelOperation(operation: KernelOperation, label: string): void {
-  if (operation.type !== "ontology.recover") {
+  if (operation.type !== "ontology.recover" && operation.type !== "ontology.indexVectors") {
     invalid(`${label} has unsupported type '${String((operation as { type?: unknown }).type)}'.`)
   }
-  assertNonBlank(operation.recoveryId, `${label} recovery id`)
+  assertNonBlank(kernelOperationId(operation), `${label} operation id`)
 }
 
 function assertTrustedPrimitiveKind(value: string, label: string): void {
@@ -459,7 +463,7 @@ function principalsEqual(
 }
 
 function kernelOperationsEqual(left: KernelOperation, right: KernelOperation): boolean {
-  return left.type === right.type && left.recoveryId === right.recoveryId
+  return left.type === right.type && kernelOperationId(left) === kernelOperationId(right)
 }
 
 function invalid(message: string): never {

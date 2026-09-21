@@ -50,13 +50,13 @@ export function createMaterializerContext(input: {
     )
   }
   if (
-    !input.storage.ontology.vectors &&
+    (!input.storage.ontology.vectors || !input.storage.ontology.vectorIndexing) &&
     input.ontology
       .listObjectTypes()
       .some((type) => Object.keys(type.search?.vectors ?? {}).length > 0)
   ) {
     throw new MaterializationValidationError(
-      "Storage does not support transactional vector profiles."
+      "Storage does not support transactional vector profiles and automatic indexing."
     )
   }
   const dependencies = input.dependencies ?? {}

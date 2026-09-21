@@ -226,7 +226,17 @@ export type AgentQueueJob =
   | AgentWorkflowNodeRequestedQueueJob
   | AgentAiUsageRecordRequestedQueueJob
 
+/** Internal lane hosted by ProjectionWorker. */
+export type VectorIndexingQueueJob = QueueJob<
+  "vector.index.requested",
+  { readonly indexingId: string }
+>
+
 export interface Queues {
+  readonly vectorIndexing: Queue<
+    VectorIndexingQueueJob,
+    "internal.unexpected" | "runtime.cancelled"
+  >
   readonly syncRuns: Queue<SyncRunRequestedQueueJob, SyncQueueJobFailureCode>
   readonly pipelines: Queue<PipelineRunRequestedQueueJob, PipelineQueueJobFailureCode>
   readonly projections: Queue<ProjectionRunRequestedQueueJob, ProjectionQueueJobFailureCode>

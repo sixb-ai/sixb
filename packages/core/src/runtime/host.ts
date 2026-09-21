@@ -55,6 +55,8 @@ import { createOntologyMaterializer, type OntologyMaterializerContract } from ".
 import type { ModelCatalogInput } from "../models"
 import { bindEmbeddingModels } from "../models/execution/embedding"
 import { ModelExecutionSession } from "../models/execution/session"
+import { createVectorIndexingRuntime } from "../objects/vectors/indexing"
+import { registerVectorIndexingRuntime } from "../objects/vectors/indexing-runtime"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import type { ProjectionDefinition } from "../projections/types"
@@ -254,6 +256,10 @@ export class SixbHost<
     }
     registerProjectionRegistry(this.hostContext, definitions.projections)
     shareSixbErrorReporter(this, this.hostContext)
+    registerVectorIndexingRuntime(
+      this,
+      createVectorIndexingRuntime(this.hostContext, this.materializer)
+    )
     this.scheduler = new SchedulerRuntime({
       schedules: definitions.schedules.list(),
       events: this.eventService,

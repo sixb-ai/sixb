@@ -1,13 +1,14 @@
 import { MaterializationValidationError } from "../../materialization/errors"
 import { utf8JsonByteLength } from "../../materialization/refs"
+import type { Storage } from "../../storage"
 import type {
   MaterializationSession,
   MaterializationWorkRecord,
   OntologyMaterializationStorage,
-  OntologyStorage,
 } from "../../storage/ontology"
 import type { MaterializerContext } from "../context"
 import { sequenceMaterializationEvent } from "../effective/build-events"
+import { scheduleVectorChanges } from "../effective/vector-indexing"
 import { invalidateVectorChanges } from "../effective/vectors"
 import { throwIfAborted } from "../shared/abort"
 import { chunkBySize } from "../shared/chunking"
@@ -48,16 +49,18 @@ export async function stageWorkBounded(
 }
 
 export async function drainStagedWork(
-  context: BatchingContext & { readonly projectId: string },
-  ontologyStorage: Pick<OntologyStorage, "materializations" | "vectors">,
+  context: Pick<MaterializerContext, "batching" | "projectId" | "ontology" | "clock">,
+  transactionStorage: Storage,
   session: MaterializationSession,
   signal?: AbortSignal
 ): Promise<void> {
+  const ontologyStorage = transactionStorage.ontology
   const storage = ontologyStorage.materializations
   let phase: number | null = null
   let pending: MaterializationPlanItem[] = []
   const flush = async () => {
     if (pending.length === 0) return
+    await scheduleVectorChanges(context, transactionStorage, pending, session)
     await invalidateVectorChanges(context.projectId, ontologyStorage.vectors, pending, session)
     await applyItems(context, storage, session, pending, signal)
     pending = []
