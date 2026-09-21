@@ -353,7 +353,7 @@ method or the HTTP route.
 | `search("acme")` | `search.defaultText` fields with `searchable` + `text` |
 | `search("acme", { fields: [Customer.p.company] })` | `company`: `searchable` + `text` |
 | `facets([{ property: Invoice.p.status, limit }])` | `status`: `searchable` + `facet` (exact-matchable) |
-| vector search | embedding field: `searchable` + `vector`, plus `search.vector.property` |
+| vector search | Named `search.vectors` profile with static text sources and an embedding model; no property query flag required. |
 
 ## Related
 

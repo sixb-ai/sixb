@@ -119,10 +119,9 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
       return {
         path,
         kind: query.kind,
-        summary: `vector ${query.profile === undefined ? `property ${query.propertyId}` : `profile ${query.profile}`} k=${query.k}`,
+        summary: `vector profile ${query.profile} k=${query.k}`,
         details: {
           profile: query.profile,
-          propertyId: query.propertyId,
           dimensions: query.vector.length,
           k: query.k,
         },

@@ -20,7 +20,6 @@ export const PropertyDefinitionSchema = z.object({
       text: z.boolean().optional(),
       exact: z.boolean().optional(),
       facet: z.boolean().optional(),
-      vector: z.boolean().optional(),
       weight: z.number().optional(),
     })
     .optional(),
@@ -76,12 +75,6 @@ export const ObjectTypeSchema = z.object({
             }),
           })
         )
-        .optional(),
-      vector: z
-        .object({
-          property: z.string(),
-          source: z.array(z.string()),
-        })
         .optional(),
     })
     .optional(),

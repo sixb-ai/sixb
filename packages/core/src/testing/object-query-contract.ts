@@ -85,16 +85,11 @@ const Room = defineObjectType({
       { type: "map", keySchema: "string", valueSchema: "string" },
       { query: { searchable: true, filterable: true } }
     ),
-    prop(
-      "embedding",
-      { type: "array", items: "double" },
-      { query: { searchable: true, vector: true } }
-    ),
+    prop("embedding", { type: "array", items: "double" }, { query: { searchable: true } }),
   ],
   links: [link("hasDevice", Device)],
   search: {
     defaultText: ["name", "description"],
-    vector: { property: "embedding", source: ["name", "description"] },
   },
 })
 
@@ -1177,29 +1172,49 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
     test("executes or rejects vector search according to provider capabilities", async () => {
       await withStorage(async ({ objects: storage, fixture }) => {
         await seedObjectQueryContractData(fixture)
+        // Keep generic fixture writes usable by providers without vector persistence.
+        const ontology = new OntologyRegistry({
+          sources: [
+            Device,
+            defineObjectType({
+              ...Room,
+              search: {
+                vectors: {
+                  content: {
+                    source: ["name", "description"],
+                    model: {
+                      providerId: "test",
+                      modelId: "embedding",
+                      definition: {
+                        kind: "embedding",
+                        providerId: "test",
+                        modelId: "embedding",
+                        dimensions: 2,
+                      },
+                    },
+                  },
+                },
+              },
+            }),
+          ],
+        })
         const query: ObjectQuery = {
           kind: "vector",
-          propertyId: "embedding",
+          profile: "content",
           vector: [1, 0],
           k: 2,
           input: { kind: "start", objectTypeId: Room.id },
         }
 
         if (storage.queryCapabilities().nodes?.vector === true) {
-          const result = await executeObjectQuery(
-            { projectId, query },
-            { ontology: objectQueryContractOntology, storage }
-          )
+          const result = await executeObjectQuery({ projectId, query }, { ontology, storage })
           expect(result.plan.mode).toBe("pushdown")
-          expect(ids(result)).toEqual(["room-alpha", "room-beta"])
+          expect(ids(result)).toEqual([]) // Business arrays are not indexed vector profiles.
           return
         }
 
         await expectPlanningIssue(
-          executeObjectQuery(
-            { projectId, query },
-            { ontology: objectQueryContractOntology, storage }
-          ),
+          executeObjectQuery({ projectId, query }, { ontology, storage }),
           "query_node_not_supported"
         )
       })

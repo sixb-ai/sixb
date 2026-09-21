@@ -453,7 +453,7 @@ describe("ontology startup validation", () => {
           "embedding",
           { type: "array", items: "double" },
           {
-            query: { searchable: true, vector: true },
+            query: { searchable: true },
           }
         ),
       ],
@@ -461,7 +461,6 @@ describe("ontology startup validation", () => {
         title: "name",
         defaultText: ["name", "email"],
         exact: ["id", "email"],
-        vector: { property: "embedding", source: ["name", "email"] },
       },
     })
 
@@ -552,73 +551,37 @@ describe("ontology startup validation", () => {
     )
   })
 
-  test("rejects vector search properties that are not numeric arrays", () => {
+  // Removing the corresponding metadata guards makes these runtime (untyped JS) checks fail.
+  test("rejects removed vector property metadata", () => {
     const objectType = defineObjectType({
-      id: "BadVector",
-      name: "Bad Vector",
+      id: "RemovedVectorProperty",
+      name: "Removed vector property",
       properties: [
-        prop("id", "string", { required: true, primary: true }),
-        prop("name", "string", { query: { searchable: true, text: true } }),
-        prop("embedding", "string", { query: { searchable: true, vector: true } }),
+        prop("id", "string", { primary: true, required: true }),
+        prop(
+          "embedding",
+          { type: "array", items: "double" },
+          {
+            // Untyped metadata must fail at startup too.
+            query: { searchable: true, vector: true },
+          }
+        ),
       ],
-      search: {
-        title: "name",
-        defaultText: ["name"],
-        vector: { property: "embedding", source: ["name"] },
-      },
     })
-
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(OntologyValidationError)
-    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow(
-      "schema is not a numeric array"
-    )
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow("removed query.vector")
   })
 
-  test("rejects vector search profiles with empty or non-text source fields", () => {
-    const emptySource = defineObjectType({
-      id: "EmptyVectorSource",
-      name: "Empty Vector Source",
-      properties: [
-        prop("id", "string", { required: true, primary: true }),
-        prop("name", "string", { query: { searchable: true, text: true } }),
-        prop(
-          "embedding",
-          { type: "array", items: "double" },
-          { query: { searchable: true, vector: true } }
-        ),
-      ],
+  test("rejects removed singular vector search metadata", () => {
+    const objectType = defineObjectType({
+      id: "RemovedVectorSearch",
+      name: "Removed vector search",
+      properties: [prop("id", "string", { primary: true, required: true })],
       search: {
-        defaultText: ["name"],
-        vector: { property: "embedding", source: [] },
+        // @ts-expect-error Only named vector profiles are supported.
+        vector: { property: "embedding", source: ["id"] },
       },
     })
-    const nonTextSource = defineObjectType({
-      id: "NonTextVectorSource",
-      name: "Non Text Vector Source",
-      properties: [
-        prop("id", "string", { required: true, primary: true }),
-        prop("name", "string", { query: { searchable: true, exact: true } }),
-        prop(
-          "embedding",
-          { type: "array", items: "double" },
-          { query: { searchable: true, vector: true } }
-        ),
-      ],
-      search: {
-        vector: { property: "embedding", source: ["name"] },
-      },
-    })
-
-    expect(() => new OntologyRegistry({ sources: [emptySource] })).toThrow(OntologyValidationError)
-    expect(() => new OntologyRegistry({ sources: [emptySource] })).toThrow(
-      "search.vector.source must include at least one source property"
-    )
-    expect(() => new OntologyRegistry({ sources: [nonTextSource] })).toThrow(
-      OntologyValidationError
-    )
-    expect(() => new OntologyRegistry({ sources: [nonTextSource] })).toThrow(
-      "must set query.searchable: true and query.text: true"
-    )
+    expect(() => new OntologyRegistry({ sources: [objectType] })).toThrow("removed search.vector")
   })
 })
 

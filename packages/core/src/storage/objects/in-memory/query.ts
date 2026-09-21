@@ -135,50 +135,31 @@ export function evaluateObjectQuery(
     case "vector": {
       const input = evaluateObjectQuery(query.input, source)
       const scoredEntries = input.entries.flatMap((entry) => {
-        const stored =
-          query.profile === undefined ? undefined : source.getVector?.(entry.row, query.profile)
+        const stored = source.getVector?.(entry.row, query.profile)
         if (
-          query.profile !== undefined &&
-          (!stored ||
-            !query.configuration ||
-            stored.configuration !== query.configuration ||
-            vectorSources(stored.source, entry.row.properties).sourceFingerprint !==
-              stored.sourceFingerprint)
+          !stored ||
+          !query.configuration ||
+          stored.configuration !== query.configuration ||
+          vectorSources(stored.source, entry.row.properties).sourceFingerprint !==
+            stored.sourceFingerprint
         )
           return []
-        const score = vectorSimilarity(
-          query.profile === undefined
-            ? entry.row.properties[query.propertyId ?? ""]
-            : stored?.values,
-          query.vector
-        )
+        const score = vectorSimilarity(stored.values, query.vector)
         return score === null
           ? []
-          : [
-              {
-                ...entry,
-                score:
-                  entry.score +
-                  (query.profile === undefined ? score : Math.max(-1, Math.min(1, score))),
-              },
-            ]
+          : [{ ...entry, score: entry.score + Math.max(-1, Math.min(1, score)) }]
       })
       scoredEntries.sort(
-        query.profile === undefined
-          ? compareEntriesByRelevance
-          : (a, b) =>
-              b.score - a.score ||
-              compareStrings(a.row.objectTypeId, b.row.objectTypeId) ||
-              compareStrings(a.row.primaryId, b.row.primaryId)
+        (a, b) =>
+          b.score - a.score ||
+          compareStrings(a.row.objectTypeId, b.row.objectTypeId) ||
+          compareStrings(a.row.primaryId, b.row.primaryId)
       )
       const limit = Math.max(0, query.k)
       return {
         entries: scoredEntries.slice(0, limit),
-        total:
-          query.profile === undefined
-            ? scoredEntries.length
-            : Math.min(limit, scoredEntries.length),
-        hasMore: query.profile === undefined && limit < scoredEntries.length,
+        total: Math.min(limit, scoredEntries.length),
+        hasMore: false,
       }
     }
     case "traverse": {
@@ -573,12 +554,6 @@ function compareSortField(
   const comparison = compareQueryScalarValues(leftValue, rightValue, field.scalarKind)
   if (Number.isNaN(comparison)) return 0
   return field.direction === "desc" ? -comparison : comparison
-}
-
-function compareEntriesByRelevance(left: QueryEntry, right: QueryEntry): number {
-  return (
-    right.score - left.score || rowIdentityKey(left.row).localeCompare(rowIdentityKey(right.row))
-  )
 }
 
 function projectRow(row: ObjectRow, properties: readonly string[]): ObjectRow {

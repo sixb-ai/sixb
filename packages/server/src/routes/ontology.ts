@@ -49,12 +49,6 @@ function serializeSearch(
           ])
         )
       : undefined,
-    vector: search.vector
-      ? {
-          property: search.vector.property,
-          source: [...search.vector.source],
-        }
-      : undefined,
   }
 }
 

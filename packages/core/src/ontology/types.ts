@@ -191,8 +191,6 @@ export interface PropertyQueryMetadata {
   exact?: boolean
   /** Enables faceting/grouping in search results. */
   facet?: boolean
-  /** Enables vector search when the property stores numeric embedding arrays. */
-  vector?: boolean
   /** Relative text-search weight. Only meaningful with `text: true`. */
   weight?: number
 }
@@ -218,13 +216,6 @@ export interface ObjectTypeSearchMetadata {
   defaultText?: readonly string[]
   /** Exact-match fields such as external ids, slugs, or emails. */
   exact?: readonly string[]
-  /** Vector-search configuration for semantic retrieval. */
-  vector?: {
-    /** Property that stores the embedding vector. */
-    property: string
-    /** Source text properties used to produce the embedding. */
-    source: readonly string[]
-  }
 }
 
 /**

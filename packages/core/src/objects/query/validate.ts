@@ -327,31 +327,15 @@ function dispatchQueryNode(
     }
     case "vector": {
       const input = validateQueryNode(query.input, `${path}.input`, ctx)
-      if (query.profile !== undefined) {
-        return {
-          result: input.result,
-          query: validateVectorProfileQuery(
-            { ...query, input: input.query },
-            input.result,
-            input.admissionState,
-            path,
-            ctx
-          ),
-          admissionState: input.admissionState,
-        }
-      }
-      validateVectorQuery(
-        query.vector,
-        query.propertyId ?? "",
-        query.k,
-        input.result,
-        input.admissionState,
-        path,
-        ctx
-      )
       return {
         result: input.result,
-        query: { ...query, input: input.query },
+        query: validateVectorProfileQuery(
+          { ...query, input: input.query },
+          input.result,
+          input.admissionState,
+          path,
+          ctx
+        ),
         admissionState: input.admissionState,
       }
     }
@@ -883,7 +867,6 @@ function validateVectorProfileQuery(
   const types = getObjectTypesForResult(shape, ctx)
   if (
     types.length !== 1 ||
-    query.propertyId !== undefined ||
     !Number.isSafeInteger(query.k) ||
     query.k < 1 ||
     query.k > MAX_VECTOR_K
@@ -925,70 +908,6 @@ function validateVectorProfileQuery(
     vector: values,
     source: [...profile.source],
     configuration: vectorConfiguration(profile),
-  }
-}
-
-function validateVectorQuery(
-  vector: readonly number[],
-  propertyId: string,
-  k: number,
-  shape: ObjectQueryResultShape,
-  admissionState: ObjectQueryAdmissionState,
-  path: string,
-  ctx: QueryValidationContext
-): void {
-  if (!Number.isInteger(k) || k <= 0) {
-    addIssue(ctx, path, "invalid_vector_k", "Vector query k must be a positive integer")
-  }
-
-  if (vector.length === 0) {
-    addIssue(ctx, path, "empty_vector", "Vector query vector must not be empty")
-  }
-
-  if (vector.some((value) => typeof value !== "number" || !Number.isFinite(value))) {
-    addIssue(ctx, path, "invalid_vector_value", "Vector query vector values must be finite numbers")
-  }
-
-  for (const objectType of getObjectTypesForResult(shape, ctx)) {
-    admitProperty(ctx, {
-      state: admissionState,
-      propertyId,
-      objectTypeId: objectType.id,
-      use: "vector",
-      path,
-    })
-    const property = getProperty(objectType, propertyId)
-    if (!property) {
-      addIssue(
-        ctx,
-        path,
-        "unknown_vector_property",
-        `Vector query references unknown property '${propertyId}' on '${objectType.id}'`
-      )
-      continue
-    }
-
-    assertStaticSearchProperty(objectType.id, property, "vector query", path, ctx)
-    assertQueryFlag(objectType.id, property, "vector", "vector query", path, ctx)
-
-    if (objectType.search?.vector?.property !== propertyId) {
-      addIssue(
-        ctx,
-        path,
-        "vector_profile_missing",
-        `Object type '${objectType.id}' must declare search.vector.property '${propertyId}' before vector search can use it`
-      )
-    }
-
-    const schema = resolveSchemaForProperty(property, objectType.id, ctx, path)
-    if (schema && !isVectorSchema(schema, ctx)) {
-      addIssue(
-        ctx,
-        path,
-        "vector_property_not_numeric_array",
-        `Vector query property '${propertyId}' on '${objectType.id}' must be a numeric array`
-      )
-    }
   }
 }
 
@@ -1598,7 +1517,7 @@ function assertStaticSearchProperty(
 function assertQueryFlag(
   objectTypeId: string,
   property: Property,
-  flag: "text" | "vector",
+  flag: "text",
   context: string,
   path: string,
   ctx: QueryValidationContext
@@ -1688,13 +1607,6 @@ function isContainsSchema(schema: Schema): boolean {
     schema === "uuid" ||
     (typeof schema !== "string" && (schema.type === "array" || schema.type === "map"))
   )
-}
-
-function isVectorSchema(schema: Schema, ctx: QueryValidationContext): boolean {
-  if (typeof schema === "string") return false
-  if (schema.type !== "array") return false
-  const itemSchema = resolveSchema(schema.items, ctx.valueTypesById)
-  return itemSchema === "integer" || itemSchema === "double" || itemSchema === "decimal"
 }
 
 function keyForTypeIds(typeIds: readonly string[]): string {

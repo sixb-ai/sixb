@@ -123,20 +123,16 @@ object types. Each type supplies its own fields. It does not change which fields
 | `defaultText` | `string[]` | Default keyword-search fields when `search("...")` is called without `fields`. |
 | `exact` | `string[]` | Exact-match fields such as external ids, emails, or invoice numbers. |
 | `vectors` | Named profiles | Derived embeddings with sources and a model; see [named vector profiles](#named-vector-profiles). |
-| `vector` (legacy) | `{ property, source }` | Vector search: `property` stores the embedding, `source` lists the text fields used to produce it. |
 
 Configure [query flags](properties.md#property-query-metadata) on each referenced property.
-Every field a profile references must carry the matching property flag:
+Keyword and exact-match fields must carry the matching property flag:
 
 - `defaultText` fields need `text: true`
 - `exact` fields need `exact: true` (the primary id is always exact-matchable, so it's exempt)
-- `vector.property` needs `vector: true`, and each `vector.source` field needs `text: true`
+- `vectors` sources need no query flag; they must be static text properties
 
 Search profiles can only reference **static** properties — telemetry properties (such as
 `Project.progress`) are not object-query indexed and will fail validation here.
-
-For new embeddings, use [named vector profiles](#named-vector-profiles). The legacy
-`search.vector` stores numeric arrays in business properties and does not manage their freshness.
 
 ## Named vector profiles
 
@@ -182,8 +178,8 @@ Generate `queryVector` with the same model: numeric validation cannot establish 
 
 V1 excludes pagination, traversal, expansion, subtype search, hybrid search and profile fusion.
 **Only `InMemoryStorage` supports named profiles in this slice**; PostgreSQL and SQLite reject
-these declarations at startup. Legacy `search.vector` and numeric-property queries remain
-compatible, without managed provenance or invalidation.
+these declarations at startup. Numeric-array properties are ordinary business data; vector
+search only uses named profiles.
 
 ## extends (inheritance)
 
