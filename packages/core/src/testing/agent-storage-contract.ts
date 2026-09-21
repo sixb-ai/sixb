@@ -290,28 +290,26 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
   }
 
   describe(label, () => {
-    test("snapshots workspace bindings without accepting runtime state or credentials", async () => {
-      // Regression proof: remove snapshotAgentThreadWorkspace from a provider's thread create.
+    test("snapshots sandbox parameter records and rejects non-JSON values", async () => {
+      // Regression proof: remove snapshotAgentThreadSandbox from a provider's thread create.
       await withStorage(async (storage) => {
-        const workspace = { params: { clientId: "acme", nested: { branch: "main" } } }
-        const record = await storage.threads.create(threadInput({ workspace }))
-        workspace.params.nested.branch = "changed"
+        const sandbox = { clientId: "acme", nested: { branch: "main" } }
+        const record = await storage.threads.create(threadInput({ sandbox }))
+        sandbox.nested.branch = "changed"
         const read = await storage.threads.getById({ projectId, id: record.id })
-        expect(read?.workspace).toEqual({
-          params: { clientId: "acme", nested: { branch: "main" } },
-        })
-        const mutable = record.workspace?.params.nested
+        expect(read?.sandbox).toEqual({ clientId: "acme", nested: { branch: "main" } })
+        const mutable = record.sandbox?.nested
         if (mutable && typeof mutable === "object" && !Array.isArray(mutable))
           mutable.branch = "tampered"
-        expect((await storage.threads.list({ projectId })).threads[0]?.workspace).toEqual(
-          read?.workspace
+        expect((await storage.threads.list({ projectId })).threads[0]?.sandbox).toEqual(
+          read?.sandbox
         )
         await expectAgentError(
           storage.threads.create(
             threadInput({
               id: "unsafe",
-              // @ts-expect-error runtime metadata cannot be supplied through a thread binding
-              workspace: { params: {}, env: { TOKEN: "secret" } },
+              // @ts-expect-error storage requires a JSON object
+              sandbox: [],
             })
           ),
           "invalid_input"
@@ -321,7 +319,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
             threadInput({
               id: "non-json",
               // @ts-expect-error storage accepts normalized JSON, not typed Dates
-              workspace: { params: { at: new Date() } },
+              sandbox: { at: new Date() },
             })
           ),
           "invalid_input"
@@ -329,21 +327,21 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       })
     })
 
-    test("keeps delimiter-containing project and workspace thread ids distinct", async () => {
+    test("keeps delimiter-containing project and sandbox thread ids distinct", async () => {
       // Regression proof: change the memory store key back to projectId + ":" + id.
       await withStorage(async (storage) => {
         await storage.threads.create(
-          threadInput({ projectId: "a:b", id: "c", workspace: { params: { repo: "one" } } })
+          threadInput({ projectId: "a:b", id: "c", sandbox: { repo: "one" } })
         )
         await storage.threads.create(
-          threadInput({ projectId: "a", id: "b:c", workspace: { params: { repo: "two" } } })
+          threadInput({ projectId: "a", id: "b:c", sandbox: { repo: "two" } })
         )
-        expect(
-          (await storage.threads.getById({ projectId: "a:b", id: "c" }))?.workspace?.params.repo
-        ).toBe("one")
-        expect(
-          (await storage.threads.getById({ projectId: "a", id: "b:c" }))?.workspace?.params.repo
-        ).toBe("two")
+        expect((await storage.threads.getById({ projectId: "a:b", id: "c" }))?.sandbox?.repo).toBe(
+          "one"
+        )
+        expect((await storage.threads.getById({ projectId: "a", id: "b:c" }))?.sandbox?.repo).toBe(
+          "two"
+        )
       })
     })
     // ── threads ───────────────────────────────────────────────────────────────────────────────

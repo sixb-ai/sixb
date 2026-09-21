@@ -5,10 +5,12 @@ import type {
   SandboxNetworkPolicy,
 } from "@sixb/core"
 import { SandboxError } from "@sixb/core"
+import { type ParamsConfig, type SandboxConfig, sandboxConfig } from "@sixb/core/sandboxes"
 import type { LocalIsolation } from "./isolation/detect"
 import { LocalSandbox } from "./local-sandbox"
 
-export interface LocalSandboxFactoryOptions {
+export interface LocalSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+  extends SandboxConfig<TParams> {
   readonly isolation?: LocalIsolation
   readonly readOnlyPaths?: readonly string[]
   readonly readWritePaths?: readonly string[]
@@ -24,8 +26,13 @@ export interface LocalSandboxFactoryOptions {
  * Pluggable factory for LocalSandbox. Wire once into createSixb({ sandboxes })
  * and call create(options) for each run.
  */
-export class LocalSandboxFactory implements SandboxFactory {
-  constructor(private readonly defaults: LocalSandboxFactoryOptions = {}) {}
+export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
+  implements SandboxFactory<TParams>
+{
+  readonly configuration: SandboxConfig<TParams>
+  constructor(private readonly defaults: LocalSandboxFactoryOptions<TParams> = {}) {
+    this.configuration = sandboxConfig<TParams>(defaults)
+  }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
     if (options.persistence !== undefined) {

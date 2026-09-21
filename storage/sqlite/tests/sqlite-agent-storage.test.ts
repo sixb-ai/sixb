@@ -15,17 +15,17 @@ runAgentStorageContractSuite("SqliteAgentStorage", {
 })
 
 describe("SqliteStorage agents", () => {
-  test("preserves workspace bindings when a durable store is reopened", async () => {
-    // Regression proof: omit workspace from the thread INSERT or remove migration 036.
-    const path = await mkdtemp(join(tmpdir(), "sixb-workspace-binding-"))
+  test("preserves sandbox bindings when a durable store is reopened", async () => {
+    // Regression proof: omit sandbox_params from the thread INSERT or remove migration 037.
+    const path = await mkdtemp(join(tmpdir(), "sixb-sandbox-binding-"))
     let storage = new SqliteStorage({ path })
     try {
       await migrateStorage(storage)
       await storage.agents.threads.create({
-        id: "workspace",
+        id: "sandbox",
         projectId: "project",
         ownerPrincipal: { type: "user", id: "owner" },
-        workspace: { params: { clientId: "acme" } },
+        sandbox: { clientId: "acme" },
       })
       await storage.agents.threads.create({
         id: "ephemeral",
@@ -36,11 +36,11 @@ describe("SqliteStorage agents", () => {
       storage = new SqliteStorage({ path })
       await migrateStorage(storage)
       expect(
-        (await storage.agents.threads.getById({ projectId: "project", id: "workspace" }))?.workspace
-      ).toEqual({ params: { clientId: "acme" } })
+        (await storage.agents.threads.getById({ projectId: "project", id: "sandbox" }))?.sandbox
+      ).toEqual({ clientId: "acme" })
       expect(
         await storage.agents.threads.getById({ projectId: "project", id: "ephemeral" })
-      ).not.toHaveProperty("workspace")
+      ).not.toHaveProperty("sandbox")
     } finally {
       storage.close()
       await rm(path, { recursive: true, force: true })

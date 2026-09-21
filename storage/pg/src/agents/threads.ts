@@ -1,4 +1,4 @@
-import { snapshotAgentThreadWorkspace } from "@sixb/core/internal/agent-run-storage-provider"
+import { snapshotAgentThreadSandbox } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   AgentStorageError,
   type AgentThreadRecord,
@@ -16,10 +16,8 @@ export class PgAgentThreadStore implements AgentThreadStore {
   constructor(private readonly sql: PgStoreClient) {}
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
-    const workspace =
-      input.workspace === undefined
-        ? null
-        : JSON.stringify(snapshotAgentThreadWorkspace(input.workspace))
+    const sandboxParams =
+      input.sandbox === undefined ? null : JSON.stringify(snapshotAgentThreadSandbox(input.sandbox))
     const createdAt = input.createdAt ?? new Date()
     const updatedAt = input.updatedAt ?? createdAt
 
@@ -31,7 +29,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
           owner_principal_type,
           owner_principal_id,
           title,
-          workspace,
+          sandbox_params,
           status,
           created_at,
           updated_at
@@ -41,7 +39,7 @@ export class PgAgentThreadStore implements AgentThreadStore {
           ${input.ownerPrincipal.type},
           ${input.ownerPrincipal.id},
           ${input.title ?? null},
-          ${workspace}::text::jsonb,
+          ${sandboxParams}::text::jsonb,
           ${input.status ?? "active"},
           ${createdAt},
           ${updatedAt}

@@ -5,6 +5,7 @@ import { resolveRuntimeAuthorizationForProject } from "../execution/authorizatio
 import type { ModelCatalog } from "../models"
 import { resolveExecutionCosts } from "../runtime/ai-cost"
 import { resolveExecutionUsage } from "../runtime/ai-usage"
+import type { SixbDependencies } from "../runtime/sixb"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
   AgentThreadRecord,
@@ -25,8 +26,8 @@ import {
   retryAgentRun,
 } from "./request"
 import { assertNoAgentSelector } from "./retired-config"
+import { normalizeSandboxBinding } from "./sandbox"
 import type { AgentDescriptor } from "./types"
-import { type AgentWorkspaceDefinition, normalizeAgentWorkspaceBinding } from "./workspace"
 
 export type ExecutionAgentRequestInput = Omit<RequestAgentRunInput, "principal">
 export type ListExecutionAgentThreadsInput = Omit<
@@ -39,7 +40,7 @@ export type CreateExecutionAgentThreadInput<
 > = {
   readonly id?: string
   readonly title?: string
-  readonly workspace?: { readonly params: TParams }
+  readonly sandbox?: TParams
 }
 
 export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
@@ -89,7 +90,7 @@ export function createAgentRuntime<
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   models?: ModelCatalog,
-  workspace?: AgentWorkspaceDefinition
+  sandbox?: SixbDependencies["sandbox"]
 ): AgentRuntime<TParams> {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
   const principal = authority.type === "principal" ? authority.context.principal : SYSTEM_PRINCIPAL
@@ -151,12 +152,18 @@ export function createAgentRuntime<
             "[Sixb] Agent storage is not configured."
           )
         }
+        if (input.sandbox !== undefined && !sandbox?.supportsPersistence) {
+          throw new AgentRequestError(
+            "sandbox_not_configured",
+            "[Sixb] Thread sandboxes require a provider with persistence support."
+          )
+        }
         const binding =
-          input.workspace === undefined
+          input.sandbox === undefined
             ? undefined
-            : normalizeAgentWorkspaceBinding(workspace, input.workspace, runtime.ontology)
+            : normalizeSandboxBinding(sandbox?.definition, input.sandbox, runtime.ontology)
         return storage.threads.create({
-          ...(binding === undefined ? {} : { workspace: binding }),
+          ...(binding === undefined ? {} : { sandbox: binding }),
           id: input.id ?? createAgentThreadId(),
           projectId: runtime.projectId,
           ownerPrincipal: principal,

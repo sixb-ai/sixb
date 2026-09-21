@@ -50,7 +50,7 @@ export type {
   AgentRunRecord,
   AgentStorage,
   AgentThreadRecord,
-  AgentThreadWorkspace,
+  AgentThreadSandbox,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,

@@ -114,7 +114,7 @@ export async function requestAgentRun(
     principal,
   })
 
-  assertWorkspaceExecutionAvailable(thread)
+  assertSandboxExecutionAvailable(thread)
   // Fast single-flight check for a clear error. `runs.create` below is the atomic authority.
   if (thread.activeRunId !== null) {
     throw new AgentRequestError(
@@ -204,7 +204,7 @@ export async function retryAgentRun(
       `[Sixb] Agent thread '${failedRun.threadId}' was not found.`
     )
   }
-  assertWorkspaceExecutionAvailable(thread)
+  assertSandboxExecutionAvailable(thread)
   const runId = createAgentRunId()
   const durableExecution = await prepareDurableAgentExecution(runtime, execution, runId)
   await assertAiLimitPreflight(runtime, durableExecution)
@@ -238,11 +238,11 @@ export async function retryAgentRun(
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
 }
 
-function assertWorkspaceExecutionAvailable(thread: AgentThreadRecord): void {
-  if (thread.workspace !== undefined) {
+function assertSandboxExecutionAvailable(thread: AgentThreadRecord): void {
+  if (thread.sandbox !== undefined) {
     throw new AgentRequestError(
-      "workspace_execution_unavailable",
-      "[Sixb] Persistent workspace execution is not available in this release. The thread binding has been preserved."
+      "sandbox_execution_unavailable",
+      "[Sixb] Persistent sandbox execution is not available in this release. The thread binding has been preserved."
     )
   }
 }

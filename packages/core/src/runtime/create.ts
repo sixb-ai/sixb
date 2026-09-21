@@ -2,7 +2,6 @@ import { resolve } from "node:path"
 import type { ActionDefinition } from "../actions"
 import type { AgentToolDefinition } from "../agents"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
-import type { AgentWorkspaceConfig } from "../agents/workspace"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
 import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap"
@@ -31,15 +30,14 @@ import { RuntimeError } from "./errors"
 import { SixbHost } from "./host"
 import type { OntologySource } from "./types"
 
-export interface CreateSixbOptions<TParams extends ParamsConfig = ParamsConfig> {
+export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsConfig> {
   id?: string
   broker: Broker
   storage: Storage
   lakeStorage: LakeStorage
   blobStorage: BlobStorage
   queues: Queues
-  sandboxes?: SandboxFactory
-  agentWorkspace?: AgentWorkspaceConfig<TParams>
+  sandboxes?: SandboxFactory<TParams>
   /** Optional process-level output provider. Omit for broker-only logging. */
   logger?: LoggerProvider
   /** Broker capture controls, independent from the output provider. */
@@ -111,7 +109,6 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     blobStorage: options.blobStorage,
     queues: options.queues,
     sandboxes: options.sandboxes,
-    agentWorkspace: options.agentWorkspace,
     logger: options.logger,
     observability: options.observability,
     onError: options.onError,

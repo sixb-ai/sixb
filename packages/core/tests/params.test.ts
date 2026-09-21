@@ -11,7 +11,7 @@ describe("definition params", () => {
     const config = { ["__proto__"]: param("string"), toString: optional(param("string")) }
     const input = JSON.parse('{"__proto__":"value"}')
     const normalized = normalizeParams(valueTypesById, config, input, {
-      kind: "workspace",
+      kind: "sandbox",
       id: "test",
     })
     expect(Object.hasOwn(normalized, "__proto__")).toBe(true)
@@ -25,7 +25,7 @@ describe("definition params", () => {
         valueTypesById,
         { toString: param("string") },
         {},
-        { kind: "workspace", id: "test" }
+        { kind: "sandbox", id: "test" }
       )
     ).toThrow("Missing required param 'toString'")
   })

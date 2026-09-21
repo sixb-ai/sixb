@@ -8,6 +8,12 @@ import {
   type SandboxNetworkPolicy,
   type SandboxSessionOptions,
 } from "@sixb/core"
+import {
+  type ParamsConfig,
+  type SandboxConfig,
+  type SandboxSource,
+  sandboxConfig,
+} from "@sixb/core/sandboxes"
 import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { toVercelNetworkPolicy } from "./network"
 import {
@@ -30,14 +36,11 @@ export type VercelSandboxRuntime = "node26" | "node24" | "node22" | "python3.13"
 export const DEFAULT_VERCEL_SANDBOX_RUNTIME: VercelSandboxRuntime = "node24"
 
 export type VercelSandboxSource =
-  | {
-      readonly type: "git"
-      readonly url: string
+  | (SandboxSource & {
       readonly username?: string
       readonly password?: string
       readonly depth?: number
-      readonly revision?: string
-    }
+    })
   | {
       readonly type: "tarball"
       readonly url: string
@@ -55,7 +58,8 @@ export interface VercelSnapshotRetentionPolicy {
   readonly deleteEvicted?: boolean
 }
 
-export interface VercelSandboxFactoryOptions {
+export interface VercelSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+  extends Omit<SandboxConfig<TParams>, "source"> {
   /** Stock Vercel runtime. Ignored with `image`/`snapshotId`. Sixb explicitly defaults to node24. */
   readonly runtime?: VercelSandboxRuntime | (string & {})
   /** VCR image reference; agent images need the worker's CLI runtime and shell utilities. */
@@ -96,13 +100,38 @@ const DEFAULT_NAME_PREFIX = "sixb-"
 const DEFAULT_SETUP_TIMEOUT_MS = 30_000
 
 /** Pluggable factory for Vercel Sandbox-backed Sixb sandboxes. */
-export class VercelSandboxFactory implements SandboxFactory {
+export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
+  implements SandboxFactory<TParams>
+{
+  readonly configuration?: SandboxConfig<TParams>
   constructor(
-    private readonly defaults: VercelSandboxFactoryOptions = {},
+    private readonly defaults: VercelSandboxFactoryOptions<TParams> = {},
     private readonly createRemote: VercelCreateSandbox = createVercelSandbox,
     private readonly persistentRemote: VercelPersistenceOperations = vercelPersistenceOperations
   ) {
     assertNoLegacyPersistence(defaults)
+    // Preserve native archive/credential options for existing low-level callers. They do not
+    // opt into managed thread environments or weaken their credential-free source contract.
+    const source = defaults.source
+    if (
+      source?.type === "tarball" ||
+      (source?.type === "git" &&
+        (source.username !== undefined ||
+          source.password !== undefined ||
+          source.depth !== undefined))
+    ) {
+      if (
+        defaults.params !== undefined ||
+        defaults.resolve !== undefined ||
+        defaults.setup !== undefined
+      ) {
+        throw new SandboxError(
+          "[Sandbox] Managed environments require a credential-free Git source without provider-specific clone options."
+        )
+      }
+    } else {
+      this.configuration = sandboxConfig<TParams>({ ...defaults, source })
+    }
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
@@ -245,7 +274,7 @@ async function stopFailedPersistentSession(
 }
 
 function buildCreateParams(input: {
-  readonly defaults: VercelSandboxFactoryOptions
+  readonly defaults: Omit<VercelSandboxFactoryOptions, "params" | "resolve">
   readonly env: Readonly<Record<string, string>>
   readonly network: SandboxNetworkPolicy
   readonly name: string
@@ -301,7 +330,9 @@ function normalizeSource(source: VercelSandboxSource): Record<string, unknown> {
   }
 }
 
-function validateSourceOptions(options: VercelSandboxFactoryOptions): void {
+function validateSourceOptions(
+  options: Omit<VercelSandboxFactoryOptions, "params" | "resolve">
+): void {
   if (options.snapshotId === undefined) {
     return
   }

@@ -54,6 +54,68 @@ Thread → User message → Queued run → Tool/model calls → Saved assistant 
 | Run | One turn; only one active turn per thread |
 | Message | Role plus text, reasoning, tool-call, and file parts |
 
+## Sandbox configuration
+
+Configure the environment directly on the sandbox factory. Use a static source/setup, or
+typed parameters and a resolver for a per-thread environment. This example uses a `Client`
+ontology type with a `repositoryUrl` string property:
+
+```ts
+import { createSixb, param } from "@sixb/core"
+import { VercelSandboxFactory } from "@sixb/sandboxes-vercel"
+import { Client } from "./ontology/client"
+
+const host = await createSixb({
+  // ...ontology, models, storage, broker, queues
+  sandboxes: new VercelSandboxFactory({
+    params: { clientId: param("string"), branch: param("string") },
+    resolve: async ({ params, sixb }) => {
+      const client = await sixb.objects(Client).get(params.clientId)
+      const repositoryUrl = client?.properties.repositoryUrl
+      if (typeof repositoryUrl !== "string" || !repositoryUrl.trim()) {
+        throw new Error("Client repository is unavailable.")
+      }
+      return {
+        source: {
+          type: "git",
+          url: repositoryUrl,
+          revision: params.branch,
+        },
+        setup: ["bun install"],
+      }
+    },
+  }),
+})
+```
+
+For a static environment, pass `source` and `setup` directly instead of `params`/`resolve`.
+`source` is optional; Git URLs must use HTTPS without embedded credentials. Parameters use
+the same builders as Actions, including `optional()`. Use the resolver's scoped `sixb` SDK
+for application access checks. `env` values are readable by the sandbox and agent.
+
+See [thread sandbox bindings](#sandbox-bindings) for usage and availability.
+
+## Sandbox bindings
+
+Opt in when creating a thread with a persistence-capable sandbox provider:
+
+```ts
+const thread = await sixb.agent.threads.create({
+  title: "Improve the client portal",
+  sandbox: { clientId: "acme", branch: "feature/portal" },
+})
+```
+
+Use `sandbox: {}` for a static environment; omit `sandbox` for existing ephemeral behavior.
+HTTP clients use the same shape on `POST /api/agent-threads`.
+
+Parameters must match the [factory configuration](#sandbox-configuration)
+and cannot be changed after creation. Do not put secrets in them.
+
+**Currently, sandbox bindings can be saved, but running a bound thread is not yet supported**
+(`sandbox_execution_unavailable`). Threads without a binding are unaffected.
+
+
 ## HTTP API
 
 ```jsonc
