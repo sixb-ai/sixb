@@ -1,4 +1,8 @@
-import type { AiModelCallUsageRecord } from "../ai-usage"
+import type {
+  AiModelCallUsageInput,
+  AiModelCallUsageRecord,
+  AiUsageReportingStatus,
+} from "../ai-usage"
 
 /** Token meters supported by deterministic local rate cards. */
 export type AiBillableMeter =
@@ -141,9 +145,22 @@ export interface ListAiModelCallAccountingInput extends AiAccountingRange {
   readonly offset?: number
 }
 
+/** Observed meter sums. Unreported meters are absent; incomplete sums are lower bounds. */
+export interface AiAccountingUsage extends AiModelCallUsageInput {
+  /** Sum of available input and output counts, including one-sided reports. */
+  readonly totalTokens?: number
+  /** Complete only when every call reports both input and output; details have separate coverage. */
+  readonly reportingStatus: AiUsageReportingStatus
+}
+
 export interface AiAccountingAggregate {
   readonly modelCallCount: number
-  readonly usage: AiModelCallUsageRecord["usage"]
+  readonly usage: AiAccountingUsage
+  readonly usageCoverage: {
+    /** Calls reporting both inputTokens and outputTokens. */
+    readonly completeCallCount: number
+    readonly fieldCallCounts: Readonly<Record<keyof AiModelCallUsageInput, number>>
+  }
   readonly costs: AiCostSummary
 }
 

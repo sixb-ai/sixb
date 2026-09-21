@@ -315,6 +315,15 @@ describe("AI accounting routes", () => {
           reasoningOutputTokens: 2,
           reportingStatus: "complete",
         },
+        usageCoverage: {
+          completeCallCount: 1,
+          fieldCallCounts: {
+            inputTokens: 1,
+            outputTokens: 1,
+            reasoningOutputTokens: 1,
+            cacheReadInputTokens: 0,
+          },
+        },
         costs: {
           amounts: [],
           ratedCallCount: 0,

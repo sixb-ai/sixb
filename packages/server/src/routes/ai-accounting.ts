@@ -40,6 +40,7 @@ function serializeAggregate(aggregate: AiAccountingAggregate) {
   return {
     modelCallCount: aggregate.modelCallCount,
     usage: aggregate.usage,
+    usageCoverage: aggregate.usageCoverage,
     costs: aggregate.costs,
   }
 }

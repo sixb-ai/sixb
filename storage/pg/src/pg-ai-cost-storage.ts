@@ -188,6 +188,8 @@ export class PgAiCostStorage implements AiCostStorage {
         COUNT(*)::text AS model_call_count,
         COUNT(*) FILTER (WHERE reporting_status <> 'unavailable')::text
           AS reported_usage_call_count,
+        COUNT(*) FILTER (WHERE input_tokens IS NOT NULL AND output_tokens IS NOT NULL)::text
+          AS complete_usage_call_count,
         COUNT(input_tokens)::text AS input_tokens_count,
         SUM(input_tokens)::text AS input_tokens_sum,
         COUNT(output_tokens)::text AS output_tokens_count,
@@ -379,6 +381,7 @@ interface AggregateRow {
   readonly amount_currency: string | null
   readonly model_call_count: string
   readonly reported_usage_call_count: string
+  readonly complete_usage_call_count: string
   readonly input_tokens_count: string
   readonly input_tokens_sum: string | null
   readonly output_tokens_count: string
@@ -455,6 +458,7 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
     modelCallCount: row.model_call_count,
     usage: {
       reportedCallCount: row.reported_usage_call_count,
+      completeCallCount: row.complete_usage_call_count,
       inputTokens: meterFragment(row.input_tokens_count, row.input_tokens_sum),
       outputTokens: meterFragment(row.output_tokens_count, row.output_tokens_sum),
       uncachedInputTokens: meterFragment(

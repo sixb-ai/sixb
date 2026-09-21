@@ -314,6 +314,8 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
     CAST(COUNT(*) AS TEXT) AS model_call_count,
     CAST(SUM(CASE WHEN reporting_status <> 'unavailable' THEN 1 ELSE 0 END) AS TEXT)
       AS reported_usage_call_count,
+    CAST(SUM(CASE WHEN input_tokens IS NOT NULL AND output_tokens IS NOT NULL THEN 1 ELSE 0 END) AS TEXT)
+      AS complete_usage_call_count,
     CAST(COUNT(input_tokens) AS TEXT) AS input_tokens_count,
     CAST(SUM(input_tokens) AS TEXT) AS input_tokens_sum,
     CAST(COUNT(output_tokens) AS TEXT) AS output_tokens_count,
@@ -430,6 +432,7 @@ interface AggregateRow {
   readonly amount_currency: string | null
   readonly model_call_count: string
   readonly reported_usage_call_count: string
+  readonly complete_usage_call_count: string
   readonly input_tokens_count: string
   readonly input_tokens_sum: string | null
   readonly output_tokens_count: string
@@ -485,6 +488,7 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
     modelCallCount: row.model_call_count,
     usage: {
       reportedCallCount: row.reported_usage_call_count,
+      completeCallCount: row.complete_usage_call_count,
       inputTokens: meterFragment(row.input_tokens_count, row.input_tokens_sum),
       outputTokens: meterFragment(row.output_tokens_count, row.output_tokens_sum),
       uncachedInputTokens: meterFragment(

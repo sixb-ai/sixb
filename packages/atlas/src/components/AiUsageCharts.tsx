@@ -57,7 +57,7 @@ export function AiUsageMetricCard({
               {value}
             </div>
             {description ? (
-              <p className="mt-1 truncate text-xs text-muted-foreground">{description}</p>
+              <p className="mt-1 text-xs text-muted-foreground">{description}</p>
             ) : null}
           </div>
           {sparkline && sparkline.length > 1 ? (
@@ -171,6 +171,7 @@ interface AiUsageTimeSeriesProps {
   readonly showLegend?: boolean
   readonly className?: string
   readonly xFormatter?: (value: string) => string
+  readonly tooltipLabelFormatter?: (value: string) => ReactNode
   readonly valueFormatter?: (value: number, seriesKey: string) => string
   readonly emptyLabel?: string
   readonly ariaLabel: string
@@ -186,6 +187,7 @@ export function AiUsageTimeSeries({
   showLegend = true,
   className,
   xFormatter,
+  tooltipLabelFormatter,
   valueFormatter,
   emptyLabel = "No data available",
   ariaLabel,
@@ -254,9 +256,10 @@ export function AiUsageTimeSeries({
       }}
       labelStyle={{ color: "var(--muted-foreground)", marginBottom: 4 }}
       wrapperStyle={{ zIndex: 20, outline: "none" }}
-      labelFormatter={(label) =>
-        xFormatter && typeof label === "string" ? xFormatter(label) : label
-      }
+      labelFormatter={(label) => {
+        const formatter = tooltipLabelFormatter ?? xFormatter
+        return formatter && typeof label === "string" ? formatter(label) : label
+      }}
       formatter={(value, name) => {
         const key = String(name)
         const seriesItem = configuredSeries.find((item) => item.key === key)

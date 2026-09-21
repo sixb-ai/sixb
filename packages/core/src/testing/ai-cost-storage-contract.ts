@@ -236,7 +236,21 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
             inputTokens: 15,
             outputTokens: 12,
             totalTokens: 27,
+            uncachedInputTokens: 12,
+            cacheReadInputTokens: 0,
             reportingStatus: "complete",
+          },
+          usageCoverage: {
+            completeCallCount: 3,
+            fieldCallCounts: {
+              inputTokens: 3,
+              outputTokens: 3,
+              uncachedInputTokens: 1,
+              cacheReadInputTokens: 1,
+              cacheWriteInputTokens: 0,
+              textOutputTokens: 0,
+              reasoningOutputTokens: 0,
+            },
           },
           costs: {
             amounts: [{ currency: "USD", amountNanos: "95000" }],
@@ -285,6 +299,85 @@ export function runAiCostStorageContractSuite<TStorage extends AiCostStorage>(
           hasMore: false,
           items: [{ usage: { id: "usage_2" }, valuationStatus: "unpriceable" }],
         })
+      } finally {
+        await options.cleanup?.(storage)
+      }
+    })
+
+    test("retains known tokens and coverage across incomplete periods", async () => {
+      // Removal proof: require presentCallCount === modelCallCount in finishAggregateUsage.
+      // Both the in-memory and SQL-backed contract runs then lose the Sep 16/18 totals.
+      const storage = await fixture()
+      try {
+        // Currency fragments must merge coverage and usage exactly once per call.
+        for (const [index, currency] of ["USD", "EUR"].entries()) {
+          await storage.recordModelCallCost(
+            ratedCost(`partial_16_${index}`, {
+              components: [],
+              money: { currency, amountNanos: "1" },
+              priceSource: { ...priceSource(`partial_${index}`), sourceId: "provider-reported" },
+            })
+          )
+        }
+        const overview = await storage.queryProjectOverview({
+          projectId,
+          from: new Date("2026-09-16"),
+          to: new Date("2026-09-19"),
+          bucket: "day",
+        })
+        expect(
+          overview.series.map((period) => ({
+            calls: period.modelCallCount,
+            total: period.usage.totalTokens,
+            complete: period.usageCoverage.completeCallCount,
+          }))
+        ).toEqual([
+          { calls: 87, total: 4_013_782, complete: 84 },
+          { calls: 0, total: undefined, complete: 0 },
+          { calls: 29, total: 334_815, complete: 28 },
+        ])
+        for (const aggregate of [overview.totals, ...overview.models, ...overview.workflows]) {
+          expect(aggregate.usage).toEqual({
+            inputTokens: 4_348_597,
+            outputTokens: 0,
+            totalTokens: 4_348_597,
+            reportingStatus: "partial",
+          })
+          expect(aggregate.usageCoverage).toMatchObject({
+            completeCallCount: 112,
+            fieldCallCounts: { inputTokens: 112, outputTokens: 112, cacheReadInputTokens: 0 },
+          })
+        }
+        expect(overview.totals.costs.amounts).toEqual([
+          { currency: "EUR", amountNanos: "1" },
+          { currency: "USD", amountNanos: "1" },
+        ])
+        const edges = await storage.queryProjectOverview({
+          projectId,
+          from: new Date("2026-09-19"),
+          to: new Date("2026-09-22"),
+          bucket: "day",
+          providerId: "gateway",
+          modelId: "partial/model",
+        })
+        expect(edges.series[0]).toMatchObject({
+          usage: { inputTokens: 3, outputTokens: 4, totalTokens: 7, reportingStatus: "partial" },
+          usageCoverage: {
+            completeCallCount: 0,
+            fieldCallCounts: { inputTokens: 1, outputTokens: 1 },
+          },
+        })
+        expect(edges.series[1]).toMatchObject({
+          modelCallCount: 1,
+          usage: { reportingStatus: "unavailable" },
+          usageCoverage: { completeCallCount: 0 },
+        })
+        expect(edges.series[1]?.usage.totalTokens).toBeUndefined()
+        expect(edges.series[2]).toMatchObject({
+          usage: { inputTokens: 0, totalTokens: 0, reportingStatus: "partial" },
+          usageCoverage: { completeCallCount: 0 },
+        })
+        expect(edges.series[2]?.usage.outputTokens).toBeUndefined()
       } finally {
         await options.cleanup?.(storage)
       }
@@ -405,4 +498,45 @@ export async function seedAiCostStorageContractUsage(
     occurredAt: new Date("2026-08-03T12:00:00.000Z"),
     recordedAt: new Date("2026-08-03T12:00:00.100Z"),
   })
+
+  for (const [day, calls, complete, tokens] of [
+    [16, 87, 84, 4_013_782],
+    [18, 29, 28, 334_815],
+  ] as const) {
+    for (let index = 0; index < calls; index++) {
+      await usage.recordModelCall({
+        id: `partial_${day}_${index}`,
+        projectId,
+        executionId: otherExecutionId,
+        attempt: 1,
+        callId: `partial_${day}_${index}`,
+        responseId: `response_partial_${day}_${index}`,
+        requesterGroupIds: [],
+        providerId: "gateway",
+        requestedModelId: "partial/model",
+        usage: index < complete ? { inputTokens: index === 0 ? tokens : 0, outputTokens: 0 } : {},
+        occurredAt: new Date(`2026-09-${day}T12:00:00Z`),
+      })
+    }
+  }
+  for (const [index, day, counts] of [
+    [0, 19, { inputTokens: 3 }],
+    [1, 19, { outputTokens: 4 }],
+    [2, 20, {}],
+    [3, 21, { inputTokens: 0 }],
+  ] as const) {
+    await usage.recordModelCall({
+      id: `edge_${index}`,
+      projectId,
+      executionId: otherExecutionId,
+      attempt: 1,
+      callId: `edge_${index}`,
+      responseId: `response_edge_${index}`,
+      requesterGroupIds: [],
+      providerId: "gateway",
+      requestedModelId: "partial/model",
+      usage: counts,
+      occurredAt: new Date(`2026-09-${day}T12:00:00Z`),
+    })
+  }
 }

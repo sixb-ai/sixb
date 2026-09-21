@@ -5160,6 +5160,62 @@
                             }
                           },
                           "required": ["reportingStatus"],
+                          "additionalProperties": false,
+                          "description": "Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete."
+                        },
+                        "usageCoverage": {
+                          "type": "object",
+                          "properties": {
+                            "completeCallCount": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Calls reporting both inputTokens and outputTokens."
+                            },
+                            "fieldCallCounts": {
+                              "type": "object",
+                              "properties": {
+                                "inputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "outputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "uncachedInputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "cacheReadInputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "cacheWriteInputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "textOutputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                },
+                                "reasoningOutputTokens": {
+                                  "type": "integer",
+                                  "minimum": 0
+                                }
+                              },
+                              "required": [
+                                "inputTokens",
+                                "outputTokens",
+                                "uncachedInputTokens",
+                                "cacheReadInputTokens",
+                                "cacheWriteInputTokens",
+                                "textOutputTokens",
+                                "reasoningOutputTokens"
+                              ],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["completeCallCount", "fieldCallCounts"],
                           "additionalProperties": false
                         },
                         "costs": {
@@ -5205,7 +5261,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": ["modelCallCount", "usage", "costs"],
+                      "required": ["modelCallCount", "usage", "usageCoverage", "costs"],
                       "additionalProperties": false
                     },
                     "series": {
@@ -5258,6 +5314,62 @@
                               }
                             },
                             "required": ["reportingStatus"],
+                            "additionalProperties": false,
+                            "description": "Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete."
+                          },
+                          "usageCoverage": {
+                            "type": "object",
+                            "properties": {
+                              "completeCallCount": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Calls reporting both inputTokens and outputTokens."
+                              },
+                              "fieldCallCounts": {
+                                "type": "object",
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "inputTokens",
+                                  "outputTokens",
+                                  "uncachedInputTokens",
+                                  "cacheReadInputTokens",
+                                  "cacheWriteInputTokens",
+                                  "textOutputTokens",
+                                  "reasoningOutputTokens"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["completeCallCount", "fieldCallCounts"],
                             "additionalProperties": false
                           },
                           "costs": {
@@ -5311,7 +5423,14 @@
                             "format": "date-time"
                           }
                         },
-                        "required": ["modelCallCount", "usage", "costs", "start", "end"],
+                        "required": [
+                          "modelCallCount",
+                          "usage",
+                          "usageCoverage",
+                          "costs",
+                          "start",
+                          "end"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -5365,6 +5484,62 @@
                               }
                             },
                             "required": ["reportingStatus"],
+                            "additionalProperties": false,
+                            "description": "Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete."
+                          },
+                          "usageCoverage": {
+                            "type": "object",
+                            "properties": {
+                              "completeCallCount": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Calls reporting both inputTokens and outputTokens."
+                              },
+                              "fieldCallCounts": {
+                                "type": "object",
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "inputTokens",
+                                  "outputTokens",
+                                  "uncachedInputTokens",
+                                  "cacheReadInputTokens",
+                                  "cacheWriteInputTokens",
+                                  "textOutputTokens",
+                                  "reasoningOutputTokens"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["completeCallCount", "fieldCallCounts"],
                             "additionalProperties": false
                           },
                           "costs": {
@@ -5416,7 +5591,14 @@
                             "type": "string"
                           }
                         },
-                        "required": ["modelCallCount", "usage", "costs", "providerId", "modelId"],
+                        "required": [
+                          "modelCallCount",
+                          "usage",
+                          "usageCoverage",
+                          "costs",
+                          "providerId",
+                          "modelId"
+                        ],
                         "additionalProperties": false
                       }
                     },
@@ -5472,6 +5654,62 @@
                                   }
                                 },
                                 "required": ["reportingStatus"],
+                                "additionalProperties": false,
+                                "description": "Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete."
+                              },
+                              "usageCoverage": {
+                                "type": "object",
+                                "properties": {
+                                  "completeCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Calls reporting both inputTokens and outputTokens."
+                                  },
+                                  "fieldCallCounts": {
+                                    "type": "object",
+                                    "properties": {
+                                      "inputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "outputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "uncachedInputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "cacheReadInputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "cacheWriteInputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "textOutputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "reasoningOutputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      }
+                                    },
+                                    "required": [
+                                      "inputTokens",
+                                      "outputTokens",
+                                      "uncachedInputTokens",
+                                      "cacheReadInputTokens",
+                                      "cacheWriteInputTokens",
+                                      "textOutputTokens",
+                                      "reasoningOutputTokens"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": ["completeCallCount", "fieldCallCounts"],
                                 "additionalProperties": false
                               },
                               "costs": {
@@ -5521,7 +5759,13 @@
                                 "enum": ["agent"]
                               }
                             },
-                            "required": ["modelCallCount", "usage", "costs", "kind"],
+                            "required": [
+                              "modelCallCount",
+                              "usage",
+                              "usageCoverage",
+                              "costs",
+                              "kind"
+                            ],
                             "additionalProperties": false
                           },
                           {
@@ -5572,6 +5816,62 @@
                                   }
                                 },
                                 "required": ["reportingStatus"],
+                                "additionalProperties": false,
+                                "description": "Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete."
+                              },
+                              "usageCoverage": {
+                                "type": "object",
+                                "properties": {
+                                  "completeCallCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Calls reporting both inputTokens and outputTokens."
+                                  },
+                                  "fieldCallCounts": {
+                                    "type": "object",
+                                    "properties": {
+                                      "inputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "outputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "uncachedInputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "cacheReadInputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "cacheWriteInputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "textOutputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      },
+                                      "reasoningOutputTokens": {
+                                        "type": "integer",
+                                        "minimum": 0
+                                      }
+                                    },
+                                    "required": [
+                                      "inputTokens",
+                                      "outputTokens",
+                                      "uncachedInputTokens",
+                                      "cacheReadInputTokens",
+                                      "cacheWriteInputTokens",
+                                      "textOutputTokens",
+                                      "reasoningOutputTokens"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "required": ["completeCallCount", "fieldCallCounts"],
                                 "additionalProperties": false
                               },
                               "costs": {
@@ -5630,6 +5930,7 @@
                             "required": [
                               "modelCallCount",
                               "usage",
+                              "usageCoverage",
                               "costs",
                               "kind",
                               "workflowId",
@@ -5690,6 +5991,62 @@
                               }
                             },
                             "required": ["reportingStatus"],
+                            "additionalProperties": false,
+                            "description": "Sums of reported meters; unreported meters are absent. totalTokens sums available input and output counts and is a lower bound when coverage is incomplete."
+                          },
+                          "usageCoverage": {
+                            "type": "object",
+                            "properties": {
+                              "completeCallCount": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Calls reporting both inputTokens and outputTokens."
+                              },
+                              "fieldCallCounts": {
+                                "type": "object",
+                                "properties": {
+                                  "inputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "outputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "uncachedInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheReadInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "cacheWriteInputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "textOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  },
+                                  "reasoningOutputTokens": {
+                                    "type": "integer",
+                                    "minimum": 0
+                                  }
+                                },
+                                "required": [
+                                  "inputTokens",
+                                  "outputTokens",
+                                  "uncachedInputTokens",
+                                  "cacheReadInputTokens",
+                                  "cacheWriteInputTokens",
+                                  "textOutputTokens",
+                                  "reasoningOutputTokens"
+                                ],
+                                "additionalProperties": false
+                              }
+                            },
+                            "required": ["completeCallCount", "fieldCallCounts"],
                             "additionalProperties": false
                           },
                           "costs": {
@@ -5738,7 +6095,13 @@
                             "type": "string"
                           }
                         },
-                        "required": ["modelCallCount", "usage", "costs", "workflowId"],
+                        "required": [
+                          "modelCallCount",
+                          "usage",
+                          "usageCoverage",
+                          "costs",
+                          "workflowId"
+                        ],
                         "additionalProperties": false
                       }
                     }
