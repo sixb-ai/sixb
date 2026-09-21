@@ -5,6 +5,11 @@ export type {
   AzureAIFoundryDiscoveryOptions,
 } from "./discovery"
 export type {
+  AzureAIFoundryEmbeddingModel,
+  AzureAIFoundryEmbeddingOptions,
+  AzureAIFoundryEmbeddingTransportOptions,
+} from "./embedding"
+export type {
   AzureAIFoundryChatOptions,
   AzureAIFoundryMessagesOptions,
   AzureAIFoundryModel,

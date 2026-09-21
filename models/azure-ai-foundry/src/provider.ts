@@ -31,6 +31,12 @@ import {
   FoundryDeployments,
   type ResolvedDeployment,
 } from "./discovery"
+import {
+  type AzureAIFoundryEmbeddingModel,
+  type AzureAIFoundryEmbeddingOptions,
+  type AzureAIFoundryEmbeddingTransportOptions,
+  createFoundryEmbedding,
+} from "./embedding"
 import { foundryMessagesEstimator, foundryMessagesUsage } from "./messages-accounting"
 import {
   foundryMessagesRequest,
@@ -49,6 +55,8 @@ import {
 import { object, PREFIX } from "./util"
 
 export interface AzureAIFoundryOptions extends TransportOptions {
+  /** Explicit resource transport: project endpoints do not route embeddings. */
+  readonly embeddings?: AzureAIFoundryEmbeddingTransportOptions
   /** Public model capabilities and reference pricing from models.dev. */
   readonly catalog?: AzureAIFoundryCatalogOptions
   /** Namespace bindings from different resources/projects in a single Sixb catalog. */
@@ -111,6 +119,10 @@ export interface AzureAIFoundryProvider extends LanguageModelProvider {
     deploymentName: string,
     options?: AzureAIFoundryMessagesOptions
   ): AzureAIFoundryModel<"messages">
+  embedding(
+    deploymentName: string,
+    options: AzureAIFoundryEmbeddingOptions
+  ): AzureAIFoundryEmbeddingModel
   readonly catalog: AzureAIFoundryCatalog
   chat(deploymentName: string, options?: AzureAIFoundryChatOptions): AzureAIFoundryModel<"chat">
 }
@@ -121,6 +133,23 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
   if (!providerId.trim()) throw new TypeError(`${PREFIX} providerId must not be empty.`)
   const deployments = new FoundryDeployments(providerId, transport, options.discovery)
   const modelCatalog = new RemoteModelsDevCatalog(options.catalog)
+  const embeddingTransport = options.embeddings
+    ? new FoundryTransport(options.embeddings, "resource")
+    : undefined
+  const embedding = (name: string, input: AzureAIFoundryEmbeddingOptions) => {
+    if (!embeddingTransport)
+      throw new TypeError(
+        `${PREFIX} Configure embeddings.endpoint and embeddings.apiKey before declaring an embedding model.`
+      )
+    return createFoundryEmbedding(
+      providerId,
+      name,
+      input,
+      embeddingTransport,
+      deployments,
+      modelCatalog
+    )
+  }
   const model = <P extends FoundryProtocol = FoundryProtocol>(
     protocol: P | undefined,
     deploymentName: string,
@@ -153,6 +182,11 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
     const results: LanguageModelDefinition[] = []
     for (const deployment of records) {
       const name = deployment.name
+      if (
+        isEmbeddingDeployment(deployment) ||
+        (await modelCatalog.getEmbedding(deployment.modelName, true))
+      )
+        continue
       try {
         const profile = resolveModel({
           providerId,
@@ -185,7 +219,7 @@ export function createAzureAIFoundry(options: AzureAIFoundryOptions): AzureAIFou
   }
   const auto = (name: string, options: AzureAIFoundryModelOptions = {}) =>
     model(undefined, name, options)
-  return Object.assign(auto, { providerId, catalog, responses, messages, chat })
+  return Object.assign(auto, { providerId, catalog, responses, messages, chat, embedding })
 }
 
 class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryModel<Protocol> {
@@ -275,6 +309,10 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
   async resolve(options?: { readonly offline?: boolean }): Promise<FoundryModel<Protocol>> {
     if (this.resolution) return this
     const resolution = await this.deployments.resolve(this.modelId, options?.offline === true)
+    if (isEmbeddingDeployment(resolution.deployment))
+      throw new UnsupportedModelFeatureError(
+        `${PREFIX} Use foundry.embedding() for an embedding deployment.`
+      )
     let catalogModel: CatalogModel | undefined
     try {
       catalogModel = await this.modelCatalog.get(resolution.deployment.modelName, options?.offline)
@@ -285,6 +323,10 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       catalogModel = await this.modelCatalog.get(resolution.deployment.modelName, true)
       if (!catalogModel && !this.options.definition) throw error
     }
+    if (await this.modelCatalog.getEmbedding(resolution.deployment.modelName, true))
+      throw new UnsupportedModelFeatureError(
+        `${PREFIX} Use foundry.embedding() for an embedding deployment.`
+      )
     return new FoundryModel(
       this.requestedProtocol,
       this.transport,
@@ -413,4 +455,12 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       throw this.transport.redactFailure(response, error)
     }
   }
+}
+
+function isEmbeddingDeployment(deployment: AzureAIFoundryDeployment): boolean {
+  return (
+    deployment.capabilities.embeddings === "true" ||
+    deployment.capabilities.embedding === "true" ||
+    /^(text-embedding-|cohere-embed)/i.test(deployment.modelName)
+  )
 }

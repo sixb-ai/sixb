@@ -20,9 +20,9 @@ export class FoundryTransport {
   readonly projectUrl: string
   private readonly options: TransportOptions
 
-  constructor(options: TransportOptions) {
+  constructor(options: TransportOptions, target: "project" | "resource" = "project") {
     if (!URL.canParse(options.endpoint))
-      throw new TypeError(`${PREFIX} endpoint must be a valid project URL.`)
+      throw new TypeError(`${PREFIX} endpoint must be a valid ${target} URL.`)
     const url = new URL(options.endpoint)
     if (
       !["https:", "http:"].includes(url.protocol) ||
@@ -32,16 +32,20 @@ export class FoundryTransport {
       url.hash
     ) {
       throw new TypeError(
-        `${PREFIX} endpoint must be an HTTP(S) project URL without credentials, query, or fragment.`
+        `${PREFIX} endpoint must be an HTTP(S) ${target} URL without credentials, query, or fragment.`
       )
     }
     const path = url.pathname.replace(/\/+$/, "")
-    if (!/^\/api\/projects\/[^/]+$/.test(path))
+    if (target === "project" && !/^\/api\/projects\/[^/]+$/.test(path))
       throw new TypeError(
         `${PREFIX} endpoint must be a Foundry project URL: https://<resource>.services.ai.azure.com/api/projects/<project>.`
       )
+    if (target === "resource" && path !== "" && path !== "/openai/v1")
+      throw new TypeError(
+        `${PREFIX} embeddings.endpoint must be a resource origin or /openai/v1 URL.`
+      )
     this.projectUrl = `${url.origin}${path}`
-    this.baseUrl = `${this.projectUrl}/openai/v1`
+    this.baseUrl = target === "project" ? `${this.projectUrl}/openai/v1` : `${url.origin}/openai/v1`
     if (
       typeof options.apiKey !== "function" &&
       (typeof options.apiKey !== "string" || !options.apiKey.trim())
@@ -65,7 +69,7 @@ export class FoundryTransport {
     signal: AbortSignal,
     providerId: string,
     modelId: string,
-    protocol: FoundryProtocol = "responses"
+    protocol: FoundryProtocol | "embeddings" = "responses"
   ): Promise<Response> {
     const url = this.url(protocol)
     const diagnostics = new RequestDiagnostics()
@@ -77,7 +81,7 @@ export class FoundryTransport {
         protocol === "messages" ? "x-api-key" : "api-key"
       )
       headers.set("content-type", "application/json")
-      headers.set("accept", "text/event-stream")
+      headers.set("accept", protocol === "embeddings" ? "application/json" : "text/event-stream")
       if (protocol === "messages") headers.set("anthropic-version", "2023-06-01")
       signal.throwIfAborted()
       // Ambiguous network failures and accepted streams are never automatically replayed.
@@ -107,7 +111,12 @@ export class FoundryTransport {
         response,
         await httpError(response, providerId, modelId, signal)
       )
-      if (!error.retryable || attempt >= (this.options.maxRetries ?? 2)) throw error
+      if (
+        protocol === "embeddings" ||
+        !error.retryable ||
+        attempt >= (this.options.maxRetries ?? 2)
+      )
+        throw error
       await wait(
         Math.min(error.retryAfterMs ?? 250 * 2 ** attempt, this.options.maxRetryDelayMs ?? 60_000),
         signal
@@ -149,7 +158,8 @@ export class FoundryTransport {
     return (this.options.fetch ?? fetch)(url, init)
   }
 
-  url(protocol: FoundryProtocol): string {
+  url(protocol: FoundryProtocol | "embeddings"): string {
+    if (protocol === "embeddings") return `${this.baseUrl}/embeddings`
     if (protocol === "responses") return `${this.baseUrl}/responses`
     if (protocol === "chat") return `${this.baseUrl}/chat/completions`
     return `${new URL(this.baseUrl).origin}/anthropic/v1/messages`
