@@ -6,7 +6,7 @@ export class SandboxError extends Error {
   readonly name: string = "SandboxError"
 }
 
-/** The named sandbox or its saved filesystem no longer exists. Explicit recreation is required. */
+/** Confirmed missing/expired state. Never use for transport, authorization or session setup errors. */
 export class SandboxStateUnavailableError extends SandboxError {
   override readonly name = "SandboxStateUnavailableError"
 }

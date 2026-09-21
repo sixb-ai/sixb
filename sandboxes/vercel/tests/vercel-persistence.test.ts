@@ -4,8 +4,8 @@ import {
   SandboxError,
   SandboxStateUnavailableError,
 } from "@sixb/core/sandboxes"
-import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
-import type { VercelPersistenceOperations } from "../src/vercel-persistence"
+import { APIError, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
+import { persistentSandboxError, type VercelPersistenceOperations } from "../src/vercel-persistence"
 import { VercelSandboxFactory } from "../src/vercel-sandbox-factory"
 
 /** Exercise the installed SDK over a fake transport, not a fake auto-resume implementation. */
@@ -22,6 +22,7 @@ function fixture() {
   let snapshotStatus = "created"
   let snapshotMissing = false
   let networkFails = false
+  let networkMissing = false
   let stopGate: Promise<void> | undefined
   const session = () => ({
     id: `session-${generation}`,
@@ -77,6 +78,7 @@ function fixture() {
         return Response.json(response())
       }
       if (path.endsWith("/network-policy")) {
+        if (networkMissing) return failure(404, "not_found")
         if (networkFails) return failure(400, "invalid_policy")
         return Response.json({ session: session() })
       }
@@ -144,6 +146,9 @@ function fixture() {
     },
     failNetwork: () => {
       networkFails = true
+    },
+    loseNetworkSession: () => {
+      networkMissing = true
     },
     gateStop: (gate: Promise<void>) => {
       stopGate = gate
@@ -260,18 +265,47 @@ describe("Vercel named persistence", () => {
     expect(f.requests[0].method).toBe("GET")
   })
 
-  test("authorization errors are not classified as lost state", async () => {
+  test.each([
+    [403, "forbidden"],
+    [404, "unknown"],
+    [410, "session_stopped"],
+    [401, "unauthorized"],
+  ] as const)("errors %s/%s are not classified as lost state", async (status, code) => {
     const f = fixture()
-    f.setError(403, "forbidden")
+    f.setError(status, code)
     const error: unknown = await f.factory.resume("workspace-1").then(
       () => undefined,
       (error: unknown) => error
     )
     expect(error).toBeInstanceOf(SandboxError)
     expect(error).not.toBeInstanceOf(SandboxStateUnavailableError)
-    expect(String(error)).toContain("HTTP 403")
+    expect(String(error)).toContain(`HTTP ${status}`)
     expect(String(error)).not.toContain("provider detail")
     expect(f.requests).toHaveLength(1)
+  })
+
+  test("a session configuration 404 is not evidence of lost saved state", async () => {
+    // Regression proof: classify bindPersistentSandbox errors as resume errors; this fails.
+    const f = fixture()
+    const sandbox = await f.factory.create({ persistence: { name: "workspace-1" } })
+    await sandbox.stop()
+    f.loseNetworkSession()
+    const error: unknown = await f.factory.resume("workspace-1").catch((error: unknown) => error)
+    expect(error).toBeInstanceOf(SandboxError)
+    expect(error).not.toBeInstanceOf(SandboxStateUnavailableError)
+    expect(String(error)).toContain("configure failed")
+  })
+
+  test("service failures and transport errors never signal confirmed loss", () => {
+    // Test classification directly: the SDK retries 5xx responses with real backoff.
+    for (const error of [
+      new APIError(new Response(null, { status: 503 }), { json: { error: { code: "not_found" } } }),
+      new Error("connection reset"),
+    ]) {
+      const mapped = persistentSandboxError(error, "resume")
+      expect(mapped).toBeInstanceOf(SandboxError)
+      expect(mapped).not.toBeInstanceOf(SandboxStateUnavailableError)
+    }
   })
 
   test("a snapshot expiring between inspection and resume never triggers creation", async () => {

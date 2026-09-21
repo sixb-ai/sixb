@@ -233,7 +233,6 @@ describe("agent routes", () => {
       id: "recovery-run",
       threadId: "recovery",
       triggerMessageId: "trigger",
-      requesterGroupIds: [],
       execution: testExecution("private-owner-token"),
     })
     await storage.agents.threads.transitionWorkspace({
