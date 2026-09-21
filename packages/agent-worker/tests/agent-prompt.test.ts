@@ -11,6 +11,20 @@ const SKILLS = [
 ] as const
 
 describe("agent system prompt", () => {
+  test("marks a durable filesystem reset without discarding conversation context", () => {
+    const sandboxResetAt = "2026-01-01T00:00:00.000Z"
+    const prompt = renderAgentSystemPrompt({ mode: "conversation", skills: [], sandboxResetAt })
+    expect(prompt).toContain(`<sandbox_state>\nThe sandbox was recreated at ${sandboxResetAt}`)
+    expect(prompt).toContain(
+      "Local files and uncommitted edits from before that time were not recovered"
+    )
+    expect(prompt).toContain("Conversation history and published attachments remain available")
+    expect(prompt).toContain("within the user's authorization")
+    expect(renderAgentSystemPrompt({ mode: "conversation", skills: [] })).not.toContain(
+      "<sandbox_state>"
+    )
+  })
+
   test.each([
     undefined,
     "",

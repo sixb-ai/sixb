@@ -209,14 +209,16 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
     toVercelNetworkPolicy(resolved.network ?? { mode: "none" })
     const params = { ...resolveCredentials(this.defaults.credentials), name }
     let client: VercelPersistentClient | undefined
+    let operation: "resume" | "configure" = "resume"
     try {
       const existing = await this.persistentRemote.get({ ...params, resume: false })
       assertStoppedPersistent(existing)
       client = await this.persistentRemote.get({ ...params, resume: true })
+      operation = "configure"
       return await bindPersistentSandbox(client, resolved)
     } catch (error) {
       await stopFailedPersistentSession(client)
-      throw persistentSandboxError(error, "resume")
+      throw persistentSandboxError(error, operation)
     }
   }
 

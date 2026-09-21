@@ -19,6 +19,8 @@ export interface AgentWorkspaceState {
   readonly status: "new" | "busy" | "ready" | "blocked" | "unavailable"
   readonly sourceFingerprint?: string
   readonly initialized: boolean
+  /** Durable context boundary: local files from before this reset are no longer available. */
+  readonly resetAt?: string
   /** Never expires automatically: a delayed provider operation must not reach a successor. */
   readonly owner?: { readonly runId: string; readonly executionToken: string }
 }
@@ -33,6 +35,13 @@ export type TransitionAgentWorkspaceInput = {
       readonly executionToken: string
       readonly generation: string
       readonly sourceFingerprint: string
+    }
+  | {
+      readonly action: "replace"
+      readonly runId: string
+      readonly executionToken: string
+      readonly generation: string
+      readonly nextGeneration: string
     }
   | {
       readonly action: "settle"

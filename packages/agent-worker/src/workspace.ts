@@ -17,6 +17,7 @@ const OPERATION_TIMEOUT_MS = 120_000
 export interface AgentWorkspaceLifecycle {
   readonly sandbox: Sandbox
   readonly env: Readonly<Record<string, string>>
+  readonly resetAt?: string
   save(): Promise<void>
 }
 
@@ -71,7 +72,7 @@ export async function openAgentWorkspace(input: {
     .digest("hex")
   const executionToken = run.execution?.token
   if (!executionToken) throw new AgentExecutionLostError(run.id)
-  const generation = thread.workspaceState?.generation ?? randomUUID()
+  let generation = thread.workspaceState?.generation ?? randomUUID()
   if (
     thread.workspaceState?.sourceFingerprint &&
     thread.workspaceState.sourceFingerprint !== fingerprint
@@ -118,27 +119,55 @@ export async function openAgentWorkspace(input: {
     )
   }
   // Include project + thread in the namespace; a new generation never touches the previous name.
-  const name = `sixb-ws-${createHash("sha256")
-    .update(JSON.stringify([context.id, thread.id, generation]))
-    .digest("hex")}`
+  const sandboxName = () =>
+    `sixb-ws-${createHash("sha256")
+      .update(JSON.stringify([context.id, thread.id, generation]))
+      .digest("hex")}`
   let sandbox: Sandbox | undefined
   let initialized = state.initialized
+  const create = () =>
+    factory.create({
+      ...options,
+      signal,
+      environment: { source: recipe.source, setup: recipe.setup },
+      persistence: { name: sandboxName() },
+    })
   try {
     await assertOwner()
     signal.throwIfAborted()
-    const acquired = await waitForAbort(
-      bounded(
-        initialized
-          ? factory.resume(name, options)
-          : factory.create({
-              ...options,
-              signal,
-              environment: { source: recipe.source, setup: recipe.setup },
-              persistence: { name },
-            })
-      ),
-      signal
-    )
+    let acquired: Sandbox
+    try {
+      acquired = await waitForAbort(
+        bounded(initialized ? factory.resume(sandboxName(), options) : create()),
+        signal
+      )
+    } catch (error) {
+      if (!initialized || !(error instanceof SandboxStateUnavailableError)) throw error
+      await assertOwner()
+      signal.throwIfAborted()
+      // A fresh clone needs source access even when the resume policy no longer allowed it.
+      options.network = workspaceNetwork(
+        recipe.network,
+        new URL(context.apiBaseUrl).origin,
+        url?.origin
+      )
+      const replacement = await context.storage.agents.threads.transitionWorkspace({
+        projectId: context.id,
+        id: thread.id,
+        action: "replace",
+        runId: run.id,
+        executionToken,
+        generation,
+        nextGeneration: randomUUID(),
+      })
+      state = replacement
+      generation = replacement.generation
+      initialized = false
+      await assertOwner()
+      signal.throwIfAborted()
+      // One attempt, never a retry loop. Failed creation remains quarantined under its new name.
+      acquired = await waitForAbort(bounded(create()), signal)
+    }
     sandbox = initialized
       ? sandboxProjectDirectory(acquired, recipe.source !== undefined)
       : acquired
@@ -218,6 +247,7 @@ export async function openAgentWorkspace(input: {
   return {
     sandbox: guarded,
     env: recipe.env ?? {},
+    resetAt: state.resetAt,
     save() {
       if (saving) return saving
       closed = true

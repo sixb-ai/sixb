@@ -44,7 +44,12 @@ export function transitionAgentWorkspace(
     if (!["busy", "blocked", "unavailable"].includes(state.status)) {
       return fail("does not require recovery.")
     }
-    return { generation: input.generation, status: "new", initialized: false }
+    return {
+      generation: input.generation,
+      status: "new",
+      initialized: false,
+      resetAt: new Date().toISOString(),
+    }
   }
   if (
     run?.kind !== "conversation" ||
@@ -71,6 +76,7 @@ export function transitionAgentWorkspace(
       generation: input.generation,
       status: "busy",
       initialized: state?.initialized ?? false,
+      ...(state?.resetAt ? { resetAt: state.resetAt } : {}),
       sourceFingerprint: input.sourceFingerprint,
       owner: { runId: input.runId, executionToken: input.executionToken },
     }
@@ -83,12 +89,29 @@ export function transitionAgentWorkspace(
   ) {
     return fail("is not owned by this execution.")
   }
+  if (input.action === "replace") {
+    if (
+      !state.initialized ||
+      input.nextGeneration === state.generation ||
+      !/^[a-zA-Z0-9-]{1,80}$/.test(input.nextGeneration)
+    ) {
+      return fail("replacement requires initialized state and a fresh valid generation.")
+    }
+    // Only the owning worker may report confirmed loss; retain its fence across replacement.
+    return {
+      ...state,
+      generation: input.nextGeneration,
+      initialized: false,
+      resetAt: new Date().toISOString(),
+    }
+  }
   if (input.status === "ready" && !input.initialized) return fail("initialization is incomplete.")
   return {
     generation: state.generation,
     status: input.status,
     initialized: input.initialized,
     sourceFingerprint: state.sourceFingerprint,
+    ...(state.resetAt ? { resetAt: state.resetAt } : {}),
   }
 }
 

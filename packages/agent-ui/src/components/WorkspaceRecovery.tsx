@@ -24,8 +24,8 @@ export function WorkspaceRecovery({
     <div className="mx-auto w-full max-w-3xl px-4 py-3 text-sm" role="status">
       <p className="font-medium">Workspace recovery required</p>
       <p className="text-muted-foreground">
-        Saved files are unavailable or the previous operation could not be confirmed. Automatic
-        resume is blocked to protect your work.
+        Recovery failed or the previous operation could not be confirmed. Automatic resume is
+        blocked to protect your work.
       </p>
       {error && <p role="alert">Could not recreate the workspace. Reload and try again.</p>}
       <AlertDialog>
@@ -38,7 +38,7 @@ export function WorkspaceRecovery({
           <AlertDialogHeader>
             <AlertDialogTitle>Start with a fresh workspace?</AlertDialogTitle>
             <AlertDialogDescription>
-              The next run will initialize a new checkout. Uncommitted files from the previous
+              The next run will initialize a new environment. Local files from the previous
               workspace will not be copied. Conversation history and published attachments stay
               available. The previous sandbox is not deleted and remains subject to provider
               retention.

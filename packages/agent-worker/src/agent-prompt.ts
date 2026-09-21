@@ -60,6 +60,7 @@ export interface RenderAgentSystemPromptInput {
   readonly mode: AgentExecutionMode
   readonly instructions?: string
   readonly skills: readonly AgentSkill[]
+  readonly sandboxResetAt?: string
 }
 
 export interface RenderWorkflowOutputFinalizerPromptInput {
@@ -70,6 +71,12 @@ export interface RenderWorkflowOutputFinalizerPromptInput {
 export function renderAgentSystemPrompt(input: RenderAgentSystemPromptInput): string {
   return [
     promptSection("sixb_runtime_context", renderRuntimeContext(input.mode, input.skills)),
+    promptSection(
+      "sandbox_state",
+      input.sandboxResetAt
+        ? `The sandbox was recreated at ${input.sandboxResetAt}. Local files and uncommitted edits from before that time were not recovered. Conversation history and published attachments remain available. Inspect the current environment before relying on earlier filesystem results, and recover or redo missing work within the user's authorization.`
+        : undefined
+    ),
     promptSection("agent_instructions", input.instructions),
     promptSection(
       "sixb_mode_rules",

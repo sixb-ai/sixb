@@ -296,7 +296,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
           context: executionContext,
           run,
           signal: turnSignal,
-          requestedBy: durableExecution.requestedBy,
+          execution: durableExecution,
         })
         workspace = await openAgentWorkspace({
           context: executionContext,

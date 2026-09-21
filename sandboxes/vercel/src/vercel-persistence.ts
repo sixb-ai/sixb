@@ -30,7 +30,7 @@ export const vercelPersistenceOperations: VercelPersistenceOperations = VercelSd
 
 export function persistentSandboxError(
   error: unknown,
-  operation: "create" | "resume"
+  operation: "create" | "resume" | "configure"
 ): SandboxError {
   if (error instanceof SandboxError) return error
   if (error instanceof APIError) {
@@ -50,7 +50,7 @@ export function persistentSandboxError(
         (error.response.status === 410 && code === "snapshot_not_found"))
     ) {
       return new SandboxStateUnavailableError(
-        "[Sandbox] Vercel saved state is unavailable. Recreate explicitly; no replacement was created."
+        "[Sandbox] Vercel saved state is missing or expired; no replacement was created."
       )
     }
     if (operation === "create" && error.response.status === 409) {

@@ -2197,15 +2197,8 @@ describe("AgentWorker", () => {
         expect(sandbox.commands.some((call) => call.command === "git")).toBe(false)
         return
       }
-      for (const failure of ["source-drift", "missing-snapshot"]) {
-        if (failure === "source-drift") {
-          sourceUrl = "https://example.com/other.git"
-        } else {
-          sourceUrl = "https://example.com/repository.git"
-          factory.resume = async () => {
-            throw new SandboxStateUnavailableError("expired")
-          }
-        }
+      {
+        sourceUrl = "https://example.com/other.git"
         const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
         const completion = observeQueueSettlement(host.queues.agents)
         const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
@@ -2217,9 +2210,7 @@ describe("AgentWorker", () => {
           )
           expect(resumes).toBe(1)
           expect(creates).toBe(1)
-          expect((await sdk.agent.threads.getById(thread.id))?.workspaceState?.status).toBe(
-            failure === "source-drift" ? "ready" : "unavailable"
-          )
+          expect((await sdk.agent.threads.getById(thread.id))?.workspaceState?.status).toBe("ready")
         } finally {
           await worker.stop()
           completion.restore()
@@ -2228,6 +2219,181 @@ describe("AgentWorker", () => {
     } finally {
       observer.mockRestore()
     }
+  })
+
+  test.each([
+    true,
+    false,
+  ])("recreates confirmed lost state and retains reset context (Git source: %s)", async (withSource) => {
+    // Regression proof: disable the unavailable-state branch in openAgentWorkspace; run 2 fails.
+    const sessions: RecordingSandbox[] = []
+    const names: string[] = []
+    const prompts: string[] = []
+    let resumes = 0
+    let resolutions = 0
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => {
+        prompts.push(JSON.stringify(options.messages))
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const host = buildSixb(
+      model,
+      new InMemoryBroker(),
+      {
+        async create(options) {
+          names.push(options!.persistence!.name)
+          const session = new RecordingSandbox(`replacement-${sessions.length}`)
+          sessions.push(session)
+          return session
+        },
+        async resume(name) {
+          resumes++
+          if (resumes === 1) throw new SandboxStateUnavailableError("expired")
+          expect(name).toBe(names[1])
+          sessions[1]!.status = "running"
+          return sessions[1]!
+        },
+      },
+      {
+        sandboxConfig: {
+          params: {},
+          resolve: () => {
+            resolutions++
+            return {
+              ...(withSource
+                ? { source: { type: "git" as const, url: "https://example.com/repo.git" } }
+                : {}),
+              setup: ["prepare-environment"],
+            }
+          },
+        },
+      }
+    )
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    let resetAt: string | undefined
+    for (let i = 0; i < 3; i++) {
+      const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
+      const completion = observeQueueSettlement(host.queues.agents)
+      const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+      await worker.start()
+      try {
+        await completion.wait()
+        expect(
+          await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+        ).toMatchObject({ status: "succeeded" })
+        const state = (
+          await agentStorageOf(host).threads.getById({ projectId: PROJECT_ID, id: thread.id })
+        )?.workspaceState
+        expect(state?.status).toBe("ready")
+        if (i === 0) {
+          expect(state?.resetAt).toBeUndefined()
+          expect(prompts[i]).not.toContain("<sandbox_state>")
+        } else {
+          expect(state?.resetAt).toEqual(expect.any(String))
+          if (i === 1) resetAt = state?.resetAt
+          expect(state?.resetAt).toBe(resetAt)
+          expect(prompts[i]).toContain("<sandbox_state>")
+          expect(prompts[i]).toContain("were not recovered")
+        }
+      } finally {
+        await worker.stop()
+        completion.restore()
+      }
+    }
+    expect(resolutions).toBe(3)
+    expect(sessions).toHaveLength(2)
+    expect(names[0]).not.toBe(names[1])
+    for (const session of sessions) {
+      expect(session.destroyed).toBe(false)
+      expect(
+        session.commands.filter((call) => call.args.includes("prepare-environment"))
+      ).toHaveLength(1)
+      expect(
+        session.commands.filter((call) => call.command === "git" && call.args[0] === "clone")
+      ).toHaveLength(withSource ? 1 : 0)
+    }
+  })
+
+  test.each([
+    "transport",
+    "replacement-failed",
+    "network-denied",
+  ] as const)("does not silently bypass %s during recovery", async (failure) => {
+    // Regression proof: recreate on every resume error or bypass network validation; counts fail.
+    let creates = 0
+    let calls = 0
+    let resolutions = 0
+    const names: string[] = []
+    const sandbox = new RecordingSandbox("recovery-failure")
+    const host = buildSixb(
+      answerModel(() => {
+        calls++
+      }),
+      new InMemoryBroker(),
+      {
+        async create(options) {
+          creates++
+          names.push(options!.persistence!.name)
+          if (creates > 1) throw new Error("creation outcome unknown")
+          return sandbox
+        },
+        async resume() {
+          if (failure === "transport") throw new Error("connection lost")
+          throw new SandboxStateUnavailableError("expired")
+        },
+      },
+      {
+        sandboxConfig: {
+          params: {},
+          resolve: () => {
+            resolutions++
+            return {
+              source: { type: "git" as const, url: "https://example.com/repo.git" },
+              ...(failure === "network-denied" && resolutions > 1
+                ? {
+                    network: {
+                      mode: "restricted" as const,
+                      allow: [{ name: "api", origin: new URL(TEST_AGENT_API_BASE_URL).origin }],
+                    },
+                  }
+                : {}),
+            }
+          },
+        },
+      }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    for (let i = 0; i < 2; i++) {
+      const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
+      const completion = observeQueueSettlement(host.queues.agents)
+      const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+      await worker.start()
+      try {
+        await completion.wait()
+        expect(
+          await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+        ).toMatchObject({ status: i === 0 ? "succeeded" : "failed" })
+      } finally {
+        await worker.stop()
+        completion.restore()
+      }
+    }
+    expect(calls).toBe(1)
+    expect(creates).toBe(failure === "replacement-failed" ? 2 : 1)
+    if (names.length > 1) expect(names[0]).not.toBe(names[1])
+    expect(sandbox.destroyed).toBe(false)
+    expect((await sdk.agent.threads.getById(thread.id))?.workspaceState?.status).toBe("blocked")
   })
 
   test.each([

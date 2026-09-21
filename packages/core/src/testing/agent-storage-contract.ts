@@ -290,6 +290,80 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
   }
 
   describe(label, () => {
+    test("replaces lost state only under its current execution fence", async () => {
+      // Regression proof: remove replace's generation/owner guards; the stale attempts succeed.
+      await withStorage(async (storage, fixture) => {
+        await storage.threads.create(threadInput({ sandbox: {} }))
+        const run = runInput({ execution: execution("first", new Date("2099-01-01")) })
+        await createAndStartRun(storage, fixture, run)
+        const acquire = {
+          projectId,
+          id: "thr_1",
+          action: "acquire" as const,
+          runId: run.id,
+          executionToken: "first",
+          generation: "generation-1",
+          sourceFingerprint: "a".repeat(64),
+        }
+        await storage.threads.transitionWorkspace(acquire)
+        const replace = { ...acquire, action: "replace" as const, nextGeneration: "generation-2" }
+        await expectAgentError(storage.threads.transitionWorkspace(replace), "invalid_state")
+        await storage.threads.transitionWorkspace({
+          ...acquire,
+          action: "settle",
+          status: "ready",
+          initialized: true,
+        })
+        await expectAgentError(storage.threads.transitionWorkspace(replace), "invalid_state")
+        await storage.threads.transitionWorkspace(acquire)
+        for (const nextGeneration of ["generation-1", "../invalid", ""]) {
+          await expectAgentError(
+            storage.threads.transitionWorkspace({ ...replace, nextGeneration }),
+            "invalid_state"
+          )
+        }
+        await expectAgentError(
+          storage.threads.transitionWorkspace({ ...replace, executionToken: "stale" }),
+          "execution_lost"
+        )
+        const replacement = await storage.threads.transitionWorkspace(replace)
+        const resetAt = replacement.resetAt
+        expect(replacement).toMatchObject({
+          generation: "generation-2",
+          status: "busy",
+          initialized: false,
+          owner: { runId: run.id, executionToken: "first" },
+          sourceFingerprint: acquire.sourceFingerprint,
+          resetAt: expect.any(String),
+        })
+        await expectAgentError(storage.threads.transitionWorkspace(replace), "invalid_state")
+        await expectAgentError(
+          storage.threads.transitionWorkspace({
+            ...acquire,
+            action: "settle",
+            status: "ready",
+            initialized: true,
+          }),
+          "invalid_state"
+        )
+        await storage.threads.transitionWorkspace({
+          ...acquire,
+          generation: "generation-2",
+          action: "settle",
+          status: "ready",
+          initialized: true,
+        })
+        const resumed = await storage.threads.transitionWorkspace({
+          ...acquire,
+          generation: "generation-2",
+        })
+        expect(resumed.resetAt).toBe(resetAt)
+        expect((await storage.threads.getById({ projectId, id: "thr_1" }))?.workspaceState).toEqual(
+          resumed
+        )
+      })
+    })
+
     test("fences workspace ownership across reclamation and explicit recreation", async () => {
       // Regression proof: remove the busy-state or owner-token checks in transitionAgentWorkspace.
       await withStorage(async (storage, fixture) => {
@@ -360,6 +434,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           generation: "generation-2",
           status: "new",
           initialized: false,
+          resetAt: expect.any(String),
         })
         await expectAgentError(storage.threads.transitionWorkspace(recreate), "invalid_state")
       })
