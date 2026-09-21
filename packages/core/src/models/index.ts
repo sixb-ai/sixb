@@ -24,8 +24,10 @@ export type {
   EmbeddingModelDefinition,
   EmbeddingModelRef,
   EmbeddingModelRequest,
+  EmbeddingModelResponseMetadata,
   EmbeddingModelResult,
 } from "./embedding-model"
+export { EmbeddingModelResponseError } from "./embedding-model"
 export {
   ModelCatalogUnavailableError,
   ModelProviderError,

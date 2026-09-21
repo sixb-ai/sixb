@@ -45,7 +45,7 @@ import {
   PostAgentMessageResponseSchema,
   RetryAgentRunResponseSchema,
 } from "../schemas/agents"
-import { codedErrorResponseSchema, ErrorResponseSchema, JsonValueSchema } from "../schemas/common"
+import { AiUsageLimitErrorResponseSchema, ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
 import {
   handleRouteError,
@@ -60,11 +60,6 @@ const AgentMessageFileContentQuerySchema = FileContentQuerySchema.extend({
     .min(1)
     .regex(/^\/parts(?:\/|$)/, "Agent message file content paths must start with /parts/"),
 })
-
-const AiUsageLimitErrorResponseSchema = codedErrorResponseSchema([
-  "ai.usage_limit_exceeded",
-  "ai.usage_limit_unavailable",
-]).extend({ details: JsonValueSchema.optional() })
 
 function serializeThread(thread: AgentThreadRecord): ReturnType<typeof AgentThreadSchema.parse> {
   return AgentThreadSchema.parse({

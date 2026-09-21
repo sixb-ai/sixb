@@ -98,3 +98,56 @@ test("wire vector queries require text and a profile and reject internal stamps"
     ObjectQuerySchema.safeParse({ ...query, profile: undefined, propertyId: "raw" }).success
   ).toBe(false)
 })
+
+test("HTTP vector search enforces AI limits before inference and exposes Retry-After", async () => {
+  let calls = 0
+  const storage = new InMemoryStorage()
+  const host = new SixbHost({
+    id: "vector-limits",
+    ontology: [Product],
+    models: {
+      embedding: [
+        {
+          ...model,
+          embed: async () => {
+            calls += 1
+            return { vectors: [[1, 0]] }
+          },
+        },
+      ],
+    },
+    storage,
+    broker: new InMemoryBroker(),
+    blobStorage: new InMemoryBlobStorage(),
+    lakeStorage: new InMemoryLakeStorage(),
+    queues: new InMemoryQueues(),
+  })
+  await storage.aiLimits.createPolicy({
+    id: "tokens",
+    projectId: host.id,
+    subject: { type: "project" },
+    limit: { meter: "tokens.total", amount: 1 },
+  })
+  const app = createSixbApi(
+    new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() })
+  )
+  const response = await app.fetch(
+    new Request("http://localhost/api/objects/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: {
+          kind: "vector",
+          input: { kind: "start", objectTypeId: Product.id },
+          profile: "content",
+          vector: "several tokens in the search text",
+          k: 1,
+        },
+      }),
+    })
+  )
+  expect(response.status).toBe(429)
+  expect(Number(response.headers.get("Retry-After"))).toBeGreaterThan(0)
+  expect(await response.json()).toMatchObject({ code: "ai.usage_limit_exceeded" })
+  expect(calls).toBe(0)
+})

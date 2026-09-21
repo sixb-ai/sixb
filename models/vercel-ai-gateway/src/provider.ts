@@ -104,24 +104,50 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
     providerId: PROVIDER_ID as typeof PROVIDER_ID,
     catalog,
     embedding: (modelId: string, embeddingOptions: VercelGatewayEmbeddingOptions) =>
-      createGatewayEmbedding(modelId, embeddingOptions, async (input, dimensions) => {
-        const response = await (transport.fetch ?? fetch)(`${transport.baseUrl}/embeddings`, {
-          method: "POST",
-          headers: {
-            ...gatewayHeaders(transport, "application/json"),
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            model: modelId,
-            input: input.texts,
-            dimensions,
-            encoding_format: "float",
-          }),
-          signal: input.signal,
-        })
-        if (!response.ok) throw await providerHttpError(response, PROVIDER_ID, modelId)
-        return response.json()
-      }),
+      createGatewayEmbedding(
+        modelId,
+        embeddingOptions,
+        async (input, dimensions) => {
+          const response = await (transport.fetch ?? fetch)(`${transport.baseUrl}/embeddings`, {
+            method: "POST",
+            headers: {
+              ...gatewayHeaders(transport, "application/json"),
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              model: modelId,
+              input: input.texts,
+              dimensions,
+              encoding_format: "float",
+            }),
+            signal: input.signal,
+          })
+          if (!response.ok) throw await providerHttpError(response, PROVIDER_ID, modelId)
+          const body: unknown = await response.json()
+          assertJsonObject(body, "Vercel AI Gateway embedding response")
+          const rawUsage = object(body.usage)
+          const inputTokens = integer(rawUsage?.prompt_tokens)
+          const metadata = gatewayMetadata(body)
+          return {
+            body,
+            metadata: {
+              usage: {
+                ...(inputTokens === undefined ? {} : { inputTokens }),
+                outputTokens: 0,
+                ...(rawUsage ? { raw: rawUsage } : {}),
+              },
+              providerIds: gatewayProviderIds(
+                body,
+                response.headers.get("x-request-id") ?? undefined
+              ),
+              responseModelId: string(body.model),
+              reportedCost: gatewayReportedCost(metadata),
+              route: gatewayRoute(metadata),
+            },
+          }
+        },
+        { resolve: () => catalog.embeddingEstimator(modelId) }
+      ),
   })
 }
 
@@ -161,6 +187,23 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
   estimate(modelId: string, usage: ModelUsage) {
     const card = this.rateCards.get(modelId)
     return rateModelCall({ usage, rateCard: card && defineModelRateCard(card) })
+  }
+  async embeddingEstimator(modelId: string): Promise<ModelCostEstimator> {
+    let card: LanguageModelRateCard | undefined
+    try {
+      await this.load()
+      const available = this.rateCards.get(modelId)
+      card = available && defineModelRateCard(available)
+    } catch {
+      console.warn(
+        "[SixbVercelGateway] Embedding pricing unavailable; cost limits will fail closed."
+      )
+    }
+    // Pin the catalog snapshot for both reservation and final valuation of this call.
+    return {
+      estimateReservation: (tokens) => estimateModelReservation({ ...tokens, rateCard: card }),
+      estimate: ({ usage }) => rateModelCall({ usage, rateCard: card }),
+    }
   }
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
   private loadedAt = 0
@@ -242,7 +285,13 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     for (const entry of body.data) {
       const model = object(entry)
       const id = string(model?.id)
-      const card = modelRateCard(object(model?.pricing))
+      const pricing = object(model?.pricing)
+      // Embeddings have no generated output tokens; only their input tariff applies.
+      const card = modelRateCard(
+        model?.type === "embedding" && pricing
+          ? { ...pricing, output: "0", output_tiers: [] }
+          : pricing
+      )
       if (id && card) rateCards.set(id, card)
     }
     this.rateCards.clear()

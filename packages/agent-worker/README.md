@@ -1,6 +1,6 @@
 # @sixb/agent-worker
 
-Runs conversation and headless workflow-agent queue jobs for a Sixb project.
+Runs conversation, headless workflow-agent, and model-accounting recovery jobs for a Sixb project.
 
 The worker claims durable conversation runs created by `sixb.agent.runs.request(...)` and agent workflow
 nodes parked by the workflow worker. It starts or reclaims the execution, renews queue ownership,
@@ -18,8 +18,11 @@ const worker = new AgentWorker(sixb, {
 await worker.start()
 ```
 
-`sixb` must provide `storage.agents`, `storage.aiUsage`, `storage.aiCosts`, `storage.auth`,
+For agent execution, `sixb` must provide `storage.agents`, `storage.aiUsage`, `storage.aiCosts`, `storage.auth`,
 `queues.agents`, `definitions.models` (or workflow agent steps), `broker`, and `sandboxes`.
+
+Embedding-only projects can start `new AgentWorker(sixb, {})` for accounting recovery without a
+sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#recovery-only-operation).
 
 ## Execution Model
 
@@ -131,7 +134,7 @@ The terminal run state is stored on the run record:
 
 ## Options
 
-- `apiBaseUrl`: required Sixb server origin that hosts the agent API gateway. The worker injects a
+- `apiBaseUrl`: required for agent execution; Sixb server origin that hosts the agent API gateway. The worker injects a
   run-scoped gateway URL into sandboxes as `SIXB_API_BASE_URL`, installs the self-documenting `sixb`
   CLI on `PATH`, writes configured project skills into `SIXB_SKILLS_DIR`, and creates the sandbox
   with a restricted network policy allowing the server origin. The gateway authorizes scoped

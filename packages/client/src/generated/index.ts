@@ -152,6 +152,7 @@ export type {
   AddConnectorConnectionErrors,
   AddConnectorConnectionResponse,
   AddConnectorConnectionResponses,
+  AiUsageLimitErrorResponse,
   AppendTelemetryData,
   AppendTelemetryError,
   AppendTelemetryErrors,

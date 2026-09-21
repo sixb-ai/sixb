@@ -172,10 +172,10 @@ describe("sixb worker", () => {
   })
 
   test("refuses without migrating, so a bad command leaves no schema behind", async () => {
-    // `sixb worker agent` cannot start without an API origin, and used to find that out after
-    // bringing the schema up to date.
+    // A project with agent work requires an API origin before migrating. Accounting-only
+    // workers can start without one.
     const logPath = await tempLogPath()
-    const result = runWorkerFixture("prod-roles", ["agent"], {
+    const result = runWorkerFixture("worker-group", ["agent"], {
       logPath,
       env: { SIXB_API_PUBLIC_ORIGIN: undefined },
     })

@@ -115,7 +115,8 @@ export interface AgentWorkerOptions {
    * Sixb server origin that hosts the agent API gateway, for example `http://localhost:3002`.
    * The sandbox receives a run-scoped gateway URL under this origin.
    */
-  readonly apiBaseUrl: string
+  /** Not required when the worker only processes accounting recovery. */
+  readonly apiBaseUrl?: string
   /** Project Agent Skills directory. Defaults to `<projectRoot>/skills`; `false` disables project skills. */
   readonly skillsDir?: string | false
   /** Maximum number of primary agent jobs this worker executes at once. Defaults to 8. */

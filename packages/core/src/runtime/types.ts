@@ -17,6 +17,7 @@ import type { DomainEventLog } from "../events"
 import type { RuntimeAuthorization } from "../execution"
 import type { AuthorizedObjectReader } from "../execution/authorized-object-reader"
 import type { EmbeddingModelCatalog } from "../models"
+import type { ModelExecutionSession } from "../models/execution/session"
 import type {
   ObjectQuery,
   ObjectQueryExplanation,
@@ -63,6 +64,8 @@ export interface SixbHostContext {
 
 /** Host dependencies paired with the process-local authority of one bound execution. */
 export interface SixbRuntimeContext extends SixbHostContext {
+  /** Internal model-call session shared by object operations and model generation. */
+  readonly modelExecution?: ModelExecutionSession
   readonly runtimeAuthorization: RuntimeAuthorization
   /** Core-owned read boundary carrying this exact execution authority. */
   readonly objectReader: AuthorizedObjectReader

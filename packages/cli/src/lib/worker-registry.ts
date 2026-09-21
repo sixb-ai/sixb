@@ -56,7 +56,10 @@ interface WorkerFactory {
    * A malformed input throws instead of answering: it is one bad value rather than one
    * unsatisfied worker, and the list of workers it took down would say nothing about it.
    */
-  readonly unmetRequirement?: (options: WorkerCreationOptions) => string | null
+  readonly unmetRequirement?: (
+    options: WorkerCreationOptions,
+    agentApiRequired: boolean
+  ) => string | null
 }
 
 const AGENT_ORIGIN_REQUIRED =
@@ -73,12 +76,14 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
   agent: {
     create: (sixb, options) =>
       new AgentWorker(sixb, {
-        apiBaseUrl: resolveAgentApiBaseUrl(options.agentApiBaseUrl),
+        apiBaseUrl: agentRuntimeRequired(sixb.definitions)
+          ? resolveAgentApiBaseUrl(options.agentApiBaseUrl)
+          : undefined,
         concurrency: options.workerConcurrency?.agent,
         turnTimeoutMs: options.agentTurnTimeoutMs,
       }),
-    unmetRequirement: (options) =>
-      agentApiBaseUrl(options.agentApiBaseUrl) ? null : AGENT_ORIGIN_REQUIRED,
+    unmetRequirement: (options, agentApiRequired) =>
+      !agentApiRequired || agentApiBaseUrl(options.agentApiBaseUrl) ? null : AGENT_ORIGIN_REQUIRED,
   },
   pipeline: {
     create: (sixb, options) =>
@@ -127,14 +132,16 @@ export function resolveWorkerTypeToStart(requestedWorker?: string): WorkerType {
  */
 export function unmetWorkerRequirement(
   workerType: string,
-  options: WorkerCreationOptions
+  options: WorkerCreationOptions,
+  agentApiRequired: boolean
 ): string | null {
   return isWorkerType(workerType)
-    ? (workerFactories[workerType].unmetRequirement?.(options) ?? null)
+    ? (workerFactories[workerType].unmetRequirement?.(options, agentApiRequired) ?? null)
     : null
 }
 
 export interface WorkerGroupInputs {
+  readonly agentApiRequired: boolean
   readonly workerTypes: readonly string[]
   readonly options: WorkerCreationOptions
   /**
@@ -154,7 +161,7 @@ export function assertWorkerInputs(input: WorkerGroupInputs): void {
   const unmet = input.workerTypes
     .map((workerType) => ({
       workerType,
-      reason: unmetWorkerRequirement(workerType, input.options),
+      reason: unmetWorkerRequirement(workerType, input.options, input.agentApiRequired),
     }))
     .filter((entry): entry is { workerType: string; reason: string } => entry.reason !== null)
 
@@ -201,11 +208,8 @@ export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly Wor
   }
 
   if (
-    (sixb.definitions.models !== undefined ||
-      sixb.definitions.workflows
-        .list()
-        .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))) &&
-    sixb.storage.agents
+    sixb.definitions.models?.embedding.list().length ||
+    (agentRuntimeRequired(sixb.definitions) && sixb.storage.agents)
   ) {
     workerTypes.push("agent")
   }
@@ -235,4 +239,14 @@ function resolveAgentApiBaseUrl(value: string | undefined): string {
     throw new Error(`[SixbWorker] The agent worker ${AGENT_ORIGIN_REQUIRED}.`)
   }
   return apiBaseUrl
+}
+
+/** Only agent execution needs a sandbox and an API origin; accounting recovery does not. */
+export function agentRuntimeRequired(definitions: LoadedSixbHost["definitions"]): boolean {
+  return (
+    definitions.models?.language !== undefined ||
+    definitions.workflows
+      .list()
+      .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
+  )
 }

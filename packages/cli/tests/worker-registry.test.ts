@@ -1,6 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import {
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  InMemoryStorage,
+  SixbHost,
+} from "@sixb/core"
 import { SixbCliError } from "../src/lib/errors"
-import { assertWorkerInputs } from "../src/lib/worker-registry"
+import {
+  agentRuntimeRequired,
+  assertWorkerInputs,
+  createWorkerForType,
+  resolveRegisteredWorkerTypes,
+} from "../src/lib/worker-registry"
 
 describe("assertWorkerInputs", () => {
   const originalOrigin = process.env.SIXB_API_PUBLIC_ORIGIN
@@ -20,6 +33,7 @@ describe("assertWorkerInputs", () => {
   test("passes when every worker can be constructed", () => {
     expect(() =>
       assertWorkerInputs({
+        agentApiRequired: true,
         workerTypes: ["sync", "pipeline", "agent"],
         options: { agentApiBaseUrl: "http://localhost:3002" },
         autoSelected: true,
@@ -31,7 +45,12 @@ describe("assertWorkerInputs", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "http://localhost:3002"
 
     expect(() =>
-      assertWorkerInputs({ workerTypes: ["agent"], options: {}, autoSelected: false })
+      assertWorkerInputs({
+        agentApiRequired: true,
+        workerTypes: ["agent"],
+        options: {},
+        autoSelected: false,
+      })
     ).not.toThrow()
   })
 
@@ -42,13 +61,19 @@ describe("assertWorkerInputs", () => {
     process.env.SIXB_API_PUBLIC_ORIGIN = "api.example.com"
 
     expect(() =>
-      assertWorkerInputs({ workerTypes: ["agent"], options: {}, autoSelected: false })
+      assertWorkerInputs({
+        agentApiRequired: true,
+        workerTypes: ["agent"],
+        options: {},
+        autoSelected: false,
+      })
     ).toThrow("Invalid API public origin")
   })
 
   test("refuses a full URL where an origin is expected", () => {
     expect(() =>
       assertWorkerInputs({
+        agentApiRequired: true,
         workerTypes: ["agent"],
         options: { agentApiBaseUrl: "https://api.example.com/api" },
         autoSelected: false,
@@ -62,6 +87,7 @@ describe("assertWorkerInputs", () => {
     // missing is that the operator never asked for an agent worker — auto-discovery did.
     const failure = expectFailure(() =>
       assertWorkerInputs({
+        agentApiRequired: true,
         workerTypes: ["sync", "pipeline", "agent"],
         options: {},
         autoSelected: true,
@@ -77,7 +103,12 @@ describe("assertWorkerInputs", () => {
 
   test("offers no escape hatch when the operator named the workers", () => {
     const failure = expectFailure(() =>
-      assertWorkerInputs({ workerTypes: ["sync", "agent"], options: {}, autoSelected: false })
+      assertWorkerInputs({
+        agentApiRequired: true,
+        workerTypes: ["sync", "agent"],
+        options: {},
+        autoSelected: false,
+      })
     )
 
     expect(failure.message).toContain("agent requires --api-public-origin")
@@ -90,7 +121,12 @@ describe("assertWorkerInputs", () => {
     // `resolveWorkerTypeToStart` runs first and refuses unknown names with the list of
     // valid ones. Repeating that check here would give the same mistake two messages.
     expect(() =>
-      assertWorkerInputs({ workerTypes: ["not-a-worker"], options: {}, autoSelected: false })
+      assertWorkerInputs({
+        agentApiRequired: true,
+        workerTypes: ["not-a-worker"],
+        options: {},
+        autoSelected: false,
+      })
     ).not.toThrow()
   })
 })
@@ -104,3 +140,43 @@ function expectFailure(run: () => void): SixbCliError {
   }
   throw new Error("Expected the call to throw a SixbCliError.")
 }
+
+test("embedding-only projects start accounting recovery without an API origin", async () => {
+  // Removal proof: require an origin unconditionally in workerFactories.agent.
+  const host = new SixbHost({
+    id: "embeddings",
+    ontology: [],
+    models: {
+      embedding: [
+        {
+          providerId: "test",
+          modelId: "embedding",
+          definition: {
+            kind: "embedding",
+            providerId: "test",
+            modelId: "embedding",
+            dimensions: 2,
+          },
+          embed: async () => ({ vectors: [[1, 0]] }),
+        },
+      ],
+    },
+    storage: new InMemoryStorage(),
+    broker: new InMemoryBroker(),
+    queues: new InMemoryQueues(),
+    blobStorage: new InMemoryBlobStorage(),
+    lakeStorage: new InMemoryLakeStorage(),
+  })
+  expect(resolveRegisteredWorkerTypes(host)).toContain("agent")
+  expect(() =>
+    assertWorkerInputs({
+      agentApiRequired: agentRuntimeRequired(host.definitions),
+      workerTypes: ["agent"],
+      options: {},
+      autoSelected: true,
+    })
+  ).not.toThrow()
+  const worker = createWorkerForType(host, "agent")
+  await worker.start()
+  await worker.stop()
+})

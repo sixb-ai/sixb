@@ -174,6 +174,18 @@ repo's `typecheck` chain reads source.
 - Treat `/.local/` files as staging material that will usually become GitHub issues, not committed repo docs.
 - Only create or commit tracked docs when the content is ready to be shared, referenced, and maintained in the repository.
 
+## Documentation
+
+- Write documentation in English.
+- Public docs explain how to configure and use Sixb, including relevant guarantees and
+  limitations. They are not implementation journals.
+- Document internals close to the code: execution flow, responsibilities, invariants, failure
+  handling, and recovery. Use a focused README for mechanisms spanning multiple files; comments
+  for local constraints.
+- Explain what is not obvious from the code. Keep documentation concise, current, and free of
+  duplicated explanations.
+- Keep change history, implementation plans, and future work in PRs or local drafts.
+
 ## Working Norms
 
 - Prefer focused, minimal diffs that match nearby code.

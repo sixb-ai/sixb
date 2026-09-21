@@ -291,6 +291,44 @@
           }
         }
       },
+      "AiUsageLimitErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": ["ai.usage_limit_exceeded", "ai.usage_limit_unavailable"],
+            "description": "Stable machine-readable failure code for programmatic handling."
+          },
+          "details": {
+            "description": "Any JSON-compatible value.",
+            "nullable": true,
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "array",
+                "items": {}
+              },
+              {
+                "type": "object",
+                "additionalProperties": true
+              }
+            ]
+          }
+        },
+        "required": ["error", "code"],
+        "additionalProperties": false
+      },
       "ObjectQueryErrorResponse": {
         "type": "object",
         "required": ["error"],
@@ -25403,6 +25441,24 @@
               }
             }
           },
+          "429": {
+            "description": "AI usage limit exceeded or unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the budget period resets, when known",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiUsageLimitErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Response for status 500",
             "content": {
@@ -25545,6 +25601,24 @@
               }
             }
           },
+          "429": {
+            "description": "AI usage limit exceeded or unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the budget period resets, when known",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiUsageLimitErrorResponse"
+                }
+              }
+            }
+          },
           "500": {
             "description": "Response for status 500",
             "content": {
@@ -25612,6 +25686,24 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "AI usage limit exceeded or unavailable",
+            "headers": {
+              "Retry-After": {
+                "description": "Seconds until the budget period resets, when known",
+                "schema": {
+                  "type": "integer"
+                }
+              }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AiUsageLimitErrorResponse"
                 }
               }
             }

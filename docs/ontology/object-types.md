@@ -179,6 +179,7 @@ Search accepts text only. Numeric vectors are generated internally with the prof
 | Object lifecycle | Reindexing changes neither the object's version nor its events. Failed commits roll back vectors and objects together. |
 | Numeric validity | Unit-length float32, 1–16,000 dimensions, finite values and nonzero norm after rounding; malformed vectors are rejected. |
 | Authorization | All sources must be readable. Candidates are authorized before ranking; ties use object type/id. |
+| Accounting | Indexing and text search share [usage, cost and limits](../models/usage-and-limits.md#embeddings). Completed calls are recorded even when vector validation or the object write fails. |
 | Query bounds | One profile and concrete type; `where` before ranking, `limit` after (`project` in JSON IR). `k`: 1–1,000. Counts, facets and `total` describe the selected top-k. |
 
 V1 excludes pagination, traversal, expansion, subtype search, hybrid search and profile fusion.

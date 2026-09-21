@@ -183,8 +183,7 @@ function handleObjectQueryError(error: unknown, set: { status?: number | string 
     }
   }
 
-  set.status = 500
-  return { error: error instanceof Error ? error.message : String(error) }
+  return handleRouteError(error, set)
 }
 
 function formatZodIssuePath(path: readonly (string | number)[]): string {
@@ -463,6 +462,20 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            429: {
+              description: "AI usage limit exceeded or unavailable",
+              headers: {
+                "Retry-After": {
+                  description: "Seconds until the budget period resets, when known",
+                  schema: { type: "integer" },
+                },
+              },
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/AiUsageLimitErrorResponse" },
+                },
+              },
+            },
             500: {
               description: "Response for status 500",
               content: {
@@ -608,6 +621,20 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
                 },
               },
             },
+            429: {
+              description: "AI usage limit exceeded or unavailable",
+              headers: {
+                "Retry-After": {
+                  description: "Seconds until the budget period resets, when known",
+                  schema: { type: "integer" },
+                },
+              },
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/AiUsageLimitErrorResponse" },
+                },
+              },
+            },
             500: {
               description: "Response for status 500",
               content: {
@@ -674,6 +701,20 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "AI usage limit exceeded or unavailable",
+              headers: {
+                "Retry-After": {
+                  description: "Seconds until the budget period resets, when known",
+                  schema: { type: "integer" },
+                },
+              },
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/AiUsageLimitErrorResponse" },
                 },
               },
             },
