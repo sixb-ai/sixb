@@ -1709,3 +1709,118 @@ body {
 .project-guide-invitation {
   z-index: 60;
 }
+
+.project-mobile-guide {
+  display: none;
+}
+@media (max-width: 640px) {
+  .home-code-example .project-source {
+    height: 620px;
+    max-height: 85svh;
+  }
+  .project-mobile-guide {
+    display: block;
+    flex-shrink: 0;
+    padding: 12px 14px;
+    background: var(--background);
+  }
+  .project-mobile-guide-heading,
+  .project-mobile-guide-buttons,
+  .project-mobile-guide-invitation {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+  .project-mobile-guide-heading strong {
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .project-mobile-guide button {
+    min-height: 36px;
+    cursor: pointer;
+  }
+  .project-mobile-guide-heading button,
+  .project-mobile-guide-invitation button:last-child {
+    min-width: 36px;
+    display: grid;
+    place-items: center;
+    color: var(--muted-foreground);
+  }
+  .project-mobile-guide p {
+    margin: 4px 0 12px;
+    font-size: 12px;
+    line-height: 1.6;
+    color: var(--muted-foreground);
+  }
+  .project-mobile-guide-progress {
+    display: flex;
+    gap: 4px;
+  }
+  .project-mobile-guide-progress > span {
+    height: 3px;
+    flex: 1;
+    background: var(--muted);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .project-mobile-guide-progress i {
+    display: block;
+    height: 100%;
+    background: var(--docs-accent);
+    transform-origin: left;
+  }
+  .project-mobile-guide-progress [data-current="true"] {
+    background: color-mix(in srgb, var(--docs-accent) 20%, var(--background));
+  }
+  .project-mobile-guide-progress [data-complete="true"] {
+    opacity: 0.45;
+  }
+  .project-mobile-guide-invitation {
+    font-size: 11px;
+  }
+  .project-mobile-guide-invitation > span {
+    color: var(--muted-foreground);
+  }
+  .project-mobile-guide-invitation button:first-child {
+    color: var(--docs-accent);
+    white-space: nowrap;
+  }
+  .project-mobile-guide-footer {
+    border-top: 1px solid var(--border);
+    padding-top: 6px;
+  }
+  .project-mobile-guide-buttons button {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--muted-foreground);
+  }
+  .project-mobile-guide-buttons button:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .project-mobile-guide-next {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    text-align: left;
+    color: var(--docs-accent);
+    font-size: 12px;
+  }
+  .project-mobile-guide-next small {
+    display: block;
+    margin-top: 3px;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+    color: var(--muted-foreground);
+  }
+}
+
+@media (max-width: 640px) {
+  .home-code-example .project-explorer {
+    scroll-margin-top: 72px;
+  }
+}

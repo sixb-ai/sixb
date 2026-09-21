@@ -169,7 +169,10 @@ export function ProjectExplorer({
             <button
               className="project-mobile-files"
               type="button"
-              onClick={() => setFilesOpen(true)}
+              onClick={() => {
+                guide.stop()
+                setFilesOpen(true)
+              }}
             >
               <FolderOpen size={14} />
               Files
@@ -198,6 +201,7 @@ export function ProjectExplorer({
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
           </div>
+          {guide.mobileHeader}
           {guide.panel}
           <div
             className="project-code-scroll"
@@ -208,6 +212,7 @@ export function ProjectExplorer({
           >
             {code}
           </div>
+          {guide.mobileFooter}
         </div>
       </div>
       <Sheet open={filesOpen} onOpenChange={setFilesOpen}>

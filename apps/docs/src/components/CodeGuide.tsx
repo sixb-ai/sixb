@@ -68,6 +68,7 @@ export function useCodeGuide(
   const positioned = useRef<string | null>(null)
   const [index, setIndex] = useState<number | null>(null)
   const [dismissed, setDismissed] = useState(false)
+  const [mobile, setMobile] = useState(false)
   const [paused, setPaused] = useState(false)
   const [hovered, setHovered] = useState(false)
   const [visible, setVisible] = useState(false)
@@ -75,18 +76,33 @@ export function useCodeGuide(
   const nextStep = steps[index === null ? 0 : index + 1]
   const step = index === null ? undefined : steps[index]
 
+  useEffect(() => {
+    const media = window.matchMedia("(max-width: 640px)")
+    const update = () => {
+      setMobile(media.matches)
+      if (media.matches) setPaused(true)
+      setHovered(false)
+    }
+    update()
+    media.addEventListener("change", update)
+    return () => media.removeEventListener("change", update)
+  }, [])
+
   function stop() {
     setIndex(null)
     setDismissed(true)
   }
   function go(next: number) {
+    if (next < 0) return
     if (next >= steps.length) {
       stop()
       return
     }
+    if (index === null && mobile) setPaused(true)
     select(steps[next]!.file)
     setIndex(next)
     setProgress(0)
+    if (mobile) root.current?.scrollIntoView({ block: "start", behavior: "instant" })
   }
 
   useEffect(() => {
@@ -285,8 +301,91 @@ export function useCodeGuide(
     interaction: () => {
       if (step) setPaused(true)
     },
+    mobileHeader:
+      enabled && !dismissed ? (
+        <div className="project-mobile-guide">
+          {step ? (
+            <section aria-label="Code walkthrough">
+              <div className="project-mobile-guide-heading">
+                <strong>
+                  {index! + 1} / {steps.length} · {step.title}
+                </strong>
+                <button type="button" aria-label="Close guide" onClick={stop}>
+                  <X size={15} />
+                </button>
+              </div>
+              <p aria-live="polite">{step.text}</p>
+              <div
+                className="project-mobile-guide-progress"
+                aria-label={`Step ${index! + 1} of ${steps.length}`}
+              >
+                {steps.map((entry, position) => (
+                  <span
+                    key={entry.file}
+                    data-complete={position < index!}
+                    data-current={position === index}
+                  >
+                    <i
+                      style={{
+                        transform: `scaleX(${position < index! ? 1 : position === index ? (paused ? 1 : progress) : 0})`,
+                      }}
+                    />
+                  </span>
+                ))}
+              </div>
+            </section>
+          ) : (
+            <div className="project-mobile-guide-invitation">
+              <button type="button" onClick={() => go(0)}>
+                Start here <span aria-hidden="true">→</span>
+              </button>
+              <span>From connector to app</span>
+              <button type="button" aria-label="Dismiss guide" onClick={stop}>
+                <X size={14} />
+              </button>
+            </div>
+          )}
+        </div>
+      ) : null,
+    mobileFooter:
+      enabled && !dismissed && step ? (
+        <nav
+          className="project-mobile-guide project-mobile-guide-footer"
+          aria-label="Walkthrough controls"
+        >
+          <div className="project-mobile-guide-buttons">
+            <button
+              type="button"
+              disabled={index === 0}
+              onClick={() => go(index! - 1)}
+              aria-label="Previous step"
+            >
+              ← Back
+            </button>
+            <button
+              type="button"
+              onClick={() => setPaused(!paused)}
+              aria-label={paused ? "Play guide" : "Pause guide"}
+            >
+              {paused ? <Play size={13} /> : <Pause size={13} />}
+              {paused ? "Auto-play" : "Pause"}
+            </button>
+          </div>
+          <button
+            type="button"
+            className="project-mobile-guide-next"
+            onClick={() => go(index! + 1)}
+          >
+            <span>
+              {nextStep ? "Next" : "Finish"}
+              {nextStep && <small>{nextStep.file}</small>}
+            </span>
+            <span aria-hidden="true">→</span>
+          </button>
+        </nav>
+      ) : null,
     panel:
-      enabled && visible && !dismissed
+      enabled && visible && !dismissed && !mobile
         ? createPortal(
             <>
               {step && (
