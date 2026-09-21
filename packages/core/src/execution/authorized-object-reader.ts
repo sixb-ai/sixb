@@ -703,7 +703,7 @@ function snapshotAuthoredQuery(query: ObjectQuery): ObjectQuery {
         node.kind === "vector" &&
         (typeof node.vector !== "string" ||
           typeof node.profile !== "string" ||
-          node.propertyId !== undefined)
+          "propertyId" in node)
       ) {
         throw new ObjectQueryValidationError([
           {

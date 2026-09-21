@@ -143,7 +143,7 @@ describe("named vector profiles", () => {
     expect(getInMemoryOntologyStorageTestingAdapter(f.storage.ontology).snapshot()).toEqual(before)
   })
 
-  test("raw authored queries reject numeric vectors before execution", async () => {
+  test("raw authored queries reject numeric vectors and property selectors before execution", async () => {
     const f = fixture()
     await seed(f)
     await index(f)
@@ -160,6 +160,9 @@ describe("named vector profiles", () => {
     await expect(
       f.sixb.objects.executeQuery({ query: { kind: "limit", input: query, limit: 1 } })
     ).rejects.toThrow("search text")
+    // Removing the propertyId guard makes this legacy selector reach the model.
+    const legacy = { ...query, vector: "search", propertyId: "embedding" }
+    await expect(f.sixb.objects.executeQuery({ query: legacy })).rejects.toThrow("search text")
     expect(f.embed).not.toHaveBeenCalled()
   })
 
