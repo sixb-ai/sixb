@@ -140,7 +140,13 @@ const expandableQuery: ObjectQuery = {
 
 test("rejects vector queries without a validated named profile", () => {
   expect(() =>
-    compileObjectQuery("project-a", { kind: "vector" } as unknown as ObjectQuery)
+    compileObjectQuery("project-a", {
+      kind: "vector",
+      input: { kind: "start", objectTypeId: "Room" },
+      profile: "content",
+      vector: [1, 0],
+      k: 1,
+    })
   ).toThrow("A validated named vector profile is required.")
   // expand is now supported and compiles without throwing.
   expect(() => compileObjectQuery("project-a", expandableQuery)).not.toThrow()
