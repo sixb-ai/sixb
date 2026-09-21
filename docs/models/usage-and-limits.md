@@ -1,6 +1,6 @@
 # Usage and limits
 
-Direct generation, conversations, and workflow agent tasks share model-call accounting and monthly limits.
+Direct generation, conversations, workflow agent tasks, vector indexing, and text-to-vector searches share model-call accounting and monthly limits.
 
 ## Automatic accounting
 
@@ -135,6 +135,25 @@ Reservations estimate input plus the request's output allowance. Actual usage ca
 
 Cost limits require `model.costEstimator.estimateReservation`. Built-in providers supply it; custom models without it can use token limits. The cost meter reserves local estimates and records the selected call valuation, including provider charges when available.
 
+## Embeddings
+
+Both object operations are accounted automatically, using the model registered for the profile:
+
+```ts
+await sixb.objects(Product).byId(id).vector("content").index()
+await sixb.objects(Product).query().vector("content", "light running shoes", { k: 10 }).list()
+```
+
+Object permissions are checked before inference. Embeddings reserve input tokens only and request
+cancellation after 30 seconds. Sixb does not retry inference automatically.
+
+A completed call counts toward usage even if its vector is invalid or the object changes before
+the vector is saved. Missing usage or pricing remains unknown, never zero.
+
+From a webhook handler, dispatch an action to index or search vectors. Calling a provider's
+`model.embed()` directly bypasses Sixb accounting. Declaring a vector profile does not index objects
+automatically; call `index()` explicitly.
+
 ## Recovery
 
 Usage, valuation, actuals, and reservation reconciliation are written atomically. Recovery replays are idempotent.
@@ -142,18 +161,19 @@ Usage, valuation, actuals, and reservation reconciliation are written atomically
 | Deployment | Recovery consumer |
 | --- | --- |
 | `bun sixb dev` / CLI cohosting | The configured Agent worker handles recovery |
-| Embedded | Start `AgentWorker` with the project's agent configuration |
+| Embedded | Start `AgentWorker`; embeddings-only projects need neither a sandbox nor an API origin |
 
 ```ts
 import { AgentWorker } from "@sixb/agent-worker"
 
-const worker = new AgentWorker(host, { apiBaseUrl: "http://localhost:3002" })
+// Embeddings-only project. Projects with agents also need their sandbox and API origin.
+const worker = new AgentWorker(host, {})
 await worker.start()
 
 // During shutdown:
 await worker.stop()
 ```
 
-Recovery jobs share `queues.agents` with agent work. `generate()` calls providers directly; only deferred accounting enters the queue. See [Built-in Agent](./built-in-agent.md) for worker setup.
+Recovery jobs share `queues.agents` with agent work. Generation, indexing, and search call providers directly; only deferred accounting enters the queue. See [Built-in Agent](./built-in-agent.md) for worker setup.
 
-The ledger covers accepted streams. Pre-stream failures and process crashes before recording can leave billing outside its guarantees. Sixb limits are admission controls, not provider-invoice hard stops.
+For language models, the ledger covers accepted streams. For embeddings, failed attempts are recorded with unknown usage when no response is available. Process crashes before recording can still leave billing outside these guarantees. Sixb limits are admission controls, not provider-invoice hard stops.

@@ -107,7 +107,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
 
     this.host = host
     const hasAgentWork =
-      host.definitions.models !== undefined ||
+      host.definitions.models?.language !== undefined ||
       host.definitions.workflows
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
@@ -140,13 +140,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       }
       return
     }
-    await new Promise<void>((resolve) => {
-      if (signal.aborted) {
-        resolve()
-        return
-      }
-      signal.addEventListener("abort", () => resolve(), { once: true })
-    })
+    await super.run(signal)
   }
 
   override async stop(): Promise<void> {
@@ -172,12 +166,12 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     signal: AbortSignal,
     delivery: QueueDelivery<AgentQueueJob, (typeof AGENT_RUN_FAILURE_CODES)[number]>
   ): Promise<void> {
-    const context = this.requireContext()
     const { job } = claimed
     if (job.type === "agent.ai-usage.record.requested") {
-      await recordRecoveredAiModelCall(context.storage, job)
+      await recordRecoveredAiModelCall(this.host.storage, job)
       return
     }
+    const context = this.requireContext()
     if (job.type === "agent.workflow-node.requested") {
       await executeWorkflowAgentNode({
         context,

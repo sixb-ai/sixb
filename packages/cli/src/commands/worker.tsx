@@ -12,6 +12,7 @@ import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
 import { resolveSingleWorkerConcurrency } from "../lib/worker-concurrency"
 import {
+  agentRuntimeRequired,
   createWorkerForType,
   type QueueWorkerProcess,
   resolveWorkerTypeToStart,
@@ -50,9 +51,13 @@ export async function runWorker(options: WorkerOptions = {}) {
 
     // Before the migration, which is the first thing here that changes something: this used to
     // bring the schema up to date and then refuse to run.
-    const unmet = unmetWorkerRequirement(workerType, {
-      agentApiBaseUrl: options.apiPublicOrigin,
-    })
+    const unmet = unmetWorkerRequirement(
+      workerType,
+      {
+        agentApiBaseUrl: options.apiPublicOrigin,
+      },
+      agentRuntimeRequired(sixb.definitions)
+    )
     if (unmet) {
       throw new SixbCliError(`[SixbCLI] \`sixb worker ${workerType}\` cannot start: it ${unmet}.`)
     }

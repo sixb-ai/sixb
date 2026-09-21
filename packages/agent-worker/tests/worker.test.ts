@@ -20,13 +20,16 @@ import {
   defineAgentTool,
   defineConnector,
   defineGroup,
+  defineObjectType,
   defineWorkflow,
+  type EmbeddingModel,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
   type ModelCatalogInput,
+  prop,
   type RunCommandOptions,
   type Sandbox,
   type SandboxFactory,
@@ -6459,6 +6462,72 @@ describe("AgentWorker", () => {
       )
       expect(appendAttempts).toBe(2)
       expect(retryRequests).toBe(1)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("recovers embedding accounting without a sandbox or agent API origin", async () => {
+    // Removal proof: restore the eager agent context or omit super.run() in recovery-only mode.
+    const storage = new InMemoryStorage()
+    let available = false
+    let providerCalls = 0
+    const model: EmbeddingModel = {
+      providerId: "test",
+      modelId: "embedding",
+      definition: { kind: "embedding", providerId: "test", modelId: "embedding", dimensions: 2 },
+      async embed() {
+        providerCalls += 1
+        return { vectors: [[1, 0]], usage: { inputTokens: 8 } }
+      },
+    }
+    const Product = defineObjectType({
+      id: "Product",
+      name: "Product",
+      properties: [
+        prop("id", "string", { primary: true, required: true }),
+        prop("title", "string"),
+      ],
+      search: { vectors: { content: { source: ["title"], model } } },
+    })
+    const host = new SixbHost({
+      id: PROJECT_ID,
+      ontology: [Product],
+      models: { embedding: [model] },
+      storage: withAiUsageRecordInterceptor(storage, async (_input, record) => {
+        if (!available) throw new Error("accounting temporarily unavailable")
+        return record()
+      }),
+      broker: new InMemoryBroker(),
+      queues: new InMemoryQueues(),
+      lakeStorage: new InMemoryLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+    })
+    const sixb = bindRequestExecution(host, {
+      request: new Request("http://localhost/search"),
+      authorization: { type: "disabled" },
+    })
+    const search = () => sixb.objects(Product).query().vector("content", "find", { k: 1 }).list()
+    await expect(search()).rejects.toMatchObject({
+      name: "ModelUsageRecordingError",
+      recoveryScheduled: true,
+    })
+    const identity = { projectId: host.id, executionId: sixb.execution.id }
+    expect((await storage.aiUsage.summarizeExecution(identity)).modelCallCount).toBe(0)
+    available = true
+    const worker = new AgentWorker(host, { idlePollMs: 5 })
+    await worker.start()
+    try {
+      const summary = await waitFor(
+        async () => {
+          const result = await storage.aiUsage.summarizeExecution(identity)
+          return result.modelCallCount === 1 ? result : null
+        },
+        { label: "embedding accounting recovery without agent dependencies" }
+      )
+      expect(summary.usage.inputTokens).toBe(8)
+      await expect(search()).rejects.toMatchObject({ name: "ModelUsageRecordingError" })
+      expect(providerCalls).toBe(1)
     } finally {
       await worker.stop()
     }

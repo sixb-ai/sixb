@@ -101,6 +101,26 @@ export type ObjectQueryLinksResponse = {
   nextPageToken?: string
 }
 
+export type AiUsageLimitErrorResponse = {
+  error: string
+  /**
+   * Stable machine-readable failure code for programmatic handling.
+   */
+  code: "ai.usage_limit_exceeded" | "ai.usage_limit_unavailable"
+  /**
+   * Any JSON-compatible value.
+   */
+  details?:
+    | string
+    | number
+    | boolean
+    | Array<unknown>
+    | {
+        [key: string]: unknown
+      }
+    | null
+}
+
 export type ObjectQueryErrorResponse = {
   error: string
   issues?: Array<ObjectQueryIssue>
@@ -8473,6 +8493,10 @@ export type QueryObjectsErrors = {
    */
   403: ErrorResponse
   /**
+   * AI usage limit exceeded or unavailable
+   */
+  429: AiUsageLimitErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -8539,6 +8563,10 @@ export type CountObjectsErrors = {
    */
   403: ErrorResponse
   /**
+   * AI usage limit exceeded or unavailable
+   */
+  429: AiUsageLimitErrorResponse
+  /**
    * Response for status 500
    */
   500: ErrorResponse
@@ -8571,6 +8599,10 @@ export type ExistsObjectsErrors = {
    * Response for status 403
    */
   403: ErrorResponse
+  /**
+   * AI usage limit exceeded or unavailable
+   */
+  429: AiUsageLimitErrorResponse
   /**
    * Response for status 500
    */

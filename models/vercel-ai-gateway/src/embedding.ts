@@ -1,7 +1,9 @@
 import {
   type EmbeddingModel,
   type EmbeddingModelRequest,
-  ModelProviderError,
+  EmbeddingModelResponseError,
+  type EmbeddingModelResponseMetadata,
+  type ModelCostEstimator,
 } from "@sixb/core/models"
 
 export interface VercelGatewayEmbeddingOptions {
@@ -13,7 +15,11 @@ export interface VercelGatewayEmbeddingOptions {
 export function createGatewayEmbedding(
   modelId: string,
   options: VercelGatewayEmbeddingOptions,
-  request: (input: EmbeddingModelRequest, dimensions: number) => Promise<unknown>
+  request: (
+    input: EmbeddingModelRequest,
+    dimensions: number
+  ) => Promise<{ body: unknown; metadata: EmbeddingModelResponseMetadata }>,
+  pricing?: { resolve?: () => Promise<ModelCostEstimator>; estimator?: ModelCostEstimator }
 ): EmbeddingModel {
   const dimensions = options.dimensions
   if (
@@ -28,9 +34,19 @@ export function createGatewayEmbedding(
     )
   }
   const providerId = "vercel-ai-gateway"
+  const resolvePricing = pricing?.resolve
   return Object.freeze({
     providerId,
     modelId,
+    costEstimator: pricing?.estimator,
+    ...(resolvePricing
+      ? {
+          resolve: async () =>
+            createGatewayEmbedding(modelId, { dimensions }, request, {
+              estimator: await resolvePricing(),
+            }),
+        }
+      : {}),
     definition: Object.freeze({
       kind: "embedding" as const,
       providerId,
@@ -48,9 +64,9 @@ export function createGatewayEmbedding(
       }
       const texts = [...input.texts]
       if (!texts.length) return { vectors: [] }
-      const result = await request({ ...input, texts }, dimensions)
+      const { body: result, metadata } = await request({ ...input, texts }, dimensions)
       if (!isRecord(result) || !Array.isArray(result.data) || result.data.length !== texts.length) {
-        throw invalidResponse(modelId)
+        throw invalidResponse(modelId, metadata)
       }
       const vectors: number[][] = new Array(texts.length)
       for (const entry of result.data) {
@@ -64,17 +80,18 @@ export function createGatewayEmbedding(
           !Array.isArray(entry.embedding) ||
           entry.embedding.length !== dimensions
         )
-          throw invalidResponse(modelId)
+          throw invalidResponse(modelId, metadata)
         const values: number[] = []
         for (const value of entry.embedding) {
           if (typeof value !== "number" || !Number.isFinite(Math.fround(value)))
-            throw invalidResponse(modelId)
+            throw invalidResponse(modelId, metadata)
           values.push(value)
         }
-        if (!values.some((value) => Math.fround(value) !== 0)) throw invalidResponse(modelId)
+        if (!values.some((value) => Math.fround(value) !== 0))
+          throw invalidResponse(modelId, metadata)
         vectors[entry.index] = values
       }
-      return { vectors }
+      return { vectors, ...metadata }
     },
   })
 }
@@ -83,11 +100,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
-function invalidResponse(modelId: string): ModelProviderError {
-  return new ModelProviderError(
+function invalidResponse(
+  modelId: string,
+  metadata: EmbeddingModelResponseMetadata
+): EmbeddingModelResponseError {
+  return new EmbeddingModelResponseError(
     "[SixbVercelGateway] Invalid embedding response: expected one finite, nonzero vector of the configured dimension per input, with unique indices.",
     "vercel-ai-gateway",
     modelId,
-    { code: "invalid_embedding_response", retryable: false }
+    metadata
   )
 }

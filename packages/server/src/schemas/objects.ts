@@ -1,6 +1,11 @@
 import type { ElysiaOpenAPIConfig } from "@elysiajs/openapi"
 import { z } from "zod"
-import { JsonValueSchema } from "./common"
+import { zodToJsonSchema } from "zod-to-json-schema"
+import {
+  AiUsageLimitErrorResponseSchema,
+  JsonValueSchema,
+  jsonValueOpenApiOverride,
+} from "./common"
 
 type OpenApiSchema = NonNullable<
   NonNullable<NonNullable<ElysiaOpenAPIConfig["documentation"]>["components"]>["schemas"]
@@ -542,6 +547,11 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
       nextPageToken: { type: "string" },
     },
   },
+  AiUsageLimitErrorResponse: zodToJsonSchema(AiUsageLimitErrorResponseSchema, {
+    target: "openApi3",
+    $refStrategy: "none",
+    override: jsonValueOpenApiOverride,
+  }) as OpenApi3Schema,
   ObjectQueryErrorResponse: {
     type: "object",
     required: ["error"],

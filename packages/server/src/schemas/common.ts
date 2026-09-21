@@ -84,3 +84,8 @@ export const jsonValueOpenApiOverride: OverrideCallback = (def) => {
 
   return ignoreOverride
 }
+
+export const AiUsageLimitErrorResponseSchema = codedErrorResponseSchema([
+  "ai.usage_limit_exceeded",
+  "ai.usage_limit_unavailable",
+]).extend({ details: JsonValueSchema.optional() })

@@ -1,4 +1,7 @@
 import type { ModelDefinition } from "./definitions"
+import { ModelProviderError } from "./errors"
+import type { ModelProviderIds, ModelRoute, ModelUsage } from "./events"
+import type { ModelCostEstimator, ModelReportedCost } from "./pricing"
 
 /** The identity includes the configured output dimension, not only the vendor's model id. */
 export interface EmbeddingModelDefinition extends ModelDefinition {
@@ -10,10 +13,20 @@ export interface EmbeddingModelDefinition extends ModelDefinition {
 
 export interface EmbeddingModelRequest {
   readonly texts: readonly string[]
+  /** Providers must honor cancellation and propagate this signal to their transport. */
   readonly signal?: AbortSignal
 }
 
-export interface EmbeddingModelResult {
+/** Provider accounting facts; absent meters or prices remain unknown. */
+export interface EmbeddingModelResponseMetadata {
+  readonly usage?: ModelUsage
+  readonly providerIds?: ModelProviderIds
+  readonly responseModelId?: string
+  readonly reportedCost?: ModelReportedCost
+  readonly route?: ModelRoute
+}
+
+export interface EmbeddingModelResult extends EmbeddingModelResponseMetadata {
   readonly vectors: readonly (readonly number[])[]
 }
 
@@ -25,6 +38,9 @@ export interface EmbeddingModelRef {
 }
 
 export interface EmbeddingModel extends EmbeddingModelRef {
+  readonly costEstimator?: ModelCostEstimator
+  /** Resolve and pin optional pricing before admission, without an inference call. */
+  resolve?(): Promise<EmbeddingModel>
   embed(request: EmbeddingModelRequest): Promise<EmbeddingModelResult>
 }
 
@@ -79,4 +95,16 @@ export function sameEmbeddingModel(left: EmbeddingModelRef, right: EmbeddingMode
 
 function validIdentityPart(value: unknown): value is string {
   return typeof value === "string" && value.length > 0 && value.trim() === value
+}
+
+/** A completed provider response whose vectors are unusable, but may still be billable. */
+export class EmbeddingModelResponseError extends ModelProviderError {
+  constructor(
+    message: string,
+    providerId: string,
+    modelId: string,
+    readonly metadata: EmbeddingModelResponseMetadata
+  ) {
+    super(message, providerId, modelId, { code: "invalid_embedding_response", retryable: false })
+  }
 }

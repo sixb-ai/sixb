@@ -24,6 +24,7 @@ import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
 import type { LoadedSixbHost } from "./loadSixb"
 import type { WorkerConcurrency } from "./worker-registry"
+import { agentRuntimeRequired } from "./worker-registry"
 
 export function waitForWorkerFailure(worker: Worker | null | undefined): Promise<never> {
   return new Promise<never>((_resolve, reject) => {
@@ -244,14 +245,13 @@ export async function startSixbRuntime(
       }
 
       if (
-        (sixb.definitions.models !== undefined ||
-          sixb.definitions.workflows
-            .list()
-            .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))) &&
-        sixb.storage.agents
+        sixb.definitions.models?.embedding.list().length ||
+        (agentRuntimeRequired(sixb.definitions) && sixb.storage.agents)
       ) {
         agentWorker = new AgentWorker(sixb, {
-          apiBaseUrl: requireAgentApiBaseUrl(options.agentApiBaseUrl),
+          apiBaseUrl: agentRuntimeRequired(sixb.definitions)
+            ? requireAgentApiBaseUrl(options.agentApiBaseUrl)
+            : undefined,
           concurrency: options.workerConcurrency?.agent,
           turnTimeoutMs: options.agentTurnTimeoutMs,
         })

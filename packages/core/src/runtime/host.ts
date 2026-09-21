@@ -53,6 +53,8 @@ import {
 } from "../maintenance"
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
 import type { ModelCatalogInput } from "../models"
+import { bindEmbeddingModels } from "../models/execution/embedding"
+import { ModelExecutionSession } from "../models/execution/session"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import type { ProjectionDefinition } from "../projections/types"
@@ -266,15 +268,22 @@ export class SixbHost<
       throw new Error("[Sixb] Kernel authority cannot be bound to the domain SDK.")
     }
 
+    const modelExecution = new ModelExecutionSession(
+      { ...this.hostContext, runtimeAuthorization: capturedScope.authorization },
+      capturedScope.execution
+    )
+    const embeddingModels = bindEmbeddingModels(this.hostContext.embeddingModels, modelExecution)
     const objectReader = createAuthorizedObjectReader({
       scope: capturedScope,
       ontology: this.hostContext.ontology,
       objectStorage: this.storage.objects,
-      embeddingModels: this.hostContext.embeddingModels,
+      embeddingModels,
     })
 
     const runtime: SixbRuntimeContext = {
       ...this.hostContext,
+      embeddingModels,
+      modelExecution,
       runtimeAuthorization: capturedScope.authorization,
       objectReader,
       ...(authorization.type === "principal" ? { authorization: authorization.context } : {}),

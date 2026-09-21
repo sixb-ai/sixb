@@ -1,10 +1,9 @@
 import type { ModelRoute, ModelUsage } from "./events"
-import type { LanguageModel } from "./language-model"
 import type { LanguageModelRateCard, ModelTokenPrice } from "./rate-card"
 
 /** Optional local financial enrichment cannot discard a completed, billable call. */
 export function estimateModelCall(
-  model: LanguageModel,
+  model: { readonly costEstimator?: ModelCostEstimator },
   input: Parameters<ModelCostEstimator["estimate"]>[0]
 ): ModelCostEstimate {
   try {

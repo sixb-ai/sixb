@@ -11,6 +11,7 @@ import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
 import { resolveWorkerConcurrency } from "../lib/worker-concurrency"
 import {
+  agentRuntimeRequired,
   assertWorkerInputs,
   createWorkerForType,
   type QueueWorkerProcess,
@@ -65,6 +66,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
     // had taken every other worker down. And before the migration, which used to run first and
     // leave a schema behind on a command that then refused.
     assertWorkerInputs({
+      agentApiRequired: agentRuntimeRequired(sixb.definitions),
       workerTypes,
       options: { agentApiBaseUrl: options.apiPublicOrigin },
       autoSelected: requestedTypes.length === 0,

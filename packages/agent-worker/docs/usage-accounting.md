@@ -34,3 +34,15 @@ but cost-limited calls fail closed until a safe estimate is available.
 Denied calls use `ai.usage_limit_exceeded`; unsafe evaluation uses
 `ai.usage_limit_unavailable`. Direct HTTP requests return 429, and exhausted responses include
 `Retry-After` based on the earliest applicable reset.
+
+## Recovery-only operation
+
+The agent queue also carries accounting recovery for direct language and embedding calls.
+`AgentWorker` handles these jobs before requiring an agent execution context, using the host's
+accounting storage. Replays reconcile the ledger and reservations without calling a model.
+
+Without a configured language catalog or workflow agent nodes, the worker drains recovery jobs
+without initializing agent tools or requiring a sandbox or API origin. The CLI uses that distinction
+for startup validation and selects this worker when embedding models are registered.
+
+See [model execution accounting](../../core/src/models/execution/README.md) for the producer flow.

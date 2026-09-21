@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import type { ReadonlyJsonObject, RecordAiModelCallInput } from "../../storage"
 import type { ModelCallEndEvent, ModelUsage } from "../events"
-import type { LanguageModel, LanguageModelRequest } from "../language-model"
+import type { LanguageModel } from "../language-model"
 import { ModelUsageRecordingError } from "./errors"
 import {
   normalizeModelCallAccounting,
@@ -9,8 +9,8 @@ import {
   requireAccountingCapabilities,
 } from "./model-call-accounting"
 import {
+  type AiModelCallAdmissionInput,
   aiModelCallOutputTokenAllowance,
-  type BeforeAiModelCall,
   estimateAiModelCallInputTokens,
   estimatedAiModelCallTotalTokens,
 } from "./model-call-admission"
@@ -88,46 +88,58 @@ export class AiModelCallRecorder {
           responseFormat: request.responseFormat,
         })
         const outputTokenAllowance = aiModelCallOutputTokenAllowance(request.maxOutputTokens)
-        let decision: Awaited<ReturnType<BeforeAiModelCall>>
-        try {
-          decision = await this.input.limits.beforeModelCall({
-            ...this.identity(request),
-            requesterGroupIds: this.input.requesterGroupIds,
-            providerId: model.providerId,
-            modelId: model.modelId,
-            costEstimator: model.costEstimator,
-            inputTokens,
-            outputTokenAllowance,
-            estimatedTotalTokens: estimatedAiModelCallTotalTokens(
-              inputTokens,
-              outputTokenAllowance
-            ),
-          })
-        } catch (error) {
-          // Execution boundaries must retain the original coded admission failure.
-          this.admissionError = error
-          throw error
-        }
-        if (decision.reservation === "active") this.reservations.add(request.callId)
+        await this.admitCall({
+          callId: request.callId,
+          providerId: model.providerId,
+          modelId: model.modelId,
+          costEstimator: model.costEstimator,
+          inputTokens,
+          outputTokenAllowance,
+          estimatedTotalTokens: estimatedAiModelCallTotalTokens(inputTokens, outputTokenAllowance),
+        })
         try {
           return await model.stream(request)
         } catch (error) {
-          if (this.reservations.has(request.callId)) {
-            await this.input.limits.markModelCallUnknown(this.identity(request))
-          }
+          await this.markCallUnknown(request.callId)
           throw error
         }
       },
     }
   }
 
-  private identity(request: Pick<LanguageModelRequest, "callId">) {
-    return {
+  /** Admit one provider attempt, independently of its language or embedding protocol. */
+  async admitCall(
+    call: Omit<
+      AiModelCallAdmissionInput,
+      "projectId" | "executionId" | "attempt" | "requesterGroupIds"
+    >
+  ): Promise<void> {
+    this.assertHealthy()
+    try {
+      const decision = await this.input.limits.beforeModelCall({
+        ...call,
+        projectId: this.input.projectId,
+        executionId: this.input.executionId,
+        attempt: this.input.attempt,
+        requesterGroupIds: this.input.requesterGroupIds,
+      })
+      if (decision.reservation === "active") this.reservations.add(call.callId)
+    } catch (error) {
+      // Execution boundaries must retain the original coded admission failure.
+      this.admissionError = error
+      throw error
+    }
+  }
+
+  /** Keep an unresolved reservation when an attempted call's billable outcome is unknown. */
+  private async markCallUnknown(callId: string): Promise<void> {
+    if (!this.reservations.has(callId)) return
+    await this.input.limits.markModelCallUnknown({
       projectId: this.input.projectId,
       executionId: this.input.executionId,
       attempt: this.input.attempt,
-      callId: request.callId,
-    }
+      callId,
+    })
   }
 
   readonly onModelCallEnd = async (event: ModelCallEndEvent): Promise<void> => {
