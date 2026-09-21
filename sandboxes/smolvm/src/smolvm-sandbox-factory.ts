@@ -7,7 +7,12 @@ import {
   SandboxIsolationUnavailableError,
   type SandboxNetworkPolicy,
 } from "@sixb/core"
-import { type ParamsConfig, type SandboxConfig, sandboxConfig } from "@sixb/core/sandboxes"
+import {
+  initializeSandboxEnvironment,
+  type ParamsConfig,
+  type SandboxConfig,
+  sandboxConfig,
+} from "@sixb/core/sandboxes"
 import { defaultAgentImageCandidates, defaultAgentImagePath } from "./agent-image"
 import { isLocalImageArchive, type SmolvmCliConfig } from "./cli"
 import { DOCKER_HUB_REGISTRY_HOSTS } from "./network"
@@ -71,7 +76,7 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
     const cli = this.resolveCli()
     this.ensureAvailable(cli)
     this.ensureImage(cli)
-    return await SmolvmSandbox.create({
+    const sandbox = await SmolvmSandbox.create({
       cli,
       registryHosts: this.defaults.registryHosts ?? DOCKER_HUB_REGISTRY_HOSTS,
       timeout: options.timeout ?? this.defaults.timeout,
@@ -79,6 +84,14 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
       env: { ...(this.defaults.env ?? {}), ...(options.env ?? {}) },
       workingDirectory: options.workingDirectory,
     })
+    try {
+      return options.environment
+        ? await initializeSandboxEnvironment(sandbox, options.environment, options.signal)
+        : sandbox
+    } catch (error) {
+      await sandbox.destroy()
+      throw error
+    }
   }
 
   /** Resolve the smolvm CLI config once, picking the default image archive lazily. */

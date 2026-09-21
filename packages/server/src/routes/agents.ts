@@ -430,11 +430,11 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
       }
     )
     .post(
-      "/api/agent-threads/:threadId/workspace/recreate",
+      "/api/agent-threads/:threadId/sandbox/recreate",
       async (context) => {
         try {
           const sixb = requireRequestSixb(context)
-          const thread = await sixb.agent.threads.recreateWorkspace(
+          const thread = await sixb.agent.threads.recreateSandbox(
             context.params.threadId,
             context.body
           )

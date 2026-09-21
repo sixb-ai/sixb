@@ -99,9 +99,6 @@ import outboxPublicationOrderSql from "./migrations/040-outbox-publication-order
 import agentThreadWorkspacesSql from "./migrations/041-agent-thread-workspaces.sql" with {
   type: "text",
 }
-import agentWorkspaceLifecycleSql from "./migrations/038-agent-workspace-lifecycle.sql" with {
-  type: "text",
-}
 
 import vectorProfilesSql from "./migrations/042-vector-profiles.sql" with { type: "text" }
 import vectorIndexingSql from "./migrations/043-vector-indexing.sql" with { type: "text" }

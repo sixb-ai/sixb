@@ -5,6 +5,7 @@ import type {
   Broker,
   DomainEventLog,
   Queues,
+  SandboxDefinition,
   SandboxFactory,
   SixbDefinitions,
   Storage,
@@ -43,13 +44,14 @@ export type AgentWorkerStorage = Storage & {
  * Models are non-serialisable and never sent over the wire.
  */
 export interface AgentWorkerHost extends AgentExecutionHost {
+  readonly sandboxDefinition?: SandboxDefinition
   readonly broker: Broker
   readonly events: DomainEventLog
   readonly storage: Storage
   readonly queues: Queues
   readonly definitions: Pick<
     SixbDefinitions,
-    "workflows" | "ontology" | "security" | "models" | "tools" | "agentWorkspace"
+    "workflows" | "ontology" | "security" | "models" | "tools"
   >
   readonly sandboxes?: SandboxFactory
   readonly projectRoot?: string

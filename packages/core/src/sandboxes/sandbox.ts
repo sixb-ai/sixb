@@ -7,7 +7,7 @@
  */
 
 import type { ParamsConfig } from "../shared/params/types"
-import type { SandboxConfig } from "./configuration"
+import type { SandboxConfig, SandboxEnvironment } from "./configuration"
 
 export type SandboxStatus = "running" | "stopped" | "failed"
 
@@ -85,6 +85,10 @@ export interface SandboxSessionOptions {
 
 /** Options accepted by every SandboxFactory.create. */
 export interface CreateSandboxOptions extends SandboxSessionOptions {
+  /** Cancel initialization; a provider request already in flight may still finish. */
+  readonly signal?: AbortSignal
+  /** Resolved initial contents/setup. When supplied, replaces the factory's static recipe. */
+  readonly environment?: Pick<SandboxEnvironment, "source" | "setup">
   /** Create new named state; reject an existing name or unsupported persistence before provisioning. */
   readonly persistence?: { readonly name: string }
 }

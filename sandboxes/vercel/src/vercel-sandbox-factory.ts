@@ -9,6 +9,7 @@ import {
   type SandboxSessionOptions,
 } from "@sixb/core"
 import {
+  initializeSandboxEnvironment,
   type ParamsConfig,
   type SandboxConfig,
   type SandboxSource,
@@ -137,7 +138,9 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
     assertNoLegacyPersistence(this.defaults)
     assertNoLegacyPersistence(options)
-    validateSourceOptions(this.defaults)
+    validateSourceOptions(
+      options.environment ? { ...this.defaults, source: undefined } : this.defaults
+    )
     const resolved = this.runtimeOptions(options)
     if (options.persistence !== undefined) {
       if (
@@ -147,11 +150,16 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
       ) {
         throw new SandboxError("[Sandbox] persistence must contain only a sandbox name.")
       }
-      return this.createPersistent(options.persistence.name, resolved)
+      return this.createPersistent(
+        options.persistence.name,
+        resolved,
+        options.environment,
+        options.signal
+      )
     }
     const { env = {}, network = { mode: "none" } } = resolved
     const params = buildCreateParams({
-      defaults: this.defaults,
+      defaults: options.environment ? { ...this.defaults, source: undefined } : this.defaults,
       env,
       network,
       name: `${this.defaults.namePrefix ?? DEFAULT_NAME_PREFIX}${randomUUID()}`,
@@ -172,7 +180,9 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
         workingDirectory: sandbox.workingDirectory,
         setupTimeoutMs: this.defaults.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       })
-      return sandbox
+      return options.environment
+        ? await initializeSandboxEnvironment(sandbox, options.environment, options.signal)
+        : sandbox
     } catch (error) {
       await client?.delete().catch(() => {})
       if (error instanceof SandboxError) {
@@ -219,12 +229,17 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
     }
   }
 
-  private async createPersistent(name: string, options: SandboxSessionOptions): Promise<Sandbox> {
+  private async createPersistent(
+    name: string,
+    options: SandboxSessionOptions,
+    environment?: CreateSandboxOptions["environment"],
+    signal?: AbortSignal
+  ): Promise<Sandbox> {
     assertPersistentName(name)
     // Persistent VM defaults contain no run env or authority.
     toVercelNetworkPolicy(options.network ?? { mode: "none" })
     const params = buildCreateParams({
-      defaults: this.defaults,
+      defaults: environment ? { ...this.defaults, source: undefined } : this.defaults,
       env: {},
       network: { mode: "none" },
       name,
@@ -243,7 +258,9 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
           throw new SandboxError("[Sandbox] Vercel persistent working directory setup failed.")
         }
       }
-      return sandbox
+      return environment
+        ? await initializeSandboxEnvironment(sandbox, environment, signal)
+        : sandbox
     } catch (error) {
       // A failed/uncertain request must never delete a name that another attempt may own.
       await stopFailedPersistentSession(client)

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import type { SandboxNetworkPolicy } from "@sixb/core/sandboxes"
 import { workspaceNetwork } from "../src/workspace-network"
 
 const api = "https://api.example.com"
@@ -12,53 +13,36 @@ const baseline = {
 }
 
 describe("workspace network", () => {
-  test.each([
-    undefined,
-    { mode: "none" },
-    { mode: "restricted", allow: [] },
-  ])("keeps required destinations without extra access: %j", (policy) =>
-    expect(workspaceNetwork(policy, api, repository)).toEqual(baseline))
-
-  test("adds canonical origins without duplicating required access", () => {
-    expect(
-      workspaceNetwork(
-        {
-          mode: "restricted",
-          allow: [
-            { name: "npm", origin: "https://registry.npmjs.org/" },
-            { name: "duplicate", origin: repository },
-          ],
-        },
-        api,
-        repository
-      )
-    ).toEqual({
+  test("derives minimal access only when the policy is omitted", () => {
+    expect(workspaceNetwork(undefined, api, repository)).toEqual(baseline)
+    expect(workspaceNetwork(undefined, api)).toEqual({
       mode: "restricted",
-      allow: [...baseline.allow, { name: "npm", origin: "https://registry.npmjs.org" }],
+      allow: [baseline.allow[0]],
+    })
+    expect(workspaceNetwork(undefined, api, api)).toEqual({
+      mode: "restricted",
+      allow: [baseline.allow[0]],
     })
   })
 
-  test("opens Internet only on explicit all", () => {
+  test.each<SandboxNetworkPolicy>([
+    { mode: "none" },
+    { mode: "restricted", allow: [] },
+    { mode: "restricted", allow: [baseline.allow[0]!] },
+    { mode: "restricted", allow: [baseline.allow[1]!] },
+  ])("never widens an explicit policy: %j", (policy) => {
+    // Regression proof: restore automatic API/repository additions; these policies stop failing.
+    expect(() => workspaceNetwork(policy, api, repository)).toThrow("denies required")
+  })
+
+  test("keeps explicit policies unchanged", () => {
+    expect(workspaceNetwork(baseline, api, repository)).toBe(baseline)
     expect(workspaceNetwork({ mode: "all" }, api, repository)).toEqual({ mode: "all" })
   })
 
-  test.each([
-    null,
-    {},
-    { mode: "unknown" },
-    { mode: "all", allow: [] },
-    { mode: "restricted" },
-    { mode: "restricted", allow: [null] },
-    ...[
-      "https://user:secret@example.com",
-      "https://example.com/path",
-      "https://example.com?token=secret",
-      "https://example.com#fragment",
-      "file:///tmp",
-      "example.com",
-    ].map((origin) => ({ mode: "restricted", allow: [{ name: "invalid", origin }] })),
-    { mode: "restricted", allow: [{ name: "", origin: api }] },
-  ])("rejects malformed policies instead of widening access: %j", (policy) => {
-    expect(() => workspaceNetwork(policy, api, repository)).toThrow("Workspace network")
+  test("requires repository access for initial clone, not for an existing checkout", () => {
+    const policy = { mode: "restricted" as const, allow: [baseline.allow[0]!] }
+    expect(workspaceNetwork(policy, api, repository, false)).toBe(policy)
+    expect(() => workspaceNetwork(policy, api, repository, true)).toThrow("workspace-repository")
   })
 })

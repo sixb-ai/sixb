@@ -301,7 +301,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         workspace = await openAgentWorkspace({
           context: executionContext,
           sixb: executionContext.sixb,
-          definition: this.host.definitions.agentWorkspace,
+          definition: this.host.sandboxDefinition,
           thread,
           run,
           signal: runtime.signal,

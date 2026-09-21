@@ -5,7 +5,12 @@ import type {
   SandboxNetworkPolicy,
 } from "@sixb/core"
 import { SandboxError } from "@sixb/core"
-import { type ParamsConfig, type SandboxConfig, sandboxConfig } from "@sixb/core/sandboxes"
+import {
+  initializeSandboxEnvironment,
+  type ParamsConfig,
+  type SandboxConfig,
+  sandboxConfig,
+} from "@sixb/core/sandboxes"
 import type { LocalIsolation } from "./isolation/detect"
 import { LocalSandbox } from "./local-sandbox"
 
@@ -38,7 +43,7 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
     if (options.persistence !== undefined) {
       throw new SandboxError("[Sandbox] local does not support persistent sandboxes.")
     }
-    return await LocalSandbox.create({
+    const sandbox = await LocalSandbox.create({
       isolation: this.defaults.isolation,
       readOnlyPaths: this.defaults.readOnlyPaths,
       readWritePaths: this.defaults.readWritePaths,
@@ -47,5 +52,13 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
       env: { ...(this.defaults.env ?? {}), ...(options.env ?? {}) },
       workingDirectory: options.workingDirectory,
     })
+    try {
+      return options.environment
+        ? await initializeSandboxEnvironment(sandbox, options.environment, options.signal)
+        : sandbox
+    } catch (error) {
+      await sandbox.destroy()
+      throw error
+    }
   }
 }

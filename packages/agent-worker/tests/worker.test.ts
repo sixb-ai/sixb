@@ -11,7 +11,6 @@ import {
   type AgentToolDefinition,
   type AgentToolResult,
   type AgentToolRunInfo,
-  type AgentWorkspaceConfig,
   type BlobStorage,
   type Broker,
   type CommandResult,
@@ -33,6 +32,7 @@ import {
   prop,
   type RunCommandOptions,
   type Sandbox,
+  type SandboxConfig,
   type SandboxFactory,
   type SandboxFileRecord,
   type SixbErrorContext,
@@ -65,7 +65,7 @@ import type {
 } from "@sixb/core/models"
 import { ModelProviderError, UnsupportedModelFeatureError } from "@sixb/core/models"
 import type { AgentQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
-import { SandboxStateUnavailableError } from "@sixb/core/sandboxes"
+import { initializeSandboxEnvironment, SandboxStateUnavailableError } from "@sixb/core/sandboxes"
 import {
   type AgentRunRecord,
   type AgentStorage,
@@ -1294,7 +1294,7 @@ function buildSixb(
   broker: Broker = new InMemoryBroker(),
   sandboxes: SandboxFactory = new RecordingSandboxFactory(),
   options: {
-    readonly agentWorkspace?: AgentWorkspaceConfig
+    readonly sandboxConfig?: SandboxConfig
     readonly projectRoot?: string
     readonly agentTools?: readonly AgentToolDefinition[]
     readonly projectTools?: readonly AgentToolDefinition[]
@@ -1313,8 +1313,21 @@ function buildSixb(
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
-    sandboxes,
-    agentWorkspace: options.agentWorkspace,
+    sandboxes: {
+      configuration: options.sandboxConfig,
+      create: async (input) => {
+        const sandbox = await sandboxes.create(input)
+        return input?.environment
+          ? initializeSandboxEnvironment(sandbox, input.environment, input.signal)
+          : sandbox
+      },
+      ...(sandboxes.resume
+        ? {
+            resume: (name: string, input?: import("@sixb/core").ResumeSandboxOptions) =>
+              sandboxes.resume!(name, input),
+          }
+        : {}),
+    },
     models: options.models ?? { language: [model] },
     ...(options.projectRoot === undefined ? {} : { projectRoot: options.projectRoot }),
   })
@@ -1972,6 +1985,46 @@ function hangingCompactionModel(): WorkerTestModel {
 }
 
 describe("AgentWorker", () => {
+  test("rejects an incompatible explicit network policy before acquiring state or compute", async () => {
+    // Regression proof: widen an explicit none policy in workspaceNetwork; provider calls start.
+    let providerCalls = 0
+    let modelCalls = 0
+    const provision = async () => {
+      providerCalls++
+      return new RecordingSandbox("denied")
+    }
+    const host = buildSixb(
+      answerModel(() => {
+        modelCalls++
+      }),
+      new InMemoryBroker(),
+      {
+        create: provision,
+        resume: provision,
+      },
+      { sandboxConfig: { resolve: () => ({ network: { mode: "none" } }) } }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(
+        await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+      ).toMatchObject({ status: "failed" })
+      expect(providerCalls).toBe(0)
+      expect(modelCalls).toBe(0)
+      expect((await sdk.agent.threads.getById(thread.id))?.workspaceState).toBeUndefined()
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+  })
+
   test("quarantines an interrupted acquisition even when the provider resolves late", async () => {
     // Regression proof: remove durable acquisition before factory.create; recovery has no anchor.
     let resolveCreate!: (sandbox: Sandbox) => void
@@ -1993,7 +2046,7 @@ describe("AgentWorker", () => {
         },
       },
       {
-        agentWorkspace: {
+        sandboxConfig: {
           params: {},
           resolve: () => ({
             source: { type: "git", url: "https://example.com/repository.git" },
@@ -2014,7 +2067,7 @@ describe("AgentWorker", () => {
       const blocked = await sdk.agent.threads.getById(thread.id)
       expect(blocked?.workspaceState?.status).toBe("blocked")
       const oldGeneration = blocked!.workspaceState!.generation
-      const fresh = await sdk.agent.threads.recreateWorkspace(thread.id, {
+      const fresh = await sdk.agent.threads.recreateSandbox(thread.id, {
         expectedGeneration: oldGeneration,
       })
       expect(fresh.workspaceState?.generation).not.toBe(oldGeneration)
@@ -2032,7 +2085,10 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("saves a persistent workspace before finalizing and resumes without rerunning setup", async () => {
+  test.each([
+    true,
+    false,
+  ])("saves before finalizing and resumes without rerunning setup (Git source: %s)", async (withSource) => {
     // Regression proof: remove beforeFinalize in runAgentTurn; the stop count fails on the first run.
     const sandbox = new RecordingSandbox("persistent")
     let creates = 0
@@ -2063,17 +2119,22 @@ describe("AgentWorker", () => {
       },
     }
     const host = buildSixb(answerModel(), new InMemoryBroker(), factory, {
-      agentWorkspace: {
+      sandboxConfig: {
         params: {},
         resolve: async () => {
           resolutions++
           return {
-            source: { type: "git", url: sourceUrl },
+            ...(withSource ? { source: { type: "git" as const, url: sourceUrl } } : {}),
             setup: ["setup-once"],
             network: {
               mode: "restricted",
-              allow:
-                resolutions === 1 ? [{ name: "npm", origin: "https://registry.npmjs.org" }] : [],
+              allow: [
+                { name: "sixb-api", origin: new URL(TEST_AGENT_API_BASE_URL).origin },
+                { name: "workspace-repository", origin: new URL(sourceUrl).origin },
+                ...(resolutions === 1
+                  ? [{ name: "npm", origin: "https://registry.npmjs.org" }]
+                  : []),
+              ],
             },
           }
         },
@@ -2130,8 +2191,12 @@ describe("AgentWorker", () => {
       expect(sandbox.destroyed).toBe(false)
       expect(
         sandbox.commands.filter((call) => call.command === "git" && call.args[0] === "clone")
-      ).toHaveLength(1)
+      ).toHaveLength(withSource ? 1 : 0)
       expect(sandbox.commands.filter((call) => call.args.includes("setup-once"))).toHaveLength(1)
+      if (!withSource) {
+        expect(sandbox.commands.some((call) => call.command === "git")).toBe(false)
+        return
+      }
       for (const failure of ["source-drift", "missing-snapshot"]) {
         if (failure === "source-drift") {
           sourceUrl = "https://example.com/other.git"
@@ -2195,7 +2260,7 @@ describe("AgentWorker", () => {
         resume: async () => sandbox,
       },
       {
-        agentWorkspace: {
+        sandboxConfig: {
           params: {},
           resolve: () => ({
             source: { type: "git", url: "https://example.com/repository.git" },
