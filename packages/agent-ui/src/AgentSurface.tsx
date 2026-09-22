@@ -158,9 +158,12 @@ export function AgentSurface({
   )
 
   useEffect(() => {
-    if (threadId === undefined || sessionState.threadId === threadId) return
-    setSessionState((current) => ({ ...current, threadId }))
-  }, [sessionState.threadId, threadId])
+    if (threadId === undefined) return
+    // Remember route changes without overwriting a local selection while navigation is pending.
+    setSessionState((current) =>
+      current.threadId === threadId ? current : { ...current, threadId }
+    )
+  }, [threadId])
 
   useEffect(() => {
     if (!fullPage || sessionState.mode === "dock") return

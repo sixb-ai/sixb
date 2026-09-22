@@ -114,31 +114,33 @@ export function AppShell({ children }: PropsWithChildren) {
         </SidebarContent>
         <NorthlineSidebarFooter />
       </Sidebar>
-      <SidebarInset className="relative h-svh min-h-0 overflow-hidden">
-        {conversationActive ? (
-          <SidebarTrigger className="absolute top-3 left-3 z-10 md:hidden" />
-        ) : (
-          <header className="flex h-12 shrink-0 items-center gap-3 bg-background px-3 sm:px-4">
-            <SidebarTrigger className="md:hidden" />
-            <GlobalSearch />
-            <div className="ml-auto">
-              <ThemeSwitcher />
+      <div className="relative flex min-h-0 min-w-0 flex-1">
+        <SidebarInset className="relative h-svh min-h-0 overflow-hidden">
+          {conversationActive ? (
+            <SidebarTrigger className="absolute top-3 left-3 z-50 md:hidden" />
+          ) : (
+            <header className="flex h-12 shrink-0 items-center gap-3 bg-background px-3 sm:px-4">
+              <SidebarTrigger className="md:hidden" />
+              <GlobalSearch />
+              <div className="ml-auto">
+                <ThemeSwitcher />
+              </div>
+            </header>
+          )}
+          <div className="min-h-0 flex-1 overflow-y-auto">
+            <div
+              className={
+                conversationActive
+                  ? "h-full w-full"
+                  : "mx-auto w-full max-w-[1320px] px-6 py-8 max-sm:px-4 max-sm:py-5"
+              }
+            >
+              {children}
             </div>
-          </header>
-        )}
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div
-            className={
-              conversationActive
-                ? "h-full w-full"
-                : "mx-auto w-full max-w-[1320px] px-6 py-8 max-sm:px-4 max-sm:py-5"
-            }
-          >
-            {children}
           </div>
-        </div>
-      </SidebarInset>
-      <OperationsAssistant />
+        </SidebarInset>
+        <OperationsAssistant />
+      </div>
     </SidebarProvider>
   )
 }

@@ -1,4 +1,6 @@
+import { Button } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
+import { ArrowLeft } from "lucide-react"
 import { useCallback } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { AgentChat, type AgentChatProps } from "./AgentChat"
@@ -19,6 +21,7 @@ export function AgentChatPage({
   routeBase = "/agents",
   className,
   ambientContext,
+  conversationHeaderActions,
   ...props
 }: AgentChatPageProps) {
   const navigate = useNavigate()
@@ -45,6 +48,21 @@ export function AgentChatPage({
         threadId={routeThreadId ?? null}
         onNavigateHome={onNavigateHome}
         onNavigateThread={onNavigateThread}
+        conversationHeaderActions={
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon-lg"
+              aria-label="Back to app"
+              title="Back to app"
+              onClick={() => navigate("/")}
+            >
+              <ArrowLeft />
+            </Button>
+            {conversationHeaderActions}
+          </>
+        }
         className={cn("min-h-0 flex-1", className)}
       />
     </section>
