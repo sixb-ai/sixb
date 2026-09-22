@@ -256,16 +256,5 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
-      - name: Prepare server vector database
-        if: matrix.name == 'server'
-        run: |
-          docker compose -p sixb-server-vector -f storage/pg/docker-compose.yml up -d --wait
-          docker compose -p sixb-server-vector -f storage/pg/docker-compose.yml exec -T postgres psql -U postgres -d postgres -c 'CREATE EXTENSION vector'
-          echo 'DATABASE_URL=postgresql://postgres:test@127.0.0.1:54329/postgres' >> "$GITHUB_ENV"
-
       - name: E2E tests
         run: bun --filter '${{ matrix.package }}' test:e2e
-
-      - name: Clean server vector database
-        if: always() && matrix.name == 'server'
-        run: docker compose -p sixb-server-vector -f storage/pg/docker-compose.yml down -v --remove-orphans
