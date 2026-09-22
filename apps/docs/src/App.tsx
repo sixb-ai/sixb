@@ -139,10 +139,9 @@ function sidebarGroups(groups: NavGroup[]): NavGroup[] {
   const models = section("Models")
   const aiOrder = [
     "/models",
-    "/models/generation",
-    "/models/tools-and-authorization",
     "/models/configuration",
     "/sandboxes",
+    "/models/tools-and-authorization",
     "/models/usage-and-limits",
   ]
   const aiPages = [...models.items, ...section("Sandboxes").items].sort((a, b) => {
@@ -168,8 +167,7 @@ function sidebarGroups(groups: NavGroup[]): NavGroup[] {
       items: aiPages,
       labels: {
         "/models": "Overview",
-        "/models/configuration": "Model providers",
-        "/models/generation": "Generating responses",
+        "/models/configuration": "Models",
         "/models/tools-and-authorization": "Tools & skills",
         "/models/usage-and-limits": "Usage & limits",
       },

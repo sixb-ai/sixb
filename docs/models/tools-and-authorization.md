@@ -72,4 +72,4 @@ reads the full instructions when relevant. Supporting files can live alongside `
 referenced by relative path.
 
 Skills guide behavior; they do not grant access. Domain operations still follow the agent's
-[permissions](./overview.md#built-in-agent).
+[permissions](./overview.md#control-access).

@@ -1,7 +1,1 @@
-[
-  "overview.md",
-  "generation.md",
-  "tools-and-authorization.md",
-  "configuration.md",
-  "usage-and-limits.md"
-]
+["overview.md", "configuration.md", "tools-and-authorization.md", "usage-and-limits.md"]

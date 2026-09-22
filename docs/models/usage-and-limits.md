@@ -25,7 +25,7 @@ are blocked.
 
 Limits control whether calls can start. They are not hard caps on a provider's bill, because a
 call's actual usage can exceed its estimate. Use
-[`maxOutputTokens`](./generation.md#choose-a-model) to bound the output of an individual call.
+[`maxOutputTokens`](./configuration.md#model-and-response-controls) to bound the output of an individual call.
 
 ## Embeddings
 

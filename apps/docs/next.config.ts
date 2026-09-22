@@ -41,12 +41,22 @@ const nextConfig: NextConfig = {
       },
       {
         source: "/models/built-in-agent",
-        destination: "/models#built-in-agent",
+        destination: "/models#how-the-agent-works",
         permanent: true,
       },
       {
         source: "/models/built-in-agent.md",
         destination: "/models/overview.md",
+        permanent: true,
+      },
+      {
+        source: "/models/generation",
+        destination: "/models/configuration",
+        permanent: true,
+      },
+      {
+        source: "/models/generation.md",
+        destination: "/models/configuration.md",
         permanent: true,
       },
       ...["local", "apple-container", "smolvm", "vercel"].flatMap((provider) =>

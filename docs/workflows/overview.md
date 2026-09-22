@@ -93,14 +93,14 @@ export const draftReminder = defineAgentStep("draft-reminder", {
 Add it with `.then(draftReminder)`, just like a regular step. The workflow waits for its validated
 output before continuing.
 
-The task uses your [configured language model](../models/overview.md#configure-a-model) and built-in sandbox
+The task uses your [configured language model](../models/configuration.md#language-models) and built-in sandbox
 tools. `groups` controls its access to project data; grant the example's `finance` group permission
 to read invoices. Without groups, it has no project grants. To add custom tools, select them with
 `tools: [...]` and register them in `createSixb({ tools })`. See
 [Tools and skills](../models/tools-and-authorization.md).
 
 For a single model call that does not need tools, use an ordinary step with
-[`sixb.models.language.generate()`](../models/generation.md#in-a-workflow).
+[`sixb.models.language.generate()`](../models/configuration.md#generate-a-response).
 
 ## Start a workflow
 
