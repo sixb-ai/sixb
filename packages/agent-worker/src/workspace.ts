@@ -10,6 +10,7 @@ import type {
 import { waitForAbort } from "./abort"
 import { AgentExecutionLostError } from "./errors"
 import type { AgentExecutionContext } from "./types"
+import { workspaceRunFilesScript } from "./workspace-files"
 import { workspaceNetwork } from "./workspace-network"
 
 const OPERATION_TIMEOUT_MS = 120_000
@@ -297,13 +298,7 @@ async function checkedCommand(
 
 /** Remove only framework-owned transient files. Refuse a redirected parent directory. */
 async function cleanRunFiles(sandbox: Sandbox, hasSource: boolean): Promise<void> {
-  const checks = hasSource
-    ? ["git rev-parse --git-dir >/dev/null", 'test -z "$(git ls-files -- .sixb/agent)"']
-    : []
-  await checkedCommand(sandbox, "bash", [
-    "-c",
-    [...checks, "test ! -L .sixb", "rm -rf -- .sixb/agent"].join(" && "),
-  ])
+  await checkedCommand(sandbox, "bash", ["-c", workspaceRunFilesScript(hasSource)])
 }
 
 function bounded<T>(operation: Promise<T>): Promise<T> {

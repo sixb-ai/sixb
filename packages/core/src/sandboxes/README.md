@@ -9,6 +9,9 @@ Factories define environments; threads retain immutable parameters; runs provide
   path to avoid preparing the source twice. Confirmed loss starts a new generation and replays setup.
 - The worker resolves each run, acquires fenced ownership, executes, cleans transient files and
   confirms preservation before finalizing. Source identity/revision cannot change on resume.
+- Git checkouts exclude `.sixb/agent/` locally before run files are written. Tracked runtime files,
+  redirected metadata and repository rules overriding this exclusion block acquisition or saving.
+  This prevents accidental staging, not deliberate publication with `git add -f`.
 - Confirmed missing/expired state allows one replacement attempt under the current execution fence.
   A durable reset timestamp informs subsequent model calls; conversation history is preserved.
 - Omitted network policy permits API/source access. Explicit policies are never widened; incompatible
