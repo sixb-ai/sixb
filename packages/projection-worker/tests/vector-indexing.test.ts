@@ -31,11 +31,14 @@ test("projection completion is independent of inference; the same worker maintai
   const entered = Promise.withResolvers<void>()
   const release = Promise.withResolvers<void>()
   let calls = 0
+  const sizes: number[] = []
   const model: EmbeddingModel = {
     providerId: "test",
     modelId: "embedding",
     definition: { kind: "embedding", providerId: "test", modelId: "embedding", dimensions: 2 },
+    batching: { maxInputs: 32, maxInputBytes: 8192, maxTotalInputBytes: 32768 },
     async embed({ texts }) {
+      sizes.push(texts.length)
       calls++
       entered.resolve()
       await release.promise
@@ -79,7 +82,10 @@ test("projection completion is independent of inference; the same worker maintai
       mode: "snapshot",
       producer: { kind: "sync", id: "test", runId: "sync" },
     })
-    await write.writeRows([{ id: "p", description: "first" }])
+    await write.writeRows([
+      { id: "p", description: "first" },
+      { id: "q", description: "second" },
+    ])
     const version = await write.commit({ commitMessage: "test" })
     await new ProjectionRunDispatcher(host).dispatch({
       projectionId: projection.id,
@@ -109,6 +115,7 @@ test("projection completion is independent of inference; the same worker maintai
       (entries) => entries.length === 1
     )
     expect(calls).toBe(1)
+    expect(sizes).toEqual([2])
     // A winning managed edit uses the same materializer hook as projections.
     await createTestSixb(host)
       .objects(Product)
@@ -125,6 +132,7 @@ test("projection completion is independent of inference; the same worker maintai
         }),
       (entries) => entries.length === 1
     )
+    expect(sizes).toEqual([2, 1])
   } finally {
     release.resolve()
     await worker.stop()

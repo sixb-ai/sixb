@@ -1091,6 +1091,7 @@ export type {
 // ── Models ──────────────────────────────────────────────────
 
 export type {
+  EmbeddingBatchLimits,
   EmbeddingModel,
   EmbeddingModelCatalog,
   EmbeddingModelDefinition,

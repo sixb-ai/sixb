@@ -3,12 +3,13 @@ import {
   MaterializationValidationError,
 } from "../../materialization/errors"
 import type { OntologyEditCommit } from "../../materialization/model"
+import { objectRefKey } from "../../materialization/refs"
 import type { ObjectVectorWrite } from "../../materialization/vectors"
 import type { Storage } from "../../storage"
 import type { VectorIndexingWork } from "../../storage/ontology/vector-indexing"
 import type { MaterializerExecution } from "../execution/scope"
 
-/** Kernel indexing can publish one persisted result, never change business data. */
+/** Kernel indexing can publish only its persisted results, never change business data. */
 export async function authorizeVectorIndexingCommit(
   storage: Storage,
   projectId: string,
@@ -22,34 +23,72 @@ export async function authorizeVectorIndexingCommit(
     input.mode !== "atomic" ||
     input.source.kind !== "runtime" ||
     input.operations.length ||
-    input.vectorWrites?.length !== 1 ||
-    input.expectedObjects.length !== 1 ||
+    !input.vectorWrites?.length ||
     input.expectedLinks.length ||
     input.expectedLinkScopes.length
   ) {
     throw new MaterializationValidationError(
-      "Vector indexing authority only permits a single vector write."
+      "Vector indexing authority only permits its persisted vector writes."
     )
   }
-  const work = await storage.ontology.vectorIndexing?.get({
-    projectId,
-    id: executor.operation.indexingId,
-  })
-  if (!work || work.status !== "ready") {
-    throw new MaterializationConflictError(
-      "effective-state",
-      "Vector indexing work is no longer ready."
-    )
-  }
-  const source = execution.scope.execution.source
+  const writes = input.vectorWrites!
+  const refs = new Set(writes.map((write) => objectRefKey(write.input.ref)))
   if (
-    source.type !== "ontologyCommit" ||
-    source.commitId !== work.sourceCommitId ||
-    !matchesStoredResult(input.vectorWrites[0]!, work)
+    input.expectedObjects.length !== refs.size ||
+    input.expectedObjects.some((expected) => !refs.has(objectRefKey(expected.ref)))
   ) {
     throw new MaterializationValidationError(
-      "Vector indexing authority only permits its current prepared representation."
+      "Vector indexing must fence exactly its written objects."
     )
+  }
+
+  const indexing = storage.ontology.vectorIndexing
+  const indexingId = executor.operation.indexingId
+  const single = await indexing?.get({ projectId, id: indexingId })
+  if (single && writes.length !== 1) {
+    throw new MaterializationValidationError(
+      "Individual indexing authority only permits one vector write."
+    )
+  }
+
+  // Multi-object publication reads membership/results once, not once per object.
+  let members: readonly VectorIndexingWork[]
+  if (single) {
+    members = [single]
+  } else if (writes.length === 1) {
+    const member = await indexing?.getBatchMember({
+      projectId,
+      batchId: indexingId,
+      ref: writes[0]!.input.ref,
+      profile: writes[0]!.input.profile,
+    })
+    members = member ? [member] : []
+  } else {
+    members = (await indexing?.getBatch({ projectId, batchId: indexingId })) ?? []
+  }
+
+  const byProfile = new Map(
+    members.map((work) => [JSON.stringify([objectRefKey(work.ref), work.profile]), work])
+  )
+  const source = execution.scope.execution.source
+
+  for (const write of writes) {
+    const work = byProfile.get(JSON.stringify([objectRefKey(write.input.ref), write.input.profile]))
+    if (!work || work.status !== "ready") {
+      throw new MaterializationConflictError(
+        "effective-state",
+        "Vector indexing work is no longer ready."
+      )
+    }
+    if (
+      source.type !== "ontologyCommit" ||
+      source.commitId !== work.sourceCommitId ||
+      !matchesStoredResult(write, work)
+    ) {
+      throw new MaterializationValidationError(
+        "Vector indexing authority only permits its current prepared representation."
+      )
+    }
   }
   return true
 }

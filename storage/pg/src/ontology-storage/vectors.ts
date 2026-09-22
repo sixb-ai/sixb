@@ -91,35 +91,64 @@ export class PgOntologyVectorStorage implements OntologyVectorStorage {
   }
 
   async write(input: Parameters<OntologyVectorStorage["write"]>[0]): Promise<void> {
-    const { value } = input
-    this.assertSession(input.session, input.projectId, value.lastCommitId)
-    // The Materializer validates float32 values before this provider boundary.
-    const embedding = this.sql.array([...value.values])
-    const rows =
-      input.expectedCommitId === null
-        ? await this.sql`
-          INSERT INTO object_vectors (
-            project_id, object_type_id, primary_id, profile,
-            configuration, source, source_fingerprint, embedding, last_commit_id
-          ) VALUES (
-            ${input.projectId}, ${value.ref.objectTypeId}, ${value.ref.primaryId}, ${value.profile},
-            ${value.configuration}, ${this.sql.array([...value.source])}::text[],
-            ${value.sourceFingerprint}, ${embedding}::real[], ${value.lastCommitId}
-          )
-          ON CONFLICT (project_id, object_type_id, primary_id, profile) DO NOTHING
-          RETURNING profile
-        `
-        : await this.sql`
-          UPDATE object_vectors
-          SET configuration = ${value.configuration}, source = ${this.sql.array([...value.source])}::text[],
-            source_fingerprint = ${value.sourceFingerprint}, embedding = ${embedding}::real[],
-            last_commit_id = ${value.lastCommitId}
-          WHERE project_id = ${input.projectId}
-            AND object_type_id = ${value.ref.objectTypeId} AND primary_id = ${value.ref.primaryId}
-            AND profile = ${value.profile} AND last_commit_id = ${input.expectedCommitId}
-          RETURNING profile
-        `
-    if (rows.length !== 1) throw vectorConflict()
+    await this.writeBatch({ session: input.session, projectId: input.projectId, entries: [input] })
+  }
+
+  async writeBatch(input: Parameters<OntologyVectorStorage["writeBatch"]>[0]): Promise<void> {
+    const entries = input.entries.map(({ value, expectedCommitId }) => {
+      this.assertSession(input.session, input.projectId, value.lastCommitId)
+      return {
+        object_type_id: value.ref.objectTypeId,
+        primary_id: value.ref.primaryId,
+        profile: value.profile,
+        configuration: value.configuration,
+        source: [...value.source],
+        source_fingerprint: value.sourceFingerprint,
+        embedding: [...value.values],
+        last_commit_id: value.lastCommitId,
+        expected_commit_id: expectedCommitId,
+      }
+    })
+    const inserts = entries.filter((entry) => entry.expected_commit_id === null)
+    const updates = entries.filter((entry) => entry.expected_commit_id !== null)
+
+    // Keep insert-if-absent and revision-checked update distinct: an upsert could recreate
+    // a deleted vector or overwrite a representation produced after preparation.
+    if (inserts.length) {
+      const rows = await this.sql`
+        INSERT INTO object_vectors (
+          project_id, object_type_id, primary_id, profile, configuration,
+          source, source_fingerprint, embedding, last_commit_id
+        )
+        SELECT ${input.projectId}, object_type_id, primary_id, profile, configuration,
+          source, source_fingerprint, embedding, last_commit_id
+        FROM jsonb_to_recordset(${json(this.sql, inserts)}::jsonb) AS incoming(
+          object_type_id text, primary_id text, profile text, configuration text,
+          source text[], source_fingerprint text, embedding real[], last_commit_id text
+        )
+        ORDER BY object_type_id, primary_id, profile
+        ON CONFLICT (project_id, object_type_id, primary_id, profile) DO NOTHING
+        RETURNING profile`
+      if (rows.length !== inserts.length) throw vectorConflict()
+    }
+
+    if (updates.length) {
+      const rows = await this.sql`
+        UPDATE object_vectors AS stored SET
+          configuration = incoming.configuration, source = incoming.source,
+          source_fingerprint = incoming.source_fingerprint, embedding = incoming.embedding,
+          last_commit_id = incoming.last_commit_id
+        FROM jsonb_to_recordset(${json(this.sql, updates)}::jsonb) AS incoming(
+          object_type_id text, primary_id text, profile text, configuration text,
+          source text[], source_fingerprint text, embedding real[], last_commit_id text,
+          expected_commit_id text
+        )
+        WHERE stored.project_id = ${input.projectId}
+          AND stored.object_type_id = incoming.object_type_id AND stored.primary_id = incoming.primary_id
+          AND stored.profile = incoming.profile AND stored.last_commit_id = incoming.expected_commit_id
+        RETURNING stored.profile`
+      if (rows.length !== updates.length) throw vectorConflict()
+    }
   }
 
   async remove(input: Parameters<OntologyVectorStorage["remove"]>[0]): Promise<void> {

@@ -52,7 +52,8 @@ export async function drainStagedWork(
   context: Pick<MaterializerContext, "batching" | "projectId" | "ontology" | "clock">,
   transactionStorage: Storage,
   session: MaterializationSession,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  projection = false
 ): Promise<void> {
   const ontologyStorage = transactionStorage.ontology
   const storage = ontologyStorage.materializations
@@ -60,7 +61,7 @@ export async function drainStagedWork(
   let pending: MaterializationPlanItem[] = []
   const flush = async () => {
     if (pending.length === 0) return
-    await scheduleVectorChanges(context, transactionStorage, pending, session)
+    await scheduleVectorChanges(context, transactionStorage, pending, session, projection)
     await invalidateVectorChanges(context.projectId, ontologyStorage.vectors, pending, session)
     await applyItems(context, storage, session, pending, signal)
     pending = []

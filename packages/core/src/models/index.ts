@@ -20,6 +20,7 @@ export type {
 } from "./definitions"
 export { defineLanguageModel } from "./definitions"
 export type {
+  EmbeddingBatchLimits,
   EmbeddingModel,
   EmbeddingModelDefinition,
   EmbeddingModelRef,

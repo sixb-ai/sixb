@@ -145,3 +145,13 @@ test("embedding resolution preserves captured dimensions when caller options cha
   const model = await binding.resolve!()
   expect(model.definition.dimensions).toBe(2)
 })
+
+test("only known OpenAI routes advertise safe automatic batching bounds", () => {
+  const gateway = createVercelGateway()
+  for (const name of ["3-small", "3-large", "ada-002"]) {
+    expect(
+      gateway.embedding(`openai/text-embedding-${name}`, { dimensions: 1536 }).batching
+    ).toEqual({ maxInputs: 2048, maxInputBytes: 8191, maxTotalInputBytes: 300000 })
+  }
+  expect(gateway.embedding("other/embedding", { dimensions: 1536 }).batching).toBeUndefined()
+})

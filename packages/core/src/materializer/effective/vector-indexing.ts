@@ -13,7 +13,8 @@ export async function scheduleVectorChanges(
   context: Pick<MaterializerContext, "projectId" | "ontology" | "clock">,
   storage: Storage,
   items: readonly MaterializationPlanItem[],
-  session: MaterializationSession
+  session: MaterializationSession,
+  projection = false
 ): Promise<void> {
   const indexing = storage.ontology.vectorIndexing
   if (!indexing) return
@@ -31,6 +32,8 @@ export async function scheduleVectorChanges(
   })
   const requests: VectorIndexingRequest[] = []
   const deleted: OntologyObjectRef[] = []
+  // Groups exist only for this materialization page and are persisted in its transaction.
+  const groups = new Map<string, { id: string; count: number; bytes: number }>()
   for (const item of items) {
     if (item.kind === "object-delete") {
       deleted.push(item.value.ref)
@@ -41,18 +44,31 @@ export async function scheduleVectorChanges(
     const profiles = context.ontology.resolveObjectType(row.ref.objectTypeId).search?.vectors ?? {}
     const before = previous.get(objectBatchKey(row.ref.objectTypeId, row.ref.primaryId))
     for (const [profile, definition] of Object.entries(profiles)) {
-      const { sourceFingerprint } = vectorSources(definition.source, row.properties)
+      const { sourceFingerprint, text } = vectorSources(definition.source, row.properties)
       if (
         before &&
         vectorSources(definition.source, before.properties).sourceFingerprint === sourceFingerprint
       )
         continue
+      const configuration = vectorConfiguration(definition)
+      const bytes = Buffer.byteLength(text)
+      const key = JSON.stringify([row.ref.objectTypeId, profile, configuration, row.lastCommitId])
+      let group = projection ? groups.get(key) : undefined
+      if (projection && (!group || group.count === 32 || group.bytes + bytes > 32_768)) {
+        group = { id: randomUUID(), count: 0, bytes: 0 }
+        groups.set(key, group)
+      }
+      if (group) {
+        group.count++
+        group.bytes += bytes
+      }
       requests.push({
+        ...(group ? { batchId: group.id } : {}),
         id: randomUUID(),
         ref: row.ref,
         profile,
         sourceFingerprint,
-        configuration: vectorConfiguration(definition),
+        configuration,
         sourceCommitId: row.lastCommitId,
       })
     }

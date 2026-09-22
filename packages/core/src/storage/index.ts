@@ -559,6 +559,7 @@ export type {
   OntologyVectorIndexingStorage,
   VectorIndexingFailureCode,
   VectorIndexingRequest,
+  VectorIndexingUpdate,
   VectorIndexingWork,
 } from "./ontology/vector-indexing"
 export { VECTOR_INDEXING_FAILURE_CODES } from "./ontology/vector-indexing"

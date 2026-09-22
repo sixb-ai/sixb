@@ -15,6 +15,7 @@ import {
 } from "@sixb/core"
 import { getVectorIndexingRuntime } from "@sixb/core/internal/runtime"
 import { createTestSixb, type TestExecutionHost } from "@sixb/core/testing"
+import { assertVectorBatchTransitions, seedVectorBatch } from "../../tests/vector-batching-contract"
 import { SqliteStorage } from "../src"
 
 test("durable indexing intent and ready results survive SQLite reopening", async () => {
@@ -136,6 +137,30 @@ test("durable indexing intent and ready results survive SQLite reopening", async
     ).toMatchObject({ status: "failed", error: failure })
   } finally {
     await host?.closeBroker()
+    await storage.close()
+    await rm(path, { recursive: true, force: true })
+  }
+})
+
+test("SQLite durable batches survive reopening and transition atomically", async () => {
+  const path = await mkdtemp(join(tmpdir(), "sixb-batch-"))
+  let storage = new SqliteStorage({ path })
+  try {
+    await migrateStorage(storage)
+    await seedVectorBatch(storage)
+    await seedVectorBatch(storage, "isolated-project")
+    await storage.close()
+    storage = new SqliteStorage({ path })
+    await assertVectorBatchTransitions(storage)
+    await storage.close()
+    storage = new SqliteStorage({ path })
+    expect(
+      await storage.ontology.vectorIndexing.getBatch({
+        projectId: "batch-project",
+        batchId: "batch",
+      })
+    ).toMatchObject([{ id: "b", status: "ready", values: [1, 0] }])
+  } finally {
     await storage.close()
     await rm(path, { recursive: true, force: true })
   }

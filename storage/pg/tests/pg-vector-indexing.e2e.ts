@@ -11,6 +11,7 @@ import {
 } from "@sixb/core"
 import { getVectorIndexingRuntime } from "@sixb/core/internal/runtime"
 import { createTestSixb } from "@sixb/core/testing"
+import { assertVectorBatchTransitions, seedVectorBatch } from "../../tests/vector-batching-contract"
 import { quoteIdent } from "../src/migrations"
 import { createPgClient } from "../src/pg-client"
 import { createTestStorage } from "./helpers"
@@ -125,6 +126,20 @@ test("PostgreSQL persists coalesced indexing and project-accounted vector commit
     ).toHaveLength(0)
   } finally {
     await host.closeBroker()
+    await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(schemaName)} CASCADE`)
+    await sql.end()
+    await storage.close()
+  }
+})
+
+test("PostgreSQL batch admission is atomic across competing claims", async () => {
+  const { storage, schemaName } = await createTestStorage()
+  const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 2 })
+  try {
+    await seedVectorBatch(storage)
+    await seedVectorBatch(storage, "isolated-project")
+    await assertVectorBatchTransitions(storage)
+  } finally {
     await sql.unsafe(`DROP SCHEMA IF EXISTS ${quoteIdent(schemaName)} CASCADE`)
     await sql.end()
     await storage.close()

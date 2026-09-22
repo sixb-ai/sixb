@@ -95,5 +95,10 @@ They use the OpenAI-compatible `/embeddings` endpoint, request float output and 
 finite nonzero values and one unique response index per input. Results follow input order.
 An empty batch returns no vectors without a request; empty texts are rejected. Pass `signal` to
 cancel a call. Embedding calls do not retry implicitly; the language-model retry options do not
-apply. Models must support the requested dimensions. Embedding usage is not recorded in Sixb's
-language-model usage ledger.
+apply. Models must support the requested dimensions. Direct provider calls bypass Sixb accounting;
+object indexing and text search use the shared usage, cost and limit controls.
+
+Automatic projection batching is enabled for known OpenAI embedding models only. Their adapter
+advertises conservative bounds of 2048 texts, 8191 UTF-8 bytes per text and 300,000 bytes total;
+the indexer also applies smaller local page bounds. Other routes remain individual until their
+limits are known. Inputs are never truncated.

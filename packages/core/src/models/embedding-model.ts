@@ -37,7 +37,16 @@ export interface EmbeddingModelRef {
   readonly definition: EmbeddingModelDefinition
 }
 
+/** Conservative transport bounds for automatic projection batching, not token estimates. */
+export interface EmbeddingBatchLimits {
+  readonly maxInputs: number
+  readonly maxInputBytes: number
+  readonly maxTotalInputBytes: number
+}
+
 export interface EmbeddingModel extends EmbeddingModelRef {
+  /** Omit when safe multi-input bounds are unknown; automatic indexing then calls one at a time. */
+  readonly batching?: EmbeddingBatchLimits
   readonly costEstimator?: ModelCostEstimator
   /** Resolve and pin optional pricing before admission, without an inference call. */
   resolve?(): Promise<EmbeddingModel>
@@ -49,6 +58,16 @@ export function assertEmbeddingModel(model: EmbeddingModel): void {
     throw new TypeError("[Sixb] Expected an EmbeddingModel with an embed method.")
   }
   assertEmbeddingModelRef(model)
+  if (
+    model.batching &&
+    [
+      model.batching.maxInputs,
+      model.batching.maxInputBytes,
+      model.batching.maxTotalInputBytes,
+    ].some((value) => !Number.isSafeInteger(value) || value < 1)
+  ) {
+    throw new TypeError("[Sixb] Embedding batch limits must be positive safe integers.")
+  }
 }
 
 export function assertEmbeddingModelRef(model: EmbeddingModelRef): void {

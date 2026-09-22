@@ -17,8 +17,8 @@ its generation id and `pending → running → ready` state. Dispatch has a sepa
 queues cannot starve later entries. Reconciliation can enqueue the same generation safely.
 
 `indexing.ts` exposes only a core-owned processing capability. Kernel authority cannot bind the
-public domain SDK. `ontology.indexVectors` authorizes one persisted result; the Materializer checks
-its identity and values as well as object/vector revisions in the transaction. Execution provenance
+public domain SDK. `ontology.indexVectors` authorizes only the persisted results of its work item or durable group.
+The Materializer checks membership, identity, values and each object/vector revision in the transaction. Execution provenance
 references the source ontology commit; requester and groups are empty, so only project budgets apply.
 
 The durable `running` fence precedes admission, so superseded work cannot reserve budget. The
@@ -31,9 +31,27 @@ those values. Source changes, deletion/recreation, or configuration mismatch dis
 A vector-only commit never schedules itself. Manual indexing remains available through authorized
 SDK executions; its valid result also makes queued work unnecessary.
 
-V1 processes one object/profile per inference, with independently bounded concurrency. It coalesces
-pending edits but does not batch different objects into one provider call. Network calls never hold
-storage transactions. Applications without projections do not start this indexing consumer.
+Projection replacement assigns `batchId` within each materialization page: same object type,
+profile, configuration and source commit, at most 32 members / 32 KiB of serialized source text.
+Membership is stored alongside intent in the activation transaction; there is no fill timer, process
+buffer or cross-run aggregation. An oversized text is isolated, never truncated.
+
+Dispatch uses the group id. Processing reads current members, drops obsolete work, and splits them
+to the adapter's optional `EmbeddingModel.batching` count / UTF-8 byte bounds. Unknown bounds or
+oversized inputs use individual calls. Search, explicit indexing and managed edits stay individual.
+Each actual provider request produces one usage/cost record, under the project's group execution.
+Admission claims all prepared members atomically before reserving budget; a superseded member
+aborts that claim. Results become ready atomically for surviving members, then publish together in
+one materialization transaction. PostgreSQL groups vector writes and intent cleanup in SQL; SQLite
+reuses prepared statements within that transaction. Every object and vector retains its own revision
+fence. A conflict rolls back publication and reprepares the current subset without inference. After
+three conflicts, individual publication lets stable peers finish while contended members are deferred.
+Restarted ready members only retry storage; running members fail with an unknown outcome.
+A partly processed group publishes ready members together and resumes other members individually.
+
+Network calls never hold storage transactions. Applications without projections do not start this
+indexing consumer. Byte bounds are conservative transport eligibility, not the accounting layer's
+token estimate; they do not reject or truncate a text that can still be sent individually.
 
 Terminal failures persist a canonical `SixbFailure` before `onError`: `vector.model_unavailable`,
 `vector.response_invalid`, or `vector.outcome_unknown` for interrupted calls. Unclassified failures

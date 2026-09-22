@@ -480,3 +480,14 @@ test("deployment aliases get distinct profile fingerprints for different model p
   expect(fingerprint(await small.resolve())).toBe(fingerprint(small))
   expect(fingerprint(await large.resolve())).toBe(fingerprint(large))
 })
+
+test("Foundry preserves safe batching bounds after deployment resolution", async () => {
+  const f = setup()
+  const model = f.provider.embedding("products", { model: f.identity, dimensions: 2 })
+  expect(model.batching).toEqual({
+    maxInputs: 2048,
+    maxInputBytes: 8191,
+    maxTotalInputBytes: 300000,
+  })
+  expect((await model.resolve()).batching).toEqual(model.batching)
+})

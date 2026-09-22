@@ -347,7 +347,7 @@ async function executeProjectionTransaction(
     ready,
     origin
   )
-  await drainStagedWork(context, storage, session, command.signal)
+  await drainStagedWork(context, storage, session, command.signal, true)
   const eventCount = await drainStagedEvents(
     context,
     storage.ontology.materializations,
