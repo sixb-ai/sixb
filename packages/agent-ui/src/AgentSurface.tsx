@@ -22,7 +22,8 @@ import {
   DEFAULT_AGENT_SURFACE_WIDTH,
   MAX_AGENT_SURFACE_WIDTH,
   MIN_AGENT_SURFACE_WIDTH,
-  parseAgentSurfaceSessionState,
+  readAgentSurfaceState,
+  writeAgentSurfaceState,
 } from "./agent-surface-state"
 
 export type { AgentSurfaceMode } from "./agent-surface-state"
@@ -91,15 +92,14 @@ export function AgentSurface({
 }: AgentSurfaceProps) {
   const minimumWidth = Math.min(minDockWidth, maxDockWidth)
   const maximumWidth = Math.max(minDockWidth, maxDockWidth)
-  const surfaceScope = "agents"
-  const storageKey = agentSurfaceSessionStorageKey(surfaceScope, persistenceKey)
+  const storageKey = agentSurfaceSessionStorageKey(persistenceKey)
   const defaults: AgentSurfaceSessionState = {
     mode: defaultMode,
     dockWidth: clampAgentSurfaceWidth(defaultDockWidth, minimumWidth, maximumWidth),
     threadId: defaultThreadId,
   }
   const [sessionState, setSessionState] = useState(() =>
-    readSessionState(storageKey, defaults, minimumWidth, maximumWidth)
+    readAgentSurfaceState(storageKey, defaults, minimumWidth, maximumWidth)
   )
   const [documentHost, setDocumentHost] = useState<HTMLDivElement | null>(null)
   const [resizing, setResizing] = useState(false)
@@ -108,23 +108,17 @@ export function AgentSurface({
     readonly clientX: number
     readonly width: number
   } | null>(null)
-  const updateSessionState = useCallback(
-    (update: (current: AgentSurfaceSessionState) => AgentSurfaceSessionState) => {
-      setSessionState((current) => {
-        const next = update(current)
-        writeSessionState(storageKey, next)
-        return next
-      })
-    },
-    [storageKey]
-  )
+
+  useEffect(() => {
+    writeAgentSurfaceState(storageKey, sessionState)
+  }, [storageKey, sessionState])
 
   useEffect(() => {
     if (!storageKey || typeof window === "undefined") return
 
     const receiveState = (event: Event) => {
       const detail = (event as CustomEvent<AgentSurfaceStateDetail>).detail
-      if (detail?.agentId !== surfaceScope || detail.storageKey !== storageKey) return
+      if (detail?.storageKey !== storageKey) return
       setSessionState(detail.state)
     }
 
@@ -133,13 +127,12 @@ export function AgentSurface({
   }, [storageKey])
 
   const currentMode = mode ?? sessionState.mode
-  const full = fullPage
   const currentThreadId = threadId === undefined ? sessionState.threadId : threadId
   const currentDockWidth = dockWidth ?? sessionState.dockWidth
   const numericDockWidth =
     typeof currentDockWidth === "number" ? currentDockWidth : sessionState.dockWidth
-  const visible = full || currentMode !== "collapsed"
-  const presentation = full ? "full" : currentMode
+  const visible = fullPage || currentMode !== "collapsed"
+  const presentation = fullPage ? "full" : currentMode
   const dockWidthValue =
     typeof currentDockWidth === "number" ? `${currentDockWidth}px` : currentDockWidth
   const surfaceStyle = { "--agent-surface-width": dockWidthValue } as CSSProperties
@@ -147,32 +140,32 @@ export function AgentSurface({
   const changeMode = useCallback(
     (nextMode: AgentSurfaceMode) => {
       if (mode === undefined) {
-        updateSessionState((current) => ({ ...current, mode: nextMode }))
+        setSessionState((current) => ({ ...current, mode: nextMode }))
       }
       onModeChange?.(nextMode)
     },
-    [mode, onModeChange, updateSessionState]
+    [mode, onModeChange]
   )
 
   const changeThread = useCallback(
     (nextThreadId: string | null) => {
-      updateSessionState((current) =>
+      setSessionState((current) =>
         current.threadId === nextThreadId ? current : { ...current, threadId: nextThreadId }
       )
       onThreadChange?.(nextThreadId)
     },
-    [onThreadChange, updateSessionState]
+    [onThreadChange]
   )
 
   useEffect(() => {
     if (threadId === undefined || sessionState.threadId === threadId) return
-    updateSessionState((current) => ({ ...current, threadId }))
-  }, [sessionState.threadId, threadId, updateSessionState])
+    setSessionState((current) => ({ ...current, threadId }))
+  }, [sessionState.threadId, threadId])
 
   useEffect(() => {
-    if (!full || sessionState.mode === "dock") return
-    updateSessionState((current) => ({ ...current, mode: "dock" }))
-  }, [full, sessionState.mode, updateSessionState])
+    if (!fullPage || sessionState.mode === "dock") return
+    setSessionState((current) => ({ ...current, mode: "dock" }))
+  }, [fullPage, sessionState.mode])
 
   const changeDockWidth = useCallback(
     (nextWidth: number) => {
@@ -182,11 +175,11 @@ export function AgentSurface({
           : Math.max(minimumWidth, Math.min(maximumWidth, window.innerWidth - minimumWidth))
       const clamped = clampAgentSurfaceWidth(nextWidth, minimumWidth, viewportMaximum)
       if (dockWidth === undefined) {
-        updateSessionState((current) => ({ ...current, dockWidth: clamped }))
+        setSessionState((current) => ({ ...current, dockWidth: clamped }))
       }
       onDockWidthChange?.(clamped)
     },
-    [dockWidth, maximumWidth, minimumWidth, onDockWidthChange, updateSessionState]
+    [dockWidth, maximumWidth, minimumWidth, onDockWidthChange]
   )
 
   function startResize(event: PointerEvent<HTMLDivElement>) {
@@ -228,12 +221,13 @@ export function AgentSurface({
       {!visible ? (
         <Button
           type="button"
-          className="fixed right-5 bottom-5 z-40 h-11 rounded-full px-4 shadow-lg max-sm:right-3 max-sm:bottom-3"
+          size="icon"
+          className="fixed right-5 bottom-5 z-40 size-11 rounded-full shadow-lg max-sm:right-3 max-sm:bottom-3"
           aria-label={launcherLabel}
+          title={launcherLabel}
           onClick={() => changeMode("dock")}
         >
           <MessageSquareText className="size-4" />
-          {launcherLabel}
         </Button>
       ) : null}
 
@@ -244,7 +238,7 @@ export function AgentSurface({
         inert={!visible}
         className={cn(
           "pointer-events-none fixed inset-y-3 left-3 z-40 max-sm:hidden",
-          (!visible || full) && "hidden"
+          (!visible || fullPage) && "hidden"
         )}
         style={{ right: `calc(${dockWidthValue} + 0.75rem)` }}
       />
@@ -257,17 +251,17 @@ export function AgentSurface({
         inert={!visible}
         style={surfaceStyle}
         className={cn(
-          "shrink-0 overflow-hidden bg-background transition-[width,border-color] duration-300 ease-out",
-          full ? "absolute inset-0 z-40 h-full min-w-0 w-full" : "relative h-svh",
-          resizing && "select-none transition-none",
+          "shrink-0 overflow-hidden bg-background",
+          fullPage ? "absolute inset-0 z-40 h-full min-w-0 w-full" : "relative h-full",
+          resizing && "select-none",
           !visible && "w-0 border-l border-transparent",
           visible &&
-            !full &&
+            !fullPage &&
             "w-[var(--agent-surface-width)] border-l border-border max-sm:fixed max-sm:inset-y-0 max-sm:right-0 max-sm:z-50 max-sm:w-screen",
           className
         )}
       >
-        {visible && !full && resizable ? (
+        {visible && !fullPage && resizable ? (
           <div
             role="separator"
             aria-label="Resize assistant"
@@ -288,10 +282,10 @@ export function AgentSurface({
         <div
           className={cn(
             "relative flex h-full min-w-0 flex-col",
-            full ? "w-full" : "w-[var(--agent-surface-width)] max-sm:w-screen"
+            fullPage ? "w-full" : "w-[var(--agent-surface-width)] max-sm:w-screen"
           )}
         >
-          {!full ? (
+          {!fullPage ? (
             <Button
               type="button"
               variant="ghost"
@@ -305,12 +299,12 @@ export function AgentSurface({
           ) : null}
 
           <AgentPanel
-            compact={!full}
+            compact={!fullPage}
             context={context}
             threadId={currentThreadId}
             onThreadChange={changeThread}
             conversationHeaderActions={
-              full ? (
+              fullPage && onRequestDock ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -324,7 +318,7 @@ export function AgentSurface({
                 >
                   <Minimize2 />
                 </Button>
-              ) : onRequestFullPage || (onExpandThread && currentThreadId) ? (
+              ) : !fullPage && (onRequestFullPage || (onExpandThread && currentThreadId)) ? (
                 <Button
                   type="button"
                   variant="ghost"
@@ -340,10 +334,10 @@ export function AgentSurface({
                 </Button>
               ) : null
             }
-            documentPreviewHost={full ? null : documentHost}
+            documentPreviewHost={fullPage ? null : documentHost}
             className={cn(
               "min-h-0 flex-1",
-              !full && "[&_[data-agent-conversation-header]]:pl-12",
+              !fullPage && "[&_[data-agent-conversation-header]]:pl-12",
               panelClassName
             )}
           />
@@ -351,32 +345,4 @@ export function AgentSurface({
       </aside>
     </>
   )
-}
-
-function readSessionState(
-  storageKey: string | null,
-  defaults: AgentSurfaceSessionState,
-  minimumWidth: number,
-  maximumWidth: number
-): AgentSurfaceSessionState {
-  if (!storageKey || typeof window === "undefined") return defaults
-  try {
-    return parseAgentSurfaceSessionState(
-      window.sessionStorage.getItem(storageKey),
-      defaults,
-      minimumWidth,
-      maximumWidth
-    )
-  } catch {
-    return defaults
-  }
-}
-
-function writeSessionState(storageKey: string | null, state: AgentSurfaceSessionState) {
-  if (!storageKey || typeof window === "undefined") return
-  try {
-    window.sessionStorage.setItem(storageKey, JSON.stringify(state))
-  } catch {
-    // Storage may be unavailable in restricted browser contexts; in-memory state still works.
-  }
 }

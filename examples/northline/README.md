@@ -32,8 +32,8 @@ The button at the bottom-right opens an agent dock with the current route and de
 as context. Files open in a closable tabbed canvas over Northline while the dock remains interactive.
 The dock header keeps collapse, thread history, and one-click compose immediately available. The
 history dialog shows the current thread, recent activity, and meaningful work status; it becomes a
-full-page search surface on small screens. The dock's
-open state, width, and current thread persist independently in each browser tab. Northline configures three language models through Vercel AI Gateway; choose
+full-page search surface on small screens. The dock's open state, width, and current thread persist
+independently in each browser tab. Northline configures three language models through Vercel AI Gateway; choose
 the model and reasoning effort from the composer. The first model is the default.
 
 ```bash

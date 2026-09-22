@@ -3,8 +3,7 @@ import { getProjectInfoOptions } from "@sixb/client/hooks"
 import { Toaster } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useRef, useState } from "react"
-import { Outlet, useLocation, useNavigate } from "react-router-dom"
-import { ATLAS_AGENT_SURFACE_KEY } from "../../lib/agentSurface"
+import { Outlet, useLocation, useMatch, useNavigate } from "react-router-dom"
 import { preloadWorkspaceView } from "../../pages/workspaceRoutes"
 import { AppShell } from "./AppShell"
 import { Sidebar, type ViewMode } from "./Sidebar"
@@ -12,12 +11,15 @@ import { type ProjectSidebarData, SidebarDataContext } from "./sidebarData"
 import { getViewModeFromPath } from "./viewMode"
 import { WorkspaceCommandMenu } from "./WorkspaceCommandMenu"
 
+const ATLAS_AGENT_SURFACE_KEY = "sixb.atlas.agent-surface.v1"
+
 export function AppLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const [sidebarData, setSidebarData] = useState<ProjectSidebarData | null>(null)
   const [commandMenuOpen, setCommandMenuOpen] = useState(false)
-  const agentsPage = location.pathname === "/agents" || location.pathname === "/agents/"
+  const routedThreadId = useMatch("/agents/:threadId")?.params.threadId
+  const agentsPage = Boolean(useMatch("/agents") || routedThreadId)
   const currentLocation = `${location.pathname}${location.search}${location.hash}`
   const lastWorkspaceLocation = useRef(agentsPage ? "/" : currentLocation)
 
@@ -65,7 +67,7 @@ export function AppLayout() {
     <SidebarDataContext.Provider value={{ sidebarData, setSidebarData }}>
       <AppShell sidebar={sidebar} currentProjectName={selectedProject?.name ?? null}>
         <div className="relative flex h-full min-h-0">
-          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto">
+          <div className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable]">
             <Outlet />
           </div>
           <AgentSurface
@@ -73,6 +75,11 @@ export function AppLayout() {
             launcherLabel="Open agents"
             defaultMode="collapsed"
             fullPage={agentsPage}
+            threadId={routedThreadId}
+            onThreadChange={(threadId) => {
+              if (agentsPage)
+                navigate(threadId ? `/agents/${encodeURIComponent(threadId)}` : "/agents")
+            }}
             onRequestFullPage={() => navigate("/agents")}
             onRequestDock={() => navigate(lastWorkspaceLocation.current, { replace: true })}
             persistenceKey={ATLAS_AGENT_SURFACE_KEY}

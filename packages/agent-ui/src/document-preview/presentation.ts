@@ -8,6 +8,6 @@ export function documentPreviewPresentation(
 ): DocumentPreviewPresentation {
   if (isMobile) return "dialog"
   if (split) return "panel"
-  if (compact && !isMobile && hasCanvas) return "canvas"
+  if (compact && hasCanvas) return "canvas"
   return compact ? "dialog" : "panel"
 }

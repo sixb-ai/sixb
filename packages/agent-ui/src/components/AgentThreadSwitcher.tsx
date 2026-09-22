@@ -49,12 +49,11 @@ export function AgentThreadSwitcher({
   const [snapshotIds, setSnapshotIds] = useState<readonly string[]>([])
   const allThreads = useMemo(() => uniqueThreads(currentThread, threads), [currentThread, threads])
   const allThreadsById = new Map(allThreads.map((thread) => [thread.id, thread]))
+  const snapshotIdSet = new Set(snapshotIds)
   const shownThreads = open
     ? [
         ...snapshotIds,
-        ...allThreads
-          .filter((thread) => !snapshotIds.includes(thread.id))
-          .map((thread) => thread.id),
+        ...allThreads.filter((thread) => !snapshotIdSet.has(thread.id)).map((thread) => thread.id),
       ].flatMap((threadId) => {
         const thread = allThreadsById.get(threadId)
         return thread ? [thread] : []
@@ -182,13 +181,11 @@ export function AgentThreadSwitcher({
                 active={filter === "all"}
                 onClick={() => setFilter("all")}
               />
-              {archivedCount > 0 ? (
-                <FilterButton
-                  label={`Archived ${archivedCount}`}
-                  active={filter === "archived"}
-                  onClick={() => setFilter("archived")}
-                />
-              ) : null}
+              <FilterButton
+                label={`Archived ${archivedCount}`}
+                active={filter === "archived"}
+                onClick={() => setFilter("archived")}
+              />
             </div>
           ) : null}
         </div>
@@ -326,8 +323,8 @@ function uniqueThreads(
   threads: readonly AgentThread[]
 ): readonly AgentThread[] {
   const byId = new Map<string, AgentThread>()
-  if (currentThread) byId.set(currentThread.id, currentThread)
   for (const thread of threads) byId.set(thread.id, thread)
+  if (currentThread) byId.set(currentThread.id, currentThread)
   return [...byId.values()]
 }
 

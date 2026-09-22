@@ -106,7 +106,6 @@ export function useAgentConversation({
     () => threadsQuery.data?.pages.flatMap((page) => page.threads) ?? [],
     [threadsQuery.data]
   )
-  const threadTotal = threadsQuery.data?.pages[0]?.total ?? threads.length
 
   const threadQuery = useQuery({
     ...getAgentThreadOptions({ path: { threadId: threadId ?? "" } }),
@@ -381,7 +380,6 @@ export function useAgentConversation({
     selectModel,
     selectReasoning,
     threads,
-    threadTotal,
     threadsError: threadsQuery.isError,
     threadsHasMore: threadsQuery.hasNextPage,
     threadsLoadingMore: threadsQuery.isFetchingNextPage,

@@ -91,7 +91,7 @@ test("starts collapsed with aggregate totals, source navigation and execution pa
   expect(html).toContain("USD 0.048007392")
   expect(html).toContain("81,668")
   expect(html).toContain("1–1 of 30 executions")
-  expect(html).toContain('href="/agents"')
+  expect(html).toContain('href="/agents/thread"')
   expect(html).not.toContain("research-task")
   expect(html).not.toContain("Loading calls")
 })

@@ -10,7 +10,6 @@ export type DocumentPreviewAction =
   | { readonly type: "open"; readonly document: AgentDocumentSource }
   | { readonly type: "select"; readonly id: string }
   | { readonly type: "close"; readonly id: string }
-  | { readonly type: "close-all" }
   | { readonly type: "restore"; readonly state: DocumentPreviewState }
   | { readonly type: "set-panel-width"; readonly width: number }
 
@@ -41,8 +40,6 @@ export function documentPreviewReducer(
         : state
     case "close":
       return closeDocument(state, action.id)
-    case "close-all":
-      return { ...state, documents: [], activeId: null }
     case "restore":
       return action.state
     case "set-panel-width":

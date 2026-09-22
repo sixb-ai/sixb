@@ -1,4 +1,4 @@
-import { EmptyState } from "@sixb/ui/components"
+import { Button, EmptyState } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
 import type { ReactNode } from "react"
@@ -55,12 +55,8 @@ export function AgentChat({
   const threadId = threadIdInput ?? null
   const conversation = useAgentConversation({
     threadId,
-    embedded: compact,
     onThreadCreated: onNavigateThread,
   })
-  const selectThread = (nextThreadId: string) => {
-    onNavigateThread(nextThreadId)
-  }
   const pendingUser = conversation.pendingUser
   const presentation = conversation.presentation
   const runningThreadCount =
@@ -92,7 +88,11 @@ export function AgentChat({
       <ErrorState
         title="Conversation unavailable"
         description="This conversation is no longer available."
-      />
+      >
+        <Button variant="outline" onClick={onNavigateHome}>
+          New thread
+        </Button>
+      </ErrorState>
     )
   } else {
     controlsInConversationHeader = true
@@ -147,7 +147,7 @@ export function AgentChat({
         agentThreads={conversation.agentThreads}
         onSend={conversation.send}
         onNewChat={onNavigateHome}
-        onSelectThread={selectThread}
+        onSelectThread={onNavigateThread}
         composerDisabled={conversation.isRunning}
         composerPending={conversation.composerPending}
         composerRunning={conversation.isRunning}
@@ -202,12 +202,21 @@ export function AgentChat({
   )
 }
 
-function ErrorState({ title, description }: { title: string; description: string }) {
+function ErrorState({
+  title,
+  description,
+  children,
+}: {
+  title: string
+  description: string
+  children?: ReactNode
+}) {
   return (
     <div className="flex h-full items-center justify-center p-6 text-center">
       <div className="max-w-md space-y-1">
         <p className="text-sm font-medium text-foreground">{title}</p>
         <p className="text-sm text-muted-foreground">{description}</p>
+        {children ? <div className="pt-3">{children}</div> : null}
       </div>
     </div>
   )
