@@ -26,7 +26,7 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun test ./tests/*.e2e.ts",
+    "test:e2e": "bun test --preload ./tests/setup.ts ./tests/*.e2e.ts",
     "generate:openapi": "bun run scripts/generate-openapi.ts",
     "prepack": "bun run build"
   },

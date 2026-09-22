@@ -20,11 +20,11 @@ if (process.platform === "darwin") {
   if (!process.env.SIXB_TEST_SQLITE_LIBRARY) throw new Error("Set SIXB_TEST_SQLITE_LIBRARY")
   Database.setCustomSQLite(process.env.SIXB_TEST_SQLITE_LIBRARY)
 }
-if (!process.env.DATABASE_URL)
-  throw new Error("Set DATABASE_URL to a disposable pgvector test database")
 
 for (const provider of ["pg", "sqlite"] as const) {
   test(`${provider}: index through SDK, query through real HTTP client, invalidate and reindex`, async () => {
+    if (!process.env.DATABASE_URL)
+      throw new Error("Run server E2E tests with bun run test:e2e to provision the test database")
     const directory = await mkdtemp(join(tmpdir(), "sixb-vector-http-"))
     const schemaName = `vector_http_${Date.now()}`
     const storage =
