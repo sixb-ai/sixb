@@ -147,6 +147,37 @@ async function runStoredActionJob(
 }
 
 describe("runActionJob", () => {
+  // Restore core's failure codec from HEAD to verify this stored-message assertion fails.
+  test.each([
+    "type",
+    "missing",
+  ])("stores a precise %s validation explanation without the rejected value", async (kind) => {
+    const invalid = defineAction("invalidEdit")
+      .params({})
+      .edits(({ objects }) => {
+        objects(Device).create({
+          id: "device-secret",
+          ...(kind === "type" ? { name: 42 } : {}),
+        } as unknown as { id: string; name: string })
+      })
+    const { host } = createSixb([invalid])
+    await queueActionRun(host, {
+      id: "invalid-edit",
+      actionId: invalid.id,
+      subject: { kind: "none" },
+      params: {},
+    })
+    await runStoredActionJob({ host, job: { id: "invalid-edit", actionId: invalid.id } })
+    const run = await host.storage.actionRuns!.getById({ projectId: host.id, id: "invalid-edit" })
+    expect(run?.status).toBe("failed")
+    expect(run?.error?.message).toBe(
+      kind === "type"
+        ? "Action execution failed. Property Device.name must be a string."
+        : "Action execution failed. Missing required property 'Device.name'."
+    )
+    expect(JSON.stringify(run?.error)).not.toContain("device-secret")
+  })
+
   test("rejects a durable run that does not match the requested job", async () => {
     const count = defineAction("count")
       .params({})

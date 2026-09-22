@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto"
 import { isDeepStrictEqual } from "node:util"
 import type { DatasetDefinition, DatasetSchema, MergeChange } from "../datasets"
-import { getDatasetRowValidationError } from "../datasets/validation"
+import { getDatasetRowValidationFailure } from "../datasets/validation"
 import { resolveDatasetChangeColumns } from "./changes"
 import { mergeStrictDatasetDefinition } from "./definition-updates"
 import { LakeConcurrencyError, LakeStorageError } from "./errors"
@@ -113,9 +113,11 @@ class InMemoryLakeWriteSession implements LakeWriteSession {
     const stagedRows: DatasetRow[] = []
     const stagedPrimaryKeys = new Set<string>()
     for await (const row of rows) {
-      const validationError = getDatasetRowValidationError(row, this.input.dataset)
+      const validationError = getDatasetRowValidationFailure(row, this.input.dataset)
       if (validationError) {
-        throw new LakeStorageError(`[LakeStorage] ${validationError}`)
+        throw new LakeStorageError(`[LakeStorage] ${validationError.message}`, {
+          cause: validationError,
+        })
       }
 
       if (getDatasetPrimaryKeyColumns(this.input.dataset) !== null) {

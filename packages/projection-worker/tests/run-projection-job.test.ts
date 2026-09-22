@@ -2685,7 +2685,8 @@ describe("runProjectionJob", () => {
     expect(run?.progress.sourceRowsSkipped).toBe(0)
     expect(run?.error).toMatchObject({
       code: "projection.execution_failed",
-      message: "Projection execution failed.",
+      message:
+        "Projection execution failed. Property Device.status must match a declared enum value.",
       retryable: false,
       details: {
         projectionId: "device-proj",

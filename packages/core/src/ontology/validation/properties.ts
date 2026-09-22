@@ -1,3 +1,4 @@
+import { withFailureMessage } from "../../errors/failure-message"
 import type { ObjectLink, ObjectType, Property, Schema, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../tokens"
@@ -92,8 +93,11 @@ export function assertRequiredProperties(
 ): void {
   for (const property of objectType.properties) {
     if (property.required && properties[property.id] === undefined) {
-      throw new OntologyValidationError(
-        `[Sixb] Missing required property '${property.id}' for object type '${objectType.id}'`
+      throw withFailureMessage(
+        new OntologyValidationError(
+          `[Sixb] Missing required property '${property.id}' for object type '${objectType.id}'`
+        ),
+        `Missing required property '${objectType.id}.${property.id}'.`
       )
     }
   }
@@ -181,14 +185,20 @@ export function validatePropertyValue(
   valueTypesById: ReadonlyMap<string, ValueType>
 ): void {
   if (value === undefined) {
-    throw new OntologyValidationError(`[Sixb] Property ${path} cannot be undefined`)
+    throw withFailureMessage(
+      new OntologyValidationError(`[Sixb] Property ${path} cannot be undefined`),
+      `Property ${path} cannot be undefined.`
+    )
   }
 
   if (value === null) {
     if (property.nullable) {
       return
     }
-    throw new OntologyValidationError(`[Sixb] Property ${path} cannot be null`)
+    throw withFailureMessage(
+      new OntologyValidationError(`[Sixb] Property ${path} cannot be null`),
+      `Property ${path} cannot be null.`
+    )
   }
 
   validateSchemaValue(property.schema, value, path, valueTypesById)

@@ -1,5 +1,7 @@
 import { cloneJsonValue, isJsonValue, isPlainRecord, type ReadonlyJsonValue } from "../json"
+import { ActionRunFailedError } from "../objects/action/errors"
 import { SIXB_ERROR_CODES, SIXB_ERROR_DEFINITIONS } from "./catalog"
+import { failureMessage } from "./failure-message"
 import { createFailureRedactor } from "./redaction"
 import type { SixbErrorCode, SixbFailure } from "./types"
 
@@ -135,10 +137,15 @@ export function toSixbFailure(
   const code = error.code
   const redactor = createFailureRedactor()
   const details = error.details === undefined ? undefined : redactor.context(error.details)
-  const { detail, truncated } = findFailureDetail(error, code)
+  const { detail, truncated, redacted } = findFailureDetail(error, code)
   const summary = SIXB_ERROR_DEFINITIONS[code].publicMessage
+  const explanation = detail?.message ?? summary
   const message = truncateUtf8(
-    redactor.text(detail && detail.message !== summary ? `${summary} ${detail.message}` : summary),
+    redactor.text(
+      explanation === summary || explanation.startsWith(`${summary} `)
+        ? explanation
+        : `${summary} ${explanation}`
+    ),
     SIXB_FAILURE_MAX_MESSAGE_BYTES
   )
   const failure: SixbFailure = {
@@ -148,7 +155,7 @@ export function toSixbFailure(
     at: failureTimestamp(options.at),
     ...(details === undefined ? {} : { details: cloneJsonValue(details, "Sixb failure details") }),
     ...(detail?.httpStatus === undefined ? {} : { httpStatus: detail.httpStatus }),
-    ...(redactor.redacted ? { redacted: true } : {}),
+    ...(redactor.redacted || redacted ? { redacted: true } : {}),
     ...(message.truncated || truncated || redactor.truncated ? { truncated: true } : {}),
   }
 
@@ -177,47 +184,72 @@ function isHttpStatus(value: unknown): value is number {
   return typeof value === "number" && Number.isInteger(value) && value >= 100 && value <= 599
 }
 
-/** Select one explanation along the causal chain; unrelated aggregate errors stay separate. */
+/** Follow the causal chain without exposing arbitrary messages or discarding deeper statuses. */
 function findFailureDetail(
   error: SixbCodedError,
   boundaryCode: SixbErrorCode
-): { detail?: { message: string; httpStatus?: number }; truncated: boolean } {
+): {
+  detail?: { message: string; httpStatus?: number }
+  truncated: boolean
+  redacted: boolean
+} {
   const seen = new Set<object>()
+  const messages = new Set<string>()
+  let catalogMessage: string | undefined
+  let httpStatus: number | undefined
+  let truncated = false
+  let redacted = false
   let current: unknown = error
   while (typeof current === "object" && current !== null && !seen.has(current)) {
-    if (seen.size === 8) return { truncated: true }
-    seen.add(current)
-    if (
-      isSixbError(current) &&
-      current.code !== boundaryCode &&
-      current.code !== "internal.unexpected"
-    ) {
-      return {
-        detail: { message: SIXB_ERROR_DEFINITIONS[current.code].publicMessage },
-        truncated: false,
-      }
+    if (seen.size === 8) {
+      truncated = true
+      break
     }
+    seen.add(current)
+    const explanation = failureMessage(current)
+    if (explanation) messages.add(explanation)
     try {
-      // Read only data properties: arbitrary messages and getters remain private.
+      if (current instanceof ActionRunFailedError) {
+        // This is an already durable child failure, not arbitrary provider prose. Revalidate it
+        // before propagation; do not copy its context over the parent's identity or retry policy.
+        const child = parseSixbFailure(Object.getOwnPropertyDescriptor(current, "error")?.value)
+        messages.add(child.message)
+        httpStatus ??= child.httpStatus
+        redacted ||= child.redacted === true
+        truncated ||= child.truncated === true
+      }
+      if (
+        isSixbError(current) &&
+        current.code !== boundaryCode &&
+        current.code !== "internal.unexpected"
+      ) {
+        catalogMessage = SIXB_ERROR_DEFINITIONS[current.code].publicMessage
+      }
+      // Read data properties only: provider accessors, messages and payloads remain private.
       const status =
         Object.getOwnPropertyDescriptor(current, "status")?.value ??
         Object.getOwnPropertyDescriptor(current, "statusCode")?.value
-      if (isHttpStatus(status)) {
-        return {
-          detail: { message: `Upstream request returned HTTP ${status}.`, httpStatus: status },
-          truncated: false,
-        }
-      }
+      if (httpStatus === undefined && isHttpStatus(status)) httpStatus = status
       const code = Object.getOwnPropertyDescriptor(current, "code")?.value
       if (typeof code === "string" && Object.hasOwn(NETWORK_MESSAGES, code)) {
-        return { detail: { message: NETWORK_MESSAGES[code] }, truncated: false }
+        messages.add(NETWORK_MESSAGES[code])
       }
       current = Object.getOwnPropertyDescriptor(current, "cause")?.value
     } catch {
       break
     }
   }
-  return { truncated: false }
+  if (messages.size === 0 && catalogMessage) messages.add(catalogMessage)
+  if (httpStatus !== undefined) {
+    const statusMessage = `Upstream request returned HTTP ${httpStatus}.`
+    if (![...messages].some((message) => message.includes(statusMessage)))
+      messages.add(statusMessage)
+  }
+  return {
+    ...(messages.size === 0 ? {} : { detail: { message: [...messages].join(" "), httpStatus } }),
+    truncated,
+    redacted,
+  }
 }
 
 /** Serializes a validated failure for durable storage. */

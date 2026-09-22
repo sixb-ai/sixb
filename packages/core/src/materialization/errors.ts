@@ -24,8 +24,8 @@ function prefixMessage(message: string): string {
 export class MaterializationValidationError extends OntologyValidationError {
   readonly name: string = "MaterializationValidationError"
 
-  constructor(message: string) {
-    super(prefixMessage(message))
+  constructor(message: string, options?: ErrorOptions) {
+    super(prefixMessage(message), options)
   }
 }
 

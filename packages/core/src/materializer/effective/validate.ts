@@ -1,3 +1,4 @@
+import { withFailureMessage } from "../../errors/failure-message"
 import type { JsonValue } from "../../json"
 import { MaterializationValidationError } from "../../materialization/errors"
 import type {
@@ -113,8 +114,11 @@ export function validateEffectiveObject(
         property.required &&
         properties[property.id] === undefined
       ) {
-        throw new Error(
-          `[Sixb] Missing required property '${property.id}' for object type '${objectType.id}'`
+        throw withFailureMessage(
+          new Error(
+            `[Sixb] Missing required property '${property.id}' for object type '${objectType.id}'`
+          ),
+          `Missing required property '${objectType.id}.${property.id}'.`
         )
       }
     }
@@ -175,6 +179,9 @@ function materializationValidation<T>(run: () => T): T {
     return run()
   } catch (error) {
     if (error instanceof MaterializationValidationError) throw error
-    throw new MaterializationValidationError(error instanceof Error ? error.message : String(error))
+    throw new MaterializationValidationError(
+      error instanceof Error ? error.message : String(error),
+      { cause: error }
+    )
   }
 }
