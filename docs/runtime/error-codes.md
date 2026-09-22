@@ -41,6 +41,11 @@ Use `code` for programmatic decisions and `message` for display. `httpStatus` de
 upstream response, not the status returned by Sixb. `retryable` indicates whether retrying may help;
 it does not guarantee that a run can safely be replayed after external side effects.
 
+Messages retain framework-authored validation explanations and recognized HTTP/network causes.
+Action failures propagated to workflows keep their message and upstream status; the workflow keeps
+its own code, context, and retry policy. Arbitrary exception messages, stacks, and payloads remain
+private to `onError`; unknown errors still use catalog text.
+
 `redacted` and `truncated` indicate filtered or shortened details. Never put credentials in
 `details`. The original exception is available to `onError` for diagnostics.
 

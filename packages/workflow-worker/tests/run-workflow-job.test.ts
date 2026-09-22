@@ -363,7 +363,7 @@ async function completeRequestedActions(
   },
   status: "succeeded" | "failed",
   errorMessage = "action failed",
-  options: { readonly effectsErrorMessage?: string } = {}
+  options: { readonly effectsErrorMessage?: string; readonly httpStatus?: number } = {}
 ): Promise<() => void> {
   const actionRuns = sixb.storage.actionRuns
   if (!actionRuns) {
@@ -424,12 +424,20 @@ async function completeRequestedActions(
                   id: event.payload.runId,
                   status: "failed",
                   finishedAt: new Date("2026-05-08T10:00:00.000Z"),
-                  error: actionFailure(
-                    "writeback",
-                    errorMessage,
-                    event.payload.actionId,
-                    event.payload.runId
-                  ),
+                  error: {
+                    ...actionFailure(
+                      "writeback",
+                      errorMessage,
+                      event.payload.actionId,
+                      event.payload.runId
+                    ),
+                    ...(options.httpStatus === undefined
+                      ? {}
+                      : {
+                          httpStatus: options.httpStatus,
+                          message: `Action execution failed. Upstream request returned HTTP ${options.httpStatus}.`,
+                        }),
+                  },
                 }
           )
 
@@ -1987,7 +1995,9 @@ describe("runWorkflowJob", () => {
       }))
     const sixb = createSixb({ actions: [attachInvoice], workflows: [workflow] })
     await createTestSixb(sixb).objects.upsert("Transaction", { id: "txn_1" })
-    const unsubscribe = await completeRequestedActions(sixb, "failed", "attach failed")
+    const unsubscribe = await completeRequestedActions(sixb, "failed", "attach failed", {
+      httpStatus: 429,
+    })
 
     try {
       await expect(
@@ -2029,8 +2039,11 @@ describe("runWorkflowJob", () => {
         actionRunId: "wfrun_action_run_failed:action:1",
       },
     })
+    expect(run?.error?.httpStatus).toBe(429)
     expect(nodes.nodes[1]?.error).toEqual(run?.error)
-    expect(nodes.nodes[1]?.error?.message).toBe("Workflow node execution failed.")
+    expect(nodes.nodes[1]?.error?.message).toBe(
+      "Workflow node execution failed. Action execution failed. Upstream request returned HTTP 429."
+    )
   })
 
   test("marks action node and workflow failed when the action run fails after request", async () => {

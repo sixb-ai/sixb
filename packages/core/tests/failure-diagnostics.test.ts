@@ -57,12 +57,14 @@ describe("durable failure diagnostics", () => {
     }
   })
 
-  test("selects one recognized cause without mixing unrelated details", () => {
+  test("keeps the catalog cause and the deeper upstream status", () => {
     const upstream = Object.assign(new Error("private"), { statusCode: 403 })
     const local = createSixbError("dataset.not_found", "private", { cause: upstream })
     const failure = captureSixbFailure(local, options)
-    expect(failure.message).toBe("Sync execution failed. Dataset not found.")
-    expect(failure.httpStatus).toBeUndefined()
+    expect(failure.message).toBe(
+      "Sync execution failed. Dataset not found. Upstream request returned HTTP 403."
+    )
+    expect(failure.httpStatus).toBe(403)
     expect(captureSixbFailure(new Error("wrapper", { cause: upstream }), options).httpStatus).toBe(
       403
     )

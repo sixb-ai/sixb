@@ -1,5 +1,5 @@
+import { withFailureMessage } from "../errors/failure-message"
 import { createSixbError, isSixbError, summarizeErrorMessage } from "../errors/internal"
-import type { ReadonlyJsonObject } from "../json"
 import {
   ModelProviderError,
   StructuredOutputError,
@@ -29,21 +29,27 @@ export interface WorkflowNodeFailureIdentity extends WorkflowNodeFailureIdentity
 
 /** Translate a node-local failure into the workflow primitive's durable vocabulary. */
 export function createWorkflowNodeFailure(error: unknown, identity: WorkflowNodeFailureIdentity) {
-  return createSixbError(
+  const modelDetails = safeModelFailureDetails(error)
+  const failure = createSixbError(
     "workflow.node_failed",
     summarizeErrorMessage(error, "Workflow node execution failed."),
     {
       cause: error,
       details: {
         ...workflowNodeFailureDetails(identity),
-        ...safeModelFailureDetails(error),
+        ...modelDetails,
       },
     }
   )
+  return modelDetails.modelFailure
+    ? withFailureMessage(failure, modelDetails.modelFailure.message)
+    : failure
 }
 
 /** Only controlled diagnostics cross the durable boundary; provider messages/output stay private. */
-function safeModelFailureDetails(error: unknown): ReadonlyJsonObject {
+function safeModelFailureDetails(error: unknown): {
+  modelFailure?: { source: string; reason: string; message: string; status?: number }
+} {
   if (error instanceof UnsupportedModelFeatureError) {
     const reason = error.reason ?? "unsupported-feature"
     const messages = {

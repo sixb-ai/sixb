@@ -1,6 +1,5 @@
 import type { BlobStorage, FileRef } from "../blob-storage"
 import { isFileRef } from "../blob-storage"
-import { isPlainRecord } from "../json"
 import type { DatasetMergeCommitResult } from "../lake-storage/merge"
 import { getDatasetMergeChangeValidationError } from "../lake-storage/merge-validation"
 import type {
@@ -11,7 +10,7 @@ import type {
 } from "../lake-storage/types"
 import type { MergeChange } from "./changes"
 import type { DatasetDefinition } from "./types"
-import { getDatasetRowValidationError } from "./validation"
+import { getDatasetRowValidationFailure } from "./validation"
 
 export interface DatasetWriteValue {
   readonly value: unknown
@@ -161,19 +160,17 @@ async function validateRow(
   input: WriteDatasetInput,
   itemIndex: number
 ): Promise<DatasetRow> {
-  if (!isPlainRecord(value)) {
-    throw new Error(
-      `${sourceLabel(input)} returned an invalid row at item ${itemIndex}. Dataset rows must be plain objects.`
-    )
-  }
-  const validationError = getDatasetRowValidationError(value, input.dataset)
+  const validationError = getDatasetRowValidationFailure(value, input.dataset)
   if (validationError) {
     throw new Error(
-      `${sourceLabel(input)} returned an invalid row at item ${itemIndex}. ${validationError}`
+      `${sourceLabel(input)} returned an invalid row at item ${itemIndex}. ${validationError.message}`,
+      { cause: validationError }
     )
   }
-  await verifyRowFileRefs(value, input, itemIndex)
-  return value
+  // The validator above establishes the row shape.
+  const row = value as DatasetRow
+  await verifyRowFileRefs(row, input, itemIndex)
+  return row
 }
 
 async function validateMergeChange(

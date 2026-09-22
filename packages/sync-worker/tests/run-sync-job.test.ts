@@ -1196,7 +1196,7 @@ describe("runSyncJob", () => {
       rowsRead: 1,
       error: {
         code: "sync.execution_failed",
-        message: "Sync execution failed.",
+        message: "Sync execution failed. Dataset 'raw.erp.orders' rows must be plain objects.",
         retryable: false,
         at: expect.any(String),
         details: {
@@ -1278,7 +1278,8 @@ describe("runSyncJob", () => {
       rowsRead: 0,
       error: {
         code: "sync.execution_failed",
-        message: "Sync execution failed.",
+        message:
+          "Sync execution failed. Dataset 'raw.erp.orders' row contains an undeclared column.",
         retryable: false,
         at: expect.any(String),
         details: {

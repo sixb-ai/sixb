@@ -1,4 +1,5 @@
 import { isFileRef } from "../blob-storage"
+import { withFailureMessage } from "../errors/failure-message"
 import { isJsonValue, isPlainRecord } from "../json"
 import { isDecimalString } from "../ontology/decimal"
 import { DatasetValidationError } from "./errors"
@@ -233,8 +234,17 @@ export function getDatasetRowValidationError(
   dataset: DatasetDefinition,
   options?: { readonly columns?: Iterable<string> }
 ): string | null {
+  return getDatasetRowValidationFailure(row, dataset, options)?.message ?? null
+}
+
+/** Internal form retains a value-free explanation for the durable failure boundary. */
+export function getDatasetRowValidationFailure(
+  row: unknown,
+  dataset: DatasetDefinition,
+  options?: { readonly columns?: Iterable<string> }
+): Error | null {
   if (!isPlainRecord(row)) {
-    return `Dataset '${dataset.id}' rows must be plain objects.`
+    return rowFailure(`Dataset '${dataset.id}' rows must be plain objects.`)
   }
 
   const columnsByName = new Map(
@@ -251,7 +261,7 @@ export function getDatasetRowValidationError(
         continue
       }
 
-      const error = getColumnValidationError(row, column, dataset)
+      const error = getColumnValidationFailure(row, column, dataset)
       if (error) {
         return error
       }
@@ -262,12 +272,15 @@ export function getDatasetRowValidationError(
 
   for (const columnName of Object.keys(row)) {
     if (!columnsByName.has(columnName)) {
-      return `Dataset '${dataset.id}' row contains unknown column '${columnName}'.`
+      return rowFailure(
+        `Dataset '${dataset.id}' row contains unknown column '${columnName}'.`,
+        `Dataset '${dataset.id}' row contains an undeclared column.`
+      )
     }
   }
 
   for (const column of dataset.schema.columns) {
-    const error = getColumnValidationError(row, column, dataset)
+    const error = getColumnValidationFailure(row, column, dataset)
     if (error) {
       return error
     }
@@ -276,29 +289,37 @@ export function getDatasetRowValidationError(
   return null
 }
 
-function getColumnValidationError(
+function getColumnValidationFailure(
   row: Record<string, unknown>,
   column: DatasetColumnDefinition,
   dataset: DatasetDefinition
-): string | null {
+): Error | null {
   const hasValue = Object.hasOwn(row, column.name)
   const value = row[column.name]
   if (column.name === dataset.sequenceBy) {
-    return getDatasetSequenceValidationError(dataset, value)
+    const message = getDatasetSequenceValidationError(dataset, value)
+    return message === null
+      ? null
+      : rowFailure(
+          message,
+          `Dataset '${dataset.id}' sequence column '${column.name}' must contain a valid ${column.type} source sequence.`
+        )
   }
 
   // Treat `undefined` the same as an omitted field so callers either send a real
   // value or use `null` explicitly on nullable columns.
   if (!hasValue || value === undefined) {
     if (!column.nullable) {
-      return `Dataset '${dataset.id}' row is missing required column '${column.name}'.`
+      return rowFailure(`Dataset '${dataset.id}' row is missing required column '${column.name}'.`)
     }
     return null
   }
 
   if (value === null) {
     if (!column.nullable) {
-      return `Dataset '${dataset.id}' column '${column.name}' does not allow null values.`
+      return rowFailure(
+        `Dataset '${dataset.id}' column '${column.name}' does not allow null values.`
+      )
     }
     return null
   }
@@ -307,13 +328,21 @@ function getColumnValidationError(
   // Reject ambiguous or lossy values before staging, even when another column orders the row.
   if (dataset.sequenceBy !== undefined && column.type === "timestamp") {
     return parseDatasetTimestamp(value) === null
-      ? `Dataset '${dataset.id}' column '${column.name}' must be a valid Date or ISO timestamp with an explicit timezone and at most millisecond precision.`
+      ? rowFailure(
+          `Dataset '${dataset.id}' column '${column.name}' must be a valid Date or ISO timestamp with an explicit timezone and at most millisecond precision.`
+        )
       : null
   }
 
   if (!matchesColumnType(value, column.type)) {
-    return `Dataset '${dataset.id}' column '${column.name}' must match type '${column.type}'.`
+    return rowFailure(
+      `Dataset '${dataset.id}' column '${column.name}' must match type '${column.type}'.`
+    )
   }
 
   return null
+}
+
+function rowFailure(message: string, publicMessage = message): Error {
+  return withFailureMessage(new DatasetValidationError(message), publicMessage)
 }
