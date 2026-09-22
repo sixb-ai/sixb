@@ -53,7 +53,10 @@ test("Foundry indexing and text search record usage and enforce limits through S
         }),
     },
   })
-  const model = foundry.embedding("products", { dimensions: 2 })
+  const model = foundry.embedding("products", {
+    model: { name: "text-embedding-3-small", version: "1" },
+    dimensions: 2,
+  })
   const Product = defineObjectType({
     id: "Product",
     name: "Product",

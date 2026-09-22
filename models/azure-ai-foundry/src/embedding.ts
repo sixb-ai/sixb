@@ -26,6 +26,8 @@ export type AzureAIFoundryEmbeddingTransportOptions = Pick<
 >
 
 export interface AzureAIFoundryEmbeddingOptions {
+  /** Pin the actual model behind the deployment; discovery must match before inference. */
+  readonly model: { readonly name: string; readonly version: string }
   /** Expected output size; sent to text-embedding-3 models, validated locally for ada-002. */
   readonly dimensions: number
   readonly rateCard?: LanguageModelRateCard
@@ -53,7 +55,25 @@ export function createFoundryEmbedding(
   resolution?: EmbeddingResolution
 ): AzureAIFoundryEmbeddingModel {
   const dimensions = options.dimensions
-  const definition = Object.freeze({ kind: "embedding" as const, providerId, modelId, dimensions })
+  const expected = options.model
+  if (
+    !expected ||
+    [expected.name, expected.version].some(
+      (value) => typeof value !== "string" || !value || value.trim() !== value
+    )
+  ) {
+    throw new TypeError(
+      `${PREFIX} Embedding deployments require an expected model name and version.`
+    )
+  }
+  const representation = Object.freeze({ name: expected.name, version: expected.version })
+  const definition = Object.freeze({
+    kind: "embedding" as const,
+    providerId,
+    modelId,
+    dimensions,
+    representation,
+  })
   if (
     !modelId ||
     modelId.trim() !== modelId ||
@@ -67,6 +87,7 @@ export function createFoundryEmbedding(
   if (options.rateCard && options.costEstimator)
     throw new TypeError(`${PREFIX} Configure either rateCard or costEstimator, not both.`)
   const settings = Object.freeze({
+    model: representation,
     dimensions,
     rateCard: options.rateCard && defineModelRateCard(options.rateCard),
     costEstimator: options.costEstimator,
@@ -94,6 +115,14 @@ export function createFoundryEmbedding(
     async resolve(input?: { readonly offline?: boolean }) {
       if (resolution) return binding
       const resolved = await deployments.resolve(modelId, input?.offline === true)
+      if (
+        resolved.deployment.modelName !== representation.name ||
+        resolved.deployment.modelVersion !== representation.version
+      ) {
+        throw new TypeError(
+          `${PREFIX} Embedding deployment '${modelId}' resolved to ${resolved.deployment.modelName}@${resolved.deployment.modelVersion}; expected ${representation.name}@${representation.version}.`
+        )
+      }
       const configurableDimensions = validateDeployment(resolved, dimensions)
       let entry: CatalogEmbeddingModel | undefined
       try {
