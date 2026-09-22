@@ -104,6 +104,6 @@ Requests from an app or API are checked against the caller's grants. An action o
 
 Treat permission to run a command as permission to perform the changes that command allows. Validate its inputs and enforce any record-specific business restrictions in your code. Ordinary object grants cover a whole type, not selected rows.
 
-Agents use their own execution permissions. See [AI](../models/overview.md#built-in-agent) and [AI workflow tasks](../workflows/overview.md#add-an-ai-task).
+Agents use their own execution permissions. See [AI](../models/overview.md#control-access) and [AI workflow tasks](../workflows/overview.md#add-an-ai-task).
 
 Use [membership policies](members.md) to control who can assign groups, and [permission tests](../testing/overview.md#test-permissions) to check allowed and denied access.

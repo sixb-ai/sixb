@@ -146,7 +146,7 @@ each needs `query.exact: true`, except the primary ID. Search profiles use stati
 ### Configure vector search
 
 Use `search.vectors` to search by meaning. Each named profile combines static string or string-enum
-properties with a [registered embedding model](../models/overview.md#embedding-models):
+properties with a [registered embedding model](../models/configuration.md#embedding-models):
 
 ```ts
 // ontology/product.ts

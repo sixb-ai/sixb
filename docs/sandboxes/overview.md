@@ -1,7 +1,7 @@
 # Sandboxes
 
 A sandbox is the environment where an agent reads files and runs commands. Configure one to use
-the [built-in agent](../models/overview.md#built-in-agent) or an
+the [built-in agent](../models/overview.md#how-the-agent-works) or an
 [AI workflow step](../workflows/overview.md#add-an-ai-task).
 
 ## Configure a sandbox

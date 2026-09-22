@@ -1,17 +1,32 @@
 # AI
 
-Use AI to generate results, search by meaning, or give users an agent that works with their
-data and the actions you define.
+Sixb includes a general-purpose agent for working with your application. Connect the models you
+want to offer, and the agent can explore your domain, work with its data, and carry out tasks
+within the permissions you define.
 
-## Configure a model
+## How the agent works
 
-Choose a [model provider](./configuration.md), install its package, and set its credentials. Add
-models to your existing project configuration. The first language model is the default.
+The Sixb harness is the runtime around the model. It manages the conversation and gives the
+agent a sandbox where it can read files, run commands, and work through a task.
+
+Think of the sandbox as the agent's computer. Sixb equips it with the [Sixb CLI](../cli/overview.md),
+which lets the agent inspect your ontology, query live data, request actions, and start workflows.
+Your domain definitions give the agent a way to discover what exists and what it can do.
+
+The same agent can work across your application as its domain grows. Add
+[tools and skills](./tools-and-authorization.md) when it needs additional capabilities or
+instructions for a particular task.
+
+## Configure the agent
+
+Choose your [models](./configuration.md) and a [sandbox provider](../sandboxes/overview.md).
+Install their packages and set the provider credentials, then add them to your existing configuration:
 
 File: `sixb.config.ts`
 
 ```ts
 import { createSixb } from "@sixb/core"
+import { LocalSandboxFactory } from "@sixb/sandboxes-local"
 import { vercelGateway } from "@sixb/vercel-ai-gateway"
 
 export const sixb = createSixb({
@@ -19,55 +34,26 @@ export const sixb = createSixb({
   models: {
     language: [vercelGateway("openai/gpt-5.5")],
   },
+  sandboxes: new LocalSandboxFactory(),
 })
 ```
 
-For a prompt with context supplied by your code, use
-[model generation](./generation.md) inside an action or workflow step. It returns text or
-validated structured data.
+You can offer models from multiple providers through the same harness. In chat, users choose
+from your configured catalog and adjust the reasoning effort supported by their selected model.
 
-### Embedding models
+## Control access
 
-Embedding models turn text into vectors for [semantic search](../objects/querying.md#search-by-meaning).
-Export a model binding from your project:
+The agent's access depends on where it runs:
 
-```ts
-// lib/models.ts
-import { vercelGateway } from "@sixb/vercel-ai-gateway"
+| Context | Permissions |
+| --- | --- |
+| Chat | The signed-in user's permissions. |
+| Workflow step | Permissions granted through the step's configured groups. |
 
-export const productEmbedding = vercelGateway.embedding("openai/text-embedding-3-small", {
-  dimensions: 1536,
-})
-```
+Sixb enforces permissions when the agent accesses project data or requests an operation.
+Instructions and skills do not grant access.
 
-Register it in `models.embedding` in your existing configuration:
-
-```ts
-// sixb.config.ts
-import { createSixb } from "@sixb/core"
-import { productEmbedding } from "./lib/models"
-
-export const sixb = createSixb({
-  // ...your existing providers
-  models: { embedding: [productEmbedding] },
-})
-```
-
-Language models and a sandbox are optional for an embeddings-only project. Reference the same
-binding in an object's [vector search profile](../ontology/properties.md#configure-vector-search).
-For other providers, see their [package READMEs](./configuration.md).
-
-## Built-in agent
-
-The agent can explore your domain, query data, and use the actions you define. It includes saved
-conversations and a chat interface in Atlas and your app. Add [tools and skills](./tools-and-authorization.md)
-when it needs capabilities or instructions specific to your project.
-
-Alongside a model, configure a [sandbox provider](../sandboxes/overview.md#configure-a-sandbox).
-The agent uses it to read files and run commands.
-
-Grant users access to the agent and the data it should be able to read. For example, this role
-lets your existing employees group use the agent with invoices:
+For example, this role lets members of your existing employees group use the agent and read invoices:
 
 File: `security/roles/assistant-user.ts`
 
@@ -82,13 +68,12 @@ export const assistantUser = defineRole("assistant.user", {
 })
 ```
 
-The agent uses the signed-in user's permissions. Grant access to actions and workflows through
-[roles](../auth/authorization.md) as needed.
+Grant access to actions and workflows through [roles](../auth/authorization.md) as needed.
 
 ## Use in your app
 
-[Sixb apps](../apps/overview.md) include the chat interface at `/agents`. You can also embed
-`AgentPanel` in an existing page and give it context from that page:
+Atlas and [Sixb apps](../apps/overview.md) include a chat interface. In your app, open `/agents`
+or embed `AgentPanel` in a page and give it context:
 
 File: `app/_components/invoice-assistant.tsx`
 
@@ -108,5 +93,12 @@ export function InvoiceAssistant({ invoiceId }: { invoiceId: string }) {
 
 Context tells the agent what the user is looking at. It does not grant additional access.
 
-For an agent that completes a task within an automated process, use an
-[AI workflow step](../workflows/overview.md#add-an-ai-task).
+## Use in a workflow
+
+An [AI workflow step](../workflows/overview.md#add-an-ai-task) gives the same harness a specific
+assignment. Use `defineAgentStep()` to supply instructions, declare its input and output, and
+choose the groups that grant access to the data and operations it needs.
+
+The agent completes the task and returns validated output for the workflow to continue.
+For a single model call with context supplied by your code, use
+[model generation](./configuration.md#generate-a-response).
