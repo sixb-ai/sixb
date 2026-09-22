@@ -132,6 +132,8 @@ export function DocumentPreviewRoot({
   )
 
   useLayoutEffect(() => {
+    // Presentation changes keep live tabs; only switching conversations restores stored state.
+    if (stateScopeRef.current === previewScopeKey) return
     stateScopeRef.current = previewScopeKey
     dispatch({ type: "restore", state: restoredState })
     setViewerVisible((!compact || split) && restoredState.activeId !== null)
@@ -228,24 +230,21 @@ export function DocumentPreviewRoot({
 
   return (
     <DocumentPreviewContext.Provider value={context}>
-      {presentation === "panel" ? (
-        <DocumentPreviewWorkspace
-          revealKey={
-            viewerVisible && activeDocument
-              ? `${previewScopeKey}:${activeDocument.id}:${revealVersion}`
-              : null
-          }
-          scopeKey={previewScopeKey}
-          panelWidth={visibleState.panelWidth}
-          onPanelResize={savePanelWidth}
-          focusActiveTab={revealVersion > 0 && revealScopeRef.current === previewScopeKey}
-          viewerProps={viewerProps}
-        >
-          {children}
-        </DocumentPreviewWorkspace>
-      ) : (
-        children
-      )}
+      {/* A stable parent preserves composer drafts and scroll state across dock/page changes. */}
+      <DocumentPreviewWorkspace
+        revealKey={
+          presentation === "panel" && viewerVisible && activeDocument
+            ? `${previewScopeKey}:${activeDocument.id}:${revealVersion}`
+            : null
+        }
+        scopeKey={previewScopeKey}
+        panelWidth={visibleState.panelWidth}
+        onPanelResize={savePanelWidth}
+        focusActiveTab={revealVersion > 0 && revealScopeRef.current === previewScopeKey}
+        viewerProps={viewerProps}
+      >
+        {children}
+      </DocumentPreviewWorkspace>
       <DocumentPreviewDialog
         open={presentation === "dialog" && viewerVisible && activeDocument !== null}
         activeDocument={activeDocument}
@@ -332,13 +331,13 @@ function DocumentPreviewWorkspace({
 
   return (
     <ResizablePanelGroup
-      id="agent-document-workspace"
+      id={`${viewerProps.idPrefix}-workspace`}
       orientation="horizontal"
       onLayoutChanged={persistPanelWidth}
       className="min-h-0"
     >
       <ResizablePanel
-        id="agent-document-preview"
+        id={`${viewerProps.idPrefix}-preview`}
         defaultSize="0%"
         minSize="20rem"
         maxSize="65%"
@@ -365,7 +364,7 @@ function DocumentPreviewWorkspace({
           !open && "pointer-events-none invisible opacity-0"
         )}
       />
-      <ResizablePanel id="agent-conversation" defaultSize="100%" minSize="30%">
+      <ResizablePanel id={`${viewerProps.idPrefix}-conversation`} defaultSize="100%" minSize="30%">
         <ConversationPane>{children}</ConversationPane>
       </ResizablePanel>
     </ResizablePanelGroup>

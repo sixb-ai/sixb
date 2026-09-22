@@ -199,25 +199,29 @@ export function ConversationPanel({
     />
   )
 
+  const threadSwitcher = (
+    <AgentThreadSwitcher
+      agentName={name}
+      currentThread={currentThread}
+      threads={agentThreads}
+      runningThreadCount={runningThreadCount}
+      threadsError={threadsError}
+      hasMoreThreads={hasMoreThreads}
+      loadingMoreThreads={loadingMoreThreads}
+      loadMoreThreadsError={loadMoreThreadsError}
+      onLoadMoreThreads={onLoadMoreThreads}
+      onSelectThread={onSelectThread}
+      onNewThread={onNewChat}
+      triggerLabel={showWelcome && hideHeaderOnEmpty ? emptyStateThreadHistoryLabel : undefined}
+    />
+  )
+
   return (
     <div className="relative flex h-full min-h-0 flex-col">
       {showWelcome && hideHeaderOnEmpty && emptyStateThreadHistoryLabel ? (
         <div className="absolute top-3 right-3 z-10 flex items-center gap-1">
           {headerActions}
-          <AgentThreadSwitcher
-            agentName={name}
-            currentThread={currentThread}
-            threads={agentThreads}
-            runningThreadCount={runningThreadCount}
-            threadsError={threadsError}
-            hasMoreThreads={hasMoreThreads}
-            loadingMoreThreads={loadingMoreThreads}
-            loadMoreThreadsError={loadMoreThreadsError}
-            onLoadMoreThreads={onLoadMoreThreads}
-            onSelectThread={onSelectThread}
-            onNewThread={onNewChat}
-            triggerLabel={emptyStateThreadHistoryLabel}
-          />
+          {threadSwitcher}
         </div>
       ) : null}
       {showWelcome && hideHeaderOnEmpty ? null : (
@@ -227,19 +231,7 @@ export function ConversationPanel({
         >
           <div className="ml-auto flex items-center gap-1">
             {headerActions}
-            <AgentThreadSwitcher
-              agentName={name}
-              currentThread={currentThread}
-              threads={agentThreads}
-              runningThreadCount={runningThreadCount}
-              threadsError={threadsError}
-              hasMoreThreads={hasMoreThreads}
-              loadingMoreThreads={loadingMoreThreads}
-              loadMoreThreadsError={loadMoreThreadsError}
-              onLoadMoreThreads={onLoadMoreThreads}
-              onSelectThread={onSelectThread}
-              onNewThread={onNewChat}
-            />
+            {threadSwitcher}
             <Button
               variant="ghost"
               size="icon-lg"

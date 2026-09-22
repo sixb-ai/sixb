@@ -143,7 +143,7 @@ export function AppShell({ children }: PropsWithChildren) {
   )
 }
 
-export function NorthlineSidebarHeader() {
+function NorthlineSidebarHeader() {
   return (
     <SidebarHeader className="h-16 justify-center border-b border-sidebar-border px-4 py-2">
       <Link to="/" aria-label="Northline Operations">
@@ -157,7 +157,7 @@ export function NorthlineSidebarHeader() {
   )
 }
 
-export function NorthlineSidebarFooter() {
+function NorthlineSidebarFooter() {
   return (
     <SidebarFooter className="border-t border-sidebar-border p-3">
       <div className="flex items-center gap-2.5 rounded-md px-1.5 py-1 text-xs">

@@ -4,8 +4,6 @@ import type { ComponentType, SVGProps } from "react"
 import { useEffect } from "react"
 import { Link, useNavigate } from "react-router-dom"
 
-const ASSISTANT_ID = "agents"
-
 const shortcuts = [
   {
     href: "/equipment",
@@ -36,7 +34,7 @@ const shortcuts = [
 export default function NorthlineHomePage() {
   const navigate = useNavigate()
   useEffect(() => {
-    setAgentSurfaceMode(ASSISTANT_ID, "collapsed")
+    setAgentSurfaceMode("collapsed")
   }, [])
 
   const changeThread = (nextThreadId: string | null) => {

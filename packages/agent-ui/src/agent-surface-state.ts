@@ -12,14 +12,13 @@ export interface AgentSurfaceSessionState {
 }
 
 export interface AgentSurfaceStateDetail {
-  readonly agentId: string
   readonly storageKey: string
   readonly state: AgentSurfaceSessionState
 }
 
-export function agentSurfaceSessionStorageKey(agentId: string, override?: string | false) {
+export function agentSurfaceSessionStorageKey(override?: string | false) {
   if (override === false) return null
-  return override ?? `sixb.agent-ui.surface.v1:${agentId}`
+  return override ?? "sixb.agent-ui.surface.v1:agents"
 }
 
 export function parseAgentSurfaceSessionState(
@@ -55,11 +54,10 @@ export function clampAgentSurfaceWidth(width: number, minimumWidth: number, maxi
 
 /** Hand a thread created elsewhere in the app to this tab's persistent assistant surface. */
 export function handoffAgentSurfaceThread(
-  agentId: string,
   threadId: string | null,
   override?: string | false
 ): void {
-  const storageKey = agentSurfaceSessionStorageKey(agentId, override)
+  const storageKey = agentSurfaceSessionStorageKey(override)
   if (!storageKey || typeof window === "undefined") return
 
   const defaults: AgentSurfaceSessionState = {
@@ -67,24 +65,16 @@ export function handoffAgentSurfaceThread(
     dockWidth: DEFAULT_AGENT_SURFACE_WIDTH,
     threadId,
   }
-  try {
-    updateAgentSurfaceState(agentId, storageKey, defaults, (current) => ({
-      ...current,
-      mode: "dock",
-      threadId,
-    }))
-  } catch {
-    // Storage can be unavailable in restricted browser contexts; the source panel still works.
-  }
+  updateAgentSurfaceState(storageKey, defaults, (current) => ({
+    ...current,
+    mode: "dock",
+    threadId,
+  }))
 }
 
 /** Change this tab's assistant presentation without discarding its selected thread or width. */
-export function setAgentSurfaceMode(
-  agentId: string,
-  mode: AgentSurfaceMode,
-  override?: string | false
-): void {
-  const storageKey = agentSurfaceSessionStorageKey(agentId, override)
+export function setAgentSurfaceMode(mode: AgentSurfaceMode, override?: string | false): void {
+  const storageKey = agentSurfaceSessionStorageKey(override)
   if (!storageKey || typeof window === "undefined") return
 
   const defaults: AgentSurfaceSessionState = {
@@ -92,29 +82,52 @@ export function setAgentSurfaceMode(
     dockWidth: DEFAULT_AGENT_SURFACE_WIDTH,
     threadId: null,
   }
-  try {
-    updateAgentSurfaceState(agentId, storageKey, defaults, (current) => ({ ...current, mode }))
-  } catch {
-    // Storage can be unavailable in restricted browser contexts; mounted surfaces keep working.
-  }
+  updateAgentSurfaceState(storageKey, defaults, (current) => ({ ...current, mode }))
 }
 
 function updateAgentSurfaceState(
-  agentId: string,
   storageKey: string,
   defaults: AgentSurfaceSessionState,
   update: (current: AgentSurfaceSessionState) => AgentSurfaceSessionState
 ) {
-  const current = parseAgentSurfaceSessionState(window.sessionStorage.getItem(storageKey), defaults)
+  const current = readAgentSurfaceState(storageKey, defaults)
   const state = update(current)
-  window.sessionStorage.setItem(storageKey, JSON.stringify(state))
+  writeAgentSurfaceState(storageKey, state)
   window.dispatchEvent(
     new CustomEvent<AgentSurfaceStateDetail>(AGENT_SURFACE_STATE_EVENT, {
-      detail: { agentId, storageKey, state },
+      detail: { storageKey, state },
     })
   )
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value)
+}
+
+export function readAgentSurfaceState(
+  storageKey: string | null,
+  defaults: AgentSurfaceSessionState,
+  minimumWidth = MIN_AGENT_SURFACE_WIDTH,
+  maximumWidth = MAX_AGENT_SURFACE_WIDTH
+): AgentSurfaceSessionState {
+  if (!storageKey || typeof window === "undefined") return defaults
+  try {
+    return parseAgentSurfaceSessionState(
+      window.sessionStorage.getItem(storageKey),
+      defaults,
+      minimumWidth,
+      maximumWidth
+    )
+  } catch {
+    return defaults
+  }
+}
+
+export function writeAgentSurfaceState(storageKey: string | null, state: AgentSurfaceSessionState) {
+  if (!storageKey || typeof window === "undefined") return
+  try {
+    window.sessionStorage.setItem(storageKey, JSON.stringify(state))
+  } catch {
+    // Storage may be unavailable in restricted browser contexts; in-memory state still works.
+  }
 }

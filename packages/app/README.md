@@ -104,8 +104,8 @@ embedded agent panel. Applications that want a conversation to move between a fu
 in-app dock should mount one `AgentSurface` in their shell and derive its `fullPage` presentation
 from the route instead of mounting a second chat.
 
-The provider also accepts `documentPreviewRenderers`. Applications can register document viewers
-without coupling `@sixb/app` or `@sixb/agent-ui` to their implementation.
+Add `AgentWorkspaceProvider` to `app/agents/layout.tsx` to register `documentPreviewRenderers`
+for the generated routes without coupling `@sixb/app` or `@sixb/agent-ui` to their implementation.
 
 ```tsx
 <AgentWorkspaceProvider documentPreviewRenderers={[workbookPreviewRenderer]}>

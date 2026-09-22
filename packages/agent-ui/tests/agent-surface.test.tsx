@@ -4,7 +4,7 @@ import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { AgentSurface, type AgentSurfaceMode } from "../src"
 
-function renderSurface(mode?: AgentSurfaceMode, fullPage = false): string {
+function renderSurface(mode?: AgentSurfaceMode, fullPage = false, canDock = true): string {
   const queryClient = new QueryClient()
   return renderToStaticMarkup(
     createElement(
@@ -13,6 +13,7 @@ function renderSurface(mode?: AgentSurfaceMode, fullPage = false): string {
       createElement(AgentSurface, {
         ...(mode ? { mode } : {}),
         fullPage,
+        onRequestDock: canDock ? () => {} : undefined,
         title: "Operations Assistant",
         launcherLabel: "Ask Operations",
       })
@@ -53,4 +54,11 @@ test("the adaptive surface reuses the conversation as a full page", () => {
   expect(page).not.toContain('aria-label="Collapse assistant"')
   expect(page).not.toContain('aria-label="Resize assistant"')
   expect(page).not.toContain('aria-label="Ask Operations"')
+})
+
+test("full-page mode omits the dock action when the host cannot navigate back", () => {
+  // Removing the onRequestDock guard restores an inert minimize button.
+  expect(renderSurface("dock", true, false)).not.toContain(
+    'aria-label="Move assistant to side panel"'
+  )
 })

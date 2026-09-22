@@ -41,14 +41,10 @@ test("agent surface state rejects malformed values and clamps persisted widths",
   expect(clampAgentSurfaceWidth(401.8, 320, 720)).toBe(402)
 })
 
-test("agent surface state uses a stable per-agent session key and can disable persistence", () => {
-  expect(agentSurfaceSessionStorageKey("operations-assistant")).toBe(
-    "sixb.agent-ui.surface.v1:operations-assistant"
-  )
-  expect(agentSurfaceSessionStorageKey("operations-assistant", "custom-surface")).toBe(
-    "custom-surface"
-  )
-  expect(agentSurfaceSessionStorageKey("operations-assistant", false)).toBeNull()
+test("agent surface state uses a stable session key and can disable persistence", () => {
+  expect(agentSurfaceSessionStorageKey()).toBe("sixb.agent-ui.surface.v1:agents")
+  expect(agentSurfaceSessionStorageKey("custom-surface")).toBe("custom-surface")
+  expect(agentSurfaceSessionStorageKey(false)).toBeNull()
 })
 
 test("a landing panel can hand its durable thread to the tab's dock", () => {
@@ -72,18 +68,19 @@ test("a landing panel can hand its durable thread to the tab's dock", () => {
 
   try {
     values.set(
-      agentSurfaceSessionStorageKey("operations-assistant") ?? "",
+      agentSurfaceSessionStorageKey() ?? "",
       JSON.stringify({ mode: "collapsed", dockWidth: 512, threadId: "old-thread" })
     )
-    handoffAgentSurfaceThread("operations-assistant", "home-thread")
+    handoffAgentSurfaceThread("home-thread")
 
-    expect(
-      JSON.parse(values.get("sixb.agent-ui.surface.v1:operations-assistant") ?? "null")
-    ).toEqual({ mode: "dock", dockWidth: 512, threadId: "home-thread" })
+    expect(JSON.parse(values.get("sixb.agent-ui.surface.v1:agents") ?? "null")).toEqual({
+      mode: "dock",
+      dockWidth: 512,
+      threadId: "home-thread",
+    })
     expect(events).toHaveLength(1)
     expect((events[0] as CustomEvent).detail).toEqual({
-      agentId: "operations-assistant",
-      storageKey: "sixb.agent-ui.surface.v1:operations-assistant",
+      storageKey: "sixb.agent-ui.surface.v1:agents",
       state: { mode: "dock", dockWidth: 512, threadId: "home-thread" },
     })
   } finally {
@@ -115,14 +112,16 @@ test("a host can collapse the dock without discarding its thread or width", () =
 
   try {
     values.set(
-      "sixb.agent-ui.surface.v1:operations-assistant",
+      "sixb.agent-ui.surface.v1:agents",
       JSON.stringify({ mode: "dock", dockWidth: 544, threadId: "thread-42" })
     )
-    setAgentSurfaceMode("operations-assistant", "collapsed")
+    setAgentSurfaceMode("collapsed")
 
-    expect(
-      JSON.parse(values.get("sixb.agent-ui.surface.v1:operations-assistant") ?? "null")
-    ).toEqual({ mode: "collapsed", dockWidth: 544, threadId: "thread-42" })
+    expect(JSON.parse(values.get("sixb.agent-ui.surface.v1:agents") ?? "null")).toEqual({
+      mode: "collapsed",
+      dockWidth: 544,
+      threadId: "thread-42",
+    })
     expect((events[0] as CustomEvent).detail.state).toEqual({
       mode: "collapsed",
       dockWidth: 544,
@@ -134,5 +133,34 @@ test("a host can collapse the dock without discarding its thread or width", () =
     } else {
       Reflect.deleteProperty(globalThis, "window")
     }
+  }
+})
+
+test("handoff still notifies a mounted surface when session storage is blocked", () => {
+  // Moving dispatchEvent back inside the storage try block makes this fail.
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "window")
+  const events: Event[] = []
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      get sessionStorage() {
+        throw new Error("Storage blocked")
+      },
+      dispatchEvent(event: Event) {
+        events.push(event)
+        return true
+      },
+    },
+  })
+  try {
+    handoffAgentSurfaceThread("thread-42", "custom-key")
+    expect(events).toHaveLength(1)
+    expect((events[0] as CustomEvent).detail).toEqual({
+      storageKey: "custom-key",
+      state: { mode: "dock", dockWidth: 384, threadId: "thread-42" },
+    })
+  } finally {
+    if (previous) Object.defineProperty(globalThis, "window", previous)
+    else Reflect.deleteProperty(globalThis, "window")
   }
 })

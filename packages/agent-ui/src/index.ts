@@ -19,6 +19,10 @@ export {
 } from "./AgentSurface"
 export { handoffAgentSurfaceThread, setAgentSurfaceMode } from "./agent-surface-state"
 export { ActivityStatusText } from "./components/ActivityStatus"
+export {
+  AgentThreadSwitcher,
+  type AgentThreadSwitcherProps,
+} from "./components/AgentThreadSwitcher"
 export { Composer, type ComposerProps } from "./components/Composer"
 export { ContextChips } from "./components/ContextChips"
 export {
@@ -48,7 +52,6 @@ export { ModelControls, type ModelControlsProps } from "./components/ModelContro
 export { ModelPickerRow } from "./components/ModelPickerRow"
 export { ProviderLogo } from "./components/ProviderLogo"
 export { ReasoningEffortSlider } from "./components/ReasoningEffortSlider"
-export { ThreadSidebar, type ThreadSidebarProps } from "./components/ThreadSidebar"
 export { Transcript, type TranscriptProps } from "./components/Transcript"
 export {
   type DocumentPreviewContextValue,

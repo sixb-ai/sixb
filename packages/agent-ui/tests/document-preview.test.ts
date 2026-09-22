@@ -364,7 +364,7 @@ describe("document preview tabs", () => {
       width: 640,
     })
     state = documentPreviewReducer(state, { type: "open", document: document("first", "first.md") })
-    state = documentPreviewReducer(state, { type: "close-all" })
+    state = documentPreviewReducer(state, { type: "close", id: "first" })
 
     expect(state).toEqual({ documents: [], activeId: null, panelWidth: 640 })
     expect(parseDocumentPreviewState(JSON.stringify(state), "thread-1")).toEqual(state)

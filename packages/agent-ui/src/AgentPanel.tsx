@@ -12,7 +12,6 @@ export interface AgentPanelProps {
   readonly threadId?: string | null
   readonly defaultThreadId?: string | null
   readonly onThreadChange?: (threadId: string | null) => void
-  readonly onBackHome?: () => void
   readonly onNewThread?: () => void
   /** Optional modeless document canvas owned by an enclosing application shell. */
   readonly documentPreviewHost?: HTMLElement | null
@@ -42,7 +41,6 @@ export function AgentPanel({
   threadId: controlledThreadId,
   defaultThreadId = null,
   onThreadChange,
-  onBackHome,
   onNewThread,
   documentPreviewHost,
   splitDocumentPreview,
@@ -90,7 +88,6 @@ export function AgentPanel({
       onNavigateHome={() => {
         changeThread(null)
         onNewThread?.()
-        onBackHome?.()
       }}
       onNavigateThread={changeThread}
       documentPreviewRenderers={documentPreviewRenderers}

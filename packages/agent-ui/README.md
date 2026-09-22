@@ -33,7 +33,11 @@ export function InvoiceSidebar({ invoice }: { invoice: ObjectRef }) {
 | `context` | Ambient context the agent sees. Omit it to inherit from `AgentContextProvider` instead; passing it makes the list fully controlled. |
 | `threadId` | Controlled thread. Omit to let the panel own its current thread. |
 | `defaultThreadId`, `onThreadChange` | For remembering where a user left off. |
-| `welcomeContent` | Custom React content centered above the composer in an empty conversation. Omit for the default agent name and description tooltip; pass `null` to leave it empty. |
+| `welcomeContent` | Custom React content centered above the composer in an empty conversation. Omit for the default agent name; pass `null` to leave it empty. |
+
+| `centerEmptyState`, `hideHeaderOnEmpty` | Turn a new draft into a focused landing composer. |
+| `emptyStateHeader`, `emptyStateFooter` | Add host branding and shortcuts around that composer. |
+| `composerPlaceholder` | Customize the prompt shown in the empty composer. |
 
 Use a logo, text, or your own component for the welcome area:
 
@@ -43,9 +47,6 @@ Use a logo, text, or your own component for the welcome area:
 
 The panel handles centering; your content controls its own styling. It disappears when the
 conversation starts. `AgentChat` also accepts `welcomeContent`.
-| `centerEmptyState`, `hideHeaderOnEmpty` | Turn a new draft into a focused landing composer. |
-| `emptyStateHeader`, `emptyStateFooter` | Add host branding and shortcuts around that composer. |
-| `composerPlaceholder` | Customize the prompt shown in the empty composer. |
 
 A context entry is either an object reference or a piece of app state:
 
@@ -93,8 +94,9 @@ its dock; full-page presentation is never persisted as assistant state.
 Pass controlled `mode`, `threadId`, or `dockWidth` props when the host needs to own one of those
 values. Set `persistenceKey={false}` to disable the default per-tab persistence.
 
-A separate landing `AgentPanel` can call `handoffAgentSurfaceThread("agents", threadId)` from its
-`onThreadChange` callback. The next mounted dock in that browser tab opens on the same durable
+A separate landing `AgentPanel` can call `handoffAgentSurfaceThread(threadId)` from its
+`onThreadChange` callback. Pass the same `persistenceKey` as the optional second argument
+when the surface uses a custom key. The next mounted dock in that browser tab opens on the same durable
 thread without adding assistant state to the host URL.
 
 Use `AgentChatPage` when an application needs a standalone routed full-page conversation.
@@ -129,7 +131,7 @@ browser navigation and deep links work.
 ```tsx
 import { AgentChatPage } from "@sixb/agent-ui/react-router"
 
-<Route path="/agents/*" element={<AgentChatPage routeBase="/agents" />} />
+<Route path="/agents/:threadId?" element={<AgentChatPage routeBase="/agents" />} />
 ```
 
 `routeBase` defaults to `/agents` and must match the path you mount it on.
@@ -148,7 +150,7 @@ All chat building blocks are available as named imports from `@sixb/agent-ui`:
 | `Composer` | Chat input, uploads, context mentions, model controls, and send/stop buttons. |
 | `Transcript` | Durable and streaming messages, optimistic user messages, scroll anchoring, and run status. |
 | `MessageView`, `LiveAssistant`, `AssistantBody` | Individual messages, a live assistant row, or normalized assistant parts. |
-| `ThreadSidebar` | Thread navigation with search and pagination callbacks. |
+| `AgentThreadSwitcher` | Thread navigation with search and pagination callbacks. |
 | `ContextPicker`, `ContextChips` | Context selection and selected context display. |
 | `ModelControls`, `ModelPickerRow`, `ReasoningEffortSlider`, `ProviderLogo` | Model and reasoning selection. |
 | `FileAttachmentCard`, `UserFileAttachment` | File attachments. |
@@ -261,7 +263,7 @@ You can also supply your own data/controller. `Transcript` accepts `AgentMessage
 `createLiveRunState()` supplies idle state for a non-streaming transcript. For custom message layouts,
 use `MessageView` or pass `normalizeDurableParts(message.parts)` to `AssistantBody`.
 
-Named types include `ComposerProps`, `TranscriptProps`, `ConversationPanelProps`, `ThreadSidebarProps`,
+Named types include `ComposerProps`, `TranscriptProps`, `ConversationPanelProps`, `AgentThreadSwitcherProps`,
 `ContextPickerProps`, `ContextPickerResult`, `ModelControlsProps`, `AgentConversation`,
 `UseAgentConversationInput`, and the message, context, model, and normalized-part types. For components
 with inline props, use React's `ComponentProps<typeof Component>`.
