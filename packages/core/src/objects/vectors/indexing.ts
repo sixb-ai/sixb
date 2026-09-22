@@ -10,6 +10,7 @@ import type { OntologyMaterializerContract } from "../../materializer/materializ
 import {
   EmbeddingModelResponseError,
   type EmbeddingModelResult,
+  sameEmbeddingModel,
 } from "../../models/embedding-model"
 import { bindEmbeddingModels } from "../../models/execution/embedding"
 import { ModelExecutionSession } from "../../models/execution/session"
@@ -125,7 +126,7 @@ async function generateVector(
     modelId: definition.model.modelId,
   })?.model
   try {
-    if (!model || model.definition.dimensions !== definition.model.definition.dimensions)
+    if (!model || !sameEmbeddingModel(model, definition.model))
       throw createSixbError(
         "vector.model_unavailable",
         "[Sixb] Vector indexing requires the profile's configured embedding model."
