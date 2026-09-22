@@ -110,6 +110,9 @@ export function createFoundryEmbedding(
     providerId,
     modelId,
     definition,
+    // OpenAI byte-level tokenization emits at most one token per UTF-8 byte.
+    // These conservative bounds avoid requiring a tokenizer for projection batching.
+    batching: Object.freeze({ maxInputs: 2048, maxInputBytes: 8191, maxTotalInputBytes: 300000 }),
     metadata,
     costEstimator: resolution?.costEstimator,
     async resolve(input?: { readonly offline?: boolean }) {

@@ -95,6 +95,7 @@ import agentThreadWorkspacesSql from "./migrations/041-agent-thread-workspaces.s
 }
 import vectorProfilesSql from "./migrations/042-vector-profiles.sql" with { type: "text" }
 import vectorIndexingSql from "./migrations/043-vector-indexing.sql" with { type: "text" }
+import vectorBatchingSql from "./migrations/044-vector-batching.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -391,6 +392,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("041-agent-thread-workspaces", agentThreadWorkspacesSql),
     pgSql("042-vector-profiles", vectorProfilesSql),
     pgSql("043-vector-indexing", vectorIndexingSql),
+    pgSql("044-vector-batching", vectorBatchingSql),
   ],
 })
 

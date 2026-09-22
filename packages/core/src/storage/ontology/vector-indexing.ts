@@ -14,6 +14,8 @@ export type VectorIndexingFailureCode = (typeof VECTOR_INDEXING_FAILURE_CODES)[n
 /** Latest desired representation; replacing its id fences every older delivery. */
 export interface VectorIndexingRequest {
   readonly id: string
+  /** Set only by projection materialization; a bounded, immediately durable group. */
+  readonly batchId?: string
   readonly ref: OntologyObjectRef
   readonly profile: string
   readonly configuration: string
@@ -23,6 +25,15 @@ export interface VectorIndexingRequest {
 
 export interface VectorIndexingWork extends VectorIndexingRequest {
   readonly status: "pending" | "running" | "ready" | "failed"
+  readonly availableAt: string
+  readonly values?: readonly number[]
+  readonly error?: SixbFailure<VectorIndexingFailureCode>
+}
+
+export interface VectorIndexingUpdate {
+  readonly id: string
+  readonly expectedStatus: VectorIndexingWork["status"]
+  readonly status: VectorIndexingWork["status"]
   readonly availableAt: string
   readonly values?: readonly number[]
   readonly error?: SixbFailure<VectorIndexingFailureCode>
@@ -42,10 +53,10 @@ export interface OntologyVectorIndexingStorage {
   complete(input: {
     projectId: string
     session: MaterializationSession
-    ref: OntologyObjectRef
-    profile: string
-    configuration: string
-    sourceFingerprint: string
+    entries: readonly Pick<
+      VectorIndexingRequest,
+      "ref" | "profile" | "configuration" | "sourceFingerprint"
+    >[]
   }): Promise<void>
   dispatched(input: {
     projectId: string
@@ -53,6 +64,20 @@ export interface OntologyVectorIndexingStorage {
     nextDispatchAt: string
   }): Promise<void>
   get(input: { projectId: string; id: string }): Promise<VectorIndexingWork | null>
+  getBatch(input: { projectId: string; batchId: string }): Promise<readonly VectorIndexingWork[]>
+  /** Read only the result this kernel batch is allowed to publish. */
+  getBatchMember(input: {
+    projectId: string
+    batchId: string
+    ref: OntologyObjectRef
+    profile: string
+  }): Promise<VectorIndexingWork | null>
+  /** Atomic transitions; requireAll prevents admission if any prepared member was superseded. */
+  updateBatch(input: {
+    projectId: string
+    updates: readonly VectorIndexingUpdate[]
+    requireAll?: boolean
+  }): Promise<boolean>
   /** Bounded fair redispatch scan. Never scans objects or backfills existing data. */
   listDue(input: {
     projectId: string

@@ -27,6 +27,7 @@ export function bindEmbeddingModels(
           providerId: entry.model.providerId,
           modelId: entry.model.modelId,
           definition: entry.model.definition,
+          batching: entry.model.batching && Object.freeze({ ...entry.model.batching }),
           embed: (input: EmbeddingModelRequest) => executeEmbedding(session, entry.model, input),
         }),
       })

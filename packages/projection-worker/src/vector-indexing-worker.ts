@@ -85,12 +85,13 @@ export class VectorIndexingWorker extends QueueWorker<
       })
       signal.throwIfAborted()
       if (work.length) {
+        const jobs = [...new Map(work.map((item) => [item.batchId ?? item.id, item])).entries()]
         await this.host.queues.vectorIndexing.enqueue({
           projectId: this.host.id,
-          jobs: work.map((item) => ({
-            id: item.id,
+          jobs: jobs.map(([id, item]) => ({
+            id,
             type: "vector.index.requested",
-            payload: { indexingId: item.id },
+            payload: { indexingId: id },
             availableAt: item.availableAt,
           })),
         })

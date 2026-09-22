@@ -27,6 +27,10 @@ Binding (no I/O)
 - Input usage is `prompt_tokens`; a conflicting `total_tokens` leaves it unknown. Output tokens
   are zero. Unexpected usage meters disable reference pricing. Azure prices are local estimates,
   not reported invoice charges; callers may supply a deployment-specific estimator.
+- `batching` advertises conservative OpenAI bounds: 2048 inputs, 8191 UTF-8 bytes per text,
+  300,000 bytes total. Byte-level tokenization bounds tokens by bytes; one token of per-input
+  headroom avoids the 8191/8192 boundary. The projection indexer also applies its smaller local
+  page bounds. This is eligibility for grouping, not truncation or a deployment-quota guarantee.
 - Credentials and signals are isolated between project discovery and resource inference.
   Discovery has its own bounded, shared cache; cancelling one inference waiter does not abort
   discovery needed by other callers.

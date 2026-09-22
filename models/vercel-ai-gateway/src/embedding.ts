@@ -39,6 +39,16 @@ export function createGatewayEmbedding(
     providerId,
     modelId,
     costEstimator: pricing?.estimator,
+    // Only advertise bounds for known OpenAI models; other gateway routes stay individual.
+    ...(/^openai\/text-embedding-(3-small|3-large|ada-002)$/.test(modelId)
+      ? {
+          batching: Object.freeze({
+            maxInputs: 2048,
+            maxInputBytes: 8191,
+            maxTotalInputBytes: 300000,
+          }),
+        }
+      : {}),
     ...(resolvePricing
       ? {
           resolve: async () =>

@@ -32,6 +32,12 @@ export interface OntologyVectorStorage {
     value: StoredObjectVector
     expectedCommitId: string | null
   }): Promise<void>
+  /** Write a validated set inside the materialization transaction; any conflict aborts it. */
+  writeBatch(input: {
+    session: MaterializationSession
+    projectId: string
+    entries: readonly { value: StoredObjectVector; expectedCommitId: string | null }[]
+  }): Promise<void>
   remove(input: {
     session: MaterializationSession
     projectId: string

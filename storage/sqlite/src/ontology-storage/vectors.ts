@@ -149,6 +149,12 @@ export class SqliteOntologyVectorStorage implements OntologyVectorStorage {
     if (changes !== 1) throw vectorConflict()
   }
 
+  async writeBatch(input: Parameters<OntologyVectorStorage["writeBatch"]>[0]): Promise<void> {
+    for (const entry of input.entries) {
+      await this.write({ session: input.session, projectId: input.projectId, ...entry })
+    }
+  }
+
   async remove(input: Parameters<OntologyVectorStorage["remove"]>[0]): Promise<void> {
     this.assertSession(input.session, input.projectId)
     const { changes } = this.db

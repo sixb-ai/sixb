@@ -31,6 +31,7 @@ import {
   startTestProjectionRun,
 } from "@sixb/core/testing"
 import { assertVectorBatchInvalidation } from "../../tests/vector-invalidation-contract"
+import { assertVectorBatchPublication } from "../../tests/vector-write-batch-contract"
 import { SqliteStorage } from "../src"
 import { createSqliteMigrator, sqliteStorageMigrations, sqliteStoragePath } from "../src/migrations"
 
@@ -489,6 +490,15 @@ test("batch invalidation is project-scoped and rolls back on a stale revision", 
   const f = await fixture()
   try {
     await assertVectorBatchInvalidation(f.storage)
+  } finally {
+    await f.close()
+  }
+})
+
+test("grouped vector publication rolls back every write and intent on a stale member", async () => {
+  const f = await fixture()
+  try {
+    await assertVectorBatchPublication(f.storage)
   } finally {
     await f.close()
   }

@@ -47,6 +47,12 @@ export class InMemoryOntologyVectorStorage implements OntologyVectorStorage {
     this.state.set(key, profiles)
   }
 
+  async writeBatch(input: Parameters<OntologyVectorStorage["writeBatch"]>[0]): Promise<void> {
+    for (const entry of input.entries) {
+      await this.write({ session: input.session, projectId: input.projectId, ...entry })
+    }
+  }
+
   async remove(input: Parameters<OntologyVectorStorage["remove"]>[0]) {
     this.assertSession(input.session, input.projectId)
     const key = vectorObjectKey(input.projectId, input.ref)

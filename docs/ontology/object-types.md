@@ -162,7 +162,8 @@ const { objects } = await sixb.objects(Product)
 
 During projections, Sixb automatically generates and updates embeddings when a profile's source
 properties change. Generation runs in the background; updated objects become searchable through
-that profile once their embedding is ready. Profile names are autocompleted.
+that profile once their embedding is ready. Compatible objects are embedded in batches when the
+provider supports it, without additional configuration. Profile names are autocompleted.
 
 Adding or changing a profile does not reindex existing objects. To explicitly index or retry an
 object, use `await sixb.objects(Product).byId("product-1").vector("content").index()`.

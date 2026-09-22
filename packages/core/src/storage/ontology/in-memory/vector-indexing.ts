@@ -47,19 +47,23 @@ export class InMemoryVectorIndexingStorage implements OntologyVectorIndexingStor
 
   async complete(input: Parameters<OntologyVectorIndexingStorage["complete"]>[0]) {
     this.assertSession(input.session, input.projectId)
-    const key = JSON.stringify([
-      input.projectId,
-      input.ref.objectTypeId,
-      input.ref.primaryId,
-      input.profile,
-    ])
-    const work = this.state.get(key)
-    if (
-      work?.configuration === input.configuration &&
-      work.sourceFingerprint === input.sourceFingerprint
-    )
-      this.state.delete(key)
+    for (const entry of input.entries) {
+      const key = JSON.stringify([
+        input.projectId,
+        entry.ref.objectTypeId,
+        entry.ref.primaryId,
+        entry.profile,
+      ])
+      const work = this.state.get(key)
+      if (
+        work?.configuration === entry.configuration &&
+        work.sourceFingerprint === entry.sourceFingerprint
+      ) {
+        this.state.delete(key)
+      }
+    }
   }
+
   async dispatched(input: Parameters<OntologyVectorIndexingStorage["dispatched"]>[0]) {
     await this.run(() => {
       for (const [key, work] of this.state)
@@ -75,6 +79,55 @@ export class InMemoryVectorIndexingStorage implements OntologyVectorIndexingStor
         ) ?? null
       )
     )
+  }
+
+  async getBatch(input: Parameters<OntologyVectorIndexingStorage["getBatch"]>[0]) {
+    return this.run(() =>
+      structuredClone(
+        [...this.state.values()]
+          .filter((work) => work.projectId === input.projectId && work.batchId === input.batchId)
+          .sort((a, b) => a.id.localeCompare(b.id))
+      )
+    )
+  }
+
+  async getBatchMember(input: Parameters<OntologyVectorIndexingStorage["getBatchMember"]>[0]) {
+    return this.run(() => {
+      const work = this.state.get(
+        JSON.stringify([
+          input.projectId,
+          input.ref.objectTypeId,
+          input.ref.primaryId,
+          input.profile,
+        ])
+      )
+      return work?.batchId === input.batchId ? structuredClone(work) : null
+    })
+  }
+
+  async updateBatch(input: Parameters<OntologyVectorIndexingStorage["updateBatch"]>[0]) {
+    return this.run(() => {
+      const updates = new Map(input.updates.map((update) => [update.id, update]))
+      const matches = [...this.state.entries()].filter(
+        ([, work]) =>
+          work.projectId === input.projectId && updates.get(work.id)?.expectedStatus === work.status
+      )
+      if (input.requireAll && matches.length !== input.updates.length) return false
+      for (const [key, work] of matches) {
+        const update = updates.get(work.id)!
+        this.state.set(
+          key,
+          structuredClone({
+            ...work,
+            status: update.status,
+            availableAt: update.availableAt,
+            values: update.values ?? work.values,
+            error: update.error,
+          })
+        )
+      }
+      return true
+    })
   }
 
   async listDue(input: Parameters<OntologyVectorIndexingStorage["listDue"]>[0]) {

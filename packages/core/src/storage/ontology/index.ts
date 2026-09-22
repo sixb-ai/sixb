@@ -136,5 +136,6 @@ export type {
   OntologyVectorIndexingStorage,
   VectorIndexingFailureCode,
   VectorIndexingRequest,
+  VectorIndexingUpdate,
   VectorIndexingWork,
 } from "./vector-indexing"

@@ -225,6 +225,7 @@ describe("Postgres storage migrations", () => {
             "041-agent-thread-workspaces",
             "042-vector-profiles",
             "043-vector-indexing",
+            "044-vector-batching",
           ],
         },
       ])
@@ -529,6 +530,13 @@ describe("Postgres storage migrations", () => {
           id: "043-vector-indexing",
           status: "applied",
           version: 43,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "044-vector-batching",
+          status: "applied",
+          version: 44,
         },
       ])
     })
@@ -2302,6 +2310,13 @@ describe("Postgres storage migrations", () => {
           id: "043-vector-indexing",
           status: "applied",
           version: 43,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "044-vector-batching",
+          status: "applied",
+          version: 44,
         },
       ])
     } finally {

@@ -10,6 +10,7 @@ import {
 import type { SqliteRootOperation } from "./shared"
 
 interface WorkRow {
+  batch_id: string | null
   request: string
   status: VectorIndexingWork["status"]
   available_at: string
@@ -31,16 +32,17 @@ export class SqliteVectorIndexingStorage implements OntologyVectorIndexingStorag
         )
         .run(input.projectId, ref.objectTypeId, ref.primaryId)
     const insert =
-      this.db.query(`INSERT INTO object_vector_indexing (project_id, id, object_type_id, primary_id, profile, request, status, available_at, dispatch_at)
-      VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)
-      ON CONFLICT (project_id, object_type_id, primary_id, profile) DO UPDATE SET id = excluded.id, request = excluded.request, status = 'pending', available_at = excluded.available_at, dispatch_at = excluded.dispatch_at, values_json = NULL, error = NULL`)
-    for (const request of input.requests)
+      this.db.query(`INSERT INTO object_vector_indexing (project_id, id, object_type_id, primary_id, profile, batch_id, request, status, available_at, dispatch_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+      ON CONFLICT (project_id, object_type_id, primary_id, profile) DO UPDATE SET id = excluded.id, batch_id = excluded.batch_id, request = excluded.request, status = 'pending', available_at = excluded.available_at, dispatch_at = excluded.dispatch_at, values_json = NULL, error = NULL`)
+    for (const { batchId, ...request } of input.requests)
       insert.run(
         input.projectId,
         request.id,
         request.ref.objectTypeId,
         request.ref.primaryId,
         request.profile,
+        batchId ?? null,
         JSON.stringify(request),
         input.availableAt,
         input.availableAt
@@ -48,19 +50,21 @@ export class SqliteVectorIndexingStorage implements OntologyVectorIndexingStorag
   }
   async complete(input: Parameters<OntologyVectorIndexingStorage["complete"]>[0]) {
     this.assertSession(input.session, input.projectId)
-    this.db
-      .query(
-        `DELETE FROM object_vector_indexing WHERE project_id = ? AND object_type_id = ? AND primary_id = ? AND profile = ? AND json_extract(request, '$.configuration') = ? AND json_extract(request, '$.sourceFingerprint') = ?`
-      )
-      .run(
+    const remove = this.db.query(
+      `DELETE FROM object_vector_indexing WHERE project_id = ? AND object_type_id = ? AND primary_id = ? AND profile = ? AND json_extract(request, '$.configuration') = ? AND json_extract(request, '$.sourceFingerprint') = ?`
+    )
+    for (const entry of input.entries) {
+      remove.run(
         input.projectId,
-        input.ref.objectTypeId,
-        input.ref.primaryId,
-        input.profile,
-        input.configuration,
-        input.sourceFingerprint
+        entry.ref.objectTypeId,
+        entry.ref.primaryId,
+        entry.profile,
+        entry.configuration,
+        entry.sourceFingerprint
       )
+    }
   }
+
   async dispatched(input: Parameters<OntologyVectorIndexingStorage["dispatched"]>[0]) {
     await this.run(() => {
       const update = this.db.query(
@@ -73,17 +77,77 @@ export class SqliteVectorIndexingStorage implements OntologyVectorIndexingStorag
     return this.run(() => {
       const row = this.db
         .query<WorkRow, [string, string]>(
-          `SELECT request, status, available_at, values_json, error FROM object_vector_indexing WHERE project_id = ? AND id = ?`
+          `SELECT batch_id, request, status, available_at, values_json, error FROM object_vector_indexing WHERE project_id = ? AND id = ?`
         )
         .get(input.projectId, input.id)
       return row ? decode(row) : null
     })
   }
+  async getBatch(input: Parameters<OntologyVectorIndexingStorage["getBatch"]>[0]) {
+    return this.run(() =>
+      this.db
+        .query<WorkRow, [string, string]>(`
+      SELECT batch_id, request, status, available_at, values_json, error FROM object_vector_indexing
+      WHERE project_id = ? AND batch_id = ? ORDER BY id`)
+        .all(input.projectId, input.batchId)
+        .map(decode)
+    )
+  }
+
+  async getBatchMember(input: Parameters<OntologyVectorIndexingStorage["getBatchMember"]>[0]) {
+    return this.run(() => {
+      const row = this.db
+        .query<WorkRow, [string, string, string, string, string]>(`
+        SELECT batch_id, request, status, available_at, values_json, error
+        FROM object_vector_indexing WHERE project_id = ? AND object_type_id = ?
+        AND primary_id = ? AND profile = ? AND batch_id = ?`)
+        .get(
+          input.projectId,
+          input.ref.objectTypeId,
+          input.ref.primaryId,
+          input.profile,
+          input.batchId
+        )
+      return row ? decode(row) : null
+    })
+  }
+
+  async updateBatch(input: Parameters<OntologyVectorIndexingStorage["updateBatch"]>[0]) {
+    return this.run(() =>
+      this.db.transaction(() => {
+        const status = this.db.query<{ status: string }, [string, string]>(
+          "SELECT status FROM object_vector_indexing WHERE project_id = ? AND id = ?"
+        )
+        if (
+          input.requireAll &&
+          input.updates.some(
+            (update) => status.get(input.projectId, update.id)?.status !== update.expectedStatus
+          )
+        )
+          return false
+        const updateRow = this.db.query(`UPDATE object_vector_indexing
+        SET status = ?, available_at = ?, values_json = COALESCE(?, values_json), error = ?
+        WHERE project_id = ? AND id = ? AND status = ?`)
+        for (const update of input.updates)
+          updateRow.run(
+            update.status,
+            update.availableAt,
+            update.values ? JSON.stringify(update.values) : null,
+            update.error ? JSON.stringify(update.error) : null,
+            input.projectId,
+            update.id,
+            update.expectedStatus
+          )
+        return true
+      })()
+    )
+  }
+
   async listDue(input: Parameters<OntologyVectorIndexingStorage["listDue"]>[0]) {
     return this.run(() =>
       this.db
         .query<WorkRow, [string, string, number]>(
-          `SELECT request, status, available_at, NULL AS values_json, error FROM object_vector_indexing WHERE project_id = ? AND status <> 'failed' AND dispatch_at <= ? ORDER BY dispatch_at, id LIMIT ?`
+          `SELECT batch_id, request, status, available_at, NULL AS values_json, error FROM object_vector_indexing WHERE project_id = ? AND status <> 'failed' AND dispatch_at <= ? ORDER BY dispatch_at, id LIMIT ?`
         )
         .all(input.projectId, input.now, input.limit)
         .map(decode)
@@ -119,6 +183,7 @@ function decode(row: WorkRow): VectorIndexingWork {
   const request = JSON.parse(row.request) as VectorIndexingRequest
   return {
     ...request,
+    ...(row.batch_id ? { batchId: row.batch_id } : {}),
     status: row.status,
     availableAt: row.available_at,
     ...(row.values_json ? { values: JSON.parse(row.values_json) as number[] } : {}),
