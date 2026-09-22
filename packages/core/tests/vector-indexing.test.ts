@@ -391,3 +391,19 @@ describe("automatic vector indexing", () => {
     expect(() => f.host.withScope(scope)).toThrow("Kernel authority cannot be bound")
   })
 })
+
+test("automatic indexing rejects catalog representation drift before inference", async () => {
+  const f = fixture()
+  await f.write("source")
+  const [work] = await f.due()
+  Object.defineProperty(f.model, "definition", {
+    value: { ...f.model.definition, representation: { name: "different-model", version: "2" } },
+  })
+  await f.process(work!.id)
+  expect(f.embed).not.toHaveBeenCalled()
+  expect(await f.vectors()).toEqual([])
+  expect(await f.indexing.get({ projectId: f.host.id, id: work!.id })).toMatchObject({
+    status: "failed",
+    error: { code: "vector.model_unavailable" },
+  })
+})
