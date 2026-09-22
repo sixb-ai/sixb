@@ -7,6 +7,7 @@ import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets/types"
 import { assertDatasetDefinition } from "../datasets/validation"
 import { createModelCatalog, type ModelCatalogInput } from "../models"
+import { sameEmbeddingModel } from "../models/embedding-model"
 import { OntologyRegistry } from "../ontology"
 import type { PipelineDefinition } from "../pipelines/types"
 import { ProjectionRegistry } from "../projections"
@@ -76,16 +77,13 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
         provider: profile.model.providerId,
         modelId: profile.model.modelId,
       })
-      if (
-        !registered ||
-        registered.model.definition.dimensions !== profile.model.definition.dimensions
-      ) {
+      if (!registered || !sameEmbeddingModel(registered.model, profile.model)) {
         throw new Error(
           "[Sixb] Vector profile " +
             type.id +
             "." +
             name +
-            " requires its model in models.embedding with matching dimensions."
+            " requires its model in models.embedding with matching identity and dimensions."
         )
       }
     }

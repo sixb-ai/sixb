@@ -18,11 +18,24 @@ export class InMemoryOntologyVectorStorage implements OntologyVectorStorage {
   ) {}
 
   async list(input: Parameters<OntologyVectorStorage["list"]>[0]) {
+    return this.listBatch({ projectId: input.projectId, refs: [input.ref] })
+  }
+
+  async listBatch(input: Parameters<OntologyVectorStorage["listBatch"]>[0]) {
     return this.runRootOperation(() =>
-      [...(this.state.get(vectorObjectKey(input.projectId, input.ref))?.values() ?? [])].map(
-        ({ values: _values, ...metadata }) => structuredClone(metadata)
+      [...new Set(input.refs.map((ref) => vectorObjectKey(input.projectId, ref)))].flatMap((key) =>
+        [...(this.state.get(key)?.values() ?? [])].map(({ values: _values, ...metadata }) =>
+          structuredClone(metadata)
+        )
       )
     )
+  }
+
+  async removeBatch(input: Parameters<OntologyVectorStorage["removeBatch"]>[0]) {
+    this.assertSession(input.session, input.projectId)
+    for (const entry of input.entries) {
+      await this.remove({ session: input.session, projectId: input.projectId, ...entry })
+    }
   }
 
   async write(input: Parameters<OntologyVectorStorage["write"]>[0]) {

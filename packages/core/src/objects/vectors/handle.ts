@@ -3,6 +3,7 @@ import { assertCanEdit } from "../../authorization"
 import { AuthorizationError } from "../../authorization/errors"
 import { MaterializationValidationError } from "../../materialization/errors"
 import type { PreparedObjectVector } from "../../materialization/vectors"
+import { sameEmbeddingModel } from "../../models/embedding-model"
 import { getOntologyMutationRuntime } from "../../runtime/ontology-mutations"
 import type { ExecutionObjectContext } from "../context"
 import { normalizeVector, vectorConfiguration, vectorSources } from "./profile"
@@ -43,7 +44,7 @@ export function createObjectVectorHandle(
         provider: profileDefinition.model.providerId,
         modelId: profileDefinition.model.modelId,
       })?.model
-      if (!model || model.definition.dimensions !== profileDefinition.model.definition.dimensions) {
+      if (!model || !sameEmbeddingModel(model, profileDefinition.model)) {
         throw new MaterializationValidationError(
           `Vector profile '${profileName}' requires its configured embedding model.`
         )

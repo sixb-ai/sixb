@@ -17,6 +17,16 @@ export function snapshotVectorProfiles(
           providerId,
           modelId,
           dimensions: definition.dimensions,
+          ...(definition.representation
+            ? {
+                representation: Object.freeze({
+                  name: definition.representation.name,
+                  ...(definition.representation.version === undefined
+                    ? {}
+                    : { version: definition.representation.version }),
+                }),
+              }
+            : {}),
         }),
       }),
     })

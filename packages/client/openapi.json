@@ -24497,6 +24497,19 @@
                                       "type": "integer",
                                       "exclusiveMinimum": true,
                                       "minimum": 0
+                                    },
+                                    "representation": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "version": {
+                                          "type": "string"
+                                        }
+                                      },
+                                      "required": ["name"],
+                                      "additionalProperties": false
                                     }
                                   },
                                   "required": ["providerId", "modelId", "dimensions"],
@@ -24823,6 +24836,19 @@
                                     "type": "integer",
                                     "exclusiveMinimum": true,
                                     "minimum": 0
+                                  },
+                                  "representation": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "version": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["name"],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": ["providerId", "modelId", "dimensions"],
