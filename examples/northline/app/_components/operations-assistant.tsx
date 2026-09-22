@@ -1,5 +1,6 @@
 import { AgentSurface, agentContext } from "@sixb/app/agents"
-import { useLocation, useNavigate } from "react-router-dom"
+import { useEffect, useRef } from "react"
+import { useLocation, useMatch, useNavigate } from "react-router-dom"
 import { CustomerAccount } from "../../ontology/customer-account"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
@@ -19,6 +20,15 @@ const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
 export function OperationsAssistant() {
   const location = useLocation()
   const navigate = useNavigate()
+  const conversationRoute = useMatch("/chat/:id")
+  const fullPage = conversationRoute !== null
+  const currentLocation = `${location.pathname}${location.search}${location.hash}`
+  const lastWorkspaceLocation = useRef("/service-cases")
+  useEffect(() => {
+    if (!fullPage && location.pathname !== "/" && !location.pathname.startsWith("/agents")) {
+      lastWorkspaceLocation.current = currentLocation
+    }
+  }, [currentLocation, fullPage, location.pathname])
   const objectContext = currentObjectContext(location.pathname)
   const pageLabel =
     pageLabels.find(([prefix]) => location.pathname.startsWith(prefix))?.[1] ?? "Home"
@@ -28,11 +38,7 @@ export function OperationsAssistant() {
     value: { path: location.pathname, query: location.search },
   })
   const context = objectContext ? [pageContext, objectContext] : [pageContext]
-  if (
-    location.pathname === "/" ||
-    location.pathname.startsWith("/agents") ||
-    location.pathname.startsWith("/chat/")
-  ) {
+  if (location.pathname === "/" || location.pathname.startsWith("/agents")) {
     return null
   }
 
@@ -41,6 +47,13 @@ export function OperationsAssistant() {
       title="Northline Operations Assistant"
       launcherLabel="Ask Northline"
       context={context}
+      fullPage={fullPage}
+      panelClassName={fullPage ? "max-md:[&_[data-agent-conversation-header]]:pl-12" : undefined}
+      threadId={conversationRoute?.params.id}
+      onThreadChange={(threadId) => {
+        if (fullPage) navigate(threadId ? `/chat/${encodeURIComponent(threadId)}` : "/")
+      }}
+      onRequestDock={() => navigate(lastWorkspaceLocation.current, { replace: true })}
       onExpandThread={(threadId) => {
         navigate(`/chat/${encodeURIComponent(threadId)}`)
       }}

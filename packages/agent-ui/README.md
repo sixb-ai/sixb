@@ -100,6 +100,7 @@ when the surface uses a custom key. The next mounted dock in that browser tab op
 thread without adding assistant state to the host URL.
 
 Use `AgentChatPage` when an application needs a standalone routed full-page conversation.
+Its conversation header includes a “Back to app” action that returns to the router's root route.
 
 ## Ambient context from anywhere in the tree
 
