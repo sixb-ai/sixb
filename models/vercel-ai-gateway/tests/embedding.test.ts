@@ -28,6 +28,7 @@ test("embedding uses configured transport and restores input order", async () =>
     providerId: "vercel-ai-gateway",
     modelId: "openai/test",
     dimensions: 2,
+    representation: { name: "openai/test" },
   })
   expect((await model.embed({ texts: ["first", "second"] })).vectors).toEqual([
     [1, 0],
