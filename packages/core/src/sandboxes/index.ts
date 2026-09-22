@@ -1,4 +1,5 @@
 export type { InferParams, ParamsConfig } from "../shared/params/types"
+export type { SandboxSourceAuth, SandboxSourceCredentials } from "./auth"
 export { sandboxConfig } from "./config"
 export type {
   SandboxConfig,

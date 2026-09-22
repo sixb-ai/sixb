@@ -121,7 +121,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     })
   }
   const usageRecorder = runtime.usageRecorder
-  const abortSignal = AbortSignal.any([runtime.signal, sandboxReadiness.signal])
+  const abortSignal = AbortSignal.any([
+    runtime.signal,
+    sandboxReadiness.signal,
+    ...(context.environmentFailureSignal ? [context.environmentFailureSignal] : []),
+  ])
   let interruptedParts: readonly AgentMessagePart[] | undefined
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
@@ -130,6 +134,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }
     usageRecorder.assertHealthy()
     sandboxReadiness.throwIfFailed()
+    context.environmentFailureSignal?.throwIfAborted()
     if (runtime.timedOut()) {
       const completedAt = new Date()
       return finalizeInterruptedTurn({

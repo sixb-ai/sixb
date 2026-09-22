@@ -41,6 +41,9 @@ export class LocalSandboxFactory<const TParams extends ParamsConfig = Record<nev
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    if (options.requestCredentials !== undefined) {
+      throw new SandboxError("[Sandbox] local does not support secure request credentials.")
+    }
     const environment = sandboxCreationEnvironment(this.configuration, options)
     if (options.persistence !== undefined) {
       throw new SandboxError("[Sandbox] local does not support persistent sandboxes.")

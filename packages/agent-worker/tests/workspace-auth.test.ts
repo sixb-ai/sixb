@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import type { AgentWorkspaceCredentials, SandboxRequestCredential } from "@sixb/core"
+import type { SandboxRequestCredential, SandboxSourceCredentials } from "@sixb/core"
 import { WorkspaceAuthSession } from "../src/workspace-auth"
 
 function grant(token: string, lifetime = 3_600_000) {
   let revocations = 0
-  const value: AgentWorkspaceCredentials = {
+  const value: SandboxSourceCredentials = {
     requests: [
       {
         origin: "https://github.com",
@@ -21,7 +21,7 @@ function grant(token: string, lifetime = 3_600_000) {
   return { value, revocations: () => revocations }
 }
 
-function fixture(authorize: () => Promise<AgentWorkspaceCredentials>) {
+function fixture(authorize: () => Promise<SandboxSourceCredentials>) {
   const controller = new AbortController()
   const updates: (readonly SandboxRequestCredential[])[] = []
   const failures: Error[] = []
@@ -29,11 +29,6 @@ function fixture(authorize: () => Promise<AgentWorkspaceCredentials>) {
   const auth = new WorkspaceAuthSession({
     auth: { authorize },
     source: { type: "git", url: "https://github.com/acme/repo.git" },
-    sandbox: {
-      setRequestCredentials: async (value) => {
-        updates.push(value)
-      },
-    },
     signal: controller.signal,
     assertOwner: async () => {
       if (!owner) throw new Error("lost")
@@ -45,6 +40,14 @@ function fixture(authorize: () => Promise<AgentWorkspaceCredentials>) {
   })
   return {
     auth,
+    start: async () => {
+      updates.push(await auth.prepare())
+      auth.attach({
+        setRequestCredentials: async (value) => {
+          updates.push(value)
+        },
+      })
+    },
     updates,
     failures,
     controller,
@@ -58,7 +61,7 @@ describe("workspace auth lifecycle", () => {
   test("injects before use, removes access and revokes once on close", async () => {
     const token = grant("secret")
     const f = fixture(async () => token.value)
-    await f.auth.start()
+    await f.start()
     expect(f.updates).toEqual([token.value.requests])
     await f.auth.close()
     await f.auth.close()
@@ -81,7 +84,7 @@ describe("workspace auth lifecycle", () => {
     }
     const f = fixture(async () => (++calls === 1 ? old.value : fresh.value))
     try {
-      await f.auth.start()
+      await f.start()
       await renewal
       expect(f.updates).toEqual([old.value.requests, fresh.value.requests])
       expect(old.revocations()).toBe(1)
@@ -101,7 +104,7 @@ describe("workspace auth lifecycle", () => {
     const failed = new Promise<void>((resolve) =>
       f.controller.signal.addEventListener("abort", () => resolve(), { once: true })
     )
-    await f.auth.start()
+    await f.start()
     await failed
     await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
     expect(f.failures[0]?.message).not.toContain("raw provider secret")
@@ -111,9 +114,9 @@ describe("workspace auth lifecycle", () => {
 
   test("an aborted, late issuance is revoked without injection", async () => {
     const token = grant("late")
-    let resolve!: (value: AgentWorkspaceCredentials) => void
+    let resolve!: (value: SandboxSourceCredentials) => void
     let issued!: () => void
-    const pending = new Promise<AgentWorkspaceCredentials>((done) => {
+    const pending = new Promise<SandboxSourceCredentials>((done) => {
       resolve = done
     })
     const started = new Promise<void>((done) => {
@@ -123,20 +126,20 @@ describe("workspace auth lifecycle", () => {
       issued()
       return pending
     })
-    const start = f.auth.start()
+    const start = f.auth.prepare()
     await started
     f.controller.abort()
     resolve(token.value)
-    await start
+    await expect(start).rejects.toThrow("authentication could not be confirmed")
     await f.auth.close()
-    expect(f.updates).toEqual([[]])
+    expect(f.updates).toEqual([])
     expect(token.revocations()).toBe(1)
   })
 
   test("lost ownership revokes the token without changing the sandbox policy", async () => {
     const token = grant("owned")
     const f = fixture(async () => token.value)
-    await f.auth.start()
+    await f.start()
     f.loseOwnership()
     f.controller.abort()
     await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
@@ -144,24 +147,26 @@ describe("workspace auth lifecycle", () => {
     expect(token.revocations()).toBeGreaterThan(0)
   })
 
-  test("rejects a provider without secure injection before issuing a token", () => {
-    let called = false
-    expect(
-      () =>
-        new WorkspaceAuthSession({
-          auth: {
-            authorize: async () => {
-              called = true
-              return grant("never").value
-            },
-          },
-          source: { type: "git", url: "https://github.com/acme/repo.git" },
-          sandbox: {},
-          signal: new AbortController().signal,
-          assertOwner: async () => {},
-          onFailure: () => {},
-        })
-    ).toThrow("secure credential injection")
-    expect(called).toBe(false)
+  test("rejects a session that cannot renew initial credentials", async () => {
+    const token = grant("unsupported")
+    const f = fixture(async () => token.value)
+    await f.auth.prepare()
+    expect(() => f.auth.attach({})).toThrow("secure credential injection")
+    await f.auth.close()
+    expect(token.revocations()).toBe(1)
+  })
+
+  test("aborts initialization before credentials expire without a session handle", async () => {
+    // Regression proof: remove the unattached timer guard; this never signals failure.
+    const token = grant("initial", 60_100)
+    const f = fixture(async () => token.value)
+    const failed = new Promise<void>((resolve) =>
+      f.controller.signal.addEventListener("abort", () => resolve(), { once: true })
+    )
+    await f.auth.prepare()
+    await failed
+    await expect(f.auth.close()).rejects.toThrow("authentication could not be confirmed")
+    expect(f.updates).toEqual([])
+    expect(token.revocations()).toBe(1)
   })
 })

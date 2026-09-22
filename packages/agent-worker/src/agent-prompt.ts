@@ -61,6 +61,17 @@ export interface RenderAgentSystemPromptInput {
   readonly instructions?: string
   readonly skills: readonly AgentSkill[]
   readonly sandboxResetAt?: string
+  readonly workspace?: AgentWorkspacePromptContext
+}
+
+/** Only non-secret facts about the environment actually prepared for this run. */
+export interface AgentWorkspacePromptContext {
+  readonly workingDirectory: string
+  readonly source?: {
+    readonly type: "git"
+    readonly url: string
+    readonly authenticatedAccess?: "read" | "write"
+  }
 }
 
 export interface RenderWorkflowOutputFinalizerPromptInput {
@@ -156,11 +167,13 @@ function renderWorkspaceContext(workspace: AgentWorkspacePromptContext): string 
   return [
     `Working directory: ${quoteWorkspaceValue(workspace.workingDirectory)}`,
     "Files persist between runs in this conversation, subject to workspace retention.",
-    ...renderWorkspaceSource(workspace.source),
+    ...(workspace.source ? renderWorkspaceSource(workspace.source) : []),
   ].join("\n")
 }
 
-function renderWorkspaceSource(source: AgentWorkspacePromptContext["source"]): string[] {
+function renderWorkspaceSource(
+  source: NonNullable<AgentWorkspacePromptContext["source"]>
+): string[] {
   switch (source.type) {
     case "git":
       return [

@@ -35,6 +35,7 @@ import {
   type SandboxConfig,
   type SandboxFactory,
   type SandboxFileRecord,
+  type SandboxSourceAuth,
   type SixbErrorContext,
   SixbHost,
   type Storage,
@@ -1321,6 +1322,7 @@ function buildSixb(
     queues: new InMemoryQueues(),
     sandboxes: {
       configuration: options.sandboxConfig,
+      supportsRequestCredentials: sandboxes.supportsRequestCredentials,
       create: async (input) => {
         const sandbox = await sandboxes.create(input)
         return input?.environment
@@ -2208,6 +2210,8 @@ describe("AgentWorker", () => {
   ])("saves before finalizing and resumes without rerunning setup (Git source: %s)", async (withSource) => {
     // Regression proof: remove beforeFinalize in runAgentTurn; the stop count fails on the first run.
     const authEvents: string[] = []
+    const withAuth = withSource
+    const prompts: string[] = []
     let grants = 0
     const sandbox = Object.assign(new RecordingSandbox("persistent"), {
       setRequestCredentials: async (
@@ -2216,7 +2220,7 @@ describe("AgentWorker", () => {
         authEvents.push(credentials.length ? "inject" : "clear")
       },
     })
-    const auth: AgentWorkspaceAuth = {
+    const auth: SandboxSourceAuth = {
       authorize: async () => {
         grants++
         authEvents.push("issue")
@@ -2243,6 +2247,7 @@ describe("AgentWorker", () => {
     const names: string[] = []
     const policies: CreateSandboxOptions["network"][] = []
     const factory: SandboxFactory = {
+      supportsRequestCredentials: true,
       async create(options) {
         // Regression proof: omit persistence from workspace creation; the first run must fail.
         if (!options?.persistence) throw new Error("No ephemeral fallback")
@@ -2250,6 +2255,8 @@ describe("AgentWorker", () => {
         creates++
         policies.push(options.network)
         names.push(options.persistence.name)
+        if (options.requestCredentials)
+          await sandbox.setRequestCredentials(options.requestCredentials)
         return sandbox
       },
       async resume(name, options) {
@@ -2260,13 +2267,28 @@ describe("AgentWorker", () => {
         policies.push(options?.network)
         names.push(name)
         sandbox.status = "running"
+        if (options?.requestCredentials)
+          await sandbox.setRequestCredentials(options.requestCredentials)
         return sandbox
       },
     }
-    const host = buildSixb(answerModel(), new InMemoryBroker(), factory, {
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => {
+        prompts.push(JSON.stringify(options.messages))
+        return stream([
+          { type: "stream-start", warnings: [] },
+          { type: "text-start", id: "answer" },
+          { type: "text-delta", id: "answer", delta: "Done" },
+          { type: "text-end", id: "answer" },
+          finish("stop"),
+        ])
+      },
+    })
+    const host = buildSixb(model, new InMemoryBroker(), factory, {
       sandboxConfig: {
         params: {},
-        ...(withAuth ? { auth } : {}),
+        auth,
         resolve: async () => {
           resolutions++
           return {
@@ -2329,8 +2351,11 @@ describe("AgentWorker", () => {
       expect(prompts).toHaveLength(2)
       for (const prompt of prompts) {
         expect(prompt).toContain("<workspace>")
-        expect(prompt).toContain(`${sandbox.workingDirectory}/repository`)
-        expect(prompt).toContain(sourceUrl)
+        expect(prompt).toContain(
+          withSource ? `${sandbox.workingDirectory}/repository` : sandbox.workingDirectory
+        )
+        if (withSource) expect(prompt).toContain(sourceUrl)
+        else expect(prompt).not.toContain("Source (git)")
         expect(prompt).not.toContain("workspace-secret")
         if (withAuth) expect(prompt).toContain("Authenticated access: read.")
         else expect(prompt).not.toContain("Authenticated access:")
@@ -2404,6 +2429,8 @@ describe("AgentWorker", () => {
     const prompts: string[] = []
     let resumes = 0
     let resolutions = 0
+    let issued = 0
+    let revoked = 0
     const model = new WorkerTestModel({
       modelId: "mock-model",
       stream: async (options) => {
@@ -2421,13 +2448,20 @@ describe("AgentWorker", () => {
       model,
       new InMemoryBroker(),
       {
+        supportsRequestCredentials: true,
         async create(options) {
           names.push(options!.persistence!.name)
-          const session = new RecordingSandbox(`replacement-${sessions.length}`)
+          if (withSource)
+            expect(options?.requestCredentials?.[0]?.headers.Authorization).toBe(`token-${issued}`)
+          const session = Object.assign(new RecordingSandbox(`replacement-${sessions.length}`), {
+            setRequestCredentials: async () => {},
+          })
           sessions.push(session)
           return session
         },
-        async resume(name) {
+        async resume(name, options) {
+          if (withSource)
+            expect(options?.requestCredentials?.[0]?.headers.Authorization).toBe(`token-${issued}`)
           resumes++
           if (resumes === 1) throw new SandboxStateUnavailableError("expired")
           expect(name).toBe(names[1])
@@ -2437,6 +2471,25 @@ describe("AgentWorker", () => {
       },
       {
         sandboxConfig: {
+          auth: {
+            authorize: async () => {
+              issued++
+              return {
+                requests: [
+                  {
+                    origin: "https://example.com",
+                    path: "/repo.git/info/refs",
+                    method: "GET",
+                    headers: { Authorization: `token-${issued}` },
+                  },
+                ],
+                expiresAt: new Date(Date.now() + 3_600_000),
+                revoke: async () => {
+                  revoked++
+                },
+              }
+            },
+          },
           params: {},
           resolve: () => {
             resolutions++
@@ -2483,6 +2536,8 @@ describe("AgentWorker", () => {
       }
     }
     expect(resolutions).toBe(3)
+    expect(issued).toBe(withSource ? 3 : 0)
+    expect(revoked).toBe(issued)
     expect(sessions).toHaveLength(2)
     expect(names[0]).not.toBe(names[1])
     for (const session of sessions) {
@@ -2595,6 +2650,7 @@ describe("AgentWorker", () => {
       answerModel(),
       new InMemoryBroker(),
       {
+        supportsRequestCredentials: true,
         create: async (options) => {
           if (!options?.persistence) throw new Error("No ephemeral fallback")
           return sandbox
@@ -2648,6 +2704,69 @@ describe("AgentWorker", () => {
       ).rejects.toMatchObject({ code: "sandbox_execution_unavailable" })
       expect(sandbox.destroyed).toBe(false)
       if (failure !== "snapshot") expect(sandbox.status).toBe("stopped")
+    } finally {
+      await worker.stop()
+      completion.restore()
+    }
+  })
+
+  test.each([
+    "unsupported",
+    "denied",
+  ] as const)("rejects %s authentication before acquiring workspace state", async (failure) => {
+    // Regression proof: move auth preparation after acquire/create; state or provider counts change.
+    let provisions = 0
+    let authorizations = 0
+    let modelCalls = 0
+    const host = buildSixb(
+      answerModel(() => {
+        modelCalls++
+      }),
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: failure !== "unsupported",
+        create: async () => {
+          provisions++
+          throw new Error("should not provision")
+        },
+        resume: async () => {
+          provisions++
+          throw new Error("should not resume")
+        },
+      },
+      {
+        sandboxConfig: {
+          source: { type: "git", url: "https://github.com/acme/repo.git" },
+          auth: {
+            authorize: async () => {
+              authorizations++
+              throw new Error("private authorization detail")
+            },
+          },
+        },
+      }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const thread = await createTestSixb(host).agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Continue" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await completion.wait()
+      const run = await agentStorageOf(host).runs.getById({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+      })
+      expect(run?.status).toBe("failed")
+      expect(JSON.stringify(run)).not.toContain("private authorization detail")
+      expect(
+        (await agentStorageOf(host).threads.getById({ projectId: PROJECT_ID, id: thread.id }))
+          ?.sandboxState
+      ).toBeUndefined()
+      expect(provisions).toBe(0)
+      expect(modelCalls).toBe(0)
+      expect(authorizations).toBe(failure === "unsupported" ? 0 : 1)
     } finally {
       await worker.stop()
       completion.restore()

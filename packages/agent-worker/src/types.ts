@@ -88,6 +88,8 @@ export interface AgentExecutionContext extends AgentWorkerContext {
 }
 
 export interface AgentTurnContext {
+  /** Environment-owned failure (for example lost source credentials), not user cancellation. */
+  readonly environmentFailureSignal?: AbortSignal
   /** Persistent environments must confirm cleanup/save before any terminal write. */
   readonly beforeFinalize?: () => Promise<void>
   readonly id: string

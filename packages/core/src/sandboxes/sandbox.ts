@@ -87,6 +87,8 @@ export interface SandboxRequestCredential {
 
 /** Current execution defaults, supplied on both creation and resume, never recovered from files. */
 export interface SandboxSessionOptions {
+  /** Apply outside the guest before source/setup or resumed commands. Reject if unsupported. */
+  readonly requestCredentials?: readonly SandboxRequestCredential[]
   readonly workingDirectory?: string
   readonly env?: Readonly<Record<string, string>>
   readonly timeout?: number
@@ -161,6 +163,8 @@ export interface Sandbox {
  * Credentials and current authority must be supplied again, never inferred from saved files.
  */
 export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConfig> {
+  /** Supports initial and renewable host-only credentials on named persistent sessions. */
+  readonly supportsRequestCredentials?: boolean
   /** Common host-side environment recipe. Never a discovered Agent definition. */
   readonly configuration?: SandboxConfig<TParams>
   /** Create an ephemeral sandbox unless persistence is requested. Existing names must fail,

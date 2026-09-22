@@ -77,6 +77,29 @@ a safe place for credentials.
 For direct factory use, `create()` applies static source/setup. An explicit `environment` replaces
 both, including `{}` to skip them. Dynamic recipes require execution-resolved configuration.
 
+## Repository authentication
+
+For private GitHub repositories, configure host-side authentication on the Vercel factory:
+
+```ts
+import { githubApp } from "@sixb/connector-github/auth"
+import { VercelSandboxFactory } from "@sixb/sandboxes-vercel"
+
+const factory = new VercelSandboxFactory({
+  source: { type: "git", url: "https://github.com/acme/app.git" },
+  auth: githubApp({
+    appId: process.env.GITHUB_APP_ID!,
+    privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+  }),
+})
+```
+
+Install the App on the repository with Contents permission. Access defaults to read; set
+`source.access: "write"` and grant Contents write permission to allow pushing.
+Public repositories can omit `auth`. Managed credentials are not written into guest files.
+Use Git normally; Sixb refreshes access for each run and revokes it during normal cleanup.
+A worker crash cannot guarantee immediate revocation.
+
 ## Keep files across conversation runs
 
 Opt in when creating a thread:

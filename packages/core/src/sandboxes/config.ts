@@ -25,6 +25,7 @@ export function sandboxConfig<TParams extends ParamsConfig>(
     ...(options.network === undefined ? {} : { network: options.network }),
   })
   return Object.freeze({
+    ...(options.auth === undefined ? {} : { auth: options.auth }),
     ...environment,
     ...(options.params === undefined ? {} : { params: structuredClone(options.params) }),
     ...(options.resolve === undefined ? {} : { resolve: options.resolve }),
