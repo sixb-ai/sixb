@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import { EmbeddingModelResponseError } from "@sixb/core/models"
+import { vectorConfiguration } from "../../../packages/core/src/objects/vectors/profile"
 import { type AzureAIFoundryEmbeddingOptions, createAzureAIFoundry } from "../src"
 
 const project = "https://project.services.ai.azure.com/api/projects/test"
@@ -9,6 +10,7 @@ const name = "text-embedding-3-small"
 function setup(
   options: {
     modelName?: string
+    modelVersion?: string
     modelPublisher?: string
     capabilities?: Record<string, string>
     response?: () => Response | Promise<Response>
@@ -33,7 +35,7 @@ function setup(
             type: "ModelDeployment",
             name: "products",
             modelName: options.modelName ?? name,
-            modelVersion: "1",
+            modelVersion: options.modelVersion ?? "1",
             modelPublisher: options.modelPublisher ?? "OpenAI",
             capabilities: options.capabilities ?? { embeddings: "true" },
             sku: { name: "GlobalStandard" },
@@ -70,6 +72,7 @@ function setup(
   })
   return {
     provider,
+    identity: { name: options.modelName ?? name, version: options.modelVersion ?? "1" },
     calls,
     discoveryCount: () => discoveryCount,
     setPrice: (value: number) => {
@@ -94,13 +97,14 @@ function response(overrides: Record<string, unknown> = {}) {
 // project transport. This fails before returning vectors and accounting evidence.
 test("embeddings route to their resource with separate credentials and preserve usage", async () => {
   const f = setup()
-  const model = f.provider.embedding("products", { dimensions: 2 })
+  const model = f.provider.embedding("products", { model: f.identity, dimensions: 2 })
   expect(f.discoveryCount()).toBe(0)
   expect(model.definition).toEqual({
     kind: "embedding",
     providerId: "my-foundry",
     modelId: "products",
     dimensions: 2,
+    representation: { name, version: "1" },
   })
   const result = await model.embed({ texts: ["running shoes"] })
   expect(result).toMatchObject({
@@ -124,9 +128,11 @@ test("embeddings route to their resource with separate credentials and preserve 
 
 test("snapshot options and pricing; refresh changes future resolutions only", async () => {
   const f = setup()
-  const options = { dimensions: 2 }
+  const options = { model: { ...f.identity }, dimensions: 2 }
   const binding = f.provider.embedding("products", options)
   options.dimensions = 3
+  options.model.name = "changed"
+  options.model.version = "changed"
   const model = await binding.resolve()
   const result = await model.embed({ texts: ["x"] })
   expect(
@@ -164,7 +170,11 @@ test("reorders indexed results to match input order", async () => {
       }),
   })
   expect(
-    (await f.provider.embedding("products", { dimensions: 2 }).embed({ texts: ["a", "b"] })).vectors
+    (
+      await f.provider
+        .embedding("products", { model: f.identity, dimensions: 2 })
+        .embed({ texts: ["a", "b"] })
+    ).vectors
   ).toEqual([
     [1, 0],
     [0, 1],
@@ -186,7 +196,9 @@ test.each(
 )("rejects invalid vectors without losing billing evidence: %j", async (data) => {
   const f = setup({ response: () => response({ data }) })
   try {
-    await f.provider.embedding("products", { dimensions: 2 }).embed({ texts: ["x"] })
+    await f.provider
+      .embedding("products", { model: f.identity, dimensions: 2 })
+      .embed({ texts: ["x"] })
     throw new Error("Expected rejection")
   } catch (error) {
     expect(error).toBeInstanceOf(EmbeddingModelResponseError)
@@ -210,7 +222,9 @@ test("duplicate indices and a different response model are rejected", async () =
   ]) {
     const f = setup({ response: () => response(body) })
     await expect(
-      f.provider.embedding("products", { dimensions: 2 }).embed({ texts: ["a", "b"] })
+      f.provider
+        .embedding("products", { model: f.identity, dimensions: 2 })
+        .embed({ texts: ["a", "b"] })
     ).rejects.toBeInstanceOf(EmbeddingModelResponseError)
   }
 })
@@ -218,7 +232,9 @@ test("duplicate indices and a different response model are rejected", async () =
 test("missing or inconsistent usage is unknown, not zero", async () => {
   for (const usage of [undefined, { prompt_tokens: -1 }, { prompt_tokens: 3, total_tokens: 2 }]) {
     const f = setup({ response: () => response({ usage }) })
-    const model = await f.provider.embedding("products", { dimensions: 2 }).resolve()
+    const model = await f.provider
+      .embedding("products", { model: f.identity, dimensions: 2 })
+      .resolve()
     const result = await model.embed({ texts: ["x"] })
     expect(result.usage?.inputTokens).toBeUndefined()
     expect(model.costEstimator?.estimate({ usage: result.usage! })).toMatchObject({
@@ -231,7 +247,9 @@ test("unexpected usage meters prevent automatic pricing", async () => {
   const f = setup({
     response: () => response({ usage: { prompt_tokens: 12, total_tokens: 12, other_meter: 1 } }),
   })
-  const model = await f.provider.embedding("products", { dimensions: 2 }).resolve()
+  const model = await f.provider
+    .embedding("products", { model: f.identity, dimensions: 2 })
+    .resolve()
   const result = await model.embed({ texts: ["x"] })
   expect(result.usage?.inputTokens).toBe(12)
   expect(model.costEstimator?.estimate({ usage: result.usage! })).toMatchObject({
@@ -248,11 +266,13 @@ test("ada-002 validates its fixed dimensions without sending a dimensions parame
         data: [{ index: 0, embedding: Array(1536).fill(1) }],
       }),
   })
-  await f.provider.embedding("products", { dimensions: 1536 }).embed({ texts: ["x"] })
+  await f.provider
+    .embedding("products", { model: f.identity, dimensions: 1536 })
+    .embed({ texts: ["x"] })
   expect(JSON.parse(String(f.calls[0]!.init?.body))).not.toHaveProperty("dimensions")
-  await expect(f.provider.embedding("products", { dimensions: 2 }).resolve()).rejects.toThrow(
-    "1536 dimensions"
-  )
+  await expect(
+    f.provider.embedding("products", { model: f.identity, dimensions: 2 }).resolve()
+  ).rejects.toThrow("1536 dimensions")
 })
 
 test("unsupported models and dimensions fail before inference", async () => {
@@ -263,7 +283,9 @@ test("unsupported models and dimensions fail before inference", async () => {
     {},
   ]) {
     const f = setup(config)
-    await expect(f.provider.embedding("products", { dimensions: 1537 }).resolve()).rejects.toThrow()
+    await expect(
+      f.provider.embedding("products", { model: f.identity, dimensions: 1537 }).resolve()
+    ).rejects.toThrow()
     expect(f.calls).toHaveLength(0)
   }
 })
@@ -274,7 +296,7 @@ test("no implicit HTTP retries; provider errors redact resource credentials", as
       Response.json({ error: { message: "embedding-key", code: "busy" } }, { status: 503 }),
   })
   await expect(
-    f.provider.embedding("products", { dimensions: 2 }).embed({ texts: ["x"] })
+    f.provider.embedding("products", { model: f.identity, dimensions: 2 }).embed({ texts: ["x"] })
   ).rejects.toThrow("[REDACTED]")
   expect(f.calls).toHaveLength(1)
 })
@@ -293,7 +315,7 @@ test("cancellation bounds resource fetch and propagates its signal", async () =>
     },
   })
   const result = f.provider
-    .embedding("products", { dimensions: 2 })
+    .embedding("products", { model: f.identity, dimensions: 2 })
     .embed({ texts: ["x"], signal: controller.signal })
   await ready
   controller.abort(new Error("stopped"))
@@ -303,8 +325,8 @@ test("cancellation bounds resource fetch and propagates its signal", async () =>
 
 test("invalid local inputs and empty batches never perform network calls", async () => {
   const f = setup()
-  expect(() => f.provider.embedding("products", { dimensions: 0 })).toThrow()
-  const model = f.provider.embedding("products", { dimensions: 2 })
+  expect(() => f.provider.embedding("products", { model: f.identity, dimensions: 0 })).toThrow()
+  const model = f.provider.embedding("products", { model: f.identity, dimensions: 2 })
   await expect(model.embed({ texts: [" "] })).rejects.toThrow("nonempty")
   await expect(model.embed({ texts: Array(2049).fill("x") })).rejects.toThrow("2048")
   expect(await model.embed({ texts: [] })).toEqual({ vectors: [] })
@@ -314,6 +336,7 @@ test("invalid local inputs and empty batches never perform network calls", async
 test("explicit pricing can rate a model absent from the public catalog", async () => {
   const f = setup({ catalog: async () => Response.json({ azure: { models: {} } }) })
   const options: AzureAIFoundryEmbeddingOptions = {
+    model: f.identity,
     dimensions: 2,
     rateCard: { currency: "USD", unit: "million-tokens", input: "1", output: "0" },
   }
@@ -324,7 +347,9 @@ test("explicit pricing can rate a model absent from the public catalog", async (
 
 test("resource endpoint and credentials are explicitly required and validated", () => {
   const provider = createAzureAIFoundry({ endpoint: project, apiKey: "project-key" })
-  expect(() => provider.embedding("products", { dimensions: 2 })).toThrow("embeddings.endpoint")
+  expect(() =>
+    provider.embedding("products", { model: { name, version: "1" }, dimensions: 2 })
+  ).toThrow("embeddings.endpoint")
   for (const endpoint of [project, `${resource}/other`, `${resource}?key=secret`, "not-a-url"]) {
     expect(() =>
       createAzureAIFoundry({
@@ -341,7 +366,9 @@ test("a successful response with invalid JSON retains its request identifier", a
     response: () => new Response("bad json", { headers: { "apim-request-id": "azure-request" } }),
   })
   try {
-    await f.provider.embedding("products", { dimensions: 2 }).embed({ texts: ["x"] })
+    await f.provider
+      .embedding("products", { model: f.identity, dimensions: 2 })
+      .embed({ texts: ["x"] })
     throw new Error("Expected rejection")
   } catch (error) {
     expect(error).toBeInstanceOf(EmbeddingModelResponseError)
@@ -359,7 +386,9 @@ test("overflowing JSON numbers in a vector do not discard known usage", async ()
       ),
   })
   try {
-    await f.provider.embedding("products", { dimensions: 2 }).embed({ texts: ["x"] })
+    await f.provider
+      .embedding("products", { model: f.identity, dimensions: 2 })
+      .embed({ texts: ["x"] })
     throw new Error("Expected rejection")
   } catch (error) {
     expect(error).toBeInstanceOf(EmbeddingModelResponseError)
@@ -369,7 +398,9 @@ test("overflowing JSON numbers in a vector do not discard known usage", async ()
 
 test("missing catalog pricing does not prevent embedding but cannot admit a cost budget", async () => {
   const f = setup({ catalog: async () => Response.json({ azure: { models: {} } }) })
-  const model = await f.provider.embedding("products", { dimensions: 2 }).resolve()
+  const model = await f.provider
+    .embedding("products", { model: f.identity, dimensions: 2 })
+    .resolve()
   expect(
     model.costEstimator?.estimateReservation?.({ inputTokens: 12, outputTokens: 0 })
   ).toBeUndefined()
@@ -390,8 +421,11 @@ test("text-embedding-3-large accepts its full output size", async () => {
       }),
   })
   expect(
-    (await f.provider.embedding("products", { dimensions: 3072 }).embed({ texts: ["x"] }))
-      .vectors[0]
+    (
+      await f.provider
+        .embedding("products", { model: f.identity, dimensions: 3072 })
+        .embed({ texts: ["x"] })
+    ).vectors[0]
   ).toHaveLength(3072)
 })
 
@@ -400,4 +434,49 @@ test("deployment facts reject language calls even without catalog pricing", asyn
   await expect(f.provider("products").resolve()).rejects.toThrow("foundry.embedding()")
   expect(await f.provider.catalog.list()).toEqual([])
   expect(f.calls).toHaveLength(0)
+})
+
+test("deployment model and version must match the declaration before inference", async () => {
+  // Removal proof: omit the discovered identity comparison in resolve(); these calls succeed.
+  for (const actual of [{ modelName: "text-embedding-3-large" }, { modelVersion: "2" }]) {
+    const f = setup(actual)
+    const model = f.provider.embedding("products", { model: { name, version: "1" }, dimensions: 2 })
+    await expect(model.embed({ texts: ["x"] })).rejects.toThrow("expected text-embedding-3-small@1")
+    expect(f.calls).toHaveLength(0)
+  }
+})
+
+test("a returned model version cannot contradict the pinned representation", async () => {
+  const f = setup({ response: () => response({ model: `${name}-2` }) })
+  await expect(
+    f.provider.embedding("products", { model: f.identity, dimensions: 2 }).embed({ texts: ["x"] })
+  ).rejects.toBeInstanceOf(EmbeddingModelResponseError)
+})
+
+test("pins are validated without network access", () => {
+  const f = setup()
+  for (const model of [
+    { name: "", version: "1" },
+    { name, version: " " },
+  ]) {
+    expect(() => f.provider.embedding("products", { model, dimensions: 2 })).toThrow(
+      "expected model name and version"
+    )
+  }
+  expect(f.discoveryCount()).toBe(0)
+})
+
+test("deployment aliases get distinct profile fingerprints for different model pins", async () => {
+  const small = setup().provider.embedding("products", {
+    model: { name, version: "1" },
+    dimensions: 2,
+  })
+  const large = setup({ modelName: "text-embedding-3-large" }).provider.embedding("products", {
+    model: { name: "text-embedding-3-large", version: "1" },
+    dimensions: 2,
+  })
+  const fingerprint = (model: typeof small) => vectorConfiguration({ source: ["text"], model })
+  expect(fingerprint(small)).not.toBe(fingerprint(large))
+  expect(fingerprint(await small.resolve())).toBe(fingerprint(small))
+  expect(fingerprint(await large.resolve())).toBe(fingerprint(large))
 })

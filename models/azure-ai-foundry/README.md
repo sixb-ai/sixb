@@ -55,11 +55,14 @@ const foundry = createAzureAIFoundry({
 })
 
 export const productEmbedding = foundry.embedding("product-embedding", {
+  model: { name: "text-embedding-3-small", version: "1" },
   dimensions: 1536,
 })
 ```
 
 Register this binding under `models.embedding` and use it in an ObjectType's vector profile.
+Set `model` to your deployment's actual model name and version. A mismatch blocks inference;
+changing the declared model or version excludes previously stored vectors from search.
 The deployment name must exist in the project and refer to the same deployment on the configured
 resource. For connected deployments, supply the owning resource's endpoint and key.
 

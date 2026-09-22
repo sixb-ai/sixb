@@ -6,11 +6,15 @@ Sixb's execution session reserves and records calls around the adapter.
 ```text
 Binding (no I/O)
   → Discover project deployment with project credentials
-  → Validate OpenAI model and dimensions; pin reference or explicit pricing
+  → Verify declared model/version; validate dimensions and pin pricing
   → POST resource /openai/v1/embeddings with resource credentials
   → Capture usage and request ID; validate model and indexed vectors
 ```
 
+- The declared model name/version is copied into `definition.representation` before any I/O.
+  Profile fingerprints and runtime checks use it; discovery must agree before budget admission.
+  Discovery retains its configured cache lifetime. Response identity is checked against the pin,
+  but a response containing only a deployment alias cannot prove a hidden provider revision.
 - `resolve()` returns an immutable execution snapshot. Direct `embed()` pins its first successful
   resolution; catalog refresh affects future resolutions, not existing snapshots.
 - The catalog separates embedding entries before building language definitions. models.dev can
