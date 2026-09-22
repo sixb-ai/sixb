@@ -31,7 +31,13 @@ export function createGatewayEmbedding(
   return Object.freeze({
     providerId,
     modelId,
-    definition: Object.freeze({ kind: "embedding" as const, providerId, modelId, dimensions }),
+    definition: Object.freeze({
+      kind: "embedding" as const,
+      providerId,
+      modelId,
+      dimensions,
+      representation: Object.freeze({ name: modelId }),
+    }),
     async embed(input: EmbeddingModelRequest) {
       input.signal?.throwIfAborted()
       if (

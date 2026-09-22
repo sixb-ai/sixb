@@ -1,5 +1,5 @@
 import type { EmbeddingModelCatalog } from "../../models/catalog"
-import type { EmbeddingModel } from "../../models/embedding-model"
+import { type EmbeddingModel, sameEmbeddingModel } from "../../models/embedding-model"
 import type { OntologyRegistry } from "../../ontology"
 import { ObjectQueryExecutionError } from "../query/errors"
 import type { ObjectQuery, ObjectQueryVector } from "../query/ir"
@@ -51,7 +51,7 @@ function resolveProfileEmbeddingModel(
     provider: profile.model.providerId,
     modelId: profile.model.modelId,
   })?.model
-  if (!model || model.definition.dimensions !== profile.model.definition.dimensions) {
+  if (!model || !sameEmbeddingModel(model, profile.model)) {
     throw new ObjectQueryExecutionError(
       "embedding_model_unavailable",
       "Vector search requires the embedding model registered for its profile."

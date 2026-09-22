@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test"
 import { defineObjectType, type EmbeddingModel, OntologyRegistry, prop } from "../src"
+import { createModelCatalog } from "../src/models/catalog"
 import { assertEmbeddingModel, sameEmbeddingModel } from "../src/models/embedding-model"
 import { vectorConfiguration } from "../src/objects/vectors/profile"
+import { resolveVectorSearchText } from "../src/objects/vectors/resolve-query"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -51,7 +53,7 @@ test("representation changes exclude stored vectors even when the route and dime
       models: { embedding: [changed] },
       ...deps,
     }).objects(Changed)
-    expect((await next.query().vector("content", [1, 0], { k: 1 }).list()).objects).toEqual([])
+    expect((await next.query().vector("content", "search", { k: 1 }).list()).objects).toEqual([])
     expect(sameEmbeddingModel(original, changed)).toBe(false)
     expect(() => {
       createTestSixb({ ontology: [Product], models: { embedding: [changed] }, ...deps })
@@ -81,4 +83,30 @@ test("profile snapshots detach representation and explicit direct-model identity
       assertEmbeddingModel({ ...model, definition: { ...model.definition, representation } })
     ).toThrow("representation")
   }
+})
+
+test("text search refuses a different representation before inference", async () => {
+  // Removal proof: compare dimensions alone in resolveProfileEmbeddingModel; this calls inference.
+  const original = binding()
+  const changed = binding("large")
+  let calls = 0
+  changed.embed = async () => {
+    calls++
+    return { vectors: [[1, 0]] }
+  }
+  const Product = product(original)
+  await expect(
+    resolveVectorSearchText(
+      {
+        kind: "vector",
+        input: { kind: "start", objectTypeId: Product.id },
+        profile: "content",
+        vector: "search",
+        k: 1,
+      },
+      new OntologyRegistry({ sources: [Product] }),
+      createModelCatalog({ embedding: [changed] }).embedding
+    )
+  ).rejects.toThrow("registered for its profile")
+  expect(calls).toBe(0)
 })
