@@ -1,89 +1,81 @@
 # Schedules
 
-A schedule is a reusable, named definition of *when* work should run, never *what*. It can observe
-a cron expression or a typed event, then be attached to a sync, pipeline, or workflow.
+Schedules start syncs, pipelines, and workflows on a timer or in response to an event.
+Define and export them from `schedules/`, then attach them to work with `.when(...)`.
 
-## Defining a schedule
+## Run on a timer
 
-Build one with `defineSchedule(id)`. Use `.cron(...)` for time or `.on(events.*)` for an event. It
-returns an inert `ScheduleDefinition` that does nothing until something references it.
+Use `defineSchedule()` with a five-field cron expression:
 
 ```ts
-// schedules/erp.ts
+// schedules/invoices.ts
 import { defineSchedule } from "@sixb/core"
 
-export const hourlyErpSync = defineSchedule("hourly-erp-sync").cron("0 * * * *", {
+export const hourlyInvoices = defineSchedule("hourly-invoices").cron("0 * * * *", {
   timezone: "Europe/Paris",
 })
 ```
 
-| Method | Signature | Notes |
-| --- | --- | --- |
-| `.cron(expression, options?)` | `expression: string`, `options?: { timezone?: string }` | `timezone` is validated against `Intl.DateTimeFormat`; an invalid zone throws |
-| `.on(selector)` | A terminal `events.*` selector | Creates a typed [event schedule](./events.md) |
+The fields are `minute hour day-of-month month day-of-week`.
 
-The `id` must be unique and non-empty. An invalid cron expression or timezone throws at
-definition time, so a malformed schedule fails fast rather than silently never firing.
+| Expression | Runs |
+| --- | --- |
+| `*/5 * * * *` | Every five minutes |
+| `0 * * * *` | Every hour |
+| `0 8 * * 1-5` | Weekdays at 08:00 |
+| `0 0 1 * *` | The first day of each month at midnight |
 
-## Attaching with `.when(...)`
+Set an IANA timezone for predictable local times. If omitted, Sixb uses the host machine's
+local timezone. Invalid cron expressions and timezones fail at definition time.
 
-A schedule drives work only when a sync, pipeline, or workflow references it through
-`.when(...)`. Pass the schedule definition itself:
+## Attach to work
+
+Pass the schedule to a sync, pipeline, or workflow with `.when(...)`:
 
 ```ts
-// syncs/erp.ts
+// syncs/invoices.ts
 import { defineSync } from "@sixb/core"
-import { acmeErpConnector } from "../connectors/acme-erp"
-import { erpInvoicesDataset } from "../datasets/erp"
-import { hourlyErpSync } from "../schedules/erp"
+import { erp } from "../connectors/erp"
+import { invoices } from "../datasets/invoices"
+import { hourlyInvoices } from "../schedules/invoices"
 
-export const syncErpInvoices = defineSync("sync-erp-invoices")
-  .when(hourlyErpSync)
-  .from(acmeErpConnector)
+export const importInvoices = defineSync("import-invoices")
+  .when(hourlyInvoices)
+  .from(erp)
   .read((client) => client.listInvoices())
-  .intoDataset(erpInvoicesDataset)
+  .intoDataset(invoices)
 ```
 
-Every `.when(...)` receives a named schedule definition. Multiple schedules on the same target use
-OR semantics: any one can request a run.
+A schedule does nothing until attached. IDs must be unique. When a target has multiple schedules,
+any one can request a run.
 
-## Cron dialect
+## Run on an event
 
-Sixb uses a 5-field cron expression: `minute hour day-of-month month day-of-week`.
+Use `.on(...)` to select a typed event. Object and link events can also have a `.where(...)`
+condition on the event's data:
 
-| Field | Range | Notes |
-| --- | --- | --- |
-| minute | 0–59 | |
-| hour | 0–23 | |
-| day-of-month | 1–31 | |
-| month | 1–12 | |
-| day-of-week | 0–6 | 0 = Sunday; `7` is normalized to `0` |
+```ts
+// schedules/invoices.ts
+import { defineSchedule, events } from "@sixb/core"
+import { Invoice } from "../ontology/invoice"
 
-Each field supports `*` (any), lists (`1,15`), ranges (`9-17`), and steps (`*/5`, `0-30/10`).
-When *both* day-of-month and day-of-week are restricted (neither is `*`), a tick matches if
-*either* one matches (standard cron OR semantics); otherwise both must match.
-
-```txt
-0 8 * * *      every day at 08:00
-*/5 * * * *    every 5 minutes
-0 9-17 * * 1-5 every hour, 09:00–17:00, Mon–Fri
-0 0 1 * *      midnight on the 1st of each month
+export const highValueInvoice = defineSchedule("high-value-invoice")
+  .on(events.object(Invoice).created())
+  .where((event) => event.object.p.amount.gt(500))
 ```
 
-### Timezone
+Attach it with `.when(highValueInvoice)`, just like a timer. For workflows that need input,
+use `.when(schedule, mapper)` to turn event data into that input. See
+[workflow event schedules](../workflows/overview.md#start-a-workflow) for an example.
 
-Pass an IANA zone to `.cron(...)` (e.g. `"Europe/Paris"`, `"America/New_York"`) when a schedule
-must fire relative to a specific wall clock — say, an invoice rollup that runs at local
-midnight. Without it, the expression is evaluated against the host machine's local time.
+You can also select link changes, rule signals, action events, dataset updates, and sync or
+pipeline outcomes. Conditions are supported on object and link events only.
 
-## File location
+Event schedules start work when an event occurs. Use [rules](../rules/overview.md) when you need
+to track whether a condition is currently active or resolved.
 
-Export schedules from `schedules/`. A schedule runs only when a sync, pipeline, or workflow references it with `.when(...)`. See [Project structure](../fundamentals/project-structure.md).
+## Next steps
 
-## Related
-
-- [Syncs](../syncs/overview.md) — pull external data on a schedule
-- [Pipelines](../pipelines/overview.md) — transform datasets on a schedule
-- [Workflows](../workflows/overview.md) — run multi-step processes on a schedule
-- [Event schedules](./events.md) — react to typed domain events
-- [Project structure](../fundamentals/project-structure.md) — the full folder layout
+- [Syncs](../syncs/overview.md): Import data on a schedule.
+- [Pipelines](../pipelines/overview.md): Transform datasets on a schedule.
+- [Workflows](../workflows/overview.md): Coordinate steps and map event data into workflow input.

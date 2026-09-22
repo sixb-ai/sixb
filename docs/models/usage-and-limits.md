@@ -1,108 +1,50 @@
 # Usage and limits
 
-Direct generation, conversations, workflow agent tasks, vector indexing, and text-to-vector searches share model-call accounting and monthly limits.
+Sixb records model usage across generation, conversations, AI workflow steps, and embeddings.
+View consumption in Atlas and set monthly limits for your project or specific users and groups.
 
-## Automatic accounting
+## View usage
 
-```text
-Check limits → Reserve capacity → Call provider
-                                      ↓
-                         Store usage + cost + actuals
-                                      ↓
-                           Return / validate output
-```
+Open **AI usage** in Atlas to see token usage and costs. Filter by date, provider, or model, and
+open **Model calls** to inspect individual calls.
 
-```ts
-const { usage, cost, callId } = await sixb.models.language.generate({
-  prompt: "Summarize: ...",
-})
+Usage and cost depend on what the provider reports and the available pricing. Missing values
+remain unknown rather than being counted as zero.
 
-usage.inputTokens  // number | undefined
-usage.outputTokens // number | undefined
-cost.status        // "rated" | "reported" | "unpriceable"
-```
+## Set a monthly limit
 
-| Evidence | Stored valuation |
-| --- | --- |
-| Provider-reported charge | Selected cost; local estimate retained separately |
-| Local rate-card estimate | Selected cost with quantities, rates, and components |
-| Insufficient usage or pricing | `unpriceable`, with a reason |
-| Interrupted accepted stream | Available identifiers and unknown final meters |
+In **AI usage**, choose **Add limit** under **Monthly usage limits**:
 
-Stored priced valuations use `status: "rated"`; their price source distinguishes provider reports from estimates. Totals count each call once. Unknown usage or cost is never zero.
+1. Choose the project, user, service account, or group the limit applies to.
+2. Select **Cost** or **Tokens** and enter the monthly amount.
+3. Choose **Add limit** to save it.
 
-```jsonc
-{ "currency": "USD", "amountNanos": "1250000" } // $0.00125
-```
+Limits reset at the start of each UTC calendar month. Editing a limit does not reset consumption.
+Every applicable limit must allow a call before it starts. Once a limit is reached, further calls
+are blocked.
 
-## Read model calls
+Limits control whether calls can start. They are not hard caps on a provider's bill, because a
+call's actual usage can exceed its estimate. Use
+[`maxOutputTokens`](./generation.md#choose-a-model) to bound the output of an individual call.
 
-In Atlas, open **AI usage → Model calls**. Server-side integrations can read the ledger:
+## Embeddings
 
-```ts
-const page = await host.storage.aiCosts!.listModelCalls({
-  projectId: host.id,
-  from: new Date("2026-09-01T00:00:00Z"),
-  to: new Date("2026-10-01T00:00:00Z"),
-})
+[Vector indexing and semantic search](../objects/querying.md#search-by-meaning) use the same
+usage accounting and limits. A completed model call can count toward usage even if its result
+cannot be saved. Calling a provider's `embed()` method directly bypasses these controls.
 
-for (const call of page.items) {
-  console.log(call.usage.callId, call.usage.usage, call.cost)
-}
-```
+Automatic projection indexing uses the project's budget. If the budget is exhausted, embedding
+generation waits while projections continue updating objects.
 
-| HTTP endpoint | Returns |
-| --- | --- |
-| `GET /api/ai/accounting/overview` | Project accounting totals |
-| `GET /api/ai/model-calls` | Paginated calls; filter by `executionId` for one execution |
-| `GET /api/ai/model-call-groups` | Execution groups for requests, actions, workflows, and Agents; includes matching subagent calls |
-
-Date, provider, model, and valuation filters apply to calls. Native provider identifiers are retained when supplied.
-
-## Monthly limits
-
-Every enabled policy matching the project, requester, or admitted requester groups must allow the call.
-
-| Meter | Amount |
-| --- | --- |
-| `tokens.total` | Non-negative safe integer: input + output tokens |
-| `cost.catalogEstimated` | Exact USD nanounits |
-
-Periods are UTC calendar months. Changing or recreating a policy does not reset recorded consumption.
-
-Requester groups are captured on the durable execution at admission. Child executions inherit that snapshot; worker redeliveries reuse it. A new user-requested run gets a new admission snapshot. Authorization still checks current permissions.
-
-```jsonc
-// POST /api/ai/limits — $100/month for the finance group
-{
-  "subject": { "type": "group", "id": "finance" },
-  "limit": {
-    "meter": "cost.catalogEstimated",
-    "amount": { "currency": "USD", "amountNanos": "100000000000" }
-  }
-}
-```
-
-```jsonc
-// POST /api/ai/limits — 1 million tokens/month for the project
-{
-  "subject": { "type": "project" },
-  "limit": { "meter": "tokens.total", "amount": 1000000 }
-}
-```
-
-| HTTP endpoint | Purpose |
-| --- | --- |
-| `GET /api/ai/limits` | List policies |
-| `GET /api/ai/limits/status` | Actual, reserved, unknown, remaining capacity, and `resetAt` |
-| `GET /api/ai/limits/subjects` | Find groups, users, and service accounts |
-| `POST /api/ai/limits` | Create a policy |
-| `PUT /api/ai/limits/:limitId` | Change its amount or enabled state |
-| `DELETE /api/ai/limits/:limitId` | Delete a policy |
+Keep the [workers](../deployment/overview.md#start-services) running so accounting can recover
+from temporary storage failures. The CLI includes the required worker for embeddings-only projects,
+without requiring a sandbox.
 
 ## Permissions
 
-The current permission reference is `agent.usage`; it covers accounting for all model calls.
+Grant access to view usage and manage limits through a [role](../auth/authorization.md):
+
+File: `security/roles/ai-usage-operators.ts`
 
 ```ts
 import { agent, can, defineRole } from "@sixb/core"
@@ -114,69 +56,5 @@ export const aiUsageOperators = defineRole("ai-usage.operators", {
 })
 ```
 
-| Grant | Access |
-| --- | --- |
-| `can.observe(agent.usage)` | Accounting, consumption, policy definitions |
-| `can.manage(agent.usage)` | Policy definitions, subject lookup, policy changes |
-| `can.run(agent)` | Conversation access; no accounting or policy-management access |
-
-## Admission and failures
-
-| Condition | Result |
-| --- | --- |
-| Insufficient remaining capacity | `ai.usage_limit_exceeded` |
-| Missing safe estimate, incomplete accounting, or unavailable limit storage | `ai.usage_limit_unavailable` |
-| Ambiguous billed attempt | Capacity remains reserved as unknown until reconciled |
-| Concurrent calls | Reserve capacity atomically |
-
-HTTP limit errors return `429`; exhausted responses include `Retry-After`.
-
-Reservations estimate input plus the request's output allowance. Actual usage can exceed that estimate; Sixb records the full amount and blocks later calls when capacity is exhausted. Per-call ceilings are configured separately through [`maxOutputTokens`](./generation.md).
-
-Cost limits require `model.costEstimator.estimateReservation`. Built-in providers supply it; custom models without it can use token limits. The cost meter reserves local estimates and records the selected call valuation, including provider charges when available.
-
-## Embeddings
-
-Both object operations are accounted automatically, using the model registered for the profile:
-
-```ts
-await sixb.objects(Product).byId(id).vector("content").index()
-await sixb.objects(Product).query().vector("content", "light running shoes", { k: 10 }).list()
-```
-
-Object permissions are checked before inference. Embeddings reserve input tokens only and request
-cancellation after 30 seconds. Sixb does not retry inference automatically.
-
-A completed call counts toward usage even if its vector is invalid or the object changes before
-the vector is saved. Missing usage or pricing remains unknown, never zero.
-
-From a webhook handler, dispatch an action to index or search vectors. Calling a provider's
-`model.embed()` directly bypasses Sixb accounting.
-
-Embeddings generated during projections count toward the project's AI budgets. When a budget is
-exhausted, embedding generation pauses while projections continue.
-
-## Recovery
-
-Run the recovery consumer to finish accounting after temporary storage failures. Recovery never
-repeats a model call.
-
-| Deployment | Recovery consumer |
-| --- | --- |
-| `bun sixb dev` / CLI cohosting | The configured Agent worker handles recovery |
-| Embedded | Start `AgentWorker`; embeddings-only projects need neither a sandbox nor an API origin |
-
-```ts
-import { AgentWorker } from "@sixb/agent-worker"
-
-// Embeddings-only project. Projects with agents also need their sandbox and API origin.
-const worker = new AgentWorker(host, {})
-await worker.start()
-
-// During shutdown:
-await worker.stop()
-```
-
-See [Built-in Agent](./built-in-agent.md) for worker setup.
-
-For language models, the ledger covers accepted streams. For embeddings, failed attempts are recorded with unknown usage when no response is available. Process crashes before recording can still leave billing outside these guarantees. Sixb limits are admission controls, not provider-invoice hard stops.
+`can.observe(agent.usage)` allows viewing usage and limits. `can.manage(agent.usage)` allows
+creating and changing limits. Permission to use the agent does not include either grant.

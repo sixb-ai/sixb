@@ -1,288 +1,77 @@
 # Deployment
 
-Sixb runs the same project in two shapes. In development one process co-hosts
-everything on in-memory providers. In production you split the work into focused
-role processes that all load the same config and point at the same durable
-providers.
+Deploy a Sixb project as services that share the same configuration and persistent providers. The CLI builds your project and starts each service.
 
-This page is the operator's mental model: dev vs production, the role commands,
-and the execution model that moves every async job. What gets scheduled and
-dispatched is documented under [schedules](../schedules/overview.md),
-[data](/#explore-the-code), [rules](../rules/overview.md), and
-[workflows](../workflows/overview.md).
+## Prepare your configuration
 
-## Dev vs production
+Use shared [infrastructure providers](../infrastructure/overview.md) for storage, datasets, files, events, and queues. In-memory providers cannot share state between production processes.
 
-`sixb dev` boots one process that hosts the API, the [Atlas](#atlas-admin-ui)
-admin UI, the custom app (if present), and every background runtime —
-orchestrator, scheduler, rules, and all queue workers. It runs in `NODE_ENV=development` using your configured providers. In-memory providers work
-here because the roles share a process:
+Configure [authentication](../auth/authentication.md), and provide the same project ID, credentials, and OAuth encryption key to each service. Keep these settings in your deployment environment.
 
-```ts
-// sixb.config.ts — local development
-import { LocalBlobStorage } from "@sixb/blob-local"
-import { createSixb, InMemoryBroker, InMemoryQueues } from "@sixb/core"
-import { LocalLakeStorage } from "@sixb/lake-local"
-import { SqliteStorage } from "@sixb/sqlite"
+## Configure public origins
 
-export const sixb = await createSixb({
-  id: "northline",
-  broker: new InMemoryBroker(),
-  storage: new SqliteStorage({ path: ".sixb" }),
-  lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
-  blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
-  queues: new InMemoryQueues(),
-})
-```
-
-Production splits those responsibilities across separate processes ("roles").
-Every role loads the same config, but each starts only part of the runtime.
-Because the roles are now separate processes, in-memory providers no longer work
-— there is no shared memory between them. Each role must point at **durable,
-shared providers**: a real `storage`, `lakeStorage`, `blobStorage`, `broker`, and
-a queue provider that can be shared across processes.
-
-```ts
-// sixb.config.ts — production
-import { S3BlobStorage } from "@sixb/blob-s3"
-import { NatsBroker } from "@sixb/broker-nats"
-import { createSixb } from "@sixb/core"
-import { DuckLakeStorage } from "@sixb/ducklake"
-import { PostgresStorage } from "@sixb/pg"
-import { BullMqQueues } from "@sixb/queues-bullmq"
-
-export const sixb = await createSixb({
-  id: "acme-corp",
-  broker: new NatsBroker({ connection: { servers: process.env.NATS_URL } }),
-  storage: new PostgresStorage({ connectionString: process.env.DATABASE_URL }),
-  lakeStorage: new DuckLakeStorage({ /* ... */ }),
-  blobStorage: new S3BlobStorage({ bucket: process.env.BLOB_BUCKET }),
-  queues: new BullMqQueues({ connection: process.env.REDIS_URL }),
-})
-```
-
-`sixb worker` and `sixb worker-group` refuse to start when `queues` is
-`InMemoryQueues`:
-
-```txt
-[SixbWorker] `sixb worker` requires a queue provider that can be shared across
-processes. `InMemoryQueues` is for `sixb dev` only.
-```
-
-|            | `sixb dev`              | Production roles                   |
-| ---------- | ----------------------- | ---------------------------------- |
-| Processes  | one                     | many, one per role                 |
-| `NODE_ENV` | `development`           | `production`                       |
-| Providers  | in-memory               | durable + shared across processes  |
-| Queues     | `InMemoryQueues`        | shared queue provider              |
-| Use for    | local iteration, tests  | real workloads, scaling, isolation |
-
-## Role commands
-
-Each role is a `sixb` subcommand that runs in `NODE_ENV=production`. All accept
-`--entry <path>` to load a config other than `sixb.config.ts`.
-
-| Command                        | Role                                                  |
-| ------------------------------ | ---------------------------------------------------- |
-| `sixb api`                     | HTTP/WebSocket API server                            |
-| `sixb atlas`                   | Built-in admin UI server                             |
-| `sixb app`                     | Custom app server                                    |
-| `sixb orchestrator`            | Event-to-queue dispatcher                            |
-| `sixb scheduler`               | Schedule producer (emits `schedule.triggered`)       |
-| `sixb rules`                   | Evaluates [rules](../rules/overview.md)              |
-| `sixb worker <type>`           | Runs one queue worker                                 |
-| `sixb worker-group [types...]` | Runs several queue workers in one process            |
-
-The worker `<type>` is one of `sync`, `action`, `agent`, `pipeline`, `projection`,
-or `workflow`:
+Set the public addresses of the API, Atlas, and your custom app:
 
 ```bash
-sixb worker sync
-sixb worker projection
+export SIXB_API_PUBLIC_ORIGIN=https://api.example.com
+export SIXB_ATLAS_PUBLIC_ORIGIN=https://atlas.example.com
+export SIXB_APP_PUBLIC_ORIGIN=https://app.example.com
 ```
 
-`sixb worker-group` runs several in one process. With no types it starts every
-worker type that has registered work in the config:
+Omit the app origin if your project has no custom app. Origins contain only the scheme, host, and optional port, with no path. They configure browser access and authentication redirects; they are separate from the host and port a process binds to.
+
+Serve these public origins over HTTPS. Atlas and the custom app connect to the API; they do not serve API routes themselves.
+
+## Build and validate
+
+Build the runtime and browser assets, then validate the deployed configuration. This example runs migrations as a separate release step:
 
 ```bash
-# explicit
-sixb worker-group sync pipeline projection
-
-# auto: every worker type with registered definitions
-sixb worker-group
+bun sixb build
+bun sixb db migrate --entry .sixb/dist/sixb.config.js
+bun sixb check --entry .sixb/dist/sixb.config.js
+bun sixb lake check --entry .sixb/dist/sixb.config.js
 ```
 
-Agent turns have a 10-minute wall-clock budget by default. Override it for `sixb dev`,
-`sixb worker agent`, or a worker group containing `agent` with a duration such as `30s`, `10m`,
-or `1h`; the flag wins over the environment:
+Run these with the production provider settings. `check` verifies project configuration and provider health; `lake check` validates dataset definitions against the lake catalog.
 
-```bash
-sixb worker agent --agent-turn-timeout 20m
-SIXB_AGENT_TURN_TIMEOUT=20m sixb worker-group
-```
+Deploy `.sixb/dist`, installed dependencies, and any files your application reads at runtime. Start services from the project root. Production commands use `.sixb/dist/sixb.config.js` when present; use `--entry` for a different build location.
 
-Queue workers execute a bounded number of jobs in each process. Agent workers default to `8`;
-sync, pipeline, projection, workflow, and action workers default to `1`. Set a scalar count for a
-single worker process:
+## Start services
 
-```bash
-sixb worker agent --concurrency 8
-sixb worker sync --concurrency 2
-```
+Run each needed command as a separate managed process or container:
 
-For `sixb worker-group` and `sixb dev`, repeat `--concurrency <type>=<count>` so each lane keeps an
-independent resource budget:
+| Command | Purpose |
+| --- | --- |
+| `bun sixb api` | Serve the HTTP API, WebSockets, and API docs. |
+| `bun sixb atlas` | Serve Atlas. |
+| `bun sixb app` | Serve your custom app, if present. |
+| `bun sixb orchestrator` | Dispatch event-triggered work. |
+| `bun sixb worker-group` | Run workers for the project's registered work. |
+| `bun sixb scheduler` | Run cron schedules, if used. |
+| `bun sixb rules` | Evaluate rules, if used. |
 
-```bash
-sixb worker-group sync agent --concurrency sync=2 --concurrency agent=8
-sixb dev --concurrency agent=1
-```
+Keep at least one API process running for event recovery and maintenance. Start workers and rules before the orchestrator and scheduler. On shutdown, stop producers before workers.
 
-The flag wins over `SIXB_<TYPE>_WORKER_CONCURRENCY`, such as
-`SIXB_AGENT_WORKER_CONCURRENCY=8`. Action execution remains serial and rejects a concurrency
-override. Concurrency is jobs inside one process; use deployment replicas to run more worker
-processes.
+In development, `bun sixb dev` starts these services together. Use the separate commands in production so your process manager can restart and scale them independently.
 
-Each agent worker also reserves four independent slots for headless child agents. This prevents a
-parent waiting for delegated work from occupying the capacity needed to execute that work.
+## Migrations
 
-A role process is **idle**, not an error, when it has nothing to do — an
-orchestrator with no routes, a rules process with no rules, or a worker group
-with no registered worker types prints a warning and stays running.
+API, worker, scheduler, orchestrator, and rules processes apply storage migrations at startup. If your release step already ran them, pass `--no-migrate` or set `SIXB_SKIP_MIGRATION=1` on those processes.
 
-## Public origins
+PostgreSQL serializes concurrent migrations. With SQLite, run migrations separately before starting multiple processes against the same file.
 
-A role that talks to a browser refuses to start in production without the origins it
-needs. Every flag has an environment equivalent; the flag wins.
+## Scaling and health
 
-| Role                | Required                                       | Also required when                                     |
-| ------------------- | ---------------------------------------------- | ------------------------------------------------------ |
-| `sixb api`          | `--api-public-origin`, `--atlas-public-origin` | `--app-public-origin`, with a built `app/`             |
-| `sixb atlas`        | `--api-public-origin`                          | —                                                      |
-| `sixb app`          | `--api-public-origin`                          | —                                                      |
-| `sixb worker agent` | `--api-public-origin`                          | —                                                      |
-| `sixb worker-group` | none                                           | `--api-public-origin`, with `agent` in the group       |
-| everything else     | none                                           | —                                                      |
+API and browser services can run multiple replicas. Queue workers can also scale through replicas or [concurrency settings](../cli/overview.md#worker-options).
 
-A group refuses to start whole, so the origin is required as soon as `agent` is one of its
-workers — including when the group selected it for you from a project that registers agents.
+Run only **one orchestrator, one scheduler, and one rules process** per project. Multiple instances can duplicate work.
 
-| Flag                    | Environment variable       |
-| ----------------------- | -------------------------- |
-| `--api-public-origin`   | `SIXB_API_PUBLIC_ORIGIN`   |
-| `--atlas-public-origin` | `SIXB_ATLAS_PUBLIC_ORIGIN` |
-| `--app-public-origin`   | `SIXB_APP_PUBLIC_ORIGIN`   |
+Configure your platform's health checks against the API:
 
-`sixb api` is the strict one because those origins are its CORS allowlist: each browser
-origin maps to one auth audience, and an unlisted one is rejected. `sixb atlas` and
-`sixb app` only display their own origin, so they start without it and print the address
-they bound instead — set it when you want the startup panel to show the public URL.
+| Endpoint | Purpose |
+| --- | --- |
+| `/health` | Check that the API process is alive. |
+| `/ready` | Check that storage is reachable and its schema is current. Returns `503` when unavailable. |
 
-An origin is scheme, host, and port, nothing else: `https://api.acme.example.com`. A path,
-a query string, or a fragment is rejected.
-
-## Storage migrations
-
-The six roles that touch the schema — `api`, `rules`, `scheduler`, `orchestrator`,
-`worker`, `worker-group` — bring it up to date at startup, so a forgotten migration
-cannot surface as a missing column on the first request. `atlas` and `app` serve a
-browser bundle and hold no DDL grant, so they never migrate.
-
-Run it as its own deploy stage when you want the schema change separated from the
-rollout:
-
-```bash
-sixb db migrate
-sixb api --no-migrate     # or SIXB_SKIP_MIGRATION=1
-```
-
-Postgres serializes concurrent migrators on an advisory lock, so replicas starting
-together are safe. **SQLite has no cross-process lock**: migrate it as its own step and
-start the roles with `--no-migrate`.
-
-## Background work and recovery
-
-Workers process queued runs. Inspect their status, inputs, outputs, and errors in Atlas.
-With durable providers, unfinished jobs can be reclaimed after a worker exits. Whether a particular
-run can be retried safely depends on its primitive and any external side effects.
-
-Run at least one API process per project: it recovers pending ontology event delivery and performs
-retention cleanup. A broker outage can delay subscribers without rolling back committed objects.
-Subscribers should tolerate duplicate events.
-
-## Startup order
-
-Roles start **consumers before producers** and shut down in reverse. This
-guarantees that by the time anything emits an event or enqueues a job, the role
-that handles it is already listening. The co-hosted dev runtime applies this
-automatically; when bringing up separate processes, follow the same order:
-
-1. **Consumers first** — rules, then the action, agent, projection,
-   pipeline, workflow, and sync workers.
-2. **Producers last** — the orchestrator (subscribes and enqueues), then the
-   scheduler (emits triggers).
-
-On shutdown the order reverses: the scheduler stops producing first, the
-orchestrator drains pending dispatches, then workers and rules drain
-in turn.
-
-## Atlas admin UI
-
-Atlas is the built-in browser admin UI. It serves the UI shell and static assets
-and injects the API origin and auth audience at runtime; the browser then
-authenticates against the API server. Atlas does **not** serve API routes —
-`/api`, `/auth`, `/ws`, and `/docs` belong to the
-[API server](../server/overview.md).
-
-In `sixb dev`, Atlas is co-hosted automatically. In production, run it as its own
-role pointed at the API origin:
-
-```bash
-sixb atlas --api-public-origin https://api.acme.example.com
-```
-
-## A minimal production topology
-
-A typical deployment runs each role as a separate process, all loading the same
-config against shared durable providers:
-
-```bash
-export SIXB_API_PUBLIC_ORIGIN=https://api.acme.example.com
-export SIXB_ATLAS_PUBLIC_ORIGIN=https://atlas.acme.example.com
-
-sixb api            # HTTP/WS API
-sixb atlas          # admin UI
-sixb orchestrator   # event -> queue dispatch
-sixb scheduler      # cron schedule triggers
-sixb rules          # rule evaluation
-sixb worker-group   # all registered queue workers
-```
-
-## Scaling roles
-
-The data plane scales horizontally. The control plane does not: in the pre-0.1 line the
-orchestrator, scheduler, and rules roles must each run as a **single process**.
-
-| Role                               | Replicas | Why                                                    |
-| ---------------------------------- | -------- | ------------------------------------------------------ |
-| `sixb api`                         | many     | outbox claims are lease-fenced, so drains never overlap |
-| `sixb atlas`, `sixb app`           | many     | they serve a static bundle                              |
-| `sixb worker`, `sixb worker-group` | many     | each job is claimed by exactly one worker               |
-| `sixb orchestrator`                | **one**  | a second process dispatches the same event twice        |
-| `sixb scheduler`                   | **one**  | a second process fires the same occurrence twice        |
-| `sixb rules`                       | **one**  | reconciliation has no cross-process lease               |
-
-Running two of a single-process role does not corrupt data — it duplicates runs.
-
-Worker concurrency and replicas multiply. For example, three agent-worker replicas at concurrency
-`8` can run up to 24 agent jobs. Size that total for model-provider limits, sandbox capacity,
-connector quotas, and storage write contention.
-
-## Related
-
-- [Runtime](../runtime/overview.md) — how `createSixb()` discovers and wires a project
-- [Infrastructure](../infrastructure/overview.md) — provider choices for storage, queues, and the broker
-- [Events](../events/overview.md) — the domain events that drive the execution model
-- [Schedules](../schedules/overview.md) — cron and event triggers
-- [Data flow](/#explore-the-code) — syncs, pipelines, and projections
-- [Workflows](../workflows/overview.md) — workflow runs and interventions
+Inspect failed runs in Atlas and configure [failure notifications](../logging/overview.md#report-failures). A failed external operation may have partially completed; check its outcome before retrying.

@@ -1,60 +1,51 @@
 # Incremental syncs
 
-Read only new source data by saving a checkpoint after each successful run. Use append for event streams and merge for a current view of keyed records.
+An incremental sync reads new or changed data since its last successful run. A checkpoint saves
+where to resume.
 
-## Incremental syncs with checkpoints
+## Save a checkpoint
 
-For append sources you usually want each run to read only what is new. Call `.checkpoint<T>()` to
-opt into a typed checkpoint. The read context then exposes the last `checkpoint` value and a
-`setCheckpoint(next)` method to record progress for the next run.
+Call `.checkpoint<T>()` to define the saved value. On the first run, `checkpoint` is `undefined`.
+Pass it to the source API to resume reading, then call `setCheckpoint()` with the new position.
+
+This connector returns pages of invoice events with a cursor for each page. The sync appends the
+rows and records the cursor after each page:
 
 ```ts
-export const syncErpInvoiceEvents = defineSync("sync-erp-invoice-events", { mode: "append" })
-  .when(hourlyErpSync)
-  .checkpoint<{ lastId: number }>()
-  .from(acmeErpConnector)
-  .read(async function* (erp, context) {
-    const since = context.checkpoint?.lastId ?? 0
-    const rows = await erp.listInvoiceEvents({ sinceId: since })
+// syncs/invoice-events.ts
+import { defineSync } from "@sixb/core"
+import { erp } from "../connectors/erp"
+import { invoiceEvents } from "../datasets/invoice-events"
 
-    let lastId = since
-    for (const row of rows) {
-      lastId = row.id
-      yield row
+export const importInvoiceEvents = defineSync("import-invoice-events", { mode: "append" })
+  .checkpoint<{ cursor: string }>()
+  .from(erp)
+  .read(async function* (client, { checkpoint, setCheckpoint }) {
+    for await (const page of client.invoiceEventPages({ cursor: checkpoint?.cursor })) {
+      yield* page.rows
+      setCheckpoint({ cursor: page.cursor })
     }
-
-    context.setCheckpoint({ lastId })
   })
-  .intoDataset(erpInvoiceEventsDataset)
+  .intoDataset(invoiceEvents)
 ```
 
-Without `.checkpoint<T>()`, `context.checkpoint` is `undefined` and there is no `setCheckpoint`.
+Sixb saves the latest checkpoint after the run succeeds, including runs that return no new rows.
+A failed run keeps the previous checkpoint. Use a new sync ID if you change its connector.
 
-## Empty and unchanged runs
+The mode controls how rows are written. The checkpoint controls where your code resumes reading;
+Sixb does not filter the source data for you.
 
-Successful runs save their next checkpoint even when no new dataset version is created.
-Only a new version triggers dataset-update schedules.
+## Update and delete records
 
-| Result | Version behavior |
-| --- | --- |
-| Append with no rows | Keeps the existing version; does not initialize an empty dataset. |
-| First successful snapshot with no rows | Creates an addressable empty version and emits its update event. |
-| Empty snapshot, without `sequenceBy` | Replaces existing rows with an empty version; later identical empty snapshots reuse it. |
-| Empty snapshot, with `sequenceBy` | Retains existing rows, including a concurrent writer's rows; reuses that version. |
-| Merge with no effective changes | Reuses the version; an initial delete of an absent key without sequencing creates none. |
-| A new deletion sequence | Creates a version even if the key was already absent. |
-
-Pipelines and projections can consume the initialized empty snapshot. A replacing empty snapshot
-withdraws the projection's source claims; it does not automatically delete ontology objects.
-
-## Merge changes
-
-Use merge when the source exposes ordered row changes and the dataset should remain a current view:
+Use `mode: "merge"` to keep a current view of records. The dataset needs a primary key with non-null
+string values. Each `change.upsert()` supplies a complete row; `change.delete()` supplies only the
+primary-key fields.
 
 ```ts
-import { change, col, defineDataset, defineSync } from "@sixb/core"
+// datasets/invoices.ts
+import { col, defineDataset } from "@sixb/core"
 
-const erpInvoicesDataset = defineDataset("erp.invoices", {
+export const invoices = defineDataset("erp.invoices", {
   schema: [
     col("invoiceId", "string"),
     col("status", "string"),
@@ -62,40 +53,39 @@ const erpInvoicesDataset = defineDataset("erp.invoices", {
   ],
   primaryKey: "invoiceId",
 })
+```
 
-export const syncErpInvoices = defineSync("sync-erp-invoices", { mode: "merge" })
+Read changes in source order and record the cursor after yielding each change:
+
+```ts
+// syncs/invoices.ts
+import { change, defineSync } from "@sixb/core"
+import { erp } from "../connectors/erp"
+import { invoices } from "../datasets/invoices"
+
+export const importInvoices = defineSync("import-invoices", { mode: "merge" })
   .checkpoint<{ cursor: string }>()
-  .from(acmeErpConnector)
-  .read(async function* (erp, context) {
-    for await (const event of erp.changesSince(context.checkpoint?.cursor)) {
+  .from(erp)
+  .read(async function* (client, { checkpoint, setCheckpoint }) {
+    for await (const event of client.changesSince(checkpoint?.cursor)) {
       yield event.deleted
         ? change.delete({ invoiceId: event.invoiceId })
         : change.upsert(event.invoice)
 
-      context.setCheckpoint({ cursor: event.cursor })
+      setCheckpoint({ cursor: event.cursor })
     }
   })
-  .intoDataset(erpInvoicesDataset)
+  .intoDataset(invoices)
 ```
 
-For datasets without `sequenceBy`, each upsert is a complete row, not a patch. Deletes provide exactly the primary-key fields. The
-final change for a repeated key wins, identical upserts and deletes of absent keys are no-ops, and
-no dataset version is created when the visible rows do not change. V1 requires non-null string
-keys, ordered changes, immutable keys, and one registered writer per keyed dataset. Object and link
-projections evaluate the complete committed dataset; telemetry projections from merge-written
-datasets are not supported yet.
+A keyed dataset can have one registered sync or pipeline writer. Merge-written datasets support
+object and relationship projections, but cannot feed [telemetry projections](../projections/telemetry.md).
 
-### Merge source requirements
+## Source requirements
 
-Without `sequenceBy`, use merge only when the source provides a durable, ordered change log. Each source event needs a
-stable cursor, a complete row for an upsert or the exact key for a delete, and deterministic replay.
-Set the next checkpoint after yielding each event as shown above. Sixb stores the latest checkpoint
-only after the entire merge commits, so retrying a failed run safely replays its changes.
-
-Changing a row's key is two changes: delete the old key, then upsert the complete row under the new
-key. Do not model it as a partial update.
-
-If the source no longer recognizes the saved cursor because its retained log has a gap, stop the
-merge and rebuild from a trusted snapshot or backfill before resuming. Missing lake-side change
-history does not require source recovery: current projections evaluate the complete committed
-dataset version rather than depending on incremental row history.
+- Use a stable cursor and a source that can replay changes in order from that cursor.
+- If changes can arrive out of order, use [`sequenceBy`](../datasets/source-ordering.md) to keep the
+  newest source record.
+- To change a primary key, delete the old key and insert the complete row under the new key.
+- If a saved cursor expires, rebuild from a fresh snapshot or backfill before resuming. Skipping
+  ahead can leave changes missing from the dataset.

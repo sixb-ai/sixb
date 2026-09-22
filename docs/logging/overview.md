@@ -1,192 +1,96 @@
 # Logging
 
-Logging captures structured lines from your runs and makes them readable everywhere — in code,
-in your app, and in the Atlas UI. Reach for it when you need to see what a sync, pipeline,
-workflow, or action actually did: the requests it made, the branches it took, the errors it
-swallowed. Each line is tagged with the run that produced it, so you can follow one execution end
-to end.
+Use handler logs to understand what your project did during a run. Sixb attaches the run and step context automatically, so you can inspect the output in Atlas.
 
-Lines flow to two independent destinations:
+## Write a log
 
-- **A bounded broker stream** (`__logs`) — captured by default whenever a `broker` is configured.
-  This is what `sixb.logs`, the client `logs` builder, and the Atlas Logs page read.
-- **An optional process-level output provider** — stdout, a file, or a hosted sink via
-  [`@sixb/logger-pino`](#output-providers). Omit it for broker-only logging.
-
-## Logging from a handler
-
-Action, sync, pipeline, and workflow handlers receive a `logger` on their context.
+Handlers receive a `logger`. Add a message and structured fields where they help explain an operation:
 
 ```ts
+// actions/mark-paid.ts
 import { defineAction } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
-export const sendInvoice = defineAction("send-invoice")
-  .target(Invoice)
+export const markPaid = defineAction("markPaid")
+  .on(Invoice)
   .params({})
-  .run(async ({ target, logger }) => {
-    logger.info("sending invoice", { invoiceId: target.primaryId })
-
-    try {
-      await deliver(target.primaryId)
-      logger.info("invoice sent")
-    } catch (error) {
-      logger.error(error instanceof Error ? error : "delivery failed")
-      throw error
-    }
+  .edits(({ subject, objects, logger }) => {
+    logger.info("Marking invoice paid", { invoiceId: subject.primaryId })
+    objects(Invoice).byId(subject.primaryId).update({ status: "paid" })
   })
 ```
 
-The `logger` is a small, fire-and-forget surface — logging never fails a handler:
-
-| Method | Purpose |
+| Method | Use for |
 | --- | --- |
-| `logger.debug(message, fields?)` | Verbose detail, off by default (capture level is `info`) |
-| `logger.info(message, fields?)` | Normal progress |
-| `logger.warn(message, fields?)` | Recoverable problem |
-| `logger.error(message \| Error, fields?)` | Failure; pass an `Error` to capture its name and stack |
-| `logger.child(bindings)` | Return a logger that adds fixed `fields` to every line |
+| `logger.debug(message, fields?)` | Extra detail while diagnosing a problem. |
+| `logger.info(message, fields?)` | Normal progress. |
+| `logger.warn(message, fields?)` | A recoverable problem. |
+| `logger.error(errorOrMessage, fields?)` | A failure, optionally including an `Error`. |
+| `logger.child(fields)` | Reuse fields across several messages. |
 
-`fields` is any JSON-serializable object (`Record<string, JsonValue>`). Use `child` to bind
-context once instead of repeating it:
+Keep fields JSON-serializable and avoid logging credentials. Let failures propagate so Sixb can record the failed run.
 
-```ts
-const step = logger.child({ step: "reconcile", batchId })
-step.info("batch started", { rows: rows.length })
-step.warn("row skipped", { rowId })
-```
+## View logs
 
-Framework metadata — the run reference, step id, phase, attempt — is attached automatically and
-cannot be overwritten through `child()`.
+Open **Logs** in Atlas to filter by run, kind, or level. Individual run pages also include their logs. Reading logs requires `can.observe("logs")` in a [role](../auth/authorization.md).
 
-## Reading logs in code
+Capture is enabled at `info` level by default. Stored logs have bounded retention; use an external output provider when you need longer retention.
 
-`sixb.logs` reads the captured stream from trusted code (server routes, tests, tooling):
+To read logs in your own interface, use the [Client SDK](../client/overview.md#read-run-logs).
 
-```ts
-const page = await sixb.logs.read({
-  kinds: ["action"], // sync | pipeline | workflow | action
-  levels: ["warn", "error"],
-  limit: 100,
-})
+## Configure output
 
-for (const line of page.lines) {
-  console.log(line.at, line.context.run, line.level, line.message, line.fields)
-}
-// page.cursor / page.hasMore paginate forward
-```
-
-Scope to a single run with `run: { kind, id }`, page backward from the newest line with
-`sixb.logs.tail(...)`, or stream new lines live with `sixb.logs.subscribe(input, handler)`.
-When no `broker` is configured, reads return an empty page (output-only logging).
-
-## Reading logs in an app
-
-`@sixb/client/logs` exposes the same stream to app pages through a fluent builder that mirrors the
-[client events](../client/events.md) API. The transport is React-free — drive it from an effect.
-
-```tsx
-import { logs, type SixbLogLine } from "@sixb/client/logs"
-import { useEffect, useState } from "react"
-
-function ActionLogs({ runId }: { runId: string }) {
-  const [lines, setLines] = useState<SixbLogLine[]>([])
-
-  useEffect(() => {
-    const stop = logs
-      .actions()
-      .run(runId)
-      .level("info")
-      .subscribe((line) => setLines((prev) => [...prev, line]))
-    return stop
-  }, [runId])
-
-  return <pre>{lines.map((l) => `${l.at} ${l.level} ${l.message}`).join("\n")}</pre>
-}
-```
-
-The root selectors are `logs.all()`, `logs.syncs()`, `logs.pipelines()`, `logs.workflows()`,
-`logs.actions()`, and `logs.webhooks()`. Refine with `.level(level)` (captures that level and above)
-and, on a run-kind builder, `.run(runId)`. Every builder terminates with `.subscribe(handler,
-options?)` for a live socket or `.read(options?)` / `.tail(options?)` for a page.
-
-## The Atlas Logs page
-
-The built-in Atlas UI ships a **Logs** console that streams the same broker stream with kind,
-level, and run filters, plus a per-run **Logs** tab on sync, pipeline, workflow, and action run
-pages. No setup is required beyond configuring a `broker`.
-
-## Configuration
-
-Both logging destinations are configured on `createSixb()`. Both are optional; broker capture is
-on by default.
+Add an output provider to also send handler logs to your process output. Install `@sixb/logger-pino`, then add it to `sixb.config.ts`:
 
 ```ts
 import { PinoLogger } from "@sixb/logger-pino"
 
-export const sixb = await createSixb({
-  // ...required providers
-  logger: new PinoLogger({ level: "info" }), // process-level output (optional)
-  observability: {
-    logs: {
-      enabled: true, // forward handler logs to the broker (default true)
-      level: "info", // minimum level captured (default "info")
-      maxLinesPerExecution: 10_000, // per-run cap (default 10,000)
-      redact: { paths: ["password", "token", "headers.authorization"] },
-    },
+const logger = new PinoLogger({ level: "info" })
+```
+
+Pass `logger` to `createSixb()`. See the [Pino provider README](https://github.com/sixb-ai/sixb/tree/main/loggers/pino#readme) for output options.
+
+Capture settings are independent of the output provider. For example, pass this as `observability` to capture debug logs and redact a field:
+
+```ts
+const observability = {
+  logs: {
+    level: "debug" as const,
+    redact: { paths: ["accessToken"] },
   },
-})
+}
 ```
 
-| Option | Purpose |
+Other capture options include `enabled`, `maxLinesPerExecution`, and `retention`. Field redaction here applies to captured logs; configure the output provider's redaction separately.
+
+## Report failures
+
+Add `onError` to `sixb.config.ts` to report failures to your monitoring service:
+
+```ts
+import type { SixbErrorHandler } from "@sixb/core"
+import { reportError } from "./lib/monitoring"
+
+const onError: SixbErrorHandler = (error, context) => {
+  reportError(error, {
+    projectId: context.projectId,
+    type: context.type,
+    code: context.failure.code,
+    notificationId: context.notificationId,
+  })
+}
+```
+
+Pass `onError` to `createSixb()`. `reportError` is your monitoring integration. Providing the callback replaces Sixb's default failure output to `console.error`.
+
+| Notification | Meaning |
 | --- | --- |
-| `logger` | Process-level `LoggerProvider` for output (stdout/file/transport). Omit for broker-only |
-| `observability.logs.enabled` | Capture handler logs to the `__logs` broker stream. Default `true` |
-| `observability.logs.level` | Minimum captured level. Default `"info"` |
-| `observability.logs.retention` | Override the bounded stream retention (`maxAgeMs`, `maxRecords`, `maxBytes`) |
-| `observability.logs.maxLinesPerExecution` | Captured lines per run. Default `10_000` |
-| `observability.logs.redact` | Dot-path `paths` (relative to `fields`) replaced with `censor` (default `"[REDACTED]"`) |
+| `run.failed` | A run failed. `runKind` and `run.runId` identify it. |
+| `action.phase.failed` | Post-commit action effects failed; the data changes remain committed. |
+| `event.delivery.failed` | Event delivery failed. |
+| `rule.evaluation.failed` | Rule evaluation failed. |
+| `vector.indexing.failed` | Automatic vector indexing failed. The context identifies the object and profile. |
 
-Reading the captured stream requires the `observe:logs` grant (see
-[Authorization](../auth/authorization.md)). The stream is bounded — old lines age out by the
-retention policy above — so logging is durable enough to debug a run, not a long-term audit log.
+Notifications may be repeated, and a process crash can prevent delivery. Use `notificationId` to deduplicate alerts. The callback does not change the operation's outcome.
 
-## Output providers
-
-Without a `logger`, logs are broker-only (readable through Atlas, `sixb.logs`, and the client
-builder). Add a provider to also emit process-level output.
-
-`@sixb/logger-pino` wraps [Pino](https://getpino.io) for structured stdout, files, and transports:
-
-```ts
-import { PinoLogger } from "@sixb/logger-pino"
-
-// Simple: Sixb creates the Pino instance
-new PinoLogger({ level: "debug" })
-
-// Advanced: reuse a configured Pino instance (transports, destinations, redaction)
-new PinoLogger({ instance: myPino })
-```
-
-To write your own provider, implement `LoggerProvider` from `@sixb/core` — a `write(entry)` plus
-optional `flush()` and `close()`.
-
-## Lifecycle
-
-The provider owns process-level resources (open files, transports, buffers). Flush and release
-them on shutdown:
-
-```ts
-await sixb.closeLogger()
-```
-
-`closeLogger()` flushes and closes the output provider; it is a no-op for broker-only logging.
-Call it alongside `sixb.closeBroker()` and `sixb.closeConnectors()`.
-
-## Related
-
-- [Runtime](../runtime/overview.md) — `createSixb()` options and the `sixb.logs` surface
-- [Client SDK](../client/overview.md) — the `@sixb/client/logs` subpath
-- [Client events](../client/events.md) — the sibling live-stream builder for domain events
-- [Infrastructure](../infrastructure/overview.md) — the `logger` provider slot and `@sixb/logger-pino`
-- [Authorization](../auth/authorization.md) — the `observe:logs` grant
+See [Errors](../errors/overview.md) for failure fields and stable error codes.

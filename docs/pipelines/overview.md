@@ -1,60 +1,79 @@
 # Pipelines
 
-A pipeline transforms [datasets](../datasets/overview.md). Reach for one after a [sync](../syncs/overview.md) lands raw
-source rows that need to be cleaned, filtered, reshaped, joined, or made ready for a
-[projection](../projections/overview.md).
-
-A pipeline is a sequence of **steps**. Each step reads one or more input datasets and writes one
-output dataset. A step runs only when a pipeline references it with `.then(...)`.
+A pipeline transforms one or more [datasets](../datasets/overview.md) into another dataset.
+Use it to clean, filter, or combine data before mapping it to your domain model.
 
 ## Define a pipeline
 
-This example filters active campaigns, then trims their names. Open each step to see its inputs,
-output, and SQL transform. The pipeline runs when the raw dataset changes.
+Define a step with its inputs, output, and transform, then add it to a pipeline with `.then()`.
+Export the pipeline from your project's `pipelines/` folder.
 
-<div data-code-explorer="pipeline"></div>
+This example trims campaign names. `rawCampaigns` and `cleanCampaigns` are datasets defined in
+`datasets/campaigns.ts`, each with `id`, `name`, and `status` columns.
 
-`.when(...)` accepts a named [schedule](../schedules/overview.md); `.then(...)` appends a step.
-
-## Step builder
-
-`definePipelineStep(id)` chains in a fixed order: `.inputs(...)`, then `.output(...)`, then a
-terminal `.sql(...)` or `.run(...)`. Input keys become the names you read inside the executor.
-
-| Method | Purpose |
-| --- | --- |
-| `.inputs(record)` | Named input datasets, e.g. `{ campaigns: rawCampaigns }`. At least one required. |
-| `.output(dataset, options?)` | Output dataset and optional write mode. |
-| `.sql(fn)` | SQL transform. `fn` receives each input as an interpolatable ref. |
-| `.run(handler)` | TypeScript transform. `handler` receives a run context. |
-
-### Write mode
+File: `pipelines/campaigns.ts`
 
 ```ts
-.output(cleanCampaigns, { mode: "append" })
+import { definePipeline, definePipelineStep } from "@sixb/core"
+import { rawCampaigns, cleanCampaigns } from "../datasets/campaigns"
+
+const cleanNames = definePipelineStep("clean-campaign-names")
+  .inputs({ campaigns: rawCampaigns })
+  .output(cleanCampaigns)
+  .sql(({ campaigns }) => `
+    select id, trim(name) as name, status
+    from ${campaigns}
+  `)
+
+export const prepareCampaigns = definePipeline("prepare-campaigns")
+  .then(cleanNames)
 ```
 
-| `mode` | Behavior |
-| --- | --- |
-| `"snapshot"` (default) | Writes a full replacement version. |
-| `"append"` | Appends rows to the output dataset. |
-
-## SQL steps
-
-Use `.sql(...)` to filter, rename, join, or aggregate rows, as in the example above.
-Input names interpolate as table references. SQL uses the DuckDB dialect and requires
+Input names become table references in the SQL query. SQL uses the DuckDB dialect and requires
 [a lake provider with SQL transform support](../infrastructure/overview.md).
+
+Each step replaces its output dataset by default. To append rows instead, use
+`.output(cleanCampaigns, { mode: "append" })`.
+
+Add more steps with `.then(nextStep)`. They run in order, so each can read the previous step's
+output. If a step fails, outputs from earlier steps remain available.
+
+## Run automatically
+
+Create a [schedule](../schedules/overview.md) to run the pipeline when its source dataset changes.
+
+File: `schedules/campaigns.ts`
+
+```ts
+import { defineSchedule, events } from "@sixb/core"
+import { rawCampaigns } from "../datasets/campaigns"
+
+export const campaignsUpdated = defineSchedule("campaigns-updated")
+  .on(events.dataset(rawCampaigns).updated())
+```
+
+Import the schedule and attach it to the pipeline with `.when()`:
+
+```ts
+// pipelines/campaigns.ts
+import { campaignsUpdated } from "../schedules/campaigns"
+
+export const prepareCampaigns = definePipeline("prepare-campaigns")
+  .when(campaignsUpdated)
+  .then(cleanNames)
+```
 
 ## TypeScript steps
 
-Use `.run(...)` for transforms that need application logic or library calls:
+Use `.run()` instead of `.sql()` when a transform needs your own code or a library.
+Here is the same step written in TypeScript:
 
 ```ts
 import { definePipelineStep } from "@sixb/core"
-import { activeCampaigns, cleanCampaigns } from "../../datasets/campaigns"
+import { rawCampaigns, cleanCampaigns } from "../datasets/campaigns"
 
-export const cleanNames = definePipelineStep("clean-campaign-names")
-  .inputs({ campaigns: activeCampaigns })
+const cleanNames = definePipelineStep("clean-campaign-names")
+  .inputs({ campaigns: rawCampaigns })
   .output(cleanCampaigns)
   .run(async ({ inputs, output }) => {
     async function* rows() {
@@ -67,28 +86,7 @@ export const cleanNames = definePipelineStep("clean-campaign-names")
   })
 ```
 
-| Run context | Purpose |
-| --- | --- |
-| `inputs[name]` | Dataset, pinned version, and `readRows(options?)` for each named input. |
-| `output.writeRows(rows)` | Write a sync or async iterable of rows. |
-| `projectId`, `pipelineId`, `stepId`, `runId` | Identify the current run. |
-| `signal` | Cooperative cancellation. |
+## Next steps
 
-Steps run in `.then(...)` order. Each commits before the next starts, so later steps can read
-its output. If a later step fails, earlier committed versions remain available.
-
-## File location
-
-Export definitions from `pipelines/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.
-
-## Concurrent runs
-
-If another run changes a step's output before it commits, the step fails. Start a new run to recompute; there is no automatic retry.
-
-New input versions create an output version and update event even when rows are unchanged, protecting against older runs. Identical inputs and rows remain a no-op.
-
-## Next
-
-- [Projections](../projections/overview.md) — map pipeline output rows onto ontology objects
-- [Datasets](../datasets/overview.md) — define the input and output tables
-- [Syncs](../syncs/overview.md) — get raw source rows into Sixb
+- [Projections](../projections/overview.md): Map the output to your domain model.
+- [Schedules](../schedules/overview.md): Run pipelines on a timer or other events.

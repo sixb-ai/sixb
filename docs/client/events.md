@@ -1,64 +1,12 @@
-# Client Events
+# Events & subscriptions
 
-`@sixb/client` exposes the domain event stream to app pages. Use it when a screen needs live
-telemetry, an activity feed, or custom coordination around runs. For a normal action button, prefer
-[`useActionRunMutation`](../apps/actions.md) — it already waits for terminal action events and
-invalidates committed object changes.
+Subscribe to live data with `@sixb/client/hooks`. Subscriptions use your browser session and receive only events permitted by your grants.
 
-## Event Builders
+For a normal action button, use [`useActionRunMutation`](../apps/actions.md). It already waits for the action and refreshes changed data.
 
-The `events.object(...)` builder creates a typed event filter. Start with an ontology object type when the
-screen is about one object family:
+## Subscribe to changes
 
-```tsx
-import { events } from "@sixb/client/hooks"
-import { Device } from "../ontology/device"
-
-events.object(Device).byId(deviceId).telemetry()
-events.object(Device).telemetry(Device.p.temperature)
-events.object(Device).byId(deviceId).created()
-events.object(Device).byId(deviceId).updated()
-events.object(Device).byId(deviceId).upserted()
-events.object(Device).byId(deviceId).deleted()
-events.object(Device).link(Device.l.installedIn).created()
-```
-
-Object-type builders carry type information. For example, `telemetry(Device.p.temperature)` narrows
-the event payload to that property, and `created()` / `updated()` type `payload.properties` from
-`Device`. `upserted()` is a selector shortcut for both `object.created` and `object.updated`; it is not a separate domain event type.
-
-Use topic builders when the screen is broader or dynamic:
-
-```tsx
-events.all()
-events.telemetry().byId(deviceId)
-events.objects()
-events.links()
-events.datasets()
-events.rules()
-events.schedules()
-events.workflows().run(workflowRunId)
-events.pipelines().run(pipelineRunId)
-events.syncs().run(syncRunId)
-```
-
-`events.all()` is the unscoped catch-all stream; `events.schedules()` scopes to schedule events.
-
-Action events have extra scopes:
-
-```tsx
-events.actions().run(runId).terminal()
-events.actions().action("approveQuote").completed()
-events.actions().subject(Quote).byId(quoteId).failed()
-events.actions().requested()
-```
-
-Use `.terminal()` for completed plus failed action events. Use `.completed()` only when successful
-terminal runs matter.
-
-## useEvents
-
-`useEvents(builder, onEvent, options?)` subscribes to matching events and returns the socket state:
+Use a typed event builder with `useEvents`:
 
 ```tsx
 import { events, useEvents } from "@sixb/client/hooks"
@@ -66,83 +14,74 @@ import { Invoice } from "../ontology/invoice"
 
 function InvoiceActivity({ invoiceId }: { invoiceId: string }) {
   const state = useEvents(events.object(Invoice).byId(invoiceId).updated(), (event) => {
-    console.log("invoice changed", event.payload.properties)
+    console.log("Invoice changed", event.payload.properties)
   })
 
   return <span>{state.connected ? "Live" : "Offline"}</span>
 }
 ```
 
-The handler can change without reopening the socket. The subscription is rebuilt only when the
-builder filter or transport options change.
+The hook manages subscription cleanup and reconnects. For a standalone browser app, complete [client setup](overview.md#standalone-browser-apps) first.
 
-Common options:
+## Filter events
 
-| Option | Purpose |
+| Builder | Selects |
 | --- | --- |
-| `enabled` | Turn the subscription on or off. |
-| `afterCursor` | Replay events after a stored cursor. |
-| `limit` | Limit replayed events on subscribe. |
-| `reconnect` | Enable or disable reconnects. |
-| `reconnectDelayMs` | Delay before reconnecting. |
-| `handshakeTimeoutMs` | Maximum time to establish and acknowledge the event subscription. |
-| `onError` | Receive socket or subscription errors. |
+| `events.object(Invoice).created()` | New invoices. |
+| `events.object(Invoice).updated()` | Changed invoices. |
+| `events.object(Invoice).upserted()` | Created or updated invoices. |
+| `events.object(Invoice).byId(id).deleted()` | Deletion of one invoice. |
+| `events.object(Device).telemetry(Device.p.temperature)` | Changes to one telemetry property. |
+| `events.object(Invoice).link(Invoice.l.customer).created()` | New customer relationships. |
+| `events.actions().run(runId).terminal()` | Completion or failure of one action run. |
+| `events.workflows().run(runId)` | Events for one workflow run. |
 
-## Latest Telemetry
+Use topic builders such as `events.datasets()`, `events.rules()`, and `events.schedules()` for broader subscriptions. `events.all()` selects all visible events.
 
-Use `useLatest` when a component needs the current live value per telemetry property:
+## Read live telemetry
+
+`useLatest` keeps the latest received value for each telemetry property:
 
 ```tsx
 import { events, useLatest } from "@sixb/client/hooks"
 import { Device } from "../ontology/device"
 
-function DeviceReading({ deviceId }: { deviceId: string }) {
-  const { values, connected } = useLatest(events.object(Device).byId(deviceId).telemetry())
-  const temperature = values[Device.p.temperature.id]?.value
-
-  return (
-    <p>
-      {connected ? "Live" : "Offline"}: {temperature == null ? "No reading" : String(temperature)}
-    </p>
-  )
+function Temperature({ deviceId }: { deviceId: string }) {
+  const { values } = useLatest(events.object(Device).byId(deviceId).telemetry())
+  const value = values[Device.p.temperature.id]?.value
+  return <span>{value == null ? "No reading" : String(value)}</span>
 }
 ```
 
-Use `useLatestByObject` for a dashboard that buckets live telemetry by object id:
+Use `useLatestByObject` for several objects; its `byObject` result groups values by object ID. Both hooks reset accumulated values when the subscription scope changes. They track received events; use a telemetry query when you also need stored readings.
 
-```tsx
-import { events, useLatestByObject } from "@sixb/client/hooks"
-import { Device } from "../ontology/device"
+## Refresh queries
 
-const { byObject } = useLatestByObject(events.object(Device).telemetry(Device.p.temperature))
-
-const value = byObject[deviceId]?.[Device.p.temperature.id]?.value
-```
-
-Both hooks reset their accumulated values when the builder scope changes.
-
-## Invalidate on Events
-
-Use `useInvalidateOnEvent` when an event should refresh TanStack Query caches:
+Use `useInvalidateOnEvent` to refresh cached queries after matching changes:
 
 ```tsx
 import { events, objectQueryKeys, useInvalidateOnEvent } from "@sixb/client/hooks"
-import { openInvoices } from "../queries/invoices"
 import { Invoice } from "../ontology/invoice"
+import { openInvoices } from "../queries/invoices"
 
 useInvalidateOnEvent(
-  events.object(Invoice).updated(),
+  events.object(Invoice).upserted(),
   () => [objectQueryKeys.list(openInvoices.limit(50))],
   { debounceMs: 50 }
 )
 ```
 
-For action buttons, `useActionRunMutation({ invalidateOnCommit: true })` is usually simpler. It
-uses action events internally and invalidates from the terminal run's commit diff.
+## Subscription options
 
-## Related
+`useEvents` accepts an optional third argument:
 
-- [Client SDK](overview.md) - SDK subpaths and transport setup.
-- [Typed queries](typed-queries.md) - object query builders and cache keys.
-- [Running actions from apps](../apps/actions.md) - action buttons and terminal mutation state.
-- [Domain events](../events/overview.md) - event catalog, runtime reads, and server subscriptions.
+| Option | Purpose |
+| --- | --- |
+| `enabled` | Start or stop the subscription. |
+| `afterCursor` | Resume after a stored cursor. |
+| `limit` | Set the event read batch size. |
+| `reconnect`, `reconnectDelayMs` | Control reconnects. |
+| `handshakeTimeoutMs` | Limit the time allowed to establish a subscription. |
+| `onError` | Receive subscription errors. |
+
+For protocol messages and replay behavior, see [WebSockets](../websockets/overview.md). Event-triggered backend work belongs in [Schedules](../schedules/overview.md#run-on-an-event).

@@ -1,285 +1,131 @@
-# Typed Object Queries & Hooks
+# Queries & hooks
 
-`@sixb/client/query` gives browser code the same fluent object-query builder the server
-runtime uses, wired to the HTTP API. Reach for it when you query objects from a custom app
-or React frontend and want compile-time-checked property names and predicate values.
+Use `objects(Type).query()` from `@sixb/client/query` to query a Sixb API with types from your ontology. React hooks add caching and loading state to the same queries.
 
-`objects(Type)` uses your existing client configuration for authentication. React apps can add
-caching with the hooks in `@sixb/client/hooks`.
+See [Object queries](../objects/querying.md) for filters, search, sorting, and relationships, or [Querying data in apps](../apps/querying-data.md) for a complete page example.
 
-For the full builder reference — filters, traversal, search, ordering — see
-[/objects/querying](../objects/querying.md). For SDK setup, see [/client](overview.md).
-
-## Builder over HTTP
-
-`objects(Type).query()` returns the builder. Import your ontology types directly; there is
-no registration step. Property names and predicate values are type-checked at compile time,
-and the server validates every query against the registered ontology.
+## Query objects
 
 ```ts
 import { objects } from "@sixb/client/query"
-import { Project } from "../ontology/project"
+import { Invoice } from "../ontology/invoice"
 
-const { objects: rows } = await objects(Project)
+const result = await objects(Invoice)
   .query()
-  .where((project) => project.p.status.eq("active"))
-  .orderBy(Project.p.deadline, "asc")
+  .where((invoice) => invoice.p.status.eq("open"))
   .limit(20)
   .list()
 ```
 
-Terminals run through the object-query routes via the generated SDK:
+| Method | Returns |
+| --- | --- |
+| `.list()` | Objects, `hasMore`, and optional `total` and `nextPageToken`. |
+| `.first()` | The first matching object or `null`. |
+| `.count()` | A count. |
+| `.exists()` | Whether a match exists. |
+| `.facets(requests)` | Counts grouped by facetable properties. |
 
-| Terminal       | Route                      | Returns                                        |
-| -------------- | -------------------------- | ---------------------------------------------- |
-| `.list()`      | `POST /api/objects/query`        | `{ objects, hasMore, total?, nextPageToken? }` |
-| `.first()`     | `POST /api/objects/query`        | first row or `null`                            |
-| `.count()`     | `POST /api/objects/query/count`  | `number`                                       |
-| `.exists()`    | `POST /api/objects/query/exists` | `boolean`                                      |
-| `.facets([…])` | `POST /api/objects/query/facets` | `ObjectQueryFacetResult[]`                     |
-
-Each row carries `primaryId`, `objectTypeId`, `properties`, and `Date`-typed `createdAt`
-and `updatedAt`. `Date` predicate values survive the JSON wire format. Rows from an
-`.expand(...)`ed query also carry a typed `links` entry (with optional `linkProperties`) per
-expanded link — see [Expanding links](#expanding-links).
-
-> `validate()` and `explain()` need ontology access and are server-side only — they are not
-> on the client builder.
+Rows include `primaryId`, `objectTypeId`, typed `properties`, and `Date` timestamps. Use [relationship expansion](../objects/querying.md#include-related-objects) to include linked objects.
 
 ### Browser-safe ontology imports
 
-Ontology files that browser code imports must define types via `@sixb/core/ontology` — the
-same `defineObjectType`, `prop`, `link`, and friends as the `@sixb/core` root, but without
-pulling the server runtime into the bundle.
+Define ontology types imported by frontend code through `@sixb/core/ontology`. This avoids bundling the server runtime.
 
 ```ts
 import { defineObjectType, prop } from "@sixb/core/ontology"
 ```
 
-## Expanding links
-
-`.expand(link)` attaches an outgoing link's target objects to each row under `.links`, without
-changing the result type — the client counterpart to the runtime builder (see
-[expanding links](../objects/querying.md#expanding-links) for the full API). A `"one"` link resolves
-to `Target | null`, a `"many"` link to `Target[]`; bound a `"many"` expansion with `{ limit,
-orderBy }` and nest a callback for deeper hops.
-
-```tsx
-const { objects: rows } = await objects(Invoice)
-  .query()
-  .where((invoice) => invoice.p.status.eq("overdue"))
-  .expand(Invoice.l.customer, (customer) => customer.expand(Customer.l.region))
-  .list()
-
-const region = rows[0]?.links.customer?.links.region
-```
-
-Precise expand and link-target types depend on a generated **type manifest**. `sixb typegen` writes
-`.sixb/types/ontology.d.ts`, a module augmentation of `SixbObjectTypeMap` (from
-`@sixb/core/ontology`) that maps object-type ids like `"Customer"` to their exported type. `sixb
-dev`, `sixb build`, and `sixb check` regenerate it automatically; run `sixb typegen` before a bare
-`tsc` (the scaffold's `typecheck` script does exactly this). Without the manifest, string-target
-links and `.expand()` still work at runtime, but their row types degrade to a loose base shape.
+For precise linked-object types, run `bun sixb typegen` before a standalone TypeScript check. `dev`, `build`, and `check` generate these types automatically.
 
 ## React hooks
 
-Hooks come from `@sixb/client/hooks` and take a built query directly — any query from the
-docs, the server runtime, or an event handler works unchanged. They key the cache on the
-query contents, so identical queries share cache entries and inline builders are safe
-to construct on every render.
+Hooks accept a query and share cached results when the query is identical.
 
-| Hook                 | Query terminal | Result type                |
-| -------------------- | -------------- | -------------------------- |
-| `useObjectsQuery`    | `list()`       | `ListResult<Row>`          |
-| `useObjectsInfinite` | paged `list()` | `InfiniteData<…>`          |
-| `useObjectsCount`    | `count()`      | `number`                   |
-| `useObjectsExists`   | `exists()`     | `boolean`                  |
-| `useObjectsFacets`   | `facets()`     | `ObjectQueryFacetResult[]` |
+| Hook | Use for |
+| --- | --- |
+| `useObjectsQuery(query, options?)` | A page of results. |
+| `useObjectsInfinite(query, options)` | Paginated results with a `pageSize`. |
+| `useObjectsCount(query, options?)` | A count. |
+| `useObjectsExists(query, options?)` | A boolean. |
+| `useObjectsFacets(query, facets, options?)` | Grouped counts. |
 
 ```tsx
-import { useObjectsFacets, useObjectsQuery } from "@sixb/client/hooks"
+import { useObjectsQuery } from "@sixb/client/hooks"
 import { objects } from "@sixb/client/query"
-import { Project } from "../ontology/project"
+import { Invoice } from "../ontology/invoice"
 
-function ProjectList() {
-  const projects = useObjectsQuery(
-    objects(Project)
-      .query()
-      .where((project) => project.p.status.eq("active"))
-      .orderBy(Project.p.deadline, "asc")
-      .limit(20)
-  )
+function InvoiceCount() {
+  const query = useObjectsQuery(objects(Invoice).query().limit(20))
 
-  // Group counts by status, for filter pills.
-  const statusFacets = useObjectsFacets(objects(Project).query(), [
-    { property: Project.p.status, limit: 10 },
-  ])
-  const buckets = statusFacets.data?.[0]?.buckets ?? []
-
-  if (projects.isLoading) return <p>Loading…</p>
-  if (projects.isError) return <p>Failed to load.</p>
-  return <ul>{projects.data?.objects.map((p) => <li key={p.primaryId}>{p.properties.name}</li>)}</ul>
+  if (query.isLoading) return <p>Loading...</p>
+  if (query.isError) return <p>Could not load invoices.</p>
+  return <p>{query.data?.objects.length ?? 0} invoices loaded</p>
 }
 ```
 
-`useObjectsFacets` takes the query plus an array of `{ property, limit }` requests; only
-properties with `query.facet` are facetable (`Invoice.status`, `Project.status`).
+Common options include `enabled`, `staleTime`, `gcTime`, and `refetchInterval`. The non-infinite hooks also accept `retry` and `refetchOnWindowFocus`.
 
-`useObjectsInfinite` threads `nextPageToken` automatically and requests pages with
-`includeTotal: false`:
+## Reuse queries
 
-```tsx
-import { useObjectsInfinite } from "@sixb/client/hooks"
+Define shared queries in a module. Refining a query returns a new value without changing the original:
 
-const pages = useObjectsInfinite(objects(Project).query().search("dashboard"), {
-  pageSize: 50,
-})
-```
-
-### Hook options
-
-`useObjectsQuery`, `useObjectsCount`, `useObjectsExists`, and `useObjectsFacets` accept a
-final options argument with common TanStack passthroughs:
-
-| Option                 | Type                | Notes                   |
-| ---------------------- | ------------------- | ----------------------- |
-| `enabled`              | `boolean`           | gate the query          |
-| `staleTime`            | `number`            | ms before data is stale |
-| `gcTime`               | `number`            | ms before cache eviction |
-| `refetchInterval`      | `number \| false`   | polling interval        |
-| `refetchOnWindowFocus` | `boolean`           |                         |
-| `retry`                | `boolean \| number` |                         |
-
-`useObjectsInfinite` takes `{ pageSize }` plus `enabled`, `staleTime`, `gcTime`, and
-`refetchInterval`. For anything beyond these passthroughs (`select`, `placeholderData`, …),
-compose the option factories below with `useQuery` directly.
-
-## Shared queries
-
-Queries are plain values, so define them once in a module and refine them at the call site.
-Each refinement (`.where(…)`, `.limit(…)`) returns a new query value, and the cache key
-follows the resulting query.
-
-```tsx
-// queries/projects.ts
+```ts
+// queries/invoices.ts
 import { objects } from "@sixb/client/query"
-import { Project } from "../ontology/project"
+import { Invoice } from "../ontology/invoice"
 
-export const openProjects = objects(Project)
+export const openInvoices = objects(Invoice)
   .query()
-  .where((project) => project.p.status.in(["active", "paused"]))
-  .orderBy(Project.p.deadline, "asc")
-
-// component
-const { data } = useObjectsQuery(openProjects.limit(50))
-const { data: openCount } = useObjectsCount(openProjects)
+  .where((invoice) => invoice.p.status.eq("open"))
 ```
+
+Pass `openInvoices.limit(50)` to a hook or call its `.list()` method directly.
 
 ## Option factories
 
-For router loaders, prefetching, SSR, or full TanStack control, use the option factories
-instead of the hooks. Each returns a TanStack `queryOptions`/`infiniteQueryOptions` object
-keyed on the query contents, so it shares cache entries with the matching hook.
+Use option factories for prefetching, loaders, or additional TanStack Query options.
 
-| Factory                      | Pairs with           | Arguments               |
-| ---------------------------- | -------------------- | ----------------------- |
-| `objectQueryOptions`         | `useObjectsQuery`    | `(query, options?)`     |
-| `objectQueryCountOptions`    | `useObjectsCount`    | `(query)`               |
-| `objectQueryExistsOptions`   | `useObjectsExists`   | `(query)`               |
-| `objectQueryFacetsOptions`   | `useObjectsFacets`   | `(query, facets)`       |
-| `objectQueryInfiniteOptions` | `useObjectsInfinite` | `(query, { pageSize })` |
+| Factory | Arguments |
+| --- | --- |
+| `objectQueryOptions` | Query and optional list options. |
+| `objectQueryCountOptions` | Query. |
+| `objectQueryExistsOptions` | Query. |
+| `objectQueryFacetsOptions` | Query and facet requests. |
+| `objectQueryInfiniteOptions` | Query and options including `pageSize`. |
 
-```tsx
+For example, prefetch into your existing QueryClient:
+
+```ts
 import { objectQueryOptions } from "@sixb/client/hooks"
-import { useQuery } from "@tanstack/react-query"
-import { openProjects } from "../queries/projects"
+import { openInvoices } from "../queries/invoices"
 
-// Prefetch in a loader
-await queryClient.prefetchQuery(objectQueryOptions(openProjects.limit(50)))
-
-// Full TanStack control in a component
-const { data } = useQuery({
-  ...objectQueryOptions(openProjects.limit(50)),
-  placeholderData: (prev) => prev,
-})
+await queryClient.prefetchQuery(objectQueryOptions(openInvoices.limit(50)))
 ```
 
-## Query Keys and Invalidation
+## Refresh cached data
 
-The hooks export stable object-query keys and exact invalidation helpers for apps that need
-manual cache control:
+For action buttons, use [`useActionRunMutation`](../apps/actions.md#refresh-data) with `invalidateOnCommit: true`. For manual invalidation, use the exported query keys or helper:
 
-```tsx
+```ts
 import { invalidateObjectQuery, objectQueryKeys } from "@sixb/client/hooks"
+import { openInvoices } from "../queries/invoices"
 
-await queryClient.invalidateQueries({
-  queryKey: objectQueryKeys.count(openProjects),
-  exact: true,
-})
-
-await invalidateObjectQuery(queryClient, openProjects.limit(50))
+await queryClient.invalidateQueries({ queryKey: objectQueryKeys.count(openInvoices) })
+await invalidateObjectQuery(queryClient, openInvoices.limit(50))
 ```
 
-For action buttons, prefer `useActionRunMutation({ invalidateOnCommit: true })`. It waits for
-the terminal action run and invalidates action-run caches plus object-query caches when the run
-commits edits.
+## Client overrides
 
-## Transport overrides
+Hooks use the client from the nearest `SixbProvider`, or the shared client when no provider is present. Pass a configured client to `SixbProvider` when a React subtree needs a different API connection.
 
-Hooks execute the query through the global SDK client (`client`, exported from
-`@sixb/client`). Wrap a subtree in `SixbProvider` to override the transport — base URL,
-auth, fetch — for every hook beneath it. `SixbProvider` takes a hey-api `Client` instance:
-
-```tsx
-import { client } from "@sixb/client"
-import { SixbProvider } from "@sixb/client/hooks"
-
-function App() {
-  return (
-    <SixbProvider client={client}>
-      <ProjectList />
-    </SixbProvider>
-  )
-}
-```
-
-A per-query client passed to `objects(Type, { client })` applies to imperative calls like
-`.list()` and `.count()`, **not** to hooks — hooks always bind to the nearest `SixbProvider`
-client (or the global client).
+For imperative queries, pass the client to `objects`:
 
 ```ts
-const rows = await objects(Project, { client }).query().list()
+const result = await objects(Invoice, { client }).query().list()
 ```
 
-## Errors
+That per-query override does not override a hook's provider.
 
-Validation and planning failures throw `SixbQueryError`, carrying the structured `issues`
-array from the route (unknown properties, wrong value types, unsupported traversal shapes,
-provider capability limits, …). Inside hooks the error surfaces on `query.error` /
-`query.isError`.
+## Query errors
 
-```ts
-import { objects, SixbQueryError } from "@sixb/client/query"
-
-try {
-  await objects(Project).query().where((p) => p.p.unknown.eq("x")).list()
-} catch (error) {
-  if (error instanceof SixbQueryError) {
-    console.error(error.message, error.issues)
-  }
-}
-```
-
-| Member    | Type                          | Description                       |
-| --------- | ----------------------------- | --------------------------------- |
-| `message` | `string`                      | `[SixbClient] …` prefixed message |
-| `issues`  | `readonly ObjectQueryIssue[]` | structured validation issues      |
-
-## Related
-
-- [/objects/querying](../objects/querying.md) — fluent builder reference
-- [/objects/http-reference](../objects/http-reference.md) — query route contracts
-- [/apps/querying-data](../apps/querying-data.md) — querying from custom apps
-- [/client/events](events.md) — live event hooks and invalidation patterns
-- [/apps/actions](../apps/actions.md) — running actions and invalidating queries from apps
-- [/client](overview.md) — SDK setup and client configuration
+Invalid queries reject with `SixbQueryError`, exported from `@sixb/client/query`. Inspect its `issues` for validation details. In React, failures appear on the hook's `error` and `isError` properties.

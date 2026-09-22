@@ -1,45 +1,42 @@
 # Manual Install
 
-Add Sixb to a project you already have, without the `create-sixb` scaffold. You
-install `@sixb/core`, pick providers for the five required infrastructure slots,
-and wire them together with `createSixb()`.
+Add Sixb to an existing Bun and TypeScript project. For a new project, use the
+[quickstart](../README.md).
 
-Starting from scratch? Prefer the [Get started](../README.md) scaffold instead —
-this page is for an existing project.
+## Install Sixb
 
-## Install
-
-`@sixb/core` ships the runtime, ontology builders, and an in-memory provider for
-every required slot. That's enough to run locally and in tests — add durable
-provider packages when you need persistence.
+Use Bun **1.4.2 or later** and install the runtime and CLI:
 
 ```bash
-bun add @sixb/core
+bun add @sixb/core @sixb/cli
 ```
 
-## Providers
+## Define your first object
 
-`createSixb()` requires five infrastructure providers. Each slot is independent,
-so you can mix in-memory, local-disk, and hosted backends freely.
+Create an object type in `ontology/`. Sixb loads it automatically when the project starts.
+This example defines a task with an ID and title.
 
-| Option | Required | Purpose | In-memory (from `@sixb/core`) |
-| --- | --- | --- | --- |
-| `broker` | yes | Domain-event pub/sub (`object.created`, `object.updated`, `telemetry.appended`, …) | `InMemoryBroker` |
-| `storage` | yes | Objects, telemetry, links, run history | `InMemoryStorage` |
-| `lakeStorage` | yes | Dataset and pipeline lake tables | `InMemoryLakeStorage` |
-| `blobStorage` | yes | Binary blob storage | `InMemoryBlobStorage` |
-| `queues` | yes | Background work queues | `InMemoryQueues` |
-| `sandboxes` | no | Sandboxed execution for agents | — |
-| `auth` | no | Authentication and authorization | — |
+File: `ontology/task.ts`
 
-For the durable provider packages (`@sixb/sqlite`, `@sixb/pg`,
-`@sixb/lake-local`, `@sixb/blob-s3`, and others) and their config options, see
-[Infrastructure](../infrastructure/overview.md).
+```ts
+import { defineObjectType, prop } from "@sixb/core/ontology"
 
-## Minimal config
+export const Task = defineObjectType({
+  id: "Task",
+  name: "Task",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("title", "string", { required: true }),
+  ],
+})
+```
 
-Create `sixb.config.ts` at your project root. The in-memory setup needs no extra
-packages:
+## Configure your project
+
+Create `sixb.config.ts` at your project root. This local configuration needs no database setup
+or additional provider packages.
+
+File: `sixb.config.ts`
 
 ```ts
 import {
@@ -51,8 +48,8 @@ import {
   InMemoryStorage,
 } from "@sixb/core"
 
-export const sixb = await createSixb({
-  id: "acme-corp",
+export const sixb = createSixb({
+  id: "my-app",
   broker: new InMemoryBroker(),
   storage: new InMemoryStorage(),
   lakeStorage: new InMemoryLakeStorage(),
@@ -61,55 +58,18 @@ export const sixb = await createSixb({
 })
 ```
 
-`createSixb()` is **async** — it scans the convention folders from disk, so
-always `await` it (or export the promise and `await` it where you consume the
-runtime).
+Data is held in memory and resets when the process restarts. Choose
+[persistent storage providers](../infrastructure/overview.md) when you need to keep it.
 
-It also requires at least one ontology source. Add an [`ontology/`](project-structure.md)
-folder (auto-discovered) or pass `ontologies` explicitly — otherwise startup
-throws `No ontology found.`
+## Start development
 
-### With durable providers
+Run this from your project root:
 
-Swap in-memory for durable providers per slot. This is the setup the
-[Northline example](../examples/overview.md) uses — SQLite for objects and
-telemetry, local disk for the lake and blobs:
-
-```ts
-import { LocalBlobStorage } from "@sixb/blob-local"
-import { createSixb, InMemoryBroker, InMemoryQueues } from "@sixb/core"
-import { LocalLakeStorage } from "@sixb/lake-local"
-import { SqliteStorage } from "@sixb/sqlite"
-
-export const sixb = await createSixb({
-  id: "northline",
-  broker: new InMemoryBroker(),
-  storage: new SqliteStorage({ path: ".sixb" }),
-  lakeStorage: new LocalLakeStorage({ path: ".sixb/lake" }),
-  blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
-  queues: new InMemoryQueues(),
-})
+```bash
+bun sixb dev
 ```
 
-## Top-level options
+Open [Atlas](http://localhost:3000) to explore your model, or the
+[API documentation](http://localhost:3002/docs) to see its endpoints.
 
-Beyond providers, `createSixb()` accepts an `id` and explicit definition arrays.
-Explicit definitions are merged with — and ordered before — anything discovered
-from the convention folders.
-
-| Option | Type | Notes |
-| --- | --- | --- |
-| `id` | `string` | Runtime identifier (a name, not a provider) |
-| `ontologies` | `OntologySource[]` | Added to discovered `ontology/` sources |
-| `actions`, `projections` | arrays | Override discovery when provided |
-| `datasets`, `connectors`, `schedules`, `syncs`, `pipelines`, `rules`, `workflows`, `agents` | arrays | Merged with discovered definitions |
-| `groups`, `roles`, `membershipPolicies` | arrays | Merged with discovered security definitions |
-| `auth` | `SixbAuthConfig` | See [Authentication](../auth/authentication.md) |
-| `projectRoot` | `string` | Discovery root (defaults to `process.cwd()`) |
-
-## Next steps
-
-- [Project Structure](project-structure.md) — the convention folders `createSixb()` discovers.
-- [Runtime](../runtime/overview.md) — what the `Sixb` instance gives you.
-- [Server](../server/overview.md) — serve the runtime over HTTP/WebSocket.
-- [Infrastructure](../infrastructure/overview.md) — choosing and configuring providers.
+To add a React interface, see [Building apps](../apps/overview.md).

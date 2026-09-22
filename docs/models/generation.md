@@ -1,122 +1,14 @@
-# Generation
+# Generating responses
 
-`sixb.models.language.generate()` makes one model call and awaits its accounting before returning.
-
-## Text
-
-```ts
-const { output } = await sixb.models.language.generate({
-  instructions: "Be concise. Use only facts in the document.",
-  prompt: document,
-})
-// output: string
-```
-
-`instructions` is the system message. `prompt` is the user task or content.
-
-## Structured output
-
-Use the same Sixb schema records as workflow `.output()`. Sixb generates the provider schema and validates the response.
-
-```ts
-const { output } = await sixb.models.language.generate({
-  prompt: document,
-  output: {
-    invoiceNumber: "string",
-    amount: "decimal",
-    currency: "string",
-    overdue: "boolean",
-  },
-})
-
-output.invoiceNumber // string
-output.amount        // DecimalValue: an exact decimal string
-output.overdue       // boolean
-```
-
-| Output schema | Result |
-| --- | --- |
-| Primitive schemas | Validated scalar values |
-| Arrays, maps, objects | Recursively validated values |
-| Value-type references | Resolved against the ontology |
-| `date`, `timestamp` | Hydrated `Date` values |
-| `decimal` | Canonical exact decimal strings |
-| Object references | Validated `{ objectTypeId, primaryId }`; no object lookup |
-
-Native structured-output support is required. Malformed, invalid, or incomplete output rejects; the call remains accounted for.
-
-## Existing messages
-
-Supply `messages` instead of `prompt`. Optional instructions are prepended; supplied messages keep their order.
-
-```ts
-const { output } = await sixb.models.language.generate({
-  instructions: "Answer in one sentence.",
-  messages: [
-    { role: "user", content: [{ type: "text", text: "What is an ontology?" }] },
-  ],
-})
-```
-
-## Controls
-
-```ts
-import { alternateModel } from "../lib/models"
-
-const result = await sixb.models.language.generate({
-  model: alternateModel,
-  prompt: document,
-  maxOutputTokens: 1_000,
-  reasoning: "medium",
-  caching: "off",
-  signal,
-})
-```
-
-| Option | Default / behavior |
-| --- | --- |
-| `model` | First configured language model |
-| `maxOutputTokens` | Resolved model limit, or 4,096 when unknown |
-| `reasoning` | Provider default; named levels or `{ budgetTokens }` when supported |
-| `caching` | Provider automatic behavior; `"off"` disables automatic prompt caching |
-| `signal` | Combines with execution cancellation; cannot override it |
-
-## Result
-
-```ts
-const { output, usage, cost, finishReason, callId } =
-  await sixb.models.language.generate({ prompt: document })
-
-if (finishReason === "length") {
-  // The text reached its output ceiling.
-}
-```
-
-| Field | Meaning |
-| --- | --- |
-| `output` | String, or the validated output record |
-| `usage` | Available provider token counts; missing counts stay unknown |
-| `cost` | Catalog-rated, provider-reported, or unpriceable |
-| `finishReason` | Provider completion reason; structured output requires `stop` |
-| `callId` | Unique identity of this inference call |
-
-One invocation makes one inference request. There are no automatic retries, repairs, tools, or continuations.
-
-| Outcome | Behavior |
-| --- | --- |
-| Text reaches its ceiling | Returns text with `finishReason: "length"` |
-| Invalid or incomplete structured output | Throws `StructuredOutputError` |
-| Provider error or content filtering | Rejects |
-| Local tool call or pending continuation | Rejects |
-| Cancellation | Rejects with the abort reason |
-| Limit denial | Rejects before inference |
-| Accounting persistence failure | Rejects and attempts durable recovery |
-
-See [Usage and limits](./usage-and-limits.md) for accounting and recovery.
+Generate text or validated structured data from a language model inside an action or workflow step.
+[Configure a model](./overview.md#configure-a-model) before making calls.
 
 ## In a workflow
 
-Use an ordinary step for a single call. Use [`defineAgentStep()`](../workflows/overview.md#define-agent-tasks) when the task needs tools.
+Use the step's `sixb` context to call a model. Supply instructions for how it should respond and a
+prompt with the content to work on:
+
+File: `workflows/steps/summarize.ts`
 
 ```ts
 import { defineWorkflowStep } from "@sixb/core"
@@ -126,44 +18,63 @@ export const summarize = defineWorkflowStep("summarize")
   .output({ summary: "string" })
   .run(async ({ input, sixb }) => {
     const { output } = await sixb.models.language.generate({
-      prompt: `Summarize this document:\n${input.document}`,
+      instructions: "Summarize in one sentence. Use only facts in the document.",
+      prompt: input.document,
     })
+
     return { summary: output }
   })
 ```
 
-## In an action
+Add the step to a [workflow](../workflows/overview.md#define-a-workflow) with `.then(summarize)`.
+You can also generate inside an action's [writeback or effects handler](../actions/overview.md#call-external-systems).
+For a task that needs tools, use an [AI workflow step](../workflows/overview.md#add-an-ai-task).
 
-Generate in writeback, then use the persisted result in edits.
+## Structured output
+
+Add an `output` schema to extract a typed result. Inside a step or action handler:
 
 ```ts
-import { defineAction, param } from "@sixb/core"
-import { Invoice } from "../ontology/invoice"
+const { output } = await sixb.models.language.generate({
+  prompt: input.document,
+  output: {
+    invoiceNumber: "string",
+    amount: "decimal",
+    currency: "string",
+    overdue: "boolean",
+  },
+})
 
-export const summarizeInvoice = defineAction("summarize-invoice")
-  .on(Invoice)
-  .params({ document: param("string") })
-  .writeback(async ({ params, sixb }) => {
-    const { output } = await sixb.models.language.generate({
-      prompt: params.document,
-      output: { summary: "string" },
-    })
-    return output
-  })
-  .edits(({ objects, subject, writeback }) => {
-    objects(Invoice).byId(subject.primaryId).update({ summary: writeback.summary })
-  })
+output.invoiceNumber // string
+output.amount // Exact decimal string
+output.overdue // boolean
 ```
 
-This example assumes `Invoice` has a `summary` string property. Effects handlers can also generate.
+Sixb validates the response against the schema. Invalid or incomplete output throws an error.
+The selected model must support structured output.
 
-## Execution context
+## Choose a model
 
-| Caller | Accounting owner |
-| --- | --- |
-| Action writeback/effects | Action execution |
-| Ordinary workflow step | Workflow execution |
-| Bound request | Request execution |
-| `createTestSixb(host)` | Test request execution |
+Generation uses the first model in `models.language`. To use another configured model, pass its
+binding as `model`. You can also limit the response length with `maxOutputTokens`:
 
-Generation uses the existing provider-access rules: ordinary principal-scoped requests cannot invoke providers directly. Worker calls retain their delivery attempt, cancellation, and admitted requester groups.
+```ts
+import { alternateModel } from "../../lib/models"
+
+const { output } = await sixb.models.language.generate({
+  model: alternateModel,
+  prompt: input.document,
+  maxOutputTokens: 1_000,
+})
+```
+
+Here, `alternateModel` is a model binding exported from your project and included in
+`models.language`. Provider-specific options are documented in the
+[provider READMEs](./configuration.md).
+
+## Usage
+
+The result includes `usage`, `cost`, and `finishReason` alongside `output`. A text response that
+reaches its token limit can be partial, with `finishReason` set to `"length"`.
+
+Calls are recorded automatically and respect your [usage limits](./usage-and-limits.md).

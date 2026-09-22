@@ -60,13 +60,17 @@ CREATE EXTENSION vector WITH SCHEMA public;
 
 ```ts
 const result = await sixb.objects(Product).query()
-  .vector("content", queryVector, { k: 10 }).list()
+  .vector("content", "lightweight running shoes", { k: 10 }).list()
 ```
 
 The exact cosine search applies filters and source-property permissions before ranking.
 Sixb normalizes stored and query vectors to unit length. At most 10,000 eligible vectors and
 16 million coordinates may be scored per search; larger queries fail explicitly. Configure
-`statementTimeoutMillis` to bound SQL execution time. Regeneration remains explicit via `index()`.
+`statementTimeoutMillis` to bound SQL execution time.
+
+Projections refresh embeddings in the background. Use `index()` to index existing objects after
+adding or changing a profile, or to retry explicitly.
+
 Tested with pgvector 0.8.1; no approximate index is created.
 
 ## Pooling and timeouts

@@ -1,68 +1,41 @@
 # Project Structure
 
-A Sixb project has one configuration file and folders for its definitions. Export a definition
-from the matching folder and Sixb loads it automatically; no central registration file is needed.
+A Sixb project has one configuration file and folders for its definitions. Sixb automatically loads
+the definitions you export from their matching folders.
 
 ## Explore a project
 
-Browse an example based on the [starter project](../README.md). Select a file to read its code. The CelesTrak client is separated into `lib/` to keep the connector declaration easy to read.
-The example follows one path: connector → sync → dataset → projection → object → app.
+Explore a project based on the [Sixb starter](../README.md). Select a file to see how the pieces
+fit together.
 
 <div data-project-explorer></div>
 
-The starter only creates the folders it needs. Add the other folders below as your app grows.
+## Files and folders
 
-## Discovered folders
+| Path | Purpose |
+| --- | --- |
+| [`sixb.config.ts`](../runtime/overview.md) | Project configuration and providers, exported as `sixb` |
+| [`ontology/`](../ontology/overview.md) | Your domain's types, properties, and relationships |
+| [`connectors/`](../connectors/overview.md) | Access to external APIs, databases, and services |
+| [`datasets/`](../datasets/overview.md) | The structure of your source and prepared data |
+| [`syncs/`](../syncs/overview.md) | Importing data from connectors into datasets |
+| [`pipelines/`](../pipelines/overview.md) | Cleaning and combining datasets |
+| [`projections/`](../projections/overview.md) | Mapping dataset rows to your domain model |
+| [`actions/`](../actions/overview.md) | Operations that change your domain's state |
+| [`workflows/`](../workflows/overview.md) | Processes with multiple steps |
+| [`rules/`](../rules/overview.md) | Conditions that signal when objects need attention |
+| [`schedules/`](../schedules/overview.md) | Timer and event triggers for background work |
+| [`security/`](../auth/authorization.md) | Access control in `groups/`, `roles/`, and `policies/` |
+| [`shares/`](../auth/shared-access.md) | Permissions that can be granted through a share link |
+| [`app/`](../apps/overview.md) | React pages and layouts, with their own routing conventions |
+| [`skills/`](../models/tools-and-authorization.md#add-a-skill) | Agent instructions in `<name>/SKILL.md` and supporting resources |
+| `lib/` | Shared helpers imported by your project |
 
-Each folder contains one kind of definition. `skills/` holds instructions and resources for the
-Agent; `app/` holds the React interface and follows its own routing conventions.
+## How files are loaded
 
-| Folder | Holds | Related page |
-| --- | --- | --- |
-| `ontology/` | Object types and value types | [Ontology](../ontology/overview.md) |
-| `actions/` | Action definitions | [Actions](../actions/overview.md) |
-| `datasets/` | Dataset definitions | [Datasets](../datasets/overview.md) |
-| `connectors/` | Connector definitions | [Connectors](../connectors/overview.md) |
-| `syncs/` | Sync definitions | [Syncs](../syncs/overview.md) |
-| `projections/` | Object, link, and telemetry projections | [Projections](../projections/overview.md) |
-| `schedules/` | Schedule definitions | [Schedules](../schedules/overview.md) |
-| `pipelines/` | Pipeline definitions | [Pipelines](../pipelines/overview.md) |
-| `rules/` | Rule definitions | [Rules](../rules/overview.md) |
-| `workflows/` | Workflow definitions | [Workflows](../workflows/overview.md) |
-| `skills/` | Agent Skills (`<name>/SKILL.md` plus references/assets/scripts) read by the agent worker | [Tools and Authorization](../models/tools-and-authorization.md) |
-| `security/groups/` | Group definitions | [Authorization](../auth/authorization.md) |
-| `security/roles/` | Role definitions | [Authorization](../auth/authorization.md) |
-| `security/policies/` | Membership-policy definitions | [Authorization](../auth/authorization.md) |
+- Export backend definitions from their matching folders.
+- File names are up to you. Sixb also loads definitions from subfolders.
+- The starter creates only the folders it needs. Add optional folders as your project grows.
+- Keep tests and standalone scripts outside definition folders, since Sixb imports their modules.
 
-## Discovery rules
-
-- Export definitions from the matching folder. File names and nesting are up to you.
-- Subfolders are scanned recursively. One file may export several definitions or an array of them.
-- Sixb loads `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, and `.cjs` modules. Avoid import-time side effects.
-- Keep tests and scripts outside definition folders. An `_` prefix does not exclude backend files.
-- Moving a file does not change its definition ID; update any imports of the old path.
-- Optional folders can be absent. Your project needs at least one object type in `ontology/`.
-
-## The entry file
-
-`sixb.config.ts` exports your project configuration as `sixb`. The CLI loads it on startup.
-Configure storage, messaging, authentication, and models here; see [Runtime](../runtime/overview.md).
-
-For tests or programmatic setups, definitions can also be passed as arrays to `createSixb()`:
-`ontologies`, `actions`, `datasets`, `connectors`, `syncs`, `pipelines`, `projections`, `schedules`,
-`rules`, `workflows`, `groups`, `roles`, and `membershipPolicies`. Duplicate IDs are rejected.
-
-## app/ is not discovered
-
-The `app/` folder holds your custom UI and is **not** part of `createSixb()` discovery.
-`@sixb/app` (`createCustomApp`) builds and serves it separately, so nothing in `app/` is
-treated as a backend definition. Route conventions and data access for `app/` are documented
-under [Apps](../apps/overview.md).
-
-## Related
-
-- [Organizing your project](organizing-your-project.md) — adaptable examples for grouping definitions
-  and growing a project's structure.
-- [Get started](../README.md) — scaffold and run a project end to end.
-- [Manual install](manual-install.md) — set up the folders by hand.
-- [Runtime](../runtime/overview.md) — what `createSixb()` accepts and returns.
+See [Organizing your project](organizing-your-project.md) for examples of grouping related files.

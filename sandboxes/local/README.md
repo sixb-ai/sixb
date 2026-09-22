@@ -36,7 +36,7 @@ export const sixb = createSixb({
 | Option | Purpose |
 | --- | --- |
 | `isolation` | `"auto"` (default) picks the backend for the platform; `"seatbelt"` and `"bwrap"` demand a specific one; `"none"` disables confinement. |
-| `readOnlyPaths` / `readWritePaths` | The filesystem the agent may see. Everything else is denied by the sandbox profile. |
+| `readOnlyPaths` / `readWritePaths` | Additional read-only mounts for bwrap and writable paths for OS sandbox backends. These do not prevent reading other host files. |
 | `env` | Default environment merged into every sandbox. Only `PATH`, `HOME`, `LANG`, and `TMPDIR` are inherited from the host — nothing else leaks in. |
 | `timeout` | Default command timeout, overridable per run. |
 | `network` | Default network policy, overridable per run. |
@@ -51,3 +51,12 @@ untrusted instructions.
 For real isolation, use a provider that puts a boundary around the workload:
 [`@sixb/sandboxes-apple-container`](../apple-container),
 [`@sixb/sandboxes-smolvm`](../smolvm), or [`@sixb/sandboxes-vercel`](../vercel).
+
+Pin `isolation` to `"seatbelt"` or `"bwrap"` to require that backend. Creation fails if it is
+unavailable instead of falling back to an ordinary child process.
+
+## Network policy
+
+Seatbelt and bwrap block outbound network when `network.mode` is `"none"`. Both `"restricted"`
+and `"all"` allow full host network access; the per-origin allow list is not enforced. With
+`isolation: "none"`, network access is unrestricted regardless of the policy.

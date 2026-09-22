@@ -1,382 +1,117 @@
 # Building Apps
 
-An app is the custom web interface for your sixb project. It turns your customers,
-projects, invoices, telemetry, actions, and workflows into the screens your team
-uses to get work done.
+An app is a React interface for your Sixb project. Build pages that display your data and let users
+interact with your domain model.
 
-Apps are optional. Add an `app/` directory and sixb serves a React single-page app
-alongside the API. With no `app/`, your project is API-only.
+## Create a page
 
-## Mental model
+Add `app/page.tsx` to your project. Export a React component to serve it at `/`.
 
-You write React pages under `app/`. sixb scans the directory, generates a router
-and an app shell, and serves it. There is no separate framework to configure: the
-file tree is the routing table, and sixb wires up everything pages need to talk to
-the API.
-
-| You provide | Purpose |
-| --- | --- |
-| `app/**/page.tsx` | Route components |
-| `app/layout.tsx` (optional) | Global wrapper and document metadata |
-| `app/**/layout.tsx` (optional) | Persistent layouts for a route subtree |
-| `app/globals.css` (optional) | App-wide styles |
-| `app/public/` | Root-relative static assets |
-
-sixb supplies React Router, TanStack Query, the authenticated client runtime, and conservative
-same-origin SPA navigation around these files.
-
-Pages fetch data with the typed hooks from `@sixb/client/hooks` and the typed
-query builder from `@sixb/client/query`, run action buttons with
-`useActionRunMutation`, then render with your own components or `@sixb/ui`. See
-[querying data](querying-data.md) and [running actions](actions.md).
-
-> `app/` is not discovered by `createSixb()` — it is built and served separately
-> by the CLI. Your ontology, datasets, workflows, and the rest stay in their own
-> top-level directories.
-
-## Public environment variables
-
-Prefix variables intended for browser use with `SIXB_PUBLIC_`:
-
-```dotenv
-SIXB_PUBLIC_GOOGLE_MAPS_API_KEY=your-browser-key
-```
-
-Read them through the app accessor, including at module scope:
-
-```ts
-import { publicEnv } from "@sixb/app"
-
-const key = publicEnv.SIXB_PUBLIC_GOOGLE_MAPS_API_KEY // string | undefined
-```
-
-Values are strings; missing variables return `undefined`. Only `SIXB_PUBLIC_*` variables are
-available. Outside the browser, `publicEnv` is empty.
-
-Works with `sixb dev` and `sixb app`. Restart the app server after changing values; no rebuild
-is required.
-
-**Public values are visible to users.** Never use `SIXB_PUBLIC_` for backend credentials or secrets.
-
-## File-based routing
-
-Put your app in `app/`. Each `page.tsx` (or `page.ts`) becomes a route.
-
-```txt
-app/
-  page.tsx                       -> /
-  projects/page.tsx              -> /projects
-  invoices/page.tsx              -> /invoices
-  invoices/layout.tsx            -> wraps /invoices/**
-  review/[interventionId]/page.tsx -> /review/:interventionId
-  review/[interventionId]/layout.tsx -> wraps /review/:interventionId/**
-  layout.tsx                     -> root wrapper and metadata
-  globals.css                    -> app styles
-  public/logo.svg                -> /logo.svg
-```
-
-Routing rules:
-
-| Pattern | Route |
-| --- | --- |
-| `app/page.tsx` | `/` |
-| `app/invoices/page.tsx` | `/invoices` |
-| `app/review/[interventionId]/page.tsx` | `/review/:interventionId` |
-| `app/invoices/layout.tsx` | Layout for `/invoices` and descendants |
-
-- Only `page.tsx` and `page.ts` create routes.
-- A descendant `layout.tsx` wraps pages in its directory and below; a layout alone does not create
-  a route.
-- A folder named `[param]` becomes a dynamic segment `:param`. Read it with React
-  Router's `useParams` inside the `[param]/page.tsx` component.
-- Route groups such as `(admin)` are reserved for future framework support and currently fail with
-  an actionable error.
-- Files or folders starting with `_` are ignored — use the prefix for components,
-  helpers, or routes you do not want mounted.
-- The route component is the page module's `default` export.
-
-Here's a projects listing page. It builds a typed query for active projects and
-renders each one as a card:
+File: `app/page.tsx`
 
 ```tsx
-import { useObjectsQuery } from "@sixb/client/hooks"
-import { objects } from "@sixb/client/query"
-import type { TwinObject } from "@sixb/core/query"
-import { Project } from "../../ontology/project"
-
-type ProjectRow = TwinObject<typeof Project, readonly []>
-
-const activeProjects = objects(Project)
-  .query()
-  .where((project) => project.p.status.in(["active", "paused"]))
-  .orderBy(Project.p.deadline, "asc")
-
-function ProjectCard({ project }: { project: ProjectRow }) {
+export default function HomePage() {
   return (
-    <article className="rounded-lg border bg-card p-4 shadow-sm">
-      <span className="text-xs font-bold text-accent-foreground capitalize">
-        {project.properties.status}
-      </span>
-      <h2 className="mt-2 text-lg font-semibold">{project.properties.name}</h2>
-      <p className="mt-2 text-muted-foreground">
-        {project.properties.description ?? "No description."}
-      </p>
-    </article>
-  )
-}
-
-export default function ProjectsPage() {
-  const projectsQuery = useObjectsQuery(activeProjects)
-  const projects = projectsQuery.data?.objects ?? []
-
-  if (projectsQuery.isLoading) return <p>Loading projects...</p>
-  if (projectsQuery.isError) return <p>Projects failed to load.</p>
-
-  return (
-    <main className="mx-auto grid max-w-3xl gap-3 p-6">
-      {projects.map((project) => (
-        <ProjectCard key={project.primaryId} project={project} />
-      ))}
+    <main>
+      <h1>My app</h1>
+      <a href="/invoices">View invoices</a>
     </main>
   )
 }
 ```
 
-Hooks, the query builder, filtering, faceting, and telemetry are covered in
-[querying data](querying-data.md). Button-driven action flows are covered in
-[running actions](actions.md).
-
-### Navigation
-
-A plain same-origin `<a href="/...">` is intercepted and routed client-side when
-its `href` matches a known route, so you get SPA navigation without React Router's
-`<Link>`:
-
-```tsx
-<a href={`/review/${encodeURIComponent(intervention.id)}`}>Open review</a>
-```
-
-Links to `/api`, `/auth`, `/ws`, `/docs`, `/shared`, cross-origin URLs, `download` links, and
-modified clicks (new tab, etc.) fall through to native navigation.
-
-## Shared access uses ordinary pages
-
-`/shared/:grantId/proposals/proposal-1#secret` opens the same page, layout, query hooks, and
-Action mutations as `/proposals/proposal-1`. Sixb removes the secret and establishes an isolated
-session before loading app code or styles. Do not create `app/shared`: that route is reserved.
-
-- **Permissions:** every request is restricted to the objects, properties, link paths, and Actions
-  selected by the Share grant.
-- **V1 limits:** no WebSockets, uploads, direct object/link/telemetry writes, or Action-run listing
-  or files.
-- **Navigation:** shared URLs are bearer credentials. Open them with `<a href={url}>`, not
-  programmatic React Router navigation, so the secret stays out of the ordinary app's SPA state.
-- **Hosting:** use `bun sixb dev`, `bun sixb app`, or `createCustomApp().start()`; a static SPA
-  fallback cannot replace the isolated shared shell. The app and API must be same-site.
-
-## Layouts and metadata
-
-`app/layout.tsx` is optional. Its `default` export wraps every route, and its
-named `metadata` export sets the static document and install identity. sixb loads
-it during app generation, before browser or auth startup, so `layout.tsx` must be
-import-safe in Bun. Keep metadata declarative and do not access `window` or
-`document` at module scope.
-
-```tsx
-import type { AppMetadata } from "@sixb/app"
-import type { PropsWithChildren } from "react"
-
-export const metadata = {
-  title: "Acme Operations",
-  description: "Customers, projects, and invoices for Acme operations.",
-  favicon: "/logo.svg",
-  themeColor: "#172018",
-  backgroundColor: "#f5f6f2",
-} satisfies AppMetadata
-
-export default function RootLayout({ children }: PropsWithChildren) {
-  return <>{children}</>
-}
-```
-
-Use descendant layouts for feature-owned shells, providers, and persistent state. They receive
-`children` directly — Sixb owns the React Router `Outlet` wiring:
-
-```tsx
-// app/analytics/layout.tsx
-import type { PropsWithChildren } from "react"
-
-export default function AnalyticsLayout({ children }: PropsWithChildren) {
-  return <AnalyticsShell>{children}</AnalyticsShell>
-}
-```
-
-This wraps `/analytics` and every routed descendant. The layout stays mounted when navigating from
-`/analytics/reports/a` to `/analytics/reports/b`, so shell state and subscriptions persist. A
-layout inside a dynamic directory can read that directory's parameter normally:
-
-```tsx
-// app/analytics/reports/[reportId]/layout.tsx
-import type { PropsWithChildren } from "react"
-import { useParams } from "react-router-dom"
-
-export default function ReportLayout({ children }: PropsWithChildren) {
-  const { reportId } = useParams()
-  return <ReportShell reportId={reportId}>{children}</ReportShell>
-}
-```
-
-Only the root `app/layout.tsx` owns `metadata`; metadata exports from descendant layouts are not
-read. Descendant layouts are browser route components.
-
-`AppMetadata` fields are all optional:
-
-| Field | Type | Purpose |
-| --- | --- | --- |
-| `title` | `string` | Document `<title>` and manifest name |
-| `description` | `string` | `<meta name="description">` |
-| `favicon` | `string` | `<link rel="icon" href>` (e.g. a `public/` path) |
-| `themeColor` | `string` | Browser chrome and manifest theme color |
-| `backgroundColor` | `string` | Manifest launch background color |
-
-The title defaults to `Sixb`. The theme defaults to the background color, then
-white; the background defaults to the resolved theme. If no favicon is configured,
-`app/public/favicon.svg` is discovered automatically.
-
-## PWA assets and standalone layout
-
-Every custom app gets a generated manifest at `/app.webmanifest` with root scope
-and `standalone` display. Add these conventional files under `app/public/` for
-reliable installation:
-
-| File | Use |
-| --- | --- |
-| `favicon.svg` | Browser favicon and best-effort manifest fallback |
-| `icon-192.png` | Standard 192x192 install icon |
-| `icon-512.png` | Standard 512x512 install icon |
-| `icon-maskable-512.png` | 512x512 Android adaptive icon; keep artwork in the 80% safe zone |
-| `apple-touch-icon.png` | 180x180 opaque iOS Home Screen icon |
-
-`/app.webmanifest` is framework-owned, so a same-named file in `app/public/` is
-ignored. Sixb emits `viewport-fit=cover`, dynamic viewport-height support, and
-disables root overscroll only when the app is running standalone. It does not add
-global safe-area padding because that would break full-bleed and fixed layouts.
-
-App-owned shells should protect important content themselves:
-
-```css
-.app-shell {
-  padding-top: max(1rem, env(safe-area-inset-top));
-  padding-right: max(1rem, env(safe-area-inset-right));
-  padding-bottom: max(1rem, env(safe-area-inset-bottom));
-  padding-left: max(1rem, env(safe-area-inset-left));
-}
-```
-
-`max()` preserves normal spacing on devices without an inset. Keep full-bleed
-backgrounds on an outer element and pad its content container. Fixed bottom
-navigation should include `env(safe-area-inset-bottom)` in its own padding.
-
-This PWA foundation does not add a service worker or cache API/authenticated data.
-Hosting outside `createCustomApp().start()` should serve `/app.webmanifest` as
-`application/manifest+json` with revalidation rather than immutable caching.
-
-## Styles and theming
-
-Use `app/globals.css` for app-wide styles. Plain CSS bundles as-is.
-
-To use `@sixb/ui` components and theme tokens, import its stylesheet. sixb detects
-the Tailwind at-rules and the `@sixb/ui` import and runs the Tailwind pipeline for
-you. Override the CSS variables after the import to re-theme the components:
-
-```css
-@import "@sixb/ui/globals.css";
-@source "./**/*.{ts,tsx}";
-
-:root {
-  --background: #f5f6f2;
-  --foreground: #172018;
-  --primary: #1f7a5a;
-  --primary-foreground: #ffffff;
-  --ring: #1f7a5a;
-}
-```
-
-Using Tailwind features requires the CLI in your project:
-
-```bash
-bun add tailwindcss @tailwindcss/cli
-```
-
-Bringing your own UI? Keep `globals.css` plain CSS and skip the install.
-
-## UI packages
-
-Sixb provides two optional packages for building app interfaces:
-
-- `@sixb/ui` provides shared React components and theme tokens for application screens. The
-  [styles and theming](#styles-and-theming) section shows how to include its stylesheet.
-- `@sixb/agent-ui` provides agent chat UI components for custom apps.
-
-The [project organization guide](../fundamentals/organizing-your-project.md) shows one way to group
-components and data access by feature.
-
-## Custom login experience
-
-Add `app/auth.tsx` to give the app audience an organization-specific magic-link experience. The
-component renders before a session exists and receives safe states and actions from Sixb:
-
-```tsx
-import type { AuthExperienceProps } from "@sixb/app/auth"
-
-export default function AuthExperience({ state, actions }: AuthExperienceProps) {
-  if (state.kind === "checkEmail") {
-    return <p>Check your inbox for a secure sign-in link.</p>
-  }
-
-  if (state.kind !== "signIn") {
-    return <button onClick={actions.restartSignIn}>Request a new link</button>
-  }
-
-  return <SignInForm onSubmit={actions.requestMagicLink} />
-}
-```
-
-The available states are `signIn`, `checkEmail`, `confirm`, `invalidLink`, and `error`. The auth
-entry automatically includes `app/globals.css` and uses the app metadata for its document title and
-theme. It is not wrapped in `app/layout.tsx`, because layouts may assume an authenticated session.
-
-Sixb builds this as a separate bundle and serves it from the API's existing `/auth/*` routes. The
-component controls presentation only: the API retains tokens, cookies, callback completion,
-audience checks, neutral email responses, and safe return redirects. Without `app/auth.tsx`, the
-generic server login remains unchanged. Atlas also continues to use the generic login.
-
-## Running
-
-During development, `bun sixb dev` starts the app alongside the API whenever `app/`
-has routes. Edits to `.ts`, `.tsx`, and `.css` files rebuild automatically.
+Start the development server and open the app URL printed in your terminal:
 
 ```bash
 bun sixb dev
 ```
 
-For production, build the project first, then serve the compiled app. `sixb app`
-errors if no built app exists yet:
+Sixb serves your app alongside the API and rebuilds it when you edit a page or stylesheet. It
+configures routing, authentication, and the query client for you.
 
-```bash
-bun run build
-bun sixb app
+## Add routes
+
+Each `page.tsx` or `page.ts` defines a route through its default export:
+
+| File | Route |
+| --- | --- |
+| `app/page.tsx` | `/` |
+| `app/invoices/page.tsx` | `/invoices` |
+| `app/invoices/[invoiceId]/page.tsx` | `/invoices/:invoiceId` |
+
+Use `[name]` for a dynamic segment and read its value with `useParams`:
+
+File: `app/invoices/[invoiceId]/page.tsx`
+
+```tsx
+import { useParams } from "react-router-dom"
+
+export default function InvoicePage() {
+  const { invoiceId } = useParams()
+  return <h1>Invoice {invoiceId}</h1>
+}
 ```
 
-## Next
+Use ordinary `<a href="/invoices">` links between pages. Sixb handles client-side navigation for
+known app routes. Files and folders beginning with `_` are ignored by routing.
 
-- [Querying data](querying-data.md) — fetch objects, telemetry, and facets from
-  pages with the typed `@sixb/client/hooks` and `@sixb/client/query`.
-- [Client events](../client/events.md) — live telemetry, activity feeds, and
-  event-driven invalidation.
-- [Running actions](actions.md) — wire action buttons with terminal loading,
-  success, error, and cache invalidation states.
-- [Typed client](../client/overview.md) — the generated client the hooks build on,
-  for non-app callers.
-- [Authentication](../auth/authentication.md) — how the app shell establishes the
-  auth session that pages run inside.
+[Shared access](../auth/shared-access.md) reuses these same pages with restricted
+permissions. Open a shared URL with `<a href={url}>`, rather than programmatic router navigation.
+
+## Add a layout
+
+An optional `app/layout.tsx` wraps every page. A layout in a subdirectory, such as
+`app/invoices/layout.tsx`, wraps only that route and its descendants. Layouts receive `children`
+and stay mounted while navigating between their pages.
+
+File: `app/layout.tsx`
+
+```tsx
+import type { PropsWithChildren } from "react"
+
+export default function RootLayout({ children }: PropsWithChildren) {
+  return (
+    <>
+      <nav>
+        <a href="/">Home</a>
+        <a href="/invoices">Invoices</a>
+      </nav>
+      {children}
+    </>
+  )
+}
+```
+
+The root layout is also loaded during app generation. Avoid accessing `window` or `document` at
+module scope. Set the page title and app icons through [Customization](customization.md).
+
+## Add styles
+
+Put app-wide styles in `app/globals.css`. Use plain CSS or your preferred components.
+
+To use the optional `@sixb/ui` components and theme, install Tailwind in your project:
+
+```bash
+bun add tailwindcss @tailwindcss/cli
+```
+
+Then include the UI stylesheet and your app's source files:
+
+File: `app/globals.css`
+
+```css
+@import "@sixb/ui/globals.css";
+@source "./**/*.{ts,tsx}";
+```
+
+Override theme variables such as `--background`, `--foreground`, and `--primary` after the import.
+For agent chat interfaces, use `@sixb/agent-ui`.
+
+## Add assets
+
+Place images, fonts, and other static files in `app/public/`. Reference them from the root:
+`app/public/logo.svg` is available at `/logo.svg`.
+
+Continue with [Querying data](querying-data.md) and [Running actions](actions.md) to connect your
+pages to the domain model. See [Deployment](../deployment/overview.md#start-services) when you are
+ready to build and serve the app in production.

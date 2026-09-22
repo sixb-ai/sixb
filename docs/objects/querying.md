@@ -1,187 +1,69 @@
-# Querying Objects
+# Querying
 
-Read objects from the latest-state graph: filter by properties, search text, sort, follow
-links, and page through results. Reach for a query when you need graph-aware reads; use
-[`get(id)`](crud.md) when you already know the primary id.
+Queries filter, search, and follow relationships between objects. Start with
+`sixb.objects(Type).query()`, then call `list()`, `first()`, `count()`, or `exists()` to read results.
+For an object whose ID you already know, use [`get()`](overview.md#read-an-object).
+
+The same query methods are available in [React apps](../apps/querying-data.md).
+
+## Filter objects
+
+Use `where()` to filter by property values. Filtered properties must declare
+`query: { searchable: true, filterable: true }` in the ontology. See
+[property query metadata](../ontology/properties.md#enable-queries).
 
 ```ts
+import { Invoice } from "./ontology/invoice"
+
 const { objects } = await sixb
-  .objects(Project)
-  .query()
-  .where((project) => project.p.status.eq("active"))
-  .orderBy(Project.p.deadline, "asc")
-  .limit(25)
-  .list()
-```
-
-`objects(Project).query()` starts from every `Project` and returns a builder. Each chained
-method narrows or reshapes the current object set; a terminal method runs it. A property is
-only filterable, sortable, searchable, or facetable if it declares that
-[query metadata](../ontology/properties.md).
-
-## Terminal Methods
-
-| Method | Returns | Use for |
-| --- | --- | --- |
-| `list(options?)` | `{ objects, total, hasMore, nextPageToken? }` | Reading rows, with pagination. |
-| `first()` | one object or `null` | When one result is enough. |
-| `count()` | `number` | A count without fetching rows. |
-| `exists()` | `boolean` | An existence probe that stops at the first match. |
-| `facets(inputs)` | bucketed counts | Aggregating a matching set by category. |
-
-### list
-
-`list()` returns object rows plus pagination metadata:
-
-```ts
-const { objects, total, hasMore } = await sixb
-  .objects(Invoice)
-  .query()
-  .where((invoice) =>
-    invoice.and(
-      invoice.p.status.eq("overdue"),
-      invoice.p.amount.gte(10_000)
-    )
-  )
-  .orderBy(Invoice.p.dueDate, "asc")
-  .limit(20)
-  .list()
-
-for (const invoice of objects) {
-  console.log(invoice.primaryId, invoice.properties.number)
-}
-```
-
-Each row has `primaryId`, `objectTypeId`, `properties`, `createdAt`, and `updatedAt`. With
-the typed API, `properties` is inferred from the object type.
-
-`total` is computed by default. Infinite-scroll UIs can skip the count query and keep only
-page state:
-
-```ts
-const page = await sixb
-  .objects(Invoice)
-  .query()
-  .orderBy(Invoice.p.dueDate, "asc")
-  .page({ pageSize: 50, pageToken })
-  .list({ includeTotal: false })
-
-console.log(page.objects, page.hasMore, page.nextPageToken)
-```
-
-### count and exists
-
-`count()` runs a count-only query and `exists()` stops after the first match. Neither
-hydrates rows.
-
-```ts
-const overdueCount = await sixb
   .objects(Invoice)
   .query()
   .where((invoice) => invoice.p.status.eq("overdue"))
-  .count()
-```
-
-### facets
-
-`facets()` returns counts grouped by category. Bucket limits are required, and each facet
-property must set `query.searchable: true` and `query.facet: true`.
-
-```ts
-const facets = await sixb
-  .objects(Invoice)
-  .query()
-  .where((invoice) => invoice.p.status.in(["sent", "overdue"]))
-  .facets([{ property: Invoice.p.status, limit: 10 }])
-
-console.log(facets[0]?.buckets)
-// [{ value: "sent", count: 42 }, { value: "overdue", count: 9 }]
-```
-
-Facets aggregate over the whole matching set, so row-shaping nodes such as `limit`, `page`,
-and `orderBy` do not restrict facet counts.
-
-## Predicates
-
-Inside `where(...)`, `builder.p` exposes one typed predicate builder per property.
-
-| Method | Meaning |
-| --- | --- |
-| `p.status.eq("paid")` / `neq("paid")` | Exact equality / inequality. |
-| `p.amount.lt(n)` / `lte` / `gt` / `gte` | Ordered comparisons. |
-| `p.status.in(["sent", "overdue"])` | Value is in a list. |
-| `p.dueDate.exists()` / `exists(false)` | Property is present / missing. |
-| `p.number.contains("INV")` | Substring (string), element (array), or key (map) match. |
-
-Predicate values are checked against the property schema. Every predicate requires
-`query.searchable: true` and `query.filterable: true` on the property (the primary id is
-exempt for `eq` and `in`). Ordered comparisons additionally require an orderable schema: strings,
-numbers, dates, timestamps, uuids, and enums.
-
-### Combining with and / or / not
-
-```ts
-const invoices = await sixb
-  .objects(Invoice)
-  .query()
-  .where((invoice) =>
-    invoice.and(
-      invoice.p.status.in(["sent", "overdue"]),
-      invoice.or(
-        invoice.p.currency.eq("EUR"),
-        invoice.p.currency.eq("USD")
-      ),
-      invoice.not(invoice.p.amount.lt(1_000))
-    )
-  )
-  .limit(10)
+  .limit(25)
   .list()
+
+for (const invoice of objects) {
+  console.log(invoice.properties.number)
+}
 ```
 
-Returning an array from `where(...)` is shorthand for an `and` group:
+`list()` returns `{ objects, total, hasMore, nextPageToken? }`. Use `first()` to return one object
+or `null` instead.
+
+| Predicate | Matches |
+| --- | --- |
+| `p.status.eq("paid")` / `neq("paid")` | Equal / unequal values. |
+| `p.amount.lt(100)` / `lte` / `gt` / `gte` | Ordered comparisons. |
+| `p.status.in(["sent", "overdue"])` | Any value in the list. |
+| `p.dueDate.exists()` / `exists(false)` | Present / missing properties. |
+| `p.number.contains("INV")` | A substring; also works for array elements and map keys. |
+
+Primary-ID comparisons with `eq` or `in` do not need query metadata.
+
+Return an array to require all conditions. Use `or(...)` for alternatives and `not(...)` to negate
+one condition:
 
 ```ts
 .where((invoice) => [
   invoice.p.status.eq("overdue"),
-  invoice.p.amount.gte(100_000),
+  invoice.or(invoice.p.currency.eq("EUR"), invoice.p.currency.eq("USD")),
+  invoice.not(invoice.p.amount.lt(1_000)),
 ])
 ```
 
-## Null and Missing Values
+A present `null` differs from a missing property: `exists()` includes `null`, while `eq(null)`
+matches only explicit nulls. `neq(...)` also matches missing properties. Ordered comparisons
+exclude both null and missing values.
 
-Sixb distinguishes an explicit JSON `null` from a missing property.
+## Search text
 
-| Predicate | Matches `null` | Matches missing |
-| --- | --- | --- |
-| `p.dueDate.eq(null)` | yes | no |
-| `p.dueDate.neq(null)` | no | yes |
-| `p.dueDate.exists()` | yes | no |
-| `p.dueDate.exists(false)` | no | yes |
-| `p.dueDate.neq(someDate)` | yes | yes |
-| `not(p.dueDate.eq(someDate))` | yes | yes |
-
-Ordered comparisons (`lt`, `lte`, `gt`, `gte`) never match null or missing values. Sorting
-places null or missing values last in both directions.
-
-To require a present, non-null value before applying another check, combine predicates:
+`search()` searches the object's `search.defaultText` fields. Each field needs
+`query: { searchable: true, text: true }`:
 
 ```ts
-.where((invoice) =>
-  invoice.and(
-    invoice.p.dueDate.exists(),
-    invoice.p.dueDate.neq(null),
-    invoice.p.dueDate.lt(new Date())
-  )
-)
-```
+import { Customer } from "./ontology/customer"
 
-## Text Search
-
-`search(...)` queries the object type's `search.defaultText` fields. Use it for substring
-and full-text matching on text-enabled fields.
-
-```ts
-const customers = await sixb
+const { objects: customers } = await sixb
   .objects(Customer)
   .query()
   .search("acme industries")
@@ -189,39 +71,91 @@ const customers = await sixb
   .list()
 ```
 
-Target specific text-enabled fields with property tokens:
+Pass `fields` to search specific text-enabled properties:
 
 ```ts
 .search("acme", { fields: [Customer.p.company, Customer.p.name] })
 ```
 
-Terms are whitespace-tokenized. Portable text search treats every term as a required match
-across the selected fields.
+Each search term must match somewhere in the selected fields. To sort by relevance, add
+`orderByRelevance("desc")`; this requires a storage provider that supports ranking.
 
-### Relevance
+## Search by meaning
 
-Providers with ranking support can order by relevance instead of a property:
+Use `vector()` with a [named profile](../ontology/properties.md#configure-vector-search) and search
+text. Sixb embeds the text on the server and returns the nearest authorized objects:
 
 ```ts
-const ranked = await sixb
-  .objects(Customer)
+import { Product } from "./ontology/product"
+
+const { objects: products } = await sixb
+  .objects(Product)
   .query()
-  .search("acme industries")
-  .orderByRelevance("desc")
-  .limit(10)
+  .vector("content", "lightweight running shoes", { k: 10 })
   .list()
 ```
 
-If the storage provider does not support relevance sorting, the query is rejected at
-execution with a structured planning error. Use `orderBy(...)` for portable, deterministic
-ordering.
+Results are ordered by similarity, highest first, with a `score` on each object. `k` accepts
+1–1,000. Search text must be nonempty and at most 8,000 characters. The same call works with
+`objects(Product)` in [React apps](../apps/querying-data.md).
 
-## Traversing Links
+Projections generate and refresh embeddings in the background. Objects become searchable once
+their embeddings are ready. To index an existing object after adding or changing a profile, or
+to explicitly retry indexing, call this from an action's writeback/effects handler or a workflow step:
 
-`traverse(...)` follows an ontology link and switches the result type to the linked object
-type. Subsequent `where(...)` calls then use the target type's properties.
+```ts
+await sixb.objects(Product).byId("product-1").vector("content").index()
+```
 
-Outgoing traversal starts from the source object and follows one of its links:
+Changing a profile does not automatically reindex existing objects. Source changes invalidate
+stale embeddings so searches do not use out-of-date content. Indexing requires edit access to
+the object. Both indexing and search require read access to every source property in the profile.
+
+Vector queries use one profile and one concrete object type. Apply `where()` before `vector()`
+to narrow candidates. Pagination, traversal, expansion, and combining keyword and vector search
+are not supported. Counts and facets describe the selected top `k` results.
+
+Storage must support vector search. See [PostgreSQL setup](https://github.com/sixb-ai/sixb/tree/main/storage/pg#vector-profiles)
+or [SQLite setup](https://github.com/sixb-ai/sixb/tree/main/storage/sqlite#vector-profiles), including
+SQLite's macOS requirements. SQL search has candidate limits; narrow filters if you reach them.
+Indexing and each search call count toward [AI usage and limits](../models/usage-and-limits.md#embeddings).
+
+## Sort and paginate
+
+Use `orderBy()` to sort and `limit()` to cap the result count. Sorted properties need
+`query: { searchable: true, sortable: true }`. Chain `orderBy()` calls to break ties:
+
+```ts
+const { objects } = await sixb
+  .objects(Invoice)
+  .query()
+  .orderBy(Invoice.p.dueDate, "asc")
+  .orderBy(Invoice.p.amount, "desc")
+  .limit(25)
+  .list()
+```
+
+Null and missing values sort last in both directions.
+
+For multiple pages, pass the previous result's `nextPageToken` to `page()`. Keep the query and page
+size the same between requests. Use `includeTotal: false` when you do not need a total count:
+
+```ts
+const query = sixb.objects(Invoice).query().orderBy(Invoice.p.dueDate, "asc")
+
+const firstPage = await query.page({ pageSize: 25 }).list({ includeTotal: false })
+
+if (firstPage.hasMore) {
+  const nextPage = await query
+    .page({ pageSize: 25, pageToken: firstPage.nextPageToken })
+    .list({ includeTotal: false })
+}
+```
+
+## Follow relationships
+
+`traverse()` follows a link and returns the related objects. This query starts from an invoice
+and returns its customer:
 
 ```ts
 const customer = await sixb
@@ -232,59 +166,48 @@ const customer = await sixb
   .first()
 ```
 
-Incoming traversal starts from the target and finds the sources that point to it:
+Use `direction: "incoming"` to follow a link in reverse. After traversal, filters and sorting apply
+to the new result type:
 
 ```ts
-const openInvoices = await sixb
+const { objects: openInvoices } = await sixb
   .objects(Customer)
   .query()
   .where((customer) => customer.p.id.eq("cust-001"))
   .traverse(Invoice.l.customer, { direction: "incoming" })
   .where((invoice) => invoice.p.status.in(["sent", "overdue"]))
-  .orderBy(Invoice.p.dueDate, "asc")
+  .limit(25)
   .list()
 ```
 
-Several object types can declare a link with the same id — `Invoice.customer` and
-`Project.customer`, for example. The fluent API pins incoming traversal to the link token's
-owner type, so `traverse(Invoice.l.customer, { direction: "incoming" })` returns only
-invoices. Wildcard links cannot be traversed through the fluent API, since the result type
-cannot be inferred. See [links](../ontology/links.md).
+The token identifies which relationship to follow. Use a link with a single target type for
+outgoing typed traversal; wildcard links cannot be traversed with this builder.
 
-## Expanding Links
+## Include related objects
 
-`expand(...)` also follows a link, but unlike `traverse` it **keeps the current result type** and
-attaches the linked objects to each row under `.links`. Reach for it when you want an object
-*together with* its related objects in one query — an invoice with its customer, a customer with
-its recent invoices — instead of switching the result to the target type.
+`expand()` keeps the objects you queried and includes related objects under `.links`.
+A `"one"` link returns one object or `null`; a `"many"` link returns an array:
 
 ```ts
-const invoices = await sixb
+const { objects: invoices } = await sixb
   .objects(Invoice)
   .query()
   .where((invoice) => invoice.p.status.eq("overdue"))
   .expand(Invoice.l.customer)
+  .limit(25)
   .list()
 
-const customer = invoices[0]?.links.customer // Customer | null
+const customer = invoices[0]?.links.customer
+console.log(customer?.properties.name)
 ```
 
-Each `expand` widens the row, keyed by link id under `.links`: a `"one"` link adds `Target | null`,
-a `"many"` link adds `Target[]`. Expanded targets expose their `.properties`, any edge
-`linkProperties`, and their own nested `.links`. Nest a callback to expand deeper hops:
+Nest a callback to include another level of relationships:
 
 ```ts
-const rows = await sixb
-  .objects(Invoice)
-  .query()
-  .expand(Invoice.l.customer, (customer) => customer.expand(Customer.l.region))
-  .list()
-
-const region = rows[0]?.links.customer?.links.region
+.expand(Invoice.l.customer, (customer) => customer.expand(Customer.l.region))
 ```
 
-For a `"many"` link, bound the fan-out to the top-N target objects per parent with `{ limit,
-orderBy }` (options and a nested callback combine as `expand(link, { limit }, (child) => …)`):
+For a `"many"` link, limit and sort the related objects returned for each parent:
 
 ```ts
 .expand(Customer.l.invoices, {
@@ -293,72 +216,34 @@ orderBy }` (options and a nested callback combine as `expand(link, { limit }, (c
 })
 ```
 
-On PostgreSQL a uniform expansion is pushed down into a single query; other providers resolve it in
-the runtime. Target types stay precise when the link uses direct object targets or resolves through
-the [type manifest](../client/typed-queries.md), and otherwise degrade to a loose base shape. The
-same builder works over HTTP from `@sixb/client` — see [typed queries](../client/typed-queries.md).
+Relationship properties, when present, are available as `linkProperties` on the related object.
 
-## Sorting and Limits
+## Count and group results
 
-`orderBy(propertyToken, direction)` gives deterministic ordering. Chain calls for
-tie-breaking:
+Use `count()` for the number of matches and `exists()` to check whether any match:
 
 ```ts
-const soonest = await sixb
+const overdue = sixb
   .objects(Invoice)
   .query()
   .where((invoice) => invoice.p.status.eq("overdue"))
-  .orderBy(Invoice.p.dueDate, "asc")
-  .orderBy(Invoice.p.amount, "desc")
-  .limit(5)
-  .list()
+
+const count = await overdue.count()
+const hasOverdueInvoices = await overdue.exists()
 ```
 
-Add `limit(...)` to any query that could return many objects. Some providers run unbounded
-queries, but bounded queries are safer and easier to reason about across storage adapters.
-
-## Validate and Explain
-
-`validate()` checks a query against the registered ontology without executing it.
+`facets()` groups counts by a property. The property needs
+`query: { searchable: true, facet: true }`, and each facet requires a bucket limit:
 
 ```ts
-const query = sixb
+const facets = await sixb
   .objects(Invoice)
   .query()
-  .where((invoice) => invoice.p.status.eq("overdue"))
-  .limit(10)
+  .facets([{ property: Invoice.p.status, limit: 10 }])
 
-const validation = query.validate()
-console.log(validation.result.objectTypeIds)
+console.log(facets[0]?.buckets)
+// [{ value: "paid", count: 42 }, { value: "overdue", count: 9 }]
 ```
 
-`explain()` returns a structured explanation tree; `formatExplanation()` renders it as text
-for logs or tests:
-
-```ts
-console.log(query.formatExplanation())
-```
-
-Validation catches unknown properties, wrong value types, missing query metadata, invalid
-text fields, and unsupported traversal shapes. Provider-capability issues — unsupported
-relevance sorting or vector search — surface only when the query runs through a terminal
-method or the HTTP route.
-
-## How Metadata Drives Queries
-
-| Query call | Required metadata |
-| --- | --- |
-| `where((o) => o.p.status.eq(...))` | `status`: `searchable` + `filterable` |
-| `orderBy(Invoice.p.amount, "desc")` | `amount`: `searchable` + `sortable` |
-| `search("acme")` | `search.defaultText` fields with `searchable` + `text` |
-| `search("acme", { fields: [Customer.p.company] })` | `company`: `searchable` + `text` |
-| `facets([{ property: Invoice.p.status, limit }])` | `status`: `searchable` + `facet` (exact-matchable) |
-| vector search | Named `search.vectors` profile with static text sources and an embedding model; no property query flag required. |
-
-## Related
-
-- [Property query metadata](../ontology/properties.md#property-query-metadata) — making fields filterable, sortable,
-  text-searchable, and facetable.
-- [Typed queries in the browser](../client/typed-queries.md) — the same builder via
-  `@sixb/client/query` and TanStack Query hooks.
-- [HTTP reference](http-reference.md) — raw query JSON for `POST /api/objects/query`.
+Facets count the whole matching set. Row limits and pagination do not restrict their counts;
+vector queries count only their selected top `k` results.
