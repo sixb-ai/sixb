@@ -8185,6 +8185,10 @@ export type ListObjectTypesResponses = {
             providerId: string
             modelId: string
             dimensions: number
+            representation?: {
+              name: string
+              version?: string
+            }
           }
         }
       }
@@ -8296,6 +8300,10 @@ export type GetObjectTypeResponses = {
             providerId: string
             modelId: string
             dimensions: number
+            representation?: {
+              name: string
+              version?: string
+            }
           }
         }
       }

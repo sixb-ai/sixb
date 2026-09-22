@@ -11,6 +11,7 @@ export function vectorConfiguration(profile: ObjectVectorSearchProfile): string 
     sources: [...profile.source],
     provider: profile.model.providerId,
     model: profile.model.modelId,
+    representation: profile.model.definition.representation ?? { name: profile.model.modelId },
     dimensions: profile.model.definition.dimensions,
     metric: "cosine",
     precision: "float32",

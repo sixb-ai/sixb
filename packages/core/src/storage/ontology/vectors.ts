@@ -17,6 +17,15 @@ export interface StoredObjectVector extends ObjectVectorState {
 /** Transactional derived state. Mutations must run inside an ontology materialization transaction. */
 export interface OntologyVectorStorage {
   list(input: { projectId: string; ref: OntologyObjectRef }): Promise<readonly ObjectVectorState[]>
+  listBatch(input: {
+    projectId: string
+    refs: readonly OntologyObjectRef[]
+  }): Promise<readonly ObjectVectorState[]>
+  removeBatch(input: {
+    session: MaterializationSession
+    projectId: string
+    entries: readonly { ref: OntologyObjectRef; profile: string; expectedCommitId: string }[]
+  }): Promise<void>
   write(input: {
     session: MaterializationSession
     projectId: string

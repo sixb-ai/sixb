@@ -44,6 +44,7 @@ function serializeSearch(
                 providerId: profile.model.providerId,
                 modelId: profile.model.modelId,
                 dimensions: profile.model.definition.dimensions,
+                representation: profile.model.definition.representation,
               },
             },
           ])

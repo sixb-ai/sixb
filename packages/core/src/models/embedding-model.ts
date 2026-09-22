@@ -4,6 +4,8 @@ import type { ModelDefinition } from "./definitions"
 export interface EmbeddingModelDefinition extends ModelDefinition {
   readonly kind: "embedding"
   readonly dimensions: number
+  /** Actual representation behind a routing alias. Omit only when modelId identifies it directly. */
+  readonly representation?: { readonly name: string; readonly version?: string }
 }
 
 export interface EmbeddingModelRequest {
@@ -35,6 +37,15 @@ export function assertEmbeddingModel(model: EmbeddingModel): void {
 
 export function assertEmbeddingModelRef(model: EmbeddingModelRef): void {
   const definition = model?.definition
+  const representation = definition?.representation
+  if (
+    representation !== undefined &&
+    (!representation ||
+      typeof representation !== "object" ||
+      !validIdentityPart(representation.name) ||
+      (representation.version !== undefined && !validIdentityPart(representation.version)))
+  )
+    throw new TypeError("[Sixb] Invalid embedding model representation.")
   if (
     !definition ||
     definition.kind !== "embedding" ||
@@ -52,4 +63,20 @@ export function assertEmbeddingModelRef(model: EmbeddingModelRef): void {
   ) {
     throw new TypeError("[Sixb] Invalid embedding model identity or dimensions (expected 1–16000).")
   }
+}
+
+/** Routing identity, representation and dimensions must agree before any inference. */
+export function sameEmbeddingModel(left: EmbeddingModelRef, right: EmbeddingModelRef): boolean {
+  return (
+    left.providerId === right.providerId &&
+    left.modelId === right.modelId &&
+    left.definition.dimensions === right.definition.dimensions &&
+    (left.definition.representation?.name ?? left.modelId) ===
+      (right.definition.representation?.name ?? right.modelId) &&
+    left.definition.representation?.version === right.definition.representation?.version
+  )
+}
+
+function validIdentityPart(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0 && value.trim() === value
 }
