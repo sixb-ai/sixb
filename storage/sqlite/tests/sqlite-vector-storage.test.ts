@@ -30,6 +30,7 @@ import {
   createTestSixb,
   startTestProjectionRun,
 } from "@sixb/core/testing"
+import { assertVectorBatchInvalidation } from "../../tests/vector-invalidation-contract"
 import { SqliteStorage } from "../src"
 import { createSqliteMigrator, sqliteStorageMigrations, sqliteStoragePath } from "../src/migrations"
 
@@ -485,4 +486,13 @@ describe("SQLite vector storage", () => {
       await f.close()
     }
   })
+})
+
+test("batch invalidation is project-scoped and rolls back on a stale revision", async () => {
+  const f = await fixture()
+  try {
+    await assertVectorBatchInvalidation(f.storage)
+  } finally {
+    await f.close()
+  }
 })

@@ -26,6 +26,7 @@ import {
   createTestSixb,
   startTestProjectionRun,
 } from "@sixb/core/testing"
+import { assertVectorBatchInvalidation } from "../../tests/vector-invalidation-contract"
 import { PostgresStorage } from "../src"
 import { createPostgresMigrator, postgresStorageMigrations, quoteIdent } from "../src/migrations"
 import { createPgClient } from "../src/pg-client"
@@ -486,4 +487,13 @@ describe("PostgreSQL vector storage", () => {
       await f.close()
     }
   })
+})
+
+test("batch invalidation is project-scoped and rolls back on a stale revision", async () => {
+  const f = await fixture()
+  try {
+    await assertVectorBatchInvalidation(f.storage)
+  } finally {
+    await f.close()
+  }
 })

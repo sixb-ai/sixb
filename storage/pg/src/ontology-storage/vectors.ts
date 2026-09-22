@@ -5,7 +5,7 @@ import type {
   OntologyVectorStorage,
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
-import type { PgRootOperation } from "./shared"
+import { jsonParameter as json, type PgRootOperation } from "./shared"
 
 interface VectorMetadataRow {
   readonly profile: string
@@ -46,6 +46,48 @@ export class PgOntologyVectorStorage implements OntologyVectorStorage {
         lastCommitId: row.last_commit_id,
       }))
     })
+  }
+
+  async listBatch(
+    input: Parameters<OntologyVectorStorage["listBatch"]>[0]
+  ): Promise<readonly ObjectVectorState[]> {
+    if (!input.refs.length) return []
+    return this.runRootOperation(async (sql) => {
+      const rows = await sql<
+        (VectorMetadataRow & { object_type_id: string; primary_id: string })[]
+      >`
+        SELECT stored.object_type_id, stored.primary_id, stored.profile, stored.configuration,
+          stored.source, stored.source_fingerprint, stored.last_commit_id
+        FROM (SELECT DISTINCT ref->>'objectTypeId' AS object_type_id, ref->>'primaryId' AS primary_id
+          FROM jsonb_array_elements(${json(sql, input.refs)}::jsonb) AS requested(ref)) AS requested
+        JOIN object_vectors AS stored ON stored.project_id = ${input.projectId}
+          AND stored.object_type_id = requested.object_type_id AND stored.primary_id = requested.primary_id
+        ORDER BY stored.object_type_id, stored.primary_id, stored.profile
+      `
+      return rows.map((row) => ({
+        ref: { objectTypeId: row.object_type_id, primaryId: row.primary_id },
+        profile: row.profile,
+        configuration: row.configuration,
+        source: row.source,
+        sourceFingerprint: row.source_fingerprint,
+        lastCommitId: row.last_commit_id,
+      }))
+    })
+  }
+
+  async removeBatch(input: Parameters<OntologyVectorStorage["removeBatch"]>[0]): Promise<void> {
+    this.assertSession(input.session, input.projectId)
+    if (!input.entries.length) return
+    const removed = await this.sql`
+      DELETE FROM object_vectors AS stored
+      USING jsonb_array_elements(${json(this.sql, input.entries)}::jsonb) AS requested(entry)
+      WHERE stored.project_id = ${input.projectId}
+        AND stored.object_type_id = entry#>>'{ref,objectTypeId}'
+        AND stored.primary_id = entry#>>'{ref,primaryId}' AND stored.profile = entry->>'profile'
+        AND stored.last_commit_id = entry->>'expectedCommitId'
+      RETURNING stored.profile
+    `
+    if (removed.length !== input.entries.length) throw vectorConflict()
   }
 
   async write(input: Parameters<OntologyVectorStorage["write"]>[0]): Promise<void> {
