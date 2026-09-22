@@ -99,13 +99,18 @@ export async function createConversationAgentEnvironment(
     runId: run.id,
     executionToken: run.execution?.token,
   })
+  const failure = new AbortController()
+  const sandboxSignal = input.signal
+    ? AbortSignal.any([input.signal, failure.signal])
+    : failure.signal
   const persistentSandbox = input.thread?.sandboxParams
     ? await openThreadSandbox({
         context,
         definition: input.sandboxDefinition,
         thread: input.thread,
         run,
-        signal: input.signal ?? new AbortController().signal,
+        signal: sandboxSignal,
+        onAuthFailure: (error) => failure.abort(error),
       })
     : undefined
   let environment: AgentExecutionEnvironment | undefined
@@ -118,7 +123,14 @@ export async function createConversationAgentEnvironment(
           plan,
           run,
           budget: preflight.budget,
-          runtime: preflight.runtime,
+          runtime: {
+            ...preflight.runtime,
+            signal: sandboxSignal,
+            assertCanContinue() {
+              preflight.runtime.assertCanContinue()
+              failure.signal.throwIfAborted()
+            },
+          },
           frameworkTools: input.frameworkTools,
         })
       : undefined
@@ -138,11 +150,12 @@ export async function createConversationAgentEnvironment(
       blobStorage: context.blobStorage,
       apiBaseUrl,
       inlineImages,
-      signal: input.signal,
+      signal: sandboxSignal,
     })
     environment = startAgentEnvironment({
       mode: "conversation",
       persistentSandbox,
+      failureSignal: failure.signal,
       context,
       plan,
       runId: run.id,
@@ -156,7 +169,7 @@ export async function createConversationAgentEnvironment(
     })
     if (persistentSandbox) {
       const ready = environment.turnContext.sandboxReady
-      if (ready) await waitForAbort(ready, input.signal)
+      if (ready) await waitForAbort(ready, sandboxSignal)
     }
     return { ...environment, threadContext: prepared?.threadContext }
   } catch (error) {
@@ -252,6 +265,7 @@ export async function createWorkflowAgentNodeEnvironment(
 }
 
 interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
+  readonly failureSignal?: AbortSignal
   readonly persistentSandbox?: AgentSandboxLifecycle
   readonly toolRun: AgentToolRunInfo
   readonly actorId?: string
@@ -359,6 +373,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   return {
     beforeFinalize,
     turnContext: {
+      environmentFailureSignal: input.failureSignal,
       ...(input.persistentSandbox ? { beforeFinalize } : {}),
       id: context.id,
       ...(context.authorPrincipal === undefined
@@ -375,6 +390,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
         instructions: plan.instructions,
         skills,
         sandboxResetAt: input.persistentSandbox?.resetAt,
+        workspace: input.persistentSandbox?.promptContext,
       }),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,

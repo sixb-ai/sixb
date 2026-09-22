@@ -190,6 +190,54 @@ describe("Vercel named persistence", () => {
     expect(f.requests.some((request) => request.method === "DELETE")).toBe(false)
   })
 
+  test("applies initial credentials before clone without persisting them in creation defaults", async () => {
+    // Regression proof: omit requestCredentials in bindPersistentSandbox's initial update.
+    const f = fixture()
+    const requestCredentials = [
+      {
+        origin: "https://github.com",
+        path: "/acme/repo.git/info/refs",
+        method: "GET" as const,
+        headers: { Authorization: "initial-secret" },
+      },
+    ]
+    // The fake transport rejects commands; even failed initialization must inject before clone.
+    await expect(
+      f.factory.create({
+        persistence: { name: "workspace-1" },
+        network: { mode: "restricted", allow: [{ name: "git", origin: "https://github.com" }] },
+        requestCredentials,
+        environment: { source: { type: "git", url: "https://github.com/acme/repo.git" } },
+      })
+    ).rejects.toThrow()
+    const update = f.requests.findIndex((request) => request.path.includes("/network-policy"))
+    const clone = f.requests.findIndex((request) => request.path.includes("/cmd"))
+    expect(update).toBeGreaterThan(0)
+    expect(clone).toBeGreaterThan(update)
+    expect(JSON.stringify(f.requests[update]?.body)).toContain("initial-secret")
+    expect(JSON.stringify(f.requests[0]?.body)).not.toContain("initial-secret")
+    expect(JSON.stringify(f.requests[clone]?.body)).not.toContain("initial-secret")
+  })
+
+  test("rejects disallowed initial credentials before provisioning", async () => {
+    const f = fixture()
+    await expect(
+      f.factory.create({
+        persistence: { name: "workspace-1" },
+        network: { mode: "none" },
+        requestCredentials: [
+          {
+            origin: "https://github.com",
+            path: "/acme/repo.git/info/refs",
+            method: "GET",
+            headers: { Authorization: "secret" },
+          },
+        ],
+      })
+    ).rejects.toThrow("credential injection target")
+    expect(f.requests).toHaveLength(0)
+  })
+
   test.each([
     null,
     false,

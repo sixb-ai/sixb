@@ -16,7 +16,7 @@ import {
   sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
 import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
-import { toVercelNetworkPolicy } from "./network"
+import { toVercelNetworkPolicy, withRequestCredentials } from "./network"
 import {
   assertPersistentName,
   assertStoppedPersistent,
@@ -92,6 +92,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
   implements SandboxFactory<TParams>
 {
   readonly configuration: SandboxConfig<TParams>
+  readonly supportsRequestCredentials = true
   constructor(
     private readonly defaults: VercelSandboxFactoryOptions<TParams> = {},
     private readonly createRemote: VercelCreateSandbox = createVercelSandbox,
@@ -102,6 +103,11 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    if (options.requestCredentials !== undefined && options.persistence === undefined) {
+      throw new SandboxError(
+        "[Sandbox] Vercel request credentials require a named persistent session."
+      )
+    }
     const environment = sandboxCreationEnvironment(this.configuration, options)
     assertNoLegacyPersistence(this.defaults)
     assertNoLegacyPersistence(options)
@@ -155,16 +161,17 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
     assertNoLegacyPersistence(options)
     if (
       Object.keys(options).some(
-        (key) => !["workingDirectory", "env", "timeout", "network"].includes(key)
+        (key) =>
+          !["workingDirectory", "env", "timeout", "network", "requestCredentials"].includes(key)
       )
     ) {
       throw new SandboxError(
-        "[Sandbox] resume accepts only workingDirectory, env, timeout and network; pass the existing name separately."
+        "[Sandbox] resume accepts only session options (workingDirectory, env, timeout, network, requestCredentials); pass the existing name separately."
       )
     }
     assertPersistentName(name)
     const resolved = this.runtimeOptions(options)
-    toVercelNetworkPolicy(resolved.network ?? { mode: "none" })
+    withRequestCredentials(resolved.network, resolved.requestCredentials ?? [])
     const params = { ...resolveCredentials(this.defaults.credentials), name }
     let client: VercelPersistentClient | undefined
     let operation: "resume" | "configure" = "resume"
@@ -186,6 +193,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
       env: { ...this.configuration.env, ...options.env },
       timeout: options.timeout ?? this.defaults.timeout,
       network: options.network ?? this.configuration.network ?? { mode: "none" },
+      requestCredentials: options.requestCredentials,
     }
   }
 
@@ -197,7 +205,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
   ): Promise<Sandbox> {
     assertPersistentName(name)
     // Persistent VM defaults contain no run env or authority.
-    toVercelNetworkPolicy(options.network ?? { mode: "none" })
+    withRequestCredentials(options.network, options.requestCredentials ?? [])
     const params = buildCreateParams({
       defaults: this.defaults,
       env: {},

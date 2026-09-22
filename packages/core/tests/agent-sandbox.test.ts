@@ -47,6 +47,33 @@ const recipe = (): SandboxConfig => ({
 })
 
 describe("Agent sandbox binding", () => {
+  test("captures source authentication without invoking it or exposing it in the recipe", async () => {
+    let calls = 0
+    const auth = {
+      authorize: async () => {
+        calls++
+        throw new Error("not invoked by configuration")
+      },
+    }
+    const { host, sixb } = setup({
+      auth,
+      source: { type: "git", url: "https://github.com/acme/app" },
+    })
+    const captured = host.sandboxDefinition!.auth!
+    auth.authorize = async () => {
+      throw new Error("mutated")
+    }
+    expect(await host.sandboxDefinition!.resolve({ params: {}, sixb })).not.toHaveProperty("auth")
+    expect(calls).toBe(0)
+    await expect(
+      captured.authorize({
+        source: { type: "git", url: "https://github.com/acme/app" },
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow("not invoked by configuration")
+    expect(calls).toBe(1)
+  })
+
   test("captures a static environment and keeps it out of discovery and thread history", async () => {
     // Regression proof: bypass captureEnvironment's snapshot; caller mutation changes the recipe.
     const source = { type: "git" as const, url: "https://github.com/acme/app.git" }

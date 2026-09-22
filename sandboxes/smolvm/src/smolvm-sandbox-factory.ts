@@ -71,6 +71,9 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    if (options.requestCredentials !== undefined) {
+      throw new SandboxError("[Sandbox] smolvm does not support secure request credentials.")
+    }
     const environment = sandboxCreationEnvironment(this.configuration, options)
     if (options.persistence !== undefined) {
       throw new SandboxError("[Sandbox] smolvm does not support persistent sandboxes.")

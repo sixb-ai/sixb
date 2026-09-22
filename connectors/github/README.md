@@ -38,8 +38,8 @@ membership visibility depends on the authenticated user's organization access.
 ## Workspace authentication
 
 `@sixb/connector-github/auth` provides `githubApp({ appId, privateKey })` for
-`agentWorkspace.auth`. It is separate from the token-based REST connector; no connector
-registration is required. See [workspace configuration](../../docs/agents/defining-agents.md#workspace-configuration).
+the sandbox factory's `auth` option. It is separate from the token-based REST connector; no connector
+registration is required. See [sandbox configuration](../../docs/agents/defining-agents.md#sandbox-configuration).
 
 The App must be installed on the selected GitHub.com repository with Contents read/write
 permission. Each run receives a repository-scoped installation token, injected outside the VM

@@ -4,6 +4,7 @@ import { assertValidSchema } from "../ontology/validation/definition"
 import type { Sixb } from "../runtime/sixb"
 import type { InferParams, ParamsConfig } from "../shared/params/types"
 import { coerceParamsToTyped, normalizeParams } from "../shared/params/validation"
+import type { SandboxSourceAuth } from "./auth"
 import { SandboxError } from "./errors"
 import type { SandboxNetworkPolicy } from "./sandbox"
 
@@ -39,6 +40,7 @@ export interface SandboxResolveContext<TParams = Record<string, unknown>> {
 // Provider option interfaces must preserve this annotation when extending the config.
 export interface SandboxConfig<in out TParams extends ParamsConfig = ParamsConfig>
   extends SandboxEnvironment {
+  readonly auth?: SandboxSourceAuth
   readonly params?: TParams
   readonly resolve?: (
     context: SandboxResolveContext<InferParams<NoInfer<TParams>>>
@@ -47,6 +49,7 @@ export interface SandboxConfig<in out TParams extends ParamsConfig = ParamsConfi
 
 /** Registered project recipe; only thread params cross the durable boundary. */
 export interface SandboxDefinition {
+  readonly auth?: SandboxSourceAuth
   readonly params: ParamsConfig
   readonly resolve: (context: SandboxResolveContext) => Promise<SandboxEnvironment>
 }
@@ -66,9 +69,12 @@ export function createSandboxDefinition<TParams extends ParamsConfig>(
     )
   }
   for (const key of Object.keys(config)) {
-    if (!["params", "resolve", "source", "setup", "env", "network"].includes(key)) {
+    if (!["params", "resolve", "source", "setup", "env", "network", "auth"].includes(key)) {
       throw new SandboxError("[Sixb] Unknown sandbox configuration field.")
     }
+  }
+  if (config.auth !== undefined && typeof config.auth?.authorize !== "function") {
+    throw new SandboxError("[Sixb] sandboxes.auth requires an authorize function.")
   }
   if (config.params !== undefined && config.resolve === undefined) {
     throw new SandboxError("[Sixb] Sandbox params require a resolve function.")
@@ -115,9 +121,11 @@ export function createSandboxDefinition<TParams extends ParamsConfig>(
   // Capture the function too: later mutation of application config must not change this host.
   // Erase inference only after capturing its schema; every invocation validates and coerces below.
   const resolve = config.resolve as SandboxConfig["resolve"]
+  const authorize = config.auth?.authorize.bind(config.auth)
   deepFreeze(params)
   return Object.freeze({
     params,
+    ...(authorize ? { auth: Object.freeze({ authorize }) } : {}),
     resolve: async ({ params: input, sixb }: SandboxResolveContext) => {
       const binding = normalizeParams(ontology.getValueTypesById(), params, input, {
         kind: "sandbox",

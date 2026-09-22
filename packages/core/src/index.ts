@@ -1074,6 +1074,7 @@ export {
   MAX_AGENT_APP_STATE_TOTAL_BYTES,
   MAX_AGENT_CONTEXT_ENTRIES,
 } from "./agents"
+export type { SandboxSourceAuth, SandboxSourceCredentials } from "./sandboxes/auth"
 export type {
   SandboxConfig,
   SandboxDefinition,

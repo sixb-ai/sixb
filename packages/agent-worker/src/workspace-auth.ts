@@ -1,8 +1,8 @@
 import type {
-  AgentWorkspaceAuth,
-  AgentWorkspaceCredentials,
-  ResolvedAgentWorkspace,
   Sandbox,
+  SandboxSource,
+  SandboxSourceAuth,
+  SandboxSourceCredentials,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 
@@ -17,38 +17,46 @@ const authError = () =>
 
 /** Owns host-side access only. Never stores credentials in workspace state or guest files. */
 export class WorkspaceAuthSession {
-  private readonly grants = new Set<AgentWorkspaceCredentials>()
-  private readonly revocations = new Map<AgentWorkspaceCredentials, Promise<void>>()
+  private readonly grants = new Set<SandboxSourceCredentials>()
+  private readonly revocations = new Map<SandboxSourceCredentials, Promise<void>>()
   private timer: ReturnType<typeof setTimeout> | undefined
   private rotating: Promise<void> | undefined
   private closing: Promise<void> | undefined
   private halted = false
   private failed = false
-  private readonly inject: NonNullable<Sandbox["setRequestCredentials"]>
+  private inject?: NonNullable<Sandbox["setRequestCredentials"]>
+  private current?: SandboxSourceCredentials
 
   constructor(
     private readonly input: {
-      auth: AgentWorkspaceAuth
-      source: ResolvedAgentWorkspace["source"]
-      sandbox: Pick<Sandbox, "setRequestCredentials">
+      auth: SandboxSourceAuth
+      source: SandboxSource
       signal: AbortSignal
       assertOwner(): Promise<void>
       onFailure(error: Error): void
     }
   ) {
-    if (!input.sandbox.setRequestCredentials) {
+    input.signal.addEventListener("abort", this.onAbort, { once: true })
+  }
+
+  /** Called only after the provider has applied prepare()'s credentials before initialization. */
+  attach(sandbox: Pick<Sandbox, "setRequestCredentials">): void {
+    this.input.signal.throwIfAborted()
+    if (this.halted || !this.current) throw authError()
+    if (!sandbox.setRequestCredentials) {
       throw createSixbError(
         "agent.execution_failed",
         "[SixbAgentWorker] Workspace authentication requires a sandbox with secure credential injection."
       )
     }
-    this.inject = input.sandbox.setRequestCredentials.bind(input.sandbox)
-    input.signal.addEventListener("abort", this.onAbort, { once: true })
+    this.inject = sandbox.setRequestCredentials.bind(sandbox)
   }
 
-  async start(): Promise<void> {
+  async prepare(): Promise<SandboxSourceCredentials["requests"]> {
     this.input.signal.throwIfAborted()
     await this.rotate()
+    if (this.halted || !this.current) throw authError()
+    return this.current.requests
   }
 
   private readonly onAbort = () => {
@@ -71,17 +79,19 @@ export class WorkspaceAuthSession {
   private async refresh(): Promise<void> {
     await this.input.assertOwner()
     if (this.halted) return
-    const request = this.input.auth
-      .authorize({
-        source: this.input.source,
-        signal: this.input.signal,
-      })
+    const request = Promise.resolve()
+      .then(() =>
+        this.input.auth.authorize({
+          source: this.input.source,
+          signal: this.input.signal,
+        })
+      )
       .then(async (grant) => {
         this.grants.add(grant)
         if (this.halted) await this.revoke(grant)
         return grant
       })
-    let grant: AgentWorkspaceCredentials
+    let grant: SandboxSourceCredentials
     try {
       grant = await bounded(request)
       if (this.halted) return
@@ -96,14 +106,23 @@ export class WorkspaceAuthSession {
         throw authError()
       await this.input.assertOwner()
       if (this.halted) return
-      await bounded(this.inject(grant.requests))
+      if (this.inject) await bounded(this.inject(grant.requests))
       if (this.halted) return
       for (const previous of this.grants) {
         if (previous !== grant) await this.revoke(previous)
       }
       if (this.halted) return
+      this.current = grant
       this.timer = setTimeout(
         () => {
+          if (!this.inject) {
+            // Provisioning/setup has not returned a session handle yet. Abort before expiry;
+            // never renew an access policy on an unowned or unknown provider session.
+            this.failed = true
+            this.halted = true
+            this.input.onFailure(authError())
+            return
+          }
           void this.rotate().catch(() => {
             this.failed = true
             this.halted = true
@@ -124,7 +143,7 @@ export class WorkspaceAuthSession {
     }
   }
 
-  private async revoke(grant: AgentWorkspaceCredentials): Promise<void> {
+  private async revoke(grant: SandboxSourceCredentials): Promise<void> {
     const existing = this.revocations.get(grant)
     if (existing) return existing
     const operation = bounded(grant.revoke())
@@ -157,8 +176,10 @@ export class WorkspaceAuthSession {
         error = true
       }
       try {
-        await this.input.assertOwner()
-        await bounded(this.inject([]))
+        if (this.inject) {
+          await this.input.assertOwner()
+          await bounded(this.inject([]))
+        }
       } catch {
         error = true
       }

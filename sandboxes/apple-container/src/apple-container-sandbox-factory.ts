@@ -79,6 +79,11 @@ export class AppleContainerSandboxFactory<const TParams extends ParamsConfig = R
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    if (options.requestCredentials !== undefined) {
+      throw new SandboxError(
+        "[Sandbox] apple-container does not support secure request credentials."
+      )
+    }
     const environment = sandboxCreationEnvironment(this.configuration, options)
     if (options.persistence !== undefined) {
       throw new SandboxError("[Sandbox] apple-container does not support persistent sandboxes.")

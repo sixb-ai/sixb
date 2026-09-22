@@ -31,4 +31,10 @@ Factories define environments; threads retain immutable parameters; runs provide
 
 Vercel requests can outlive their worker: storage fencing cannot cancel provider-side work.
 Uncertain sandboxes stay blocked; explicit recreation uses a new name without deleting old state.
-Saved files remain subject to provider retention. Git authentication is a separate slice.
+Saved files remain subject to provider retention.
+
+Source `auth` stays host-side. Named providers advertising `supportsRequestCredentials` must apply
+initial credentials before setup and expose session-scoped renewal. Unsupported providers reject
+credentials before provisioning. During initial provisioning/setup, the worker aborts before token
+expiry if no session handle is available yet; renewal begins after acquisition. Normal teardown
+removes injection and revokes grants. A crash cannot guarantee immediate revocation.

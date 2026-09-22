@@ -1,5 +1,5 @@
 import { createPrivateKey, sign } from "node:crypto"
-import type { AgentWorkspaceAuth, AgentWorkspaceCredentials } from "@sixb/core"
+import type { SandboxSourceAuth, SandboxSourceCredentials } from "@sixb/core"
 import type { SandboxRequestCredential } from "@sixb/core/sandboxes"
 
 export interface GitHubAppOptions {
@@ -12,7 +12,7 @@ const API = "https://api.github.com"
 const REQUEST_TIMEOUT_MS = 30_000
 
 /** GitHub.com Git access through short-lived, repository-scoped installation tokens. */
-export function githubApp(options: GitHubAppOptions): AgentWorkspaceAuth {
+export function githubApp(options: GitHubAppOptions): SandboxSourceAuth {
   const appId = options.appId
   if (typeof appId !== "string" || !/^[1-9][0-9]*$/.test(appId)) {
     throw new Error("[GitHub] App ID must be a positive numeric string.")
@@ -40,7 +40,7 @@ export function githubApp(options: GitHubAppOptions): AgentWorkspaceAuth {
     async authorize({
       source,
       signal,
-    }: Parameters<AgentWorkspaceAuth["authorize"]>[0]): Promise<AgentWorkspaceCredentials> {
+    }: Parameters<SandboxSourceAuth["authorize"]>[0]): Promise<SandboxSourceCredentials> {
       const { owner, repo, path } = repository(source.url)
       const access = source.access ?? "read"
       if (source.type !== "git" || (access !== "read" && access !== "write")) {
