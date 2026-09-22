@@ -260,3 +260,20 @@ describe("embedding execution accounting", () => {
     expect(unknown?.meter === "tokens.total" && unknown.amount > 0).toBe(true)
   })
 })
+
+test("resolved representation drift fails before provider inference or budget admission", async () => {
+  // Removal proof: compare only route/dimensions in executeEmbedding; inference is called.
+  const f = setup()
+  f.model.resolve = async () => ({
+    ...f.model,
+    definition: {
+      ...f.model.definition,
+      representation: { name: "different-model", version: "2" },
+    },
+  })
+  await expect(f.search()).rejects.toThrow("identity does not match")
+  expect(f.embed).not.toHaveBeenCalled()
+  expect(await f.storage.aiUsage.summarizeExecution(f.identity)).toMatchObject({
+    modelCallCount: 0,
+  })
+})

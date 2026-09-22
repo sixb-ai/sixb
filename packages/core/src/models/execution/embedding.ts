@@ -7,6 +7,7 @@ import {
   EmbeddingModelResponseError,
   type EmbeddingModelResponseMetadata,
   type EmbeddingModelResult,
+  sameEmbeddingModel,
 } from "../embedding-model"
 import { estimateModelCall } from "../pricing"
 import type { AiModelCallRecorder } from "./model-call-recorder"
@@ -61,11 +62,7 @@ async function executeEmbedding(
   accounting.assertHealthy()
   const model = (await binding.resolve?.()) ?? binding
   assertEmbeddingModel(model)
-  if (
-    model.providerId !== binding.providerId ||
-    model.modelId !== binding.modelId ||
-    model.definition.dimensions !== binding.definition.dimensions
-  ) {
+  if (!sameEmbeddingModel(model, binding)) {
     throw new TypeError(
       "[SixbModels] Resolved embedding model identity does not match the selected model."
     )
