@@ -1,149 +1,93 @@
 # Rules
 
-A rule watches one [object type](../ontology/object-types.md) for a business condition and signals
-when that condition starts or clears. Reach for rules to track health states like "this invoice is
-overdue" or "this project is at risk."
-
-A rule does not fetch data, transform rows, or run a process. It names the condition, reacts to
-object and link changes, and emits a stable triggered/resolved signal that the rest of your app —
-alerts, attention badges, [workflows](../workflows/overview.md) — can react to.
+A rule tracks a condition on your objects and signals when an object starts or stops matching.
+Use rules to detect states such as an invoice needing review.
 
 ## Define a rule
 
-Write a rule as the state where the object needs attention. Put each definition in `rules/` and
-export it.
+Give each rule a unique ID and export it from `rules/`. Sixb discovers it automatically. Select
+an [object type](../ontology/object-types.md) with `.on()` and its condition with `.where()`:
 
-File: `rules/business-health.ts`
+File: `rules/invoices.ts`
 
 ```ts
 import { defineRule } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
-export const overdueInvoices = defineRule("invoice.overdue")
+export const invoiceNeedsReview = defineRule("invoice.needs-review")
   .on(Invoice)
-  .where((invoice) => invoice.p.status.eq("overdue"))
+  .where((invoice) => invoice.p.status.eq("submitted"))
 ```
 
-This matches when an `Invoice` has `status` of `"overdue"`.
+When an invoice starts matching, Sixb emits `rule.triggered`. When it stops matching, Sixb emits
+`rule.resolved`. Further changes while it remains active do not create a new transition. It can
+trigger again after resolving.
 
-| Part | Meaning |
-| --- | --- |
-| `defineRule("invoice.overdue")` | Names the rule with a unique id |
-| `.on(Invoice)` | The object type the rule watches |
-| `.where(...)` | Describes when the rule matches |
+Sixb evaluates the condition as objects and links change. Open **Rules** in Atlas to inspect
+active matches.
 
-The `.where(...)` callback receives a typed subject built from the object type. Use `p` for
-[properties](../ontology/properties.md) and `l` for [links](../ontology/links.md); both are keyed by
-the type's ids.
+## Combine conditions
 
-## Compose conditions
-
-Combine smaller conditions with `all`, `any`, and `not`. This rule flags an at-risk project — one
-that is active, large, and missing a lead.
+Use `p` for properties and `l` for relationships. Combine conditions with `all()`, `any()`, and
+`not()`. For example, narrow the rule to submitted invoices of at least 10,000 with no reviewer
+assigned, using the invoice's numeric `amount` property and `reviewer` link:
 
 ```ts
-import { defineRule } from "@sixb/core"
-import { Project } from "../ontology/project"
-
-export const atRiskProjects = defineRule("project.at-risk")
-  .on(Project)
-  .where((project) =>
-    project.all(
-      project.p.status.eq("active"),
-      project.p.budget.gte(150000),
-      project.l.lead.isMissing()
-    )
+.where((invoice) =>
+  invoice.all(
+    invoice.p.status.eq("submitted"),
+    invoice.p.amount.gte(10_000),
+    invoice.l.reviewer.isMissing()
   )
+)
 ```
 
-Property predicates check values (`p`), link predicates check whether a relationship exists (`l`).
-You can nest groups — for example, flag invoices that are overdue or large-and-still-sent:
-
-```ts
-export const collectionRisk = defineRule("invoice.collection-risk")
-  .on(Invoice)
-  .where((invoice) =>
-    invoice.any(
-      invoice.p.status.eq("overdue"),
-      invoice.all(invoice.p.status.eq("sent"), invoice.p.amount.gte(40000))
-    )
-  )
-```
-
-## Predicates
-
-| Need | Predicate |
+| Condition | Methods |
 | --- | --- |
-| Equal / not equal | `eq(value)`, `notEq(value)` |
-| Compare numbers | `gt(n)`, `gte(n)`, `lt(n)`, `lte(n)` |
-| Property is set | `isPresent()`, `isMissing()` |
-| Link is set | `exists()`, `isMissing()` |
-| Combine | `all(...)`, `any(...)`, `not(...)` |
+| Equal or not equal | `eq(value)`, `notEq(value)` |
+| Numeric comparison | `gt(value)`, `gte(value)`, `lt(value)`, `lte(value)` |
+| Property has a value | `isPresent()`, `isMissing()` |
+| Relationship exists | `exists()`, `isMissing()` |
+| Combine conditions | `all(...)`, `any(...)`, `not(...)` |
 
-`eq` / `notEq` take a string, number, boolean, or `null`. The comparison predicates take a number.
-`isPresent` / `isMissing` / `exists` take no value.
+Values are typed to the property. For decimal properties, use `decimal()` from `@sixb/core` to
+create comparison values, such as `decimal("10000")`.
 
-## How matching works
+## Start a workflow
 
-Once registered, Sixb evaluates rules as objects and links change. When a rule starts matching an
-object, it is **triggered**; when the object stops matching, it is **resolved**. Active state is
-tracked so each object triggers once until it clears.
+A rule identifies the condition; a workflow defines what happens next. Create an
+[event schedule](../schedules/overview.md#run-on-an-event) for the rule's triggered signal:
 
-Evaluation reacts to object/link `created`, `updated`, and `deleted` events for the watched type
-and any links named in the predicate. See [Events](../events/overview.md) for the full domain-event
-list.
-
-The event only wakes evaluation: Rules always read current committed object/link state. A startup
-and periodic reconciliation repairs events missed while the worker was offline and resolves active
-state for deleted objects.
-
-The pre-0.1 line supports one active Rules worker per project. Rule notifications are at-least-once,
-so consumers must tolerate a duplicate around process failure.
-
-## Reacting to the signal
-
-A rule emits `rule.triggered` and `rule.resolved` [domain events](../events/overview.md). Consume
-them by attaching an [event schedule](../schedules/events.md): select the occurrence with
-`events.rule(rule).triggered()` (or `.resolved()`) and bind it to a workflow, sync, or pipeline.
+File: `schedules/invoices.ts`
 
 ```ts
 import { defineSchedule, events } from "@sixb/core"
-import { collectionRisk } from "../rules/business-health"
+import { invoiceNeedsReview } from "../rules/invoices"
 
-export const onCollectionRisk = defineSchedule("invoice.collection-risk-triggered")
-  .on(events.rule(collectionRisk).triggered())
+export const invoiceReviewRequested = defineSchedule("invoice.review-requested")
+  .on(events.rule(invoiceNeedsReview).triggered())
 ```
 
-Attach `onCollectionRisk` to a workflow with `.when(...)` to act on it. In an app, subscribe to the
-same signal live with the client `events.rules()` builder — see [client events](../client/events.md).
+Attach the schedule to a workflow with `.when()` and pass the matching invoice into its input.
+Here, `reviewInvoice` is a [step you define](../workflows/overview.md#define-a-workflow) that accepts
+an invoice reference:
 
-## File location
+File: `workflows/invoice-review.ts`
 
-Export definitions from `rules/`. See [Project structure](../fundamentals/project-structure.md) for discovery rules.
+```ts
+import { defineWorkflow, ref } from "@sixb/core"
+import { Invoice } from "../ontology/invoice"
+import { invoiceReviewRequested } from "../schedules/invoices"
+import { reviewInvoice } from "./steps/review-invoice"
 
-## Rule vs workflow
+export const invoiceReview = defineWorkflow("invoice-review")
+  .input({ invoice: ref(Invoice) })
+  .when(invoiceReviewRequested, ({ event }) => ({ invoice: event.subject }))
+  .then(reviewInvoice)
+```
 
-Rules decide *if* something is true; [workflows](../workflows/overview.md) decide *what to do next*.
+Use `.resolved()` instead of `.triggered()` to start work when the condition clears. Rule events
+can be delivered more than once, so make downstream operations safe to repeat.
 
-| Need | Use |
-| --- | --- |
-| Know whether an object needs attention | Rule |
-| Emit a triggered / resolved signal | Rule |
-| Run a multi-step process | [Workflow](../workflows/overview.md) |
-| Fetch source data | [Sync](../syncs/overview.md) |
-| Clean or join table data | [Pipeline](../pipelines/overview.md) |
-
-## Notes
-
-- Rule ids must be unique, and each rule is scoped to one object type.
-- Predicates are validated against the resolved ontology at startup. Unknown properties or links,
-  and empty `all()` / `any()` groups, are rejected.
-- The `.where(...)` callback runs once at definition time and produces serializable predicate data;
-  the callback itself is not stored.
-
-## Related
-
-- [Workflows](../workflows/overview.md) — run a multi-step process in response to a signal
-- [Interventions](../workflows/interventions.md) — human-in-the-loop steps
-- [Events](../events/overview.md) — the domain events rules react to
-- [Object types](../ontology/object-types.md) and [Links](../ontology/links.md)
+See [Workflows](../workflows/overview.md) for defining steps and
+[Human-in-the-Loop](../workflows/interventions.md) for pausing a workflow for review.

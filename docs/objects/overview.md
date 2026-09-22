@@ -1,177 +1,135 @@
 # Objects
 
-`sixb.objects(Type)` is the typed runtime API for reading and writing object
-instances: create and update, fetch by id, query the latest-state graph, follow
-links, append telemetry, and request actions. It is the main surface your
-application code uses to talk to your data.
+An object represents one thing in your domain, such as a customer, invoice, or project.
+Use `sixb.objects(Type)` to read and update objects with types inferred from your
+[ontology](../ontology/object-types.md).
 
-Object *types* are declared in the ontology (see
-[object types](../ontology/object-types.md)). This page covers the runtime API
-you use to operate on the *instances* of those types.
+These examples run in backend code. For React apps, see [Querying data in apps](../apps/querying-data.md).
 
-## Mental model
+## Read an object
 
-An object is the current state of one entity — one `Customer`, one `Invoice`,
-one `Project` — keyed by its primary property. `sixb.objects(Type)` returns an
-`ObjectSet`: a type-safe collection bound to that type, with signatures inferred
-from the ontology definition.
-
-From an `ObjectSet` you reach three things:
-
-| Entry point | Returns | Use for |
-| --- | --- | --- |
-| collection methods | the set itself | `upsert`, `get`, `list`, batch telemetry, set-level link/action helpers |
-| `.query()` | a query builder | graph-aware reads: filter, search, sort, follow links, page |
-| `.byId(id)` | an object handle | operations on one instance: links, telemetry, actions |
+Pass the object's primary ID to `get()`. It returns the object, or `null` if it does not exist.
+Property values are available under `.properties`:
 
 ```ts
-const invoices = sixb.objects(Invoice)
+import { Invoice } from "./ontology/invoice"
 
+const invoices = sixb.objects(Invoice)
 const invoice = await invoices.get("inv-001")
-const handle = invoices.byId("inv-001")
+
+if (invoice) {
+  console.log(invoice.properties.amount, invoice.properties.status)
+}
 ```
 
-A fetched object is a `TwinObject`: read `.primaryId` and `.properties.<name>`.
+The returned object also includes `primaryId`, `objectTypeId`, and `createdAt` and `updatedAt`
+as `Date` values.
 
-## Collection methods
+## Create or update an object
 
-Called directly on `sixb.objects(Type)`. All methods are async — `await` them.
-
-| Method | Signature | Notes |
-| --- | --- | --- |
-| `upsert` | `upsert({ properties }) => TwinObject` | Create or update by primary id — the given properties are merged over any existing ones. The primary property must be inside `properties`. |
-| `get` | `get(id) => TwinObject \| null` | Fetch one object by primary id. |
-| `list` | `list(input?) => { objects, hasMore, total }` | Browse by id prefix/suffix or timestamps, with `limit`/`offset`/`orderBy`/`order`. |
-| `query` | `query() => QueryBuilder` | Start a graph-aware query. See [querying](./querying.md). |
-| `byId` | `byId(id) => ObjectByIdHandle` | Bind operations to one instance. |
-| `appendTelemetryBatch` | `appendTelemetryBatch(items) => void` | Append telemetry across many objects in one call. See [telemetry](./telemetry.md). |
-| `upsertLink` | `upsertLink({ sourceId, linkId, targetTypeId, targetId, properties? }) => void` | Create or update a link by string ids. |
-| `removeLink` | `removeLink({ sourceId, linkId, targetTypeId, targetId }) => void` | Remove a link by string ids. |
-| `requestAction` | `requestAction({ id, actionId, params?, runId? }) => …` | Request an action against one object. |
-| `requestActionAndWait` | `requestActionAndWait({ id, actionId, params?, timeoutMs?, signal? }) => …` | Request and await the run. |
+`upsert()` creates an object or updates the one with the same primary ID. Include the primary
+property inside `properties`, along with all required properties when creating an object:
 
 ```ts
-const invoices = sixb.objects(Invoice)
-
-// Create or update by primary id
 await invoices.upsert({
-  properties: { id: "inv-001", number: "2026-001", amount: 4200, currency: "EUR", status: "sent" },
-})
-
-// Read one
-const invoice = await invoices.get("inv-001")
-
-// Browse the type
-const page = await invoices.list({ limit: 25, orderBy: "updatedAt", order: "desc" })
-```
-
-## `.byId(id)` handle
-
-`byId(id)` returns an `ObjectByIdHandle` scoped to a single object.
-
-| Method | Signature | Notes |
-| --- | --- | --- |
-| `get` | `get() => TwinObject \| null` | Fetch this object. |
-| `link` | `link(token, target, options?) => void` | Add a link via a typed token (`Type.l.<name>`). |
-| `unlink` | `unlink(token, target) => void` | Remove a link. |
-| `listLinks` | `listLinks(token?) => links` | List this object's links, optionally for one token. |
-| `telemetry` | `telemetry(token) => { append }` | Per-property telemetry appender (`Type.p.<name>`). |
-| `requestAction` | `requestAction({ actionId, params?, runId? }) => …` | Request an action on this object. |
-| `requestActionAndWait` | `requestActionAndWait({ actionId, params?, timeoutMs?, signal? }) => …` | Request and await the run. |
-
-```ts
-const handle = sixb.objects(Invoice).byId("inv-001")
-
-// Append telemetry to a project's progress series
-await sixb.objects(Project).byId("proj-001").telemetry(Project.p.progress).append({
-  value: 60,
-  at: new Date(),
-})
-
-// Request an action on the invoice
-await handle.requestAction({
-  actionId: "sendReminder",
+  properties: {
+    id: "inv-001",
+    number: "INV-2026-001",
+    amount: 4800,
+    currency: "EUR",
+    status: "sent",
+  },
 })
 ```
 
-## Links
-
-Links connect objects in the latest-state graph. Define them on an object type
-with `link(...)` (see [links](../ontology/links.md)), then operate on them at
-runtime two ways:
-
-- **Typed tokens** via the handle: `byId(id).link(Type.l.<name>, target)`,
-  `unlink(...)`, and `listLinks(...)`. The token is checked at compile time
-  against the source type.
-- **String ids** via the set: `upsertLink({ ... })` and `removeLink({ ... })`
-  when you only have raw ids.
+To update an existing object, pass only the primary ID and the properties to change.
+Omitted properties keep their values:
 
 ```ts
-const invoices = sixb.objects(Invoice)
-
-// Typed token form
-await invoices.byId("inv-001").link(Invoice.l.customer, {
-  objectTypeId: "Customer",
-  primaryId: "cust-001",
-})
-
-// String-id form
-await invoices.upsertLink({
-  sourceId: "inv-001",
-  linkId: "customer",
-  targetTypeId: "Customer",
-  targetId: "cust-001",
-})
-```
-
-Traverse links in reads with the [query builder](./querying.md), and read raw
-link rows with `byId(id).listLinks(...)`. Links are also exposed over HTTP — see
-the [HTTP reference](./http-reference.md).
-
-## Writing inside an action
-
-Two `objects(Type)` APIs look almost identical. Picking the wrong one is the
-most common mistake.
-
-| | `sixb.objects(Type)` (runtime) | `objects(Type)` (action `.edits()`) |
-| --- | --- | --- |
-| Where | workflow steps, syncs, scripts, app code | inside an action's `.edits(...)` handler |
-| Timing | **async, immediate** — writes apply now | **sync, staged** — applied atomically on commit |
-| `await` | every method returns a promise | edit calls are synchronous |
-| Create | `upsert({ properties })` | `create(properties)` |
-| Update | `upsert(...)` (merge over existing) | `byId(id).update({ ... })` |
-| Reads | `get` / `query` / `list` | `read.objects(Type)` |
-
-```ts
-// Runtime — async, immediate
-await sixb.objects(Invoice).upsert({
+await invoices.upsert({
   properties: { id: "inv-001", status: "paid" },
 })
-
-// Action .edits() — synchronous, staged, no await
-objects(Invoice).byId(subject.primaryId).update({ status: "paid" })
-objects(Invoice).create({ id: params.id, status: "paid" })
 ```
 
-Staged edits separate create from update. `create` requires that the object does
-not already exist and `update` requires that it does, so an action that
-synchronizes a record which may or may not exist has to read first and branch.
-The runtime `upsert` is the create-or-update form.
+Inside an [action's `.edits()` handler](../actions/overview.md), use its `objects` helper to stage
+changes instead. Those edits are synchronous and commit together when the handler succeeds.
 
-If you wrote `sixb.objects(...)` you are in the runtime API. If you destructured
-`objects` from an action handler argument, you are staging edits. See
-[actions](../actions/overview.md) for the EditBatch model.
+## List objects
 
-## In this section
+Use `list()` to browse objects by ID or creation/update time. Set `limit` and `offset` to page
+through the results:
 
-- [CRUD](./crud.md) — create, read, update, delete with `upsert`/`get`/`list`/`delete`.
-- [Querying](./querying.md) — filter, search, sort, follow links, and page.
-- [Telemetry](./telemetry.md) — append and read per-property timeseries.
-- [HTTP reference](./http-reference.md) — the REST/WebSocket surface.
+```ts
+const { objects, hasMore, total } = await invoices.list({
+  orderBy: "updatedAt",
+  order: "desc",
+  limit: 25,
+  offset: 0,
+})
+```
 
-## Related
+`objects` contains the current page, `hasMore` indicates another page, and `total` is the matching
+count. Increase `offset` by `limit` to read the next page. For property filters, text search, or
+related objects, use [queries](querying.md).
 
-- [Object types](../ontology/object-types.md) — declaring the types these APIs operate on.
-- [Links](../ontology/links.md) — modeling relationships.
-- [Actions](../actions/overview.md) — staged edits and writebacks.
-- [Events](../events/overview.md) — canonical object, telemetry, and link mutation events.
+## Add or remove relationships
+
+Use `byId()` to work with one object's [links](../ontology/links.md). Pass a link token and the
+target object's type and primary ID:
+
+```ts
+import { Customer } from "./ontology/customer"
+
+const invoice = invoices.byId("inv-001")
+const customer = { objectTypeId: Customer.id, primaryId: "cust-001" }
+
+await invoice.link(Invoice.l.customer, customer)
+
+const links = await invoice.listLinks(Invoice.l.customer)
+
+await invoice.unlink(Invoice.l.customer, customer)
+```
+
+For a link with cardinality `"one"`, remove the existing target before linking a different one.
+Linking the same target updates the existing relationship. To replace a target atomically, use
+[action edits](../actions/overview.md#edit-objects-and-relationships).
+
+### Write relationship properties
+
+Pass values through the link call's `properties` option. This example uses the
+[`reviewers` relationship](../ontology/links.md#add-relationship-properties), which declares a required
+`assignedAt` timestamp:
+
+```ts
+const reviewer = { objectTypeId: "Reviewer", primaryId: "reviewer-1" } as const
+
+await invoices.byId("inv-001").link(Invoice.l.reviewers, reviewer, {
+  properties: { assignedAt: new Date() },
+})
+```
+
+Each call replaces the relationship's properties, so include required values every time.
+Use `listLinks(Invoice.l.reviewers)` to read the relationship rows, or
+[expand the link](querying.md#include-related-objects) to read the related objects with their
+`linkProperties`.
+
+## Delete and restore
+
+`delete()` removes an object and its links. Deleting an object that does not exist has no effect:
+
+```ts
+await invoices.byId("inv-001").delete()
+```
+
+An object supplied by a projection stays hidden after deletion, even when the projection runs
+again. Use `restore()` to reveal its projected state:
+
+```ts
+await invoices.byId("inv-001").restore()
+```
+
+For an object created only from code, deletion is permanent and `restore()` has no effect.
+Use `upsert()` to create it again.
+
+For commands against objects, see [Actions](../actions/overview.md). For values that change over
+time, see [Telemetry](telemetry.md).

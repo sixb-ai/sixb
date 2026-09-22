@@ -12,7 +12,7 @@ export const people = defineDataset("crm.people", {
 })
 ```
 
-Use the **source's** revision or timestamp, not fetch/receipt time. [Syncs](../syncs/overview.md) and [webhooks](../connectors/webhooks.md#webhooks-updating-source-datasets) submit complete rows or sequenced deletes:
+Use the **source's** revision or timestamp, not fetch/receipt time. [Syncs](../syncs/overview.md) and [webhooks](../connectors/webhooks.md#define-a-webhook) submit complete rows or sequenced deletes:
 
 ```ts
 import { change } from "@sixb/core"

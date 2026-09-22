@@ -1,64 +1,31 @@
 # Telemetry projections
 
-A telemetry projection records timestamped readings onto telemetry-mode properties. When one row
-contains several readings for the same object and instant, map them together from the object type:
+A telemetry projection maps timestamped dataset readings to an object's property history.
+It runs automatically when the source dataset updates.
 
-First mark the property as telemetry in the ontology (see
-[Properties](../ontology/properties.md)):
+## Define a telemetry projection
+
+Mark the property as telemetry in your [ontology](../ontology/properties.md):
 
 ```ts
 prop("progress", "integer", { mode: "telemetry" })
 ```
 
-Then map the dataset with `.points(...)`:
+Export the projection from `projections/`. Target the property and map the columns holding the
+object's ID, the reading's timestamp, and its value. The target object must exist to receive readings.
+
+File: `projections/project-progress.ts`
 
 ```ts
 import { defineProjection } from "@sixb/core"
-import { googleAnalyticsActivity } from "../datasets/google-analytics"
-import { GoogleAnalyticsProperty } from "../ontology/google-analytics-property"
-
-export const activityProjection = defineProjection("ga-activity", GoogleAnalyticsProperty)
-  .fromDataset(googleAnalyticsActivity)
-  .points({
-    objectId: "account_id",
-    at: "day",
-    properties: {
-      activeUsers: "active_users",
-      newUsers: "new_users",
-      engagementDuration: "engagement_duration",
-    },
-  })
-```
-
-| Mapping key | Meaning |
-| --- | --- |
-| `objectId` | Dataset column holding the target object's primary id |
-| `at` | Timestamp column for the reading |
-| `properties.<id>` | Shorthand value column for a unitless telemetry property |
-| `properties.<id>.value` | Value column when the property also needs a unit |
-| `properties.<id>.unit` | Unit column; required for semantic types with units and forbidden otherwise |
-
-A blank value skips that property's point. A row is skipped when it emits no points. A nonblank invalid value or unit rejects the
-whole batch, so a row cannot be partially committed. The `at` column must be a
-string, date, or timestamp; values without a time zone (no trailing `Z` or numeric offset) are read
-as UTC.
-
-Group properties only when they share the same dataset, object id, timestamp, and projection
-lifecycle. Each mapped telemetry property has its own series and belongs to this projection.
-
-For a dataset with one telemetry value per row, the property-token form remains concise sugar for a
-one-property `properties` mapping:
-
-```ts
-import { defineProjection } from "@sixb/core"
-import { erpProjectProgressDataset } from "../datasets/erp"
+import { projectReadings } from "../datasets/project-readings"
 import { Project } from "../ontology/project"
 
 export const projectProgressProjection = defineProjection(
   "project-progress",
   Project.p.progress
 )
-  .fromDataset(erpProjectProgressDataset)
+  .fromDataset(projectReadings)
   .points({
     objectId: "project_id",
     at: "recorded_at",
@@ -66,5 +33,51 @@ export const projectProgressProjection = defineProjection(
   })
 ```
 
-How point identity works — and what re-projecting the same instant does — is covered in
-[Telemetry](../objects/telemetry.md).
+Use a string, date, or timestamp column for `at`. Timestamps without a time zone are read as UTC.
+Blank values are skipped; invalid readings fail the run.
+
+## Map multiple readings
+
+When a row contains several readings for the same object and timestamp, target the object type
+and map them together with `properties`. Use this in place of the single-property projection above.
+Each mapped property must be declared with `mode: "telemetry"`, including `completedTasks` here.
+
+```ts
+export const projectProgressProjection = defineProjection(
+  "project-progress",
+  Project
+)
+  .fromDataset(projectReadings)
+  .points({
+    objectId: "project_id",
+    at: "recorded_at",
+    properties: {
+      progress: "progress_pct",
+      completedTasks: "completed_tasks",
+    },
+  })
+```
+
+## Readings with units
+
+For a property with a [semantic type](../ontology/units-and-semantics.md), also map a unit column.
+This example assumes `timeSpent` is a telemetry property with `semanticType: "TimeSpan"` and
+`time_unit` contains a valid unit such as `hour`.
+
+```ts
+export const projectTimeProjection = defineProjection(
+  "project-time",
+  Project.p.timeSpent
+)
+  .fromDataset(projectReadings)
+  .points({
+    objectId: "project_id",
+    at: "recorded_at",
+    value: "time_spent",
+    unit: "time_unit",
+  })
+```
+
+Omit `unit` for properties without a semantic type.
+
+See [Telemetry](../objects/telemetry.md) to read the history and latest values.

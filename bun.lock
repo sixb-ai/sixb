@@ -16,7 +16,6 @@
       "version": "0.1.0",
       "dependencies": {
         "@sixb/client": "workspace:*",
-        "@sixb/connector-google": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/ui": "workspace:*",
         "lucide-react": "^0.562.0",

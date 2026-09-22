@@ -1,440 +1,179 @@
 # Actions
 
-Actions are typed business commands against your [ontology](../ontology/overview.md). They declare
-params, validate the request, talk to external systems, and stage object edits for one atomic
-commit. Every request becomes a durable, replayable run with a lifecycle you can wait on. Trusted
-runtime code may also use the direct [object CRUD API](../objects/crud.md); storage providers remain
-read-only and never receive mutation events as commands.
+An action is a typed command that changes your domain model or calls an external system. Define
+its inputs and behavior, then run it from your app, an agent, or a workflow.
 
-Their real power is doing both sides of a change as one run: **write back** to external systems
-*and* **edit** the ontology graph, so the two stay in step. Reach for just one phase when that is
-all you need — graph-only edits, or an external-only writeback — but actions shine when a change
-must land in both places.
+## Define an action
 
-Put action definitions in `actions/`. `createSixb()` auto-discovers them.
+Export an action from `actions/`. Sixb discovers it automatically. Use `.on()` to bind it to an
+object type, `.params()` to declare its inputs, and `.edits()` to change objects.
+
+File: `actions/mark-paid.ts`
 
 ```ts
-import { defineAction, optional, param } from "@sixb/core"
-import { acmeErpConnector } from "../connectors/acme-erp"
+import { defineAction } from "@sixb/core"
 import { Invoice } from "../ontology/invoice"
 
-export const markPaid = defineAction("markPaid", {
-  description: "Record a payment in the ERP, then mark the invoice paid.",
-})
+export const markPaid = defineAction("markPaid")
   .on(Invoice)
-  .params({
-    paymentMethod: optional(param("string")),
-  })
-  // writeback: update the external system. Runs before the commit; no graph edits here.
-  .writeback(async ({ target, params, sixb }) => {
-    const erp = await sixb.connector(acmeErpConnector)
-    const receipt = await erp.recordPayment({
-      invoiceNumber: target.properties.number,
-      amount: target.properties.amount,
-      method: params.paymentMethod ?? "manual",
-    })
-    return { receiptId: receipt.id } // flows into edits + effects as `writeback`
-  })
-  // edits: update the graph, carrying the ERP receipt id across the commit.
-  .edits(({ objects, params, writeback, run, subject }) => {
-    objects(Invoice).byId(subject.primaryId).update({
-      status: "paid",
-      paymentInfo: {
-        method: params.paymentMethod ?? "manual",
-        reference: writeback.receiptId,
-        recordedAt: run.startedAt.toISOString(),
-      },
-    })
+  .params({})
+  .edits(({ objects, subject }) => {
+    objects(Invoice).byId(subject.primaryId).update({ status: "paid" })
   })
 ```
 
-`markPaid` does both sides as one run: the **writeback** phase records the payment in the ERP, then
-the **edits** phase marks the invoice paid in the graph — committed only if the writeback succeeded,
-and carrying the ERP receipt id across the boundary. The graph and the external system stay in step.
+`subject.primaryId` identifies the invoice the action runs on. Edits are saved together when the
+handler succeeds. Keep `.params({})` when there are no inputs.
 
-## The builder
+For a global action, omit `.on(...)`. Use one for a command that creates an object or works across
+several objects without a single target.
 
-For model-generated edits, call `sixb.models.language.generate()` in writeback and consume the persisted result in edits. See the [action example](../models/generation.md#in-an-action).
+## Parameters
 
-`defineAction(id, options?)` starts the chain. `options.description` is optional human-readable
-text. From there you pick a binding, declare params, then attach phase handlers.
-
-| Step | Method | Notes |
-| --- | --- | --- |
-| Binding | `.on(ObjectType)` | Object action — runs against one object instance. Omit for a global action. |
-| Params | `.params({ ... })` | Declares the typed input shape. Required even when empty (`.params({})`). |
-| Validate | `.validate(fn)` | Optional, repeatable. Read-only checks before any mutation. |
-| Phase | `.writeback(fn)` / `.edits(fn)` / `.effects(fn)` | Attach handlers in fixed order (see below). |
-
-### Bindings
-
-- **Object actions** chain `.on(ObjectType)`. The runtime resolves the target object and exposes
-  it as `target` (in `validate`/`writeback`) and `subject` (in `edits`/`effects`).
-- **Global actions** skip `.on(...)` and go straight to `.params(...)`. They are not tied to a
-  single object — use them to create objects or run cross-object commands.
-
-```ts
-// Global action: create a draft invoice and link it to a customer and project.
-import { defineAction, optional, param, ref } from "@sixb/core"
-import { stringEnum } from "@sixb/core/ontology"
-import { Customer } from "../ontology/customer"
-import { Invoice } from "../ontology/invoice"
-import { Project } from "../ontology/project"
-
-export const createDraftInvoice = defineAction("createDraftInvoice", {
-  description: "Create a draft invoice and attach it to a customer and project.",
-})
-  .params({
-    id: param("string"),
-    number: param("string"),
-    amount: param("double"),
-    currency: optional(param(stringEnum(["EUR", "USD", "GBP"]))),
-    customer: param(ref(Customer), { description: "Customer to bill." }),
-    project: param(ref(Project), { description: "Project the invoice belongs to." }),
-  })
-  .edits(({ objects, params, run }) => {
-    const invoice = objects(Invoice).create({
-      id: params.id,
-      number: params.number,
-      amount: params.amount,
-      currency: params.currency ?? "EUR",
-      status: "draft",
-      paymentInfo: {
-        method: "pending",
-        reference: `draft:${params.id}`,
-        recordedAt: run.startedAt.toISOString(),
-      },
-    })
-
-    invoice.link(Invoice.l.customer, objects(Customer).byId(params.customer.primaryId))
-    invoice.link(Invoice.l.project, objects(Project).byId(params.project.primaryId))
-  })
-```
-
-### Params
-
-Each entry in `.params({ ... })` is built with `param(schema, options?)`, which marks the param
-**required**. Wrap it in `optional(...)` to make it optional.
+Use `param()` for required inputs and wrap it in `optional()` for optional inputs. Both come from
+`@sixb/core`. For example, extend the invoice action to accept a payment method and an optional note:
 
 ```ts
 .params({
-  approved: param("boolean"),                       // required
-  message: param("string"),                         // required
-  reviewerNote: optional(param("string")),          // optional
-  category: optional(param(stringEnum(["general", "services"]), { nullable: true })),
-  currency: param(stringEnum(["EUR", "USD", "GBP"])),
-  customer: param(ref(Customer)),                   // object reference param
+  paymentMethod: param("string"),
+  note: optional(param("string", { nullable: true })),
 })
 ```
 
-Presence and nullability are independent. A required nullable param must be present but may be
-`null`; wrapping it in `optional(...)` adds the omitted state:
+Handlers receive validated, typed values through `params`. Use `params.paymentMethod` in the
+handler and pass `{ paymentMethod: "card" }` when requesting this version of the action.
 
-| Declaration | Omitted / `undefined` | `null` | Value |
-| --- | --- | --- | --- |
-| `param(schema)` | rejected | rejected | validated |
-| `optional(param(schema))` | omitted | rejected | validated |
-| `param(schema, { nullable: true })` | rejected | accepted | validated |
-| `optional(param(schema, { nullable: true }))` | omitted | accepted | validated |
+`optional()` allows an input to be omitted. `{ nullable: true }` allows an explicit `null` value.
+Your handler decides how each affects the edit, such as leaving a note unchanged or clearing it.
 
-This makes partial update actions explicit: omitted means “leave unchanged,” while `null` means
-“clear the value.”
-
-`param` schemas include the primitives `"string"`, `"uuid"`, `"boolean"`, `"integer"`,
-`"double"`, `"decimal"`, `"date"`, `"timestamp"`, plus `stringEnum([...])` and `ref(ObjectType)`.
-`param` options are `description`, `semanticType`, and `nullable`. Handlers receive params validated and
-narrowed to TypeScript types — `date`/`timestamp` arrive as `Date`, `ref(...)` as an `ObjectRef`
-(read `.primaryId` to resolve it). See [properties](../ontology/properties.md) and
-[value types](../ontology/value-types.md).
-
-## Execution model
-
-A run executes up to four phases in a **fixed order**. Each phase is optional except that you must
-attach at least `writeback` or `edits`, and `effects` requires `edits` first.
-
-| # | Phase | Purpose | Mutations? |
-| --- | --- | --- | --- |
-| 1 | `validate` | Read-only preconditions; throw to reject. Runs every attached validator. | No |
-| 2 | `writeback` | Talk to external systems before committing locally. | No object edits |
-| 3 | `edits` | Stage object create/update/delete/link edits. Committed atomically. | Yes — the only place |
-| 4 | `effects` | Side effects after the commit lands (notify, fan-out). | No object edits |
-
-The hard rule: **object mutations happen only in the `edits` phase.** `edits` stages edits via the
-`objects(...)` facade and the runtime commits them in one atomic batch; `validate`, `writeback`,
-and `effects` must not mutate ontology objects. Phases short-circuit on the first thrown error and
-the run is marked failed at the phase that threw.
-
-### Phase contexts
-
-Each handler receives a context object. Every phase gets `params` (validated), `run`
-(`{ id, startedAt, idempotencyKey }`), `subject`, and `signal` (an `AbortSignal`). The rest vary:
-
-| Phase | Added context fields |
-| --- | --- |
-| `validate` | `target` (object actions) |
-| `writeback` | `target` (object actions), `sixb` (connectors + telemetry writes + immutable blobs), `read` |
-| `edits` | `objects` (edit facade), `read` (read facade), `writeback` (writeback's return value) |
-| `effects` | `sixb`, `commit` (what the edits changed), `writeback` |
-
-`commit` tells the `effects` handler exactly what the run wrote:
-
-| Field | Notes |
-| --- | --- |
-| `changes` | The objects and links that actually changed, each with `before`, `after`, and the changed properties |
-| `committedAt` | When the changes were saved |
-| `commitId` | Id for this run's write; useful for logging and correlating with events |
-| `created` | `false` when a retried run reused the write it had already made |
-| `outcomes` | One result per edit you recorded, in the order you recorded them |
-
-Sixb emits the domain events for those changes itself, so drive notifications and fan-out from
-`changes` instead of appending mutation events by hand.
-
-`effects` runs after the edits are committed. Retrying post-commit work does not apply those edits
-again. Events may arrive more than once; make external effects safe to retry.
-
-`writeback` runs an external call before the local commit, and its return value flows into `edits`
-and `effects` as `writeback` (see the `markPaid` example above, which carries the ERP receipt id
-into the edit). Writeback and effects handlers can stream immutable file content into Sixb with
-`sixb.blobs.put(...)`, inspect it with `sixb.blobs.stat(...)`, and reopen it with
-`sixb.blobs.open(...)`; the resulting `FileRef` is JSON-safe and can flow into `edits`. The `edits`
-handler can also read current committed state through `read` and stage
-writes through `objects`. This `sendReminder` gates its edit on an approval read at edit time:
+Use `ref()` from `@sixb/core` for an object-reference input:
 
 ```ts
-import { defineAction, optional, param } from "@sixb/core"
+.params({
+  customer: param(ref(Customer)),
+})
+```
+
+Callers pass `{ objectTypeId: "Customer", primaryId: "cus-1" }` for `customer`. In a handler,
+read its ID from `params.customer.primaryId` or pass the reference to a link edit.
+
+Other input types use the [property schemas](../ontology/properties.md#choose-a-schema), including
+enums and structured values. Date and timestamp inputs arrive in handlers as `Date` values.
+
+## Validate a request
+
+Add `.validate()` after `.params()` to check the request before any external call or edit. For an
+object action, `target` contains the current object. Throw an error to reject the request:
+
+```ts
+.validate(({ target }) => {
+  if (target.properties.status === "paid") {
+    throw new Error("This invoice is already paid.")
+  }
+})
+```
+
+Validation checks are read-only. You can attach more than one validator.
+
+## Call external systems
+
+Use `.writeback()` before `.edits()` when a change depends on an external call. Return the data
+your edit needs; Sixb passes it to the next handler as `writeback`.
+
+This example uses a project [connector](../connectors/overview.md#custom-connectors) whose
+`recordPayment()` method accepts an invoice number and idempotency key, and returns a receipt ID:
+
+```ts
+import { defineAction } from "@sixb/core"
+import { billing } from "../connectors/billing"
 import { Invoice } from "../ontology/invoice"
 
-export const sendReminder = defineAction("sendReminder", {
-  description: "Send a payment reminder to the customer.",
-})
+export const recordPayment = defineAction("recordPayment")
   .on(Invoice)
-  .params({
-    approved: param("boolean"),
-    message: param("string"),
-    reviewerNote: optional(param("string")),
+  .params({})
+  .writeback(async ({ target, sixb, run }) => {
+    const client = await sixb.connector(billing)
+    const receipt = await client.recordPayment({
+      invoiceNumber: target.properties.number,
+      idempotencyKey: run.idempotencyKey,
+    })
+    return { receiptId: receipt.id }
   })
-  .edits(async ({ objects, params, read, subject }) => {
-    const invoice = await read.objects(Invoice).get(subject.primaryId)
-    if (!invoice) {
-      throw new Error(`Invoice '${subject.primaryId}' not found.`)
-    }
-
-    const reviewedAt = new Date().toISOString()
-    if (!params.approved) {
-      objects(Invoice).byId(subject.primaryId).update({
-        reminderReviewStatus: "revision_requested",
-        reminderReviewedAt: reviewedAt,
-        reminderReviewerNote: params.reviewerNote,
-      })
-      return
-    }
-
+  .edits(({ objects, subject, writeback }) => {
     objects(Invoice).byId(subject.primaryId).update({
-      status: "sent",
-      reminderReviewStatus: "approved",
-      reminderReviewedAt: reviewedAt,
-      reminderReviewerNote: params.reviewerNote,
+      status: "paid",
+      receiptId: writeback.receiptId,
     })
   })
 ```
 
-The runtime commits every staged edit in a single atomic batch once the handler returns.
+Return JSON-compatible values or no value from `.writeback()`. For example, return an ID or a
+string timestamp rather than an SDK client or `Date` instance. An action can use `.writeback()`
+without `.edits()` when it only needs to call an external system.
 
-Writeback results must be JSON-shaped data or no result (`void` / `undefined`), including for async
-handlers. The builder validates this at compile time while preserving the inferred result type in
-`edits` and `effects`. Serialize dates with `.toISOString()`, convert `Map` and `bigint` values to JSON
-representations, and validate `unknown` external responses before returning them. A JSON-shaped
-interface does not need an index signature.
+External calls are not part of the local atomic commit. A successful API call cannot be rolled
+back by Sixb if the later edit fails. Make calls safe to repeat, using `run.idempotencyKey` with
+an external API that supports idempotency.
 
-### Reading telemetry in Actions
+For notifications or other work after saving, add `.effects()` after `.edits()`. Its handler gets
+`writeback` and `commit`, which describes the saved changes. An effects error is recorded in
+`run.effects`; it does not undo the edits or make the committed action fail. Make these calls safe
+to repeat as well.
 
-`read.telemetry.historyBatch(...)` reads several telemetry series through one authorized provider
-call. Series use ontology property tokens, so values and units stay typed without exposing storage
-ids or the project id:
+The order is `validate` → `writeback` → `edits` → `effects`. Only add the handlers you need, with
+at least `.writeback()` or `.edits()`. Sixb emits the corresponding [events](../websockets/overview.md)
+automatically.
 
-```ts
-.writeback(async ({ params, read, run }) => {
-  const histories = await read.telemetry.historyBatch({
-    series: [
-      { objectId: params.clientId, property: ClientMetric.p.value },
-      { objectId: params.clientId, property: ClientMetric.p.target },
-    ],
-    from: params.from,
-    to: params.to ?? run.startedAt,
-    order: "asc",
-  })
+## Edit objects and relationships
 
-  return buildReport(histories)
-})
-```
+Inside `.edits()`, use `objects(Type)` to create an object or get an edit handle with `.byId(id)`.
+These methods stage changes synchronously; all edits commit together after the handler returns.
+Use `read.objects(Type)` when you need to read existing values or relationships.
 
-The result contains one entry per requested series in the same order, including duplicates. Each
-entry exposes its `objectId`, the original `property` token, and typed `{ value, at, unit? }`
-points. `from` and `to` are inclusive; `limitPerSeries` applies the same intentional cap to every
-series.
-
-Telemetry history is a coherent snapshot for this batch call, not an Action edit dependency. It is
-therefore not added to the object/link revision fence. Use a stable upper bound such as
-`params.to ?? run.startedAt` to keep the report window stable across retries. This excludes newly
-dated points after the run began, but does not freeze later backfills or corrections whose `at`
-still falls inside the range. Exact object reads and link-scope reads are fenced; arbitrary object
-`query()`/`list()` results and telemetry history are snapshot reads in this release.
-
-### Editing objects
-
-`objects(Type)` gives you an object to edit: `byId(id)` for one that exists, or `create(properties)`
-for a new one. Both return a handle with the rest of the edits:
-
-| Call | What it does |
+| Method | Purpose |
 | --- | --- |
-| `objects(Type).create(properties)` | Creates a new object; fails if that object already exists |
-| `handle.update(properties)` | Writes the properties you pass and leaves the rest alone |
-| `handle.unset(...propertyIds)` | Clears properties this action set, so they read as absent |
-| `handle.reset(...propertyIds)` | Forgets what this action set, so a projected value shows again |
-| `handle.delete()` / `handle.restore()` | Removes the object, or brings back one an action deleted |
+| `objects(Type).create(properties)` | Create an object; fails if its ID already exists |
+| `handle.update(properties)` | Set the given properties and leave others unchanged |
+| `handle.unset(...propertyIds)` | Explicitly clear properties |
+| `handle.reset(...propertyIds)` | Release action overrides so projected values can apply |
+| `handle.delete()` / `handle.restore()` | Delete an object or restore its projected state |
+| `handle.link(link, target)` / `handle.unlink(link, target)` | Add or remove a relationship |
+| `handle.resetLink(link, target)` | Release an action's override of a relationship |
 
-```ts
-.edits(({ objects, params, subject }) => {
-  const invoice = objects(Invoice).byId(subject.primaryId)
-  invoice.update({ status: "sent", reminderReviewerNote: params.note })
-  invoice.unset("reminderReviewedAt")
-})
-```
+`create()` generates a stable ID for the run if you omit the primary property. Provide the other
+required properties from your object type.
 
-By default, when a [projection](../projections/overview.md) also writes an object, values your actions set
-win over the projected ones. A projection configured with `mostRecent` can instead make a newer
-source value effective. `reset(...)` drops the action's value in either case so the projected value
-becomes visible again — use it to hand a field back to the projection.
-
-Repeated edits on one object stay in order, and a later `update(...)` sees what an earlier one wrote.
-An edit that ends up changing nothing emits no mutation event.
-
-`create(...)` derives its primary id from the action run when you omit one, so a retried run creates
-the same object instead of a duplicate.
-
-### Reassigning a cardinality-one link
-
-`link(...)` adds a relationship, `unlink(...)` removes a relationship, and `resetLink(...)` forgets a relationship this action managed so a projected one shows again. There is no setter: to repoint a `cardinality: "one"` link, read the current target and replace it in the same handler.
-
-For a cardinality-one link, the managed decision owns the `(source, linkId)` slot. If the projection later proposes another target, the managed target (or clear) remains authoritative; `resetLink(...)` releases the slot and reveals the latest projected target.
+For a link with cardinality `"one"`, remove its existing target before linking a different one.
+An action with a `customer: param(ref(Customer))` input can reassign an invoice like this:
 
 ```ts
 .edits(async ({ objects, read, params, subject }) => {
-  const transcript = objects(Transcript).byId(subject.primaryId)
-  for (const current of await read
-    .objects(Transcript)
-    .byId(subject.primaryId)
-    .listLinks(Transcript.l.project)) {
-    transcript.unlink(Transcript.l.project, {
-      objectTypeId: "Project",
+  const invoice = objects(Invoice).byId(subject.primaryId)
+  const existing = await read.objects(Invoice).byId(subject.primaryId)
+    .listLinks(Invoice.l.customer)
+
+  for (const current of existing) {
+    invoice.unlink(Invoice.l.customer, {
+      objectTypeId: Customer.id,
       primaryId: current.targetId,
     })
   }
-  transcript.link(Transcript.l.project, params.project)
+  invoice.link(Invoice.l.customer, params.customer)
 })
 ```
 
-Both edits land together, and Sixb remembers what the handler read through `read`: if that state
-changed before the run committed, the whole commit fails instead of overwriting someone else's write.
-Reassigning emits `link.deleted` and `link.created`.
+Both changes commit together. If an object or link scope read this way changes before the commit,
+the commit fails rather than overwriting the concurrent change.
 
-## Requesting actions
+When a [projection](../projections/overview.md) also supplies an object, action values take
+precedence by default. A projection using `mostRecent` can make a newer source value effective.
+Use `reset()` to return a property to its projected value. For a cardinality-one relationship,
+unlinking also hides later projected targets. Use `resetLink()` to return the choice of target
+to the projection.
 
-Actions run asynchronously. Requesting one enqueues a durable run and returns immediately; a worker
-executes the phases. Request object actions through the object API, and global actions through the
-runtime `actions` API. You can pass the imported action definition (typed) or its `actionId` string.
+## Use your action
 
-```ts
-// Object action: fire-and-forget. Returns { runId, queuedAt, created }.
-const { runId } = await sixb.objects(Invoice).byId("inv-1").requestAction({
-  action: markPaid,
-  params: { paymentMethod: "card" },
-})
+Call an action from your app or include it in a workflow.
 
-// Wait for the run to reach a terminal state. Returns the ActionRunRecord.
-const run = await sixb.objects(Invoice).byId("inv-1").requestActionAndWait({
-  action: markPaid,
-  params: { paymentMethod: "card" },
-  timeoutMs: 30_000,
-})
-if (run.status === "failed") {
-  throw new Error(run.error?.message)
-}
-
-// Global action: no subject. Request through sixb.actions.
-// ref(...) params take an object ref ({ objectTypeId, primaryId }), not a bare id.
-await sixb.actions.request({
-  actionId: "createDraftInvoice",
-  params: {
-    id: "inv-9",
-    number: "INV-009",
-    amount: 4200,
-    customer: { objectTypeId: "Customer", primaryId: "cus-1" },
-    project: { objectTypeId: "Project", primaryId: "prj-1" },
-  },
-})
-```
-
-`requestActionAndWait` resolves when the run completes or fails, and rejects with
-`ActionRunTimeoutError` if `timeoutMs` elapses first (default 60s). Pass a `runId` to make a
-request idempotent — re-requesting the same `runId` with the same action, subject, and params
-returns the existing run (`created: false`) instead of starting a new one.
-
-In browser apps, prefer `useActionRunMutation` from `@sixb/client/hooks` for button-driven
-commands. Its loading, success, and error states track the terminal run, and
-`invalidateOnCommit: true` refreshes object queries after committed edits. The generated
-`requestActionMutation()` remains enqueue-only and resolves as soon as the server accepts the
-request. See [running actions from apps](../apps/actions.md).
-
-| Option | Applies to | Meaning |
-| --- | --- | --- |
-| `action` / `actionId` | both | The action to run — pass the definition or its id. |
-| `params` | both | The action's typed params. |
-| `runId` | `requestAction`, `sixb.actions.request` | Stable id for idempotent retries. |
-| `timeoutMs` | `requestActionAndWait` | Reject after this many ms. Default `60_000`. |
-| `signal` | `requestActionAndWait` | `AbortSignal` to cancel the wait. |
-
-## Run lifecycle and events
-
-Every request creates an `ActionRunRecord` with a `status` and the current `phase`.
-
-| `status` | Meaning |
-| --- | --- |
-| `queued` | Requested, waiting for a worker. |
-| `running` | A worker is executing phases. |
-| `succeeded` | All phases completed. |
-| `failed` | A phase threw; `error` holds the failure and its `phase`. |
-| `cancelled` | Run was cancelled. |
-
-`phase` tracks progress through `request -> enqueue -> validation -> writeback -> edits -> commit
--> effects`. The record carries `writeback` and `effects` sub-records as each phase lands, so runs
-stay inspectable. What the run changed in the graph arrives as `commit` in the `effects` phase and as
-[domain events](../events/overview.md).
-
-The runtime also appends [domain events](../events/overview.md) you can subscribe to:
-
-| Event | When | Payload |
-| --- | --- | --- |
-| `action.requested` | On enqueue | `actionId`, `subject`, `params`, `runId` |
-| `action.completed` | Run succeeded | `actionId`, `runId`, `subject`, `finishedAt` |
-| `action.failed` | Run failed | `actionId`, `runId`, `subject`, `error`, `finishedAt` |
-
-These are how `requestActionAndWait` detects completion. In client code, the fluent event
-builder can scope action events by run, action id, or object subject:
-
-```tsx
-events.actions().run(runId).terminal()
-events.actions().action("markPaid").completed()
-events.actions().subject(Invoice).byId("inv-1").failed()
-```
-
-To react to a run on the server, subscribe through `sixb.events`, or model the reaction as a
-[rule](../rules/overview.md) or [workflow](../workflows/overview.md).
-
-## Related
-
-- [Objects](../objects/overview.md) — the CRUD and edit facade actions stage into.
-- [Object CRUD](../objects/crud.md) — `create`/`update`/`delete`/`link` used inside `edits`.
-- [Events](../events/overview.md) — the domain-event stream actions emit.
-- [Running actions from apps](../apps/actions.md) — React action buttons and terminal state.
-- [Authorization](../auth/authorization.md) — `apply:action` grants gate who can request actions.
+- [Running actions in apps](../apps/actions.md): Connect an action to a React interface.
+- [Workflow action steps](../workflows/overview.md#run-an-action): Run an action as part of a larger process.

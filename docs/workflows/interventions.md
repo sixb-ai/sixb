@@ -1,192 +1,119 @@
 # Human-in-the-Loop
 
-An **intervention** is a [workflow](overview.md) node that pauses a run and waits for a human (or
-service account) to submit a response before the run continues. Reach for it when a step needs a
-decision that should not be automated: an approval, a review, a sign-off.
+An intervention pauses a [workflow](overview.md) for someone to review information and submit a
+response. The workflow continues using that response.
 
-You define an intervention with `defineIntervention`, place it in a chain with `.then(...)`, and the
-run *waits* until an app submits a response over the HTTP API. The submitted response flows
-downstream exactly like a step's output.
+## Define an intervention
 
-## Defining an intervention
+Use `.input()` for the data shown to the reviewer and `.response()` for the fields they submit.
+Add `.defaults()` to pre-fill values that the reviewer can edit.
 
-`defineIntervention(id, options?)` returns a builder. Chain `.input(...)` to declare the data shown
-to the reviewer, then `.response(...)` to declare the fields they fill in. Optionally chain
-`.defaults(...)` to pre-fill the response form.
+File: `workflows/steps/review-reminder.ts`
 
 ```ts
 import { defineIntervention, interventionField, ref } from "@sixb/core"
-import { Invoice } from "../ontology/invoice"
+import { Invoice } from "../../ontology/invoice"
 
-export const reviewInvoiceReminder = defineIntervention("review-invoice-reminder", {
-  description: "Approve or request changes before sending the invoice reminder.",
+export const reviewReminder = defineIntervention("review-reminder", {
+  description: "Review the message before sending the invoice reminder.",
 })
-  .input({
-    invoice: ref(Invoice),
-    message: "string",
-    channel: "string",
-    deliveryBatchId: "string",
-  })
+  .input({ invoice: ref(Invoice), message: "string" })
   .response({
-    approved: interventionField("boolean", { required: true }),
-    message: interventionField("string", { required: true }),
+    message: "string",
     reviewerNote: interventionField("string", { required: false }),
   })
-  .defaults(({ input }) => ({
-    approved: true,
-    message: input.message,
-  }))
+  .defaults(({ input }) => ({ message: input.message }))
 ```
 
-| Method | Purpose |
-| --- | --- |
-| `defineIntervention(id, options?)` | Start the builder. `id` must be non-empty; `options.description` is optional. |
-| `.input(shape)` | Schema record describing the data presented to the reviewer. Each value is a `SchemaOrRef` (e.g. `"string"`, `ref(Invoice)`). |
-| `.response(shape)` | Schema record describing the fields the reviewer submits. Each value is a bare `SchemaOrRef` or an `interventionField(...)` config. |
-| `.defaults(handler)` | Optional. Computes a partial response to pre-fill the form. |
+Response fields are required by default. Use `interventionField()` with `required` set to `false`
+for an optional field, or add `description` to explain what a field is for.
 
-### Response fields
+## Add it to a workflow
 
-A `.response(...)` value can be a plain schema, or an `interventionField(schema, options)` config
-when you need to mark a field optional or document it. Fields are required by default.
+Place the review between preparing the reminder and sending it. This example reuses `prepareReminder`
+from the [overview](overview.md#define-a-workflow) and a project `sendReminder` action that accepts
+a `message` parameter:
 
-```ts
-interventionField("boolean")                          // required
-interventionField("string", { required: false })      // optional
-interventionField("string", { description: "Note to the customer" })
-```
-
-| `interventionField` argument | Type | Notes |
-| --- | --- | --- |
-| `schema` | `SchemaOrRef` | The field's value type. |
-| `options.required` | `boolean` | Defaults to `true`. Must be a literal `true` / `false`. |
-| `options.description` | `string` | Optional human-facing label. |
-
-### Defaults
-
-`.defaults(handler)` pre-fills the form. The handler receives the resolved node `input`, the original
-`workflowInput`, and prior `steps` outputs, and returns a *partial* response — the reviewer can still
-change every field. The result is persisted on the pending record as `defaultResponse`.
-
-```ts
-.defaults(({ input, workflowInput, steps }) => ({
-  approved: true,
-  message: input.message,
-}))
-```
-
-## Placing an intervention in a workflow
-
-Add the intervention to a chain with `.then(...)`. Its `.response(...)` shape becomes the node's
-output, available to later nodes under a key derived from the intervention id (camelCased, so
-`review-invoice-reminder` → `reviewInvoiceReminder`).
-
-Like a step, an intervention's `input` is fed by direct dataflow (the prior node's output matches the
-intervention's input shape) or by a mapper function as the second `.then(...)` argument.
+File: `workflows/reviewed-reminder.ts`
 
 ```ts
 import { defineWorkflow, ref } from "@sixb/core"
-import { sendReminder } from "../actions/sendReminder"
+import { sendReminder } from "../actions/send-reminder"
 import { Invoice } from "../ontology/invoice"
+import { prepareReminder } from "./invoice-reminder"
+import { reviewReminder } from "./steps/review-reminder"
 
-export const invoiceReminderWorkflow = defineWorkflow("invoice-reminder-workflow")
+export const reviewedReminder = defineWorkflow("reviewed-reminder")
   .input({ invoice: ref(Invoice) })
-  .then(loadInvoiceContext)
-  .then(evaluateReminderPolicy)
-  .then(composeInvoiceReminder)
-  .then(reviewInvoiceReminder)
-  .then(sendReminder, ({ steps }) => ({
-    subject: steps.composeInvoiceReminder.invoice,
-    params: {
-      approved: steps.reviewInvoiceReminder.approved,
-      message: steps.reviewInvoiceReminder.message,
-      reviewerNote: steps.reviewInvoiceReminder.reviewerNote,
-    },
+  .then(prepareReminder)
+  .then(reviewReminder)
+  .then(sendReminder, ({ input, steps }) => ({
+    subject: input.invoice,
+    params: { message: steps.reviewReminder.message },
   }))
 ```
 
-## Lifecycle: waiting → submit → resume
+The run waits at `reviewReminder`. After a valid response is submitted, `steps.reviewReminder`
+contains that response, so the action sends the reviewed message.
 
-When a run reaches an intervention node, the runtime:
+Submitting a response resumes the workflow. A field such as `approved: false` does not stop it
+unless your following step or action handles that value. Cancelling the intervention stops the run.
 
-1. Evaluates `.defaults(...)` (if present) and creates a **pending intervention record** with status
-   `pending`. The node run and workflow run move to `waiting`.
-2. Emits `workflow.intervention.requested` (and `workflow.run.waiting`).
-3. Stops advancing the run until the pending intervention is resolved.
+## Submit a response
 
-An app then **submits** a response. The record moves to `submitted`,
-`workflow.intervention.submitted` fires, and a `workflow.run.resume.requested` job is enqueued. The
-runtime resumes the run, exposing the submitted response as the node's output to downstream nodes.
+In Atlas, open the workflow run and select its waiting review step to fill in the response form.
+Sixb validates the response and records the authenticated reviewer.
 
-If the intervention is **cancelled** instead, the node run, workflow run, and record all move to
-`cancelled` and the run finishes.
+For a custom app, use the [client hooks](../client/typed-queries.md#react-hooks).
+Call `listWorkflowInterventionsOptions()` with the `status` query filter set to `pending`.
+Each record includes `id`, `input`, and `defaultResponse`.
 
-| Status | Meaning |
-| --- | --- |
-| `pending` | Created and waiting for a response. Only `pending` records can be submitted or cancelled. |
-| `submitted` | A response was submitted; the run resumes. |
-| `cancelled` | Cancelled; the node and run finish as `cancelled`. |
-| `expired` | Passed its `expiresAt` without a response. |
+Pass the record's `id` and the message from `defaultResponse` to a form like this:
 
-### Lifecycle events
+```tsx
+import { submitWorkflowInterventionMutation } from "@sixb/client/hooks"
+import { useMutation } from "@tanstack/react-query"
 
-These fire on the `workflows` topic (see [Events](../events/overview.md)). Each payload carries
-`workflowId`, `runId`, `nodeRunId`, `interventionId`, `pendingInterventionId`, and the relevant
-timestamp.
+export function ReviewReminder({
+  interventionId,
+  message,
+}: {
+  interventionId: string
+  message: string
+}) {
+  const submit = useMutation(submitWorkflowInterventionMutation())
 
-| Event | When |
-| --- | --- |
-| `workflow.intervention.requested` | A pending intervention is created and the run waits. |
-| `workflow.intervention.submitted` | A response is submitted and the run resumes. |
-| `workflow.intervention.cancelled` | The intervention is cancelled. |
-| `workflow.intervention.expired` | The intervention expires. |
+  if (submit.isSuccess) return <p>Response submitted.</p>
 
-## Resolving interventions (HTTP)
-
-Apps list and resolve pending interventions through the workflow HTTP routes. The submitted
-`response` is validated against the intervention's `.response(...)` contract before the run resumes.
-
-| Method & path | Purpose |
-| --- | --- |
-| `GET /api/workflow-interventions` | List interventions. Filter by `status`, `workflowId`, `workflowRunId`, `nodeRunId`, `interventionId`, and `requestedAfter` / `requestedBefore`. |
-| `GET /api/workflow-interventions/:interventionId` | Get one record, including `input` and `defaultResponse`. |
-| `POST /api/workflow-interventions/:interventionId/submit` | Submit a response. Returns `202` and enqueues the resume job. |
-| `POST /api/workflow-interventions/:interventionId/cancel` | Cancel a pending intervention. Finishes the run as `cancelled`. |
-
-```bash
-curl "$BASE_URL/api/workflow-interventions?status=pending&workflowId=invoice-reminder-workflow"
-```
-
-Each record includes `input` (data for the reviewer), `defaultResponse` (pre-filled values), `status`,
-and — once resolved — `response`, `submittedAt`, and `submittedBy`.
-
-### Submitting a response
-
-```json
-{
-  "response": {
-    "approved": true,
-    "message": "Reminder approved. Please send today.",
-    "reviewerNote": "Customer asked for a softer tone."
-  },
-  "submittedBy": {
-    "principalType": "user",
-    "principalId": "u_123"
-  }
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault()
+        const form = new FormData(event.currentTarget)
+        submit.mutate({
+          path: { interventionId },
+          body: { response: { message: String(form.get("message") ?? "") } },
+        })
+      }}
+    >
+      <label>
+        Message
+        <textarea
+          name="message"
+          defaultValue={message}
+          required
+          disabled={submit.isPending}
+        />
+      </label>
+      <button type="submit" disabled={submit.isPending}>
+        {submit.isPending ? "Submitting..." : "Approve and continue"}
+      </button>
+      {submit.isError && <p role="alert">Could not submit the review. Try again.</p>}
+    </form>
+  )
 }
 ```
 
-| Field | Type | Notes |
-| --- | --- | --- |
-| `response` | object | Values keyed by the intervention's `.response(...)` field names. Validated against the contract. |
-| `submittedBy` | object | Optional actor. `principalType` is `"user"`, `"serviceAccount"`, or `"system"`; `principalId` is a string. |
-
-The submit and cancel endpoints require CSRF protection. See [Server](../server/overview.md) and
-[Authentication](../auth/authentication.md).
-
-## Related
-
-- [Workflows](overview.md) — the chain DSL, steps, and actions.
-- [Rules](../rules/overview.md) — automatic, non-blocking reactions.
-- [Actions](../actions/overview.md) — used as workflow nodes after a decision.
-- [Events](../events/overview.md) — subscribe to intervention lifecycle events.
+Use the record's ID as the form's React `key` when switching between reviews. After submission,
+refresh your pending-review query. To stop a run from your app, use
+`cancelWorkflowInterventionMutation()` with the same `interventionId`.

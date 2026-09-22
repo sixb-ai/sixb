@@ -1,221 +1,69 @@
-# Authentication
+# OAuth connectors
 
-Use environment variables for API keys and service accounts. Use OAuth when users connect their own accounts.
+OAuth connectors let users authorize your app to access their accounts in external services.
+Sixb handles authorization, account selection, and token refresh.
 
-## API keys
+## Configure a connector
 
-Keep secrets on the backend. For a REST API, resolve the header when each request is sent:
-
-```ts
-rest({
-  baseUrl: "https://api.example.com",
-  headers: () => ({ authorization: `Bearer ${process.env.API_TOKEN}` }),
-})
-```
-
-## Define an OAuth connector
-
-For OAuth, Sixb owns state, PKCE, encrypted credentials, refresh coordination, and account
-selection. The adapter owns the provider protocol and the client exposed to application code.
+Export an OAuth connector from `connectors/`. Follow its [package README](library.md) for the
+provider credentials and scopes. For example:
 
 ```ts
 import { defineConnector } from "@sixb/core"
+import { linkedin } from "@sixb/connector-linkedin"
 
-export const socialConnector = defineConnector("social", {
-  type: "social",
-  authentication: {
-    type: "oauth2",
-    authorizationUrl(context, { state, codeChallenge, codeChallengeMethod }) {
-      const url = new URL("https://social.example/oauth/authorize")
-      url.searchParams.set("redirect_uri", context.redirectUri)
-      url.searchParams.set("state", state)
-      if (codeChallenge !== undefined && codeChallengeMethod !== undefined) {
-        url.searchParams.set("code_challenge", codeChallenge)
-        url.searchParams.set("code_challenge_method", codeChallengeMethod)
-      }
-      return url
-    },
-    exchangeCode(context, input) {
-      return exchangeSocialCode({
-        ...input,
-        redirectUri: context.redirectUri,
-        signal: context.signal,
-      })
-    },
-    refresh(context, credentials) {
-      return refreshSocialToken(credentials, { signal: context.signal })
-    },
-    revoke(context, credentials) {
-      return revokeSocialGrant(credentials, { signal: context.signal })
-    },
-  },
-  discoverAccounts(context, credentials) {
-    return listSocialAccounts(credentials, { signal: context.signal })
-  },
-  connect({ account, tokenSource, signal }) {
-    return {
-      async request(path: string) {
-        const token = await tokenSource.get()
-        const response = await fetch(`https://social.example/accounts/${account.id}/${path}`, {
-          headers: { authorization: `${token.tokenType ?? "Bearer"} ${token.accessToken}` },
-          signal,
-        })
-        if (response.status === 401) token.invalidate()
-        return response
-      },
-    }
-  },
-})
+export const linkedinAds = defineConnector("linkedin-ads", linkedin({
+  clientId: process.env.LINKEDIN_CLIENT_ID!,
+  clientSecret: process.env.LINKEDIN_CLIENT_SECRET!,
+  accountType: "ad-account",
+  scopes: ["r_ads", "r_ads_reporting"],
+}))
 ```
 
-Trusted primitive executions resolve one stable project connection by its application-defined
-slot:
+Register this callback URL with the provider, using your Sixb API's origin:
 
-```ts
-const social = await sixb.connector(socialConnector, {
-  owner: { type: "project" },
-  slot: "organic-marketing",
-})
+```text
+https://<sixb-api-origin>/auth/connectors/callback
 ```
 
-Each returned token invalidates only its own credential revision, so a late `401` cannot refresh a
-newer token. Provider failures that affect a grant can be classified explicitly:
-
-| `ConnectorOAuthError` kind | Use when |
-| --- | --- |
-| `retryable` | The adapter guarantees that the provider made no external change. |
-| `terminal` | The provider definitively rejected the grant or credential. |
-| `ambiguous` | The provider may have changed state, or the adapter cannot prove otherwise. |
-
-Unclassified errors are treated as `ambiguous` and fail closed. Throw, for example,
-`new ConnectorOAuthError("retryable", "Social provider is unavailable", { cause })` only when
-retrying the unchanged operation is safe. `revoke()` must be idempotent: an already revoked or
-invalid grant resolves successfully.
-
-Managing an OAuth connection requires an authenticated request whose role grants the connector:
+With persistent storage, set `connectorConnections.encryptionKey` in your `createSixb()` config:
 
 ```ts
-can.manage(socialConnector)
-// or: can.manage(every.connector())
-```
-
-Syncs automatically read every connected account for an OAuth connector. The handler receives
-non-secret connection metadata through `context.connection`; no connection selector is required
-in the Sync definition. See [OAuth connector fan-out](../syncs/overview.md#oauth-connector-fan-out).
-
-OAuth webhooks can resolve connected accounts inside their handler. See [Managed OAuth webhooks](webhooks.md#managed-oauth-webhooks).
-
-## Provider-specific OAuth options
-
-PKCE defaults to S256. Disable it explicitly for providers whose OAuth flow does not support it:
-
-```ts
-authentication: {
-  type: "oauth2",
-  pkce: "disabled",
-  // authorizationUrl, exchangeCode, refresh, and revoke as above.
+connectorConnections: {
+  encryptionKey: process.env.SIXB_CONNECTOR_ENCRYPTION_KEY!,
 },
 ```
 
-Restart any in-flight authorization after changing this setting.
-
-### Callback parameters
-
-Declare the extra callback parameters your provider returns. Store grant-specific data in
-`authorizationContext` for account discovery, refresh, and revocation.
-
-```ts
-authentication: {
-  type: "oauth2",
-  callbackParameters: ["tenant"],
-  // Other OAuth methods as above.
-  async exchangeCode(context, input) {
-    const tenant = input.callbackParameters?.tenant
-    if (!tenant) throw new Error("[Acme] OAuth callback is missing its tenant.")
-
-    const credentials = await exchangeAcmeCode(context, input)
-    return {
-      ...credentials,
-      authorizationContext: { tenant },
-    }
-  },
-},
-async discoverAccounts(context, credentials) {
-  const tenant = credentials.authorizationContext?.tenant
-  if (typeof tenant !== "string") throw new Error("[Acme] Missing tenant context.")
-
-  // Verify access with the provider before offering the account.
-  const account = await getAcmeTenant(credentials, tenant, { signal: context.signal })
-  return [{ id: account.id, label: account.name }]
-},
-```
-
-Sixb forwards only declared parameters and rejects duplicate values. The adapter validates required
-values; OAuth fields such as `state`, `code`, and `error` remain framework-owned.
-
-`authorizationContext` must be a JSON object; it is stored securely with the credentials.
-
-- **Refresh:** omit context to preserve it, return an object to replace it, or `{}` to clear it.
-- **Reauthorization:** uses fresh context and verifies that existing connected accounts remain available.
-
-## Protect OAuth credentials
-
-When at least one OAuth connector uses durable connector storage, Sixb encrypts its tokens at rest.
-`SqliteStorage` and `PostgresStorage` provide that durable storage automatically. Provide the
-canonical base64url encoding of 32 random bytes through `createSixb()`:
-
-```ts
-const connectorEncryptionKey = process.env.SIXB_CONNECTOR_ENCRYPTION_KEY
-
-if (!connectorEncryptionKey) {
-  throw new Error("[SixbConfig] SIXB_CONNECTOR_ENCRYPTION_KEY is required")
-}
-
-export const sixb = createSixb({
-  storage: new PostgresStorage({ connectionString: process.env.DATABASE_URL }),
-  connectorConnections: { encryptionKey: connectorEncryptionKey },
-})
-```
-
-The storage provider owns persistence; `connectorConnections` only configures credential
-protection. Static connectors still require neither.
-
-Generate the value once, then store it in the deployment's secret manager:
+Generate the key once and store it as a deployment secret. Keep the same key across restarts and
+all processes sharing the database. Losing or replacing it makes existing credentials unreadable.
 
 ```bash
 bun -e 'import { randomBytes } from "node:crypto"; console.log(randomBytes(32).toString("base64url"))'
 ```
 
-Every process sharing the same connector database must receive the same key. Do not commit,
-replace, or lose it: existing OAuth credentials would become unreadable.
+## Connect an account
 
-Static connectors do not need this setting. It can also be omitted with ephemeral connector
-storage, where both the stored credentials and Sixb's process-local protection disappear on
-restart.
-
-## Connect an OAuth account from an app
-
-Sixb owns the OAuth callback, state, PKCE exchange, durable run, and lifecycle transitions. The
-application keeps control of its interface through one headless hook:
+Use `useConnectorConnection` in your app to start authorization and let the user choose an account.
+The user must be signed in with a role that grants `can.manage(linkedinAds)`.
 
 ```tsx
 import { useConnectorConnection } from "@sixb/client/hooks"
 
-export function SocialConnection() {
-  const social = useConnectorConnection({
-    connectorId: "social",
-    slot: "organic-marketing",
+export function ConnectLinkedIn() {
+  const linkedin = useConnectorConnection({
+    connectorId: "linkedin-ads",
+    slot: "marketing",
   })
 
   return (
     <>
-      <button onClick={social.connect} disabled={!social.canConnect}>
-        {social.connection?.account.label ?? "Connect social account"}
+      <button onClick={linkedin.connect} disabled={!linkedin.canConnect}>
+        {linkedin.connection?.account.label ?? "Connect LinkedIn"}
       </button>
 
-      {social.status === "selecting_account" &&
-        social.accounts.map((account) => (
-          <button key={account.id} onClick={() => social.selectAccount(account.id)}>
+      {linkedin.status === "selecting_account" &&
+        linkedin.accounts.map((account) => (
+          <button key={account.id} onClick={() => linkedin.selectAccount(account.id)}>
             {account.label}
           </button>
         ))}
@@ -224,55 +72,22 @@ export function SocialConnection() {
 }
 ```
 
-`slot` is the stable application role filled by the connection, not the provider account id. For
-example, `organic-marketing`, `customer-support`, or `brand-france` can each resolve a different
-account later through `sixb.connector(...)`. Project ownership is implicit in V1.
+`slot` names how your app uses the account, such as `marketing` or `customer-support`.
+Keep this component mounted on the page users return to after authorization so the hook can
+resume account selection. The hook also exposes `disconnect()` and `error` for your interface.
 
-Register this server-owned callback URL with the OAuth provider:
+## Use the account
 
-```text
-https://<sixb-api-origin>/auth/connectors/callback
-```
+In backend code, pass the connector and the same slot to get its authenticated client:
 
-By default, OAuth returns to the current page while preserving unrelated query parameters and the
-URL hash. Keep the hook mounted there: it resumes the run from the non-secret callback identity and
-exposes `selecting_account` when the application must present provider accounts. The hook also
-exposes `disconnect()`, `revoke()`, and `needs_reauthorization`; Sixb imposes the protocol, not its
-visual representation.
+```ts
+import { linkedinAds } from "./connectors/linkedin"
 
-Selecting an account for an occupied slot returns a replacement conflict. Detect it with
-`isConnectorReplacementRequired(connection.error?.cause)`, ask for confirmation in the
-application, then retry with `selectAccount(accountId, { replace: true })`.
-
-To expose another account from the same OAuth grant, start a selection run from an existing
-connection. The provider authorization is not repeated:
-
-```tsx
-import { useAddConnectorConnection } from "@sixb/client/hooks"
-
-const addAccount = useAddConnectorConnection({
-  connectorId: "social",
-  fromConnectionId: socialConnection.id,
-  slot: "paid-marketing",
+const client = await sixb.connector(linkedinAds, {
+  owner: { type: "project" },
+  slot: "marketing",
 })
-
-addAccount.mutate()
 ```
 
-The returned run is already waiting for `account_selection`. Use `useConnectorConnectionRun` and
-`useSelectConnectorAccount` when building this advanced multi-slot flow.
-
-A connection run records the interactive execution: `waiting`, `running`, then a terminal status.
-Its terminal record is secret-free and retained without automatic cleanup in V1.
-
-| Client operation | Effect |
-| --- | --- |
-| `listConnectorConnections()` | Lists known connections and their current lifecycle status. |
-| `listPendingConnectorConnectionRuns()` | Lists the initiating user's unfinished OAuth exchanges and account selections. |
-| `addConnectorConnection()` | Selects another account through an existing OAuth grant. |
-| `disconnectConnectorConnection()` | Disconnects one account; the last usage also schedules grant revocation. |
-| `reauthorizeConnectorConnection()` | Starts a new OAuth run for an existing grant. |
-| `revokeConnectorConnection()` | Revokes the grant and disconnects every account sharing it. |
-
-Management routes require a browser session, CSRF protection, and `can.manage(connector)`.
-Authorization ids and OAuth credentials are never exposed.
+[Syncs](../syncs/overview.md#sync-connected-accounts) read all connected accounts automatically,
+so you don't need to select a slot in a sync definition.

@@ -2,58 +2,26 @@
 
 import { Sheet, SheetContent, SheetTitle } from "@sixb/ui/components"
 import { Check, ChevronRight, Copy, FileCode2, Folder, FolderOpen, Info } from "lucide-react"
-import { type CSSProperties, useEffect, useId, useMemo, useRef, useState } from "react"
+import { type CSSProperties, useId, useMemo, useRef, useState } from "react"
 import { projects } from "../generated/projectFiles"
-import { useCodeGuide } from "./CodeGuide"
+import { useClipboard } from "./useClipboard"
 
-export type ProjectName = keyof typeof projects
-
-export function ProjectExplorer({
-  project = "starter",
-  selectedFile,
-  onSelect,
-  renderCode,
-  guided = false,
-}: {
-  guided?: boolean
-  project?: ProjectName
-  selectedFile?: string
-  onSelect?: (path: string) => void
-  renderCode: (html: string) => React.ReactNode
-}) {
+export function ProjectExplorer({ renderCode }: { renderCode: (html: string) => React.ReactNode }) {
   const sourceId = useId()
-  const collection = projects[project]
+  const collection = projects.starter
   const [selected, setSelected] = useState<string>(collection.initialFile)
   const [filesOpen, setFilesOpen] = useState(false)
-  const [sidebarWidth, setSidebarWidth] = useState(220)
-  const [copied, setCopied] = useState(false)
-  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [sidebarWidth, setSidebarWidth] = useState(180)
   const root = useRef<HTMLElement>(null)
   const drag = useRef<{ x: number; width: number } | null>(null)
-  const file =
-    collection.files.find((entry) => entry.path === (selectedFile ?? selected)) ??
-    collection.files[0]
+  const file = collection.files.find((entry) => entry.path === selected) ?? collection.files[0]
   const code = useMemo(
     () => renderCode(file.html.replace(/<figcaption\b[\s\S]*?<\/figcaption>/g, "")),
     [file.html, renderCode]
   )
   const parts = file.path.split("/")
-  const guide = useCodeGuide(
-    root,
-    (path) => {
-      setSelected(path)
-      setFilesOpen(false)
-    },
-    guided,
-    filesOpen,
-    () => setFilesOpen(true)
-  )
-  useEffect(
-    () => () => {
-      if (copyTimer.current) clearTimeout(copyTimer.current)
-    },
-    []
-  )
+  const { status, copy } = useClipboard(file.code)
+  const copied = status === "copied"
 
   function resize(width: number) {
     const max = Math.min(360, (root.current?.clientWidth ?? 700) * 0.45)
@@ -72,7 +40,7 @@ export function ProjectExplorer({
       const path = `${parent}${name}`
       if (!entries.some((entry) => entry.path === path))
         return (
-          <details key={path} open>
+          <details key={path} open={file.path.startsWith(`${path}/`)}>
             <summary>
               <ChevronRight size={12} aria-hidden="true" />
               <Folder size={14} aria-hidden="true" />
@@ -91,10 +59,8 @@ export function ProjectExplorer({
             aria-pressed={path === file.path}
             aria-controls={sourceId}
             onClick={() => {
-              guide.selectFile(path)
+              setSelected(path)
               setFilesOpen(false)
-              setCopied(false)
-              onSelect?.(path)
             }}
           >
             <FileCode2 size={14} aria-hidden="true" />
@@ -103,16 +69,6 @@ export function ProjectExplorer({
         </div>
       )
     })
-  }
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(file.code)
-      setCopied(true)
-      if (copyTimer.current) clearTimeout(copyTimer.current)
-      copyTimer.current = setTimeout(() => setCopied(false), 1800)
-    } catch {
-      setCopied(false)
-    }
   }
   return (
     <section
@@ -169,10 +125,7 @@ export function ProjectExplorer({
             <button
               className="project-mobile-files"
               type="button"
-              onClick={() => {
-                guide.stop()
-                setFilesOpen(true)
-              }}
+              onClick={() => setFilesOpen(true)}
             >
               <FolderOpen size={14} />
               Files
@@ -201,18 +154,9 @@ export function ProjectExplorer({
               {copied ? <Check size={14} /> : <Copy size={14} />}
             </button>
           </div>
-          {guide.mobileHeader}
-          {guide.panel}
-          <div
-            className="project-code-scroll"
-            key={file.path}
-            onPointerDown={guide.interaction}
-            onWheel={guide.interaction}
-            onKeyDown={guide.interaction}
-          >
+          <div className="project-code-scroll" key={file.path}>
             {code}
           </div>
-          {guide.mobileFooter}
         </div>
       </div>
       <Sheet open={filesOpen} onOpenChange={setFilesOpen}>

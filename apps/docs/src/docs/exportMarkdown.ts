@@ -1,16 +1,14 @@
 import { projects } from "../generated/projectFiles"
 import { connectorCatalog } from "./connectorCatalog"
+import { providerCatalog } from "./providerCatalog"
+import { starterPrompt } from "./starterPrompt"
 
 /** Keep interactive examples available in copied Markdown and the AI documentation corpus. */
 export function exportMarkdown(markdown: string): string {
   let result = markdown
-  for (const [name, project] of Object.entries(projects)) {
-    const marker =
-      name === "starter"
-        ? "<div data-project-explorer></div>"
-        : `<div data-code-explorer="${name}"></div>`
-    if (!result.includes(marker)) continue
-    const files = project.files
+  const marker = "<div data-project-explorer></div>"
+  if (result.includes(marker)) {
+    const files = projects.starter.files
       .map(
         (file) =>
           `File: \`${file.path}\`\n\n${file.description}\n\n\`\`\`${file.path.endsWith("tsx") ? "tsx" : "ts"}\n${file.code}\n\`\`\``
@@ -18,10 +16,6 @@ export function exportMarkdown(markdown: string): string {
       .join("\n\n")
     result = result.replace(marker, files)
   }
-  result = result.replace(
-    "<div data-data-flow></div>",
-    "Connector → Sync → Raw dataset → Pipeline (optional) → Clean dataset → Projection → Objects → App"
-  )
   result = result.replace(
     "<div data-connector-library></div>",
     connectorCatalog
@@ -31,5 +25,20 @@ export function exportMarkdown(markdown: string): string {
       )
       .join("\n")
   )
+  result = result.replace(
+    "<div data-build-with-ai></div>",
+    `Paste this prompt into your coding agent:\n\n\`\`\`text\n${starterPrompt}\n\`\`\``
+  )
+  for (const [kind, entries] of Object.entries(providerCatalog)) {
+    result = result.replace(
+      `<div data-provider-library="${kind}"></div>`,
+      entries
+        .map(
+          (entry) =>
+            `- [${entry.name}](${entry.href}): ${entry.description} Package: \`${entry.package}\`.`
+        )
+        .join("\n")
+    )
+  }
   return result
 }

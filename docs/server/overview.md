@@ -1,182 +1,85 @@
-# Server & API
+# HTTP API
 
-The Sixb server gives your app and other services access to objects, actions, workflows, agents,
-and events over HTTP and WebSockets. It authenticates callers and enforces their permissions.
+The Sixb API exposes your project's data and operations over HTTP. Requests are authenticated and checked against the caller's permissions.
 
-The API, Atlas, and your custom app run as separate services. During development, `sixb dev`
-starts all three. Most projects use the CLI; the configuration below is for custom server setup.
+During development, `bun sixb dev` serves the API at `http://localhost:3002` by default. In production, use the configured API origin.
 
-## Starting the server
+## Explore the API
 
-The common path is `sixb dev` (runtime + atlas + custom app) or `sixb api` (API only). To embed the server directly:
+Open `/docs` on your API server for the generated OpenAPI reference. It includes endpoints, parameters, request bodies, response schemas, and authentication requirements.
 
-```ts
-import { createSixb } from "@sixb/core"
-import { createSixbServer } from "@sixb/server"
+| Area | Example endpoint |
+| --- | --- |
+| Objects | `GET /api/objects` |
+| Queries | `POST /api/objects/query` |
+| Actions | `POST /api/actions/:actionId` |
+| Workflows | `POST /api/workflows/:id/runs` |
+| Datasets | `GET /api/datasets` |
+| Events | `GET /api/events` |
+| Logs | `GET /api/logs` |
+| Project | `GET /api/project` |
 
-const host = await createSixb({ /* providers */ })
+For TypeScript callers, the [Client SDK](../client/overview.md) provides typed functions for these endpoints. See [Object queries](object-queries.md) for the JSON query format and [WebSockets](../websockets/overview.md) for live streams.
 
-const server = createSixbServer({
-  host,
-  port: 3000,
-  hostname: "0.0.0.0",
-  browser: {
-    publicOrigin: "https://api.acme.example",
-    allowedOrigins: [
-      { origin: "https://atlas.acme.example", audience: "atlas" },
-      { origin: "https://app.acme.example", audience: "app" },
-    ],
-  },
-})
+## Authenticate a request
 
-await server.start()
-// API at      http://0.0.0.0:3000
-// OpenAPI at  http://0.0.0.0:3000/docs
+Scripts and external services use a [personal or service-account token](../auth/members.md#service-accounts-and-tokens):
 
-await server.stop()
+```bash
+curl https://api.example.com/api/objects \
+  -H "Authorization: Bearer $SIXB_API_TOKEN"
 ```
 
-### Options
+Tokens carry their identity's permissions. They work only on routes that support bearer authentication, as indicated in OpenAPI; browser sign-in and WebSockets require sessions.
 
-| Option    | Type                   | Default     | Description                                                     |
-| --------- | ---------------------- | ----------- | --------------------------------------------------------------- |
-| `host`    | `SixbHost`             | (required)  | A host from `createSixb()`. The server never builds one.        |
-| `browser` | `SixbApiBrowserPolicy` | (required)  | Origin policy: the API's `publicOrigin` and `allowedOrigins`.   |
-| `port`    | `number`               | `3000`      | TCP port to listen on.                                          |
-| `hostname`| `string`               | `"0.0.0.0"` | Bind hostname.                                                  |
-| `quiet`   | `boolean`              | `false`     | Suppress startup logging.                                       |
+Browser apps use session cookies. Mutating requests also send the CSRF token in `x-sixb-csrf`, and the browser origin must be allowed by the API. Sixb-served apps handle this automatically; standalone apps should use the [browser client](../client/overview.md#standalone-browser-apps).
 
-The `browser` policy is load-bearing for security: it drives CORS, rejects disallowed `Origin` headers up front, and resolves the public origin used to mint auth redirects. Each `allowedOrigins` entry maps one front-end origin to its auth `audience` (`atlas` or `app`), and each audience can have only one origin. Configured audiences become invitation destinations and application-access boundaries.
+Being authenticated does not grant data access or member-management rights. Configure those through [Security](../auth/authorization.md).
 
-## Route groups
+## Send a request
 
-All JSON routes are prefixed with `/api` and mirror the runtime's typed APIs; see the linked pages for behavior. The full per-route request/response contract for objects lives in the [HTTP reference](../objects/http-reference.md).
+Send JSON with the appropriate content type. This requests a project-defined action on an invoice:
 
-| Group          | Representative routes                                                                | See                                             |
-| -------------- | ----------------------------------------------------------------------------------- | ----------------------------------------------- |
-| Objects CRUD   | `GET /api/objects`, `GET/PUT /api/objects/:type/:id`                                 | [Objects](../objects/overview.md)               |
-| Object query   | `POST /api/objects/query`, `.../query/links`, `.../query/count`, `.../query/exists`, `.../query/facets` | [Querying](../objects/querying.md)              |
-| Files          | `POST /api/files`, `/api/files/uploads/...`, `GET .../files/content`                 | [Files](#files)                                 |
-| Telemetry      | `GET/POST /api/objects/:type/:id/telemetry/:prop`, `.../history`, `.../latest`       | [Telemetry](../objects/telemetry.md)            |
-| Links          | `POST /api/objects/query/links`; `PUT/DELETE /api/objects/:type/:id/links/:linkId`    | [Links](../ontology/links.md)                   |
-| Actions        | `GET /api/actions`, `POST /api/actions/:actionId`                                    | [Actions](../actions/overview.md)               |
-| Action runs    | `GET /api/action-runs`, `GET /api/action-runs/:runId`                                | [Actions](../actions/overview.md)               |
-| Ontology       | `GET /api/object-types`, `GET /api/object-types/:objectTypeId`                       | [Ontology](../ontology/overview.md)             |
-| Events (WS)    | `GET /ws/events`                                                                     | [Events](../events/overview.md)                 |
-| Built-in Agent | `GET /api/agent`, `/api/agent-threads`, `.../messages`, `/api/agent-runs/:runId`, `GET /ws/agents` | [Built-in Agent](../models/built-in-agent.md) |
-| Logs           | `GET /api/logs`, `GET /ws/logs`                                                      | [Logging](../logging/overview.md)               |
-| Workflows      | `GET /api/workflows`, `/api/workflow-runs`, `/api/workflows/:id/runs`                | [Workflows](../workflows/overview.md)           |
-| Interventions  | `/api/workflow-interventions`, `.../:id/submit`, `.../:id/cancel`                    | [Interventions](../workflows/interventions.md)  |
-| Rules          | `GET /api/rules`, `GET /api/rule-states`                                             | [Rules](../rules/overview.md)                   |
-| Datasets       | `/api/datasets`, `.../versions`, `.../rows`                                          | [Datasets](../datasets/overview.md)                 |
-| Syncs          | `/api/syncs`, `/api/sync-runs`, `/api/syncs/:id/runs`                                | [Syncs](../syncs/overview.md)                       |
-| Pipelines      | `/api/pipelines`, `/api/pipeline-runs`, `/api/pipelines/:id/runs`                    | [Pipelines](../pipelines/overview.md)               |
-| Projections    | `GET /api/projections`, `GET /api/projections/:projectionId`                         | [Projections](../projections/overview.md)           |
-| Connectors     | `GET /api/connectors`, `GET /api/connectors/:connectorId`                            | [Connectors](../connectors/overview.md)             |
-| Webhooks       | `POST /api/webhooks/:connectorId/:webhookId`, `GET /api/webhook-runs`               | [Connectors](../connectors/overview.md)             |
-| Auth           | `/api/auth/session`, `/auth/sign-in`, `/auth/callback`, `/api/auth/...`              | [Auth](../auth/overview.md)                     |
-| Project/Status | `GET /api/project`, `GET /api/status`, `GET /health`, `GET /ready`                   | —                                               |
+```bash
+curl https://api.example.com/api/actions/markPaid \
+  -H "Authorization: Bearer $SIXB_API_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": {
+      "kind": "object",
+      "objectTypeId": "Invoice",
+      "primaryId": "inv-1"
+    },
+    "params": {}
+  }'
+```
 
-Object data routes enforce the caller's grants: reads are filtered, and the object, link, and
-telemetry writes require `edit:object` or `append:telemetry` and answer `403` without it. File and
-auth-administration routes are **authenticated-only** — neither has a grant family yet. See
-[Authorization](../auth/authorization.md).
+The response acknowledges the queued request with a `runId`. Read `/api/action-runs/:runId` to check completion. A successful request does not mean the operation has finished.
 
-Status endpoints have distinct meanings:
-
-| Endpoint | Meaning | Failure behavior |
-| --- | --- | --- |
-| `GET /health` | The API process is alive. | Returns `200` while the process can serve HTTP. |
-| `GET /ready` | Storage is reachable and its schema is current. | Returns `503` when the runtime must leave traffic. |
-| `GET /api/status` | Cached outbox, retry, cleanup, and maintenance state. | Reports `degraded` without removing a healthy API from traffic. |
+For paginated reads, use the parameters and continuation fields documented on that endpoint. Object queries return a `nextPageToken`; see [Paginate results](object-queries.md#paginate-results).
 
 ## Files
 
-A [`fileRef`](../ontology/properties.md) property holds a blob. Uploading it takes one request
-when the file is small, and a session when it is not.
+Upload a small file with `POST /api/files` using multipart form data. Larger uploads can use the `/api/files/uploads` session endpoints described in OpenAPI.
 
-| Route | Use |
-| --- | --- |
-| `POST /api/files` | one multipart request; the whole file travels through the API |
-| `POST /api/files/uploads` | open a session for a large or client-uploaded file |
-| `PUT /api/files/uploads/:uploadId/content` | send the content through the API |
-| `POST /api/files/uploads/:uploadId/parts/:partNumber` | get a signed URL and upload the part directly to blob storage |
-| `POST /api/files/uploads/:uploadId/complete` | finish the session and get the reference |
-| `POST /api/files/uploads/:uploadId/abort` | discard it |
-
-Reading back is `GET` (or `HEAD`) on the owner's `files/content`, with a JSON pointer to the
-reference as `path` — on an object it must start with `/properties`:
+Read a file through the object or run that owns its reference. For example, download the `scan` property from an invoice:
 
 ```bash
-curl "$API/api/objects/Invoice/inv-1/files/content?path=/properties/scan" -o scan.pdf
+curl 'https://api.example.com/api/objects/Invoice/inv-1/files/content?path=/properties/scan' \
+  -H "Authorization: Bearer $SIXB_API_TOKEN" \
+  -o invoice.pdf
 ```
 
-The same route shape hangs off action runs, workflow runs, workflow-run nodes, and agent thread
-messages — `/api/action-runs/:runId/files/content`, `/api/workflow-runs/:runId/files/content`,
-`.../nodes/:nodeKey/files/content`, and
-`/api/agent-threads/:threadId/messages/:messageId/files/content`.
+The API checks access to the owning resource before returning the bytes. For browser images and download links, use [`objectFileContentUrl`](../client/overview.md#display-files).
 
-These contextual URLs resolve the current reference, so responses use
-`Cache-Control: private, no-cache`. Browsers can store the bytes but must revalidate
-before reuse. GET and HEAD support `If-None-Match` and return `304` for an unchanged
-representation after checking access and blob existence. ETags include the content
-identity and effective response metadata. `If-Range` accepts a matching strong ETag;
-other validators cause the full representation to be returned.
+With the built-in PostgreSQL and SQLite providers, upload sessions are currently held in the serving process. Route a session's requests to one instance; a restart loses it. Single-request uploads are unaffected.
 
-For object images and download links, use the client's
-[`objectFileContentUrl`](../client/overview.md#rendering-object-files) helper. Its
-content-aware URL changes when a refetched property changes, prompting an existing
-image element to load the new file. The optional `v` query parameter is only a client
-cache key; it does not select an old blob or enable immutable caching.
+## Errors
 
-> **Pre-0.1 limit — upload sessions are in-memory.** Neither `@sixb/pg` nor `@sixb/sqlite`
-> implements `fileUploadSessions`, so every session opened by `POST /api/files/uploads` lives in
-> the serving process: it does not survive a restart and is not shared across replicas. Route a
-> session's requests to one instance, supply your own store on `host.storage.fileUploadSessions`,
-> or use single-request `POST /api/files`, which is unaffected.
+Check the HTTP status and structured error code instead of parsing message text. See [Errors](../errors/overview.md) for the response format and code reference.
 
-## Real-time events
+## Custom server setup
 
-`GET /ws/events` is a WebSocket stream of [domain events](../events/overview.md) — `object.created`, `object.updated`, `telemetry.appended`, `link.created`, `action.requested`, and more. Any authenticated principal may connect; each event is filtered per-principal by grants as it streams.
+Most projects start the API through the [CLI](../cli/overview.md#production-services). If you need to embed it in your own process, use `createSixbServer` from `@sixb/server`; the [package README](https://github.com/sixb-ai/sixb/tree/main/packages/server#readme) documents its options.
 
-On connect, the server sends a `connected` control frame. Send a `subscribe` message to filter the stream — by `topic` (one domain-event topic such as `objects`, `telemetry`, `links`, or `actions`), `types` (specific event types), and/or `objectTypeId` (one object type) — and `unsubscribe` to stop:
-
-```json
-{ "type": "subscribe", "topic": "objects", "types": ["object.created", "object.updated"], "objectTypeId": "Invoice", "limit": 100 }
-```
-
-The example above streams create and update events for `Invoice` objects only — useful for a billing dashboard that reacts as invoices are created, sent, or marked paid. The server replies with `subscribed` and `unsubscribed` control frames, streams matching events as `{ "type": "event", "event": ... }`, and reports problems as `{ "type": "error", "message": ... }`. For a typed client over this stream, see [Client](../client/overview.md).
-
-Two more WebSocket streams follow the same connect/subscribe shape: `/ws/logs` for run [logs](../logging/overview.md) and `/ws/agents` for live [Agent](../models/built-in-agent.md) runs.
-
-## OpenAPI
-
-The server mounts Swagger UI at `/docs` and serves an OpenAPI document for every route group (tagged Objects, Telemetry, Actions, Workflows, Datasets, Syncs, Pipelines, Projections, Auth, and more). Zod schemas are converted to JSON Schema automatically, so the docs stay in sync with route validation. The generated typed client in [`packages/client`](../client/overview.md) is built from this contract — when routes or schemas change, run `bun run generate:client`.
-
-## Auth, CSRF, and cookies
-
-Auth is enforced centrally. On every request the server resolves the session once and applies the caller's grants to protected domain operations. When auth is disabled explicitly, protected routes use that project configuration rather than bypassing authorization through a privileged runtime.
-
-| Mechanism      | Detail                                                                                          |
-| -------------- | ----------------------------------------------------------------------------------------------- |
-| Session        | `/auth/sign-in` starts the flow; `/auth/callback` mints the `httpOnly` session cookie.          |
-| CSRF           | Double-submit: a `sixb_csrf` cookie plus a matching `x-sixb-csrf` request header on mutations.  |
-| Browser origin | Disallowed `Origin` headers get a `403` before routing; CORS is restricted to `allowedOrigins`. |
-
-Browser front-ends call the API with credentials (cookies) and echo the CSRF token in the `x-sixb-csrf` header on writes. Server-to-server callers authenticate per your auth provider. See [Authentication](../auth/authentication.md) and [Authorization](../auth/authorization.md) for the full model.
-
-## Admin UI (atlas) vs custom apps
-
-The API server serves no HTML. Front-ends are separate servers pointed at `apiBaseUrl`:
-
-- **atlas** — the built-in admin UI (`@sixb/atlas`). `sixb dev` starts it automatically alongside the API. It is a browser client for the same `/api` routes, scoped to the `atlas` audience.
-- **custom app** — your own front-end under the project's app directory, served with the `app` audience. See [Apps](../apps/overview.md).
-
-Both are ordinary API clients. To build one, consume the typed [Client](../client/overview.md) and the [Objects HTTP reference](../objects/http-reference.md).
-
-## Related
-
-- [Client](../client/overview.md) — the generated typed client over these routes
-- [Apps](../apps/overview.md) — building a custom front-end
-- [Authentication](../auth/authentication.md) and [Authorization](../auth/authorization.md)
-- [Objects HTTP reference](../objects/http-reference.md)
+For builds, public origins, and service health checks, see [Deployment](../deployment/overview.md).

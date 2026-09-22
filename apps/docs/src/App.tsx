@@ -44,21 +44,24 @@ import {
   Menu,
   Microchip,
   Network,
+  Radio,
   RefreshCw,
   Rocket,
   ScrollText,
   Search,
   Server,
-  Webhook,
+  Terminal,
+  TriangleAlert,
   Workflow,
   Zap,
 } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { type MouseEvent, type ReactNode, useCallback, useEffect, useMemo, useState } from "react"
+import { type MouseEvent, useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react"
+import { BuildWithAI } from "./components/BuildWithAI"
 import { ConnectorLibrary } from "./components/ConnectorLibrary"
-import { DataFlow } from "./components/DataFlow"
 import { HomeWalkthrough } from "./components/HomeWalkthrough"
 import { ProjectExplorer } from "./components/ProjectExplorer"
+import { ProviderLibrary } from "./components/ProviderLibrary"
 import { legacySections } from "./docs/legacySections"
 import { searchDocs } from "./docs/search"
 import { docs } from "./generated/docs"
@@ -69,15 +72,20 @@ type Navigate = (href: string) => void
 interface NavGroup {
   readonly title: string
   readonly items: Doc[]
-  readonly children?: NavGroup[]
+  readonly labels?: Readonly<Record<string, string>>
 }
 
 const sectionIcons: Record<string, LucideIcon | undefined> = {
   "Data integration": Database,
   Build: Code,
-  "Run & deploy": Cloud,
+  Configuration: Cpu,
+  Security: Lock,
+  WebSockets: Radio,
+  CLI: Terminal,
+  Errors: TriangleAlert,
+  "HTTP API": Server,
+  AI: Microchip,
   Apps: LayoutDashboard,
-  Agents: Microchip,
   "Get Started": Rocket,
   Fundamentals: Blocks,
   Runtime: Cpu,
@@ -94,12 +102,10 @@ const sectionIcons: Record<string, LucideIcon | undefined> = {
   Workflows: Workflow,
   Models: Microchip,
   Sandboxes: Container,
-  "Events & Webhooks": Webhook,
   Logging: ScrollText,
   "Building Apps": LayoutDashboard,
   "Client SDK": Code,
   "Server & API": Server,
-  Auth: Lock,
   Infrastructure: Layers,
   Deployment: Cloud,
   Testing: FlaskConical,
@@ -126,51 +132,86 @@ function groupDocs(): NavGroup[] {
 function sidebarGroups(groups: NavGroup[]): NavGroup[] {
   const section = (title: string): NavGroup =>
     groups.find((group) => group.title === title) ?? { title, items: [] }
-  const parent = (title: string, children: NavGroup[]): NavGroup => ({
+  const topic = (title: string, sources: string[]): NavGroup => ({
     title,
-    children,
-    items: children.flatMap((child) => child.items),
+    items: sources.flatMap((source) => section(source).items),
   })
   const models = section("Models")
-  const agentPages = models.items.filter((doc) => doc.routePath === "/models/built-in-agent")
+  const aiOrder = [
+    "/models",
+    "/models/generation",
+    "/models/tools-and-authorization",
+    "/models/configuration",
+    "/sandboxes",
+    "/models/usage-and-limits",
+  ]
+  const aiPages = [...models.items, ...section("Sandboxes").items].sort((a, b) => {
+    const aIndex = aiOrder.indexOf(a.routePath)
+    const bIndex = aiOrder.indexOf(b.routePath)
+    return (aIndex < 0 ? aiOrder.length : aIndex) - (bIndex < 0 ? aiOrder.length : bIndex)
+  })
   return [
     section("Get Started"),
     section("Fundamentals"),
     section("Ontology"),
-    { title: "Data integration", items: [] },
-    ...["Connectors", "Datasets", "Syncs", "Pipelines", "Projections"].map(section),
-    parent("Build", [
-      parent("Apps", [
-        ...section("Building Apps").items.map((doc) => ({
-          title: doc.isOverview ? "Overview" : doc.title,
-          items: [doc],
-        })),
-        section("Client SDK"),
-      ]),
-      section("Objects"),
-      section("Actions"),
-      section("Workflows"),
-      { title: "Agents", items: agentPages },
-      { title: "Models", items: models.items.filter((doc) => !agentPages.includes(doc)) },
-      section("Schedules"),
-      section("Rules"),
-    ]),
-    parent(
-      "Run & deploy",
-      [
-        "Runtime",
-        "Infrastructure",
-        "Deployment",
-        "Auth",
-        "Logging",
-        "Testing",
-        "Server & API",
-        "Events & Webhooks",
-        "Sandboxes",
-      ].map(section)
-    ),
+    { title: "Data Integration", items: [] },
+    {
+      ...section("Connectors"),
+      labels: { "/connectors/authentication": "OAuth" },
+    },
+    ...["Datasets", "Syncs", "Pipelines", "Projections"].map(section),
+    { title: "Build", items: [] },
+    topic("Apps", ["Building Apps"]),
+    ...["Objects", "Actions", "Workflows"].map(section),
+    {
+      title: "AI",
+      items: aiPages,
+      labels: {
+        "/models": "Overview",
+        "/models/configuration": "Model providers",
+        "/models/generation": "Generating responses",
+        "/models/tools-and-authorization": "Tools & skills",
+        "/models/usage-and-limits": "Usage & limits",
+      },
+    },
+    ...["Rules", "Schedules"].map(section),
+    { title: "Manage", items: [] },
+    {
+      title: "Configuration",
+      items: [...section("Runtime").items, ...section("Infrastructure").items],
+      labels: {
+        "/runtime": "Project configuration",
+        "/infrastructure": "Infrastructure providers",
+      },
+    },
+    section("Security"),
+    section("Deployment"),
+    section("Logging"),
+    section("Testing"),
+    { title: "Reference", items: [] },
+    section("Client SDK"),
+    {
+      title: "HTTP API",
+      items: section("HTTP API").items,
+      labels: { "/server": "Overview" },
+    },
+    ...["WebSockets", "CLI", "Errors"].map(section),
     section("Examples"),
   ]
+}
+
+// Documentation is generated at build time. Derive its navigation once for every surface.
+const groups = groupDocs()
+const navigationGroups = sidebarGroups(groups)
+const navigationDocs = navigationGroups.flatMap((group) => group.items)
+
+function navigationLabel(doc: Doc, group?: NavGroup) {
+  return (
+    group?.labels?.[doc.routePath] ??
+    (doc.isOverview && group?.items.filter((item) => item.isOverview).length === 1
+      ? "Overview"
+      : doc.title)
+  )
 }
 
 function intercept(navigate: Navigate, href: string) {
@@ -209,7 +250,6 @@ function RawHtml({
 
 export function App({ initialPath }: { initialPath: string }) {
   const router = useRouter()
-  const groups = useMemo(groupDocs, [])
   const [path, setPath] = useState(() => normalize(initialPath))
   const [searchOpen, setSearchOpen] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -257,8 +297,13 @@ export function App({ initialPath }: { initialPath: string }) {
   )
 
   useEffect(() => {
-    const destination = legacySections[path]?.[window.location.hash.slice(1)]
-    if (destination) router.replace(destination)
+    const redirectSection = () => {
+      const destination = legacySections[path]?.[window.location.hash.slice(1)]
+      if (destination) router.replace(destination)
+    }
+    redirectSection()
+    window.addEventListener("hashchange", redirectSection)
+    return () => window.removeEventListener("hashchange", redirectSection)
   }, [path, router])
 
   const current = docs.find((doc) => doc.routePath === path)
@@ -271,14 +316,19 @@ export function App({ initialPath }: { initialPath: string }) {
         navigate={navigate}
       />
       <div className="flex w-full">
-        <DesktopSidebar groups={groups} path={path} navigate={navigate} />
+        <DesktopSidebar groups={navigationGroups} path={path} navigate={navigate} />
         <main className="min-w-0 flex-1">
-          <div className="mx-auto flex w-full max-w-[1100px] gap-16 px-6 py-10 lg:px-10 lg:py-12">
+          <div
+            className={cn(
+              "mx-auto flex w-full gap-16 px-6 py-10 lg:px-10 lg:py-12",
+              current ? "max-w-[1100px]" : "docs-landing-content"
+            )}
+          >
             <div className="min-w-0 flex-1">
               {current ? (
                 <DocPage key={current.routePath} doc={current} navigate={navigate} />
               ) : (
-                <Landing navigate={navigate} />
+                <Landing />
               )}
             </div>
             {current && current.headings.length > 0 ? (
@@ -290,7 +340,7 @@ export function App({ initialPath }: { initialPath: string }) {
       <MobileSidebar
         open={menuOpen}
         setOpen={setMenuOpen}
-        groups={groups}
+        groups={navigationGroups}
         path={path}
         navigate={navigate}
       />
@@ -315,7 +365,7 @@ function TopBar({
 }) {
   return (
     <header className="sticky top-0 z-40 bg-background/80 backdrop-blur">
-      <div className="flex h-14 w-full items-center gap-3 px-4 lg:px-6">
+      <div className="flex h-14 w-full items-center gap-1 px-4 sm:gap-3 lg:px-6">
         <Button
           variant="ghost"
           size="icon-sm"
@@ -351,6 +401,32 @@ function TopBar({
             Docs
           </a>
         </div>
+        <div className="flex shrink-0 items-center gap-1">
+          <a
+            href="https://github.com/sixb-ai/sixb"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Sixb on GitHub (opens in a new tab)"
+            title="GitHub"
+            className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            <svg viewBox="0 0 24 24" className="size-[18px]" fill="currentColor" aria-hidden="true">
+              <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12" />
+            </svg>
+          </a>
+          <a
+            href="https://discord.gg/rPSbZSRDzQ"
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label="Sixb on Discord (opens in a new tab)"
+            title="Discord"
+            className="flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+          >
+            <svg viewBox="0 0 24 24" className="size-[18px]" fill="currentColor" aria-hidden="true">
+              <path d="M20.317 4.369a19.791 19.791 0 0 0-4.885-1.515.074.074 0 0 0-.079.037c-.211.375-.445.865-.609 1.25a18.27 18.27 0 0 0-5.487 0 12.64 12.64 0 0 0-.618-1.25.077.077 0 0 0-.079-.037A19.736 19.736 0 0 0 3.675 4.37a.07.07 0 0 0-.032.027C.533 9.043-.32 13.579.099 18.057a.082.082 0 0 0 .031.056 19.9 19.9 0 0 0 5.993 3.03.078.078 0 0 0 .084-.028 14.09 14.09 0 0 0 1.226-1.994.076.076 0 0 0-.041-.106 13.107 13.107 0 0 1-1.872-.892.077.077 0 0 1-.008-.128c.126-.094.252-.192.372-.291a.074.074 0 0 1 .078-.01c3.928 1.793 8.18 1.793 12.061 0a.074.074 0 0 1 .079.009c.12.099.246.198.373.292a.077.077 0 0 1-.006.127 12.299 12.299 0 0 1-1.873.892.077.077 0 0 0-.041.107c.36.698.772 1.362 1.225 1.993a.076.076 0 0 0 .084.028 19.84 19.84 0 0 0 6.002-3.03.077.077 0 0 0 .032-.054c.5-5.177-.838-9.676-3.548-13.66a.061.061 0 0 0-.031-.03zM8.02 15.33c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.211 0 2.176 1.096 2.157 2.419 0 1.334-.955 2.419-2.157 2.419zm7.975 0c-1.183 0-2.157-1.085-2.157-2.419 0-1.333.955-2.419 2.157-2.419 1.211 0 2.176 1.096 2.157 2.419 0 1.334-.946 2.419-2.157 2.419z" />
+            </svg>
+          </a>
+        </div>
         <button
           type="button"
           onClick={onSearch}
@@ -377,6 +453,35 @@ function TopBar({
   )
 }
 
+// Route pages remount the docs shell. Keep navigation state for this browser session.
+const sidebarPositions = { desktop: 0, mobile: 0 }
+let sidebarOpenTopic: string | null = null
+
+function useSidebarScroll(surface: keyof typeof sidebarPositions) {
+  return useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!element) return
+      element.scrollTop = sidebarPositions[surface]
+      let timer: ReturnType<typeof setTimeout> | undefined
+      const onScroll = () => {
+        sidebarPositions[surface] = element.scrollTop
+        element.dataset.scrolling = "true"
+        clearTimeout(timer)
+        timer = setTimeout(() => {
+          delete element.dataset.scrolling
+        }, 800)
+      }
+      element.addEventListener("scroll", onScroll, { passive: true })
+      return () => {
+        sidebarPositions[surface] = element.scrollTop
+        element.removeEventListener("scroll", onScroll)
+        clearTimeout(timer)
+      }
+    },
+    [surface]
+  )
+}
+
 function DesktopSidebar({
   groups,
   path,
@@ -388,8 +493,11 @@ function DesktopSidebar({
 }) {
   return (
     <aside className="hidden w-64 shrink-0 lg:block">
-      <div className="sticky top-14 max-h-[calc(100vh-3.5rem)] overflow-y-auto px-3 pt-4 pb-8 lg:px-4">
-        <SidebarNav groups={sidebarGroups(groups)} path={path} navigate={navigate} />
+      <div
+        ref={useSidebarScroll("desktop")}
+        className="docs-sidebar-scroll sticky top-14 max-h-[calc(100vh-3.5rem)] overflow-y-auto px-3 pt-4 pb-8 lg:px-4"
+      >
+        <SidebarNav groups={groups} path={path} navigate={navigate} />
       </div>
     </aside>
   )
@@ -410,9 +518,13 @@ function MobileSidebar({
 }) {
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetContent side="left" className="w-72 overflow-y-auto p-6">
+      <SheetContent
+        ref={useSidebarScroll("mobile")}
+        side="left"
+        className="docs-sidebar-scroll w-72 overflow-y-auto p-6"
+      >
         <SheetTitle className="mb-6 text-base font-semibold">Sixb Docs</SheetTitle>
-        <SidebarNav groups={sidebarGroups(groups)} path={path} navigate={navigate} />
+        <SidebarNav groups={groups} path={path} navigate={navigate} />
       </SheetContent>
     </Sheet>
   )
@@ -422,30 +534,34 @@ function SidebarNav({
   groups,
   path,
   navigate,
-  depth = 0,
 }: {
   groups: NavGroup[]
   path: string
   navigate: Navigate
-  depth?: number
 }) {
   const activeTitle = groups.find((group) =>
     group.items.some((doc) => doc.routePath === path)
   )?.title
-  const [openSection, setOpenSection] = useState<string | null>(() => activeTitle ?? null)
+  const [openSection, setOpenSection] = useState<string | null>(
+    () => activeTitle ?? sidebarOpenTopic
+  )
+
+  useLayoutEffect(() => {
+    sidebarOpenTopic = openSection
+  }, [openSection])
 
   useEffect(() => {
     if (activeTitle) setOpenSection(activeTitle)
   }, [activeTitle])
 
   return (
-    <nav aria-label={depth === 0 ? "Documentation" : undefined} className="flex flex-col gap-0.5">
+    <nav aria-label="Documentation" className="flex flex-col gap-0.5">
       {groups.map((group) => {
         if (group.items.length === 0) {
           return (
             <p
               key={group.title}
-              className="mt-5 mb-1 px-3 text-[11px] font-medium text-muted-foreground/70"
+              className="mt-6 mb-1 px-3 text-[10px] font-semibold tracking-[0.08em] text-muted-foreground/70 uppercase"
             >
               {group.title}
             </p>
@@ -456,7 +572,7 @@ function SidebarNav({
         const sectionActive = group.title === activeTitle
 
         // Single-page sections collapse to a direct link — no empty disclosure.
-        if (group.items.length === 1 && !group.children) {
+        if (group.items.length === 1) {
           const doc = group.items[0]
           if (!doc) return null
           const active = doc.routePath === path
@@ -468,13 +584,13 @@ function SidebarNav({
               aria-current={active ? "page" : undefined}
               className={cn(
                 "flex items-center gap-2.5 rounded-lg px-3 py-2 text-[13px] font-medium transition-colors",
-                depth === 0 && group.title === "Examples" && "mt-5 border-t border-border pt-4",
+                group.title === "Examples" && "mt-5 border-t border-border pt-4",
                 active
                   ? "bg-accent text-foreground"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
               )}
             >
-              {Icon && depth === 0 ? <Icon className="size-4 shrink-0" /> : null}
+              {Icon ? <Icon className="size-4 shrink-0" /> : null}
               {group.title}
             </a>
           )
@@ -484,14 +600,16 @@ function SidebarNav({
           <div key={group.title} className="flex flex-col">
             <button
               type="button"
-              onClick={() => setOpenSection((prev) => (prev === group.title ? null : group.title))}
+              onClick={() =>
+                setOpenSection((previous) => (previous === group.title ? null : group.title))
+              }
               aria-expanded={expanded}
               className={cn(
                 "flex items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] font-medium transition-colors hover:text-foreground",
                 sectionActive ? "text-foreground" : "text-muted-foreground"
               )}
             >
-              {Icon && depth === 0 ? <Icon className="size-4 shrink-0" /> : null}
+              {Icon ? <Icon className="size-4 shrink-0" /> : null}
               <span className="flex-1">{group.title}</span>
               <ChevronRight
                 className={cn(
@@ -514,36 +632,26 @@ function SidebarNav({
                 )}
               >
                 <div className="mt-0.5 mb-1 ml-[1.45rem] flex flex-col border-l border-border">
-                  {group.children ? (
-                    <SidebarNav
-                      groups={group.children}
-                      path={path}
-                      navigate={navigate}
-                      depth={depth + 1}
-                    />
-                  ) : (
-                    group.items.map((doc) => {
-                      const active = doc.routePath === path
-                      const label =
-                        doc.isOverview && doc.title === group.title ? "Overview" : doc.title
-                      return (
-                        <a
-                          key={doc.routePath}
-                          href={doc.routePath}
-                          onClick={intercept(navigate, doc.routePath)}
-                          aria-current={active ? "page" : undefined}
-                          className={cn(
-                            "-ml-px border-l-2 py-1.5 pl-4 text-[14px] transition-colors",
-                            active
-                              ? "border-[color:var(--docs-accent)] font-medium text-[color:var(--docs-accent)]"
-                              : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
-                          )}
-                        >
-                          {label}
-                        </a>
-                      )
-                    })
-                  )}
+                  {group.items.map((doc) => {
+                    const active = doc.routePath === path
+                    const label = navigationLabel(doc, group)
+                    return (
+                      <a
+                        key={doc.routePath}
+                        href={doc.routePath}
+                        onClick={intercept(navigate, doc.routePath)}
+                        aria-current={active ? "page" : undefined}
+                        className={cn(
+                          "-ml-px border-l-2 py-1.5 pl-4 text-[14px] transition-colors",
+                          active
+                            ? "border-[color:var(--docs-accent)] font-medium text-[color:var(--docs-accent)]"
+                            : "border-transparent text-muted-foreground hover:border-border hover:text-foreground"
+                        )}
+                      >
+                        {label}
+                      </a>
+                    )
+                  })}
                 </div>
               </div>
             </div>
@@ -555,9 +663,9 @@ function SidebarNav({
 }
 
 function DocPage({ doc, navigate }: { doc: Doc; navigate: Navigate }) {
-  const index = docs.findIndex((entry) => entry.routePath === doc.routePath)
-  const prev = index > 0 ? docs[index - 1] : undefined
-  const next = index < docs.length - 1 ? docs[index + 1] : undefined
+  const index = navigationDocs.findIndex((entry) => entry.routePath === doc.routePath)
+  const prev = index > 0 ? navigationDocs[index - 1] : undefined
+  const next = index < navigationDocs.length - 1 ? navigationDocs[index + 1] : undefined
 
   const onClick = useCallback(
     (event: MouseEvent<HTMLDivElement>) => {
@@ -589,7 +697,9 @@ function DocPage({ doc, navigate }: { doc: Doc; navigate: Navigate }) {
   const hasBreadcrumb = doc.routePath !== "/get-started"
 
   return (
-    <article className="relative mx-auto w-full max-w-[720px]">
+    <article
+      className={cn("relative mx-auto w-full max-w-[720px]", !hasBreadcrumb && "docs-get-started")}
+    >
       {hasBreadcrumb ? (
         <div className="mb-5 flex items-center justify-between gap-4">
           <Breadcrumb doc={doc} navigate={navigate} />
@@ -601,7 +711,7 @@ function DocPage({ doc, navigate }: { doc: Doc; navigate: Navigate }) {
         </div>
       )}
       <DocContent html={doc.html} onClick={onClick} />
-      {prev || next ? (
+      {hasBreadcrumb && (prev || next) ? (
         <nav className="mt-16 grid gap-3 border-t border-border pt-8 sm:grid-cols-2">
           {prev ? <Pager doc={prev} dir="Previous" navigate={navigate} /> : <span />}
           {next ? <Pager doc={next} dir="Next" navigate={navigate} /> : <span />}
@@ -614,8 +724,12 @@ function DocPage({ doc, navigate }: { doc: Doc; navigate: Navigate }) {
 function Breadcrumb({ doc, navigate }: { doc: Doc; navigate: Navigate }) {
   // The standalone Get Started page is a top-level entry with no parent crumb.
   if (doc.routePath === "/get-started") return null
-  const overview = docs.find((entry) => entry.section === doc.section && entry.isOverview)
-  const label = doc.isOverview && doc.title === doc.section ? "Overview" : doc.title
+  const topic = navigationGroups.find((group) =>
+    group.items.some((item) => item.routePath === doc.routePath)
+  )
+  const title = topic?.title ?? doc.section
+  const overview = topic?.items[0]
+  const label = navigationLabel(doc, topic)
   const linkSection = overview && overview.routePath !== doc.routePath
   return (
     <nav className="flex min-w-0 items-center gap-1.5 text-sm text-muted-foreground">
@@ -625,10 +739,10 @@ function Breadcrumb({ doc, navigate }: { doc: Doc; navigate: Navigate }) {
           onClick={intercept(navigate, overview.routePath)}
           className="truncate transition-colors hover:text-foreground"
         >
-          {doc.section}
+          {title}
         </a>
       ) : (
-        <span className="truncate">{doc.section}</span>
+        <span className="truncate">{title}</span>
       )}
       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground/50" />
       <span className="truncate text-foreground">{label}</span>
@@ -770,163 +884,10 @@ function Toc({ path, headings }: { path: string; headings: Doc["headings"] }) {
   )
 }
 
-const landingGroups: ReadonlyArray<{
-  readonly title: string
-  readonly cards: ReadonlyArray<{ readonly section: string; readonly description: string }>
-}> = [
-  {
-    title: "Model your domain",
-    cards: [
-      {
-        section: "Ontology",
-        description: "Define objects, properties, links, and telemetry as one typed model.",
-      },
-      {
-        section: "Objects",
-        description: "Read, write, query, and traverse instances through a typed runtime API.",
-      },
-      {
-        section: "Actions",
-        description: "Typed, validated commands for changing state safely.",
-      },
-    ],
-  },
-  {
-    title: "Bring in live data",
-    cards: [
-      {
-        section: "Connectors",
-        description: "Connect external systems and bring their data into your project.",
-      },
-      {
-        section: "Schedules",
-        description: "Cron triggers that drive syncs, pipelines, and workflows.",
-      },
-      {
-        section: "Workflows",
-        description: "Multi-step processes, including human-in-the-loop steps.",
-      },
-    ],
-  },
-  {
-    title: "Ship the interface",
-    cards: [
-      {
-        section: "Building Apps",
-        description: "Custom React apps built on the same typed runtime.",
-      },
-      {
-        section: "Client SDK",
-        description: "A type-safe client with React Query hooks for the browser.",
-      },
-      {
-        section: "Server & API",
-        description: "An HTTP + WebSocket API with OpenAPI, generated for you.",
-      },
-    ],
-  },
-]
-
-function sectionRoute(section: string): string {
-  return docs.find((doc) => doc.section === section && doc.isOverview)?.routePath ?? "/"
-}
-
-function LandingLink({
-  href,
-  navigate,
-  children,
-}: {
-  href: string
-  navigate: Navigate
-  children: ReactNode
-}) {
+function Landing() {
   return (
-    <a
-      href={href}
-      onClick={intercept(navigate, href)}
-      className="font-medium text-foreground underline decoration-border underline-offset-2 transition-colors hover:decoration-foreground"
-    >
-      {children}
-    </a>
-  )
-}
-
-function Landing({ navigate }: { navigate: Navigate }) {
-  return (
-    <div className="mx-auto w-full max-w-[1080px]">
-      <section className="home-intro">
-        <p className="text-sm font-medium text-muted-foreground">Sixb documentation</p>
-        <h1>
-          Your data. Your app. Your AI.
-          <br />
-          One TypeScript framework.
-        </h1>
-        <p className="home-intro-copy">
-          Connect your tools, model your business, and build apps, workflows, and agents on the same
-          data.
-        </p>
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Button asChild>
-            <a href="/get-started" onClick={intercept(navigate, "/get-started")}>
-              Get started
-            </a>
-          </Button>
-          <Button asChild variant="outline">
-            <a href="/examples" onClick={intercept(navigate, "/examples")}>
-              Explore examples
-            </a>
-          </Button>
-        </div>
-      </section>
+    <div className="docs-landing">
       <HomeWalkthrough />
-
-      {landingGroups.map((group) => (
-        <section key={group.title} className="mt-12">
-          <h2 className="text-lg font-semibold tracking-tight">{group.title}</h2>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {group.cards.map((card) => {
-              const Icon = sectionIcons[card.section]
-              const route = sectionRoute(card.section)
-              return (
-                <a
-                  key={card.section}
-                  href={route}
-                  onClick={intercept(navigate, route)}
-                  className="group flex flex-col gap-2 rounded-xl border border-border p-5 transition-colors hover:bg-accent/40"
-                >
-                  <span className="flex items-center gap-2 font-medium text-foreground">
-                    {Icon ? <Icon className="size-4 text-muted-foreground" /> : null}
-                    {card.section}
-                  </span>
-                  <span className="text-sm leading-relaxed text-muted-foreground">
-                    {card.description}
-                  </span>
-                </a>
-              )
-            })}
-          </div>
-        </section>
-      ))}
-
-      <section className="mt-12 border-t border-border pt-6 text-sm text-muted-foreground">
-        Going to production?{" "}
-        <LandingLink href="/auth" navigate={navigate}>
-          Auth
-        </LandingLink>
-        ,{" "}
-        <LandingLink href="/infrastructure" navigate={navigate}>
-          Infrastructure
-        </LandingLink>
-        ,{" "}
-        <LandingLink href="/deployment" navigate={navigate}>
-          Deployment
-        </LandingLink>
-        , and{" "}
-        <LandingLink href="/testing" navigate={navigate}>
-          Testing
-        </LandingLink>
-        .
-      </section>
     </div>
   )
 }
@@ -1001,35 +962,26 @@ function DocContent({
   html: string
   onClick: (event: MouseEvent<HTMLDivElement>) => void
 }) {
-  const [selectedFile, setSelectedFile] = useState("connectors/google-ads.ts")
-  useEffect(() => {
-    const file = new URLSearchParams(window.location.search).get("file")
-    if (file) setSelectedFile(file)
-  }, [])
   const parts = html.split(
-    /(<div data-(?:project-explorer|data-flow|connector-library|code-explorer="(?:data|pipeline)")><\/div>)/g
+    /(<div data-(?:build-with-ai|project-explorer|connector-library|provider-library="(?:models|sandboxes)")><\/div>)/g
   )
   const renderCode = (code: string) => <RawHtml className="prose" onClick={onClick} html={code} />
   return parts.map((part, index) => {
     // Content and widget positions are fixed for the lifetime of a document.
     const key = `${index}-${part.slice(0, 50)}`
+    if (part === "<div data-build-with-ai></div>")
+      return (
+        <div key={key} className="mt-4">
+          <BuildWithAI />
+        </div>
+      )
     if (part === "<div data-project-explorer></div>")
       return <ProjectExplorer key={key} renderCode={renderCode} />
     if (part === "<div data-connector-library></div>") return <ConnectorLibrary key={key} />
-    if (part === "<div data-data-flow></div>") return <DataFlow key={key} />
-    if (part === '<div data-code-explorer="data"></div>')
-      return (
-        <div id="data-code-example" key={key}>
-          <ProjectExplorer
-            project="data"
-            selectedFile={selectedFile}
-            onSelect={setSelectedFile}
-            renderCode={renderCode}
-          />
-        </div>
-      )
-    if (part === '<div data-code-explorer="pipeline"></div>')
-      return <ProjectExplorer key={key} project="pipeline" renderCode={renderCode} />
+    if (part === '<div data-provider-library="models"></div>')
+      return <ProviderLibrary key={key} kind="models" />
+    if (part === '<div data-provider-library="sandboxes"></div>')
+      return <ProviderLibrary key={key} kind="sandboxes" />
     return <RawHtml key={key} className="prose" onClick={onClick} html={part} />
   })
 }

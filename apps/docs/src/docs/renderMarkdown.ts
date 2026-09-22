@@ -45,7 +45,7 @@ export function renderMarkdown(markdown: string): string {
 export async function renderHighlightedMarkdown(
   markdown: string,
   options: {
-    readonly doc: DocConfig
+    readonly doc: Pick<DocConfig, "markdownPath">
     readonly docs: readonly DocConfig[]
   }
 ): Promise<RenderedDoc> {
@@ -100,7 +100,7 @@ function stripTags(value: string): string {
 function rewriteLocalMarkdownLinks(
   html: string,
   options: {
-    readonly doc: DocConfig
+    readonly doc: Pick<DocConfig, "markdownPath">
     readonly docs: readonly DocConfig[]
   }
 ): string {
@@ -113,7 +113,7 @@ function rewriteLocalMarkdownLinks(
 function resolveRenderedRoutePath(
   rawHref: string,
   options: {
-    readonly doc: DocConfig
+    readonly doc: Pick<DocConfig, "markdownPath">
     readonly docs: readonly DocConfig[]
   }
 ): string | null {

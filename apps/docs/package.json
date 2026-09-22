@@ -21,8 +21,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "@sixb/core": "workspace:*",
-    "@sixb/client": "workspace:*",
-    "@sixb/connector-google": "workspace:*"
+    "@sixb/client": "workspace:*"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4.3.2",

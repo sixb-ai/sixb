@@ -1,240 +1,86 @@
 # Links
 
-Links describe how objects relate: a project is delivered for a customer, led by one employee, and
-staffed by many. Declare links on the source [object type](./object-types.md) with `link(...)`,
-then write and traverse them through the typed API.
+A link defines a relationship between objects, such as an invoice's customer. Use links when
+you need to navigate or query related objects; use [properties](properties.md) for values that
+belong to one object.
 
-Use links for relationships your app needs to navigate, query, or display. For values that live on
-a single object, use [properties](./properties.md) instead.
+## Define a link
 
-## Declare a link
-
-Add a `links` array to `defineObjectType`. Each entry connects this object type (the source) to a
-target object type.
+Add `link(id, target, options?)` to the source type's `links` array. This belongs in the
+`Invoice` definition from [Object types](object-types.md):
 
 ```ts
-import { defineObjectType, link, prop, stringEnum } from "@sixb/core/ontology"
+import { link } from "@sixb/core/ontology"
 import { Customer } from "./customer"
-import { Employee } from "./employee"
 
-export const Project = defineObjectType({
-  id: "Project",
-  name: "Project",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("name", "string", { required: true }),
-    prop("status", stringEnum(["draft", "active", "paused", "completed", "cancelled"])),
-  ],
-  links: [
-    link("customer", Customer, { cardinality: "one" }),
-    link("lead", Employee, { cardinality: "one" }),
-    link("members", Employee, { cardinality: "many" }),
-  ],
-})
+const links = [
+  link("customer", Customer, { cardinality: "one" }),
+]
 ```
 
-## Link forms
+Pass `links` to `defineObjectType()`. The ID names the relationship on the source type; the
+target defines which object type it can point to. Optional `name` and `description` provide
+display text.
 
-```ts
-link(id, target, options?)
-link.ref(id, targetTypeId, options?)
-link.self(id, options?)
-link.any(id, options?)
-```
+Declaring a link does not create relationships between instances. Use [object operations](../objects/overview.md#add-or-remove-relationships),
+[action edits](../actions/overview.md#edit-objects-and-relationships), or [projections](../projections/overview.md#add-relationships)
+to populate them.
 
-For links to object types you can import directly, use `link(...)`:
+## Choose cardinality
 
-```ts
-link("customer", Customer)
-link("relatedTo", [Project, Task])
-```
+Cardinality applies to each **source object**, not to how many objects can point at a target:
 
-For id references, self-links, or intentionally open links, use the explicit helpers:
-
-```ts
-link.ref("customer", "Customer")
-link.self("parent", { cardinality: "one" })
-link.any("relatedTo", { cardinality: "many" })
-```
-
-Use `link.ref(...)` when you want to reference another object type by id instead of importing it.
-Sixb's generated ontology type manifest lets typed client queries resolve those ids.
-
-Use `link.self(...)` for recursive relationships such as folders, org charts, or threaded
-comments. The target id is filled in from the object type that declares the link.
-
-Use `link.any(...)` only for wildcard relationships that can point to any object type. Prefer a
-specific target for relationships your app understands.
-
-## Link parameters
-
-| Parameter | Required | Expected |
-| --- | --- | --- |
-| `id` | Yes | A stable relationship key, unique within the source object type |
-| `target` | Depends on helper | The object type or object type id this link can point to |
-| `options` | No | Metadata and relationship behavior |
-
-`options` accepts:
-
-| Option | Type | Meaning |
-| --- | --- | --- |
-| `name` | `string` | Display name. Defaults to the link `id`. |
-| `description` | `string` | Human-readable context for the relationship. |
-| `cardinality` | `"one"` \| `"many"` | Whether each source links to one or many targets. |
-| `properties` | `Property[]` | Metadata stored on each relationship instance. |
-
-## Target forms
-
-`link(...)` accepts an object type or an array of object types. `link.ref(...)` accepts an object
-type id string or an array of ids. `link.self(...)` points back to the declaring object type.
-`link.any(...)` creates a wildcard.
-
-| Form | Example | Points to |
-| --- | --- | --- |
-| Object type | `link("customer", Customer)` | One specific type |
-| Object type id | `link.ref("customer", "Customer")` | One specific type, by id |
-| Array of types | `link("relatedTo", [Project, Task])` | Any of the listed types |
-| Array of ids | `link.ref("relatedTo", ["Project", "Task"])` | Any of the listed types |
-| Self-link | `link.self("parent")` | The declaring object type |
-| Wildcard | `link.any("anything")` | Any object type |
-| Wildcard with options | `link.any("anything", { cardinality: "many" })` | Any object type |
-
-Passing an object type extracts its `.id` at build time. Prefer the object-type form when the
-target can be imported — it keeps the target type-checked and powers typed traversal.
-
-## Cardinality
-
-`cardinality` controls how many targets each source object can link to under this link id.
-
-| Value | Meaning |
+| Cardinality | Meaning |
 | --- | --- |
-| `"one"` | Each source links to at most one target — a project has one `lead`. |
-| `"many"` | The source can link to multiple targets — a project has many `members`. |
+| `"one"` | Each invoice can have at most one customer. Many invoices can share that customer. |
+| `"many"` | Each source can link to several targets under the same relationship ID. |
+
+A `"one"` link is not required; an object can have no target. Set cardinality explicitly to make
+the intended relationship clear.
+
+Links have a direction. Declaring `Invoice.customer` does not add a separate `Customer.invoices`
+link. Use [incoming traversal](../objects/querying.md#follow-relationships) to find the invoices
+that point to a customer.
+
+## Add relationship properties
+
+A link can hold values about the relationship itself. For example, an invoice can have several
+reviewers, each with their own assignment time:
 
 ```ts
-link("lead", Employee, { cardinality: "one" })
-link("members", Employee, { cardinality: "many" })
+import { link, prop } from "@sixb/core/ontology"
+import { Customer } from "./customer"
+import { Reviewer } from "./reviewer"
+
+const links = [
+  link("customer", Customer, { cardinality: "one" }),
+  link("reviewers", Reviewer, {
+    cardinality: "many",
+    properties: [prop("assignedAt", "timestamp", { required: true })],
+  }),
+]
 ```
 
-## Link properties
+Define and export the `Reviewer` object type in `ontology/` before using this relationship.
+Declare relationship properties with `prop()`, just like object properties. Sixb validates their
+values when you write a link. A link without a property definition cannot accept extra properties.
 
-A link can carry metadata about the relationship itself — not about either object. Declare these
-with `prop(...)`, exactly like object [properties](./properties.md).
+See [Write relationship properties](../objects/overview.md#write-relationship-properties) for the
+corresponding write.
 
-```ts
-import { defineObjectType, link, prop } from "@sixb/core/ontology"
-import { Employee } from "./employee"
+## Other targets
 
-export const Project = defineObjectType({
-  id: "Project",
-  name: "Project",
-  properties: [prop("id", "string", { required: true, primary: true })],
-  links: [
-    link("members", Employee, {
-      cardinality: "many",
-      properties: [
-        prop("role", "string"),
-        prop("allocatedAt", "timestamp"),
-      ],
-    }),
-  ],
-})
-```
+Prefer an imported object type for typed relationships. Use these forms when the model needs them:
 
-Good link properties are facts about the connection: a member's `role` on the project, when they
-were `allocatedAt`, or a `confidence` score. If a link does not declare `properties`, writing a
-link with properties is rejected with an `OntologyValidationError`.
+| Form | Use for |
+| --- | --- |
+| `link.ref("customer", "Customer")` | A target by ID, including when direct imports would be circular. |
+| `link("relatedTo", [Customer, Invoice])` | A relationship that accepts either of the listed types. |
+| `link.self("parent", { cardinality: "one" })` | Another object of the declaring type. |
+| `link.any("relatedTo", { cardinality: "many" })` | An intentionally open relationship to any object type. |
 
-## Create and remove links
+`link.ref()` also accepts an array of target IDs. All named target types must be registered in
+the project. For typed queries through ID-based links, the CLI generates the required ontology
+types during development and builds.
 
-Use the link token and a target reference (`objectTypeId` + `primaryId`):
-
-```ts
-const project = sixb.objects(Project).byId("proj-001")
-const employee = { objectTypeId: "Employee", primaryId: "emp-014" } as const
-
-await project.link(Project.l.members, employee, {
-  properties: { role: "backend", allocatedAt: new Date() },
-})
-
-await project.unlink(Project.l.members, employee)
-```
-
-- TypeScript checks the target type against the link definition.
-- `link(...)` replaces all relationship properties; include required ones on every call.
-- For a `many` link, `unlink(...)` removes only the specified relationship.
-- For a `one` link, remove the current target before linking a different one. Use `listLinks(...)`
-  to find it. Linking the same target updates its properties.
-
-For relationships populated by a projection, an app edit remains authoritative: removing a
-`one` link also keeps later projected targets hidden. In an [action](../actions/overview.md),
-`resetLink(...)` restores the projected relationship. An action can unlink and link together
-in one `.edits(...)` transaction.
-
-Changes emit [`link.created`, `link.updated`, or `link.deleted`](../events/overview.md).
-
-## List links from an object
-
-`listLinks(...)` returns the relationship rows for an object, optionally filtered to one link token.
-
-```ts
-// All links from this project
-const all = await sixb.objects(Project).byId("proj-001").listLinks()
-
-// Only members links
-const members = await sixb
-  .objects(Project)
-  .byId("proj-001")
-  .listLinks(Project.l.members)
-```
-
-## Traverse links in queries
-
-`traverse(...)` follows a link inside an [object query](../objects/querying.md) and changes the
-result type to the type on the other end of the link.
-
-```ts
-// Outgoing: from a project to its members
-const members = await sixb
-  .objects(Project)
-  .query()
-  .where((project) => project.p.id.eq("proj-001"))
-  .traverse(Project.l.members)
-  .list()
-```
-
-Pass `{ direction: "incoming" }` to walk a link backwards — from the link's target type to its
-source type:
-
-```ts
-// Incoming: from a customer to the active projects that link to it
-const projects = await sixb
-  .objects(Customer)
-  .query()
-  .where((customer) => customer.p.id.eq("cust-001"))
-  .traverse(Project.l.customer, { direction: "incoming" })
-  .where((project) => project.p.status.eq("active"))
-  .list()
-```
-
-| Direction | Token comes from | Result type |
-| --- | --- | --- |
-| `"outgoing"` (default) | The source type's link | The link's target type |
-| `"incoming"` | The other type's link | The link's source type |
-
-After `traverse(...)`, the builder operates on the new result type, so `where(...)`,
-`orderBy(...)`, and `list(...)` apply to the traversed objects.
-
-## Inherited links
-
-When an object type uses `extends`, it inherits the parent's links along with its properties. A
-`Contract extends Document` gains `Document`'s `project` and `author` links without redeclaring
-them. See [object types](./object-types.md) for inheritance details.
-
-## Related
-
-- [Object types](./object-types.md) — declare the types links connect
-- [Properties](./properties.md) — values that live on a single object
-- [Querying objects](../objects/querying.md) — filters, ordering, and `traverse`
-- [CRUD](../objects/crud.md) — upsert, link, and unlink from code
-- [Events](../events/overview.md) — `link.created`, `link.updated`, and `link.deleted`
+Use a single target type when you want [typed traversal](../objects/querying.md#follow-relationships).

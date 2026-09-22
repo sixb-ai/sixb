@@ -60,7 +60,7 @@ Windows do not need this macOS setup. Unsupported native platforms fail with a d
 
 ```ts
 const result = await sixb.objects(Product).query()
-  .vector("content", queryVector, { k: 10 }).list()
+  .vector("content", "lightweight running shoes", { k: 10 }).list()
 ```
 
 Exact cosine search uses normalized vectors and applies filters and source permissions before

@@ -1,9 +1,12 @@
 # Connectors
 
-A connector gives your project a reusable client for an API, database, or external service.
-Start with the [connector library](library.md), or define your own adapter.
+A connector lets your Sixb project interact with an external API, database, or service.
+Explore the [connector library](library.md) for existing connectors, or define your own below.
 
 ## Define a connector
+
+Use an adapter from the [connector library](library.md) to define and export a connector from
+your project's `connectors/` folder.
 
 File: `connectors/billing.ts`
 
@@ -17,12 +20,14 @@ export const billing = defineConnector("billing", rest({
 }))
 ```
 
-Export it from `connectors/`. Sixb opens the connection on first use and reuses the client.
-Keep credentials here; keep row mapping in [syncs](../syncs/overview.md).
+Sixb creates the client on first use and reuses it.
 
-## Custom clients
+## Custom connectors
 
-An adapter provides `type` and `connect()`. It may also provide `disconnect(client)` to release resources.
+If your system isn't in the library, define a custom adapter. Its `connect()` function returns
+the client your code will use.
+
+File: `connectors/billing.ts`
 
 ```ts
 import { defineConnector } from "@sixb/core"
@@ -39,25 +44,35 @@ export const billing = defineConnector("billing", {
 })
 ```
 
-`createBillingClient` is your application code. It returns the methods your handlers need.
+`createBillingClient` is your own client or SDK wrapper. Optionally provide `disconnect()` to
+close the client and release resources.
 
-| `connect` context | Purpose |
-| --- | --- |
-| `projectId` | Current project identifier. |
-| `connectorId` | This connector's identifier. |
-| `signal` | Cancels work when the connector disconnects. |
+## Use a connector
 
-## Use the client
+Import your connector and pass it to a [sync](../syncs/overview.md) with `.from()`, or access its
+client directly in your backend code. This example uses the REST connector above and assumes
+`/invoices` returns an array matching your invoices dataset:
 
-A sync receives the client through `.from(billing)`. In a workflow or another backend handler,
-resolve it with `await sixb.connector(billing)`.
+```ts
+import { defineSync } from "@sixb/core"
+import { billing } from "../connectors/billing"
+import { invoices } from "../datasets/invoices"
 
-Always import the registered definition. Creating another definition with the same ID does not
-refer to the registered connector.
+export const syncInvoices = defineSync("billing-invoices")
+  .from(billing)
+  .read(async (client) => {
+    const response = await client.get("/invoices")
+    return response.json()
+  })
+  .intoDataset(invoices)
 
-## Next
+// In a backend handler with access to sixb:
+const client = await sixb.connector(billing)
+const invoice = await client.get("/invoices/123")
+```
 
-- [Library](library.md) — packaged adapters and their options.
-- [Authentication](authentication.md) — API keys, OAuth, and connecting accounts from your app.
-- [Webhooks](webhooks.md) — receive deliveries and update source datasets.
-- [Syncs](../syncs/overview.md) — read the client into a dataset.
+## Next steps
+
+- [Connector library](library.md): Explore the available adapters.
+- [OAuth](authentication.md): Let users connect their accounts.
+- [Webhooks](webhooks.md): Receive updates from external systems.

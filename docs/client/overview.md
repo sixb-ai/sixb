@@ -1,71 +1,74 @@
 # Client SDK
 
-`@sixb/client` is the type-safe SDK for talking to a Sixb server from the
-browser (or any TypeScript runtime). It is generated from the server's OpenAPI
-schema, so every route, request body, and response is typed end to end.
+`@sixb/client` connects TypeScript code to a Sixb API. It includes typed API functions, object queries, React hooks, and live subscriptions.
 
-The package ships as a set of focused subpaths. You import only the layer you
-need: the raw generated SDK, a typed object-query builder, TanStack Query
-hooks, live WebSocket event hooks, or the browser auth bootstrap.
+In a Sixb `app/`, client configuration and React Query setup are automatic. Start with [Apps](../apps/overview.md) for page-building examples.
 
-## Mental model
+## Choose an import
 
-Every subpath calls the same shared transport: a shared `client`
-instance. You configure it once —
-base URL, credentials, auth interceptors — and all SDK calls, query builders,
-hooks, and the events WebSocket inherit that configuration.
+| Import | Use for |
+| --- | --- |
+| `@sixb/client` | API functions, action helpers, and the shared client. |
+| `@sixb/client/query` | Typed object queries without React. |
+| `@sixb/client/hooks` | React queries, mutations, and live event hooks. |
+| `@sixb/client/browser` | Authentication setup for a standalone browser app. |
+| `@sixb/client/logs` | Reading and subscribing to run logs. |
+
+## Configure a client
+
+For scripts and other server-side TypeScript code, configure the API origin and an [access token](../auth/members.md#service-accounts-and-tokens):
 
 ```ts
 import { client } from "@sixb/client"
 
 client.setConfig({
-  baseUrl: "https://ops.acme.example",
-  credentials: "include",
+  baseUrl: "https://api.example.com",
+  headers: { Authorization: `Bearer ${process.env.SIXB_API_TOKEN}` },
 })
 ```
 
-In a Sixb-served app (the `app/` directory), this is done for you: the runtime
-injects config via [`/browser`](#browser-auth-bootstrap) and wraps your pages in
-a `QueryClientProvider`. You write pages with the [`/hooks`](#hooks-tanstack-query)
-layer and never touch the transport directly. In a standalone app, configure
-`client` yourself and optionally wrap your tree in `SixbProvider`.
+The shared client is used by API functions and query builders. Never expose a service token in browser code.
 
-## Subpath map
+## Standalone browser apps
 
-| Import | What it gives you |
-| --- | --- |
-| `@sixb/client` | Generated per-route SDK functions, terminal action wait helpers, the shared `client`, the `SixbEvent` types and `events.object(...)` builder, and the UI models from `/models` |
-| `@sixb/client/query` | `objects(Type).query()` — typed object-query builder over HTTP |
-| `@sixb/client/hooks` | TanStack Query hooks and `*Options` factories, `SixbProvider`, the events layer, and `useAgentRunStream` |
-| `@sixb/client/logs` | The `logs` builder — read, tail, and subscribe to run logs |
-| `@sixb/client/browser` | CSRF/auth bootstrap and `__SIXB_RUNTIME__` handoff |
-| `@sixb/client/models` | `encode`/`decodeObjectId` and UI shape mappers |
-
-> `@sixb/client/hooks` re-exports the events layer and the typed-query hooks,
-> so a React app usually only imports from `/hooks`.
-
-## Root: generated SDK
-
-The root export is the generated SDK: one function per server route, each fully
-typed against its request and response schema. This is the lowest-level,
-framework-agnostic way to call the API.
+For a browser app served outside Sixb, initialize the browser client before rendering. The API must allow the app's [public origin](../deployment/overview.md#configure-public-origins).
 
 ```ts
-import { listObjects, getObject } from "@sixb/client"
+import {
+  configureSixbBrowserClient,
+  requireSixbBrowserAuthSession,
+} from "@sixb/client/browser"
 
-const { data } = await listObjects({
-  query: { objectTypeId: "Invoice", limit: "50" },
+const config = {
+  api: { baseUrl: "https://api.example.com" },
+  auth: { audience: "app" as const, enabled: true },
+}
+const controller = configureSixbBrowserClient(config)
+await requireSixbBrowserAuthSession(config, controller)
+```
+
+This handles cookies, CSRF, session activity, and sign-in redirects. Call `controller.dispose()` when tearing down this setup. Expired sessions redirect to sign-in; failed mutations are not automatically retried.
+
+React hooks also need a TanStack `QueryClientProvider`. A Sixb-served app supplies it for you; a standalone React app supplies its own.
+
+## Call the API
+
+API functions accept `path`, `query`, and `body` options matching the endpoint. Set `throwOnError` to reject failed requests:
+
+```ts
+import { getObject } from "@sixb/client"
+
+const { data } = await getObject({
+  path: { objectTypeId: "Invoice", objectId: "inv-1" },
   throwOnError: true,
 })
 ```
 
-Every SDK function accepts the standard hey-api options (`path`, `query`,
-`body`, `throwOnError`, `responseStyle`, and a per-call `client` override). The
-shared `client` is also exported here for configuration.
+Use [typed queries](typed-queries.md) when you want ontology-derived property types. Your API's `/docs` page contains the complete endpoint schemas.
 
-For actions that should behave like a normal async command, use
-`requestActionAndWait`. It sends the enqueue request, listens for terminal action
-events, and fetches the final action-run detail as the source of truth.
+## Wait for an action
+
+`requestActionAndWait` waits for a terminal result. The lower-level `requestAction` returns when the request is queued.
 
 ```ts
 import { requestActionAndWait } from "@sixb/client"
@@ -74,217 +77,51 @@ const run = await requestActionAndWait({
   path: { actionId: "markPaid" },
   body: {
     subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-1" },
-    params: { paymentMethod: "card" },
+    params: {},
   },
   timeoutMs: 30_000,
 })
 ```
 
-Failed and cancelled terminal runs reject with `ActionRunFailedError`; timeouts
-reject with `ActionRunTimeoutError`. Keep the generated `requestAction()` when
-you only need enqueue acknowledgement.
+Failed or cancelled runs reject with `ActionRunFailedError`; a timeout rejects with `ActionRunTimeoutError` and does not cancel the run. The helper follows terminal events when available and polls the run as a fallback.
 
-### Rendering object files
+In React, use [`useActionRunMutation`](../apps/actions.md), which includes loading and error state.
 
-Use `objectFileContentUrl` for an object property's image source or download link:
+## Display files
+
+Use `objectFileContentUrl` to render an object property's file. The example assumes `invoice` came from a typed query and has a `scan` file property.
 
 ```tsx
 import { objectFileContentUrl } from "@sixb/client"
 
-const logoUrl = objectFileContentUrl({
-  objectTypeId: "Organization",
-  objectId: organization.primaryId,
-  pathSegments: ["logo"],
-  fileRef: organization.properties.logo,
-  disposition: "inline",
+const url = objectFileContentUrl({
+  objectTypeId: "Invoice",
+  objectId: invoice.primaryId,
+  pathSegments: ["scan"],
+  fileRef: invoice.properties.scan,
+  disposition: "attachment",
 })
 
-<img src={logoUrl} alt="Organization logo" />
+const download = <a href={url}>Download invoice</a>
 ```
 
-Call it with the current `FileRef` when rendering. After saving a replacement and
-refetching the object, its URL changes, so the browser loads the new image. Unchanged
-references produce the same URL. Filename, media type, and logical path changes also
-change the URL. Use `disposition: "attachment"` for download links.
+Use `inline` for images. Pass the current file reference so the URL updates when the property changes. Native links use browser sessions; bearer-token callers must fetch file content through an authenticated request.
 
-`pathSegments` starts at the property name; the helper adds `/properties` and escapes
-JSON pointer segments. It uses the shared client's base URL, or a supplied `client`
-override, and supports relative URLs for same-origin apps and SSR.
+## Read run logs
 
-The generated `v` query value is an opaque cache key, not a historical-file selector.
-The endpoint always resolves the current property and revalidates privately cached
-content. Native images and links use browser credentials; a URL cannot carry the
-client's bearer headers. Bearer-only callers should fetch content through the SDK.
-
-## /query: typed object queries
-
-`@sixb/client/query` exposes `objects(Type).query()` — the same fluent query
-builder the server runtime uses, wired to the object-query routes through the
-generated SDK. Queries are validated server-side; failures throw `SixbQueryError`
-carrying the validation `issues`.
+Read or subscribe to captured logs with the logs builder:
 
 ```ts
-import { objects } from "@sixb/client/query"
-import { Invoice } from "./ontology/invoice"
+import { logs } from "@sixb/client/logs"
 
-const result = await objects(Invoice)
-  .query()
-  .where((inv) => inv.p.status.eq("overdue"))
-  .list()
-```
-
-This is the direct, hook-free path. For caching and React integration, the
-`/hooks` layer wraps the same builder. See
-[typed queries](typed-queries.md) for the full builder reference.
-
-## /hooks: TanStack Query
-
-`@sixb/client/hooks` is the React layer. It provides two kinds of API:
-
-- `*Options` factories (e.g. `listObjectsOptions`, `objectQueryOptions`) that
-  return TanStack Query option objects for prefetching, loaders, and SSR.
-- `use*` hooks (e.g. `useObjectsQuery`, `useObjectsInfinite`,
-  `useTelemetryHistoryQuery`) for components.
-
-```tsx
-import { listObjectsOptions } from "@sixb/client/hooks"
-import { useQuery } from "@tanstack/react-query"
-
-function Invoices() {
-  const { data } = useQuery(
-    listObjectsOptions({ query: { objectTypeId: "Invoice", limit: "200" } })
-  )
-  return <ul>{data?.map((o) => <li key={o.id}>{o.name}</li>)}</ul>
-}
-```
-
-`SixbProvider` binds a specific `client` to the React tree so hooks and query
-builders execute through it; without it, they fall back to the global `client`.
-
-```tsx
-import { SixbProvider } from "@sixb/client/hooks"
-
-<SixbProvider client={client}>{children}</SixbProvider>
-```
-
-For typed-query hooks (`useObjectsQuery` and friends), see
-[querying data](../apps/querying-data.md).
-
-### Action run mutations
-
-Use `useActionRunMutation` when mutation state should represent the final action
-run, not just the enqueue request.
-
-```tsx
-import { useActionRunMutation } from "@sixb/client/hooks"
-import { Invoice } from "../ontology/invoice"
-
-const markPaid = useActionRunMutation<{ paymentMethod: "card" | "ach" }>({
-  actionId: "markPaid",
-  subject: { objectType: Invoice, primaryId: invoiceId },
-  invalidateOnCommit: true,
+const page = await logs.actions().run("run-1").tail({ limit: 50 })
+const stop = logs.actions().run("run-1").subscribe((line) => {
+  console.log(line.level, line.message)
 })
+
+// Call stop() when the subscription is no longer needed.
 ```
 
-With `invalidateOnCommit: true`, terminal runs refresh action-run caches and, when
-a commit diff exists, object detail caches plus the typed object-query cache
-group. See [running actions from apps](../apps/actions.md) for loading, error,
-high-frequency control, and manual invalidation patterns.
+Other selectors include `logs.all()`, `logs.syncs()`, `logs.pipelines()`, and `logs.workflows()`. Add `.level("warn")` for warnings and errors. Reading logs requires `can.observe("logs")`; subscriptions use browser sessions.
 
-## Events: live WebSocket
-
-The events layer carries the `SixbEvent` union types, the `isSixbEvent`
-guard, and the fluent `events.object(...)` builder — all exported from the root
-and re-exported by `/hooks`. React apps use the builder through the `/hooks`
-event hooks: `useEvents`, `useLatest`, `useLatestByObject`,
-and `useInvalidateOnEvent`.
-
-```tsx
-import { events, useEvents } from "@sixb/client/hooks"
-import { Invoice } from "../ontology/invoice"
-
-useEvents(events.object(Invoice).byId(invoiceId).updated(), (event) => {
-  console.log(event.payload.properties)
-})
-```
-
-The builder scopes and narrows event payloads by object type, topic, action run,
-and action subject. See [client events](events.md) for setup, builder methods,
-latest telemetry hooks, and cache invalidation patterns.
-
-## /browser: auth bootstrap
-
-Sixb-generated apps configure the browser client for you. Use `@sixb/client/browser` only when
-bootstrapping a standalone app:
-
-```ts
-import {
-  configureSixbBrowserClient,
-  readSixbBrowserRuntimeConfig,
-  requireSixbBrowserAuthSession,
-} from "@sixb/client/browser"
-
-const config = readSixbBrowserRuntimeConfig({ audience: "app" })
-const browserClient = configureSixbBrowserClient(config)
-
-if (config.auth.enabled) {
-  await requireSixbBrowserAuthSession(config, browserClient)
-}
-
-if (import.meta.hot) {
-  import.meta.hot.dispose(() => browserClient.dispose())
-}
-```
-
-After setup, use the generated SDK, hooks, and query client normally. Sixb handles cookies, CSRF,
-session activity, and sign-in redirects. Expired sessions return users to their current page, but
-failed requests are not replayed; users must submit failed mutations again.
-
-See [authentication](../auth/authentication.md) to configure session timeouts.
-
-## /models: ids and UI shapes
-
-`@sixb/client/models` holds object-id codecs and the UI shape mappers used by the built-in UI.
-
-| Export | Purpose |
-| --- | --- |
-| `encodeObjectId(typeId, primaryId)` | Encode a `typeId~primaryId` opaque object id |
-| `decodeObjectId(id)` | Decode it back to `{ objectTypeId, primaryId }` or `null` |
-
-```ts
-import { decodeObjectId, encodeObjectId } from "@sixb/client/models"
-
-const id = encodeObjectId("Invoice", "inv-2042")
-// "Invoice~inv-2042"
-
-const identity = decodeObjectId(id)
-// { objectTypeId: "Invoice", primaryId: "inv-2042" }
-```
-
-Object ids are encoded as `encodeURIComponent(typeId)~encodeURIComponent(primaryId)`,
-so they are safe to pass through URLs and route params.
-
-## Which subpath to use
-
-| Goal | Use |
-| --- | --- |
-| One-off API call, no React | root SDK function (`@sixb/client`) |
-| Typed object query, no React | `@sixb/client/query` |
-| React component reading data | `@sixb/client/hooks` |
-| React action button with terminal loading/error state | `useActionRunMutation` (`@sixb/client/hooks`) |
-| Live updates in React | `events.object(...)` with `useEvents` / `useLatest` (`@sixb/client/hooks`) |
-| Live run logs in an app | `logs.actions()`/`.syncs()`/… `.subscribe()` (`@sixb/client/logs`) |
-| Stream a live agent run | `useAgentRunStream` (`@sixb/client/hooks`) |
-| Bootstrap a standalone browser client | `@sixb/client/browser` |
-| Encode/decode ids or map API responses to UI shapes | `@sixb/client/models` |
-
-## Related
-
-- [Typed queries](typed-queries.md) — the object-query builder reference
-- [Client events](events.md) — live event builders and React hooks
-- [Logging](../logging/overview.md) — the `@sixb/client/logs` builder
-- [Querying data in apps](../apps/querying-data.md) — hooks in practice
-- [Running actions from apps](../apps/actions.md) — action buttons and terminal mutation state
-- [Events](../events/overview.md) — topics and event types
-- [Authentication](../auth/authentication.md) — sessions and CSRF
-- [Building apps](../apps/overview.md) — the Sixb-served app model
+For live data, see [Events & subscriptions](events.md). For error handling, see [Errors](../errors/overview.md).

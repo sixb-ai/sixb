@@ -73,6 +73,19 @@ new SmolvmSandboxFactory({ image: "/opt/sixb/agent.tar" })
 | `overlayGiB` | smolvm default (2) | Writable-layer disk size; raise to avoid "no space left". |
 | `env` | `{}` | Env merged into every run. |
 
+## Network policy
+
+The agent worker allows access to the Sixb gateway. When configuring a sandbox directly,
+`network.mode` can disable networking (`"none"`), allow specific hosts (`"restricted"`), or allow
+all outbound traffic (`"all"`).
+
+Restricted policies are enforced by hostname, not port. An allowed host is reachable on any port.
+Use a separate gateway host if other services on the same host must remain inaccessible.
+
+Registry images need network access to pull at startup. The provider adds Docker Hub hosts to
+restricted policies by default; set `registryHosts` for other registries. Local image archives
+can boot without registry access.
+
 ## Dev note: localhost
 
 A microVM can't reach a gateway on `localhost` — that's the VM's own loopback, not your host. In dev, point the API at your host's LAN IP so the sandbox can reach it:

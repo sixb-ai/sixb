@@ -78,7 +78,9 @@ await resumed.stop()
   resume. Runtime options must be supplied again. Files can still contain anything guest code wrote;
   per-command env delivery is not a mechanism for hiding secrets from the guest.
 
-See the [provider-neutral contract](../../docs/sandboxes/overview.md#optional-filesystem-persistence).
+The built-in agent and AI workflow steps use a fresh sandbox for each run. This persistence API
+is for callers managing sandbox sessions directly; snapshot retention alone does not give agents
+a persistent workspace.
 
 Migration: the former factory option `persistent` is rejected, including `false`. Remove it for
 ephemeral creation; use `create({ persistence: { name } })` for confirmed preservation and explicit
