@@ -207,11 +207,7 @@ export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly Wor
     workerTypes.push("action")
   }
 
-  if (
-    sixb.definitions.models?.embedding.list().length ||
-    sixb.definitions.models?.decision ||
-    (agentRuntimeRequired(sixb.definitions) && sixb.storage.agents)
-  ) {
+  if (agentWorkerRequired(sixb)) {
     workerTypes.push("agent")
   }
 
@@ -240,6 +236,13 @@ function resolveAgentApiBaseUrl(value: string | undefined): string {
     throw new Error(`[SixbWorker] The agent worker ${AGENT_ORIGIN_REQUIRED}.`)
   }
   return apiBaseUrl
+}
+
+/** Explicit model calls can enqueue accounting recovery without a model catalog. */
+export function agentWorkerRequired(sixb: LoadedSixbHost): boolean {
+  const { storage } = sixb
+  const canRecoverAccounting = Boolean(storage.aiUsage && storage.aiCosts && storage.aiLimits)
+  return canRecoverAccounting || (agentRuntimeRequired(sixb.definitions) && Boolean(storage.agents))
 }
 
 /** Only agent execution needs a sandbox and an API origin; accounting recovery does not. */

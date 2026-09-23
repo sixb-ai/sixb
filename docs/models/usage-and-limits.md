@@ -11,6 +11,12 @@ open **Model calls** to inspect individual calls.
 Usage and cost depend on what the provider reports and the available pricing. Missing values
 remain unknown rather than being counted as zero.
 
+Keep the [workers](../deployment/overview.md#start-services) running so accounting can recover
+from temporary storage failures. With AI accounting storage, `sixb dev` and automatic
+`sixb worker-group` selection include the `agent` worker even without a model catalog.
+If you select worker types explicitly, include `agent` for recovery. Recovery alone requires
+neither a sandbox nor an API origin.
+
 ## Set a monthly limit
 
 In **AI usage**, choose **Add limit** under **Monthly usage limits**:
@@ -35,10 +41,6 @@ cannot be saved. Calling a provider's `embed()` method directly bypasses these c
 
 Automatic projection indexing uses the project's budget. If the budget is exhausted, embedding
 generation waits while projections continue updating objects.
-
-Keep the [workers](../deployment/overview.md#start-services) running so accounting can recover
-from temporary storage failures. The CLI includes the required worker for embeddings-only projects,
-without requiring a sandbox.
 
 ## Permissions
 

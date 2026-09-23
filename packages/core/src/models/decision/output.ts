@@ -12,7 +12,11 @@ type RequiredField<S extends SchemaOrRef> = { required: true; schema: S }
 type ChoiceAnswerSchema<C extends Readonly<Record<string, DecisionContent | null>>> = {
   type: "object"
   properties: {
-    choice: RequiredField<{ type: "enum"; valueType: "string"; values: Extract<keyof C, string>[] }>
+    choice: RequiredField<{
+      type: "enum"
+      valueType: "string"
+      values: `${Extract<keyof C, string | number>}`[]
+    }>
     probabilities: RequiredField<{
       type: "object"
       properties: { [K in keyof C]: RequiredField<"double"> }
