@@ -180,3 +180,43 @@ test("embedding-only projects start accounting recovery without an API origin", 
   await worker.start()
   await worker.stop()
 })
+
+test("decision-only projects start accounting recovery without an API origin", async () => {
+  // Removal proof: require an origin unconditionally in workerFactories.agent.
+  const host = new SixbHost({
+    id: "decisions",
+    ontology: [],
+    models: {
+      decision: [
+        {
+          providerId: "test",
+          modelId: "decision",
+          definition: {
+            kind: "decision",
+            providerId: "test",
+            modelId: "decision",
+            capabilities: { questions: ["probability"] },
+          },
+          evaluate: async () => ({ output: { ok: { probability: 1 } } }),
+        },
+      ],
+    },
+    storage: new InMemoryStorage(),
+    broker: new InMemoryBroker(),
+    queues: new InMemoryQueues(),
+    blobStorage: new InMemoryBlobStorage(),
+    lakeStorage: new InMemoryLakeStorage(),
+  })
+  expect(resolveRegisteredWorkerTypes(host)).toContain("agent")
+  expect(() =>
+    assertWorkerInputs({
+      agentApiRequired: agentRuntimeRequired(host.definitions),
+      workerTypes: ["agent"],
+      options: {},
+      autoSelected: true,
+    })
+  ).not.toThrow()
+  const worker = createWorkerForType(host, "agent")
+  await worker.start()
+  await worker.stop()
+})

@@ -1,4 +1,7 @@
 import { RuntimeError } from "../runtime/errors"
+import { indexModelBindings } from "./catalog-index"
+import { createDecisionCatalog, type DecisionModelCatalog } from "./decision/catalog"
+import type { DecisionModel } from "./decision/types"
 import {
   defineLanguageModel,
   type LanguageModelDefinition,
@@ -45,92 +48,73 @@ export interface LanguageModelEntry extends LanguageModelRef {
 /** Models a project allows Sixb to use, organized by technical model kind. */
 export interface ModelCatalog {
   readonly language?: LanguageModelCatalog
+  readonly decision?: DecisionModelCatalog
   readonly embedding: EmbeddingModelCatalog
 }
 
 export interface ModelCatalogInput {
   /** Ordered; the first entry is the project default. */
   readonly language?: readonly LanguageModel[]
+  /** Ordered; the first entry is the project default decision model. */
+  readonly decision?: readonly DecisionModel[]
   readonly embedding?: readonly EmbeddingModel[]
 }
 
-/** Build the immutable project model catalog. Rejects invalid, duplicate, and empty catalogs. */
-export function createModelCatalog(
-  input: ModelCatalogInput & { readonly language: readonly LanguageModel[] }
-): ModelCatalog & { readonly language: LanguageModelCatalog }
-export function createModelCatalog(input: ModelCatalogInput): ModelCatalog
+// Only statically required inputs make their corresponding catalogs required.
+type ConfiguredModelKinds<TInput> = {
+  [Kind in keyof ModelCatalog]-?: [TInput] extends [Record<Kind, readonly unknown[]>] ? Kind : never
+}[keyof ModelCatalog]
+
+export type ModelCatalogFor<TInput extends ModelCatalogInput> = ModelCatalog &
+  Required<Pick<ModelCatalog, ConfiguredModelKinds<TInput>>>
+
+/** Build an immutable catalog while preserving each family's default and empty-list rules. */
+export function createModelCatalog<TInput extends ModelCatalogInput>(
+  input: TInput
+): ModelCatalogFor<TInput>
 export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
-  if (!input || (input.language !== undefined && !Array.isArray(input.language))) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new RuntimeError("[Sixb] 'models' must be a model catalog configuration.")
+  }
+
+  const language = createLanguageCatalog(input.language)
+  const embedding = createEmbeddingCatalog(input.embedding)
+  const decision = createDecisionCatalog(input.decision)
+
+  if (!language && !decision && embedding.list().length === 0) {
+    throw new RuntimeError("[Sixb] Configure at least one language, embedding or decision model.")
+  }
+
+  return Object.freeze({ language, embedding, decision })
+}
+
+function createLanguageCatalog(
+  models: readonly LanguageModel[] | undefined
+): LanguageModelCatalog | undefined {
+  if (models === undefined) return undefined
+  if (!Array.isArray(models)) {
     throw new RuntimeError("[Sixb] 'models.language' must be an array of Sixb language models.")
   }
 
-  const entries: LanguageModelEntry[] = []
-  const byProvider = new Map<string, Map<string, LanguageModelEntry>>()
-
-  for (const [index, model] of (input.language ?? []).entries()) {
-    assertLanguageModel(model, index)
-
-    let byModelId = byProvider.get(model.providerId)
-    if (byModelId === undefined) {
-      byModelId = new Map()
-      byProvider.set(model.providerId, byModelId)
-    }
-    if (byModelId.has(model.modelId)) {
-      throw new RuntimeError(
-        `[Sixb] Duplicate language model '${model.providerId}/${model.modelId}' in 'models'. Each provider and model id pair may be configured once.`
-      )
-    }
-
-    const entry = Object.freeze({
-      provider: model.providerId,
-      modelId: model.modelId,
-      model,
-    })
-    byModelId.set(model.modelId, entry)
-    entries.push(entry)
-  }
-
-  const [defaultEntry] = entries
-  if (input.language !== undefined && defaultEntry === undefined) {
+  const index = indexModelBindings(models, "language", assertLanguageModel)
+  const [defaultEntry] = index.list()
+  if (!defaultEntry) {
     throw new RuntimeError(
-      "[Sixb] 'models.language' needs at least one model. Configure one or omit 'models' from createSixb()."
+      "[Sixb] 'models.language' needs at least one model. Configure one or omit 'models.language'."
     )
   }
 
-  const listed = Object.freeze(entries.slice())
-  const language: LanguageModelCatalog | undefined =
-    defaultEntry === undefined
-      ? undefined
-      : Object.freeze({
-          default: defaultEntry,
-          list: () => listed,
-          getByRef: (ref: LanguageModelRef) =>
-            byProvider.get(ref.provider)?.get(ref.modelId) ?? null,
-        })
+  return Object.freeze({ ...index, default: defaultEntry })
+}
 
-  if (input.embedding !== undefined && !Array.isArray(input.embedding)) {
+function createEmbeddingCatalog(
+  models: readonly EmbeddingModel[] | undefined
+): EmbeddingModelCatalog {
+  if (models !== undefined && !Array.isArray(models)) {
     throw new RuntimeError("[Sixb] models.embedding must be an array of embedding models.")
   }
-  const embeddings = [...(input.embedding ?? [])]
-  const embeddingByRef = new Map<string, EmbeddingModelEntry>()
-  for (const model of embeddings) {
-    assertEmbeddingModel(model)
-    const key = JSON.stringify([model.providerId, model.modelId])
-    if (embeddingByRef.has(key)) throw new RuntimeError(`[Sixb] Duplicate embedding model ${key}`)
-    embeddingByRef.set(
-      key,
-      Object.freeze({ provider: model.providerId, modelId: model.modelId, model })
-    )
-  }
-  if (!language && embeddings.length === 0)
-    throw new RuntimeError("[Sixb] Configure at least one language or embedding model.")
-  const listedEmbeddings = Object.freeze([...embeddingByRef.values()])
-  const embedding: EmbeddingModelCatalog = Object.freeze({
-    list: () => listedEmbeddings,
-    getByRef: (ref: ModelRef) =>
-      embeddingByRef.get(JSON.stringify([ref.provider, ref.modelId])) ?? null,
-  })
-  return Object.freeze({ language, embedding })
+
+  return indexModelBindings(models ?? [], "embedding", assertEmbeddingModel)
 }
 
 function assertLanguageModel(model: unknown, index: number): asserts model is LanguageModel {

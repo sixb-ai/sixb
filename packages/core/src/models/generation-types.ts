@@ -1,4 +1,5 @@
 import type { InferSchemaOrRef, SchemaOrRef } from "../ontology"
+import type { DecisionModelsRuntime } from "./decision/types"
 import type { ModelFinishReason, ModelUsage } from "./events"
 import type { LanguageModel, ModelReasoning } from "./language-model"
 import type { ModelMessage } from "./messages"
@@ -47,4 +48,5 @@ export interface LanguageModelsRuntime {
 
 export interface ModelsRuntime {
   readonly language: LanguageModelsRuntime
+  readonly decision: DecisionModelsRuntime
 }

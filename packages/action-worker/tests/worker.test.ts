@@ -17,9 +17,11 @@ import {
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import {
+  type DecisionModel,
   defineLanguageModel,
   type LanguageModel,
   type LanguageModelStreamEvent,
+  question,
 } from "@sixb/core/models"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
@@ -82,6 +84,63 @@ function captureThrown(callback: () => unknown): unknown {
 }
 
 describe("ActionWorker", () => {
+  test("persists decision writeback and accounts under the action attempt", async () => {
+    // Removal proof: omit the decision facade or its accounting call; this path fails.
+    const questions = {
+      status: question.choice({
+        instructions: "Operational status?",
+        options: { ready: "Operational", blocked: "Unusable" },
+      }),
+    }
+    const model: DecisionModel = {
+      providerId: "test",
+      modelId: "decision",
+      definition: {
+        kind: "decision",
+        providerId: "test",
+        modelId: "decision",
+        capabilities: { questions: ["choice"] },
+      },
+      evaluate: async () => ({
+        output: { status: { choice: "ready", probabilities: { ready: 1, blocked: 0 } } },
+        usage: { inputTokens: 6, outputTokens: 4 },
+      }),
+    }
+    const action = defineAction("decide-status")
+      .on(Device)
+      .params({})
+      .writeback(
+        async ({ sixb }) =>
+          (await sixb.models.decision.evaluate({ model, input: "Repaired", questions })).output
+      )
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.status.choice })
+      })
+    const { host, sixb } = createSixb([action])
+    const worker = new ActionWorker(host)
+    await sixb.objects.upsert("Device", { id: "decision-device", name: "Device" })
+    await worker.start()
+    try {
+      const run = await deviceObjects(sixb).requestActionAndWait({
+        id: "decision-device",
+        actionId: action.id,
+      })
+      expect(run.status).toBe("succeeded")
+      expect(run.writeback).toMatchObject({
+        status: "succeeded",
+        result: { status: { choice: "ready" } },
+      })
+      expect(
+        await host.storage.aiUsage!.getLatestForExecution({
+          projectId: host.id,
+          executionId: run.executionId,
+        })
+      ).toMatchObject({ attempt: 1, usage: { inputTokens: 6, outputTokens: 4, totalTokens: 10 } })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("accounts for direct generation in action writeback before persisting the result", async () => {
     // Removal proof: remove models from the Action facade or its worker attempt binding.
     const model: LanguageModel = {

@@ -1138,6 +1138,22 @@ export type {
   ActionParamDescriptor,
   ActionPhaseDescriptor,
 } from "./actions/descriptor"
+export type { DecisionAnswerSchema, DecisionOutputShape } from "./models/decision/output"
+export { decisionOutput } from "./models/decision/output"
+export { question } from "./models/decision/questions"
+export type {
+  ChoiceQuestion,
+  DecisionAnswer,
+  DecisionAnswers,
+  DecisionContent,
+  DecisionEvaluateInput,
+  DecisionEvaluateResult,
+  DecisionModelsRuntime,
+  DecisionQuestion,
+  DecisionQuestions,
+  ProbabilityQuestion,
+  ScoreQuestion,
+} from "./models/decision/types"
 export type {
   ForeignKeyDescriptor,
   LinkProjectionDefinition,
