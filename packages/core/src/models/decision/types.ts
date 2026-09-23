@@ -34,7 +34,7 @@ export type DecisionQuestions = Readonly<Record<string, DecisionQuestion>>
 export type DecisionAnswer<TQuestion extends DecisionQuestion> =
   TQuestion extends ChoiceQuestion<infer TOptions>
     ? {
-        choice: Extract<keyof TOptions, string>
+        choice: `${Extract<keyof TOptions, string | number>}`
         probabilities: { -readonly [K in keyof TOptions]: number }
         confidence?: number
       }

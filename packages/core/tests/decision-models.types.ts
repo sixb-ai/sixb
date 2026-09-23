@@ -1,4 +1,4 @@
-import { decisionOutput, defineWorkflowStep, question } from "../src"
+import { decisionOutput, defineWorkflowStep, type InferStepOutput, question } from "../src"
 import type { DecisionModelResult, DecisionModelsRuntime, LanguageModel } from "../src/models"
 
 declare const models: DecisionModelsRuntime
@@ -67,3 +67,31 @@ void [
   invalidProviderProbability,
   undecodedProviderResponse,
 ]
+
+// Removal proof: restore Extract<keyof Options, string> in either result or schema types.
+// Exact equality catches never as well as widening to string.
+type Expect<T extends true> = T
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
+
+const numericQuestions = {
+  numeric: question.choice({ instructions: "Topic?", options: { 1: "Repair", 2: "Billing" } }),
+  mixed: question.choice({ instructions: "Topic?", options: { 1: "Repair", other: "Other" } }),
+  text: questions.topic,
+}
+const numericResult = await models.evaluate({ input: "Broken", questions: numericQuestions })
+type _numericChoice = Expect<Equal<typeof numericResult.output.numeric.choice, "1" | "2">>
+type _mixedChoice = Expect<Equal<typeof numericResult.output.mixed.choice, "1" | "other">>
+type _textChoice = Expect<Equal<typeof numericResult.output.text.choice, "billing" | "repair">>
+
+const numericStep = defineWorkflowStep("numeric-triage")
+  .input({ text: "string" })
+  .output(decisionOutput(numericQuestions))
+  .run(
+    async ({ input, sixb }) =>
+      (await sixb.models.decision.evaluate({ input, questions: numericQuestions })).output
+  )
+type NumericStepOutput = InferStepOutput<typeof numericStep>
+type _numericWorkflowChoice = Expect<Equal<NumericStepOutput["numeric"]["choice"], "1" | "2">>
+type _mixedWorkflowChoice = Expect<Equal<NumericStepOutput["mixed"]["choice"], "1" | "other">>
+type _textWorkflowChoice = Expect<Equal<NumericStepOutput["text"]["choice"], "billing" | "repair">>

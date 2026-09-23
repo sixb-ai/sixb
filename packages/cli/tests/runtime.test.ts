@@ -245,7 +245,7 @@ describe("startSixbRuntime", () => {
     await runtime.stop()
   })
 
-  test("skips workers when cohostWorkers is true but no definitions are registered", async () => {
+  test("co-hosts only accounting recovery when no definitions are registered", async () => {
     const sixb = new SixbHost({
       id: "cli-no-workers",
       ontology: [Zone],
@@ -258,6 +258,7 @@ describe("startSixbRuntime", () => {
 
     const runtime = await startSixbRuntime(sixb, { cohostWorkers: true })
 
+    expect(runtime.agentWorker).not.toBeNull()
     expect(runtime.rulesWorker).toBeNull()
     expect(runtime.syncWorker).toBeNull()
     expect(runtime.actionWorker).toBeNull()
@@ -290,6 +291,7 @@ describe("startSixbRuntime", () => {
 
     const runtime = await startSixbRuntime(sixb, { cohostWorkers: false })
 
+    expect(runtime.agentWorker).toBeNull()
     expect(runtime.rulesWorker).toBeNull()
     expect(runtime.syncWorker).toBeNull()
 

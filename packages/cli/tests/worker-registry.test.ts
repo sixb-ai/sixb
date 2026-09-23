@@ -220,3 +220,24 @@ test("decision-only projects start accounting recovery without an API origin", a
   await worker.start()
   await worker.stop()
 })
+
+for (const capability of ["aiUsage", "aiCosts", "aiLimits"] as const) {
+  test(`does not select recovery when storage lacks ${capability}`, () => {
+    const storage = new InMemoryStorage()
+    const host = new SixbHost({
+      id: "no-accounting",
+      ontology: [],
+      storage: {
+        ...storage,
+        [capability]: undefined,
+        ping: () => storage.ping(),
+        transaction: storage.transaction.bind(storage),
+      },
+      broker: new InMemoryBroker(),
+      queues: new InMemoryQueues(),
+      blobStorage: new InMemoryBlobStorage(),
+      lakeStorage: new InMemoryLakeStorage(),
+    })
+    expect(resolveRegisteredWorkerTypes(host)).not.toContain("agent")
+  })
+}
