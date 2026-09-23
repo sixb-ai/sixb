@@ -1,3 +1,4 @@
+import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, readEntity } from "../query"
 import type { QuickBooksPage, QuickBooksPaymentListOptions } from "../types/query"
 import type { QuickBooksPayment } from "../types/transactions"
@@ -40,11 +41,15 @@ export interface QuickBooksPaymentsResource {
   send(id: string, options: QuickBooksPaymentSendOptions): Promise<QuickBooksPayment>
   /** GET /v3/company/{realmId}/payment/{id} */
   get(id: string): Promise<QuickBooksPayment>
+  /** GET /v3/company/{realmId}/payment/{id}/pdf */
+  downloadPdf(id: string): Promise<Uint8Array<ArrayBuffer>>
   list(options?: QuickBooksPaymentListOptions): Promise<QuickBooksPage<QuickBooksPayment>>
   listAll(options?: QuickBooksPaymentListOptions): AsyncIterable<QuickBooksPayment>
 }
 
-export function createPaymentsResource(http: QuickBooksWriteHttp): QuickBooksPaymentsResource {
+export function createPaymentsResource(
+  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
+): QuickBooksPaymentsResource {
   const resource: QuickBooksPaymentsResource = {
     async create(input, options) {
       createInput(input)
@@ -76,6 +81,7 @@ export function createPaymentsResource(http: QuickBooksWriteHttp): QuickBooksPay
       return sendEntity(http, "Payment", id, options)
     },
     get: (id) => readEntity(http, "Payment", `payment/${pathId(id)}`, id),
+    downloadPdf: (id) => http.getPdf(`payment/${pathId(id)}/pdf`),
     list: (options) => listTransactions(http, "Payment", options),
     listAll: (options) => listAll(resource.list, options),
   }

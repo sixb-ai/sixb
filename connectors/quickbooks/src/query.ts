@@ -38,12 +38,12 @@ function assertEntity(
     throw new Error(`[SixbQuickBooks] Invalid ${entity} response.`)
 }
 
-function integer(value: number, name: string, min: number, max = Number.MAX_SAFE_INTEGER) {
+export function integer(value: number, name: string, min: number, max = Number.MAX_SAFE_INTEGER) {
   if (!Number.isSafeInteger(value) || value < min || value > max)
     throw new Error(`[SixbQuickBooks] ${name} must be an integer from ${min} to ${max}.`)
 }
 
-function quoted(value: string): string {
+export function quoted(value: string): string {
   nonEmpty(value, "query value")
   return `'${value.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`
 }
@@ -131,7 +131,7 @@ function dateLiteral(value: string): string {
   return quoted(value)
 }
 
-async function readQueryPage<T>(
+export async function readQueryPage<T>(
   http: QuickBooksReadHttp,
   entity: string,
   query: string,

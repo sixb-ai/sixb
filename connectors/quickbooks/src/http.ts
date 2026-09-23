@@ -31,12 +31,59 @@ export async function createQuickBooksHttp(
     onUnauthorized: invalidate ? (request) => handles.get(request)?.invalidate() : undefined,
   }).connect(context)
 
+  // Signed attachment URLs must never receive the Accounting API bearer token.
+  const downloads = await rest({
+    baseUrl: host,
+    timeoutMs: options.timeoutMs,
+    minDelayMs: options.minDelayMs,
+    retry: { maxRetries: 2, ...options.retry },
+  }).connect(context)
+
   const versioned = (path: string) =>
     `${path}${path.includes("?") ? "&" : "?"}minorversion=${options.minorVersion ?? 75}`
 
   return {
+    async download(url: string): Promise<Uint8Array<ArrayBuffer>> {
+      const target = new URL(url)
+      if (target.protocol !== "https:" || target.username || target.password)
+        throw new Error("[SixbQuickBooks] Invalid attachment download URL.")
+      const response = await downloads.get(target.href, { redirect: "error", credentials: "omit" })
+      if (!response.ok)
+        throw new QuickBooksApiError(response.status, response.headers.get("intuit_tid"), [])
+      return new Uint8Array(await response.arrayBuffer())
+    },
+    async upload(body: FormData, requestId: string): Promise<unknown> {
+      try {
+        const response = await client.post(
+          `${versioned("upload")}&requestid=${encodeURIComponent(requestId)}`,
+          body,
+          undefined,
+          { retryable: false }
+        )
+        const result = await parseResponse(response, requestId)
+        // Upload errors can be nested in a successful HTTP response.
+        if (isRecord(result) && Array.isArray(result.AttachableResponse))
+          for (const item of result.AttachableResponse) throwFault(item, response, requestId)
+        return result
+      } catch (error) {
+        if (error instanceof QuickBooksApiError) throw error
+        throw new QuickBooksWriteError(requestId, error)
+      }
+    },
     async get(path: string): Promise<unknown> {
       return parseResponse(await client.get(versioned(path)))
+    },
+    async getPdf(path: string): Promise<Uint8Array<ArrayBuffer>> {
+      const response = await client.get(versioned(path), {
+        headers: { Accept: "application/pdf" },
+      })
+      const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase()
+      if (!response.ok || contentType !== "application/pdf") {
+        // Preserve provider faults, including faults returned with HTTP 200.
+        await parseResponse(response)
+        throw new Error("[SixbQuickBooks] Expected an application/pdf response.")
+      }
+      return new Uint8Array(await response.arrayBuffer())
     },
     async post(path: string, body: unknown, requestId: string, send = false): Promise<unknown> {
       // Reject values JSON would silently turn into null before contacting QuickBooks.
@@ -77,6 +124,11 @@ async function parseResponse(response: Response, writeRequestId?: string): Promi
       writeRequestId
     )
   }
+  throwFault(body, response, writeRequestId)
+  return body
+}
+
+function throwFault(body: unknown, response: Response, writeRequestId?: string): void {
   if (!response.ok || (isRecord(body) && body.Fault !== undefined)) {
     const fault = isRecord(body) && isRecord(body.Fault) ? body.Fault : undefined
     const errors: QuickBooksFaultError[] = []
@@ -98,5 +150,4 @@ async function parseResponse(response: Response, writeRequestId?: string): Promi
       writeRequestId
     )
   }
-  return body
 }

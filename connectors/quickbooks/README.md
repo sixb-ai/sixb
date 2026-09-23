@@ -6,6 +6,7 @@ credit memos, bills, bill payments, and vendor credits are implemented as reads.
 Typed writes cover these reference and transaction resources, including invoice, credit-memo,
 and payment-receipt sending. CompanyInfo and writable Preferences settings support updates.
 Typed CDC reads and verified CloudEvents webhook handlers support incremental syncs.
+Invoice/payment PDFs, file attachments, and receivable/payable aging reports are also supported.
 
 ## Register
 
@@ -98,6 +99,97 @@ classification without including provider response bodies or credentials in thei
 
 Accounting failures throw `QuickBooksApiError` with `status`, `requestId` (`intuit_tid`),
 `faultType`, and provider `errors` (`code`, `Message`, `Detail`, `element`).
+
+## Download invoice and payment PDFs
+
+```ts
+const pdf = await qb.invoices.downloadPdf("42") // Invoice.Id
+await Bun.write("invoice.pdf", pdf)
+const receipt = await qb.payments.downloadPdf("17") // Payment.Id
+await Bun.write("receipt.pdf", receipt)
+```
+
+`downloadPdf(id)` returns `Uint8Array` bytes from `GET /invoice/{id}/pdf` or
+`GET /payment/{id}/pdf`, formatted using
+the company's custom form styles. It uses the selected company, managed authentication,
+and the same retry settings as other reads. The caller chooses where to save or serve the file.
+Provider faults throw `QuickBooksApiError`; unexpected non-PDF responses reject.
+
+## Attachments
+
+```ts
+for await (const attachment of qb.attachments.listAll({
+  entity: { type: "Bill", value: "9" },
+})) {
+  console.log(attachment.Id, attachment.FileName, attachment.Note)
+}
+const metadata = await qb.attachments.get("42")
+const bytes = await qb.attachments.download("42")
+await Bun.write("supplier-invoice.pdf", bytes)
+
+const uploaded = await qb.attachments.upload({
+  file: Bun.file("supplier-invoice.pdf"),
+  FileName: "supplier-invoice.pdf",
+  ContentType: "application/pdf",
+  Note: "Supplier invoice",
+  AttachableRef: [{ EntityRef: { type: "Bill", value: "9" } }],
+}, { requestId: "supplier-invoice-upload-42" })
+```
+
+`get`, `list`, and `listAll` return QuickBooks `Attachable` metadata, including notes and entity
+references. List options are `entity`, `startPosition`, and `maxResults`, with the same pagination
+bounds as other resources. Omit `entity` to list the company's attachments. Pagination is not a
+snapshot; concurrent changes can affect enumeration.
+
+`download` reads fresh metadata to obtain `TempDownloadUri`, then returns file bytes. Temporary
+URLs are not cached, and file requests carry no OAuth credentials. Only HTTPS URLs without
+embedded credentials are accepted; redirects reject. Note-only attachments have no downloadable
+file and reject. Keep temporary URLs private because they grant temporary access to the file.
+
+`upload` sends one Blob (including Bun files) and its metadata as multipart data to `/upload`.
+`ContentType` defaults to the Blob's media type. Omit `AttachableRef` to upload an unlinked file;
+set a reference's `IncludeOnSend` to include the attachment when QuickBooks sends the linked form.
+QuickBooks validates supported file types, sizes, and link targets. Creating standalone notes,
+editing metadata, and deleting attachments are not exposed by this resource.
+
+Uploads are never automatically replayed, including after a 401 or transient failure. Provider
+faults throw `QuickBooksApiError`, including faults inside `AttachableResponse`. An unusable
+response throws `QuickBooksWriteError` with `writeRequestId`; inspect the company's attachments
+before deciding how to retry an upload whose outcome is unknown.
+
+Protocol references: [attachment API](https://developer.intuit.com/app/developer/qbo/docs/api/accounting/all-entities/attachable),
+[Intuit's multipart upload example](https://www.postman.com/intuit-developer/intuit-developer-quickbooks-online-accounting-api/documentation/4884662-e6c576f1-f6d3-440f-b090-da9ff1ac519d).
+
+## Aging reports
+
+```ts
+const receivables = await qb.reports.agedReceivables({
+  reportDate: "2026-09-23",
+  agingMethod: "Report_Date",
+  agingPeriod: 30,
+  numPeriods: 4,
+  customerIds: ["9"],
+})
+const receivableDetail = await qb.reports.agedReceivableDetail({ reportDate: "2026-09-23" })
+const payables = await qb.reports.agedPayables({ reportDate: "2026-09-23" })
+const payableDetail = await qb.reports.agedPayableDetail({ vendorIds: ["17"] })
+```
+
+The four methods call `/reports/AgedReceivables`, `/reports/AgedReceivableDetail`,
+`/reports/AgedPayables`, and `/reports/AgedPayableDetail`. Common options are `reportDate`
+(`YYYY-MM-DD`), `agingMethod` (`Current` or `Report_Date`), `agingPeriod` (days per bucket), and
+`numPeriods` (bucket count). Receivable methods accept `customerIds`; payable methods accept
+`vendorIds`. Omitted options use QuickBooks defaults; use an explicit date and aging method when
+reproducibility matters. Unsupported options reject locally; QuickBooks validates company-specific
+availability and parameter limits.
+
+Reports preserve the provider's `Header`, `Columns`, nested `Rows`, and summaries. Amounts remain
+strings and missing values remain empty strings. Empty reports can omit rows. Interpret columns
+using their metadata instead of hardcoding positions or titles, and do not assume a stable row
+order. These are report snapshots, not paginated entity lists.
+
+See [Intuit's report modernization guidance](https://medium.com/intuitdev/upcoming-changes-to-reports-apis-5083ec9aadce)
+for response conventions and the supported aging reports.
 
 ## Write operations
 
@@ -477,8 +569,9 @@ and [Term field definitions](https://static.developer.intuit.com/sdkdocs/qbv3doc
 See [tests/README.md](tests/README.md) in the repository for deterministic integration coverage and
 opt-in sandbox commands. `bun run test:e2e` skips live tests unless `QUICKBOOKS_LIVE` selects a mode.
 
-Writes cover the operations listed above on the current resources. Reports (including aging), PDFs,
-attachments, bundle writes, and additional transaction resources are follow-ups.
+Writes cover the operations listed above on the current resources. Reports other than aging,
+other resource PDFs, attachment metadata writes/deletion, bundle writes, and additional transaction
+resources are follow-ups.
 Tax, inventory, multicurrency, and custom-field
 availability depend on the company's locale, subscription, and preferences; returned values are
 preserved without inventing defaults or deriving accounting totals.

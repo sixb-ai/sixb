@@ -5,6 +5,12 @@ Keep fixtures anonymized and representative; do not replace fault, token rotatio
 signature tests with live dependencies. The CompanyInfo fixture deliberately has entity ID `1`
 and a different realm ID, matching the provider contract discovered in the sandbox.
 
+`invoice-pdf.test.ts` and `attachments-reports.test.ts` cover binary PDF preservation, attachment
+queries and pagination, multipart uploads and nested faults, upload non-replay, credential-free
+temporary URL downloads, and the four aging report routes with nested/empty report responses.
+These use synthetic provider responses; PDFs, attachments, and aging reports have not yet been
+verified against a live sandbox. Regression-removal instructions are beside the relevant tests.
+
 `packages/server/tests/quickbooks-webhooks.test.ts` exercises the real QuickBooks adapter through
 Sixb HTTP dispatch, signature verification, selected-account lookup, lazy clients and encrypted
 credential refresh. Intuit HTTP responses are mocked. Generic OAuth authorization/selection and

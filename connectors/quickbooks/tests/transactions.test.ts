@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from "bun:test"
-import { type QuickBooksInvoiceListOptions, quickbooks } from "../src"
+import { type QuickBooksEntity, type QuickBooksInvoiceListOptions, quickbooks } from "../src"
 import {
   bill,
   billPayment,
@@ -86,7 +86,7 @@ for (const [resource, entity, path, sample] of [
         ? { QueryResponse: { [entity]: [sample], startPosition: 2, maxResults: 1 } }
         : { QueryResponse: {} }
     })
-    const results = await collect(
+    const results = await collect<QuickBooksEntity>(
       qb[resource].listAll({
         ids: ["42"],
         txnDateFrom: "2026-09-01",
