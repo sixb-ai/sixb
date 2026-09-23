@@ -1,8 +1,8 @@
 # Models
 
 Configure the AI models available to your project. Language models power conversations and
-generation. Embedding models power semantic search. [Browse providers](#providers) for
-installation and credentials.
+generation. Decision models classify inputs, score them against a rubric, and estimate probabilities.
+Embedding models power semantic search. [Browse providers](#providers) for installation and credentials.
 
 ## Language models
 
@@ -107,6 +107,110 @@ output.requiresFollowUp // boolean
 
 Sixb validates the response against the schema. Invalid or incomplete output throws an error.
 The selected model must support structured output.
+
+## Decision models
+
+Register a provider in `models.decision`. For example, install the TypeSafe provider and set
+its credentials:
+
+```bash
+bun add @sixb/typesafe
+export TYPESAFE_API_KEY="..."
+```
+
+File: `sixb.config.ts`
+
+```ts
+import { createSixb } from "@sixb/core"
+import { typesafe } from "@sixb/typesafe"
+
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    decision: [typesafe("jev-1.13.0")],
+  },
+})
+```
+
+The first decision model is the default. Decision models need neither a language model nor a sandbox.
+
+### Define questions
+
+Use `question.choice()` to select an option, `question.score()` to score against ordered levels,
+and `question.probability()` for a yes/no probability. Questions can be reused across calls:
+
+File: `lib/triage-questions.ts`
+
+```ts
+import { question } from "@sixb/core"
+
+export const triageQuestions = {
+  category: question.choice({
+    instructions: "Identify the main issue in description.",
+    options: {
+      maintenance: "Breakdowns, leaks, and repairs",
+      billing: "Invoices, payments, and refunds",
+      other: "Any other request",
+    },
+  }),
+  severity: question.score({
+    instructions: "Assess the operational impact described in description.",
+    levels: [
+      "No operational impact",
+      "Degraded operation; workaround available",
+      "Operation stopped; no workaround",
+    ],
+  }),
+  blocked: question.probability(
+    "Does description explicitly report equipment that cannot operate?"
+  ),
+}
+```
+
+### Evaluate an input
+
+Call `sixb.models.decision.evaluate()` inside an action's
+[writeback or effects handler](../actions/overview.md#call-external-systems) or a workflow step:
+
+```ts
+import { triageQuestions } from "../../lib/triage-questions"
+
+const { output } = await sixb.models.decision.evaluate({
+  input: { description: "The cooling unit has stopped." },
+  questions: triageQuestions,
+})
+
+output.category.choice // "maintenance" | "billing" | "other"
+output.category.probabilities.maintenance // number from 0 to 1
+output.severity.score // number from 0 to 2, possibly fractional
+output.blocked.probability // number from 0 to 1
+```
+
+Scores are the expected level index, starting at zero. Use multiple probability questions when
+several labels can apply to the same input. Validate thresholds on your application's data.
+Calls are recorded and respect your [usage limits](./usage-and-limits.md).
+
+For a workflow step, `decisionOutput()` derives the output schema from your questions:
+
+File: `workflows/steps/triage.ts`
+
+```ts
+import { decisionOutput, defineWorkflowStep } from "@sixb/core"
+import { triageQuestions } from "../../lib/triage-questions"
+
+export const triage = defineWorkflowStep("triage")
+  .input({ description: "string" })
+  .output(decisionOutput(triageQuestions))
+  .run(async ({ input, sixb }) => {
+    const { output } = await sixb.models.decision.evaluate({
+      input,
+      questions: triageQuestions,
+    })
+    return output
+  })
+```
+
+Add it to a [workflow](../workflows/overview.md#define-a-workflow) with `.then(triage)`.
 
 ## Embedding models
 

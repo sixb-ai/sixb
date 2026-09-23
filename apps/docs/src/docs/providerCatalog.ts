@@ -24,6 +24,13 @@ export const providerCatalog: Record<"models" | "sandboxes", readonly ProviderEn
       icon: "azure.svg",
     },
     {
+      name: "TypeSafe",
+      description: "Classify and score inputs with Jev decision models.",
+      package: "@sixb/typesafe",
+      href: "https://github.com/sixb-ai/sixb/tree/main/models/typesafe#readme",
+      icon: "typesafe.png",
+    },
+    {
       name: "Vercel AI Gateway",
       description: "Access models from multiple vendors through one gateway.",
       package: "@sixb/vercel-ai-gateway",

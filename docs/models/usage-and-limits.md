@@ -12,10 +12,9 @@ Usage and cost depend on what the provider reports and the available pricing. Mi
 remain unknown rather than being counted as zero.
 
 Keep the [workers](../deployment/overview.md#start-services) running so accounting can recover
-from temporary storage failures. With AI accounting storage, `sixb dev` and automatic
-`sixb worker-group` selection include the `agent` worker even without a model catalog.
-If you select worker types explicitly, include `agent` for recovery. Recovery alone requires
-neither a sandbox nor an API origin.
+from temporary storage failures. `sixb dev` and automatic `sixb worker-group` selection
+include the required worker. If you select worker types explicitly, include `agent`, even
+for projects that only use decision or embedding models. Accounting recovery does not require a sandbox.
 
 ## Set a monthly limit
 

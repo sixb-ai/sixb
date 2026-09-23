@@ -16,7 +16,7 @@ const models = { decision: [jev] }
 ```
 
 Use `sixb.models.decision.evaluate({ input, questions })` from an action writeback/effects
-handler or an ordinary workflow step. [Questions and complete examples](../../docs/models/decisions.md).
+handler or an ordinary workflow step. [Decision models](../../docs/models/configuration.md#decision-models).
 
 ## Configuration
 

@@ -104,4 +104,4 @@ For a single model call with context supplied by your code, use
 [model generation](./configuration.md#generate-a-response).
 
 For choices, rubric scores and probabilities in actions or ordinary workflow steps, use
-[decision models](./decisions.md). They share model usage accounting and do not require an agent.
+[decision models](./configuration.md#decision-models). They share model usage accounting and do not require an agent.
