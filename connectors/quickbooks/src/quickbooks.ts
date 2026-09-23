@@ -2,6 +2,7 @@ import type { OAuthConnectorAdapter } from "@sixb/core"
 import { createQuickBooksHttp } from "./http"
 import { createQuickBooksOAuth } from "./oauth"
 import { createAccountsResource } from "./resources/accounts"
+import { createAttachmentsResource } from "./resources/attachments"
 import { createBillPaymentsResource } from "./resources/bill-payments"
 import { createBillsResource } from "./resources/bills"
 import { createCdcResource } from "./resources/cdc"
@@ -11,6 +12,7 @@ import { createInvoicesResource } from "./resources/invoices"
 import { createItemsResource } from "./resources/items"
 import { createPaymentsResource } from "./resources/payments"
 import { createPreferencesResource } from "./resources/preferences"
+import { createReportsResource } from "./resources/reports"
 import { createTermsResource } from "./resources/terms"
 import { createVendorCreditsResource } from "./resources/vendor-credits"
 import { createVendorsResource } from "./resources/vendors"
@@ -69,6 +71,8 @@ export function quickbooks(input: QuickBooksConnectorOptions): QuickBooksConnect
           },
         },
         cdc: createCdcResource(http),
+        attachments: createAttachmentsResource(http),
+        reports: createReportsResource(http),
         preferences: createPreferencesResource(http),
         customers: createCustomersResource(http),
         vendors: createVendorsResource(http),

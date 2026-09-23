@@ -1,3 +1,4 @@
+import type { createQuickBooksHttp } from "../http"
 import { listAll, listTransactions, pathId, readEntity } from "../query"
 import type { QuickBooksInvoiceListOptions, QuickBooksPage } from "../types/query"
 import type { QuickBooksInvoice } from "../types/transactions"
@@ -30,11 +31,15 @@ export interface QuickBooksInvoicesResource {
   send(id: string, options?: QuickBooksInvoiceSendOptions): Promise<QuickBooksInvoice>
   /** GET /v3/company/{realmId}/invoice/{id} */
   get(id: string): Promise<QuickBooksInvoice>
+  /** GET /v3/company/{realmId}/invoice/{id}/pdf — PDF bytes using company form styles. */
+  downloadPdf(id: string): Promise<Uint8Array<ArrayBuffer>>
   list(options?: QuickBooksInvoiceListOptions): Promise<QuickBooksPage<QuickBooksInvoice>>
   listAll(options?: QuickBooksInvoiceListOptions): AsyncIterable<QuickBooksInvoice>
 }
 
-export function createInvoicesResource(http: QuickBooksWriteHttp): QuickBooksInvoicesResource {
+export function createInvoicesResource(
+  http: QuickBooksWriteHttp & Pick<Awaited<ReturnType<typeof createQuickBooksHttp>>, "getPdf">
+): QuickBooksInvoicesResource {
   const resource: QuickBooksInvoicesResource = {
     async create(input, options) {
       createInput(input)
@@ -75,6 +80,7 @@ export function createInvoicesResource(http: QuickBooksWriteHttp): QuickBooksInv
       return writeEntity(http, "Invoice", path, undefined, options, { id }, true)
     },
     get: (id) => readEntity(http, "Invoice", `invoice/${pathId(id)}`, id),
+    downloadPdf: (id) => http.getPdf(`invoice/${pathId(id)}/pdf`),
     list: (options) => listTransactions(http, "Invoice", options),
     listAll: (options) => listAll(resource.list, options),
   }

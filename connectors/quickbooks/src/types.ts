@@ -1,5 +1,6 @@
 import type { RestRetryPolicy } from "@sixb/connector-rest"
 import type { QuickBooksAccountsResource } from "./resources/accounts"
+import type { QuickBooksAttachmentsResource } from "./resources/attachments"
 import type { QuickBooksBillPaymentsResource } from "./resources/bill-payments"
 import type { QuickBooksBillsResource } from "./resources/bills"
 import type { QuickBooksCdcResource } from "./resources/cdc"
@@ -9,6 +10,7 @@ import type { QuickBooksInvoicesResource } from "./resources/invoices"
 import type { QuickBooksItemsResource } from "./resources/items"
 import type { QuickBooksPaymentsResource } from "./resources/payments"
 import type { QuickBooksPreferencesResource } from "./resources/preferences"
+import type { QuickBooksReportsResource } from "./resources/reports"
 import type { QuickBooksTermsResource } from "./resources/terms"
 import type { QuickBooksVendorCreditsResource } from "./resources/vendor-credits"
 import type { QuickBooksVendorsResource } from "./resources/vendors"
@@ -64,6 +66,8 @@ export interface QuickBooksCompanyInfo {
 }
 
 export interface QuickBooksClient {
+  readonly attachments: QuickBooksAttachmentsResource
+  readonly reports: QuickBooksReportsResource
   readonly cdc: QuickBooksCdcResource
   readonly invoices: QuickBooksInvoicesResource
   readonly payments: QuickBooksPaymentsResource
