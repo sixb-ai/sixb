@@ -4,8 +4,7 @@ import "../src/styles.css"
 import { Providers } from "./providers"
 
 export const siteDescription =
-  "Connect your tools, model your business, and build apps, workflows, and agents on the same " +
-  "data. One TypeScript framework."
+  "Model your domain. Put it to work. A TypeScript framework for ontology-powered apps and AI."
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://docs.sixb.ai"),
