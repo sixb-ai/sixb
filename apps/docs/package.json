@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "generate:readme": "bun ./src/docs/exportReadmeArchitecture.ts",
     "generate:docs": "bun ./src/docs/buildDocs.ts && bun ./src/docs/buildSnippets.ts",
     "clean:public": "bun ./src/docs/cleanPublic.ts",
     "copy:docs": "bun ./src/docs/writePublicDocs.ts",
