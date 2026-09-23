@@ -4,9 +4,9 @@ Logos identify the services supported by the connectors; the marks belong to the
 Assets are served locally, without third-party image requests.
 
 Google Ads reuses the multicolor SVG from `examples/marketing/app/public/logos/google-ads.svg`.
-GitHub, Meta, LinkedIn, Notion, Stripe and TikTok use [Simple Icons](https://github.com/simple-icons/simple-icons)
+GitHub, Meta, LinkedIn, Notion, QuickBooks, Stripe and TikTok use [Simple Icons](https://github.com/simple-icons/simple-icons)
 ([CC0](https://github.com/simple-icons/simple-icons/blob/develop/LICENSE.md)). LinkedIn uses release
-11.15.0; the others were retrieved from develop. Meta, LinkedIn and Stripe use their brand color.
+11.15.0; the others were retrieved from develop. Meta, LinkedIn, QuickBooks and Stripe use their brand color.
 
 The following assets were retrieved from icons linked by the services' official sites:
 
