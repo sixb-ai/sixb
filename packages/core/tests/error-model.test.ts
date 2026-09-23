@@ -218,10 +218,10 @@ describe("Sixb error model", () => {
 
   test("documents every catalog code exactly once", async () => {
     const documentation = await readFile(
-      resolve(import.meta.dir, "../../../docs/runtime/error-codes.md"),
+      resolve(import.meta.dir, "../../../docs/errors/overview.md"),
       "utf8"
     )
-    // Removal proof: scan the whole document again; the notification table is then
+    // Removal proof: scan the whole document again; the failure-record table is then
     // mistaken for error codes. Missing, duplicate, or unknown catalog codes still fail.
     const catalog = documentation.split("## Error catalog\n")[1]?.split("\n## ")[0]
     expect(catalog).toBeDefined()
