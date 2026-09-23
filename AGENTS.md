@@ -177,10 +177,9 @@ repo's `typecheck` chain reads source.
 ## Documentation
 
 - Write documentation in English.
-- Write `docs/` for developers using the framework: what they need to do and what behavior to
-  expect. Document the current state and update it when usage changes. Explain features without
-  requiring knowledge of the internal architecture. Include technical details and limitations
-  only when they affect usage or a developer's decision.
+- Public docs address developers discovering Sixb: what they need to do and what behavior to
+  expect. Explain features without requiring knowledge of the internal architecture. Include
+  technical details and limitations only when they affect usage or a developer's decision.
 - Document internals close to the code: execution flow, responsibilities, invariants, failure
   handling, and recovery. Use a focused README for mechanisms spanning multiple files; comments
   for local constraints.
