@@ -42,7 +42,7 @@ export class ModelExecutionSession {
   private requireBinding(): ModelExecutionAttempt {
     if (!this.binding) {
       throw new Error(
-        "[SixbModels] Generation requires a bound request or worker execution attempt."
+        "[SixbModels] Model calls require a bound request or worker execution attempt."
       )
     }
     return this.binding

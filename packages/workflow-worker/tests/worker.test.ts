@@ -20,9 +20,12 @@ import {
 import { createSixbError } from "@sixb/core/internal/errors"
 import { LOGS_STREAM } from "@sixb/core/internal/logging"
 import {
+  type DecisionModel,
+  decisionOutput,
   defineLanguageModel,
   type LanguageModel,
   type LanguageModelStreamEvent,
+  question,
 } from "@sixb/core/models"
 import type { ClaimedQueueJob, WorkflowQueueJob } from "@sixb/core/queues"
 import {
@@ -157,6 +160,62 @@ async function waitFor<T>(
 }
 
 describe("WorkflowWorker", () => {
+  test("ordinary workflow steps persist typed decisions under the workflow attempt", async () => {
+    // Removal proof: omit modelExecution in the worker binding; evaluation must fail.
+    const questions = { urgent: question.probability("Does this require immediate intervention?") }
+    const model: DecisionModel = {
+      providerId: "test",
+      modelId: "decision",
+      definition: {
+        kind: "decision",
+        providerId: "test",
+        modelId: "decision",
+        capabilities: { questions: ["probability"] },
+      },
+      evaluate: async () => ({
+        output: { urgent: { probability: 0.9 } },
+        usage: { inputTokens: 7, outputTokens: 3 },
+      }),
+    }
+    const step = defineWorkflowStep("assess")
+      .input({ text: "string" })
+      .output(decisionOutput(questions))
+      .run(
+        async ({ sixb, input }) =>
+          (await sixb.models.decision.evaluate({ model, input, questions })).output
+      )
+    const verify = defineWorkflowStep("verify-assessment")
+      .input(decisionOutput(questions))
+      .output({ checked: "boolean" })
+      .run(({ input }) => {
+        expect(input.urgent.probability).toBe(0.9)
+        return { checked: true }
+      })
+    const workflow = defineWorkflow("decision-workflow")
+      .input({ text: "string" })
+      .then(step)
+      .then(verify)
+    const host = createSixb({ workflows: [workflow] })
+    const worker = new WorkflowWorker(host)
+    await worker.start()
+    try {
+      await requestWorkflowRun(host, workflow, "decision-run", { text: "Equipment stopped" })
+      const run = await waitFor(
+        () => host.storage.workflowRuns!.getById({ projectId: host.id, id: "decision-run" }),
+        (value) => value?.status === "succeeded" || value?.status === "failed"
+      )
+      expect(run?.status).toBe("succeeded")
+      expect(
+        await host.storage.aiUsage!.getLatestForExecution({
+          projectId: host.id,
+          executionId: run!.executionId,
+        })
+      ).toMatchObject({ attempt: 1, usage: { inputTokens: 7, outputTokens: 3, totalTokens: 10 } })
+    } finally {
+      await worker.stop()
+    }
+  })
+
   test("ordinary workflow steps generate inline under the workflow execution", async () => {
     // Removal proof: remove modelExecution from the Workflow worker's primitive binding.
     const model: LanguageModel = {

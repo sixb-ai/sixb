@@ -1,6 +1,6 @@
 # Model execution accounting
 
-Internal execution and accounting shared by language and embedding calls. Application usage is
+Internal execution and accounting shared by language, embedding and decision calls. Application usage is
 documented in [Usage and limits](../../../../../docs/models/usage-and-limits.md).
 
 ## Execution boundary
@@ -46,3 +46,18 @@ replays accounting only, never inference; see the
 Direct provider calls bypass this session. Webhook handlers have no bound model execution attempt;
 they must dispatch an action for accounted calls. A process crash before accounting is captured
 can still leave provider billing outside the ledger.
+
+## Decision flow
+
+Decision evaluation in `../decision/runtime.ts` uses the same session and recorder. It snapshots JSON input/questions
+before yielding, resolves only a permitted catalog binding, checks primitive capabilities,
+admits one call, invokes the provider, and records usage before validating or returning answers.
+The original question snapshot defines valid answer keys, labels and score levels.
+
+Input reservation uses serialized UTF-8 bytes divided by four; output reserves the shared
+4,096-token estimate. Neither is a tokenizer or a provider-enforced ceiling. Decision providers
+must preserve their actual output-token meters even when their output price is zero.
+
+`DecisionModelResponseError` carries accounting metadata when protocol translation fails after
+a billable response. Other errors retain unknown usage. Recovery replays accounting, never
+inference. Decision-only projects use the existing recovery worker without an agent sandbox.

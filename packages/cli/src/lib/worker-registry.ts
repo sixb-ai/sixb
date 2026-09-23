@@ -209,6 +209,7 @@ export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly Wor
 
   if (
     sixb.definitions.models?.embedding.list().length ||
+    sixb.definitions.models?.decision ||
     (agentRuntimeRequired(sixb.definitions) && sixb.storage.agents)
   ) {
     workerTypes.push("agent")

@@ -1,0 +1,60 @@
+{
+  "name": "@sixb/typesafe",
+  "version": "0.1.0",
+  "description": "TypeSafe Jev decision models for Sixb",
+  "keywords": [
+    "sixb",
+    "models",
+    "typesafe",
+    "jev",
+    "decision"
+  ],
+  "homepage": "https://sixb.ai",
+  "bugs": {
+    "url": "https://github.com/sixb-ai/sixb/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sixb-ai/sixb.git",
+    "directory": "models/typesafe"
+  },
+  "author": "Sixb contributors",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun ../../scripts/build-package.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "prepack": "bun run build"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.7.0",
+    "@sixb/action-worker": "workspace:*"
+  },
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "@sixb/core": "workspace:^"
+  }
+}

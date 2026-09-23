@@ -190,6 +190,9 @@ packages that should ship and leave unrelated manifests alone. The publisher rea
 before its first write, publishes only local versions that do not exist yet, and keeps dependency
 order across that smaller plan.
 
+Prepare version bumps as part of a release, not during feature implementation or refactoring.
+Keep existing package versions unchanged until release preparation.
+
 ### Workspace dependencies
 
 Bun resolves workspace protocols when packing. Use:

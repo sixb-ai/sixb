@@ -125,7 +125,7 @@ describe("createModelCatalog", () => {
   })
 
   test("rejects two models that derive the same reference", () => {
-    // Proven by removal: drop the `byRef.has(ref)` guard in `createModelCatalog` and this fails —
+    // Proven by removal: drop the `byRef.has(key)` guard in `models/catalog-index.ts` and this fails —
     // the second entry replaces the first in the lookup while `list()` still reports both.
     expect(() =>
       createModelCatalog({ language: [gpt, testModel("gateway", "openai/gpt-5.4")] })

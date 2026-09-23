@@ -3,6 +3,7 @@ import { assertProviderAccess } from "../authorization"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type { ModelCatalog } from "./catalog"
+import { createDecisionRuntime } from "./decision/runtime"
 import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } from "./errors"
 import type { ModelCallEndEvent } from "./events"
 import { registerModelExecutionBinding } from "./execution/binding"
@@ -121,6 +122,7 @@ export function createModelsRuntime(
 
   const models: ModelsRuntime = {
     language: { generate },
+    decision: createDecisionRuntime(runtime, execution, catalog, session),
   }
   registerModelExecutionBinding(models, (input) => {
     session.bind(input)

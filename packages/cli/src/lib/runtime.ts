@@ -246,6 +246,7 @@ export async function startSixbRuntime(
 
       if (
         sixb.definitions.models?.embedding.list().length ||
+        sixb.definitions.models?.decision ||
         (agentRuntimeRequired(sixb.definitions) && sixb.storage.agents)
       ) {
         agentWorker = new AgentWorker(sixb, {

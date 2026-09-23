@@ -8,11 +8,35 @@ export type {
   LanguageModelEntry,
   LanguageModelRef,
   ModelCatalog,
+  ModelCatalogFor,
   ModelCatalogInput,
   ModelDefinitionCatalog,
   ModelRef,
 } from "./catalog"
 export { createModelCatalog } from "./catalog"
+export type { DecisionModelCatalog, DecisionModelEntry } from "./decision/catalog"
+export { DecisionModelResponseError } from "./decision/errors"
+export type { DecisionAnswerSchema, DecisionOutputShape } from "./decision/output"
+export { decisionOutput } from "./decision/output"
+export { question } from "./decision/questions"
+export type {
+  ChoiceQuestion,
+  DecisionAnswer,
+  DecisionAnswers,
+  DecisionContent,
+  DecisionEvaluateInput,
+  DecisionEvaluateResult,
+  DecisionModel,
+  DecisionModelDefinition,
+  DecisionModelRequest,
+  DecisionModelResponseMetadata,
+  DecisionModelResult,
+  DecisionModelsRuntime,
+  DecisionQuestion,
+  DecisionQuestions,
+  ProbabilityQuestion,
+  ScoreQuestion,
+} from "./decision/types"
 export type {
   LanguageModelDefinition,
   ModelDefinition,

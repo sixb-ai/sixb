@@ -186,6 +186,9 @@
     },
     {
       "path": "storage/sqlite/tsconfig.build.json"
+    },
+    {
+      "path": "models/typesafe/tsconfig.build.json"
     }
   ]
 }
