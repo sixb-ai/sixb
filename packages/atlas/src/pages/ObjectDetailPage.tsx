@@ -32,19 +32,20 @@ import { Fragment, useEffect, useMemo, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router-dom"
 import { ActionButton } from "../components/ActionButton"
 import { BackNav, LetterAvatar, LoadingState, Section } from "../components/common"
-import { FileRefAttachment } from "../components/objects/FileRefAttachment"
+import { PropertyValue } from "../components/objects/PropertyValue"
 import { TelemetryChart } from "../components/TelemetryChart"
 import { TelemetryValue } from "../components/TelemetryValue"
 import { TelemetryGrid } from "../components/telemetry"
 import { UsageBar } from "../components/UsageBar"
 import { useObjectLiveUpdates } from "../features/objects/hooks/useObjectLiveUpdates"
 import { useObjectTelemetryUpdates } from "../features/objects/hooks/useObjectTelemetryUpdates"
-import { classifyFileValue, type FileValueContext } from "../lib/files"
-import { formatValue } from "../lib/formatValue"
+import { useOntologyValueTypes } from "../features/objects/hooks/useOntologyValueTypes"
+import { classifyFileValue } from "../lib/files"
 import { humanizeIdentifier } from "../lib/labels"
 import { objectDetailPath } from "../lib/objectRoutes"
 import { getHistoryBounds, isSampleInBounds } from "../lib/telemetryHistory"
 import { formatRelativeTime } from "../lib/time"
+import { type ValueSchema, type ValueTypeSchemas, valueSchema } from "../lib/valueSchema"
 
 interface ObjectDetailPageProps {
   projectName: string
@@ -269,6 +270,8 @@ export function ObjectDetailPage({ projectName, objectLookup }: ObjectDetailPage
     }),
     enabled: !!objectId,
   })
+
+  const ontology = useOntologyValueTypes()
 
   const { data: relationships = [] } = useQuery({
     ...listRelationshipsOptions({
@@ -534,7 +537,7 @@ export function ObjectDetailPage({ projectName, objectLookup }: ObjectDetailPage
     )
   }
 
-  if (objectLoading) {
+  if (objectLoading || ontology.isLoading) {
     return (
       <div className="flex items-center justify-center py-20">
         <LoadingState label="Loading object..." />
@@ -789,6 +792,11 @@ export function ObjectDetailPage({ projectName, objectLookup }: ObjectDetailPage
             objectTypeId={object.objectTypeId}
             primaryId={object.primaryId}
             properties={properties}
+            propertySchemas={
+              ontology.objectTypes.find((objectType) => objectType.id === object.objectTypeId)
+                ?.properties
+            }
+            valueTypes={ontology.valueTypes}
           />
         </Section>
       ) : null}
@@ -884,14 +892,20 @@ function TelemetryDatePicker({
   )
 }
 
+const noPropertySchemas: readonly { readonly id: string; readonly schema?: unknown }[] = []
+
 function DetailsList({
   objectTypeId,
   primaryId,
   properties,
+  propertySchemas = noPropertySchemas,
+  valueTypes,
 }: {
   objectTypeId: string
   primaryId: string
   properties: Record<string, unknown>
+  propertySchemas?: readonly { readonly id: string; readonly schema?: unknown }[]
+  valueTypes: ValueTypeSchemas
 }) {
   const rows = useMemo(() => {
     const list: Array<{
@@ -899,19 +913,36 @@ function DetailsList({
       label: string
       kind: "value" | "primary"
       value?: unknown
+      schema: ValueSchema
     }> = []
+    // A property the object type does not declare (or a type Atlas could not
+    // load) has no schema here, and renders as an undescribed value.
+    const schemaFor = (key: string) =>
+      valueSchema(propertySchemas.find((property) => property.id === key)?.schema, valueTypes)
 
     if (typeof properties.id !== "undefined") {
-      list.push({ key: "id", label: "ID", kind: "primary", value: properties.id })
+      list.push({
+        key: "id",
+        label: "ID",
+        kind: "primary",
+        value: properties.id,
+        schema: schemaFor("id"),
+      })
     }
 
     for (const [key, value] of Object.entries(properties)) {
       if (key === "id") continue
-      list.push({ key, label: humanizeIdentifier(key), kind: "value", value })
+      list.push({
+        key,
+        label: humanizeIdentifier(key),
+        kind: "value",
+        value,
+        schema: schemaFor(key),
+      })
     }
 
     return list
-  }, [properties])
+  }, [properties, propertySchemas, valueTypes])
 
   if (rows.length === 0) return null
 
@@ -919,7 +950,7 @@ function DetailsList({
     <Card className="p-4 sm:p-5">
       <dl className="grid grid-cols-[max-content_minmax(0,1fr)] items-baseline gap-x-6 gap-y-2.5 text-sm">
         {rows.map((row) => {
-          const fileValue = classifyFileValue(row.value).kind !== "none"
+          const fileValue = classifyFileValue(row.value, row.schema).kind !== "none"
 
           return (
             <Fragment key={row.key}>
@@ -940,8 +971,9 @@ function DetailsList({
                 ) : null}
               </dt>
               <dd className={cn("min-w-0 text-foreground", fileValue && "self-start")}>
-                <FormattedValue
+                <PropertyValue
                   value={row.value}
+                  schema={row.schema}
                   fileContext={{ objectTypeId, primaryId, pathSegments: [row.key] }}
                 />
               </dd>
@@ -1046,67 +1078,4 @@ function RelatedObjectLink({
       ) : null}
     </Link>
   )
-}
-
-function FormattedValue({
-  value,
-  fileContext,
-}: {
-  value: unknown
-  fileContext?: FileValueContext
-}) {
-  if (fileContext) {
-    const file = classifyFileValue(value)
-    if (file.kind === "single") {
-      return <FileRefAttachment fileRef={file.fileRef} {...fileContext} />
-    }
-    if (file.kind === "array") {
-      return (
-        <div className="flex min-w-0 flex-col gap-2">
-          {file.fileRefs.map((fileRef, index) => (
-            <FileRefAttachment
-              key={`${fileRef.blobId}:${index}`}
-              fileRef={fileRef}
-              objectTypeId={fileContext.objectTypeId}
-              primaryId={fileContext.primaryId}
-              pathSegments={[...fileContext.pathSegments, String(index)]}
-            />
-          ))}
-        </div>
-      )
-    }
-  }
-
-  if (isIsoDateString(value)) {
-    return <span title={value}>{formatIsoDate(value)}</span>
-  }
-  const formatted = formatValue(value)
-  const isComplex = value !== null && typeof value === "object"
-  const isMonoFriendly =
-    !isComplex && (/^[a-z][a-z0-9_-]*$/i.test(formatted) || /^\d+$/.test(formatted))
-  return (
-    <span
-      className={cn(
-        "break-words",
-        isComplex && "font-mono text-xs leading-relaxed",
-        isMonoFriendly && "font-mono"
-      )}
-    >
-      {formatted}
-    </span>
-  )
-}
-
-function isIsoDateString(value: unknown): value is string {
-  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}T/.test(value)
-}
-
-function formatIsoDate(value: string): string {
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return date.toLocaleDateString(undefined, {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-  })
 }
