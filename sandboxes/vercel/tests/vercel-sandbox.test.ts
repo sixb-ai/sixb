@@ -100,6 +100,25 @@ class FakeVercelClient implements VercelSandboxClient {
 }
 
 describe("VercelSandbox", () => {
+  // Regression check: replace cwd resolution in runCommand with
+  // `options.cwd ?? this.workingDirectory`; the relative-path cases must fail.
+  for (const workingDirectory of ["/vercel/sandbox", "/workspace/custom-run"]) {
+    test.each([
+      ["omitted", undefined, workingDirectory],
+      ["dot", ".", workingDirectory],
+      ["nested", "nested", `${workingDirectory}/nested`],
+      ["normalized", "./nested/../other", `${workingDirectory}/other`],
+      ["absolute", "/tmp", "/tmp"],
+    ] as const)(`runCommand resolves %s cwd from ${workingDirectory}`, async (_label, cwd, expected) => {
+      const client = new FakeVercelClient()
+      const sandbox = new VercelSandbox({ client, workingDirectory })
+
+      await sandbox.runCommand("pwd", [], { cwd })
+
+      expect(client.commands[0].cwd).toBe(expected)
+    })
+  }
+
   test("runCommand forwards cwd/env/timeout and maps output", async () => {
     const client = new FakeVercelClient()
     const sandbox = new VercelSandbox({ client, env: { A: "factory" }, timeout: 5_000 })
