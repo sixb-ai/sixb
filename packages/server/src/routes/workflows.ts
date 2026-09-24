@@ -133,8 +133,8 @@ function serializeWorkflowNodeRun(node: WorkflowNodeRunView) {
   }
 }
 
-function serializePrincipal(principal: Principal) {
-  return { principalType: principal.type, principalId: principal.id }
+function serializePrincipal(principal: Principal): Principal {
+  return { type: principal.type, id: principal.id }
 }
 
 function serializeWorkflowAgentExecutionSummary(execution: WorkflowAgentNodeRunView) {

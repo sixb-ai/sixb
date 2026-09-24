@@ -1,4 +1,4 @@
-import type { Principal } from "../../auth"
+import { type Principal, principalsEqual } from "../../auth"
 import type { FileRef, SignedBlobUploadPart } from "../../blob-storage"
 import { FileUploadSessionError } from "./errors"
 import type {
@@ -10,7 +10,6 @@ import {
   createFileUploadId,
   isFileUploadSessionExpired,
   isTerminalFileUploadSessionExpired,
-  principalKey,
   shouldDeleteFileUploadSession,
 } from "./utils"
 
@@ -45,7 +44,7 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
     const session: FileUploadSession = {
       id: input.id ?? createFileUploadId(),
       projectId: input.projectId,
-      principalKey: principalKey(input.principal),
+      principal: input.principal,
       strategy: input.strategy,
       status: "pending",
       ...(input.fileName === undefined ? {} : { fileName: input.fileName }),
@@ -67,7 +66,7 @@ export class InMemoryFileUploadSessions implements FileUploadSessionStore {
 
   async getForPrincipal(uploadId: string, principal: Principal): Promise<FileUploadSession> {
     const session = this.sessionsById.get(uploadId)
-    if (!session || session.principalKey !== principalKey(principal)) {
+    if (!session || !principalsEqual(session.principal, principal)) {
       throw new FileUploadSessionError("not_found", "File upload session not found.")
     }
 

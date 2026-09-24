@@ -6,8 +6,8 @@ import type {
   ExpireWorkflowInterventionInput,
   ListWorkflowInterventionsInput,
   ListWorkflowInterventionsResult,
+  Principal,
   SubmitWorkflowInterventionInput,
-  WorkflowInterventionActor,
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
 } from "@sixb/core/storage"
@@ -113,7 +113,7 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
         .run(
           "submitted",
           (input.submittedAt ?? new Date()).toISOString(),
-          serializeActor(input.submittedBy),
+          serializePrincipal(input.submittedBy),
           serializeRecord(input.response),
           existing.project_id,
           existing.id
@@ -141,7 +141,7 @@ export class SqliteWorkflowInterventionStorage implements WorkflowInterventionSt
         .run(
           "cancelled",
           (input.cancelledAt ?? new Date()).toISOString(),
-          serializeActor(input.cancelledBy),
+          serializePrincipal(input.cancelledBy),
           existing.project_id,
           existing.id
         )
@@ -331,12 +331,12 @@ function parseRecord(value: string): WorkflowIOSnapshot {
   return JSON.parse(value) as WorkflowIOSnapshot
 }
 
-function serializeActor(actor: WorkflowInterventionActor | undefined): string | null {
-  return actor ? JSON.stringify(actor) : null
+function serializePrincipal(principal: Principal | undefined): string | null {
+  return principal ? JSON.stringify(principal) : null
 }
 
-function parseActor(value: string | null): WorkflowInterventionActor | undefined {
-  return value ? (JSON.parse(value) as WorkflowInterventionActor) : undefined
+function parsePrincipal(value: string | null): Principal | undefined {
+  return value ? (JSON.parse(value) as Principal) : undefined
 }
 
 function rowToWorkflowInterventionRecord(
@@ -358,10 +358,10 @@ function rowToWorkflowInterventionRecord(
     requestedAt: new Date(row.requested_at),
     expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
     submittedAt: row.submitted_at ? new Date(row.submitted_at) : undefined,
-    submittedBy: parseActor(row.submitted_by),
+    submittedBy: parsePrincipal(row.submitted_by),
     response: row.response ? parseRecord(row.response) : undefined,
     cancelledAt: row.cancelled_at ? new Date(row.cancelled_at) : undefined,
-    cancelledBy: parseActor(row.cancelled_by),
+    cancelledBy: parsePrincipal(row.cancelled_by),
     expiredAt: row.expired_at ? new Date(row.expired_at) : undefined,
   }
 }

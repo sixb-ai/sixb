@@ -7,7 +7,7 @@ import { z } from "zod"
 import { AgentMessagePartSchema, AgentRunFailureSchema } from "./agents"
 import { AiCostSummarySchema } from "./ai-accounting"
 import { AiUsageSummarySchema } from "./ai-usage"
-import { JsonValueSchema, sixbFailureSchema } from "./common"
+import { JsonValueSchema, PrincipalSchema, sixbFailureSchema } from "./common"
 
 export const WorkflowIOSnapshotSchema = z.record(JsonValueSchema)
 
@@ -74,11 +74,6 @@ export const RequestWorkflowRunBodySchema = z
   })
   .default({})
 
-export const WorkflowInterventionActorSchema = z.object({
-  principalType: z.enum(["user", "serviceAccount", "system"]),
-  principalId: z.string().min(1),
-})
-
 export const CancelWorkflowRunBodySchema = z.object({}).default({})
 
 export const SubmitWorkflowInterventionBodySchema = z.object({
@@ -133,7 +128,7 @@ export const WorkflowRunSummarySchema = z.object({
   startedAt: z.string(),
   finishedAt: z.string().optional(),
   error: WorkflowRunFailureSchema.optional(),
-  requestedBy: WorkflowInterventionActorSchema,
+  requestedBy: PrincipalSchema,
 })
 
 export const WorkflowRunDetailSchema = WorkflowRunSummarySchema.extend({
@@ -198,10 +193,10 @@ export const WorkflowInterventionSchema = z.object({
   requestedAt: z.string(),
   expiresAt: z.string().optional(),
   submittedAt: z.string().optional(),
-  submittedBy: WorkflowInterventionActorSchema.optional(),
+  submittedBy: PrincipalSchema.optional(),
   response: WorkflowIOSnapshotSchema.optional(),
   cancelledAt: z.string().optional(),
-  cancelledBy: WorkflowInterventionActorSchema.optional(),
+  cancelledBy: PrincipalSchema.optional(),
   expiredAt: z.string().optional(),
 })
 

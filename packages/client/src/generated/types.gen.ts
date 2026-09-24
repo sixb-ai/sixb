@@ -5879,8 +5879,8 @@ export type ListWorkflowsResponses = {
         truncated?: true
       }
       requestedBy: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
     } | null
   }>
@@ -6065,8 +6065,8 @@ export type GetWorkflowResponses = {
         truncated?: true
       }
       requestedBy: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
     } | null
   }
@@ -6154,8 +6154,8 @@ export type ListWorkflowInterventionsResponses = {
       expiresAt?: string
       submittedAt?: string
       submittedBy?: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
       response?: {
         [key: string]:
@@ -6170,8 +6170,8 @@ export type ListWorkflowInterventionsResponses = {
       }
       cancelledAt?: string
       cancelledBy?: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
       expiredAt?: string
     }>
@@ -6257,8 +6257,8 @@ export type GetWorkflowInterventionResponses = {
     expiresAt?: string
     submittedAt?: string
     submittedBy?: {
-      principalType: "user" | "serviceAccount" | "system"
-      principalId: string
+      type: "user" | "serviceAccount" | "system"
+      id: string
     }
     response?: {
       [key: string]:
@@ -6273,8 +6273,8 @@ export type GetWorkflowInterventionResponses = {
     }
     cancelledAt?: string
     cancelledBy?: {
-      principalType: "user" | "serviceAccount" | "system"
-      principalId: string
+      type: "user" | "serviceAccount" | "system"
+      id: string
     }
     expiredAt?: string
   }
@@ -6370,8 +6370,8 @@ export type SubmitWorkflowInterventionResponses = {
       expiresAt?: string
       submittedAt?: string
       submittedBy?: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
       response?: {
         [key: string]:
@@ -6386,8 +6386,8 @@ export type SubmitWorkflowInterventionResponses = {
       }
       cancelledAt?: string
       cancelledBy?: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
       expiredAt?: string
     }
@@ -6475,8 +6475,8 @@ export type CancelWorkflowInterventionResponses = {
       expiresAt?: string
       submittedAt?: string
       submittedBy?: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
       response?: {
         [key: string]:
@@ -6491,8 +6491,8 @@ export type CancelWorkflowInterventionResponses = {
       }
       cancelledAt?: string
       cancelledBy?: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
       expiredAt?: string
     }
@@ -6574,8 +6574,8 @@ export type ListWorkflowRunsResponses = {
         truncated?: true
       }
       requestedBy: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
     }>
     hasMore: boolean
@@ -6657,8 +6657,8 @@ export type GetWorkflowRunResponses = {
         truncated?: true
       }
       requestedBy: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
       input: {
         [key: string]:
@@ -7145,8 +7145,8 @@ export type CancelWorkflowRunResponses = {
         truncated?: true
       }
       requestedBy: {
-        principalType: "user" | "serviceAccount" | "system"
-        principalId: string
+        type: "user" | "serviceAccount" | "system"
+        id: string
       }
       input: {
         [key: string]:

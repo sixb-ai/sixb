@@ -5,8 +5,8 @@ import type {
   ExpireWorkflowInterventionInput,
   ListWorkflowInterventionsInput,
   ListWorkflowInterventionsResult,
+  Principal,
   SubmitWorkflowInterventionInput,
-  WorkflowInterventionActor,
   WorkflowInterventionRecord,
   WorkflowInterventionStorage,
 } from "@sixb/core/storage"
@@ -78,7 +78,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
         SET
           status = ${"submitted"},
           submitted_at = ${input.submittedAt ?? new Date()},
-          submitted_by = ${serializeActor(input.submittedBy)}::text::jsonb,
+          submitted_by = ${serializePrincipal(input.submittedBy)}::text::jsonb,
           response = ${serializeRecord(input.response)}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
@@ -97,7 +97,7 @@ export class PgWorkflowInterventionStorage implements WorkflowInterventionStorag
         SET
           status = ${"cancelled"},
           cancelled_at = ${input.cancelledAt ?? new Date()},
-          cancelled_by = ${serializeActor(input.cancelledBy)}::text::jsonb
+          cancelled_by = ${serializePrincipal(input.cancelledBy)}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
@@ -268,16 +268,12 @@ function parseRecord(value: WorkflowIOSnapshot | string): WorkflowIOSnapshot {
   return typeof value === "string" ? (JSON.parse(value) as WorkflowIOSnapshot) : value
 }
 
-function serializeActor(actor: WorkflowInterventionActor | undefined): string | null {
-  return actor ? JSON.stringify(actor) : null
+function serializePrincipal(principal: Principal | undefined): string | null {
+  return principal ? JSON.stringify(principal) : null
 }
 
-function parseActor(
-  value: WorkflowInterventionActor | string | null
-): WorkflowInterventionActor | undefined {
-  return typeof value === "string"
-    ? (JSON.parse(value) as WorkflowInterventionActor)
-    : (value ?? undefined)
+function parsePrincipal(value: Principal | string | null): Principal | undefined {
+  return typeof value === "string" ? (JSON.parse(value) as Principal) : (value ?? undefined)
 }
 
 function rowToWorkflowInterventionRecord(
@@ -299,10 +295,10 @@ function rowToWorkflowInterventionRecord(
     requestedAt: new Date(row.requested_at),
     expiresAt: row.expires_at ? new Date(row.expires_at) : undefined,
     submittedAt: row.submitted_at ? new Date(row.submitted_at) : undefined,
-    submittedBy: parseActor(row.submitted_by),
+    submittedBy: parsePrincipal(row.submitted_by),
     response: row.response ? parseRecord(row.response) : undefined,
     cancelledAt: row.cancelled_at ? new Date(row.cancelled_at) : undefined,
-    cancelledBy: parseActor(row.cancelled_by),
+    cancelledBy: parsePrincipal(row.cancelled_by),
     expiredAt: row.expired_at ? new Date(row.expired_at) : undefined,
   }
 }
@@ -331,9 +327,9 @@ interface WorkflowInterventionDatabaseRow {
   requested_at: Date | string
   expires_at: Date | string | null
   submitted_at: Date | string | null
-  submitted_by: WorkflowInterventionActor | string | null
+  submitted_by: Principal | string | null
   response: WorkflowIOSnapshot | string | null
   cancelled_at: Date | string | null
-  cancelled_by: WorkflowInterventionActor | string | null
+  cancelled_by: Principal | string | null
   expired_at: Date | string | null
 }

@@ -17745,16 +17745,16 @@
                           "requestedBy": {
                             "type": "object",
                             "properties": {
-                              "principalType": {
+                              "type": {
                                 "type": "string",
                                 "enum": ["user", "serviceAccount", "system"]
                               },
-                              "principalId": {
+                              "id": {
                                 "type": "string",
                                 "minLength": 1
                               }
                             },
-                            "required": ["principalType", "principalId"],
+                            "required": ["type", "id"],
                             "additionalProperties": false
                           }
                         },
@@ -18217,16 +18217,16 @@
                         "requestedBy": {
                           "type": "object",
                           "properties": {
-                            "principalType": {
+                            "type": {
                               "type": "string",
                               "enum": ["user", "serviceAccount", "system"]
                             },
-                            "principalId": {
+                            "id": {
                               "type": "string",
                               "minLength": 1
                             }
                           },
-                          "required": ["principalType", "principalId"],
+                          "required": ["type", "id"],
                           "additionalProperties": false
                         }
                       },
@@ -18481,16 +18481,16 @@
                           "submittedBy": {
                             "type": "object",
                             "properties": {
-                              "principalType": {
+                              "type": {
                                 "type": "string",
                                 "enum": ["user", "serviceAccount", "system"]
                               },
-                              "principalId": {
+                              "id": {
                                 "type": "string",
                                 "minLength": 1
                               }
                             },
-                            "required": ["principalType", "principalId"],
+                            "required": ["type", "id"],
                             "additionalProperties": false
                           },
                           "response": {
@@ -18525,16 +18525,16 @@
                           "cancelledBy": {
                             "type": "object",
                             "properties": {
-                              "principalType": {
+                              "type": {
                                 "type": "string",
                                 "enum": ["user", "serviceAccount", "system"]
                               },
-                              "principalId": {
+                              "id": {
                                 "type": "string",
                                 "minLength": 1
                               }
                             },
-                            "required": ["principalType", "principalId"],
+                            "required": ["type", "id"],
                             "additionalProperties": false
                           },
                           "expiredAt": {
@@ -18728,16 +18728,16 @@
                     "submittedBy": {
                       "type": "object",
                       "properties": {
-                        "principalType": {
+                        "type": {
                           "type": "string",
                           "enum": ["user", "serviceAccount", "system"]
                         },
-                        "principalId": {
+                        "id": {
                           "type": "string",
                           "minLength": 1
                         }
                       },
-                      "required": ["principalType", "principalId"],
+                      "required": ["type", "id"],
                       "additionalProperties": false
                     },
                     "response": {
@@ -18772,16 +18772,16 @@
                     "cancelledBy": {
                       "type": "object",
                       "properties": {
-                        "principalType": {
+                        "type": {
                           "type": "string",
                           "enum": ["user", "serviceAccount", "system"]
                         },
-                        "principalId": {
+                        "id": {
                           "type": "string",
                           "minLength": 1
                         }
                       },
-                      "required": ["principalType", "principalId"],
+                      "required": ["type", "id"],
                       "additionalProperties": false
                     },
                     "expiredAt": {
@@ -19099,16 +19099,16 @@
                         "submittedBy": {
                           "type": "object",
                           "properties": {
-                            "principalType": {
+                            "type": {
                               "type": "string",
                               "enum": ["user", "serviceAccount", "system"]
                             },
-                            "principalId": {
+                            "id": {
                               "type": "string",
                               "minLength": 1
                             }
                           },
-                          "required": ["principalType", "principalId"],
+                          "required": ["type", "id"],
                           "additionalProperties": false
                         },
                         "response": {
@@ -19143,16 +19143,16 @@
                         "cancelledBy": {
                           "type": "object",
                           "properties": {
-                            "principalType": {
+                            "type": {
                               "type": "string",
                               "enum": ["user", "serviceAccount", "system"]
                             },
-                            "principalId": {
+                            "id": {
                               "type": "string",
                               "minLength": 1
                             }
                           },
-                          "required": ["principalType", "principalId"],
+                          "required": ["type", "id"],
                           "additionalProperties": false
                         },
                         "expiredAt": {
@@ -19396,16 +19396,16 @@
                         "submittedBy": {
                           "type": "object",
                           "properties": {
-                            "principalType": {
+                            "type": {
                               "type": "string",
                               "enum": ["user", "serviceAccount", "system"]
                             },
-                            "principalId": {
+                            "id": {
                               "type": "string",
                               "minLength": 1
                             }
                           },
-                          "required": ["principalType", "principalId"],
+                          "required": ["type", "id"],
                           "additionalProperties": false
                         },
                         "response": {
@@ -19440,16 +19440,16 @@
                         "cancelledBy": {
                           "type": "object",
                           "properties": {
-                            "principalType": {
+                            "type": {
                               "type": "string",
                               "enum": ["user", "serviceAccount", "system"]
                             },
-                            "principalId": {
+                            "id": {
                               "type": "string",
                               "minLength": 1
                             }
                           },
-                          "required": ["principalType", "principalId"],
+                          "required": ["type", "id"],
                           "additionalProperties": false
                         },
                         "expiredAt": {
@@ -19713,16 +19713,16 @@
                           "requestedBy": {
                             "type": "object",
                             "properties": {
-                              "principalType": {
+                              "type": {
                                 "type": "string",
                                 "enum": ["user", "serviceAccount", "system"]
                               },
-                              "principalId": {
+                              "id": {
                                 "type": "string",
                                 "minLength": 1
                               }
                             },
-                            "required": ["principalType", "principalId"],
+                            "required": ["type", "id"],
                             "additionalProperties": false
                           }
                         },
@@ -19915,16 +19915,16 @@
                         "requestedBy": {
                           "type": "object",
                           "properties": {
-                            "principalType": {
+                            "type": {
                               "type": "string",
                               "enum": ["user", "serviceAccount", "system"]
                             },
-                            "principalId": {
+                            "id": {
                               "type": "string",
                               "minLength": 1
                             }
                           },
-                          "required": ["principalType", "principalId"],
+                          "required": ["type", "id"],
                           "additionalProperties": false
                         },
                         "input": {
@@ -21271,16 +21271,16 @@
                         "requestedBy": {
                           "type": "object",
                           "properties": {
-                            "principalType": {
+                            "type": {
                               "type": "string",
                               "enum": ["user", "serviceAccount", "system"]
                             },
-                            "principalId": {
+                            "id": {
                               "type": "string",
                               "minLength": 1
                             }
                           },
-                          "required": ["principalType", "principalId"],
+                          "required": ["type", "id"],
                           "additionalProperties": false
                         },
                         "input": {

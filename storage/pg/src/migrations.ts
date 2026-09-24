@@ -99,6 +99,9 @@ import vectorBatchingSql from "./migrations/044-vector-batching.sql" with { type
 import agentThreadSandboxStateSql from "./migrations/045-agent-thread-sandbox-state.sql" with {
   type: "text",
 }
+import workflowInterventionPrincipalsSql from "./migrations/046-workflow-intervention-principals.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -397,6 +400,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("043-vector-indexing", vectorIndexingSql),
     pgSql("044-vector-batching", vectorBatchingSql),
     pgSql("045-agent-thread-sandbox-state", agentThreadSandboxStateSql),
+    pgSql("046-workflow-intervention-principals", workflowInterventionPrincipalsSql),
   ],
 })
 

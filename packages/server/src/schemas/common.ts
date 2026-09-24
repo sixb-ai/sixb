@@ -15,6 +15,12 @@ export function codedErrorResponseSchema<
 
 export const SuccessResponseSchema = z.object({ success: z.boolean() })
 
+/** The canonical `Principal` shape from `@sixb/core`. */
+export const PrincipalSchema = z.object({
+  type: z.enum(["user", "serviceAccount", "system"]),
+  id: z.string().min(1),
+})
+
 export type JsonValue =
   | string
   | number

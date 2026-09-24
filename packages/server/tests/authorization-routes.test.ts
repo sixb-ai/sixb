@@ -1484,7 +1484,7 @@ describe("authorized event and workflow routes", () => {
       runs: [
         expect.objectContaining({
           id: requested.runId,
-          requestedBy: { principalType: "user", principalId: "usr_run" },
+          requestedBy: { type: "user", id: "usr_run" },
         }),
       ],
       hasMore: false,

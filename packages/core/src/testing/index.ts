@@ -151,3 +151,7 @@ export {
   createTestAutomaticWorkflowExecution,
   createTestWorkflowExecution,
 } from "./workflow-execution"
+export {
+  runWorkflowInterventionStorageContractSuite,
+  type WorkflowInterventionStorageContractSuiteOptions,
+} from "./workflow-intervention-storage-contract"
