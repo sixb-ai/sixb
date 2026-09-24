@@ -1,11 +1,7 @@
+import type { Principal } from "../../auth"
 import type { WorkflowIOSnapshot } from "../workflow-runs"
 
 export type WorkflowInterventionStatus = "pending" | "submitted" | "cancelled" | "expired"
-
-export interface WorkflowInterventionActor {
-  readonly principalType: "user" | "serviceAccount" | "system"
-  readonly principalId: string
-}
 
 export interface WorkflowInterventionRecord {
   readonly id: string
@@ -23,10 +19,10 @@ export interface WorkflowInterventionRecord {
   readonly requestedAt: Date
   readonly expiresAt?: Date
   readonly submittedAt?: Date
-  readonly submittedBy?: WorkflowInterventionActor
+  readonly submittedBy?: Principal
   readonly response?: WorkflowIOSnapshot
   readonly cancelledAt?: Date
-  readonly cancelledBy?: WorkflowInterventionActor
+  readonly cancelledBy?: Principal
   readonly expiredAt?: Date
 }
 
@@ -51,14 +47,14 @@ export interface SubmitWorkflowInterventionInput {
   readonly id: string
   readonly response: WorkflowIOSnapshot
   readonly submittedAt?: Date
-  readonly submittedBy?: WorkflowInterventionActor
+  readonly submittedBy?: Principal
 }
 
 export interface CancelWorkflowInterventionInput {
   readonly projectId: string
   readonly id: string
   readonly cancelledAt?: Date
-  readonly cancelledBy?: WorkflowInterventionActor
+  readonly cancelledBy?: Principal
 }
 
 export interface ExpireWorkflowInterventionInput {

@@ -26,7 +26,7 @@ export interface CreateFileUploadSessionInput {
 export interface FileUploadSession {
   readonly id: string
   readonly projectId: string
-  readonly principalKey: string
+  readonly principal: Principal
   readonly strategy: FileUploadStrategy
   readonly status: FileUploadStatus
   readonly fileName?: string

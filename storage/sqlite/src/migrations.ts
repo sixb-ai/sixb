@@ -105,6 +105,9 @@ import vectorBatchingSql from "./migrations/044-vector-batching.sql" with { type
 import agentThreadSandboxStateSql from "./migrations/045-agent-thread-sandbox-state.sql" with {
   type: "text",
 }
+import workflowInterventionPrincipalsSql from "./migrations/046-workflow-intervention-principals.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -205,6 +208,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("043-vector-indexing", vectorIndexingSql),
     sqliteSql("044-vector-batching", vectorBatchingSql),
     sqliteSql("045-agent-thread-sandbox-state", agentThreadSandboxStateSql),
+    sqliteSql("046-workflow-intervention-principals", workflowInterventionPrincipalsSql),
   ],
 })
 

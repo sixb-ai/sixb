@@ -1860,7 +1860,7 @@ describe("SixbServer HTTP contract", () => {
           id: string
           status: string
           response: Record<string, unknown>
-          submittedBy: { principalType: string; principalId: string }
+          submittedBy: { type: string; id: string }
         }
       }
       expect(validSubmitBody.jobId).toBeTruthy()
@@ -1868,7 +1868,7 @@ describe("SixbServer HTTP contract", () => {
         id: pending.id,
         status: "submitted",
         response: { approved: false, note: "Needs inspection." },
-        submittedBy: { principalType: "system", principalId: "system" },
+        submittedBy: { type: "system", id: "system" },
       })
 
       const [resumeJob] = await sixb.queues.workflows.claim({
@@ -1943,7 +1943,7 @@ describe("SixbServer HTTP contract", () => {
         intervention: {
           id: pending.id,
           status: "cancelled",
-          cancelledBy: { principalType: "system", principalId: "system" },
+          cancelledBy: { type: "system", id: "system" },
         },
       })
 

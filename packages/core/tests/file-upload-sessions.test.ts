@@ -33,6 +33,32 @@ async function expectSessionError(
 }
 
 describe("InMemoryFileUploadSessions", () => {
+  test("records the owning principal and hides the session from every other principal", async () => {
+    const sessions = new InMemoryFileUploadSessions()
+    const owner: Principal = { type: "user", id: "usr_owner" }
+    const session = await sessions.create({
+      id: "upload_owned",
+      projectId: "test-project",
+      principal: owner,
+      strategy: "server",
+      expiresAt: futureDate(60_000),
+    })
+
+    expect(session.principal).toEqual({ type: "user", id: "usr_owner" })
+    expect(await sessions.getForPrincipal(session.id, { type: "user", id: "usr_owner" })).toBe(
+      session
+    )
+    for (const other of [
+      { type: "serviceAccount", id: "usr_owner" },
+      { type: "user", id: "usr_other" },
+    ] satisfies Principal[]) {
+      await expectSessionError(sessions.getForPrincipal(session.id, other), {
+        reason: "not_found",
+        message: "File upload session not found.",
+      })
+    }
+  })
+
   test("cleans expired pending sessions and reports direct lookup as expired", async () => {
     const sessions = new InMemoryFileUploadSessions()
     const expired = await sessions.create({

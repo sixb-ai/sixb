@@ -58,6 +58,65 @@ test("adds sandbox state after the shipped params migration without changing exi
     db.close()
   }
 })
+test("rewrites legacy intervention actors to the canonical principal shape", () => {
+  // Regression proof: remove 046; the legacy { principalType, principalId } values survive.
+  const db = new Database(":memory:")
+  try {
+    const legacyIndex = sqliteStorageMigrations.steps.findIndex(
+      (step) => step.id === "046-workflow-intervention-principals"
+    )
+    for (const migration of sqliteStorageMigrations.steps.slice(0, legacyIndex)) {
+      migration.up(db)
+    }
+    const insert = db.query(`
+      INSERT INTO workflow_interventions (
+        project_id, id, workflow_id, workflow_run_id, node_run_id, node_index, node_id,
+        node_key, intervention_id, input, default_response, status, requested_at,
+        submitted_by, cancelled_by
+      ) VALUES ('project-a', ?, 'wf', 'run', 'node-run', 0, 'node', 'node', 'review', '{}', '{}',
+        ?, '2026-01-01T00:00:00.000Z', ?, ?)
+    `)
+    insert.run(
+      "submitted",
+      "submitted",
+      JSON.stringify({ principalType: "user", principalId: "usr_1" }),
+      null
+    )
+    insert.run(
+      "cancelled",
+      "cancelled",
+      null,
+      JSON.stringify({ principalType: "system", principalId: "workflow-timeout" })
+    )
+    insert.run("current", "submitted", JSON.stringify({ type: "serviceAccount", id: "sa_1" }), null)
+    insert.run("pending", "pending", null, null)
+
+    sqliteStorageMigrations.steps[legacyIndex]!.up(db)
+
+    const rows = db
+      .query("SELECT id, submitted_by, cancelled_by FROM workflow_interventions ORDER BY id")
+      .all() as Array<{ id: string; submitted_by: string | null; cancelled_by: string | null }>
+    expect(
+      rows.map((row) => ({
+        id: row.id,
+        submittedBy: row.submitted_by && JSON.parse(row.submitted_by),
+        cancelledBy: row.cancelled_by && JSON.parse(row.cancelled_by),
+      }))
+    ).toEqual([
+      {
+        id: "cancelled",
+        submittedBy: null,
+        cancelledBy: { type: "system", id: "workflow-timeout" },
+      },
+      { id: "current", submittedBy: { type: "serviceAccount", id: "sa_1" }, cancelledBy: null },
+      { id: "pending", submittedBy: null, cancelledBy: null },
+      { id: "submitted", submittedBy: { type: "user", id: "usr_1" }, cancelledBy: null },
+    ])
+  } finally {
+    db.close()
+  }
+})
+
 const LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES = ["webhook.delivery_failed"] as const
 const expectedStorageMigrationRows = [
   {
@@ -374,6 +433,13 @@ const expectedStorageMigrationRows = [
     id: "045-agent-thread-sandbox-state",
     status: "applied",
     version: 45,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "046-workflow-intervention-principals",
+    status: "applied",
+    version: 46,
   },
 ]
 

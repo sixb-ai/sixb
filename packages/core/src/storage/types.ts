@@ -300,7 +300,6 @@ export type {
   ListWorkflowInterventionsInput,
   ListWorkflowInterventionsResult,
   SubmitWorkflowInterventionInput,
-  WorkflowInterventionActor,
   WorkflowInterventionRecord,
   WorkflowInterventionStatus,
   WorkflowInterventionStorage,

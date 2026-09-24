@@ -227,6 +227,7 @@ describe("Postgres storage migrations", () => {
             "043-vector-indexing",
             "044-vector-batching",
             "045-agent-thread-sandbox-state",
+            "046-workflow-intervention-principals",
           ],
         },
       ])
@@ -545,6 +546,13 @@ describe("Postgres storage migrations", () => {
           id: "045-agent-thread-sandbox-state",
           status: "applied",
           version: 45,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "046-workflow-intervention-principals",
+          status: "applied",
+          version: 46,
         },
       ])
     })
@@ -1287,6 +1295,71 @@ describe("Postgres storage migrations", () => {
           { id: "action-run", output: { seed: "kept" } },
           { id: "data-run", output: { winner: 10 } },
           { id: "failed-run", output: null },
+        ])
+      } finally {
+        await sql.unsafe("RESET search_path")
+        await sql.unsafe(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
+      }
+    })
+  })
+
+  test("rewrites legacy intervention actors to the canonical principal shape", async () => {
+    // Regression proof: remove 046; the legacy { principalType, principalId } values survive.
+    const schemaName = `sixb_test_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+    await withSql(async (sql) => {
+      const schema = quoteIdent(schemaName)
+      const context = {
+        exec: async (sqlText: string) => {
+          await sql.unsafe(sqlText)
+        },
+      }
+      const principalsIndex = postgresStorageMigrations.steps.findIndex(
+        (step) => step.id === "046-workflow-intervention-principals"
+      )
+
+      try {
+        await sql.unsafe(`CREATE SCHEMA ${schema}`)
+        await sql.unsafe(`SET search_path TO ${schema}`)
+        for (const migration of postgresStorageMigrations.steps.slice(0, principalsIndex)) {
+          await migration.up(context)
+        }
+        await sql.unsafe(`
+          INSERT INTO workflow_interventions (
+            project_id, id, workflow_id, workflow_run_id, node_run_id, node_index, node_id,
+            node_key, intervention_id, input, default_response, status, requested_at,
+            submitted_by, cancelled_by
+          ) VALUES
+            ('project-a', 'submitted', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
+             '{}', '{}', 'submitted', '2026-01-01T00:00:00.000Z',
+             '{"principalType":"user","principalId":"usr_1"}', NULL),
+            ('project-a', 'cancelled', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
+             '{}', '{}', 'cancelled', '2026-01-01T00:00:00.000Z',
+             NULL, '{"principalType":"system","principalId":"workflow-timeout"}'),
+            ('project-a', 'current', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
+             '{}', '{}', 'submitted', '2026-01-01T00:00:00.000Z',
+             '{"type":"serviceAccount","id":"sa_1"}', NULL),
+            ('project-a', 'pending', 'wf', 'run', 'node-run', 0, 'node', 'node', 'review',
+             '{}', '{}', 'pending', '2026-01-01T00:00:00.000Z', NULL, NULL);
+        `)
+
+        await postgresStorageMigrations.steps[principalsIndex]!.up(context)
+
+        const rows = await sql.unsafe<
+          { id: string; submitted_by: unknown; cancelled_by: unknown }[]
+        >("SELECT id, submitted_by, cancelled_by FROM workflow_interventions ORDER BY id")
+        expect(rows).toEqual([
+          {
+            id: "cancelled",
+            submitted_by: null,
+            cancelled_by: { type: "system", id: "workflow-timeout" },
+          },
+          {
+            id: "current",
+            submitted_by: { type: "serviceAccount", id: "sa_1" },
+            cancelled_by: null,
+          },
+          { id: "pending", submitted_by: null, cancelled_by: null },
+          { id: "submitted", submitted_by: { type: "user", id: "usr_1" }, cancelled_by: null },
         ])
       } finally {
         await sql.unsafe("RESET search_path")
@@ -2332,6 +2405,13 @@ describe("Postgres storage migrations", () => {
           id: "045-agent-thread-sandbox-state",
           status: "applied",
           version: 45,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "046-workflow-intervention-principals",
+          status: "applied",
+          version: 46,
         },
       ])
     } finally {
