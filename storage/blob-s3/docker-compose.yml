@@ -1,24 +1,25 @@
 services:
-  minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
-    command: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
+  s3:
+    image: chrislusf/seaweedfs:4.47@sha256:ce9e796f1fe6f06968f4c04bdaf8f678dad9c8acdfef3d244133d71bfa6bf882
+    command:
+      - mini
+      - -dir=/data
+      - -master.telemetry=false
+      - -admin.ui=false
+      - -webdav=false
+      - -s3.port.iceberg=0
+      - -s3.port.lance=0
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      AWS_ACCESS_KEY_ID: sixb
+      AWS_SECRET_ACCESS_KEY: sixb-secret
+      S3_BUCKET: sixb-test
     ports:
-      - "49000:9000"
+      - "127.0.0.1:49000:8333"
     healthcheck:
-      test: ["CMD", "mc", "ready", "local"]
+      # Wait for authenticated access to the pre-created bucket, not just a listening port.
+      test:
+        - CMD-SHELL
+        - 'curl -fsS --aws-sigv4 "aws:amz:us-east-1:s3" --user "$$AWS_ACCESS_KEY_ID:$$AWS_SECRET_ACCESS_KEY" --head "http://127.0.0.1:8333/$$S3_BUCKET" > /dev/null'
       interval: 2s
       timeout: 3s
       retries: 20
-
-  minio-mc:
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
-    depends_on:
-      minio:
-        condition: service_healthy
-    entrypoint:
-      - /bin/sh
-      - -c
-      - mc alias set local http://minio:9000 minioadmin minioadmin && mc mb -p local/sixb-test

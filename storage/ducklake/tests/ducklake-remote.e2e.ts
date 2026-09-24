@@ -179,7 +179,7 @@ describe("DuckLakeStorage remote catalogs", () => {
     const storage = new DuckLakeStorage({
       catalog: postgresCatalog(),
       dataPath: `s3://${s3Bucket()}/lake/${randomId()}`,
-      secrets: [minioSecret()],
+      secrets: [s3Secret()],
     })
 
     try {
@@ -203,7 +203,7 @@ describe("DuckLakeStorage remote catalogs", () => {
     const storage = new DuckLakeStorage({
       catalog: postgresCatalog(),
       dataPath: `s3://${s3Bucket()}/lake/${randomId()}`,
-      secrets: [minioSecret()],
+      secrets: [s3Secret()],
     })
 
     try {
@@ -502,7 +502,7 @@ function postgresCatalog(): Extract<DuckLakeStorageOptions["catalog"], { type: "
   }
 }
 
-function minioSecret(): DuckDbSecretOptions {
+function s3Secret(): DuckDbSecretOptions {
   return {
     type: "s3",
     keyId: process.env.SIXB_DUCKLAKE_S3_KEY_ID ?? "sixb",

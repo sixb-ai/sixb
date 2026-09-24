@@ -2,7 +2,7 @@
 
 S3-compatible `BlobStorage` provider for Sixb `fileRef` payloads.
 
-It works with AWS S3 and S3-compatible services such as Cloudflare R2, MinIO, DigitalOcean Spaces,
+It works with AWS S3 and S3-compatible services such as Cloudflare R2, SeaweedFS, DigitalOcean Spaces,
 Backblaze B2, and Google Cloud Storage's S3-compatible API. One official AWS SDK client handles
 writes, reads, metadata, server-side copies, cleanup, and direct-upload URL signing.
 
@@ -114,14 +114,14 @@ before being promoted to the content-addressed `blobs/sha256/` prefix. A crashed
 upload can leave bytes under `uploads/`, so configure an S3 lifecycle rule to expire objects under
 that prefix (there is no in-repo sweeper).
 
-For S3-compatible providers, pass an `endpoint`:
+For S3-compatible providers, pass an `endpoint`. For example, with the local SeaweedFS test fixture:
 
 ```ts
 const blobStorage = new S3BlobStorage({
-  bucket: "sixb",
-  endpoint: "http://localhost:9000",
-  accessKeyId: "minioadmin",
-  secretAccessKey: "minioadmin",
+  bucket: "sixb-test",
+  endpoint: "http://127.0.0.1:49000",
+  accessKeyId: "sixb",
+  secretAccessKey: "sixb-secret",
   basePath: "sixb",
 })
 ```
@@ -149,3 +149,12 @@ and digest. Use `basePath: ""` to store under `blobs/sha256/<hex>` at the bucket
 name, media type, or logical path. `stat(...)` returns size and digest information for an existing
 blob, or `null` when the blob id is unknown. `open(...)` returns a `ReadableStream<Uint8Array>` for
 the stored bytes and throws for unknown blob ids.
+
+## Tests
+
+```bash
+bun --filter @sixb/blob-s3 test:e2e
+```
+
+Requires Docker. The suite starts a digest-pinned SeaweedFS instance on `127.0.0.1:49000`,
+creates its test bucket, and removes its containers and data afterward. No cloud credentials required.
