@@ -19,7 +19,7 @@
       "!**/dist",
       "!**/build",
       "!**/.sixb",
-      "!**/.claude",
+      "!.claude",
       "!**/coverage",
       "!**/*.d.ts",
       "!**/bun.lock",
