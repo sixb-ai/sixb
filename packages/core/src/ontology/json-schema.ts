@@ -101,6 +101,8 @@ function schemaJsonSchema(
           required: ["blobId", "digest", "sizeBytes"],
           additionalProperties: false,
         }
+      default:
+        schema satisfies never
     }
   }
 

@@ -44,7 +44,17 @@ export function normalizeSchemaValue(
         return normalizeTimestampValue(value, path)
       case "decimal":
         return normalizeDecimal(value, path)
+      case "string":
+      case "uuid":
+      case "integer":
+      case "double":
+      case "boolean":
+      case "fileRef":
+        assertJsonValue(value, path)
+        return cloneJsonValue(value)
       default:
+        // Untyped definitions can still carry an unknown string; it keeps the JSON pass-through.
+        schema satisfies never
         assertJsonValue(value, path)
         return cloneJsonValue(value)
     }
@@ -164,10 +174,22 @@ export function coerceSchemaValueToTyped(
   }
 
   if (typeof schema === "string") {
-    if (schema === "date" || schema === "timestamp") {
-      return value instanceof Date ? value : new Date(String(value))
+    switch (schema) {
+      case "date":
+      case "timestamp":
+        return value instanceof Date ? value : new Date(String(value))
+      case "string":
+      case "uuid":
+      case "integer":
+      case "double":
+      case "decimal":
+      case "boolean":
+      case "fileRef":
+        return value
+      default:
+        schema satisfies never
+        return value
     }
-    return value
   }
 
   if (schema.type === "valueTypeRef") {

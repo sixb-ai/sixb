@@ -1,6 +1,7 @@
 import { withFailureMessage } from "../../errors/failure-message"
-import type { ObjectLink, ObjectType, Property, Schema, ValueType } from ".."
+import type { ObjectLink, ObjectType, PrimitiveSchema, Property, Schema, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
+import { primitiveTraits } from "../primitives"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../tokens"
 import { validateSchemaValue } from "./schema"
 
@@ -168,10 +169,12 @@ export function validatePropertyDefinitions(
 ): void {
   for (const [typeId, objectType] of objectTypesById) {
     for (const property of objectType.properties) {
-      // Telemetry stores time-series samples, not blob references, even when fileRef is nested.
-      if (property.mode === "telemetry" && schemaContainsFileRef(property.schema, valueTypesById)) {
+      if (property.mode !== "telemetry") continue
+      // Telemetry stores time-series samples, not references, even when the reference is nested.
+      const primitive = findNonTelemetryPrimitive(property.schema, valueTypesById)
+      if (primitive) {
         throw new OntologyValidationError(
-          `[Sixb] Telemetry property '${property.id}' on '${typeId}' cannot use fileRef`
+          `[Sixb] Telemetry property '${property.id}' on '${typeId}' cannot use ${primitive}`
         )
       }
     }
@@ -204,42 +207,42 @@ export function validatePropertyValue(
   validateSchemaValue(property.schema, value, path, valueTypesById)
 }
 
-function schemaContainsFileRef(
+function findNonTelemetryPrimitive(
   schema: Schema,
   valueTypesById: ReadonlyMap<string, ValueType>,
   seenValueTypeIds = new Set<string>()
-): boolean {
-  if (schema === "fileRef") {
-    return true
-  }
-
+): PrimitiveSchema | undefined {
   if (typeof schema === "string") {
-    return false
+    return primitiveTraits(schema)?.telemetry === false ? schema : undefined
   }
 
   if (schema.type === "array") {
-    return schemaContainsFileRef(schema.items, valueTypesById, seenValueTypeIds)
+    return findNonTelemetryPrimitive(schema.items, valueTypesById, seenValueTypeIds)
   }
 
   if (schema.type === "map") {
-    return schemaContainsFileRef(schema.valueSchema, valueTypesById, seenValueTypeIds)
+    return findNonTelemetryPrimitive(schema.valueSchema, valueTypesById, seenValueTypeIds)
   }
 
   if (schema.type === "object") {
-    return Object.values(schema.properties).some((field) =>
-      schemaContainsFileRef(field.schema, valueTypesById, seenValueTypeIds)
-    )
+    for (const field of Object.values(schema.properties)) {
+      const primitive = findNonTelemetryPrimitive(field.schema, valueTypesById, seenValueTypeIds)
+      if (primitive) return primitive
+    }
+    return undefined
   }
 
   if (schema.type === "valueTypeRef") {
     if (seenValueTypeIds.has(schema.valueTypeId)) {
-      return false
+      return undefined
     }
 
     seenValueTypeIds.add(schema.valueTypeId)
     const resolved = schema._resolved ?? valueTypesById.get(schema.valueTypeId)?.schema
-    return resolved ? schemaContainsFileRef(resolved, valueTypesById, seenValueTypeIds) : false
+    return resolved
+      ? findNonTelemetryPrimitive(resolved, valueTypesById, seenValueTypeIds)
+      : undefined
   }
 
-  return false
+  return undefined
 }

@@ -1192,9 +1192,25 @@ describe("SixbServer HTTP contract", () => {
       expect(objectTypeResponse.status).toBe(200)
       const objectType = (await objectTypeResponse.json()) as {
         id: string
+        properties: Array<{ id: string; capabilities: unknown }>
         actions: Array<{ id: string; params: Array<{ id: string; nullable?: boolean }> }>
       }
       expect(objectType.id).toBe("device")
+      expect(
+        Object.fromEntries(
+          objectType.properties.map((property) => [property.id, property.capabilities])
+        )
+      ).toEqual({
+        id: { operators: ["eq", "in"], sortable: false, facet: false, text: false },
+        label: {
+          operators: ["eq", "neq", "lt", "lte", "gt", "gte", "in", "contains", "exists"],
+          sortable: false,
+          facet: true,
+          text: false,
+        },
+        rpm: { operators: [], sortable: false, facet: false, text: false },
+        online: { operators: [], sortable: false, facet: false, text: false },
+      })
       expect(objectType.actions[0]).toMatchObject({
         id: "setSpeed",
         params: [{ id: "speed", nullable: true }],

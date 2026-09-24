@@ -25,6 +25,21 @@ export const PropertyDefinitionSchema = z.object({
     .optional(),
 })
 
+export const PropertyQueryCapabilitiesSchema = z
+  .object({
+    operators: z.array(z.enum(["eq", "neq", "lt", "lte", "gt", "gte", "in", "exists", "contains"])),
+    sortable: z.boolean(),
+    facet: z.boolean(),
+    text: z.boolean(),
+  })
+  .describe(
+    "What object queries accept for this property, resolved from its schema and query metadata."
+  )
+
+export const ObjectPropertyDefinitionSchema = PropertyDefinitionSchema.extend({
+  capabilities: PropertyQueryCapabilitiesSchema,
+})
+
 export const LinkDefinitionSchema = z.object({
   id: z.string(),
   name: z.string(),
@@ -57,7 +72,7 @@ export const ObjectTypeSchema = z.object({
   description: z.string().optional(),
   extends: z.string().optional(),
   implements: z.array(z.string()).optional(),
-  properties: z.array(PropertyDefinitionSchema),
+  properties: z.array(ObjectPropertyDefinitionSchema),
   search: z
     .object({
       title: z.string().optional(),

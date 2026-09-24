@@ -1,5 +1,5 @@
 import type { DecimalValue } from "../ontology/decimal"
-import type { Property, Schema } from "../ontology/types"
+import type { PrimitiveSchema, Property, Schema } from "../ontology/types"
 
 export type Predicate =
   | AllPredicate
@@ -65,39 +65,47 @@ export type PredicateValueFor<TProperty extends Property> = string extends TProp
     ? SerializableSchemaPredicateValue<TProperty["schema"]> | null
     : SerializableSchemaPredicateValue<TProperty["schema"]>
 
-type SerializableSchemaPredicateValue<TSchema extends Schema> = TSchema extends
-  | "string"
-  | "uuid"
-  | "date"
-  | "timestamp"
-  ? string
-  : TSchema extends "integer" | "double"
-    ? number
-    : TSchema extends "decimal"
-      ? DecimalValue
-      : TSchema extends "boolean"
-        ? boolean
-        : TSchema extends { readonly type: "enum"; readonly values: readonly (infer TValue)[] }
-          ? Extract<TValue, PredicateValue>
-          : TSchema extends {
-                readonly type: "valueTypeRef"
-                readonly _resolved: infer TResolved extends Schema
-              }
-            ? SerializableSchemaPredicateValue<TResolved>
-            : never
+/**
+ * Rule predicate values per primitive: `equality` for `eq`/`notEq`, `ordered` for range operators.
+ * `never` rejects the operator. Indexed by `PrimitiveSchema`, so a new primitive must add a row.
+ */
+interface PrimitivePredicateValues {
+  string: { equality: string; ordered: never }
+  uuid: { equality: string; ordered: never }
+  date: { equality: string; ordered: never }
+  timestamp: { equality: string; ordered: never }
+  integer: { equality: number; ordered: number }
+  double: { equality: number; ordered: number }
+  decimal: { equality: DecimalValue; ordered: DecimalValue }
+  boolean: { equality: boolean; ordered: never }
+  fileRef: { equality: never; ordered: never }
+}
 
-type OrderedSchemaPredicateValue<TSchema extends Schema> = TSchema extends "decimal"
-  ? DecimalValue
-  : TSchema extends "integer" | "double"
+type SerializableSchemaPredicateValue<TSchema extends Schema> = TSchema extends PrimitiveSchema
+  ? PrimitivePredicateValues[TSchema] extends { equality: infer TValue }
+    ? TValue
+    : never
+  : TSchema extends { readonly type: "enum"; readonly values: readonly (infer TValue)[] }
+    ? Extract<TValue, PredicateValue>
+    : TSchema extends {
+          readonly type: "valueTypeRef"
+          readonly _resolved: infer TResolved extends Schema
+        }
+      ? SerializableSchemaPredicateValue<TResolved>
+      : never
+
+type OrderedSchemaPredicateValue<TSchema extends Schema> = TSchema extends PrimitiveSchema
+  ? PrimitivePredicateValues[TSchema] extends { ordered: infer TValue }
+    ? TValue
+    : never
+  : TSchema extends { readonly type: "enum"; readonly valueType: "integer" }
     ? number
-    : TSchema extends { readonly type: "enum"; readonly valueType: "integer" }
-      ? number
-      : TSchema extends {
-            readonly type: "valueTypeRef"
-            readonly _resolved: infer TResolved extends Schema
-          }
-        ? OrderedSchemaPredicateValue<TResolved>
-        : never
+    : TSchema extends {
+          readonly type: "valueTypeRef"
+          readonly _resolved: infer TResolved extends Schema
+        }
+      ? OrderedSchemaPredicateValue<TResolved>
+      : never
 
 /** Ordered comparison value inferred from a concrete numeric ontology property. */
 export type OrderedPredicateValueFor<TProperty extends Property> = string extends TProperty["id"]

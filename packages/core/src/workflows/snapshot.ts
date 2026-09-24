@@ -234,14 +234,22 @@ function snapshotSchemaValue(params: {
   const { schema, value, path, valueTypesById } = params
 
   if (typeof schema === "string") {
-    if (schema === "date" || schema === "timestamp") {
-      if (value instanceof Date) {
-        return snapshotDate(value, path)
-      }
-      return snapshotJsonValue(value, path)
+    switch (schema) {
+      case "date":
+      case "timestamp":
+        return value instanceof Date ? snapshotDate(value, path) : snapshotJsonValue(value, path)
+      case "string":
+      case "uuid":
+      case "integer":
+      case "double":
+      case "decimal":
+      case "boolean":
+      case "fileRef":
+        return snapshotJsonValue(value, path)
+      default:
+        schema satisfies never
+        return snapshotJsonValue(value, path)
     }
-
-    return snapshotJsonValue(value, path)
   }
 
   if (schema.type === "enum") {

@@ -1,4 +1,5 @@
-import type { OntologySource, SixbHostView } from "@sixb/core"
+import type { OntologySource, Property, SixbHostView, ValueType } from "@sixb/core"
+import { resolvePropertyQueryCapabilities } from "@sixb/core/internal/ontology"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
 import { bearerSecurityRequirement } from "../auth/access-token-boundary"
@@ -23,6 +24,17 @@ function serializeProperty(
     semanticType: property.semanticType,
     schema: property.schema,
     query: property.query ? { ...property.query } : undefined,
+  }
+}
+
+function serializeObjectProperty(
+  property: Property,
+  valueTypesById: ReadonlyMap<string, ValueType>
+) {
+  const capabilities = resolvePropertyQueryCapabilities(property, valueTypesById)
+  return {
+    ...serializeProperty(property),
+    capabilities: { ...capabilities, operators: [...capabilities.operators] },
   }
 }
 
@@ -55,6 +67,7 @@ function serializeSearch(
 
 function serializeObjectType(
   execution: Sixb<readonly OntologySource[]>,
+  valueTypesById: ReadonlyMap<string, ValueType>,
   objectType: ReturnType<SixbHostView["definitions"]["ontology"]["listObjectTypes"]>[number]
 ) {
   return {
@@ -63,7 +76,9 @@ function serializeObjectType(
     description: objectType.description,
     extends: objectType.extends,
     implements: objectType.implements ? [...objectType.implements] : undefined,
-    properties: objectType.properties.map(serializeProperty),
+    properties: objectType.properties.map((property) =>
+      serializeObjectProperty(property, valueTypesById)
+    ),
     search: serializeSearch(objectType.search),
     links: objectType.links.map((link) => ({
       id: link.id,
@@ -92,13 +107,16 @@ function serializeObjectType(
   }
 }
 
-export function registerOntologyRoutes(app: Elysia, _host: SixbHostView) {
+export function registerOntologyRoutes(app: Elysia, host: SixbHostView) {
   return app
     .get(
       "/api/object-types",
       async (context) => {
         const sixb = requireRequestSixb(context)
-        return sixb.objects.listTypes().map((objectType) => serializeObjectType(sixb, objectType))
+        const valueTypesById = host.definitions.ontology.getValueTypesById()
+        return sixb.objects
+          .listTypes()
+          .map((objectType) => serializeObjectType(sixb, valueTypesById, objectType))
       },
       {
         response: { 200: ObjectTypeSchema.array() },
@@ -121,7 +139,7 @@ export function registerOntologyRoutes(app: Elysia, _host: SixbHostView) {
           return { error: "Object type not found" }
         }
 
-        return serializeObjectType(sixb, objectType)
+        return serializeObjectType(sixb, host.definitions.ontology.getValueTypesById(), objectType)
       },
       {
         params: ObjectTypeParamsSchema,
