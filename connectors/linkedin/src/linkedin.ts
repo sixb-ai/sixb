@@ -14,6 +14,7 @@ import {
 import { createLinkedinClient } from "./client"
 import { LinkedinConfigurationError } from "./errors"
 import { createLinkedinHttp, type LinkedinHttp } from "./http"
+import { createMediaTransport } from "./media-upload"
 import { createLinkedinOAuth } from "./oauth"
 import { assertNonEmpty } from "./restli"
 import type { LinkedinClient } from "./types/client"
@@ -58,7 +59,13 @@ export function linkedin(options: LinkedinConnectorOptions): LinkedinConnector {
       const http = await createHttp(context, context.tokenSource, resolvedOptions, true)
       return createLinkedinClient(
         http,
-        connectedLinkedinAccount(options.accountType, context.account)
+        connectedLinkedinAccount(options.accountType, context.account),
+        await createMediaTransport(
+          context,
+          context.tokenSource,
+          options.timeoutMs,
+          options.minDelayMs
+        )
       )
     },
   }

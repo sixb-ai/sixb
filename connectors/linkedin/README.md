@@ -260,9 +260,71 @@ for (const role of roles.items) {
 Posts are modeled as the versioned `/posts` wire format. `content` types article, media,
 multi-image, poll, reference, carousel, and celebration payloads while remaining open to new
 LinkedIn formats. Resolve image, video, and document URNs through `li.images`, `li.videos`, and
-`li.documents`; their signed download URLs can expire, so resolve them close to use. Upload
-initialization and multipart transfer remain explicit upstream workflows and are not hidden behind
-post creation.
+`li.documents`; their signed download URLs can expire, so resolve them close to use. Media upload
+and post creation are separate operations: uploading an asset does not publish it.
+
+### Publish photos and videos
+
+For a Page, request `w_organization_social` and authorize a member with an appropriate Page role.
+Add `r_organization_social` to read the resulting posts. Reauthorize existing connections after
+adding scopes; changing the connector configuration does not extend an existing OAuth grant.
+
+```ts
+import { escapeLinkedinText, organizationUrn } from "@sixb/connector-linkedin"
+
+const author = organizationUrn(123) // The Page authorized by this connection
+const image = await li.images.upload({ owner: author, file: Bun.file("./collection.jpg") })
+// For video: li.videos.upload({ owner: author, file: Bun.file("./collection.mp4") })
+const post = await li.posts.create({
+  author,
+  commentary: escapeLinkedinText("Our new collection (behind the scenes)"),
+  visibility: "PUBLIC",
+  distribution: { feedDistribution: "MAIN_FEED" },
+  lifecycleState: "PUBLISHED",
+  content: { media: { id: image, altText: "The new collection in our studio" } },
+})
+const published = await li.posts.get(post.id, "AUTHOR")
+```
+
+- `images.upload` and `videos.upload` accept `Blob`/`File` and return typed media URNs after
+  `AVAILABLE`. Video parts follow LinkedIn's inclusive byte ranges; the final part stops at EOF.
+  Only each slice is transferred, without reading the complete video into memory.
+- Pass `{ signal, timeoutMs, pollIntervalMs }` as the second argument to control processing waits
+  (defaults: five minutes, one-second polling). `timeoutMs` here bounds processing, not the whole
+  upload; connector `timeoutMs` applies to individual HTTP requests. Increase the poll interval
+  for low-quota applications. Processing failure, deadline or cancellation rejects the operation.
+- `{ waitUntilAvailable: false }` skips status reads, **not** processing. In particular, a token
+  with only `w_member_social` cannot read the versioned Images API. Do not assume that an uploaded
+  asset is immediately publishable with this option.
+- For persistent/resumable workflows, use `images.initializeUpload` → `uploadContent`, or
+  `videos.initializeUpload` → `uploadPart` → `finalizeUpload`. Persist the returned media URN,
+  session and ordered part IDs securely; signed URLs and upload tokens are credentials. Call
+  `waitUntilAvailable(urn, options)` separately. An empty video upload token is valid.
+- The video convenience method uploads the video itself, without captions or a custom thumbnail.
+  Low-level initialization exposes their flags and signed URLs for an application-managed transfer.
+- Use the same owner for uploaded media and the post author. For an organic gallery, set
+  `content: { multiImage: { images: [{ id: firstImage }, { id: secondImage }] } }` with 2–20 images.
+  Single video posts use `content.media`; mixed photo/video galleries are not supported here.
+- `commentary` is LinkedIn's **little** format. Use `escapeLinkedinText` once for plain text, not
+  for already-authored mentions or markup. `posts.create` preserves the supplied string unchanged.
+- Asset readiness and post publication are distinct. A successful create returns `{ id }`, not
+  the post; inspect its lifecycle through `posts.get`. Keep scheduling/drafts in your application.
+  Do not blindly repeat creation after an ambiguous failure: writes have no default retry.
+
+Binary transfers accept only HTTPS URLs on LinkedIn's documented `www.linkedin.com` upload host
+and reject redirects. Images use the current OAuth token; video parts use signed URLs without it.
+Transfers are not automatically retried, even with a custom REST retry policy. A signed-URL `401`
+does not invalidate the OAuth grant. `LinkedinMediaUploadError` exposes an HTTP `status` when
+available but excludes signed URLs, upstream bodies and fetch causes.
+
+LinkedIn validates media formats, dimensions and duration server-side. The connector checks
+non-empty files and upload protocol invariants, not the file contents. See the
+[Images API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/images-api?view=li-lms-2026-08),
+[Videos API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/videos-api?view=li-lms-2026-08),
+[Posts API](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/posts-api?view=li-lms-2026-08)
+and [little format](https://learn.microsoft.com/en-us/linkedin/marketing/community-management/shares/little-text-format?view=li-lms-2026-08)
+for their versioned contracts. The video guide's general 500 MB limit differs from its schema's
+5 GB ceiling; do not treat the latter as a guarantee for every publishing use case.
 
 Organization share analytics are organic-only and limited upstream to a rolling 12-month window.
 Use `li.adAnalytics` for sponsored performance. Lifetime follower demographics also have an

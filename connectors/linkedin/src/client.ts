@@ -1,4 +1,5 @@
 import type { LinkedinHttp } from "./http"
+import type { LinkedinMediaTransport } from "./media-upload"
 import { createAdAccountUsersResource } from "./resources/ad-account-users"
 import { createAdAccountsResource } from "./resources/ad-accounts"
 import { createAdAnalyticsResource } from "./resources/ad-analytics"
@@ -23,7 +24,8 @@ import type { LinkedinClient, LinkedinConnectedAccount } from "./types/client"
 
 export function createLinkedinClient(
   http: LinkedinHttp,
-  account: LinkedinConnectedAccount
+  account: LinkedinConnectedAccount,
+  media: LinkedinMediaTransport
 ): LinkedinClient {
   return {
     account,
@@ -38,8 +40,8 @@ export function createLinkedinClient(
     reactions: createReactionsResource(http),
     organizationAnalytics: createOrganizationAnalyticsResource(http),
     memberAnalytics: createMemberAnalyticsResource(http),
-    images: createImagesResource(http),
-    videos: createVideosResource(http),
+    images: createImagesResource(http, media),
+    videos: createVideosResource(http, media),
     documents: createDocumentsResource(http),
     adAccount(id) {
       const accountId = pathId(id, "ad account id")
