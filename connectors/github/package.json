@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-github",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "GitHub connector for Sixb — repositories, issues, people, and webhooks",
   "keywords": [
     "sixb",

@@ -1,6 +1,6 @@
 {
   "name": "@sixb/rules-worker",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Worker that evaluates Sixb rules",
   "keywords": [
     "sixb",

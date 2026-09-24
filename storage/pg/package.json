@@ -1,6 +1,6 @@
 {
   "name": "@sixb/pg",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "PostgreSQL storage provider for Sixb",
   "keywords": [
     "sixb",

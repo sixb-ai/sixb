@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-quickbooks",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "QuickBooks Online Accounting API connector for Sixb",
   "keywords": [
     "sixb",

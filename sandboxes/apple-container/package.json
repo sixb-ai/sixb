@@ -1,6 +1,6 @@
 {
   "name": "@sixb/sandboxes-apple-container",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Apple Container sandbox provider for Sixb agents",
   "keywords": [
     "sixb",
