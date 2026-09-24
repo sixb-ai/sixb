@@ -29,6 +29,14 @@ export function sandboxCreationEnvironment<TParams extends ParamsConfig>(
     )
   }
   if (environment.source) {
+    if (
+      (configuration.auth !== undefined || environment.source.access === "write") &&
+      !options.requestCredentials?.length
+    ) {
+      throw new SandboxError(
+        "[Sixb] Sandbox source authentication requires execution-prepared request credentials."
+      )
+    }
     const network = options.network ?? configuration.network ?? { mode: "none" }
     const origin = new URL(environment.source.url).origin
     if (

@@ -74,6 +74,42 @@ function fixture() {
   }
 }
 
+test("source authentication cannot be silently skipped by direct creation", () => {
+  const source = { type: "git" as const, url: "https://example.com/app.git" }
+  const config = {
+    source,
+    network: { mode: "all" as const },
+    auth: {
+      authorize: async () => {
+        throw new Error("must not obtain authority")
+      },
+    },
+  }
+  expect(() => sandboxCreationEnvironment(config, {})).toThrow("execution-prepared")
+  expect(() => sandboxCreationEnvironment(config, { environment: { source } })).toThrow(
+    "execution-prepared"
+  )
+  expect(sandboxCreationEnvironment(config, { environment: {} })).toEqual({})
+  expect(() =>
+    sandboxCreationEnvironment(
+      { source: { ...source, access: "write" }, network: { mode: "all" } },
+      {}
+    )
+  ).toThrow("execution-prepared")
+  expect(
+    sandboxCreationEnvironment(config, {
+      requestCredentials: [
+        {
+          origin: "https://example.com",
+          path: "/app.git/info/refs",
+          method: "GET",
+          headers: { Authorization: "test" },
+        },
+      ],
+    })
+  ).toEqual({ source })
+})
+
 test("initializes a Git project once and returns its command/file directory", async () => {
   const f = fixture()
   const project = await initializeSandboxEnvironment(f.sandbox, {

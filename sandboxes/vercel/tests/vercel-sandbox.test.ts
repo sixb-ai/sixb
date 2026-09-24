@@ -174,6 +174,16 @@ describe("VercelSandbox", () => {
 })
 
 describe("VercelSandboxFactory", () => {
+  test("requires current credentials before resuming an authenticated configuration", async () => {
+    const factory = new VercelSandboxFactory({
+      auth: {
+        authorize: async () => {
+          throw new Error("must not authorize")
+        },
+      },
+    })
+    await expect(factory.resume("private-repository")).rejects.toThrow("execution-prepared")
+  })
   test("prepares static source and setup once through Sixb, never native cloning", async () => {
     const client = new FakeVercelClient()
     let received: Parameters<VercelCreateSandbox>[0] | undefined

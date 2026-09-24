@@ -157,6 +157,11 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
   }
 
   async resume(name: string, options: ResumeSandboxOptions = {}): Promise<Sandbox> {
+    if (this.configuration.auth !== undefined && options.requestCredentials === undefined) {
+      throw new SandboxError(
+        "[Sandbox] Authenticated sandbox configuration requires execution-prepared request credentials on resume."
+      )
+    }
     assertNoLegacyPersistence(this.defaults)
     assertNoLegacyPersistence(options)
     if (
