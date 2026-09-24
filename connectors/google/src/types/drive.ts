@@ -64,6 +64,20 @@ export type DriveFileDownloadOptions = QueryParams & {
   readonly acknowledgeAbuse?: boolean
 }
 
+/** Single inclusive byte range; omit endInclusive to read through EOF. */
+export interface DriveDownloadRange {
+  readonly start: number
+  readonly endInclusive?: number
+}
+
+/** Transport options are separate from Drive query parameters. */
+export interface DriveFileDownloadStreamOptions {
+  readonly supportsAllDrives?: boolean
+  readonly acknowledgeAbuse?: boolean
+  readonly signal?: AbortSignal
+  readonly range?: DriveDownloadRange
+}
+
 export interface DriveChange {
   readonly fileId?: string
   readonly file?: DriveFile

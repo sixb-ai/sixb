@@ -3,12 +3,14 @@ import { pathSegment } from "../../http"
 import { listAllPages } from "../../pagination"
 import type { QueryParams } from "../../types/common"
 import type {
+  DriveDownloadRange,
   DriveFile,
   DriveFileContent,
   DriveFileCopyInput,
   DriveFileCreateInput,
   DriveFileDeleteOptions,
   DriveFileDownloadOptions,
+  DriveFileDownloadStreamOptions,
   DriveFileGetOptions,
   DriveFileList,
   DriveFilesListOptions,
@@ -27,6 +29,13 @@ export interface DriveFilesResource {
    * such as a CSV, XLSX, PDF, or image. Use `export` for Google-native files.
    */
   download(fileId: string, options?: DriveFileDownloadOptions): Promise<Uint8Array>
+  /**
+   * Stored-file bytes as an unconsumed Response (body, headers, status).
+   * Consume or cancel the body. Read errors are not retried after delivery.
+   * With range, inspect status/Content-Range before appending: a server may
+   * ignore Range and return 200. Does not export Google-native files.
+   */
+  downloadStream(fileId: string, options?: DriveFileDownloadStreamOptions): Promise<Response>
   /**
    * `GET /files/{fileId}/export` — export a Google-native doc (e.g. a Meet
    * transcript Doc) to `text/plain`, `text/markdown`, `application/pdf`, …
@@ -76,6 +85,17 @@ export function driveFilesResource(http: GoogleHttp): DriveFilesResource {
           supportsAllDrives: options?.supportsAllDrives,
           acknowledgeAbuse: options?.acknowledgeAbuse,
         },
+      })
+    },
+    downloadStream(fileId, options) {
+      return http.mediaResponse("drive", `files/${pathSegment(fileId, "fileId")}`, {
+        query: {
+          alt: "media",
+          supportsAllDrives: options?.supportsAllDrives,
+          acknowledgeAbuse: options?.acknowledgeAbuse,
+        },
+        headers: options?.range ? { Range: downloadRangeHeader(options.range) } : undefined,
+        signal: options?.signal,
       })
     },
     export(fileId, mimeType) {
@@ -192,4 +212,17 @@ function splitWriteInput(
     query: Object.keys(query).length > 0 ? query : undefined,
     content: content as DriveFileContent | undefined,
   }
+}
+
+function downloadRangeHeader({ start, endInclusive }: DriveDownloadRange): string {
+  if (
+    !Number.isSafeInteger(start) ||
+    start < 0 ||
+    (endInclusive !== undefined && (!Number.isSafeInteger(endInclusive) || endInclusive < start))
+  ) {
+    throw new Error(
+      "[SixbGoogle] Download range requires non-negative safe integer offsets and endInclusive >= start."
+    )
+  }
+  return `bytes=${start}-${endInclusive ?? ""}`
 }

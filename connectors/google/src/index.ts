@@ -26,7 +26,13 @@ export { createGoogleClient } from "./client"
 export { GoogleApiError, GoogleAuthError } from "./errors"
 export type { GoogleConnector } from "./google"
 export { google } from "./google"
-export type { GoogleHttp, GoogleSurface, GoogleUploadOptions, HttpMethod } from "./http"
+export type {
+  GoogleHttp,
+  GoogleMediaOptions,
+  GoogleSurface,
+  GoogleUploadOptions,
+  HttpMethod,
+} from "./http"
 export type { AnalyticsAdminSurface } from "./surfaces/analytics/admin"
 export type { AnalyticsAccountSummariesResource } from "./surfaces/analytics/admin/accountSummaries"
 export type { AnalyticsAccountsResource } from "./surfaces/analytics/admin/accounts"
