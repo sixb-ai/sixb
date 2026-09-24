@@ -21,6 +21,7 @@ export async function seedVectorBatch(storage: Storage, projectId = "batch-proje
         requestHash: "hash",
         executionId: "batch-execution",
         origin: { kind: "runtime", requestId: "batch" },
+        executor: { type: "request", requestId: "batch" },
         ontologyRevision: "test",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
         committedAt: now,

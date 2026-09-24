@@ -1,4 +1,5 @@
-import type { EventActor } from "../../events/envelope"
+import type { EventExecutor } from "../../events/envelope"
+import type { AuthorizablePrincipal } from "../../execution/types"
 import type {
   EditCommitResult,
   OntologyMaterializationOrigin,
@@ -57,7 +58,10 @@ interface OntologyCommitFields {
   readonly requestHash: string
   readonly executionId: string
   readonly origin: OntologyMaterializationOrigin
-  readonly actor?: EventActor
+  /** Principal on whose behalf the execution ran, copied from `ExecutionRecord.requestedBy`. */
+  readonly requestedBy?: AuthorizablePrincipal
+  /** Workload that wrote the commit, copied from its execution. */
+  readonly executor: EventExecutor
   readonly ontologyRevision: string
   readonly projectionRevision?: string
   readonly ownershipHash?: string

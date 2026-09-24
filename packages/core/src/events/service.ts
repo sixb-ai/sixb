@@ -12,13 +12,7 @@ import {
   resolveEventStorage,
 } from "./definitions"
 import { EventsError } from "./errors"
-import type {
-  DomainEvent,
-  EventActor,
-  EventDraft,
-  StoredAuthorableEvent,
-  StoredDomainEvent,
-} from "./types"
+import type { DomainEvent, EventDraft, StoredAuthorableEvent, StoredDomainEvent } from "./types"
 
 // Keep domain events as a short recent log. This is 2 days in milliseconds.
 export const DEFAULT_EVENTS_RETENTION_MS = 2 * 24 * 60 * 60 * 1000
@@ -37,7 +31,6 @@ export interface DomainEventServiceOptions {
 }
 
 export interface EventsAppendInput {
-  readonly actor?: EventActor
   readonly correlationId?: string
   readonly causationId?: string
   readonly events: readonly EventDraft[]
@@ -146,7 +139,6 @@ export class DomainEventService implements DomainEventLog, StableEventPublisher 
     const payloads = input.events.map((event) =>
       toStoredEventPayload({
         projectId: this.projectId,
-        actor: input.actor,
         correlationId: input.correlationId,
         causationId: input.causationId,
         event,
@@ -306,7 +298,6 @@ type StoredEventPayload = Omit<StoredAuthorableEvent, "cursor">
 
 function toStoredEventPayload(params: {
   projectId: string
-  actor?: EventActor
   correlationId?: string
   causationId?: string
   event: EventDraft
@@ -326,7 +317,6 @@ function toStoredEventPayload(params: {
   setIfDefined(payload, "correlationId", params.correlationId)
   setIfDefined(payload, "causationId", params.causationId)
   setIfDefined(payload, "idempotencyKey", params.event.idempotencyKey)
-  setIfDefined(payload, "actor", params.actor)
   setIfDefined(payload, "origin", params.event.origin)
   setIfDefined(payload, "metadata", params.event.metadata)
 

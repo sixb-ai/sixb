@@ -79,6 +79,7 @@ test("existence lookup seeks requested keys without scanning mixed work", async 
             idempotencyKey: id,
             requestHash: id,
             origin: { kind: "runtime", requestId: id },
+            executor: { type: "request", requestId: id },
             ontologyRevision: "test",
             intent: { kind: "edit", mode: "atomic", operationCount: 0 },
             committedAt: "2026-09-19T00:00:00.000Z",

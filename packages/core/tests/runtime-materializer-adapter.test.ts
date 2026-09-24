@@ -120,7 +120,10 @@ describe("runtime object writes", () => {
     expect(events.length).toBeGreaterThan(0)
     expect(
       events.every(
-        (event) => event.correlationId === sixb.execution.correlationId && event.actor === undefined
+        (event) =>
+          event.correlationId === sixb.execution.correlationId &&
+          "executor" in event &&
+          !("requestedBy" in event)
       )
     ).toBe(true)
   })

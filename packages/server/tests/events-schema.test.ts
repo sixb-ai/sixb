@@ -15,6 +15,8 @@ const materializedObject = {
   type: "object.updated",
   topic: "objects",
   origin: { kind: "runtime", requestId: "request-1" },
+  requestedBy: { type: "user", id: "user-1" },
+  executor: { type: "request", requestId: "request-1" },
   commitId: "commit-1",
   commitOrdinal: 0,
   payload: {
@@ -36,6 +38,12 @@ describe("EventSchema", () => {
     const { commitId: _, ...withoutCommit } = materializedObject
 
     expect(EventSchema.safeParse(withoutCommit).success).toBe(false)
+  })
+
+  test("requires the executor that made an ontology change", () => {
+    const { executor: _, ...withoutExecutor } = materializedObject
+
+    expect(EventSchema.safeParse(withoutExecutor).success).toBe(false)
   })
 
   test("validates authoritative property changes", () => {

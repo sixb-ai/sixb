@@ -37,7 +37,6 @@ describe("DomainEventService broker backing", () => {
     const runtime = new DomainEventService({ projectId: "project-a", broker })
 
     const [event] = await runtime.append({
-      actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       events: [
@@ -55,7 +54,6 @@ describe("DomainEventService broker backing", () => {
       type: "action.requested",
       topic: "actions",
       partitionKey: "test-action",
-      actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },
@@ -89,7 +87,6 @@ describe("DomainEventService broker backing", () => {
       projectId: "project-a",
       type: "action.requested",
       topic: "actions",
-      actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },

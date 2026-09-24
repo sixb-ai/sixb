@@ -512,6 +512,7 @@ function telemetryEnvelope(
     occurredAt: at,
     correlationId: `correlation-${objectId}-${at}`,
     origin: { kind: "runtime", requestId: `seed-${objectId}-${at}` },
+    executor: { type: "request", requestId: `seed-${objectId}-${at}` },
     commitId: `commit-${objectId}-${at}`,
     commitOrdinal: 0,
     type: "telemetry.appended",

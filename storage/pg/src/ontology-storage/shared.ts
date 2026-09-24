@@ -39,7 +39,8 @@ export interface PgOntologyCommitRow {
   readonly origin_run_id: string | null
   readonly origin_batch_ordinal: number | string | null
   readonly origin: unknown
-  readonly actor: unknown | null
+  readonly requested_by: unknown | null
+  readonly executor: unknown
   readonly ontology_revision: string
   readonly projection_revision: string | null
   readonly ownership_hash: string | null
@@ -187,11 +188,14 @@ export function commitRecord(row: PgOntologyCommitRow): OntologyCommitRecord {
     requestHash: row.request_hash,
     executionId: row.execution_id,
     origin: structuredClone(row.origin) as OntologyCommitWrite["origin"],
-    ...(row.actor === null
+    ...(row.requested_by === null
       ? {}
       : {
-          actor: structuredClone(row.actor) as NonNullable<OntologyCommitWrite["actor"]>,
+          requestedBy: structuredClone(row.requested_by) as NonNullable<
+            OntologyCommitWrite["requestedBy"]
+          >,
         }),
+    executor: structuredClone(row.executor) as OntologyCommitWrite["executor"],
     ontologyRevision: row.ontology_revision,
     ...(row.projection_revision === null ? {} : { projectionRevision: row.projection_revision }),
     ...(row.ownership_hash === null ? {} : { ownershipHash: row.ownership_hash }),

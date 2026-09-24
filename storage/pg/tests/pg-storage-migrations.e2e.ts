@@ -85,6 +85,115 @@ describe("Postgres storage migrations", () => {
     })
   })
 
+  test("attributes existing commits and pending events from their executions", async () => {
+    // Removal proof: drop 047's commit UPDATE; `SET NOT NULL` on executor then fails.
+    await withStorage(false, async (_storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      try {
+        await sql.unsafe(`CREATE SCHEMA IF NOT EXISTS ${quoteIdent(schemaName)}`)
+        await sql.unsafe(`
+          CREATE TABLE executions (
+            project_id TEXT, id TEXT, executor_kind TEXT, executor_id TEXT,
+            requested_by_user_id TEXT, requested_by_service_account_id TEXT,
+            authority_primitive_id TEXT, authority_kernel_operation TEXT
+          );
+          CREATE TABLE ontology_commits (
+            project_id TEXT, id TEXT, execution_id TEXT, actor JSONB
+          );
+          CREATE TABLE ontology_outbox (project_id TEXT, commit_id TEXT, envelope JSONB NOT NULL);
+          INSERT INTO executions VALUES
+            ('p', 'request', 'request', 'req-1', 'alice', NULL, NULL, NULL),
+            ('p', 'service', 'request', 'req-2', NULL, 'svc-import', NULL, NULL),
+            ('p', 'action', 'action', 'run-1', 'alice', NULL, 'approve', NULL),
+            ('p', 'agent', 'agent', 'agent-run', 'alice', NULL, NULL, NULL),
+            ('p', 'scheduled', 'workflow', 'wf-run', NULL, NULL, 'nightly', NULL),
+            ('p', 'recover', 'kernel', 'recovery-1', NULL, NULL, NULL, 'ontology.recover'),
+            ('p', 'index', 'kernel', 'indexing-1', NULL, NULL, NULL, 'ontology.indexVectors');
+          INSERT INTO ontology_commits
+            SELECT project_id, 'c-' || id, id,
+              CASE WHEN id = 'request' THEN '{"id":"alice","type":"user"}'::jsonb END
+            FROM executions;
+          INSERT INTO ontology_outbox VALUES
+            ('p', 'c-request', '{"id":"e1","actor":{"id":"alice","type":"user"}}'),
+            ('p', 'c-scheduled', '{"id":"e2"}');
+        `)
+        const migration = postgresStorageMigrations.steps.find(
+          (step) => step.id === "047-ontology-commit-attribution"
+        )!
+        await migration.up({
+          exec: async (text) => {
+            await sql.unsafe(text)
+          },
+        })
+
+        expect(await readTableColumns(schemaName, "ontology_commits")).not.toContain("actor")
+        expect(await readColumnNullable(schemaName, "ontology_commits", "executor")).toBe("NO")
+        const commits =
+          await sql`SELECT id, requested_by, executor FROM ontology_commits ORDER BY id`
+        expect([...commits]).toEqual([
+          {
+            id: "c-action",
+            requested_by: { type: "user", id: "alice" },
+            executor: { type: "primitive", kind: "action", id: "approve", runId: "run-1" },
+          },
+          {
+            id: "c-agent",
+            requested_by: { type: "user", id: "alice" },
+            executor: { type: "agent", runId: "agent-run" },
+          },
+          {
+            id: "c-index",
+            requested_by: null,
+            executor: {
+              type: "kernel",
+              operation: { type: "ontology.indexVectors", indexingId: "indexing-1" },
+            },
+          },
+          {
+            id: "c-recover",
+            requested_by: null,
+            executor: {
+              type: "kernel",
+              operation: { type: "ontology.recover", recoveryId: "recovery-1" },
+            },
+          },
+          {
+            id: "c-request",
+            requested_by: { type: "user", id: "alice" },
+            executor: { type: "request", requestId: "req-1" },
+          },
+          {
+            id: "c-scheduled",
+            requested_by: null,
+            executor: { type: "primitive", kind: "workflow", id: "nightly", runId: "wf-run" },
+          },
+          {
+            id: "c-service",
+            requested_by: { type: "serviceAccount", id: "svc-import" },
+            executor: { type: "request", requestId: "req-2" },
+          },
+        ])
+
+        const envelopes = await sql`SELECT envelope FROM ontology_outbox ORDER BY commit_id`
+        expect([...envelopes].map((row) => row.envelope)).toEqual([
+          {
+            id: "e1",
+            requestedBy: { type: "user", id: "alice" },
+            executor: { type: "request", requestId: "req-1" },
+          },
+          {
+            id: "e2",
+            executor: { type: "primitive", kind: "workflow", id: "nightly", runId: "wf-run" },
+          },
+        ])
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
   test("upgrades model accounting in one step without losing historical evidence or constraints", async () => {
     // Regression proof: omit 029's reason conversion or native ID columns, or change shipped 026.
     await withStorage(false, async (_storage, schemaName) => {
@@ -228,6 +337,7 @@ describe("Postgres storage migrations", () => {
             "044-vector-batching",
             "045-agent-thread-sandbox-state",
             "046-workflow-intervention-principals",
+            "047-ontology-commit-attribution",
           ],
         },
       ])
@@ -553,6 +663,13 @@ describe("Postgres storage migrations", () => {
           id: "046-workflow-intervention-principals",
           status: "applied",
           version: 46,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "047-ontology-commit-attribution",
+          status: "applied",
+          version: 47,
         },
       ])
     })
@@ -1157,6 +1274,10 @@ describe("Postgres storage migrations", () => {
         "ontology_source_rows",
         "ontology_sources",
       ])
+      expect(await readTableColumns(schemaName, "ontology_commits")).toEqual(
+        expect.arrayContaining(["execution_id", "requested_by", "executor"])
+      )
+      expect(await readTableColumns(schemaName, "ontology_commits")).not.toContain("actor")
       expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
@@ -2412,6 +2533,13 @@ describe("Postgres storage migrations", () => {
           id: "046-workflow-intervention-principals",
           status: "applied",
           version: 46,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "047-ontology-commit-attribution",
+          status: "applied",
+          version: 47,
         },
       ])
     } finally {

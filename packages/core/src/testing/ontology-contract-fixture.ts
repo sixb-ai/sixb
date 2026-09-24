@@ -1,3 +1,4 @@
+import type { AuthorizablePrincipal } from "../execution/types"
 import { createEventId } from "../materialization/identity"
 import type {
   MaterializationPlanHeader,
@@ -29,6 +30,11 @@ const emptyChunk = {
   outbox: [],
 } as const
 
+/** The request executor `ensureContractExecution` records for a contract commit. */
+export function contractExecutor(id: string) {
+  return { type: "request" as const, requestId: `contract-request:${id}` }
+}
+
 export function contractEditHeader(id: string): MaterializationPlanHeader {
   return {
     commit: {
@@ -38,6 +44,7 @@ export function contractEditHeader(id: string): MaterializationPlanHeader {
       requestHash: `hash:${id}`,
       executionId: `contract-execution:${id}`,
       origin: { kind: "runtime", requestId: id },
+      executor: contractExecutor(id),
       ontologyRevision: "ontology-contract-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
       committedAt: CONTRACT_COMMITTED_AT,
@@ -90,9 +97,15 @@ export async function commitExactObject(
     readonly primaryId?: string
     readonly omitFinalize?: boolean
     readonly throwAfterFinalize?: boolean
+    /** Must name an existing auth principal: SQL providers reference it from the execution. */
+    readonly requestedBy?: AuthorizablePrincipal
   } = {}
 ): Promise<{ readonly eventId: string }> {
-  const header = contractEditHeader(id)
+  const defaultHeader = contractEditHeader(id)
+  const header: MaterializationPlanHeader =
+    options.requestedBy === undefined
+      ? defaultHeader
+      : { ...defaultHeader, commit: { ...defaultHeader.commit, requestedBy: options.requestedBy } }
   const ref = { objectTypeId: "ContractDevice", primaryId: options.primaryId ?? id }
   const row = {
     ref,
@@ -109,6 +122,8 @@ export async function commitExactObject(
     occurredAt: header.commit.committedAt,
     correlationId: `contract-correlation:${id}`,
     origin: header.commit.origin,
+    ...(header.commit.requestedBy === undefined ? {} : { requestedBy: header.commit.requestedBy }),
+    executor: header.commit.executor,
     commitId: id,
     type: "object.created" as const,
     topic: "objects" as const,
@@ -214,12 +229,17 @@ export async function ensureContractExecution(
   ) {
     return
   }
+  const { requestedBy } = header.commit
   await storage.executions.create({
     id: header.commit.executionId,
     projectId: header.commit.projectId,
-    executor: { type: "request", requestId: `contract-request:${header.commit.id}` },
+    ...(requestedBy === undefined ? {} : { requestedBy }),
+    executor: contractExecutor(header.commit.id),
     source: { type: "http", requestId: `contract-request:${header.commit.id}` },
     correlationId: `contract-correlation:${header.commit.id}`,
-    authorizationRef: { type: "disabled" },
+    authorizationRef:
+      requestedBy === undefined
+        ? { type: "disabled" }
+        : { type: "principal", principal: requestedBy },
   })
 }

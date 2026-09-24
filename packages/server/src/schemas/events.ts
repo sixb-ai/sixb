@@ -1,4 +1,4 @@
-import type { DomainEvent } from "@sixb/core"
+import type { DomainEvent, TrustedPrimitiveKind } from "@sixb/core"
 import {
   EVENT_TOPICS as CORE_EVENT_TOPICS,
   EVENT_TYPES as CORE_EVENT_TYPES,
@@ -60,14 +60,37 @@ const StoredEventBaseSchema = z.object({
   schemaVersion: z.literal(1),
   projectId: z.string(),
   occurredAt: z.string(),
-  actor: z
-    .object({
-      type: z.enum(["user", "serviceAccount", "system"]),
-      id: z.string(),
-    })
-    .optional(),
   partitionKey: z.string(),
 })
+
+const TRUSTED_PRIMITIVE_KINDS = [
+  "action",
+  "pipeline",
+  "projection",
+  "rule",
+  "sync",
+  "webhook",
+  "workflow",
+] as const satisfies readonly TrustedPrimitiveKind[]
+
+/** Mirrors the core `EventExecutor`: the workload that made an ontology change. */
+export const EventExecutorSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("request"), requestId: z.string() }),
+  z.object({
+    type: z.literal("primitive"),
+    kind: z.enum(TRUSTED_PRIMITIVE_KINDS),
+    id: z.string(),
+    runId: z.string(),
+  }),
+  z.object({ type: z.literal("agent"), runId: z.string() }),
+  z.object({
+    type: z.literal("kernel"),
+    operation: z.discriminatedUnion("type", [
+      z.object({ type: z.literal("ontology.recover"), recoveryId: z.string() }),
+      z.object({ type: z.literal("ontology.indexVectors"), indexingId: z.string() }),
+    ]),
+  }),
+])
 
 const StoredAuthorableEventBaseSchema = StoredEventBaseSchema.extend({
   correlationId: z.string().optional(),
@@ -79,6 +102,11 @@ const StoredAuthorableEventBaseSchema = StoredEventBaseSchema.extend({
 
 const StoredOntologyEventBaseSchema = StoredEventBaseSchema.extend({
   origin: EventOriginSchema,
+  requestedBy: z
+    .object({ type: z.enum(["user", "serviceAccount"]), id: z.string() })
+    .optional()
+    .describe("Principal on whose behalf the write ran; absent for automatic or anonymous work."),
+  executor: EventExecutorSchema,
   commitId: z.string(),
   commitOrdinal: z.number().int().nonnegative(),
 })

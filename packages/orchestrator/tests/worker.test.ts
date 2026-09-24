@@ -111,6 +111,7 @@ function makeInvoiceUpdatedEvent(
     occurredAt: "2026-04-18T02:00:00.000Z",
     correlationId: `correlation-${amountBefore}-${amountAfter}`,
     origin: { kind: "runtime", requestId: `request-${amountBefore}-${amountAfter}` },
+    executor: { type: "request", requestId: `request-${amountBefore}-${amountAfter}` },
     commitId: `commit-${amountBefore}-${amountAfter}`,
     commitOrdinal: 0,
     type: "object.updated",

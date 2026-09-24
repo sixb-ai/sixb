@@ -1,16 +1,23 @@
+import type { KernelOperation, TrustedPrimitiveKind } from "../execution/types"
 import type { JsonValue } from "../json"
 
 /**
- * Who made a change.
+ * Workload that made an ontology change, copied from its execution.
  *
- * The type literals are exactly `Principal["type"]` from `auth/types`, on purpose: an actor *is* a
- * principal recorded on an event, and two spellings of the same concept meant a translation layer
- * between them, which is one more place for the two to drift.
+ * It names what ran; `requestedBy` names on whose behalf. A primitive carries its definition id so
+ * a consumer can tell which workflow, sync, or webhook wrote without reading the run. An Agent
+ * `runId` is its Agent run, or the step run of a Workflow Agent step.
  */
-export interface EventActor {
-  type: "user" | "serviceAccount" | "system"
-  id: string
-}
+export type EventExecutor =
+  | { readonly type: "request"; readonly requestId: string }
+  | {
+      readonly type: "primitive"
+      readonly kind: TrustedPrimitiveKind
+      readonly id: string
+      readonly runId: string
+    }
+  | { readonly type: "agent"; readonly runId: string }
+  | { readonly type: "kernel"; readonly operation: KernelOperation }
 
 export interface ActionEventOrigin {
   readonly kind: "action"
@@ -62,7 +69,6 @@ export interface EventEnvelope {
   correlationId?: string
   causationId?: string
   idempotencyKey?: string
-  actor?: EventActor
   origin?: EventOrigin
   metadata?: Record<string, JsonValue>
 }

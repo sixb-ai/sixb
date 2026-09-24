@@ -114,6 +114,7 @@ function objectUpdatedFact(
     occurredAt: "2026-01-01T00:00:00.000Z",
     correlationId: `correlation-${id}`,
     origin: { kind: "runtime", requestId: id },
+    executor: { type: "request", requestId: id },
     commitId: `commit-${id}`,
     commitOrdinal: 0,
     type: "object.updated",

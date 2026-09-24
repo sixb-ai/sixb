@@ -325,6 +325,7 @@ const envelope = {
   correlationId: "correlation-1",
   cursor: "c1",
   origin: { kind: "runtime" as const, requestId: "request-1" },
+  executor: { type: "request" as const, requestId: "request-1" },
   commitId: "commit-1",
   commitOrdinal: 0,
 }

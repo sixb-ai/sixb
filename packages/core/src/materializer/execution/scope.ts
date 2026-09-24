@@ -1,7 +1,11 @@
-import type { EventActor } from "../../events/envelope"
+import type { EventExecutor } from "../../events/envelope"
 import { resolveExecutionScopeAuthorization } from "../../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../../execution/durable"
-import type { ExecutionScope, TrustedPrimitiveKind } from "../../execution/types"
+import type {
+  AuthorizablePrincipal,
+  ExecutionScope,
+  TrustedPrimitiveKind,
+} from "../../execution/types"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
@@ -12,13 +16,22 @@ import type {
   ExecutionStorage,
 } from "../../storage/executions"
 
+/**
+ * Who and what a commit and its events are attributed to. Both are copied from the execution, so
+ * they are a pure function of `executionId` and never an input the caller chooses.
+ */
+export interface MaterializerAttribution {
+  readonly requestedBy?: AuthorizablePrincipal
+  readonly executor: EventExecutor
+}
+
 /** Immutable execution metadata attached to one prepared Materializer command. */
 export interface MaterializerExecution {
   readonly scope: ExecutionScope
   readonly record: CreateExecutionInput
   readonly executionId: string
   readonly correlationId: string
-  readonly actor?: EventActor
+  readonly attribution: MaterializerAttribution
 }
 
 /** Validate the process-local scope before any Materializer read or write is attempted. */
@@ -26,9 +39,9 @@ export function prepareMaterializerExecution(
   projectId: string,
   scope: ExecutionScope
 ): MaterializerExecution {
-  const authorization = resolveExecutionScopeAuthorization(projectId, scope)
+  resolveExecutionScopeAuthorization(projectId, scope)
 
-  const base = {
+  return {
     scope,
     record: executionRecordInputFromRuntime({
       execution: scope.execution,
@@ -36,9 +49,29 @@ export function prepareMaterializerExecution(
     }),
     executionId: scope.execution.id,
     correlationId: scope.execution.correlationId,
+    attribution: executionAttribution(scope),
   }
-  if (authorization.type !== "principal") return base
-  return { ...base, actor: authorization.context.principal }
+}
+
+function executionAttribution(scope: ExecutionScope): MaterializerAttribution {
+  const { requestedBy, executor } = scope.execution
+  const attributed = { executor: eventExecutor(executor) }
+  if (requestedBy === undefined) return attributed
+  return { ...attributed, requestedBy: { type: requestedBy.type, id: requestedBy.id } }
+}
+
+/** Drop the process-local Agent actor id: the durable execution does not record it. */
+function eventExecutor(executor: ExecutionScope["execution"]["executor"]): EventExecutor {
+  switch (executor.type) {
+    case "request":
+      return { type: "request", requestId: executor.requestId }
+    case "primitive":
+      return { type: "primitive", kind: executor.kind, id: executor.id, runId: executor.runId }
+    case "agent":
+      return { type: "agent", runId: executor.runId }
+    case "kernel":
+      return { type: "kernel", operation: structuredClone(executor.operation) }
+  }
 }
 
 /** Persist a direct request lazily, or prove that a durable worker restored the exact record. */

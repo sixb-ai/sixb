@@ -31,6 +31,7 @@ function projectionHeader(originProjectionId = "devices"): MaterializationPlanHe
         datasetId: datasetVersion.datasetId,
         datasetVersionId: datasetVersion.versionId,
       },
+      executor: { type: "primitive", kind: "projection", id: "devices", runId: "run" },
       ontologyRevision: "ontology-revision",
       projectionRevision: "projection-revision",
       ownershipHash: "ownership-hash",
@@ -72,6 +73,7 @@ function telemetryHeader(input?: {
           batchOrdinal: 0,
         },
       },
+      executor: { type: "primitive", kind: "projection", id: "device-readings", runId: "run" },
       ontologyRevision: "ontology-revision",
       projectionRevision: "projection-revision",
       ownershipHash: "ownership-hash",
@@ -109,6 +111,31 @@ describe("materialization header validation", () => {
   test("reports the exact projection correlation that failed", () => {
     expect(() => assertMaterializationHeader(projectionHeader("other"))).toThrow(
       "Projection commit origin does not match its projection."
+    )
+  })
+
+  test("requires a projected write to name the projection run that owns it", () => {
+    const header = projectionHeader()
+    const foreign: MaterializationPlanHeader = {
+      ...header,
+      commit: {
+        ...header.commit,
+        executor: { type: "primitive", kind: "workflow", id: "devices", runId: "run" },
+      },
+    }
+    expect(() => assertMaterializationHeader(foreign)).toThrow(
+      "Commit projection origin does not match its executor."
+    )
+  })
+
+  test("rejects a requester that is not an authorizable principal", () => {
+    const header = projectionHeader()
+    const system = {
+      ...header,
+      commit: { ...header.commit, requestedBy: { type: "system", id: "system" } },
+    } as unknown as MaterializationPlanHeader
+    expect(() => assertMaterializationHeader(system)).toThrow(
+      "Materialization requester must be a user or service account."
     )
   })
 

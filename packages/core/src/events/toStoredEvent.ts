@@ -1,10 +1,9 @@
 import { randomUUID } from "node:crypto"
 import { resolveEventStorage } from "./definitions"
-import type { EventActor, EventDraft, StoredAuthorableEvent } from "./types/index"
+import type { EventDraft, StoredAuthorableEvent } from "./types/index"
 
 export function toStoredEvent(params: {
   projectId: string
-  actor?: EventActor
   correlationId?: string
   causationId?: string
   event: EventDraft
@@ -18,7 +17,6 @@ export function toStoredEvent(params: {
     correlationId: params.correlationId,
     causationId: params.causationId,
     idempotencyKey: params.event.idempotencyKey,
-    actor: params.actor,
     origin: params.event.origin,
     metadata: params.event.metadata,
     cursor: params.cursor,

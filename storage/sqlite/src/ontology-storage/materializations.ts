@@ -719,10 +719,12 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
           `
             INSERT INTO ontology_commits (
               project_id, id, idempotency_key, request_hash, execution_id,
-              origin_kind, origin_run_id, origin_batch_ordinal, origin, actor,
+              origin_kind, origin_run_id, origin_batch_ordinal, origin, requested_by, executor,
               ontology_revision, projection_revision, ownership_hash,
               intent, result, committed_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, json(?), json(?), ?, ?, ?, json(?), json(?), ?)
+            ) VALUES (
+              ?, ?, ?, ?, ?, ?, ?, ?, json(?), json(?), json(?), ?, ?, ?, json(?), json(?), ?
+            )
           `
         )
         .run(
@@ -735,7 +737,8 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
           origin.runId,
           origin.batchOrdinal,
           canonicalJson(commit.origin),
-          commit.actor === undefined ? null : canonicalJson(commit.actor),
+          commit.requestedBy === undefined ? null : canonicalJson(commit.requestedBy),
+          canonicalJson(commit.executor),
           commit.ontologyRevision,
           commit.projectionRevision ?? null,
           commit.ownershipHash ?? null,
