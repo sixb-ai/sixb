@@ -32,3 +32,25 @@ test("rejects ambiguous recipes before registration or provisioning", () => {
     sandboxConfig({ source: { type: "git", url: "https://secret@example.com" } })
   ).toThrow("credential-free HTTPS")
 })
+
+test("captures the auth method without invoking it during configuration", async () => {
+  let calls = 0
+  const auth = {
+    async authorize(): Promise<never> {
+      calls += 1
+      throw new Error("original auth")
+    },
+  }
+  const config = sandboxConfig({ auth })
+  auth.authorize = async () => {
+    throw new Error("replacement auth")
+  }
+  expect(calls).toBe(0)
+  await expect(
+    config.auth!.authorize({
+      source: { type: "git", url: "https://example.com/app.git" },
+      signal: new AbortController().signal,
+    })
+  ).rejects.toThrow("original auth")
+  expect(calls).toBe(1)
+})

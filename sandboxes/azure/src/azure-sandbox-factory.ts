@@ -125,6 +125,9 @@ export class AzureSandboxFactory<const TParams extends ParamsConfig = Record<nev
 }
 
 function assertEphemeral(options: object): void {
+  if ("requestCredentials" in options && options.requestCredentials !== undefined) {
+    throw new SandboxError("[Sandbox] azure does not support secure request credentials.")
+  }
   if (("persistence" in options && options.persistence !== undefined) || "persistent" in options) {
     throw new SandboxError("[Sandbox] Azure named persistence is not supported; omit persistence.")
   }

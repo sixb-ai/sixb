@@ -6,6 +6,10 @@ import { SandboxError } from "./errors"
 export function sandboxConfig<TParams extends ParamsConfig>(
   options: SandboxConfig<TParams>
 ): SandboxConfig<TParams> {
+  if (options.auth !== undefined && typeof options.auth?.authorize !== "function") {
+    throw new SandboxError("[Sixb] sandboxes.auth requires an authorize function.")
+  }
+  const authorize = options.auth?.authorize.bind(options.auth)
   if (options.params !== undefined && options.resolve === undefined) {
     throw new SandboxError("[Sixb] Sandbox params require a resolve function.")
   }
@@ -25,7 +29,7 @@ export function sandboxConfig<TParams extends ParamsConfig>(
     ...(options.network === undefined ? {} : { network: options.network }),
   })
   return Object.freeze({
-    ...(options.auth === undefined ? {} : { auth: options.auth }),
+    ...(authorize ? { auth: Object.freeze({ authorize }) } : {}),
     ...environment,
     ...(options.params === undefined ? {} : { params: structuredClone(options.params) }),
     ...(options.resolve === undefined ? {} : { resolve: options.resolve }),

@@ -1994,6 +1994,99 @@ function hangingCompactionModel(): WorkerTestModel {
 }
 
 describe("AgentWorker", () => {
+  test.each([
+    "preflight",
+    "model",
+  ] as const)("interrupts %s when environment authentication renewal fails", async (phase) => {
+    // Regression proof: omit the environment failure signal from preflight or runAgentTurn.
+    let authorizations = 0
+    let revocations = 0
+    let interruption: unknown
+    const waitForFailure = (signal: AbortSignal) =>
+      new Promise<never>((_, reject) => {
+        const abort = () => {
+          interruption = signal.reason
+          reject(signal.reason)
+        }
+        if (signal.aborted) abort()
+        else signal.addEventListener("abort", abort, { once: true })
+      })
+    const sandbox = Object.assign(new RecordingSandbox("auth-failure"), {
+      setRequestCredentials: async () => {},
+    })
+    const model = new WorkerTestModel({
+      modelId: "mock-model",
+      stream: async (options) => waitForFailure(options.signal),
+    })
+    const host = buildSixb(
+      model,
+      new InMemoryBroker(),
+      {
+        supportsRequestCredentials: true,
+        create: async () => sandbox,
+        resume: async () => sandbox,
+      },
+      {
+        sandboxConfig: {
+          source: { type: "git", url: "https://example.com/repo.git" },
+          auth: {
+            authorize: async () => {
+              if (++authorizations > 1) throw new Error("private renewal detail")
+              return {
+                requests: [
+                  {
+                    origin: "https://example.com",
+                    path: "/repo.git/info/refs",
+                    method: "GET",
+                    headers: { Authorization: "test-token" },
+                  },
+                ],
+                expiresAt: new Date(Date.now() + 61_000),
+                revoke: async () => {
+                  revocations++
+                },
+              }
+            },
+          },
+        },
+      }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const prepare = conversationPreparation.prepareAgentConversationContext
+    const preflight = spyOn(
+      conversationPreparation,
+      "prepareAgentConversationContext"
+    ).mockImplementation((input) =>
+      phase === "preflight" ? waitForFailure(input.runtime.signal) : prepare(input)
+    )
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions({ skillsDir: false, turnTimeoutMs: 3_000 }))
+    await worker.start()
+    try {
+      await completion.wait()
+      const run = await agentStorageOf(host).runs.getById({
+        projectId: PROJECT_ID,
+        id: requested.run.id,
+      })
+      expect(run?.status).toBe("failed")
+      expect(JSON.stringify(run)).not.toContain("private renewal detail")
+      expect(interruption).toMatchObject({
+        message: "[SixbAgentWorker] Workspace authentication could not be confirmed.",
+      })
+      expect(authorizations).toBe(2)
+      expect(revocations).toBe(1)
+      expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("blocked")
+      expect(sandbox.status).toBe("stopped")
+    } finally {
+      await worker.stop()
+      completion.restore()
+      preflight.mockRestore()
+    }
+  })
+
   test("does not save a partially prepared environment after losing the queue lease", async () => {
     // Regression proof: remove the lease-loss guard in the environment preparation catch.
     const controller = new AbortController()
@@ -2263,6 +2356,9 @@ describe("AgentWorker", () => {
         // Class-based providers require their receiver, not a detached resume function.
         expect(this).toBe(factory)
         expect(options).not.toHaveProperty("persistence")
+        // Even source-free recipes explicitly confirm current auth requirements on resume.
+        expect(options?.requestCredentials).toBeDefined()
+        if (!withSource) expect(options?.requestCredentials).toEqual([])
         resumes++
         policies.push(options?.network)
         names.push(name)

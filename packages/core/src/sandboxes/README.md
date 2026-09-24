@@ -34,6 +34,7 @@ Uncertain sandboxes stay blocked; explicit recreation uses a new name without de
 Saved files remain subject to provider retention.
 
 Source `auth` stays host-side. Named providers advertising `supportsRequestCredentials` must apply
+execution-prepared credentials; direct create/resume never invoke `auth` implicitly. They apply
 initial credentials before setup and expose session-scoped renewal. Unsupported providers reject
 credentials before provisioning. During initial provisioning/setup, the worker aborts before token
 expiry if no session handle is available yet; renewal begins after acquisition. Normal teardown
