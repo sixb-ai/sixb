@@ -12,8 +12,10 @@ import type { PrimitiveSchema } from "./types"
 export interface PrimitiveTraits {
   /** Scalar kind object queries compare values with; `undefined` when values are not comparable. */
   readonly queryScalarKind: QueryScalarKind | undefined
-  /** Exact matching: `eq`/`neq`/`in`/`exists` predicates, `query.exact`, and `query.filterable`. */
+  /** Exact matching: `eq`/`neq`/`in`/`exists` predicates and `query.filterable`. */
   readonly exact: boolean
+  /** Exact-match search profile: `query.exact` and `search.exact`, matched against search input. */
+  readonly exactSearch: boolean
   /** Ordering: range predicates and `query.sortable`. */
   readonly sortable: boolean
   /** Keyword search: `query.text`, search titles, and vector sources. */
@@ -30,6 +32,7 @@ export interface PrimitiveTraits {
 
 const comparable = {
   exact: true,
+  exactSearch: true,
   sortable: true,
   text: false,
   contains: false,
@@ -51,10 +54,24 @@ const PRIMITIVE_TRAITS = {
   fileRef: {
     queryScalarKind: undefined,
     exact: false,
+    exactSearch: false,
     sortable: false,
     text: false,
     contains: false,
     facet: false,
+    telemetry: false,
+    shareableParam: false,
+  },
+  // User references match by identity, never against typed search input. They are not text, carry
+  // no order, and stay out of telemetry and shared sessions, which cannot disclose who they point to.
+  userRef: {
+    queryScalarKind: "userRef",
+    exact: true,
+    exactSearch: false,
+    sortable: false,
+    text: false,
+    contains: false,
+    facet: true,
     telemetry: false,
     shareableParam: false,
   },

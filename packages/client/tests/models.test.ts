@@ -37,6 +37,13 @@ const objectType: ObjectTypeDefinition = {
           required: true,
           nullable: false,
         },
+        {
+          id: "owner",
+          name: "owner",
+          schema: "userRef",
+          required: false,
+          nullable: false,
+        },
       ],
     },
   ],
@@ -54,5 +61,11 @@ describe("client object models", () => {
       type: "string",
       required: true,
     })
+  })
+
+  test("keeps user reference params distinct from strings", () => {
+    const summary = toObjectSummary(object, objectType)
+
+    expect(summary.actions.updateCategory?.params?.owner?.type).toBe("userRef")
   })
 })

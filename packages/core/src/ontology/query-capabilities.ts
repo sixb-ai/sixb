@@ -7,9 +7,15 @@ import type { QueryScalarKind } from "../objects/query/ir"
 import { primitiveTraits } from "./primitives"
 import type { Property, Schema, ValueType } from "./types"
 
-/** `eq`/`neq`/`in`/`exists` predicates and `query.exact`. */
+/** `eq`/`neq`/`in`/`exists` predicates. */
 export function isExactSchema(schema: Schema): boolean {
   if (typeof schema === "string") return primitiveTraits(schema)?.exact === true
+  return schema.type === "enum"
+}
+
+/** `query.exact`, and through it `search.exact`: matched against search input. */
+export function isExactSearchSchema(schema: Schema): boolean {
+  if (typeof schema === "string") return primitiveTraits(schema)?.exactSearch === true
   return schema.type === "enum"
 }
 

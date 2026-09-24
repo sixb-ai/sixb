@@ -338,6 +338,7 @@ function predicateScalarOperation(
     case "eq":
     case "neq":
     case "in":
+    case "contains":
       return "equality"
     case "lt":
     case "lte":

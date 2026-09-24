@@ -122,4 +122,29 @@ describe("Atlas action params", () => {
       sourcePdf: "Expected an uploaded file.",
     })
   })
+
+  test("sends a user id as a user reference", () => {
+    const action = actionWithParam({
+      id: "assignee",
+      name: "Assignee",
+      schema: "userRef",
+      required: true,
+    })
+    const assignee = { type: "user", id: "usr_1" }
+
+    expect(describeActionParamInput("userRef")).toEqual({ kind: "userRef" })
+    expect(buildActionParams(action, { assignee: " usr_1 " })).toEqual({
+      params: { assignee },
+      errors: {},
+    })
+
+    const objectAction: ObjectAction = {
+      id: "assign",
+      params: { assignee: { type: "userRef", required: true } },
+    }
+    expect(buildObjectActionParams(objectAction, { assignee: "usr_1" })).toEqual({
+      params: { assignee },
+      errors: {},
+    })
+  })
 })

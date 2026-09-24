@@ -3,6 +3,7 @@ import { withFailureMessage } from "../../errors/failure-message"
 import type { ObjectFieldSchema, Schema, ValueType, ValueTypeRefSchema } from ".."
 import { isDecimalString } from "../decimal"
 import { OntologyValidationError } from "../errors"
+import { isUserRef } from "../user-ref"
 
 /** Recursive schema validator used by both object and link property validation. */
 export function validateSchemaValue(
@@ -75,6 +76,17 @@ export function validateSchemaValue(
           throw withFailureMessage(
             new OntologyValidationError(`[Sixb] Property ${path} must be a fileRef`),
             `Property ${diagnosticPath} must be a fileRef.`
+          )
+        }
+        return
+      }
+      case "userRef": {
+        if (!isUserRef(value)) {
+          throw withFailureMessage(
+            new OntologyValidationError(
+              `[Sixb] Property ${path} must be a user reference { type: "user", id }`
+            ),
+            `Property ${diagnosticPath} must be a user reference.`
           )
         }
         return

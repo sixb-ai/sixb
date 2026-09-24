@@ -8,7 +8,7 @@
 import type { DatasetDefinition } from "../datasets"
 import type { OntologyDefinitionCatalog } from "../ontology"
 import type { ObjectType, Property, ValueType } from "../ontology/types"
-import { resolveSemanticType } from "../ontology/validation"
+import { findPrimitiveSchema, resolveSemanticType } from "../ontology/validation"
 import { ProjectionValidationError } from "./errors"
 import {
   computeProjectionOwnership,
@@ -392,6 +392,20 @@ export function validateProjectionsAtStartup(
       if (property?.mode === "telemetry") {
         throw new ProjectionValidationError(
           `[Sixb] ${prefix}: source mappings cannot own telemetry property "${projection.objectTypeId}.${propId}"`
+        )
+      }
+      // A dataset column cannot prove that a user exists and is active, so user references stay
+      // out of source data until a projection can resolve them.
+      if (
+        property &&
+        findPrimitiveSchema(
+          property.schema,
+          ontology.getValueTypesById(),
+          (schema) => schema === "userRef"
+        )
+      ) {
+        throw new ProjectionValidationError(
+          `[Sixb] ${prefix}: property "${projection.objectTypeId}.${propId}" holds user references (ref.user()), which projections cannot map yet. Set it from an Action or a runtime edit instead.`
         )
       }
     }

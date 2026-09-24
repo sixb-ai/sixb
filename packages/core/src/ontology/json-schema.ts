@@ -101,6 +101,16 @@ function schemaJsonSchema(
           required: ["blobId", "digest", "sizeBytes"],
           additionalProperties: false,
         }
+      case "userRef":
+        return {
+          type: "object",
+          properties: {
+            type: { type: "string", enum: ["user"] },
+            id: { type: "string", minLength: 1 },
+          },
+          required: ["type", "id"],
+          additionalProperties: false,
+        }
       default:
         schema satisfies never
     }

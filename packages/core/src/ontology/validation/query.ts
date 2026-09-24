@@ -2,7 +2,7 @@ import { assertEmbeddingModelRef } from "../../models/embedding-model"
 import type { ObjectType, Property, Schema, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
 import {
-  isExactSchema,
+  isExactSearchSchema,
   isFacetSchema,
   isFilterableSchema,
   isSortableSchema,
@@ -83,7 +83,7 @@ function validatePropertyQueryMetadata(
     )
   }
 
-  if (query.exact && !isExactSchema(schema)) {
+  if (query.exact && !isExactSearchSchema(schema)) {
     throw new OntologyValidationError(
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables exact search, but its schema cannot be exact-matched`
     )

@@ -34,6 +34,7 @@ import { compileEditExecutionUnits, type EditExecutionUnit } from "./execution-u
 import { loadEditWorkingState } from "./load-state"
 import { applyEditOperation, type EditUndoJournal, undoEditJournal } from "./operations"
 import { stageEditPlan } from "./plan"
+import { loadReferencedUsers, type ReferencedUsers } from "./user-refs"
 import { authorizeVectorIndexingCommit } from "./vector-authority"
 import { commitVectorWrites } from "./vectors"
 import type { EditWorkingState } from "./working-state"
@@ -45,20 +46,22 @@ interface PreparedEditCommit {
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
   readonly execution: MaterializerExecution
+  /** Read before the transaction opens; see `user-refs.ts`. */
+  readonly users: ReferencedUsers
 }
 
 export async function commitEdits(
   context: MaterializerContext,
   raw: MaterializerCommand<OntologyEditCommit>
 ): Promise<EditCommitResult> {
-  const command = prepareEditCommit(context, raw)
+  const command = await prepareEditCommit(context, raw)
   return executeEditCommit(context, command)
 }
 
-function prepareEditCommit(
-  context: Pick<MaterializerContext, "projectId" | "clock">,
+async function prepareEditCommit(
+  context: Pick<MaterializerContext, "projectId" | "clock" | "ontology" | "storage">,
   raw: MaterializerCommand<OntologyEditCommit>
-): PreparedEditCommit {
+): Promise<PreparedEditCommit> {
   const input = normalizeOntologyEditCommit(raw.input)
   const idempotencyKey = editIdempotencyKey(input)
   const identity = createTimedCommitIdentity({
@@ -72,6 +75,7 @@ function prepareEditCommit(
     identity,
     origin: input.source,
     execution: prepareMaterializerExecution(context.projectId, raw.scope),
+    users: await loadReferencedUsers(context, input.operations),
   }
 }
 
@@ -290,7 +294,7 @@ function applyOneEditOperation(
   command: PreparedEditCommit
 ): OntologyOperationOutcome {
   try {
-    return applyEditOperation(context, state, operation, command.identity)
+    return applyEditOperation(context, state, operation, command.identity, command.users)
   } catch (error) {
     if (!isRecoverableEditValidation(command.input, error)) throw error
     return { id: operation.id, ok: false, error: { code: "validation", message: error.message } }
@@ -316,7 +320,14 @@ function applyEditOperationGroup(
   for (const operation of group) {
     let outcome: OntologyOperationOutcome
     try {
-      outcome = applyEditOperation(context, state, operation, command.identity, journal)
+      outcome = applyEditOperation(
+        context,
+        state,
+        operation,
+        command.identity,
+        command.users,
+        journal
+      )
     } catch (error) {
       if (!isRecoverableEditValidation(command.input, error)) throw error
       undoEditJournal(journal)

@@ -2,6 +2,7 @@ import { assertJsonValue, cloneJsonValue, type JsonValue } from "../../json"
 import type { ObjectFieldSchema, Property, Schema, ValueType } from ".."
 import { normalizeDecimalValue } from "../decimal"
 import { OntologyValidationError } from "../errors"
+import { isUserRef } from "../user-ref"
 import { isRecord, resolveValueTypeSchema } from "./schema"
 
 /**
@@ -52,6 +53,8 @@ export function normalizeSchemaValue(
       case "fileRef":
         assertJsonValue(value, path)
         return cloneJsonValue(value)
+      case "userRef":
+        return normalizeUserRef(value, path)
       default:
         // Untyped definitions can still carry an unknown string; it keeps the JSON pass-through.
         schema satisfies never
@@ -149,6 +152,16 @@ function normalizeDecimal(value: unknown, path: string): string {
   }
 }
 
+/** Rebuilds the reference in canonical field order so stored JSON compares and groups stably. */
+function normalizeUserRef(value: unknown, path: string): JsonValue {
+  if (!isUserRef(value)) {
+    throw new OntologyValidationError(
+      `[Sixb] Property ${path} must be a user reference { type: "user", id }`
+    )
+  }
+  return { type: "user", id: value.id }
+}
+
 function normalizeDateLike(value: unknown, path: string): Date {
   const date = value instanceof Date ? value : new Date(String(value))
   if (Number.isNaN(date.getTime())) {
@@ -185,6 +198,7 @@ export function coerceSchemaValueToTyped(
       case "decimal":
       case "boolean":
       case "fileRef":
+      case "userRef":
         return value
       default:
         schema satisfies never

@@ -30,6 +30,8 @@ interface DispatchActionRunInput {
   readonly createExecution: (executionId: string, runId: string) => Promise<CreateExecutionInput>
   /** Runs before payload comparison or retry so an existing run cannot cross authority owners. */
   readonly assertCanReuseExisting?: (storage: Storage, run: ActionRunRecord) => void | Promise<void>
+  /** Checks that hold only for a run this call creates; a replayed run keeps its accepted params. */
+  readonly assertNewRun?: () => Promise<void>
 }
 
 interface PreparedActionRun {
@@ -76,6 +78,7 @@ async function persistActionRun(
     return reuseActionRun(input, existing)
   }
 
+  await input.assertNewRun?.()
   const execution = await input.createExecution(`exec_${randomUUID()}`, request.runId)
   const queuedAt = new Date()
   try {

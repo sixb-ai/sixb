@@ -169,13 +169,32 @@ export function validatePropertyDefinitions(
 ): void {
   for (const [typeId, objectType] of objectTypesById) {
     for (const property of objectType.properties) {
+      assertNoObjectRefSchema(property, `Property '${typeId}.${property.id}'`, valueTypesById)
       if (property.mode !== "telemetry") continue
       // Telemetry stores time-series samples, not references, even when the reference is nested.
-      const primitive = findNonTelemetryPrimitive(property.schema, valueTypesById)
+      const primitive = findPrimitiveSchema(
+        property.schema,
+        valueTypesById,
+        (schema) => primitiveTraits(schema)?.telemetry === false
+      )
       if (primitive) {
         throw new OntologyValidationError(
           `[Sixb] Telemetry property '${property.id}' on '${typeId}' cannot use ${primitive}`
         )
+      }
+    }
+    for (const link of objectType.links) {
+      for (const property of link.properties ?? []) {
+        const path = `Link property '${typeId}.${link.id}.${property.id}'`
+        assertNoObjectRefSchema(property, path, valueTypesById)
+        // Link edits do not check that referenced users exist and are active.
+        if (
+          findPrimitiveSchema(property.schema, valueTypesById, (schema) => schema === "userRef")
+        ) {
+          throw new OntologyValidationError(
+            `[Sixb] ${path} cannot use ref.user(). User references are supported on object properties only.`
+          )
+        }
       }
     }
   }
@@ -207,26 +226,31 @@ export function validatePropertyValue(
   validateSchemaValue(property.schema, value, path, valueTypesById)
 }
 
-function findNonTelemetryPrimitive(
+/**
+ * First primitive anywhere inside `schema`, through arrays, maps, object fields, and value types,
+ * that `matches` accepts.
+ */
+export function findPrimitiveSchema(
   schema: Schema,
   valueTypesById: ReadonlyMap<string, ValueType>,
+  matches: (schema: PrimitiveSchema) => boolean,
   seenValueTypeIds = new Set<string>()
 ): PrimitiveSchema | undefined {
   if (typeof schema === "string") {
-    return primitiveTraits(schema)?.telemetry === false ? schema : undefined
+    return matches(schema) ? schema : undefined
   }
 
   if (schema.type === "array") {
-    return findNonTelemetryPrimitive(schema.items, valueTypesById, seenValueTypeIds)
+    return findPrimitiveSchema(schema.items, valueTypesById, matches, seenValueTypeIds)
   }
 
   if (schema.type === "map") {
-    return findNonTelemetryPrimitive(schema.valueSchema, valueTypesById, seenValueTypeIds)
+    return findPrimitiveSchema(schema.valueSchema, valueTypesById, matches, seenValueTypeIds)
   }
 
   if (schema.type === "object") {
     for (const field of Object.values(schema.properties)) {
-      const primitive = findNonTelemetryPrimitive(field.schema, valueTypesById, seenValueTypeIds)
+      const primitive = findPrimitiveSchema(field.schema, valueTypesById, matches, seenValueTypeIds)
       if (primitive) return primitive
     }
     return undefined
@@ -240,9 +264,58 @@ function findNonTelemetryPrimitive(
     seenValueTypeIds.add(schema.valueTypeId)
     const resolved = schema._resolved ?? valueTypesById.get(schema.valueTypeId)?.schema
     return resolved
-      ? findNonTelemetryPrimitive(resolved, valueTypesById, seenValueTypeIds)
+      ? findPrimitiveSchema(resolved, valueTypesById, matches, seenValueTypeIds)
       : undefined
   }
 
   return undefined
+}
+
+/**
+ * `ref(ObjectType)` is a parameter schema. Untyped definitions can still pass it to `prop()`,
+ * where it would be stored as an opaque record instead of a traversable relationship.
+ */
+function assertNoObjectRefSchema(
+  property: Property,
+  path: string,
+  valueTypesById: ReadonlyMap<string, ValueType>
+): void {
+  if (!containsObjectRefSchema(property.schema, valueTypesById)) return
+  throw new OntologyValidationError(
+    `[Sixb] ${path} uses ref(ObjectType), which is only for Action and Workflow parameters. Point to another object with link("${property.id}", ObjectType) instead.`
+  )
+}
+
+function containsObjectRefSchema(
+  schema: unknown,
+  valueTypesById: ReadonlyMap<string, ValueType>,
+  seen = new Set<unknown>()
+): boolean {
+  if (typeof schema !== "object" || schema === null || seen.has(schema)) return false
+  seen.add(schema)
+  const node = schema as Record<string, unknown>
+  switch (node.type) {
+    case "objectRef":
+      return true
+    case "array":
+      return containsObjectRefSchema(node.items, valueTypesById, seen)
+    case "map":
+      return containsObjectRefSchema(node.valueSchema, valueTypesById, seen)
+    case "object":
+      return (
+        typeof node.properties === "object" &&
+        node.properties !== null &&
+        Object.values(node.properties).some((field) =>
+          containsObjectRefSchema((field as { schema?: unknown })?.schema, valueTypesById, seen)
+        )
+      )
+    case "valueTypeRef":
+      return containsObjectRefSchema(
+        node._resolved ?? valueTypesById.get(String(node.valueTypeId))?.schema,
+        valueTypesById,
+        seen
+      )
+    default:
+      return false
+  }
 }

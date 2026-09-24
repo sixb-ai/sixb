@@ -2,6 +2,7 @@ import type {
   ObjectQuery,
   ObjectQueryPredicate,
   ObjectQuerySortField,
+  QueryScalarKind,
 } from "../../../objects/query"
 import {
   compareQueryScalarValues,
@@ -82,6 +83,7 @@ export const IN_MEMORY_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     decimal: { equality: true, ordering: true },
     date: { equality: true, ordering: true },
     timestamp: { equality: true, ordering: true },
+    userRef: { equality: true },
   },
   limits: {
     totalCount: true,
@@ -423,17 +425,25 @@ function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): bool
       return predicate.value ? exists : !exists
     }
     case "contains":
-      return containsValue(row.properties[predicate.propertyId], predicate.value)
+      return containsValue(
+        row.properties[predicate.propertyId],
+        predicate.value,
+        predicate.scalarKind
+      )
   }
 }
 
-function containsValue(actual: unknown, expected: unknown): boolean {
+function containsValue(
+  actual: unknown,
+  expected: unknown,
+  itemScalarKind: QueryScalarKind | undefined
+): boolean {
   if (typeof actual === "string" && typeof expected === "string") {
     return actual.includes(expected)
   }
 
   if (Array.isArray(actual)) {
-    return actual.some((item) => queryScalarValuesEqual(item, expected))
+    return actual.some((item) => queryScalarValuesEqual(item, expected, itemScalarKind))
   }
 
   if (isPlainObject(actual) && typeof expected === "string") {

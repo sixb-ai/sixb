@@ -312,7 +312,7 @@ describe("Share definitions", () => {
         target: objectRef(Proposal, "proposal-1"),
         ...runtimeFor(undefined, [nestedFileAction]),
       })
-    ).toThrow("Shared Action parameters cannot contain objectRef or fileRef in V1")
+    ).toThrow("Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1")
 
     const nestedObjectRefShare = defineShare("share-nested-object-ref", {
       target: Proposal,
@@ -324,7 +324,28 @@ describe("Share definitions", () => {
         target: objectRef(Proposal, "proposal-1"),
         ...runtimeFor(undefined, [nestedObjectRefAction]),
       })
-    ).toThrow("Shared Action parameters cannot contain objectRef or fileRef in V1")
+    ).toThrow("Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1")
+  })
+
+  test("rejects user references in shared Action params, even nested", () => {
+    const assignAction = defineAction("assign-reviewers")
+      .on(Proposal)
+      .params({ reviewers: param({ type: "array", items: ref.user() }) })
+      .writeback(async () => {})
+    const share = defineShare("share-assign-reviewers", {
+      target: Proposal,
+      grants: ({ target }) => [can.view(target), can.apply(assignAction).on(target)],
+    })
+
+    expect(() =>
+      compileShareAccessPlan({
+        share,
+        target: objectRef(Proposal, "proposal-1"),
+        ...runtimeFor(undefined, [assignAction]),
+      })
+    ).toThrow(
+      "parameter 'reviewers[]' uses userRef. Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1."
+    )
   })
 
   test("follows ValueType refs with a cycle guard when validating shared Action params", () => {
@@ -398,7 +419,7 @@ describe("Share definitions", () => {
         target: objectRef(Proposal, "proposal-1"),
         ...runtimeFor(undefined, [action]),
       })
-    ).toThrow("Shared Action parameters cannot contain objectRef or fileRef in V1")
+    ).toThrow("Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1")
   })
 
   test("reports malformed discovered grants as nominal Share errors", () => {

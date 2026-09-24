@@ -73,4 +73,4 @@ The URL is returned only when issued. Anyone holding it can use its permitted ac
 
 Use `revokeSharedAccessGrant` with the issued grant ID. Narrowing the Share definition also narrows existing links; widening it does not add permissions to links already issued.
 
-Revoke outstanding grants before permanently removing or reusing a Share definition's ID. Shared sessions currently do not support WebSockets, uploads, direct object writes, or action parameters containing object or file references.
+Revoke outstanding grants before permanently removing or reusing a Share definition's ID. Shared sessions currently do not support WebSockets, uploads, direct object writes, or action parameters containing object, file, or user references.

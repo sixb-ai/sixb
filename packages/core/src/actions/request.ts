@@ -14,6 +14,7 @@ import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
+import { assertParamUsersActive } from "../shared/params/user-refs"
 import {
   ActionRunError,
   type ActionRunRecord,
@@ -159,6 +160,18 @@ export async function requestAction(
     subject,
     params: actionParams,
     runId: request.runId,
+    assertNewRun: () =>
+      assertParamUsersActive({
+        auth: runtime.storage.auth,
+        projectId,
+        schemas: Object.fromEntries(
+          Object.entries(action.params).map(([paramId, param]) => [paramId, param.schema])
+        ),
+        values: actionParams,
+        valueTypesById: runtime.ontology.getValueTypesById(),
+        describe: (paramId) => `Action param '${pathPrefix}.${paramId}'`,
+        invalid: (message) => new OntologyValidationError(message),
+      }),
     ...(authorization.type === "delegated"
       ? {
           assertCanReuseExisting: async (

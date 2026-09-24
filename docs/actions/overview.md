@@ -57,6 +57,18 @@ Use `ref()` from `@sixb/core` for an object-reference input:
 Callers pass `{ objectTypeId: "Customer", primaryId: "cus-1" }` for `customer`. In a handler,
 read its ID from `params.customer.primaryId` or pass the reference to a link edit.
 
+Use `ref.user()` for an input that names a project member:
+
+```ts
+.params({
+  assignee: param(ref.user()),
+})
+```
+
+Callers pass `{ type: "user", id: "usr_1" }`. Sixb rejects the request when the user does not exist
+or is suspended. Store the value in a [user reference property](../ontology/properties.md#reference-a-user)
+or compare it with one.
+
 Other input types use the [property schemas](../ontology/properties.md#choose-a-schema), including
 enums and structured values. Date and timestamp inputs arrive in handlers as `Date` values.
 

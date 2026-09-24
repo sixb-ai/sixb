@@ -587,6 +587,9 @@ function parseFieldValue({
       }
     }
 
+    // The field holds a user id; the input carries the reference.
+    if (schema === "userRef") return { present: true, value: { type: "user", id: trimmed } }
+
     if (schema === "timestamp") {
       const timestamp = new Date(trimmed)
       if (Number.isNaN(timestamp.getTime())) {
@@ -737,6 +740,10 @@ function initialFormValueForSchema(schema: unknown, value: unknown): string | nu
     return isFileRef(value) ? JSON.stringify(value) : null
   }
 
+  if (schema === "userRef") {
+    return isRecord(value) && typeof value.id === "string" ? value.id : null
+  }
+
   if (schema === "date" && typeof value === "string") {
     return value.slice(0, 10)
   }
@@ -777,6 +784,7 @@ function inputTypeForPrimitive(schema: PrimitiveSchema): string {
 
 function placeholderForPrimitive(schema: PrimitiveSchema): string {
   if (schema === "uuid") return "00000000-0000-0000-0000-000000000000"
+  if (schema === "userRef") return "User ID"
   if (schema === "date") return "YYYY-MM-DD"
   if (schema === "timestamp") return "YYYY-MM-DDTHH:mm"
   if (schema === "integer" || schema === "double" || schema === "decimal") return "0"
@@ -809,6 +817,7 @@ type PrimitiveSchema =
   | "timestamp"
   | "uuid"
   | "fileRef"
+  | "userRef"
 
 type EnumSchema = {
   readonly type: "enum"
@@ -852,7 +861,8 @@ function isPrimitiveSchema(value: unknown): value is PrimitiveSchema {
     value === "date" ||
     value === "timestamp" ||
     value === "uuid" ||
-    value === "fileRef"
+    value === "fileRef" ||
+    value === "userRef"
   )
 }
 

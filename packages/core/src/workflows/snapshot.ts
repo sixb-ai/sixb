@@ -245,6 +245,7 @@ function snapshotSchemaValue(params: {
       case "decimal":
       case "boolean":
       case "fileRef":
+      case "userRef":
         return snapshotJsonValue(value, path)
       default:
         schema satisfies never
