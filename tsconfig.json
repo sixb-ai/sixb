@@ -39,6 +39,7 @@
       "@sixb/connector-mercury": ["./connectors/mercury/src/index.ts"],
       "@sixb/connector-meta": ["./connectors/meta/src/index.ts"],
       "@sixb/connector-microsoft": ["./connectors/microsoft/src/index.ts"],
+      "@sixb/connector-monday": ["./connectors/monday/src/index.ts"],
       "@sixb/connector-notion": ["./connectors/notion/src/index.ts"],
       "@sixb/connector-pandadoc": ["./connectors/pandadoc/src/index.ts"],
       "@sixb/connector-pennylane": ["./connectors/pennylane/src/index.ts"],
