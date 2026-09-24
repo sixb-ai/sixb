@@ -98,8 +98,7 @@ async function seedPersonalAccessToken(storage: InMemoryStorage, name = "CLI boo
     projectId,
     name,
     kind: "personal",
-    subjectType: "user",
-    subjectId: "usr_1",
+    subject: { type: "user", id: "usr_1" },
     tokenHash: credential.tokenHash,
     createdAt: new Date("2026-05-16T10:00:00.000Z"),
     expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -261,7 +260,9 @@ describe("access token management routes", () => {
     )
     expect(listTokensResponse.status).toBe(200)
     await expect(listTokensResponse.json()).resolves.toMatchObject({
-      accessTokens: [{ id: createdToken.accessToken.id, subjectId: "svc_cli" }],
+      accessTokens: [
+        { id: createdToken.accessToken.id, subject: { type: "serviceAccount", id: "svc_cli" } },
+      ],
     })
 
     const revokeTokenResponse = await app.fetch(
@@ -366,7 +367,9 @@ describe("access token management routes", () => {
     )
     expect(listTokensResponse.status).toBe(200)
     await expect(listTokensResponse.json()).resolves.toMatchObject({
-      accessTokens: [{ id: createdToken.accessToken.id, subjectId: "svc_agents" }],
+      accessTokens: [
+        { id: createdToken.accessToken.id, subject: { type: "serviceAccount", id: "svc_agents" } },
+      ],
     })
 
     const revokeTokenResponse = await app.fetch(

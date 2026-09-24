@@ -851,8 +851,8 @@ function assertCompletableDeviceAuthorization(
     !authorization.approvedUserId ||
     !authorization.approvedSessionId ||
     input.accessToken.projectId !== input.projectId ||
-    input.accessToken.subjectType !== "user" ||
-    input.accessToken.subjectId !== authorization.approvedUserId ||
+    input.accessToken.subject.type !== "user" ||
+    input.accessToken.subject.id !== authorization.approvedUserId ||
     input.accessToken.createdBySessionId !== authorization.approvedSessionId
   ) {
     throw new AuthStorageError(

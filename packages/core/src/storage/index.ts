@@ -199,7 +199,6 @@ export type {
 export { AiUsageStorageError, aggregateAiModelCallUsage, InMemoryAiUsageStorage } from "./ai-usage"
 export type {
   AccessTokenRecord,
-  AccessTokenSubjectType,
   AuthAccessTokenStore,
   AuthDeviceAuthorizationStore,
   AuthGroupMembershipStore,

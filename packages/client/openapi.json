@@ -1827,12 +1827,19 @@
                             "type": "string",
                             "enum": ["active", "expired", "revoked"]
                           },
-                          "subjectType": {
-                            "type": "string",
-                            "enum": ["user", "serviceAccount"]
-                          },
-                          "subjectId": {
-                            "type": "string"
+                          "subject": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount"]
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
                           },
                           "subjectLabel": {
                             "type": "string"
@@ -1867,8 +1874,7 @@
                           "name",
                           "kind",
                           "status",
-                          "subjectType",
-                          "subjectId",
+                          "subject",
                           "createdAt",
                           "expiresAt"
                         ],
@@ -2032,12 +2038,19 @@
                           "type": "string",
                           "enum": ["active", "expired", "revoked"]
                         },
-                        "subjectType": {
-                          "type": "string",
-                          "enum": ["user", "serviceAccount"]
-                        },
-                        "subjectId": {
-                          "type": "string"
+                        "subject": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         },
                         "subjectLabel": {
                           "type": "string"
@@ -2072,8 +2085,7 @@
                         "name",
                         "kind",
                         "status",
-                        "subjectType",
-                        "subjectId",
+                        "subject",
                         "createdAt",
                         "expiresAt"
                       ],
@@ -2209,12 +2221,19 @@
                           "type": "string",
                           "enum": ["active", "expired", "revoked"]
                         },
-                        "subjectType": {
-                          "type": "string",
-                          "enum": ["user", "serviceAccount"]
-                        },
-                        "subjectId": {
-                          "type": "string"
+                        "subject": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         },
                         "subjectLabel": {
                           "type": "string"
@@ -2249,8 +2268,7 @@
                         "name",
                         "kind",
                         "status",
-                        "subjectType",
-                        "subjectId",
+                        "subject",
                         "createdAt",
                         "expiresAt"
                       ],
@@ -2853,12 +2871,19 @@
                             "type": "string",
                             "enum": ["active", "expired", "revoked"]
                           },
-                          "subjectType": {
-                            "type": "string",
-                            "enum": ["user", "serviceAccount"]
-                          },
-                          "subjectId": {
-                            "type": "string"
+                          "subject": {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "enum": ["user", "serviceAccount"]
+                              },
+                              "id": {
+                                "type": "string"
+                              }
+                            },
+                            "required": ["type", "id"],
+                            "additionalProperties": false
                           },
                           "subjectLabel": {
                             "type": "string"
@@ -2893,8 +2918,7 @@
                           "name",
                           "kind",
                           "status",
-                          "subjectType",
-                          "subjectId",
+                          "subject",
                           "createdAt",
                           "expiresAt"
                         ],
@@ -3103,12 +3127,19 @@
                           "type": "string",
                           "enum": ["active", "expired", "revoked"]
                         },
-                        "subjectType": {
-                          "type": "string",
-                          "enum": ["user", "serviceAccount"]
-                        },
-                        "subjectId": {
-                          "type": "string"
+                        "subject": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         },
                         "subjectLabel": {
                           "type": "string"
@@ -3143,8 +3174,7 @@
                         "name",
                         "kind",
                         "status",
-                        "subjectType",
-                        "subjectId",
+                        "subject",
                         "createdAt",
                         "expiresAt"
                       ],
@@ -3306,12 +3336,19 @@
                           "type": "string",
                           "enum": ["active", "expired", "revoked"]
                         },
-                        "subjectType": {
-                          "type": "string",
-                          "enum": ["user", "serviceAccount"]
-                        },
-                        "subjectId": {
-                          "type": "string"
+                        "subject": {
+                          "type": "object",
+                          "properties": {
+                            "type": {
+                              "type": "string",
+                              "enum": ["user", "serviceAccount"]
+                            },
+                            "id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["type", "id"],
+                          "additionalProperties": false
                         },
                         "subjectLabel": {
                           "type": "string"
@@ -3346,8 +3383,7 @@
                         "name",
                         "kind",
                         "status",
-                        "subjectType",
-                        "subjectId",
+                        "subject",
                         "createdAt",
                         "expiresAt"
                       ],

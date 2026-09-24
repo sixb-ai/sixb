@@ -397,10 +397,10 @@ export class AuthRuntime {
 
     await this.touchAccessTokenLastUsed(storage, accessToken, request, now)
 
-    if (accessToken.subjectType === "user") {
+    if (accessToken.subject.type === "user") {
       const user = await storage.users.getById({
         projectId: this.projectId,
-        id: accessToken.subjectId,
+        id: accessToken.subject.id,
       })
 
       if (!user) {
@@ -431,7 +431,7 @@ export class AuthRuntime {
 
     const serviceAccount = await storage.serviceAccounts.getById({
       projectId: this.projectId,
-      id: accessToken.subjectId,
+      id: accessToken.subject.id,
     })
 
     if (!serviceAccount) {
@@ -604,8 +604,7 @@ export class AuthRuntime {
     const result = await storage.accessTokens.list({
       projectId: this.projectId,
       kind: "personal",
-      subjectType: "user",
-      subjectId: session.user.id,
+      subject: { type: "user", id: session.user.id },
       includeRevoked: true,
       order: "desc",
       limit: 100,
@@ -631,8 +630,7 @@ export class AuthRuntime {
       projectId: this.projectId,
       name: input.name,
       kind: "personal",
-      subjectType: "user",
-      subjectId: session.user.id,
+      subject: { type: "user", id: session.user.id },
       tokenHash: credential.tokenHash,
       groupIds,
       createdByPrincipal: session.principal,
@@ -660,8 +658,8 @@ export class AuthRuntime {
     if (
       !token ||
       token.kind !== "personal" ||
-      token.subjectType !== "user" ||
-      token.subjectId !== session.user.id
+      token.subject.type !== "user" ||
+      token.subject.id !== session.user.id
     ) {
       throw missingAccessTokenError(input.tokenId, this.projectId)
     }
@@ -778,8 +776,7 @@ export class AuthRuntime {
     const result = await storage.accessTokens.list({
       projectId: this.projectId,
       kind: "serviceAccount",
-      subjectType: "serviceAccount",
-      subjectId: serviceAccount.id,
+      subject: { type: "serviceAccount", id: serviceAccount.id },
       includeRevoked: true,
       order: "desc",
       limit: 100,
@@ -817,8 +814,7 @@ export class AuthRuntime {
       projectId: this.projectId,
       name: input.name,
       kind: "serviceAccount",
-      subjectType: "serviceAccount",
-      subjectId: serviceAccount.id,
+      subject: { type: "serviceAccount", id: serviceAccount.id },
       tokenHash: credential.tokenHash,
       groupIds,
       createdByPrincipal: session.principal,
@@ -850,8 +846,8 @@ export class AuthRuntime {
     if (
       !token ||
       token.kind !== "serviceAccount" ||
-      token.subjectType !== "serviceAccount" ||
-      token.subjectId !== serviceAccount.id
+      token.subject.type !== "serviceAccount" ||
+      token.subject.id !== serviceAccount.id
     ) {
       throw missingAccessTokenError(input.tokenId, this.projectId)
     }

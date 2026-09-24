@@ -620,8 +620,10 @@ export type ListAuthAccessTokensResponses = {
       name: string
       kind: "personal" | "serviceAccount"
       status: "active" | "expired" | "revoked"
-      subjectType: "user" | "serviceAccount"
-      subjectId: string
+      subject: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
       subjectLabel?: string
       groupIds?: Array<string>
       createdAt: string
@@ -688,8 +690,10 @@ export type CreateAuthPersonalAccessTokenResponses = {
       name: string
       kind: "personal" | "serviceAccount"
       status: "active" | "expired" | "revoked"
-      subjectType: "user" | "serviceAccount"
-      subjectId: string
+      subject: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
       subjectLabel?: string
       groupIds?: Array<string>
       createdAt: string
@@ -755,8 +759,10 @@ export type RevokeAuthAccessTokenResponses = {
       name: string
       kind: "personal" | "serviceAccount"
       status: "active" | "expired" | "revoked"
-      subjectType: "user" | "serviceAccount"
-      subjectId: string
+      subject: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
       subjectLabel?: string
       groupIds?: Array<string>
       createdAt: string
@@ -993,8 +999,10 @@ export type ListAuthServiceAccountAccessTokensResponses = {
       name: string
       kind: "personal" | "serviceAccount"
       status: "active" | "expired" | "revoked"
-      subjectType: "user" | "serviceAccount"
-      subjectId: string
+      subject: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
       subjectLabel?: string
       groupIds?: Array<string>
       createdAt: string
@@ -1069,8 +1077,10 @@ export type CreateAuthServiceAccountAccessTokenResponses = {
       name: string
       kind: "personal" | "serviceAccount"
       status: "active" | "expired" | "revoked"
-      subjectType: "user" | "serviceAccount"
-      subjectId: string
+      subject: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
       subjectLabel?: string
       groupIds?: Array<string>
       createdAt: string
@@ -1137,8 +1147,10 @@ export type RevokeAuthServiceAccountAccessTokenResponses = {
       name: string
       kind: "personal" | "serviceAccount"
       status: "active" | "expired" | "revoked"
-      subjectType: "user" | "serviceAccount"
-      subjectId: string
+      subject: {
+        type: "user" | "serviceAccount"
+        id: string
+      }
       subjectLabel?: string
       groupIds?: Array<string>
       createdAt: string

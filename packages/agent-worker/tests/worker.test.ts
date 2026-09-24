@@ -8348,8 +8348,7 @@ describe("AgentWorker", () => {
       const tokens = await auth.accessTokens.list({
         projectId: PROJECT_ID,
         kind: "serviceAccount",
-        subjectType: "serviceAccount",
-        subjectId: "svc_agent_assistant",
+        subject: { type: "serviceAccount", id: "svc_agent_assistant" },
         includeRevoked: true,
       })
       expect(tokens.accessTokens).toEqual([])

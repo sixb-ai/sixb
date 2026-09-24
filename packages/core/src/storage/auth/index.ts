@@ -3,7 +3,6 @@ export { AuthStorageError } from "./errors"
 export { InMemoryAuthStorage } from "./in-memory"
 export type {
   AccessTokenRecord,
-  AccessTokenSubjectType,
   AuthAccessTokenStore,
   AuthDeviceAuthorizationStore,
   AuthGroupMembershipStore,

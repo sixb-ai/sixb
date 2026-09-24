@@ -330,7 +330,7 @@ function isUsableUserAccessToken(
   userId: string,
   now: Date
 ): token is AccessTokenRecord {
-  if (!token || token.subjectType !== "user" || token.subjectId !== userId) return false
+  if (!token || !principalsEqual(token.subject, { type: "user", id: userId })) return false
   return token.revokedAt === undefined && token.expiresAt.getTime() > now.getTime()
 }
 

@@ -1,10 +1,10 @@
 import type { AccessTokenKind, AuthSessionAudience, Principal } from "../../auth"
+import type { AuthorizablePrincipal } from "../../execution/types"
 
 export type UserStatus = "active" | "suspended"
 export type ServiceAccountStatus = "active" | "suspended"
 export type InvitationStatus = "pending" | "accepted" | "revoked"
 export type GroupMembershipSource = "invitation" | "manual" | "agent"
-export type AccessTokenSubjectType = "user" | "serviceAccount"
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied" | "consumed"
 export const MAX_PENDING_DEVICE_AUTHORIZATIONS = 100
 
@@ -72,8 +72,7 @@ export interface AccessTokenRecord {
   readonly projectId: string
   readonly name: string
   readonly kind: AccessTokenKind
-  readonly subjectType: AccessTokenSubjectType
-  readonly subjectId: string
+  readonly subject: AuthorizablePrincipal
   readonly tokenHash: string
   /**
    * Optional group constraint. Undefined means "inherit every current group";
@@ -280,8 +279,7 @@ export interface CreateAuthAccessTokenInput {
   readonly projectId: string
   readonly name: string
   readonly kind: AccessTokenKind
-  readonly subjectType: AccessTokenSubjectType
-  readonly subjectId: string
+  readonly subject: AuthorizablePrincipal
   readonly tokenHash: string
   readonly groupIds?: readonly string[]
   readonly createdByPrincipal?: Principal
@@ -293,8 +291,7 @@ export interface CreateAuthAccessTokenInput {
 export interface ListAuthAccessTokensInput {
   readonly projectId: string
   readonly kind?: AccessTokenKind
-  readonly subjectType?: AccessTokenSubjectType
-  readonly subjectId?: string
+  readonly subject?: AuthorizablePrincipal
   readonly includeRevoked?: boolean
   readonly limit?: number
   readonly offset?: number

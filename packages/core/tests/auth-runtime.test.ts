@@ -219,8 +219,7 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       name: "Local CLI",
       kind: "personal",
-      subjectType: "user",
-      subjectId: "usr_1",
+      subject: { type: "user", id: "usr_1" },
       tokenHash: credential.tokenHash,
       groupIds: ["finance"],
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
@@ -278,8 +277,7 @@ describe("SixbHost auth runtime", () => {
       projectId: sixb.id,
       name: "Sandbox agent",
       kind: "serviceAccount",
-      subjectType: "serviceAccount",
-      subjectId: "svc_ingest",
+      subject: { type: "serviceAccount", id: "svc_ingest" },
       tokenHash: credential.tokenHash,
       createdAt: new Date("2026-05-16T10:00:00.000Z"),
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -352,8 +350,7 @@ describe("SixbHost auth runtime", () => {
     expect(personal.tokenValue).toStartWith("sixb_pat_tok_")
     expect(personal.accessToken).toMatchObject({
       kind: "personal",
-      subjectType: "user",
-      subjectId: "usr_1",
+      subject: { type: "user", id: "usr_1" },
       groupIds: [],
     })
 
@@ -376,8 +373,7 @@ describe("SixbHost auth runtime", () => {
     expect(serviceToken.tokenValue).toStartWith("sixb_sat_tok_")
     expect(serviceToken.accessToken).toMatchObject({
       kind: "serviceAccount",
-      subjectType: "serviceAccount",
-      subjectId: "svc_agent",
+      subject: { type: "serviceAccount", id: "svc_agent" },
     })
 
     await sixb.auth.revokeServiceAccountAccessToken(request, {
