@@ -534,7 +534,7 @@ Local DuckLake e2e tests:
 bun --filter @sixb/ducklake test:e2e:local
 ```
 
-Docker-backed PostgreSQL and MinIO/S3-compatible e2e tests:
+Docker-backed PostgreSQL and SeaweedFS (S3-compatible) e2e tests:
 
 ```bash
 bun --filter @sixb/ducklake test:e2e:remote

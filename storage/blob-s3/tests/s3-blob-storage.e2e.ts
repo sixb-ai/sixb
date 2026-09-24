@@ -186,6 +186,52 @@ describe("S3BlobStorage", () => {
     expect(await new Response(stream).text()).toBe("staged s3")
   })
 
+  test.each([
+    { tampering: "body", status: 400, code: "BadDigest" },
+    { tampering: "signature", status: 403, code: "SignatureDoesNotMatch" },
+  ] as const)("rejects a direct upload with a tampered $tampering", async ({
+    tampering,
+    status,
+    code,
+  }) => {
+    const storage = createStorage()
+    const uploadId = `upload_${randomUUID().replaceAll("-", "")}`
+    const body = "staged s3"
+    const digest = computeBlobDigest(encoder.encode(body))
+    const upload = await storage.createUpload({
+      uploadId,
+      sizeBytes: body.length,
+      expectedDigest: digest,
+      expiresAt: new Date(Date.now() + 60_000),
+    })
+    if (upload.strategy !== "direct-put") {
+      throw new Error("Expected direct-put upload strategy.")
+    }
+
+    const url = new URL(upload.url)
+    if (tampering === "signature") {
+      url.searchParams.set("X-Amz-Signature", "0".repeat(64))
+    }
+    // Negative control: removing the signature/body mutation must make this test fail.
+    // Keep the body length unchanged to test checksum verification, not Content-Length.
+    const response = await fetch(url, {
+      method: upload.method,
+      headers: upload.headers,
+      body: tampering === "body" ? "altered!!" : body,
+    })
+    expect(response.status).toBe(status)
+    expect(await response.text()).toContain(`<Code>${code}</Code>`)
+    await expect(
+      storage.completeUpload({
+        uploadId,
+        stagingKey: upload.stagingKey,
+        expectedSizeBytes: body.length,
+        expectedDigest: digest,
+      })
+    ).rejects.toBeInstanceOf(BlobStorageError)
+    await expect(storage.stat(`blob_${digest.slice("sha256:".length)}`)).resolves.toBeNull()
+  })
+
   test("refuses to complete a staged upload the backend never checksum-verified", async () => {
     const storage = createStorage()
     const uploadId = `upload_${randomUUID().replaceAll("-", "")}`

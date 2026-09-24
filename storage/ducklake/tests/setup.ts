@@ -1,13 +1,10 @@
 import { afterAll, beforeAll } from "bun:test"
 
 const composeFile = `${import.meta.dir}/../docker-compose.yml`
-
-let composeStarted = false
+const composeProject = `sixb-ducklake-${process.pid}`
 
 beforeAll(async () => {
-  await Bun.$`docker compose -f ${composeFile} up -d --wait postgres minio`.quiet()
-  composeStarted = true
-  await Bun.$`docker compose -f ${composeFile} run --rm createbuckets`.quiet()
+  await Bun.$`docker compose -p ${composeProject} -f ${composeFile} up -d --wait postgres s3`.quiet()
 
   process.env.SIXB_DUCKLAKE_POSTGRES_HOST = "127.0.0.1"
   process.env.SIXB_DUCKLAKE_POSTGRES_PORT = "54331"
@@ -21,9 +18,6 @@ beforeAll(async () => {
 }, 90_000)
 
 afterAll(async () => {
-  if (!composeStarted) {
-    return
-  }
-
-  await Bun.$`docker compose -f ${composeFile} down -v --remove-orphans`.quiet()
+  // Also reclaim this run's containers if startup only partially succeeded.
+  await Bun.$`docker compose -p ${composeProject} -f ${composeFile} down -v --remove-orphans`.quiet()
 }, 30_000)
