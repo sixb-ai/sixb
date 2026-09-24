@@ -6,6 +6,7 @@ export {
   LINKEDIN_RESTLI_PROTOCOL_VERSION,
   linkedin,
 } from "./linkedin"
+export { LinkedinMediaUploadError } from "./media-upload"
 export {
   LINKEDIN_ACCESS_TOKEN_URL,
   LINKEDIN_AUTHORIZATION_URL,
@@ -26,6 +27,7 @@ export type { OrganizationsResource } from "./resources/organizations"
 export type { PostsResource } from "./resources/posts"
 export type { ReactionsResource } from "./resources/reactions"
 export type { SocialMetadataResource } from "./resources/social-metadata"
+export { escapeLinkedinText } from "./text"
 export type * from "./types/index"
 export {
   organizationUrn,

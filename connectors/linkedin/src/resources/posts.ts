@@ -27,7 +27,7 @@ export interface PostsResource {
     author: LinkedinOrganizationUrn | LinkedinPersonUrn,
     options?: LinkedinPostListOptions
   ): AsyncIterable<LinkedinPost>
-  create(input: LinkedinCreatePostInput): Promise<LinkedinCreatedEntity>
+  create(input: LinkedinCreatePostInput): Promise<LinkedinCreatedEntity<LinkedinPostUrn>>
   update(post: LinkedinPostUrn, input: LinkedinUpdatePostInput): Promise<void>
   delete(post: LinkedinPostUrn): Promise<void>
 }
@@ -65,7 +65,12 @@ export function createPostsResource(http: LinkedinHttp): PostsResource {
     async create(input) {
       assertCreatePostInput(input)
       urnPath(input.author, "post author URN")
-      return http.create("posts", input)
+      const { id } = await http.create("posts", input)
+      if (!isPostUrn(id))
+        throw new Error(
+          "[SixbLinkedin] Created post response is missing a valid share or ugcPost URN."
+        )
+      return { id }
     },
     update(post, input) {
       if (Object.keys(input).length === 0) {
@@ -92,6 +97,11 @@ function assertCreatePostInput(input: LinkedinCreatePostInput): void {
     throw new Error("[SixbLinkedin] post lifecycleState must be PUBLISHED during creation.")
   }
 
+  const images = input.content?.multiImage?.images
+  if (images && (images.length < 2 || images.length > 20)) {
+    throw new Error("[SixbLinkedin] multiImage posts require between 2 and 20 images.")
+  }
+
   const poll = input.content?.poll
   if (!poll) return
 
@@ -114,6 +124,10 @@ function assertCreatePostInput(input: LinkedinCreatePostInput): void {
       "[SixbLinkedin] LinkedIn requires isVoterVisibleToAuthor to be true when it is provided."
     )
   }
+}
+
+function isPostUrn(value: string): value is LinkedinPostUrn {
+  return /^urn:li:(share|ugcPost):\d+$/.test(value)
 }
 
 function characterCount(value: string): number {
