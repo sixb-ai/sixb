@@ -46,6 +46,12 @@ export interface GoogleRequestOptions {
   readonly retryable?: boolean
 }
 
+export interface GoogleMediaOptions {
+  readonly query?: QueryParams
+  readonly headers?: HeadersInit
+  readonly signal?: AbortSignal
+}
+
 export interface GoogleUploadOptions {
   readonly query?: QueryParams
   /** JSON metadata body — sent as-is for metadata-only writes. */
@@ -71,6 +77,12 @@ export interface GoogleHttp {
     path: string,
     options?: { query?: QueryParams }
   ): Promise<Uint8Array>
+  /** Unconsumed successful response. The caller must consume or cancel its body. */
+  mediaResponse(
+    surface: GoogleSurface,
+    path: string,
+    options?: GoogleMediaOptions
+  ): Promise<Response>
   /**
    * Write with optional media bytes. No `content` → plain JSON request on the
    * API host. Small buffered content → one `multipart/related` request. Larger
@@ -87,6 +99,21 @@ export interface GoogleHttp {
 }
 
 export function createGoogleHttp(clients: GoogleHttpClients): GoogleHttp {
+  const mediaResponse = async (
+    surface: GoogleSurface,
+    path: string,
+    options?: GoogleMediaOptions
+  ): Promise<Response> => {
+    const response = await clients.api[surface].get(withQuery(path, options?.query), {
+      headers: options?.headers,
+      signal: options?.signal,
+    })
+    if (!response.ok) {
+      throw new GoogleApiError(response.status, await readErrorBody(response))
+    }
+    return response
+  }
+
   const json = async <T>(
     surface: GoogleSurface,
     method: HttpMethod,
@@ -115,16 +142,14 @@ export function createGoogleHttp(clients: GoogleHttpClients): GoogleHttp {
 
   return {
     json,
+    mediaResponse,
 
     async media(
       surface: GoogleSurface,
       path: string,
       options?: { query?: QueryParams }
     ): Promise<Uint8Array> {
-      const response = await clients.api[surface].get(withQuery(path, options?.query))
-      if (!response.ok) {
-        throw new GoogleApiError(response.status, await readErrorBody(response))
-      }
+      const response = await mediaResponse(surface, path, options)
       return new Uint8Array(await response.arrayBuffer())
     },
 

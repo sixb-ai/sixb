@@ -46,10 +46,50 @@ const { startPageToken } = await client.drive.changes.getStartPageToken()
 for await (const change of client.drive.changes.listAll({ pageToken: startPageToken })) { /* ... */ }
 ```
 
-Use `files.download()` for stored files such as CSV, XLSX, PDF, and images. It returns the file's
-raw bytes and supports Shared Drive files with `{ supportsAllDrives: true }` (plus
-`acknowledgeAbuse` when needed). Use `files.export()` instead for native Google Docs, Sheets, and
-Slides, choosing the desired export MIME type.
+Use `files.download()` for small stored files such as CSV, XLSX, PDF, images, and videos. It
+buffers the entire file and returns a `Uint8Array`. Use `files.downloadStream()` for large files:
+it returns a native `Response` as soon as the headers arrive, with an unread `body` stream and
+Google's status and headers. Both methods support Shared Drives with `supportsAllDrives: true`.
+
+```ts
+const response = await client.drive.files.downloadStream(fileId, {
+  supportsAllDrives: true,
+  signal: abortController.signal,
+})
+if (!response.body) throw new Error("Drive returned no file body")
+
+// The destination must also consume streams incrementally to keep memory bounded.
+const file = await blobs.put({
+  body: response.body,
+  mediaType: response.headers.get("content-type") ?? undefined,
+  signal: abortController.signal,
+})
+```
+
+Consume the response body once, or cancel it when abandoning the download. Calling
+`response.arrayBuffer()` or `response.blob()` buffers the file again. Native stream consumption
+provides backpressure and propagates read failures. The request signal, connector context signal,
+and configured `timeoutMs` apply to the fetch, including body consumption. HTTP errors throw
+`GoogleApiError` before a response is returned; retries and token refresh apply before delivery,
+not to interruptions while reading the body. There is no automatic download resume.
+
+For a partial download, pass `range: { start: 500, endInclusive: 999 }` (inclusive offsets), or
+`range: { start: 500 }` to read through EOF. Offsets must be non-negative safe integers, with the
+end at or after the start. This sends an HTTP `Range` header. Inspect `response.status` and
+`Content-Range` before appending bytes to an existing file: a server may ignore the range and
+return `200` with the whole file. Unsatisfiable ranges fail with a `GoogleApiError` (HTTP `416`).
+When implementing resume, also ensure the remote file has not changed between requests.
+
+Downloads require access to the file and an OAuth scope allowing content reads (for example,
+`drive.readonly`); metadata-only scopes do not suffice. Before downloading, check `capabilities.canDownload` via
+`files.get(..., { fields: "capabilities", supportsAllDrives: true })`. `acknowledgeAbuse` must only be enabled
+after the user acknowledges the risk; it does not bypass download permissions or restrictions.
+
+Use `files.export()` for native Google Docs, Sheets, and Slides, choosing the export MIME type.
+These download helpers use `files.get?alt=media`, not Google's long-running `files.download`
+operation. Google Vids requires that separate operation and is not supported by these helpers.
+See Google's [download guide](https://developers.google.com/workspace/drive/api/guides/manage-downloads)
+and [`files.get` reference](https://developers.google.com/workspace/drive/api/reference/rest/v3/files/get).
 
 ### Writing files
 
