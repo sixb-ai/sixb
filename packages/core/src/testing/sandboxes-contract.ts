@@ -129,6 +129,33 @@ export function runSandboxesContractSuite(
     })
 
     describe("working directory", () => {
+      // Regression check: remove the provider's cwd resolution, leaving only
+      // `options.cwd ?? this.workingDirectory`; these relative file reads must fail.
+      test.each([
+        [".", "root"],
+        ["nested", "child"],
+        ["./nested/..", "root"],
+      ])("resolves relative cwd %s against the workspace", async (cwd, expected) => {
+        const sandbox = await factory.create()
+        try {
+          await sandbox.writeFiles([
+            { path: "cwd-probe.txt", contents: "root" },
+            { path: "nested/cwd-probe.txt", contents: "child" },
+          ])
+
+          const result = await sandbox.runCommand("cat", ["cwd-probe.txt"], { cwd })
+          expect(result.exitCode).toBe(0)
+          expect(result.stdout).toBe(expected)
+
+          // A per-call override must not change the next command's default directory.
+          const next = await sandbox.runCommand("cat", ["cwd-probe.txt"])
+          expect(next.exitCode).toBe(0)
+          expect(next.stdout).toBe("root")
+        } finally {
+          await sandbox.destroy()
+        }
+      })
+
       test("pwd reflects the configured workingDirectory", async () => {
         const sandbox = await factory.create()
         try {

@@ -123,7 +123,7 @@ export class VercelSandbox implements Sandbox {
     const start = Date.now()
     const timeoutMs = options.timeout ?? this.defaultTimeoutMs
     const env = { ...this.sandboxEnv, ...(options.env ?? {}) }
-    const cwd = options.cwd ?? this.workingDirectory
+    const cwd = posix.resolve(this.workingDirectory, options.cwd ?? ".")
 
     if (options.signal?.aborted) {
       return abortedResult(start)

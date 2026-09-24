@@ -191,7 +191,7 @@ export class AppleContainerSandbox implements Sandbox {
       return await runAppleContainerCli({
         argv: buildExecArgv(this.cli, {
           id: this.id,
-          cwd: options.cwd ?? this.workingDirectory,
+          cwd: posix.resolve(this.workingDirectory, options.cwd ?? "."),
           command,
           args,
           env: { ...this.sandboxEnv, ...(options.env ?? {}) },

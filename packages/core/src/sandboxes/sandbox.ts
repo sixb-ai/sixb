@@ -16,7 +16,10 @@ export type SandboxStatus = "running" | "stopped" | "failed"
  * default set at factory.create(...).
  */
 export interface RunCommandOptions {
-  /** Overrides the sandbox-level workingDirectory for this call. */
+  /**
+   * Working directory for this call. Defaults to the sandbox's workingDirectory;
+   * relative paths resolve against it, while absolute paths override it.
+   */
   readonly cwd?: string
   /** Merged on top of sandbox-level env. Per-call wins on collision. */
   readonly env?: Readonly<Record<string, string>>

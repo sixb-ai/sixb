@@ -56,6 +56,43 @@ describe("AppleContainerSandbox lifecycle", () => {
     }
   })
 
+  // Regression check: restore `options.cwd ?? this.workingDirectory` in runCommand;
+  // the relative-path cases then fail to read the workspace files.
+  test("resolves command working directories before invoking the CLI", async () => {
+    const sandbox = await AppleContainerSandbox.create({
+      cli: await fakeCli(),
+      id: "cwd-test",
+      workingDirectory: dir,
+    })
+    try {
+      await sandbox.writeFiles([
+        { path: "cwd-probe.txt", contents: "root" },
+        { path: "nested/cwd-probe.txt", contents: "child" },
+      ])
+      for (const [cwd, expectedDirectory, expectedContent] of [
+        [undefined, dir, "root"],
+        [".", dir, "root"],
+        ["nested", `${dir}/nested`, "child"],
+        ["./nested/..", dir, "root"],
+        [`${dir}/nested`, `${dir}/nested`, "child"],
+      ] as const) {
+        const result = await sandbox.runCommand("cat", ["cwd-probe.txt"], { cwd })
+        expect(result.exitCode).toBe(0)
+        expect(result.stdout).toBe(expectedContent)
+        expect((await readCalls()).at(-1)).toEqual([
+          "exec",
+          "--workdir",
+          expectedDirectory,
+          "cwd-test",
+          "cat",
+          "cwd-probe.txt",
+        ])
+      }
+    } finally {
+      await sandbox.destroy()
+    }
+  })
+
   test("pins the production Node image to an immutable OCI index", () => {
     expect(DEFAULT_APPLE_CONTAINER_IMAGE).toMatch(/^node:22-bookworm@sha256:[a-f0-9]{64}$/)
   })
