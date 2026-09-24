@@ -1,4 +1,5 @@
 import { type FileRef, isFileRef } from "@sixb/core/blob-storage"
+import { describeValueSchema, fileRefAt, type ValueSchema } from "./valueSchema"
 
 export interface FileValueContext {
   readonly objectTypeId: string
@@ -12,21 +13,31 @@ export interface FileValueContext {
  * attachment spacing?) and the value renderer (one attachment vs. a list), so
  * the two can never disagree about what counts as a file. It also carries the
  * narrowed `FileRef`(s) so callers render without re-checking or casting.
+ *
+ * The declared schema decides: only a `fileRef` position (or an array of them)
+ * is a file, and only when the value really is one. A record that merely has a
+ * FileRef's shape in a property declared as something else is not.
  */
 export type FileValueClassification =
   | { readonly kind: "single"; readonly fileRef: FileRef }
   | { readonly kind: "array"; readonly fileRefs: readonly FileRef[] }
   | { readonly kind: "none" }
 
-export function classifyFileValue(value: unknown): FileValueClassification {
-  if (isFileRef(value)) {
-    return { kind: "single", fileRef: value }
+export function classifyFileValue(value: unknown, schema: ValueSchema): FileValueClassification {
+  const node = describeValueSchema(schema)
+  const fileRef = fileRefAt(node, value)
+  if (fileRef) {
+    return { kind: "single", fileRef }
   }
   // Bind to `unknown[]` (not the `any[]` that `Array.isArray` yields) so
   // `every(isFileRef)` genuinely narrows `items` to `FileRef[]`. This makes the
   // runtime guard load-bearing at the type level too: dropping it would fail to
   // compile rather than silently letting non-FileRef elements through.
-  if (Array.isArray(value)) {
+  if (
+    node.kind === "array" &&
+    describeValueSchema(node.items).kind === "fileRef" &&
+    Array.isArray(value)
+  ) {
     const items: readonly unknown[] = value
     if (items.length > 0 && items.every(isFileRef)) {
       return { kind: "array", fileRefs: items }

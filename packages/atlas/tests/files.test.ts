@@ -8,6 +8,7 @@ import {
   workflowNodeFileContentUrl,
   workflowRunFileContentUrl,
 } from "../src/lib/files"
+import { valueSchema } from "../src/lib/valueSchema"
 
 const fileRef: FileRef = {
   blobId: "blob_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -19,15 +20,46 @@ const fileRef: FileRef = {
 }
 
 describe("Atlas file helpers", () => {
-  test("classifies single, array, and non-file values with narrowed refs", () => {
-    expect(classifyFileValue(fileRef)).toEqual({ kind: "single", fileRef })
-    expect(classifyFileValue([fileRef])).toEqual({ kind: "array", fileRefs: [fileRef] })
-    expect(classifyFileValue([]).kind).toBe("none")
-    expect(classifyFileValue({ ...fileRef, sizeBytes: "7789" }).kind).toBe("none")
+  test("classifies declared file values with narrowed refs", () => {
+    const single = valueSchema("fileRef")
+    const list = valueSchema({ type: "array", items: "fileRef" })
+    expect(classifyFileValue(fileRef, single)).toEqual({ kind: "single", fileRef })
+    expect(classifyFileValue([fileRef], list)).toEqual({ kind: "array", fileRefs: [fileRef] })
+    expect(classifyFileValue([], list).kind).toBe("none")
+    expect(classifyFileValue({ ...fileRef, sizeBytes: "7789" }, single).kind).toBe("none")
     // A blobId that is not derivable from the digest is not a valid reference.
-    expect(classifyFileValue({ ...fileRef, blobId: "blob_tampered" }).kind).toBe("none")
+    expect(classifyFileValue({ ...fileRef, blobId: "blob_tampered" }, single).kind).toBe("none")
     // A mixed array is not treated as a file list.
-    expect(classifyFileValue([fileRef, "not-a-file"]).kind).toBe("none")
+    expect(classifyFileValue([fileRef, "not-a-file"], list).kind).toBe("none")
+  })
+
+  test("never classifies a FileRef-shaped value declared as something else", () => {
+    const record = valueSchema({
+      type: "object",
+      properties: Object.fromEntries(
+        Object.keys(fileRef).map((key) => [key, { schema: "string" }])
+      ),
+    })
+    expect(classifyFileValue(fileRef, record).kind).toBe("none")
+    expect(classifyFileValue([fileRef], valueSchema({ type: "array", items: "string" })).kind).toBe(
+      "none"
+    )
+    // A schema Atlas cannot read is not a license to guess.
+    expect(classifyFileValue(fileRef, valueSchema(undefined)).kind).toBe("none")
+    expect(
+      classifyFileValue(fileRef, valueSchema({ type: "valueTypeRef", valueTypeId: "Unknown" })).kind
+    ).toBe("none")
+  })
+
+  test("follows value type refs to a declared file", () => {
+    const attachment = valueSchema({ type: "valueTypeRef", valueTypeId: "Attachment" })
+    expect(classifyFileValue(fileRef, attachment).kind).toBe("none")
+    expect(
+      classifyFileValue(
+        fileRef,
+        valueSchema(attachment.schema, new Map([["Attachment", "fileRef"]]))
+      )
+    ).toEqual({ kind: "single", fileRef })
   })
 
   test("builds run-bound file content URLs", () => {

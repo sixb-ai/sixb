@@ -24,6 +24,14 @@ export type DatasetGridColumnMeta = {
 
 type Row = Record<string, unknown>
 
+/**
+ * The file in a cell, only when its column is declared `fileRef`. A `json`
+ * column holding a FileRef-shaped record holds a record, not a file.
+ */
+function declaredFileRef(meta: DatasetGridColumnMeta | undefined, value: unknown): FileRef | null {
+  return meta?.type.replace("?", "") === "fileRef" && isFileRef(value) ? value : null
+}
+
 type DatasetTableGridProps = {
   columns: string[]
   columnMeta: Map<string, DatasetGridColumnMeta>
@@ -79,6 +87,7 @@ export function DatasetTableGrid({
     column: string
     rowNumber: number
     value: unknown
+    fileRef: FileRef | null
   } | null>(null)
 
   const gridColumns = useMemo<DataTableColumn<Row>[]>(
@@ -94,8 +103,9 @@ export function DatasetTableGrid({
           size: defaultColumnWidth(meta),
           cell: (value) => {
             const nullish = isNullish(value)
-            if (isFileRef(value)) {
-              return <FileRefCell fileRef={value} />
+            const fileRef = declaredFileRef(meta, value)
+            if (fileRef) {
+              return <FileRefCell fileRef={fileRef} />
             }
 
             const text = nullish ? "null" : formatValue(value)
@@ -146,7 +156,12 @@ export function DatasetTableGrid({
           />
         }
         onCellClick={({ columnId, value, rowIndex }) =>
-          setExpandedCell({ column: columnId, rowNumber: offset + rowIndex + 1, value })
+          setExpandedCell({
+            column: columnId,
+            rowNumber: offset + rowIndex + 1,
+            value,
+            fileRef: declaredFileRef(columnMeta.get(columnId), value),
+          })
         }
       />
       <CellDetailDialog cell={expandedCell} onClose={() => setExpandedCell(null)} />
@@ -158,12 +173,12 @@ function CellDetailDialog({
   cell,
   onClose,
 }: {
-  cell: { column: string; rowNumber: number; value: unknown } | null
+  cell: { column: string; rowNumber: number; value: unknown; fileRef: FileRef | null } | null
   onClose: () => void
 }) {
   const [copied, setCopied] = useState(false)
   const text = cell ? prettyValue(cell.value) : ""
-  const fileRef = cell && isFileRef(cell.value) ? cell.value : null
+  const fileRef = cell?.fileRef ?? null
 
   const handleCopy = async () => {
     try {

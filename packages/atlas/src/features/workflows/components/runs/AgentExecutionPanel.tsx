@@ -5,6 +5,7 @@ import { ScrollText } from "lucide-react"
 import type { ReactNode } from "react"
 import { SixbFailureSummary } from "../../../../components/SixbFailureSummary"
 import { type FileLinkForPath, StructuredValue } from "../../../../components/StructuredValue"
+import type { ValueSchema } from "../../../../lib/valueSchema"
 import {
   formatDate,
   type WorkflowAgentNodeExecution,
@@ -18,6 +19,8 @@ export function AgentExecutionPanel({
   nodeInput,
   nodeOutput,
   nodeError,
+  inputSchema,
+  outputSchema,
   inputFileLinkForPath,
   outputFileLinkForPath,
   loading,
@@ -28,6 +31,9 @@ export function AgentExecutionPanel({
   nodeInput: WorkflowRunNode["input"]
   nodeOutput: WorkflowRunNode["output"]
   nodeError: WorkflowRunNode["error"]
+  /** Declared schemas of the recorded IO; omitted where nothing declares it. */
+  inputSchema?: ValueSchema
+  outputSchema?: ValueSchema
   inputFileLinkForPath: FileLinkForPath
   outputFileLinkForPath: FileLinkForPath
   loading: boolean
@@ -128,6 +134,7 @@ export function AgentExecutionPanel({
           <RunDebugSection label="Workflow input">
             <StructuredValue
               value={nodeInput}
+              schema={inputSchema}
               emptyLabel="No input"
               fileLinkForPath={inputFileLinkForPath}
               variant="debug"
@@ -158,6 +165,7 @@ export function AgentExecutionPanel({
           <RunDebugSection label="Structured output">
             <StructuredValue
               value={nodeOutput ?? null}
+              schema={outputSchema}
               emptyLabel="No structured output"
               fileLinkForPath={outputFileLinkForPath}
               variant="debug"
@@ -169,6 +177,7 @@ export function AgentExecutionPanel({
           <AgentExecutionMetadata data={data} execution={execution} />
           <AgentUsageDetails usage={data.usage} />
           {execution?.diagnostics?.length ? (
+            // Runtime diagnostics are not declared by anything; they render as open values.
             <RunDebugSection label="Diagnostics">
               <StructuredValue value={execution.diagnostics} variant="debug" />
             </RunDebugSection>

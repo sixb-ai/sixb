@@ -52,6 +52,7 @@ import {
   isUnconfiguredStorageError,
   UnrecordedHistoryState,
 } from "../components/UnrecordedHistoryState"
+import { useOntologyValueTypes } from "../features/objects/hooks/useOntologyValueTypes"
 import { SchemaShape } from "../features/workflows/components/nodes/SchemaShape"
 import { WorkflowInterventionPanel } from "../features/workflows/components/nodes/WorkflowInterventionPanel"
 import { RequestWorkflowRunDialog } from "../features/workflows/components/RequestWorkflowRunDialog"
@@ -78,8 +79,16 @@ import {
   type WorkflowRunDetail,
   type WorkflowRunNode,
   type WorkflowRunStatus,
+  workflowNodeIoSchemas,
+  workflowSchemas,
 } from "../features/workflows/utils/workflows"
 import { workflowNodeFileContentUrl, workflowRunFileContentUrl } from "../lib/files"
+import {
+  fieldRecordSchema,
+  type ValueSchema,
+  type ValueTypeSchemas,
+  valueSchema,
+} from "../lib/valueSchema"
 
 type WorkflowTrigger = WorkflowDetail["triggers"][number]
 
@@ -114,6 +123,12 @@ export function WorkflowDetailPage() {
     runId: activeRunId ?? undefined,
     enabled: activeRunId !== null && (runDetail ? isActiveRunStatus(runDetail.run.status) : true),
   })
+
+  const declaredSchemas = useMemo(
+    () => (workflowQuery.data ? workflowSchemas(workflowQuery.data) : []),
+    [workflowQuery.data]
+  )
+  const { valueTypes } = useOntologyValueTypes(declaredSchemas)
 
   const runNodesByFlowId = useMemo(() => {
     const map = new Map<string, WorkflowRunNode>()
@@ -218,6 +233,7 @@ export function WorkflowDetailPage() {
 
   const panelContent = renderPanel({
     workflow,
+    valueTypes,
     activeRunId,
     runQuery: { isLoading: runQuery.isLoading, isError: runQuery.isError, data: runDetail },
     runNodesByFlowId,
@@ -736,6 +752,7 @@ type RunResult = { run: WorkflowRunDetail; nodes: readonly WorkflowRunNode[] }
 
 function renderPanel(props: {
   workflow: WorkflowDetail
+  valueTypes: ValueTypeSchemas
   activeRunId: string | null
   runQuery: { isLoading: boolean; isError: boolean; data: RunResult | undefined }
   runNodesByFlowId: Map<string, WorkflowRunNode>
@@ -749,6 +766,7 @@ function renderPanel(props: {
 }): ReactNode {
   const {
     workflow,
+    valueTypes,
     activeRunId,
     runNodesByFlowId,
     selectedNodeId,
@@ -787,7 +805,14 @@ function renderPanel(props: {
     }
 
     if (selectedNodeId === "start") {
-      return <RunStartPanel run={runData.run} onBack={onCloseNode} onClose={onClose} />
+      return (
+        <RunStartPanel
+          run={runData.run}
+          inputSchema={valueSchema(fieldRecordSchema(workflow.input), valueTypes)}
+          onBack={onCloseNode}
+          onClose={onClose}
+        />
+      )
     }
 
     if (selectedNodeId) {
@@ -797,6 +822,7 @@ function renderPanel(props: {
         <RunNodePanel
           runNode={runNodesByFlowId.get(selectedNodeId)}
           definitionNode={definitionNode}
+          valueTypes={valueTypes}
           index={index}
           onBack={onCloseNode}
           onClose={onClose}
@@ -1321,10 +1347,12 @@ function RunStat({ label, value }: { label: string; value: string }) {
 
 function RunStartPanel({
   run,
+  inputSchema,
   onBack,
   onClose,
 }: {
   run: WorkflowRunDetail
+  inputSchema: ValueSchema
   onBack: () => void
   onClose: () => void
 }) {
@@ -1358,6 +1386,7 @@ function RunStartPanel({
         <PanelBlock label="Input" icon={<ArrowDownToLine className={SECTION_ICON} />}>
           <StructuredValue
             value={run.input}
+            schema={inputSchema}
             emptyLabel="No input"
             fileLinkForPath={fileLinkForPath}
           />
@@ -1370,17 +1399,24 @@ function RunStartPanel({
 function RunNodePanel({
   runNode,
   definitionNode,
+  valueTypes,
   index,
   onBack,
   onClose,
 }: {
   runNode: WorkflowRunNode | undefined
   definitionNode: WorkflowNode | undefined
+  valueTypes: ValueTypeSchemas
   index: number
   onBack: () => void
   onClose: () => void
 }) {
   const kind: WorkflowNodeData["kind"] = definitionNode ? definitionNode.type : "step"
+  // A node missing from the current definition has nothing declaring its IO,
+  // so its recorded values render as open values.
+  const io = definitionNode ? workflowNodeIoSchemas(definitionNode) : null
+  const inputSchema = io ? valueSchema(io.input, valueTypes) : undefined
+  const outputSchema = io?.output ? valueSchema(io.output, valueTypes) : undefined
   const title = runNode?.nodeKey ?? definitionNode?.key ?? "Node"
   const baseUrl = client.getConfig().baseUrl ?? window.location.origin
   const fileLinkForRoot = (root: "input" | "output") => (pathSegments: readonly string[]) => {
@@ -1446,6 +1482,8 @@ function RunNodePanel({
                 execution={agentExecutionQuery.data}
                 nodeInput={runNode.input}
                 nodeOutput={runNode.output}
+                inputSchema={inputSchema}
+                outputSchema={outputSchema}
                 nodeError={runNode.error}
                 inputFileLinkForPath={fileLinkForRoot("input")}
                 outputFileLinkForPath={fileLinkForRoot("output")}
@@ -1461,6 +1499,8 @@ function RunNodePanel({
             {runNode.nodeType === "agent" ? null : (
               <WorkflowNodeExecutionPanel
                 node={runNode}
+                inputSchema={inputSchema}
+                outputSchema={outputSchema}
                 inputFileLinkForPath={fileLinkForRoot("input")}
                 outputFileLinkForPath={fileLinkForRoot("output")}
               />

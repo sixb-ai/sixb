@@ -15,6 +15,14 @@ import {
 } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import { fileMediaLabel, formatFileSize } from "../lib/files"
+import {
+  childValueSchema,
+  describeValueSchema,
+  fileRefAt,
+  type ObjectRefValue,
+  objectRefAt,
+  type ValueSchema,
+} from "../lib/valueSchema"
 
 export interface FileContentLinks {
   readonly inlineUrl: string
@@ -25,34 +33,52 @@ export type FileLinkForPath = (path: readonly string[]) => FileContentLinks | nu
 
 export type StructuredValueVariant = "default" | "debug"
 
+/**
+ * Renders a JSON-like value as a readable tree.
+ *
+ * Pass `schema` whenever the value was declared with one (object properties,
+ * action params, workflow and node IO): object references and files are then
+ * recognized only where the schema declares them. Without a schema the value is
+ * open — arbitrary output nobody declared — and refs and files are recognized
+ * by shape, which is the only signal available.
+ */
 export function StructuredValue({
   value,
   emptyLabel = "No data",
   fileLinkForPath,
   path = [],
+  schema,
   variant = "default",
 }: {
   value: unknown
   emptyLabel?: string
   fileLinkForPath?: FileLinkForPath
   path?: readonly string[]
+  schema?: ValueSchema
   variant?: StructuredValueVariant
 }) {
   if (value === null || value === undefined) {
     return <p className="text-sm text-muted-foreground">{emptyLabel}</p>
   }
 
-  if (isObjectRef(value)) {
+  const position = readPosition(value, schema)
+
+  if (position.objectRef) {
+    const { objectTypeId, primaryId } = position.objectRef
     return variant === "debug" ? (
-      <DebugObjectRef objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+      <DebugObjectRef objectTypeId={objectTypeId} primaryId={primaryId} />
     ) : (
-      <ObjectRefChip objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+      <ObjectRefChip objectTypeId={objectTypeId} primaryId={primaryId} />
     )
   }
 
-  if (isFileRef(value)) {
+  if (position.fileRef) {
     return (
-      <FileRefValue fileRef={value} links={fileLinkForPath?.(path) ?? null} variant={variant} />
+      <FileRefValue
+        fileRef={position.fileRef}
+        links={fileLinkForPath?.(path) ?? null}
+        variant={variant}
+      />
     )
   }
 
@@ -66,6 +92,7 @@ export function StructuredValue({
               value={item}
               label={`${index + 1}`}
               path={[...path, String(index)]}
+              schema={position.child(String(index))}
               fileLinkForPath={fileLinkForPath}
               variant={variant}
             />
@@ -86,6 +113,7 @@ export function StructuredValue({
               value={item}
               label={name}
               path={[...path, name]}
+              schema={position.child(name)}
               fileLinkForPath={fileLinkForPath}
               variant={variant}
             />
@@ -95,42 +123,59 @@ export function StructuredValue({
     )
   }
 
-  return <RunValue value={value} path={path} fileLinkForPath={fileLinkForPath} variant={variant} />
+  return (
+    <RunValue
+      value={value}
+      path={path}
+      schema={schema}
+      fileLinkForPath={fileLinkForPath}
+      variant={variant}
+    />
+  )
 }
 
 function RunValue({
   label,
   value,
   path,
+  schema,
   fileLinkForPath,
   variant,
 }: {
   label?: string
   value: unknown
   path: readonly string[]
+  schema: ValueSchema | undefined
   fileLinkForPath?: FileLinkForPath
   variant: StructuredValueVariant
 }) {
-  if (isObjectRef(value)) {
+  const position = readPosition(value, schema)
+
+  if (position.objectRef) {
+    const { objectTypeId, primaryId } = position.objectRef
     if (variant === "debug") {
       return (
         <DebugField label={label}>
-          <DebugObjectRef objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+          <DebugObjectRef objectTypeId={objectTypeId} primaryId={primaryId} />
         </DebugField>
       )
     }
     return (
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {label ? <FieldLabel>{label}</FieldLabel> : null}
-        <ObjectRefChip objectTypeId={value.objectTypeId} primaryId={value.primaryId} />
+        <ObjectRefChip objectTypeId={objectTypeId} primaryId={primaryId} />
       </div>
     )
   }
 
-  if (isFileRef(value)) {
+  if (position.fileRef) {
     return (
       <DebugField label={label} stacked={variant === "default"}>
-        <FileRefValue fileRef={value} links={fileLinkForPath?.(path) ?? null} variant={variant} />
+        <FileRefValue
+          fileRef={position.fileRef}
+          links={fileLinkForPath?.(path) ?? null}
+          variant={variant}
+        />
       </DebugField>
     )
   }
@@ -153,6 +198,7 @@ function RunValue({
             <StructuredValue
               value={value}
               path={path}
+              schema={schema}
               fileLinkForPath={fileLinkForPath}
               variant={variant}
             />
@@ -181,6 +227,7 @@ function RunValue({
             <StructuredValue
               value={value}
               path={path}
+              schema={schema}
               fileLinkForPath={fileLinkForPath}
               variant={variant}
             />
@@ -484,6 +531,33 @@ function CopyButton({ text }: { text: string }) {
       )}
     </button>
   )
+}
+
+interface ValuePosition {
+  readonly objectRef: ObjectRefValue | null
+  readonly fileRef: FileRef | null
+  /** Schema of a child; `undefined` (open) below an open value. */
+  readonly child: (key: string) => ValueSchema | undefined
+}
+
+/**
+ * What a value is at its position. With a schema, only the schema decides;
+ * without one, the value's shape is all there is to go on.
+ */
+function readPosition(value: unknown, schema: ValueSchema | undefined): ValuePosition {
+  if (!schema) {
+    return {
+      objectRef: isObjectRef(value) ? value : null,
+      fileRef: isFileRef(value) ? value : null,
+      child: () => undefined,
+    }
+  }
+  const node = describeValueSchema(schema)
+  return {
+    objectRef: objectRefAt(node, value),
+    fileRef: fileRefAt(node, value),
+    child: (key) => childValueSchema(node, key),
+  }
 }
 
 function isObjectRef(value: unknown): value is { objectTypeId: string; primaryId: string } {

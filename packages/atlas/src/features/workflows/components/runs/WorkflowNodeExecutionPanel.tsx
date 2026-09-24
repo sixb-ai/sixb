@@ -2,15 +2,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@sixb/ui/components"
 import { ScrollText } from "lucide-react"
 import { SixbFailureSummary } from "../../../../components/SixbFailureSummary"
 import { type FileLinkForPath, StructuredValue } from "../../../../components/StructuredValue"
+import type { ValueSchema } from "../../../../lib/valueSchema"
 import { formatDate, type WorkflowRunNode } from "../../utils/workflows"
 import { RunDebugSection, RunMetadataRows, stringifyRunDebugValue } from "./RunDebugSection"
 
 export function WorkflowNodeExecutionPanel({
   node,
+  inputSchema,
+  outputSchema,
   inputFileLinkForPath,
   outputFileLinkForPath,
 }: {
   node: WorkflowRunNode
+  /** Declared schemas of the recorded IO; omitted where nothing declares it. */
+  inputSchema?: ValueSchema
+  outputSchema?: ValueSchema
   inputFileLinkForPath: FileLinkForPath
   outputFileLinkForPath: FileLinkForPath
 }) {
@@ -45,6 +51,7 @@ export function WorkflowNodeExecutionPanel({
         <TabsContent value="input" className="mt-0">
           <StructuredValue
             value={node.input}
+            schema={inputSchema}
             emptyLabel="No input"
             fileLinkForPath={inputFileLinkForPath}
             variant="debug"
@@ -54,6 +61,7 @@ export function WorkflowNodeExecutionPanel({
         <TabsContent value="output" className="mt-0">
           <StructuredValue
             value={node.output ?? null}
+            schema={outputSchema}
             emptyLabel={`No ${outputLabel.toLowerCase()}`}
             fileLinkForPath={outputFileLinkForPath}
             variant="debug"
