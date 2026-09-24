@@ -15,7 +15,7 @@ import {
 import type { LocalIsolation } from "./isolation/detect"
 import { LocalSandbox } from "./local-sandbox"
 
-export interface LocalSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+export interface LocalSandboxFactoryOptions<in out TParams extends ParamsConfig = ParamsConfig>
   extends SandboxConfig<TParams> {
   readonly isolation?: LocalIsolation
   readonly readOnlyPaths?: readonly string[]

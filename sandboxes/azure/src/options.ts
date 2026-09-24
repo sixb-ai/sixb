@@ -15,7 +15,7 @@ export interface AzureSandboxResources {
 }
 
 /** Configuration for an existing sandbox group. Provision the group and RBAC separately. */
-export interface AzureSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+export interface AzureSandboxFactoryOptions<in out TParams extends ParamsConfig = ParamsConfig>
   extends SandboxSessionOptions,
     SandboxConfig<TParams> {
   readonly subscriptionId: string

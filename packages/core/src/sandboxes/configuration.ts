@@ -36,6 +36,7 @@ export interface SandboxResolveContext<TParams = Record<string, unknown>> {
 
 // The recipe both declares and consumes this schema: keep it invariant instead of asking
 // TypeScript to compare the recursive ontology inference through callback variance.
+// Provider option interfaces must preserve this annotation when extending the config.
 export interface SandboxConfig<in out TParams extends ParamsConfig = ParamsConfig>
   extends SandboxEnvironment {
   readonly params?: TParams

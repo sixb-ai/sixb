@@ -48,7 +48,7 @@ export interface VercelSnapshotRetentionPolicy {
   readonly deleteEvicted?: boolean
 }
 
-export interface VercelSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+export interface VercelSandboxFactoryOptions<in out TParams extends ParamsConfig = ParamsConfig>
   extends SandboxConfig<TParams> {
   /** Stock Vercel runtime. Ignored with `image`/`snapshotId`. Sixb explicitly defaults to node24. */
   readonly runtime?: VercelSandboxRuntime | (string & {})

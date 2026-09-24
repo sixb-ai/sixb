@@ -20,7 +20,7 @@ import { DOCKER_HUB_REGISTRY_HOSTS } from "./network"
 import { probeSmolvm, type SmolvmProbe } from "./preflight"
 import { SmolvmSandbox } from "./smolvm-sandbox"
 
-export interface SmolvmSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+export interface SmolvmSandboxFactoryOptions<in out TParams extends ParamsConfig = ParamsConfig>
   extends SandboxConfig<TParams> {
   /**
    * Image the VM boots from. Defaults to the managed agent archive built by

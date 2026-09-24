@@ -22,8 +22,9 @@ import {
 } from "./cli"
 import { type AppleContainerProbe, probeAppleContainer } from "./preflight"
 
-export interface AppleContainerSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
-  extends SandboxConfig<TParams> {
+export interface AppleContainerSandboxFactoryOptions<
+  in out TParams extends ParamsConfig = ParamsConfig,
+> extends SandboxConfig<TParams> {
   /** For agent use, the image must include the worker's CLI runtime and shell utilities. */
   readonly image?: string
   /** Apple Container CLI binary name or absolute path. Defaults to "container". */
