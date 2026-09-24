@@ -1,5 +1,5 @@
 import type { TokenCredential } from "@azure/core-auth"
-import type { SandboxSessionOptions } from "@sixb/core/sandboxes"
+import type { ParamsConfig, SandboxConfig, SandboxSessionOptions } from "@sixb/core/sandboxes"
 
 /** An Azure identity credential; management credentials never enter the guest. */
 export type AzureSandboxCredential = TokenCredential
@@ -15,7 +15,9 @@ export interface AzureSandboxResources {
 }
 
 /** Configuration for an existing sandbox group. Provision the group and RBAC separately. */
-export interface AzureSandboxFactoryOptions extends SandboxSessionOptions {
+export interface AzureSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
+  extends SandboxSessionOptions,
+    SandboxConfig<TParams> {
   readonly subscriptionId: string
   readonly resourceGroup: string
   readonly sandboxGroup: string

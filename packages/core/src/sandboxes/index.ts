@@ -6,7 +6,11 @@ export type {
   SandboxResolveContext,
   SandboxSource,
 } from "./configuration"
-export { initializeSandboxEnvironment, sandboxProjectDirectory } from "./environment"
+export {
+  initializeSandboxEnvironment,
+  sandboxCreationEnvironment,
+  sandboxProjectDirectory,
+} from "./environment"
 export {
   SandboxError,
   SandboxIsolationUnavailableError,

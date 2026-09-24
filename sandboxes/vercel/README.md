@@ -44,7 +44,7 @@ retention on the factory.
 `factory.create({ ...options, persistence: { name } })` creates a named persistent sandbox;
 `factory.resume(name, options)` resumes it without a creation fallback. Both return
 the normal Sixb sandbox handle. Use `stop()` to save and `destroy()` only for deliberate permanent
-deletion. Conversation [workspace bindings](../../docs/agents/running-and-streaming.md#workspace-bindings)
+deletion. Conversation [sandbox bindings](../../docs/sandboxes/overview.md#keep-files-across-conversation-runs)
 enable this lifecycle; other runs remain ephemeral.
 
 ```ts
@@ -79,9 +79,8 @@ await resumed.stop()
   resume. Runtime options must be supplied again. Files can still contain anything guest code wrote;
   per-command env delivery is not a mechanism for hiding secrets from the guest.
 
-The built-in agent and AI workflow steps use a fresh sandbox for each run. This persistence API
-is for callers managing sandbox sessions directly; snapshot retention alone does not give agents
-a persistent workspace.
+Conversations opt in to persistence through a thread sandbox binding. Unbound runs, workflows and
+subagents remain ephemeral; snapshot retention alone does not enable conversation continuity.
 
 Migration: the former factory option `persistent` is rejected, including `false`. Remove it for
 ephemeral creation; use `create({ persistence: { name } })` for confirmed preservation and explicit
@@ -141,8 +140,8 @@ new VercelSandboxFactory({
 | --- | --- | --- |
 | `runtime` | `node24` | `"node26"`, `"node24"`, `"node22"`, or `"python3.13"`; ignored with `image`/`snapshotId`. Python alone cannot execute the portable agent CLI. |
 | `image` | — | Vercel Container Registry image reference. |
-| `snapshotId` | — | Boot from a Vercel Sandbox snapshot; mutually exclusive with `runtime`, `image`, and `source`. |
-| `source` | — | Git or tarball source for Vercel to clone/mount at create time. |
+| `snapshotId` | — | Boot from a Vercel Sandbox snapshot; mutually exclusive with `runtime` and `image`. |
+| `source` | — | Common Sixb HTTPS Git source; credentials and provider-specific clone options are not accepted. |
 | `resources` | Vercel default | `{ vcpus }`; memory is 2048 MB per vCPU. |
 | `ports` | `[]` | Ports to expose through Vercel sandbox domains. |
 | `sessionTimeoutMs` | Vercel default | Sandbox session lifetime; separate from Sixb's per-command timeout. |

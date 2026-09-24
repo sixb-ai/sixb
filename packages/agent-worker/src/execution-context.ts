@@ -1,4 +1,3 @@
-import type { Sixb } from "@sixb/core"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import type { AgentExecutionAuthorization } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
@@ -12,7 +11,7 @@ export function createAgentExecutionContext(input: {
   readonly runId: string
   readonly authorization: AgentExecutionAuthorization
   readonly authorPrincipal?: AgentExecutionContext["authorPrincipal"]
-}): AgentExecutionContext & { readonly sixb: Sixb } {
+}): AgentExecutionContext {
   const sixb = bindDurableAgentExecution(input.host, {
     execution: input.execution,
     ...(input.actorId === undefined ? {} : { actorId: input.actorId }),

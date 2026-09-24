@@ -226,7 +226,7 @@ describe("agent routes", () => {
       projectId: sixb.id,
       id: "recovery",
       ownerPrincipal: { type: "user", id: "workspace-owner" },
-      sandbox: { clientId: "acme" },
+      sandboxParams: { clientId: "acme" },
     })
     await createStartedRun(storage, {
       projectId: sixb.id,
@@ -235,17 +235,17 @@ describe("agent routes", () => {
       triggerMessageId: "trigger",
       execution: testExecution("private-owner-token"),
     })
-    await storage.agents.threads.transitionWorkspace({
+    await storage.agents.threads.transitionSandbox({
       projectId: sixb.id,
       id: "recovery",
       action: "acquire",
       runId: "recovery-run",
       executionToken: "private-owner-token",
-      generation: "old-generation",
+      name: "old-name",
       sourceFingerprint: "a".repeat(64),
     })
     const path = "/api/agent-threads/recovery/sandbox/recreate"
-    const body = { expectedGeneration: "old-generation" }
+    const body = { expectedSandboxName: "old-name" }
     expect((await app.fetch(jsonRequest(path, "POST", body, stranger.csrfHeaders))).status).toBe(
       404
     )
@@ -263,8 +263,8 @@ describe("agent routes", () => {
     const response = await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))
     expect(response.status).toBe(200)
     expect(await response.json()).toMatchObject({
-      sandbox: { clientId: "acme" },
-      workspaceState: { status: "new", initialized: false },
+      sandboxParams: { clientId: "acme" },
+      sandboxState: { status: "new", initialized: false },
     })
     expect((await app.fetch(jsonRequest(path, "POST", body, owner.csrfHeaders))).status).toBe(409)
   })
@@ -279,11 +279,11 @@ describe("agent routes", () => {
     )
     expect(created.status).toBe(201)
     expect(await created.json()).toMatchObject({
-      thread: { sandbox: { clientId: "acme" } },
+      thread: { sandboxParams: { clientId: "acme" } },
     })
     const list = await app.fetch(new Request("http://localhost/api/agent-threads"))
     expect(await list.json()).toMatchObject({
-      threads: [{ sandbox: { clientId: "acme" } }],
+      threads: [{ sandboxParams: { clientId: "acme" } }],
     })
     const run = await app.fetch(
       jsonRequest("/api/agent-threads/sandbox-thread/messages", "POST", { text: "Work" })

@@ -55,7 +55,7 @@ describe("Agent sandbox binding", () => {
     source.url = "https://github.com/other/app.git"
     commands.push("unexpected")
     const thread = await sixb.agent.threads.create({ sandbox: {} })
-    expect(thread.sandbox).toEqual({})
+    expect(thread.sandboxParams).toEqual({})
     expect(host.definitions).not.toHaveProperty("agentWorkspace")
     const resolved = await host.sandboxDefinition!.resolve({ params: {}, sixb })
     expect(resolved).toEqual({
@@ -69,7 +69,7 @@ describe("Agent sandbox binding", () => {
 
   test("supports a source-free environment", async () => {
     const { host, sixb } = setup({})
-    expect((await sixb.agent.threads.create({ sandbox: {} })).sandbox).toEqual({})
+    expect((await sixb.agent.threads.create({ sandbox: {} })).sandboxParams).toEqual({})
     expect(await host.sandboxDefinition!.resolve({ params: {}, sixb })).toEqual({})
   })
 
@@ -212,7 +212,7 @@ describe("Agent sandbox binding", () => {
     // No object is loaded at binding time. Current access must be checked by the run resolver.
     const client = objectRef(Client, "acme")
     const thread = await sixb.agent.threads.create({ sandbox: { client } })
-    expect(thread.sandbox).toEqual({ client })
+    expect(thread.sandboxParams).toEqual({ client })
     await expect(
       sixb.agent.threads.create({
         sandbox: { client: { objectTypeId: "Other", primaryId: "acme" } },
@@ -226,15 +226,19 @@ describe("Agent sandbox binding", () => {
     const input = { clientId: "acme" }
     const thread = await sixb.agent.threads.create({ id: "bound", sandbox: input })
     input.clientId = "changed"
-    expect(thread.sandbox).toEqual({ clientId: "acme" })
-    expect((await sixb.agent.threads.getById(thread.id))?.sandbox).toEqual(thread.sandbox)
+    expect(thread.sandboxParams).toEqual({ clientId: "acme" })
+    expect((await sixb.agent.threads.getById(thread.id))?.sandboxParams).toEqual(
+      thread.sandboxParams
+    )
     await expect(
       sixb.agent.threads.create({
         id: thread.id,
         sandbox: { clientId: "other" },
       })
     ).rejects.toMatchObject({ code: "duplicate_id" })
-    expect((await sixb.agent.threads.getById(thread.id))?.sandbox).toEqual(thread.sandbox)
+    expect((await sixb.agent.threads.getById(thread.id))?.sandboxParams).toEqual(
+      thread.sandboxParams
+    )
   })
 
   test("rejects absent configuration, unknown fields and invalid values without creating history", async () => {
@@ -285,12 +289,14 @@ describe("Agent sandbox binding", () => {
       sandbox: { requestedAt: date, note: null },
     })
     expect(calls).toBe(0)
-    expect(thread.sandbox).toEqual({ requestedAt: date.toISOString(), note: null })
+    expect(thread.sandboxParams).toEqual({ requestedAt: date.toISOString(), note: null })
     const definition = host.sandboxDefinition!
     expect(Object.isFrozen(definition.params.requestedAt)).toBe(true)
-    await definition.resolve({ params: thread.sandbox!, sixb })
+    await definition.resolve({ params: thread.sandboxParams!, sixb })
     expect(calls).toBe(1)
-    expect((await sixb.agent.threads.getById(thread.id))?.sandbox).toEqual(thread.sandbox)
+    expect((await sixb.agent.threads.getById(thread.id))?.sandboxParams).toEqual(
+      thread.sandboxParams
+    )
   })
 
   test("admits fresh workspaces but denies runs and retries after uncertain work", async () => {
@@ -303,13 +309,13 @@ describe("Agent sandbox binding", () => {
       id: admitted.run.id,
       execution: { token: "owner", queueLeaseExpiresAt: new Date("2099-01-01") },
     })
-    await storage.agents.threads.transitionWorkspace({
+    await storage.agents.threads.transitionSandbox({
       projectId: host.id,
       id: thread.id,
       action: "acquire",
       runId: admitted.run.id,
       executionToken: "owner",
-      generation: "test-generation",
+      name: "test-name",
       sourceFingerprint: "a".repeat(64),
     })
     await storage.agents.runs.finish({
@@ -344,11 +350,11 @@ describe("Agent sandbox binding", () => {
     })
     expect((await sixb.agent.runs.listForThread(thread.id))?.runs).toHaveLength(2)
     const visible = await sixb.agent.threads.getById(thread.id)
-    expect(visible?.workspaceState).not.toHaveProperty("owner")
+    expect(visible?.sandboxState).not.toHaveProperty("owner")
     const recreated = await sixb.agent.threads.recreateSandbox(thread.id, {
-      expectedGeneration: "test-generation",
+      expectedSandboxName: "test-name",
     })
-    expect(recreated.workspaceState?.status).toBe("new")
+    expect(recreated.sandboxState?.status).toBe("new")
   })
 
   test("keeps bindings private to the thread owner", async () => {

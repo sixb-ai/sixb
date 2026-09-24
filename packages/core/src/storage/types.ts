@@ -50,8 +50,8 @@ export type {
   AgentRunRecord,
   AgentStorage,
   AgentThreadRecord,
-  AgentThreadSandbox,
-  AgentWorkspaceState,
+  AgentThreadSandboxParams,
+  AgentThreadSandboxState,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,
@@ -72,7 +72,7 @@ export type {
   SubagentRunRecord,
   SubagentRunResult,
   SubagentRunSpec,
-  TransitionAgentWorkspaceInput,
+  TransitionAgentThreadSandboxInput,
 } from "./agents"
 export { AGENT_RUN_FAILURE_CODES, AgentStorageError } from "./agents"
 export type {

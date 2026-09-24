@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { WorkspaceRecovery } from "../src/components/WorkspaceRecovery"
+import { SandboxRecovery } from "../src/components/SandboxRecovery"
 
 test("offers explicit workspace recreation without performing it during render", () => {
   let calls = 0
   const html = renderToStaticMarkup(
-    createElement(WorkspaceRecovery, {
+    createElement(SandboxRecovery, {
       pending: false,
       error: false,
       onRecreate: () => {
@@ -14,15 +14,15 @@ test("offers explicit workspace recreation without performing it during render",
       },
     })
   )
-  expect(html).toContain("Workspace recovery required")
-  expect(html).toContain("Start with a fresh workspace")
+  expect(html).toContain("Sandbox recovery required")
+  expect(html).toContain("Start with a fresh sandbox")
   expect(html).toContain("Automatic resume is blocked")
   expect(calls).toBe(0)
 })
 
 test("disables duplicate recovery requests and exposes failures", () => {
   const html = renderToStaticMarkup(
-    createElement(WorkspaceRecovery, {
+    createElement(SandboxRecovery, {
       pending: true,
       error: true,
       onRecreate: () => {},

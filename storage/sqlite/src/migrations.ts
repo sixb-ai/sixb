@@ -99,10 +99,12 @@ import outboxPublicationOrderSql from "./migrations/040-outbox-publication-order
 import agentThreadWorkspacesSql from "./migrations/041-agent-thread-workspaces.sql" with {
   type: "text",
 }
-
 import vectorProfilesSql from "./migrations/042-vector-profiles.sql" with { type: "text" }
 import vectorIndexingSql from "./migrations/043-vector-indexing.sql" with { type: "text" }
 import vectorBatchingSql from "./migrations/044-vector-batching.sql" with { type: "text" }
+import agentThreadSandboxStateSql from "./migrations/045-agent-thread-sandbox-state.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -202,6 +204,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("042-vector-profiles", vectorProfilesSql),
     sqliteSql("043-vector-indexing", vectorIndexingSql),
     sqliteSql("044-vector-batching", vectorBatchingSql),
+    sqliteSql("045-agent-thread-sandbox-state", agentThreadSandboxStateSql),
   ],
 })
 

@@ -1,6 +1,15 @@
 import { AgentToolPublicError } from "@sixb/core"
 import type { AgentCompactionFailureCode } from "@sixb/core/agents/streams"
 
+/** Failed preservation is a failure even when the run was also cancelled. */
+export class AgentEnvironmentSaveError extends Error {
+  readonly name = "AgentEnvironmentSaveError"
+
+  constructor() {
+    super("[SixbAgentWorker] Sandbox save or cleanup could not be confirmed. Recovery is required.")
+  }
+}
+
 /** A thread could not complete its required preflight compaction. */
 export class AgentContextCompactionError extends Error {
   readonly name = "AgentContextCompactionError"

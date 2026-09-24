@@ -16,7 +16,7 @@ runAgentStorageContractSuite("SqliteAgentStorage", {
 
 describe("SqliteStorage agents", () => {
   test("preserves sandbox bindings when a durable store is reopened", async () => {
-    // Regression proof: omit sandbox_params from the thread INSERT or remove migration 037.
+    // Regression proof: omit sandbox_params from the thread INSERT or remove migration 041.
     const path = await mkdtemp(join(tmpdir(), "sixb-sandbox-binding-"))
     let storage = new SqliteStorage({ path })
     try {
@@ -25,7 +25,7 @@ describe("SqliteStorage agents", () => {
         id: "sandbox",
         projectId: "project",
         ownerPrincipal: { type: "user", id: "owner" },
-        sandbox: { clientId: "acme" },
+        sandboxParams: { clientId: "acme" },
       })
       await storage.agents.threads.create({
         id: "ephemeral",
@@ -36,11 +36,12 @@ describe("SqliteStorage agents", () => {
       storage = new SqliteStorage({ path })
       await migrateStorage(storage)
       expect(
-        (await storage.agents.threads.getById({ projectId: "project", id: "sandbox" }))?.sandbox
+        (await storage.agents.threads.getById({ projectId: "project", id: "sandbox" }))
+          ?.sandboxParams
       ).toEqual({ clientId: "acme" })
       expect(
         await storage.agents.threads.getById({ projectId: "project", id: "ephemeral" })
-      ).not.toHaveProperty("sandbox")
+      ).not.toHaveProperty("sandboxParams")
     } finally {
       storage.close()
       await rm(path, { recursive: true, force: true })

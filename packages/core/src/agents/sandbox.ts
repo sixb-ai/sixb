@@ -3,14 +3,14 @@ import { OntologyValidationError } from "../ontology/errors"
 import type { OntologyRegistry } from "../ontology/registry"
 import type { SandboxDefinition } from "../sandboxes/configuration"
 import { normalizeParams } from "../shared/params/validation"
-import type { AgentThreadSandbox } from "../storage/agents/types"
+import type { AgentThreadSandboxParams } from "../storage/agents/types"
 import { AgentRequestError } from "./errors"
 
 export function normalizeSandboxBinding(
   definition: Pick<SandboxDefinition, "params"> | undefined,
   input: unknown,
   ontology: OntologyRegistry
-): AgentThreadSandbox {
+): AgentThreadSandboxParams {
   if (!definition) {
     throw new AgentRequestError(
       "sandbox_not_configured",

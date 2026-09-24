@@ -1,11 +1,15 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test"
 import { chmod, mkdtemp, readFile, realpath, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { SandboxNotRunningError } from "@sixb/core"
 import { AppleContainerSandbox } from "../src/apple-container-sandbox"
-import { DEFAULT_APPLE_CONTAINER_IMAGE } from "../src/apple-container-sandbox-factory"
+import {
+  AppleContainerSandboxFactory,
+  DEFAULT_APPLE_CONTAINER_IMAGE,
+} from "../src/apple-container-sandbox-factory"
 import type { AppleContainerCliConfig } from "../src/cli"
+import * as preflight from "../src/preflight"
 
 let dir: string
 let logPath: string
@@ -20,6 +24,38 @@ afterEach(async () => {
 })
 
 describe("AppleContainerSandbox lifecycle", () => {
+  test.each([
+    undefined,
+    {},
+    { setup: ["touch override-marker"] },
+  ])("factory applies only the selected setup: %j", async (environment) => {
+    // Regression proof: initialize only options.environment; the default-marker case fails.
+    const cli = await fakeCli()
+    const probe = spyOn(preflight, "probeAppleContainer").mockReturnValue({
+      ok: true,
+      message: "Fake CLI",
+    })
+    try {
+      const factory = new AppleContainerSandboxFactory({
+        bin: cli.bin,
+        setup: ["touch default-marker"],
+      })
+      const sandbox = await factory.create({ workingDirectory: dir, environment })
+      try {
+        expect((await sandbox.runCommand("test", ["-f", "default-marker"])).exitCode).toBe(
+          environment === undefined ? 0 : 1
+        )
+        expect((await sandbox.runCommand("test", ["-f", "override-marker"])).exitCode).toBe(
+          environment?.setup ? 0 : 1
+        )
+      } finally {
+        await sandbox.destroy()
+      }
+    } finally {
+      probe.mockRestore()
+    }
+  })
+
   test("pins the production Node image to an immutable OCI index", () => {
     expect(DEFAULT_APPLE_CONTAINER_IMAGE).toMatch(/^node:22-bookworm@sha256:[a-f0-9]{64}$/)
   })

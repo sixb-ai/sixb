@@ -341,11 +341,11 @@ export function useAgentConversation({
   }
 
   const handleRecreateSandbox = () => {
-    if (!thread?.workspaceState || isRunning) return
+    if (!thread?.sandboxState || isRunning) return
     recreateSandbox.mutate(
       {
         path: { threadId: thread.id },
-        body: { expectedGeneration: thread.workspaceState.generation },
+        body: { expectedSandboxName: thread.sandboxState.name },
       },
       {
         onSuccess: () => {
@@ -389,18 +389,18 @@ export function useAgentConversation({
       ? pendingUser
       : null
 
-  const workspaceRecovery =
-    thread?.workspaceState &&
+  const sandboxRecovery =
+    thread?.sandboxState &&
     !isRunning &&
-    ["busy", "blocked", "unavailable"].includes(thread.workspaceState.status)
-      ? thread.workspaceState
+    ["busy", "blocked", "unavailable"].includes(thread.sandboxState.status)
+      ? thread.sandboxState
       : null
 
   return {
     agentLoading: agentQuery.isLoading,
-    workspaceRecovery,
-    recreatingWorkspace: recreateSandbox.isPending,
-    workspaceRecoveryError: recreateSandbox.isError,
+    sandboxRecovery,
+    recreatingSandbox: recreateSandbox.isPending,
+    sandboxRecoveryError: recreateSandbox.isError,
     recreateSandbox: handleRecreateSandbox,
     agentError: agentQuery.isError,
     models,

@@ -10,6 +10,14 @@ export function createAgentThreadId(): string {
   return `agt_thr_${randomUUID()}`
 }
 
+/** A fresh provider name, scoped to one project's thread; never a filesystem revision. */
+export function createAgentThreadSandboxName(projectId: string, threadId: string): string {
+  const digest = createHash("sha256")
+    .update(JSON.stringify([projectId, threadId, randomUUID()]))
+    .digest("hex")
+  return `sixb-sb-${digest}`
+}
+
 export function createAgentRunId(): string {
   return `agt_run_${randomUUID()}`
 }

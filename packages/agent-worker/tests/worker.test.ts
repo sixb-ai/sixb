@@ -54,6 +54,7 @@ import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import { workflowAgentStepActorId } from "@sixb/core/internal/workflows"
 import type {
   LanguageModel,
@@ -89,6 +90,7 @@ import { AGENT_RUNTIME_PROFILE } from "../src/agent-runtime/profile"
 import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
+import * as conversationPreparation from "../src/context-compaction"
 import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
 import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { finishRunOrThrow } from "../src/finalize"
@@ -1629,6 +1631,7 @@ async function buildAgentWorkerContext(
   })
   return {
     ...context,
+    sixb: agentSixb,
     blobStorage: agentSixb.blobs,
     connector: agentSixb.connector,
   }
@@ -1985,6 +1988,118 @@ function hangingCompactionModel(): WorkerTestModel {
 }
 
 describe("AgentWorker", () => {
+  test("does not save a partially prepared environment after losing the queue lease", async () => {
+    // Regression proof: remove the lease-loss guard in the environment preparation catch.
+    const controller = new AbortController()
+    const lost = new QueueDeliveryLeaseLostError("lease lost")
+    const sandbox = new RecordingSandbox("lost-during-preparation")
+    sandbox.writeFiles = async () => {
+      controller.abort(lost)
+      throw lost
+    }
+    const stop = spyOn(sandbox, "stop")
+    const host = buildSixb(
+      answerModel(),
+      new InMemoryBroker(),
+      {
+        create: async () => sandbox,
+        resume: async () => sandbox,
+      },
+      { sandboxConfig: { setup: [] } }
+    )
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    const run = await reserveRequestedRun(host, requested)
+    try {
+      await expect(
+        createConversationAgentEnvironment({
+          context: await buildAgentWorkerContext(host),
+          plan: executionPlanFor(host),
+          thread,
+          sandboxDefinition: host.sandboxDefinition,
+          run,
+          signal: controller.signal,
+        })
+      ).rejects.toBe(lost)
+      expect(stop).not.toHaveBeenCalled()
+      expect(sandbox.destroyed).toBe(false)
+      expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("busy")
+    } finally {
+      stop.mockRestore()
+    }
+  })
+
+  test.each([
+    "preflight",
+    "materialization",
+  ] as const)("preserves or quarantines the sandbox before terminalizing a failed %s", async (phase) => {
+    // Regression proof: remove the save in createConversationAgentEnvironment's catch.
+    let acquired = false
+    let modelCalls = 0
+    const sandbox = new RecordingSandbox("preparation-failure")
+    if (phase === "materialization") {
+      sandbox.writeFiles = async () => {
+        throw new Error("file transport failed")
+      }
+    }
+    const host = buildSixb(
+      answerModel(() => {
+        modelCalls++
+      }),
+      new InMemoryBroker(),
+      {
+        create: async () => {
+          acquired = true
+          return sandbox
+        },
+        resume: async () => sandbox,
+      },
+      { sandboxConfig: { setup: [] } }
+    )
+    attachSixbErrorReporter(host, () => {})
+    const sdk = createTestSixb(host)
+    const thread = await sdk.agent.threads.create({ sandbox: {} })
+    const requested = await requestAgent(host, { threadId: thread.id, text: "Work" })
+    const agents = agentStorageOf(host)
+    const prepare = conversationPreparation.prepareAgentConversationContext
+    const history = spyOn(
+      conversationPreparation,
+      "prepareAgentConversationContext"
+    ).mockImplementation(async (input) => {
+      if (phase === "preflight" && acquired) throw new Error("history unavailable")
+      return prepare(input)
+    })
+    const stop = sandbox.stop.bind(sandbox)
+    const preservation = spyOn(sandbox, "stop").mockImplementation(async () => {
+      expect(
+        await agents.runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+      ).toMatchObject({ status: "running" })
+      await stop()
+    })
+    const completion = observeQueueSettlement(host.queues.agents)
+    const worker = new AgentWorker(host, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await completion.wait()
+      expect(
+        await agents.runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
+      ).toMatchObject({ status: "failed" })
+      expect(await sdk.agent.threads.getById(thread.id)).toMatchObject({
+        activeRunId: null,
+        sandboxState: { status: phase === "preflight" ? "ready" : "blocked" },
+      })
+      expect(preservation).toHaveBeenCalledTimes(1)
+      expect(modelCalls).toBe(0)
+      expect(sandbox.destroyed).toBe(false)
+    } finally {
+      await worker.stop()
+      completion.restore()
+      history.mockRestore()
+      preservation.mockRestore()
+    }
+  })
+
   test("rejects an incompatible explicit network policy before acquiring state or compute", async () => {
     // Regression proof: widen an explicit none policy in workspaceNetwork; provider calls start.
     let providerCalls = 0
@@ -2018,7 +2133,7 @@ describe("AgentWorker", () => {
       ).toMatchObject({ status: "failed" })
       expect(providerCalls).toBe(0)
       expect(modelCalls).toBe(0)
-      expect((await sdk.agent.threads.getById(thread.id))?.workspaceState).toBeUndefined()
+      expect((await sdk.agent.threads.getById(thread.id))?.sandboxState).toBeUndefined()
     } finally {
       await worker.stop()
       completion.restore()
@@ -2065,20 +2180,18 @@ describe("AgentWorker", () => {
       })
       await worker.stop()
       const blocked = await sdk.agent.threads.getById(thread.id)
-      expect(blocked?.workspaceState?.status).toBe("blocked")
-      const oldGeneration = blocked!.workspaceState!.generation
+      expect(blocked?.sandboxState?.status).toBe("blocked")
+      const oldName = blocked!.sandboxState!.name
       const fresh = await sdk.agent.threads.recreateSandbox(thread.id, {
-        expectedGeneration: oldGeneration,
+        expectedSandboxName: oldName,
       })
-      expect(fresh.workspaceState?.generation).not.toBe(oldGeneration)
+      expect(fresh.sandboxState?.name).not.toBe(oldName)
       const sandbox = new RecordingSandbox("late-session")
       resolveCreate(sandbox)
       await Promise.resolve()
       expect(sandbox.commands).toHaveLength(0)
       expect(sandbox.destroyed).toBe(false)
-      expect((await sdk.agent.threads.getById(thread.id))?.workspaceState).toEqual(
-        fresh.workspaceState
-      )
+      expect((await sdk.agent.threads.getById(thread.id))?.sandboxState).toEqual(fresh.sandboxState)
     } finally {
       resolveCreate(new RecordingSandbox("cleanup-late"))
       await worker.stop()
@@ -2151,7 +2264,7 @@ describe("AgentWorker", () => {
         id: thread.id,
       })
       expect(current?.activeRunId).not.toBeNull()
-      expect(current?.workspaceState?.status).toBe("busy")
+      expect(current?.sandboxState?.status).toBe("busy")
       await stopSession()
     })
     try {
@@ -2167,6 +2280,8 @@ describe("AgentWorker", () => {
           )
           expect(observer).toHaveBeenCalledTimes(i + 1)
           expect(sandbox.status).toBe("stopped")
+          // The stored identity is the exact provider name, not an input to another derivation.
+          expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.name).toBe(names[i])
         } finally {
           await worker.stop()
           completion.restore()
@@ -2210,7 +2325,7 @@ describe("AgentWorker", () => {
           )
           expect(resumes).toBe(1)
           expect(creates).toBe(1)
-          expect((await sdk.agent.threads.getById(thread.id))?.workspaceState?.status).toBe("ready")
+          expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("ready")
         } finally {
           await worker.stop()
           completion.restore()
@@ -2225,7 +2340,7 @@ describe("AgentWorker", () => {
     true,
     false,
   ])("recreates confirmed lost state and retains reset context (Git source: %s)", async (withSource) => {
-    // Regression proof: disable the unavailable-state branch in openAgentWorkspace; run 2 fails.
+    // Regression proof: disable the unavailable-state branch in openThreadSandbox; run 2 fails.
     const sessions: RecordingSandbox[] = []
     const names: string[] = []
     const prompts: string[] = []
@@ -2292,7 +2407,7 @@ describe("AgentWorker", () => {
         ).toMatchObject({ status: "succeeded" })
         const state = (
           await agentStorageOf(host).threads.getById({ projectId: PROJECT_ID, id: thread.id })
-        )?.workspaceState
+        )?.sandboxState
         expect(state?.status).toBe("ready")
         if (i === 0) {
           expect(state?.resetAt).toBeUndefined()
@@ -2393,7 +2508,7 @@ describe("AgentWorker", () => {
     expect(creates).toBe(failure === "replacement-failed" ? 2 : 1)
     if (names.length > 1) expect(names[0]).not.toBe(names[1])
     expect(sandbox.destroyed).toBe(false)
-    expect((await sdk.agent.threads.getById(thread.id))?.workspaceState?.status).toBe("blocked")
+    expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("blocked")
   })
 
   test.each([
@@ -2446,7 +2561,7 @@ describe("AgentWorker", () => {
       expect(
         await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: requested.run.id })
       ).toMatchObject({ status: "failed" })
-      expect((await sdk.agent.threads.getById(thread.id))?.workspaceState?.status).toBe("blocked")
+      expect((await sdk.agent.threads.getById(thread.id))?.sandboxState?.status).toBe("blocked")
       await expect(
         requestAgent(host, { threadId: thread.id, text: "Again" })
       ).rejects.toMatchObject({ code: "sandbox_execution_unavailable" })
@@ -2459,7 +2574,7 @@ describe("AgentWorker", () => {
   })
 
   test("refuses a stored workspace without a recipe before model or sandbox work", async () => {
-    // Regression proof: remove the configuration guard in openAgentWorkspace.
+    // Regression proof: remove the configuration guard in openThreadSandbox.
     let modelCalls = 0
     const factory = new RecordingSandboxFactory()
     const model = answerModel(() => {
@@ -2471,7 +2586,7 @@ describe("AgentWorker", () => {
       projectId: PROJECT_ID,
       id: "sandbox-thread",
       ownerPrincipal: { type: "system", id: "system" },
-      sandbox: { clientId: "acme" },
+      sandboxParams: { clientId: "acme" },
     })
     const executionId = await createTestAgentExecution(sixb.storage, {
       projectId: PROJECT_ID,
@@ -7331,6 +7446,8 @@ describe("AgentWorker", () => {
 
       expect(run.status).toBe("succeeded")
       const createOptions = sandboxes.createOptions[0]
+      // Regression proof: omit environment: {} in provisionSandbox; this assertion fails.
+      expect(createOptions?.environment).toEqual({})
       expect(createOptions?.network).toMatchObject({
         mode: "restricted",
         allow: [{ name: "sixb-api" }],

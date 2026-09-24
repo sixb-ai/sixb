@@ -1084,7 +1084,8 @@ export type { ParamOptions } from "./shared/params/builders"
 export type { InferParams, ParamConfig, ParamsConfig } from "./shared/params/types"
 export type {
   AgentThreadRecord,
-  AgentThreadSandbox,
+  AgentThreadSandboxParams,
+  AgentThreadSandboxState,
   ListAgentThreadsResult,
 } from "./storage/agents"
 

@@ -55,6 +55,23 @@ afterEach(async () => {
 })
 
 describe("SmolvmSandbox functional (faithful guest emulation)", () => {
+  test("applies static setup and explicit empty overrides", async () => {
+    const factory = new SmolvmSandboxFactory({
+      bin,
+      image: "node:22-slim",
+      setup: ["touch setup-marker"],
+    })
+    for (const environment of [undefined, {}]) {
+      const sandbox = await factory.create({ environment })
+      try {
+        expect((await sandbox.runCommand("test", ["-f", "setup-marker"])).exitCode).toBe(
+          environment === undefined ? 0 : 1
+        )
+      } finally {
+        await sandbox.destroy()
+      }
+    }
+  })
   function factory(env?: Record<string, string>) {
     return new SmolvmSandboxFactory({ bin, image: "node:22-slim", timeout: 10_000, env })
   }

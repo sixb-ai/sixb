@@ -67,11 +67,11 @@ function serializeThread(thread: AgentThreadRecord): ReturnType<typeof AgentThre
     projectId: thread.projectId,
     ownerPrincipal: thread.ownerPrincipal,
     title: thread.title,
-    sandbox: thread.sandbox,
-    workspaceState: thread.workspaceState && {
-      generation: thread.workspaceState.generation,
-      status: thread.workspaceState.status,
-      initialized: thread.workspaceState.initialized,
+    sandboxParams: thread.sandboxParams,
+    sandboxState: thread.sandboxState && {
+      name: thread.sandboxState.name,
+      status: thread.sandboxState.status,
+      initialized: thread.sandboxState.initialized,
     },
     status: thread.status,
     activeRunId: thread.activeRunId,
@@ -442,14 +442,14 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         } catch (error) {
           if (error instanceof AgentStorageError && error.code === "invalid_state") {
             context.set.status = 409
-            return { error: "Workspace state changed or a run is active. Reload and try again." }
+            return { error: "Sandbox state changed or a run is active. Reload and try again." }
           }
           return handleAgentRouteError(error, context.set)
         }
       },
       {
         params: AgentThreadParamsSchema,
-        body: z.object({ expectedGeneration: z.string().min(1) }).strict(),
+        body: z.object({ expectedSandboxName: z.string().min(1) }).strict(),
         response: {
           200: AgentThreadSchema,
           400: ErrorResponseSchema,

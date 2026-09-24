@@ -10,6 +10,7 @@ import {
   type ParamsConfig,
   type SandboxConfig,
   sandboxConfig,
+  sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
 import { AppleContainerSandbox } from "./apple-container-sandbox"
 import {
@@ -77,6 +78,7 @@ export class AppleContainerSandboxFactory<const TParams extends ParamsConfig = R
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    const environment = sandboxCreationEnvironment(this.configuration, options)
     if (options.persistence !== undefined) {
       throw new SandboxError("[Sandbox] apple-container does not support persistent sandboxes.")
     }
@@ -88,14 +90,12 @@ export class AppleContainerSandboxFactory<const TParams extends ParamsConfig = R
       internalNetworkPrefix: this.defaults.internalNetworkPrefix,
       setupTimeoutMs: this.defaults.setupTimeoutMs,
       timeout: options.timeout ?? this.defaults.timeout,
-      network: options.network ?? this.defaults.network,
-      env: { ...(this.defaults.env ?? {}), ...(options.env ?? {}) },
+      network: options.network ?? this.configuration.network,
+      env: { ...this.configuration.env, ...options.env },
       workingDirectory: options.workingDirectory,
     })
     try {
-      return options.environment
-        ? await initializeSandboxEnvironment(sandbox, options.environment, options.signal)
-        : sandbox
+      return await initializeSandboxEnvironment(sandbox, environment, options.signal)
     } catch (error) {
       await sandbox.destroy()
       throw error

@@ -1,17 +1,17 @@
 import type { Database } from "bun:sqlite"
 import {
-  snapshotAgentThreadSandbox,
-  transitionAgentWorkspace,
+  snapshotAgentThreadSandboxParams,
+  transitionAgentThreadSandbox,
 } from "@sixb/core/internal/agent-run-storage-provider"
 import {
   AgentStorageError,
   type AgentThreadRecord,
+  type AgentThreadSandboxState,
   type AgentThreadStore,
-  type AgentWorkspaceState,
   type CreateAgentThreadInput,
   type ListAgentThreadsInput,
   type ListAgentThreadsResult,
-  type TransitionAgentWorkspaceInput,
+  type TransitionAgentThreadSandboxInput,
 } from "@sixb/core/storage"
 import type { SqliteValue } from "../run-list-query"
 import { isUniqueConstraintError } from "../storage-errors"
@@ -26,7 +26,9 @@ import {
 export class SqliteAgentThreadStore implements AgentThreadStore {
   constructor(private readonly db: Database) {}
 
-  async transitionWorkspace(input: TransitionAgentWorkspaceInput): Promise<AgentWorkspaceState> {
+  async transitionSandbox(
+    input: TransitionAgentThreadSandboxInput
+  ): Promise<AgentThreadSandboxState> {
     return this.db
       .transaction(() => {
         const run =
@@ -36,9 +38,9 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
                 .query("SELECT * FROM agent_runs WHERE project_id = ? AND id = ?")
                 .get(input.projectId, input.runId) as AgentRunRow | null)
         const thread = this.requireThread(input.projectId, input.id)
-        const state = transitionAgentWorkspace(thread, run ? rowToRunRecord(run) : null, input)
+        const state = transitionAgentThreadSandbox(thread, run ? rowToRunRecord(run) : null, input)
         this.db
-          .query("UPDATE agent_threads SET workspace_state = ? WHERE project_id = ? AND id = ?")
+          .query("UPDATE agent_threads SET sandbox_state = ? WHERE project_id = ? AND id = ?")
           .run(JSON.stringify(state), input.projectId, input.id)
         return state
       })
@@ -47,7 +49,9 @@ export class SqliteAgentThreadStore implements AgentThreadStore {
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
     const sandboxParams =
-      input.sandbox === undefined ? null : JSON.stringify(snapshotAgentThreadSandbox(input.sandbox))
+      input.sandboxParams === undefined
+        ? null
+        : JSON.stringify(snapshotAgentThreadSandboxParams(input.sandboxParams))
     const createdAt = input.createdAt ?? new Date()
     const updatedAt = input.updatedAt ?? createdAt
 

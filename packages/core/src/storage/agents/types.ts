@@ -11,11 +11,12 @@ import type { LanguageModelRef } from "../../models"
 export type AgentThreadStatus = "active" | "archived"
 
 /** Immutable, non-secret application input. Never store resolved env or credentials here. */
-export type AgentThreadSandbox = Readonly<Record<string, JsonValue>>
+export type AgentThreadSandboxParams = Readonly<Record<string, JsonValue>>
 
 /** Worker-owned state, independent from the immutable application binding. */
-export interface AgentWorkspaceState {
-  readonly generation: string
+export interface AgentThreadSandboxState {
+  /** Exact name passed to the provider. Replacements always receive a fresh name. */
+  readonly name: string
   readonly status: "new" | "busy" | "ready" | "blocked" | "unavailable"
   readonly sourceFingerprint?: string
   readonly initialized: boolean
@@ -25,7 +26,7 @@ export interface AgentWorkspaceState {
   readonly owner?: { readonly runId: string; readonly executionToken: string }
 }
 
-export type TransitionAgentWorkspaceInput = {
+export type TransitionAgentThreadSandboxInput = {
   readonly projectId: string
   readonly id: string
 } & (
@@ -33,28 +34,28 @@ export type TransitionAgentWorkspaceInput = {
       readonly action: "acquire"
       readonly runId: string
       readonly executionToken: string
-      readonly generation: string
+      readonly name: string
       readonly sourceFingerprint: string
     }
   | {
       readonly action: "replace"
       readonly runId: string
       readonly executionToken: string
-      readonly generation: string
-      readonly nextGeneration: string
+      readonly name: string
+      readonly nextName: string
     }
   | {
       readonly action: "settle"
       readonly runId: string
       readonly executionToken: string
-      readonly generation: string
+      readonly name: string
       readonly status: "ready" | "blocked" | "unavailable"
       readonly initialized: boolean
     }
   | {
       readonly action: "recreate"
-      readonly expectedGeneration: string
-      readonly generation: string
+      readonly expectedSandboxName: string
+      readonly name: string
     }
 )
 
@@ -64,8 +65,8 @@ export interface AgentThreadRecord {
   /** Who owns/opened the thread. Reuses the canonical auth principal (gains `agent` later for free). */
   readonly ownerPrincipal: Principal
   readonly title?: string
-  readonly sandbox?: AgentThreadSandbox
-  readonly workspaceState?: AgentWorkspaceState
+  readonly sandboxParams?: AgentThreadSandboxParams
+  readonly sandboxState?: AgentThreadSandboxState
   readonly status: AgentThreadStatus
   /** Single-flight anchor: the id of the one run currently allowed to write, or `null` when idle. */
   readonly activeRunId: string | null
@@ -80,7 +81,7 @@ export interface CreateAgentThreadInput {
   readonly projectId: string
   readonly ownerPrincipal: Principal
   readonly title?: string
-  readonly sandbox?: AgentThreadSandbox
+  readonly sandboxParams?: AgentThreadSandboxParams
   readonly status?: AgentThreadStatus
   readonly createdAt?: Date
   readonly updatedAt?: Date
@@ -468,7 +469,7 @@ export interface CreateAgentContextCheckpointInput {
 
 export interface AgentThreadStore {
   /** Atomic run-fenced transition, or explicit idle-thread recreation. */
-  transitionWorkspace(input: TransitionAgentWorkspaceInput): Promise<AgentWorkspaceState>
+  transitionSandbox(input: TransitionAgentThreadSandboxInput): Promise<AgentThreadSandboxState>
   create(input: CreateAgentThreadInput): Promise<AgentThreadRecord>
   getById(params: { projectId: string; id: string }): Promise<AgentThreadRecord | null>
   list(input: ListAgentThreadsInput): Promise<ListAgentThreadsResult>

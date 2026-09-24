@@ -78,6 +78,7 @@ export {
   createAgentRunExecutionToken,
   createAgentRunId,
   createAgentThreadId,
+  createAgentThreadSandboxName,
   createSubagentExecutionId,
   createSubagentRunId,
 } from "./ids"
