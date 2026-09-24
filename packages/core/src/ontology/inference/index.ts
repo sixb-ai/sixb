@@ -14,6 +14,7 @@ import type {
 } from ".."
 import type { DecimalValue } from "../decimal"
 import type { QuantitativeTypeId, UnitsOf } from "../units"
+import type { UserRef } from "../user-ref"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 
@@ -68,6 +69,7 @@ type InferObjectFields<
 
 interface PrimitiveSchemaValueMap {
   fileRef: FileRef
+  userRef: UserRef
   string: string
   uuid: string
   boolean: boolean

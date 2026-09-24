@@ -512,6 +512,10 @@ function sqliteFacetValue(valueType: string | null, value: unknown): unknown {
   if (valueType === "true") return true
   if (valueType === "false") return false
   if (valueType === "null") return null
+  // json_extract returns structured values, such as user references, as JSON text.
+  if ((valueType === "object" || valueType === "array") && typeof value === "string") {
+    return JSON.parse(value)
+  }
   return value
 }
 

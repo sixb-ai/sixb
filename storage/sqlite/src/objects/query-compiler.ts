@@ -963,9 +963,13 @@ function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
       return negatePredicate(item)
     }
     case "eq":
-      return compileEqualityPredicate(predicate.propertyId, "eq", predicate.value)
+      return predicate.scalarKind === "userRef"
+        ? compileUserRefInPredicate(predicate.propertyId, [predicate.value])
+        : compileEqualityPredicate(predicate.propertyId, "eq", predicate.value)
     case "neq":
-      return compileEqualityPredicate(predicate.propertyId, "neq", predicate.value)
+      return predicate.scalarKind === "userRef"
+        ? negatePredicate(compileUserRefInPredicate(predicate.propertyId, [predicate.value]))
+        : compileEqualityPredicate(predicate.propertyId, "neq", predicate.value)
     case "lt":
     case "lte":
     case "gt":
@@ -977,15 +981,66 @@ function compilePredicate(predicate: ObjectQueryPredicate): CompiledPredicate {
       }
     }
     case "in":
-      return compileInPredicate(predicate.propertyId, predicate.values)
+      return predicate.scalarKind === "userRef"
+        ? compileUserRefInPredicate(predicate.propertyId, predicate.values)
+        : compileInPredicate(predicate.propertyId, predicate.values)
     case "exists": {
       const sql = `${jsonTypeExpression()} IS NOT NULL`
       const item: CompiledPredicate = { sql, args: [jsonPath(predicate.propertyId)] }
       return predicate.value ? item : negatePredicate(item)
     }
     case "contains":
-      return compileContainsPredicate(predicate.propertyId, predicate.value)
+      return predicate.scalarKind === "userRef"
+        ? compileUserRefContainsPredicate(predicate.propertyId, predicate.value)
+        : compileContainsPredicate(predicate.propertyId, predicate.value)
   }
+}
+
+/**
+ * User references are JSON objects, so they match on both fields rather than on serialized text,
+ * which would depend on key order.
+ */
+function compileUserRefInPredicate(
+  propertyId: string,
+  values: readonly unknown[]
+): CompiledPredicate {
+  const path = jsonPath(propertyId)
+  const ids = values.flatMap((value) => {
+    const id = userRefId(value)
+    return id === undefined ? [] : [id]
+  })
+  const clauses: string[] = []
+  const args: SqliteValue[] = []
+
+  if (values.includes(null)) {
+    clauses.push(`${jsonTypeExpression()} = 'null'`)
+    args.push(path)
+  }
+  if (ids.length > 0) {
+    clauses.push(
+      `(${jsonValueExpression()} = 'user' AND ${jsonValueExpression()} IN (${ids.map(() => "?").join(", ")}))`
+    )
+    args.push(`${path}.type`, `${path}.id`, ...ids)
+  }
+  if (clauses.length === 0) return { sql: "0 = 1", args: [] }
+
+  return { sql: `(${clauses.join(" OR ")})`, args }
+}
+
+function compileUserRefContainsPredicate(propertyId: string, value: unknown): CompiledPredicate {
+  const id = userRefId(value)
+  if (id === undefined) return { sql: "0 = 1", args: [] }
+  const path = jsonPath(propertyId)
+  return {
+    sql: `(${jsonTypeExpression()} = 'array' AND EXISTS (SELECT 1 FROM json_each(properties, ?) AS item WHERE item.type = 'object' AND json_extract(item.value, '$.type') = 'user' AND json_extract(item.value, '$.id') = ?))`,
+    args: [path, path, id],
+  }
+}
+
+function userRefId(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const { type, id } = value as { type?: unknown; id?: unknown }
+  return type === "user" && typeof id === "string" ? id : undefined
 }
 
 function negatePredicate(predicate: CompiledPredicate): CompiledPredicate {

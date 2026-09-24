@@ -20,6 +20,8 @@ export type QueryScalarKind =
   | "decimal"
   | "date"
   | "timestamp"
+  /** A `{ type: "user", id }` value, equal when both fields are. */
+  | "userRef"
 
 export type ObjectQuery =
   | ObjectQueryStart
@@ -214,6 +216,11 @@ export interface ObjectQueryPredicateContains {
   op: "contains"
   propertyId: string
   value: unknown
+  /**
+   * Core-resolved scalar schema of the array's items when the property is an array; never
+   * authored by callers. String substring and map key matches carry none.
+   */
+  scalarKind?: QueryScalarKind
 }
 
 export type ObjectQuerySortField =

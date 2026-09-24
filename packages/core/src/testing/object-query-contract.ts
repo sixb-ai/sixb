@@ -10,10 +10,11 @@ import {
   normalizeObjectQuery,
   type ObjectQuery,
   ObjectQueryPlanningError,
+  type ObjectQueryPredicate,
   planObjectQuery,
   validateObjectQuery,
 } from "../objects/query"
-import { defineObjectType, link, OntologyRegistry, prop, stringEnum } from "../ontology"
+import { defineObjectType, link, OntologyRegistry, prop, ref, stringEnum } from "../ontology"
 import type { ObjectStorage, QueryObjectsResult } from "../storage/objects"
 import type { Storage } from "../storage/types"
 import {
@@ -133,8 +134,29 @@ const DefaultTextChild = defineObjectType({
   search: { defaultText: ["alias"] },
 })
 
+const Task = defineObjectType({
+  id: "ContractTask",
+  name: "Contract Task",
+  properties: [
+    prop("id", "string", {
+      required: true,
+      primary: true,
+      query: { searchable: true, sortable: true },
+    }),
+    prop("assignee", ref.user(), {
+      nullable: true,
+      query: { searchable: true, filterable: true, facet: true },
+    }),
+    prop(
+      "reviewers",
+      { type: "array", items: ref.user() },
+      { query: { searchable: true, filterable: true } }
+    ),
+  ],
+})
+
 export const objectQueryContractOntology = new OntologyRegistry({
-  sources: [Room, Device, Zone, Asset, LaptopAsset, DefaultTextBase, DefaultTextChild],
+  sources: [Room, Device, Zone, Asset, LaptopAsset, DefaultTextBase, DefaultTextChild, Task],
 })
 
 /**
@@ -151,6 +173,7 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
 ): void {
   const withStorage = async (
     body: (context: {
+      readonly storage: TStorage
       readonly objects: TStorage["objects"]
       readonly fixture: MaterializerTestFixture
     }) => Promise<void>
@@ -158,6 +181,7 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
     const storage = await options.createStorage()
     try {
       await body({
+        storage,
         objects: storage.objects,
         fixture: createMaterializerTestFixture({
           projectId,
@@ -832,6 +856,101 @@ export function runObjectQueryProviderContractSuite<TStorage extends Storage>(
         if (exists.plan.mode !== "pushdown") return
         expect(exists.plan.query.kind).toBe("text")
         expect(exists.exists).toBe(true)
+      })
+    })
+
+    test("matches user references on type and id, and groups facets by user", async () => {
+      await withStorage(async ({ storage: complete, objects: storage, fixture }) => {
+        const auth = complete.auth
+        if (!auth) throw new Error("The object query contract requires auth storage.")
+        for (const id of ["usr_alice", "usr_bob", "usr_carol"]) {
+          await auth.users.create({ projectId, id, email: `${id}@example.com` })
+        }
+        const alice = { type: "user", id: "usr_alice" }
+        const bob = { type: "user", id: "usr_bob" }
+        const carol = { type: "user", id: "usr_carol" }
+        await fixture.seed({
+          objects: [
+            objectSeed(Task.id, "t1", { assignee: alice, reviewers: [bob] }),
+            objectSeed(Task.id, "t2", { assignee: alice, reviewers: [bob, carol] }),
+            objectSeed(Task.id, "t3", { assignee: alice, reviewers: [] }),
+            objectSeed(Task.id, "t4", { assignee: bob, reviewers: [alice] }),
+            objectSeed(Task.id, "t5", { assignee: bob, reviewers: [carol] }),
+            objectSeed(Task.id, "t6", { assignee: null, reviewers: [] }),
+            objectSeed(Task.id, "t7", { reviewers: [] }),
+          ],
+        })
+
+        const ids = async (predicate: ObjectQueryPredicate) => {
+          const result = await executeObjectQuery(
+            {
+              projectId,
+              query: {
+                kind: "sort",
+                fields: [{ kind: "property", propertyId: "id" }],
+                input: {
+                  kind: "filter",
+                  predicate,
+                  input: { kind: "start", objectTypeId: Task.id },
+                },
+              },
+            },
+            { ontology: objectQueryContractOntology, storage }
+          )
+          expect(result.plan.mode).toBe("pushdown")
+          return result.objects.map((object) => object.primaryId)
+        }
+
+        expect(await ids({ op: "eq", propertyId: "assignee", value: alice })).toEqual([
+          "t1",
+          "t2",
+          "t3",
+        ])
+        // Field order is not part of the value.
+        expect(
+          await ids({ op: "eq", propertyId: "assignee", value: { id: "usr_alice", type: "user" } })
+        ).toEqual(["t1", "t2", "t3"])
+        expect(await ids({ op: "neq", propertyId: "assignee", value: alice })).toEqual([
+          "t4",
+          "t5",
+          "t6",
+          "t7",
+        ])
+        expect(await ids({ op: "in", propertyId: "assignee", values: [bob, null] })).toEqual([
+          "t4",
+          "t5",
+          "t6",
+        ])
+        expect(await ids({ op: "exists", propertyId: "assignee", value: false })).toEqual(["t7"])
+        expect(await ids({ op: "contains", propertyId: "reviewers", value: bob })).toEqual([
+          "t1",
+          "t2",
+        ])
+        expect(await ids({ op: "contains", propertyId: "reviewers", value: carol })).toEqual([
+          "t2",
+          "t5",
+        ])
+        expect(await ids({ op: "contains", propertyId: "reviewers", value: alice })).toEqual(["t4"])
+
+        const facets = await facetObjects(
+          {
+            projectId,
+            query: { kind: "start", objectTypeId: Task.id },
+            facets: [{ propertyId: "assignee", limit: 10 }],
+          },
+          { ontology: objectQueryContractOntology, storage }
+        )
+        expect(facets.plan.mode).toBe("pushdown")
+        expect(facets.facets).toEqual([
+          {
+            propertyId: "assignee",
+            buckets: [
+              { value: alice, count: 3 },
+              { value: bob, count: 2 },
+              { value: null, count: 1 },
+            ],
+          },
+        ])
       })
     })
 

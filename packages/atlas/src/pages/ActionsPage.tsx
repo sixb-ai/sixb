@@ -756,6 +756,7 @@ function ActionParamFields({
                 className="min-h-24 font-mono text-xs"
               />
             ) : (
+              // A user reference is entered as a user id until the member picker exists.
               <Input
                 id={fieldId}
                 type={input.kind === "number" ? "number" : "text"}
@@ -763,6 +764,7 @@ function ActionParamFields({
                 onChange={(event) => onChange(param.id, event.target.value)}
                 required={fieldRequired}
                 disabled={fieldDisabled}
+                placeholder={input.kind === "userRef" ? "User ID" : undefined}
               />
             )}
 

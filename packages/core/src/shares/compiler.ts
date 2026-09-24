@@ -104,7 +104,7 @@ function assertShareableActionParams(input: {
 
   const reject = (path: string, kind: "objectRef" | PrimitiveSchema): never => {
     throw invalid(
-      `Share '${input.shareId}' Action '${input.actionId}' parameter '${path}' uses ${kind}. Shared Action parameters cannot contain objectRef or fileRef in V1.`
+      `Share '${input.shareId}' Action '${input.actionId}' parameter '${path}' uses ${kind}. Shared Action parameters cannot contain objectRef, fileRef, or userRef in V1.`
     )
   }
 

@@ -95,6 +95,7 @@ const SQLITE_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
     decimal: { equality: true },
     date: { equality: true, ordering: true },
     timestamp: { equality: true, ordering: true },
+    userRef: { equality: true },
   },
   limits: {
     totalCount: true,

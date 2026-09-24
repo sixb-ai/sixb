@@ -22,6 +22,7 @@ import type { QuantitativeTypeId } from "./units"
  * - `"uuid"` for an external system identifier.
  * - `"timestamp"` for `lastObservedAt`.
  * - `"fileRef"` for blob-backed documents, images, and attachments.
+ * - `"userRef"` for a Sixb user, such as a task's assignee (author it with `ref.user()`).
  * - `"double"` for telemetry such as temperature or humidity.
  */
 export type PrimitiveSchema =
@@ -34,6 +35,7 @@ export type PrimitiveSchema =
   | "timestamp"
   | "uuid"
   | "fileRef"
+  | "userRef"
 
 export interface ValueTypeRefSchema {
   type: "valueTypeRef"

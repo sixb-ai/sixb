@@ -200,6 +200,7 @@ function ActionParamsDialog({
                     onPendingChange={(pending) => handleFileUploadPendingChange(key, pending)}
                   />
                 ) : (
+                  // A user reference is entered as a user id until the member picker exists.
                   <Input
                     id={`action-param-${key}`}
                     type={def.type === "number" ? "number" : "text"}
@@ -207,7 +208,7 @@ function ActionParamsDialog({
                     onChange={(event) => setParamValue(key, event.target.value)}
                     required={fieldRequired}
                     disabled={fieldDisabled}
-                    placeholder={`Enter ${key}...`}
+                    placeholder={def.type === "userRef" ? "User ID" : `Enter ${key}...`}
                   />
                 )}
                 {errors[key] ? (

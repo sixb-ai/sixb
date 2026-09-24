@@ -40,6 +40,7 @@ export type {
   Schema,
   SchemaOrRef,
   SixbObjectTypeMap,
+  UserRef,
   ValueType,
   ValueTypeRefSchema,
 } from "./ontology"
@@ -56,6 +57,7 @@ export {
   prop,
   ref,
   stringEnum,
+  userRef,
   valueTypeRef,
 } from "./ontology"
 

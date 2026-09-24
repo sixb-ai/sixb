@@ -24,7 +24,8 @@ export interface RelationshipEdge {
 }
 
 export interface ActionParam {
-  type: "string" | "number" | "boolean" | "fileRef"
+  /** `userRef` params take a user reference `{ type: "user", id }`. */
+  type: "string" | "number" | "boolean" | "fileRef" | "userRef"
   required?: boolean
   nullable?: boolean
   description?: string
@@ -151,12 +152,13 @@ function parseLocation(
   return undefined
 }
 
-function inferPrimitiveType(schema: unknown): "string" | "number" | "boolean" | "fileRef" {
+function inferPrimitiveType(schema: unknown): ActionParam["type"] {
   if (typeof schema === "string") {
     if (schema === "integer" || schema === "double") return "number"
     if (schema === "decimal") return "string"
     if (schema === "boolean") return "boolean"
     if (schema === "fileRef") return "fileRef"
+    if (schema === "userRef") return "userRef"
     return "string"
   }
 

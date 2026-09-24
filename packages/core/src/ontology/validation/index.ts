@@ -16,6 +16,7 @@ export {
   assertObjectTypeRegistered,
   assertPropertyTokenBelongsToObjectType,
   assertRequiredProperties,
+  findPrimitiveSchema,
   validateObjectProperties,
   validatePrimaryProperties,
   validatePropertyDefinitions,

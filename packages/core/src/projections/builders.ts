@@ -108,14 +108,35 @@ type ProjectionSchemaByDatasetColumnType = {
   readonly fileRef: "fileRef"
 }
 
+/** Projections cannot map user references yet, even nested ones; registration rejects them too. */
+type SchemaContainsUserRef<TSchema> = TSchema extends "userRef"
+  ? true
+  : TSchema extends { type: "array"; items: infer TItems }
+    ? SchemaContainsUserRef<TItems>
+    : TSchema extends { type: "map"; valueSchema: infer TValue }
+      ? SchemaContainsUserRef<TValue>
+      : TSchema extends { type: "object"; properties: infer TFields }
+        ? true extends {
+            [K in keyof TFields]: TFields[K] extends { schema: infer TField }
+              ? SchemaContainsUserRef<TField>
+              : false
+          }[keyof TFields]
+          ? true
+          : false
+        : TSchema extends { type: "valueTypeRef"; _resolved: infer TResolved }
+          ? SchemaContainsUserRef<TResolved>
+          : false
+
 type DatasetColumnCompatibleWithSchema<
   TColumnType extends DatasetColumnType,
   TSchema extends Schema,
 > = [ResolvedProjectionSchema<TSchema>] extends [never]
   ? false
-  : ResolvedProjectionSchema<TSchema> extends ProjectionSchemaByDatasetColumnType[TColumnType]
-    ? true
-    : false
+  : SchemaContainsUserRef<TSchema> extends true
+    ? false
+    : ResolvedProjectionSchema<TSchema> extends ProjectionSchemaByDatasetColumnType[TColumnType]
+      ? true
+      : false
 
 type DatasetColumnNameCompatibleWithSchema<
   TDataset extends DatasetDefinition,

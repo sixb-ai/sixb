@@ -33,6 +33,9 @@ export function compareQueryScalarValues(
     case "date":
     case "timestamp":
       return compareTemporalValues(left, right)
+    case "userRef":
+      // Identity only: user references have no order.
+      return Number.NaN
   }
 }
 
@@ -52,8 +55,24 @@ export function queryScalarValuesEqual(
     return !Number.isNaN(comparison) && comparison === 0
   }
 
+  if (scalarKind === "userRef") return userRefsEqual(left, right)
   if (scalarKind !== undefined) return Object.is(left, right)
   return runtimeValuesEqual(left, right)
+}
+
+function userRefsEqual(left: unknown, right: unknown): boolean {
+  if (left === null || right === null) return left === right
+  return (
+    isRecord(left) &&
+    isRecord(right) &&
+    left.type === right.type &&
+    typeof left.id === "string" &&
+    left.id === right.id
+  )
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
 }
 
 function compareRuntimeValues(left: unknown, right: unknown): number {

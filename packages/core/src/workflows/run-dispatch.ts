@@ -6,9 +6,10 @@ import { captureSixbFailure } from "../errors/internal"
 import type { DomainEventLog } from "../events"
 import type { RunDispatcher } from "../execution/dispatch"
 import { createPrimitiveExecutionRecord } from "../execution/durable"
-import type { ValueType } from "../ontology"
+import type { SchemaOrRef, ValueType } from "../ontology"
 import type { Queues } from "../queues"
 import type { SixbDefinitions } from "../runtime/definitions"
+import { assertParamUsersActive } from "../shared/params/user-refs"
 import type { CreateExecutionInput, Storage, WorkflowRunRecord } from "../storage"
 import { WORKFLOW_RUN_FAILURE_CODES, WorkflowRunError } from "../storage"
 import { WorkflowValidationError } from "./errors"
@@ -172,6 +173,16 @@ async function persistWorkflowRun(
     return { run: existing, created: false }
   }
 
+  // A replayed run keeps the input it was accepted with; only a new run checks its users.
+  await assertParamUsersActive({
+    auth: input.storage.auth,
+    projectId: input.projectId,
+    schemas: input.workflow.input as Readonly<Record<string, SchemaOrRef>>,
+    values: request.snapshot,
+    valueTypesById: input.valueTypesById,
+    describe: (fieldId) => `Workflow "${input.workflow.id}" input '${fieldId}'`,
+    invalid: (message) => new WorkflowValidationError(message),
+  })
   const execution = await input.createExecution(`exec_${randomUUID()}`, request.runId)
   const queuedAt = new Date()
   try {

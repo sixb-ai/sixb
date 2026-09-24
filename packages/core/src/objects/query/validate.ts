@@ -600,8 +600,15 @@ function validatePredicate(
         addIssue(ctx, path, "invalid_exists_value", "Predicate 'exists' value must be boolean")
       }
       return predicate
-    case "contains":
-      resolveAndValidatePredicateProperty(predicate.propertyId, predicate.op, shape, path, ctx)
+    case "contains": {
+      const { scalarKind: _authoredScalarKind, ...authoredPredicate } = predicate
+      const scalarKind = resolveAndValidatePredicateProperty(
+        predicate.propertyId,
+        predicate.op,
+        shape,
+        path,
+        ctx
+      )
       validateContainsValue(predicate.propertyId, predicate.value, shape, path, ctx)
       admitProperty(ctx, {
         state: admissionState,
@@ -609,7 +616,12 @@ function validatePredicate(
         use: "filter",
         path,
       })
-      return predicate
+      return {
+        ...authoredPredicate,
+        value: normalizeObjectQueryValue(predicate.value, scalarKind),
+        ...(scalarKind ? { scalarKind } : {}),
+      }
+    }
   }
 }
 
@@ -672,8 +684,39 @@ function resolveAndValidatePredicateProperty(
     }
   }
 
-  if (op === "exists" || op === "contains") return undefined
+  if (op === "exists") return undefined
+  if (op === "contains") return resolveArrayItemScalarKind(schemas, ctx)
   return resolveCommonQueryScalarKind(schemas, propertyId, path, ctx)
+}
+
+/**
+ * Item scalar kind for `contains` over arrays, so array membership compares items the way `eq`
+ * compares values. Strings and maps keep substring and key semantics, and mixed item kinds keep the
+ * untyped comparison.
+ */
+function resolveArrayItemScalarKind(
+  schemas: readonly Schema[],
+  ctx: QueryValidationContext
+): QueryScalarKind | undefined {
+  const kinds = new Set<QueryScalarKind | undefined>()
+  for (const schema of schemas) {
+    if (typeof schema === "string" || schema.type !== "array") return undefined
+    const items = resolveValueTypeRefs(schema.items, ctx.valueTypesById)
+    kinds.add(items ? queryScalarKindForSchema(items) : undefined)
+  }
+  return kinds.size === 1 ? [...kinds][0] : undefined
+}
+
+function resolveValueTypeRefs(
+  schema: Schema,
+  valueTypesById: ReadonlyMap<string, ValueType>,
+  seen = new Set<string>()
+): Schema | undefined {
+  if (typeof schema === "string" || schema.type !== "valueTypeRef") return schema
+  if (seen.has(schema.valueTypeId)) return undefined
+  seen.add(schema.valueTypeId)
+  const resolved = schema._resolved ?? valueTypesById.get(schema.valueTypeId)?.schema
+  return resolved ? resolveValueTypeRefs(resolved, valueTypesById, seen) : undefined
 }
 
 function normalizeObjectQueryValue(value: unknown, scalarKind: QueryScalarKind | undefined) {

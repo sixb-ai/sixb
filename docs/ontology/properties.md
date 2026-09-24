@@ -26,10 +26,16 @@ for additional context. Without a name, Sixb uses the ID.
 | `"integer"`, `"double"` | Whole numbers or floating-point numbers. |
 | `"decimal"` | Exact decimal values, represented as strings. |
 | `"date"`, `"timestamp"` | A calendar date or timestamp. Writes accept `Date` values or ISO strings. |
-| `"fileRef"` | A reference to an uploaded file. |
+| `ref.file()` | A reference to an uploaded file. The string `"fileRef"` is equivalent. |
+| `ref.user()` | A [reference to a Sixb user](#reference-a-user), such as an assignee. |
 | `stringEnum([...])`, `integerEnum([...])` | A fixed set of string or integer values. |
 | `array`, `object`, `map` | Structured values, shown below. |
 | `valueTypeRef(ValueType)` | A [reusable schema](value-types.md). |
+
+Scalar schemas are strings. Schemas that point somewhere else are built with `ref`: `ref.file()`,
+`ref.user()`, and `ref(ObjectType)` for [action parameters](../actions/overview.md#parameters). To
+point from one object to another, use a [link](links.md) instead; `ref(ObjectType)` on a property is
+rejected.
 
 For exact decimal values, use `decimal()` with a string rather than converting through a
 JavaScript number:
@@ -84,6 +90,50 @@ unrestricted `json` property schema; describe the shape you expect.
 Use a [value type](value-types.md) when several properties share a shape. If the value needs its
 own identity or relationships, define an object type and connect it with a [link](links.md).
 
+## Reference a user
+
+Use `ref.user()` when a property names a member of your project, such as a task's assignee or a
+request's reviewer:
+
+```ts
+import { prop, ref } from "@sixb/core/ontology"
+
+prop("assignee", ref.user(), {
+  nullable: true,
+  query: { searchable: true, filterable: true, facet: true },
+})
+prop("reviewers", { type: "array", items: ref.user() })
+```
+
+The value is `{ type: "user", id }`, with the ID of a Sixb user. A write can only set a user who
+exists and is active. Values an object already holds stay valid: suspending a user does not
+block later updates of objects that reference them. The reference carries no display data and
+grants no access by itself.
+
+Build a value with `userRef(id)`. Queries can match a user with `eq`, `neq`, `in`, and `exists`,
+find a user in an array with `contains`, and group objects by user with `facet`:
+
+```ts
+import { userRef } from "@sixb/core"
+
+const assignee = userRef("usr_1")
+await sixb.objects(Task).upsert({ properties: { id: "task-1", assignee } })
+
+await sixb
+  .objects(Task)
+  .query()
+  .where((task) => task.or(task.p.assignee.eq(assignee), task.p.reviewers.contains(assignee)))
+  .list()
+```
+
+A signed-in `Principal` whose `type` is `"user"` is already a user reference. User references
+cannot be sorted, searched as text, or listed in `search.exact`.
+
+User references are set by your code, actions, and workflows. Projections, telemetry properties,
+link properties, and action parameters of a [share](../auth/shared-access.md) cannot use them yet. For a
+person who is part of your domain rather than a project member, such as a customer contact, define
+an object type.
+
 ## Enable queries
 
 Add `query` options to the properties you filter, sort, search, or group. Set `searchable: true`
@@ -106,7 +156,7 @@ prop("dueDate", "date", {
 | `sortable` | Ordering results by this property. |
 | `text` | Keyword search on a string or string enum. |
 | `exact` | Using this property in the type's exact-match search profile. |
-| `facet` | Grouped counts for scalar or enum values, excluding file references. |
+| `facet` | Grouped counts for scalar, enum, or user reference values, excluding file references. |
 | `weight` | Positive text-ranking weight; also requires `text: true` and provider support. |
 
 Without query options, a property can still be stored and read. Comparing the primary ID with
@@ -182,7 +232,7 @@ prop("progress", "integer", { mode: "telemetry" })
 prop("online", "boolean", { mode: "telemetry" })
 ```
 
-Telemetry supports scalar and structured values, but cannot contain file references. Values
+Telemetry supports scalar and structured values, but cannot contain file or user references. Values
 with a physical `semanticType` also require a valid [unit](units-and-semantics.md).
 
 See [Telemetry](../objects/telemetry.md) for appending readings and querying their history.

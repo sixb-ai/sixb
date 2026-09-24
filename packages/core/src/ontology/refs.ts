@@ -25,14 +25,40 @@ export type InferSchemaOrRef<
       ? InferSchema<TSchema, TValueTypes>
       : never
 
-export function ref<const TObjectType extends ObjectType>(
-  objectType: TObjectType
-): ObjectRefSchema<TObjectType["id"]> {
-  return {
+interface RefBuilder {
+  /**
+   * Reference to one object of `objectType`, for Action and Workflow parameters.
+   *
+   * Object properties point at other objects with `link(...)` instead: a link is traversable,
+   * queryable from both ends, and kept consistent when its target is deleted.
+   */
+  <const TObjectType extends ObjectType>(
+    objectType: TObjectType
+  ): ObjectRefSchema<TObjectType["id"]>
+  /** Reference to a Sixb user, valued `{ type: "user", id }`. Serialized as `"userRef"`. */
+  user(): "userRef"
+  /** Reference to a stored file, valued as a `FileRef`. Serialized as `"fileRef"`. */
+  file(): "fileRef"
+}
+
+/**
+ * Schemas that point outside the value itself.
+ *
+ * Scalars are plain strings (`"string"`, `"timestamp"`); anything that points elsewhere or takes
+ * parameters is a builder: `ref(Customer)`, `ref.user()`, `ref.file()`.
+ */
+export const ref: RefBuilder = Object.assign(
+  <const TObjectType extends ObjectType>(
+    objectType: TObjectType
+  ): ObjectRefSchema<TObjectType["id"]> => ({
     type: "objectRef",
     objectTypeId: objectType.id,
+  }),
+  {
+    user: (): "userRef" => "userRef",
+    file: (): "fileRef" => "fileRef",
   }
-}
+)
 
 /** Build an exact, typed reference to one object instance. */
 export function objectRef<const TObjectType extends ObjectType>(

@@ -27,6 +27,7 @@ export type ActionParamInputDescriptor =
   | { kind: "decimal" }
   | { kind: "boolean" }
   | { kind: "fileRef" }
+  | { kind: "userRef" }
   | { kind: "json" }
   | { kind: "enum"; values: readonly unknown[]; valueType: "string" | "integer" }
   | { kind: "objectRef"; objectTypeId: string }
@@ -117,6 +118,7 @@ export function describeActionParamInput(schema: unknown): ActionParamInputDescr
   if (resolved === "fileRef") {
     return { kind: "fileRef" }
   }
+  if (resolved === "userRef") return { kind: "userRef" }
   if (isRecord(resolved)) {
     if (resolved.type === "objectRef" && typeof resolved.objectTypeId === "string") {
       return { kind: "objectRef", objectTypeId: resolved.objectTypeId }
@@ -154,6 +156,7 @@ function parseObjectActionParamValue(param: ObjectActionParam, rawValue: string)
     }
     return fileRef
   }
+  if (param.type === "userRef") return userRefFromId(rawValue)
   return rawValue
 }
 
@@ -193,9 +196,16 @@ function parseActionParamValue(param: ActionParam, rawValue: string): unknown {
         : rawValue
     case "objectRef":
       return { objectTypeId: input.objectTypeId, primaryId: rawValue }
+    case "userRef":
+      return userRefFromId(rawValue)
     case "text":
       return rawValue
   }
+}
+
+/** The form holds a user id; the request carries the reference. */
+function userRefFromId(id: string): { type: "user"; id: string } {
+  return { type: "user", id }
 }
 
 function parseIntegerEnumValue(rawValue: string, values: readonly unknown[]): number {

@@ -38,7 +38,9 @@ or `null` instead.
 | `p.dueDate.exists()` / `exists(false)` | Present / missing properties. |
 | `p.number.contains("INV")` | A substring; also works for array elements and map keys. |
 
-Primary-ID comparisons with `eq` or `in` do not need query metadata.
+Primary-ID comparisons with `eq` or `in` do not need query metadata. To match a
+[user reference](../ontology/properties.md#reference-a-user), pass `userRef(id)`, for example
+`task.p.assignee.eq(userRef("usr_1"))`.
 
 Return an array to require all conditions. Use `or(...)` for alternatives and `not(...)` to negate
 one condition:

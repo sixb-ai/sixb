@@ -36,6 +36,13 @@ describe("WorkflowRunInputForm", () => {
     })
   })
 
+  test("sends a user id as a user reference", () => {
+    expect(buildWorkflowInput({ assignee: "userRef" }, { assignee: " usr_1 " })).toEqual({
+      input: { assignee: { type: "user", id: "usr_1" } },
+      errors: {},
+    })
+  })
+
   test("rejects JSON numbers that cannot be represented as finite values", () => {
     expect(buildWorkflowInput({ payload: "json" }, { payload: "1e400" })).toEqual({
       input: {},

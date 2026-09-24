@@ -17,6 +17,7 @@ type Expect<T extends true> = T
 const traits: PrimitiveTraits = {
   queryScalarKind: "string",
   exact: true,
+  exactSearch: true,
   sortable: true,
   text: true,
   contains: true,
@@ -71,6 +72,7 @@ export type RulePredicateValues = [
   Expect<Equal<PredicateValueFor<PropertyOf<"decimal">>, DecimalValue>>,
   Expect<Equal<PredicateValueFor<PropertyOf<"boolean">>, boolean>>,
   Expect<Equal<PredicateValueFor<PropertyOf<"fileRef">>, never>>,
+  Expect<Equal<PredicateValueFor<PropertyOf<"userRef">>, never>>,
   Expect<Equal<OrderedPredicateValueFor<PropertyOf<"integer">>, number>>,
   Expect<Equal<OrderedPredicateValueFor<PropertyOf<"double">>, number>>,
   Expect<Equal<OrderedPredicateValueFor<PropertyOf<"decimal">>, DecimalValue>>,
@@ -78,4 +80,5 @@ export type RulePredicateValues = [
   Expect<Equal<OrderedPredicateValueFor<PropertyOf<"timestamp">>, never>>,
   Expect<Equal<OrderedPredicateValueFor<PropertyOf<"boolean">>, never>>,
   Expect<Equal<OrderedPredicateValueFor<PropertyOf<"fileRef">>, never>>,
+  Expect<Equal<OrderedPredicateValueFor<PropertyOf<"userRef">>, never>>,
 ]

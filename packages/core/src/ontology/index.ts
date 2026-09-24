@@ -60,6 +60,8 @@ export type {
   ValueType,
   ValueTypeRefSchema,
 } from "./types"
+export type { UserRef } from "./user-ref"
+export { userRef } from "./user-ref"
 
 // ── Registry ──────────────────────────────────────────────
 

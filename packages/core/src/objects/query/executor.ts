@@ -30,6 +30,7 @@ import type {
   ObjectQueryPredicate,
   ObjectQueryResultShape,
   ObjectQuerySortField,
+  QueryScalarKind,
 } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
@@ -1104,17 +1105,25 @@ function matchesPredicate(row: ObjectRow, predicate: ObjectQueryPredicate): bool
       return predicate.value ? exists : !exists
     }
     case "contains":
-      return containsValue(row.properties[predicate.propertyId], predicate.value)
+      return containsValue(
+        row.properties[predicate.propertyId],
+        predicate.value,
+        predicate.scalarKind
+      )
   }
 }
 
-function containsValue(actual: unknown, expected: unknown): boolean {
+function containsValue(
+  actual: unknown,
+  expected: unknown,
+  itemScalarKind: QueryScalarKind | undefined
+): boolean {
   if (typeof actual === "string" && typeof expected === "string") {
     return actual.includes(expected)
   }
 
   if (Array.isArray(actual)) {
-    return actual.some((item) => queryScalarValuesEqual(item, expected))
+    return actual.some((item) => queryScalarValuesEqual(item, expected, itemScalarKind))
   }
 
   if (isPlainObject(actual) && typeof expected === "string") {

@@ -4,6 +4,7 @@ import type { OntologyEditOperation, OntologyOperationOutcome } from "../../mate
 import { linkRefKey, linkScopeKey, objectRefKey } from "../../materialization/refs"
 import type { MaterializerContext } from "../context"
 import { diffEffectiveObject } from "../effective/diff"
+import type { ResolvedObjectValue } from "../effective/resolve"
 import {
   validateEffectiveObject,
   validateLinkAuthorityProperties,
@@ -15,6 +16,7 @@ import {
 import type { TimedCommitIdentity } from "../shared/identity"
 import { applyLinkEdit, applyObjectEdit } from "./apply"
 import { linkCardinality } from "./read-set"
+import { assertIntroducedUsersActive, type ReferencedUsers } from "./user-refs"
 import {
   type EditWorkingState,
   resolveLinkEdge,
@@ -53,11 +55,12 @@ export function applyEditOperation(
   state: EditWorkingState,
   operation: OntologyEditOperation,
   identity: TimedCommitIdentity,
+  users: ReferencedUsers,
   journal?: EditUndoJournal
 ): OntologyOperationOutcome {
   validateOperationRef(context, operation)
   if (isObjectOperation(operation)) {
-    return applyObjectOperation(context, state, operation, identity, journal)
+    return applyObjectOperation(context, state, operation, identity, users, journal)
   }
   return applyLinkOperation(
     context,
@@ -84,6 +87,7 @@ function applyObjectOperation(
   state: EditWorkingState,
   operation: ObjectOperation,
   identity: TimedCommitIdentity,
+  users: ReferencedUsers,
   journal?: EditUndoJournal
 ): OntologyOperationOutcome {
   const working = requireWorkingObject(state, operation)
@@ -99,7 +103,27 @@ function applyObjectOperation(
     ...normalized,
   })
 
-  applyObjectTransition(context, state, working, transition.next, transition.editedAt, journal)
+  // Restore brings back values the object already held; only caller-written values are new.
+  const assertUsers =
+    operation.kind === "object.restore"
+      ? undefined
+      : (resolved: ResolvedObjectValue) =>
+          assertIntroducedUsersActive(
+            context.ontology,
+            operation.ref.objectTypeId,
+            currentEffective?.properties,
+            resolved.properties,
+            users
+          )
+  applyObjectTransition(
+    context,
+    state,
+    working,
+    transition.next,
+    transition.editedAt,
+    journal,
+    assertUsers
+  )
 
   return objectOperationOutcome(operation, working, transition.changed, context, identity)
 }
@@ -149,7 +173,8 @@ function applyObjectTransition(
   working: WorkingObject,
   next: WorkingObject["override"],
   nextEditedAt: Readonly<Record<string, string>>,
-  journal?: EditUndoJournal
+  journal?: EditUndoJournal,
+  validateResolved?: (resolved: ResolvedObjectValue) => void
 ): void {
   const previous = working.override
   const previousEditedAt = working.editedAt
@@ -157,7 +182,10 @@ function applyObjectTransition(
   working.editedAt = { ...nextEditedAt }
   try {
     const resolved = resolveObject(context.ontology, working)
-    if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
+    if (resolved) {
+      validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
+      validateResolved?.(resolved)
+    }
     validateWorkingCardinality(state.links.slots)
   } catch (error) {
     working.override = previous
