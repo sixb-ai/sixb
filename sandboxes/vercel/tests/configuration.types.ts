@@ -6,7 +6,23 @@ import {
   param,
   type SixbHostView,
 } from "@sixb/core"
-import { VercelSandboxFactory } from "../src"
+import type { SandboxFactory } from "@sixb/core/sandboxes"
+import { VercelSandboxFactory, type VercelSandboxFactoryOptions } from "../src"
+
+// Regression proof: remove the options' `in out` annotation, rebuild types, then typecheck tests.
+function checkAnnotatedOptions(options: VercelSandboxFactoryOptions) {
+  const factory: SandboxFactory = new VercelSandboxFactory(options)
+  const params = { clientId: param("string") }
+  const configured: VercelSandboxFactoryOptions<typeof params> = {
+    params,
+    resolve: ({ params }) => ({ source: { type: "git", url: params.clientId } }),
+  }
+  const typed: SandboxFactory<typeof params> = new VercelSandboxFactory(configured)
+  // @ts-expect-error a parameterized recipe cannot become an untyped resolver
+  const widened: VercelSandboxFactoryOptions = configured
+  void [factory, typed, widened]
+}
+void checkAnnotatedOptions
 
 // Regression proof: erase TParams on the factory or createSixb; the expected errors disappear.
 async function checkConfiguration(options: CreateSixbOptions, scope: ExecutionScope) {

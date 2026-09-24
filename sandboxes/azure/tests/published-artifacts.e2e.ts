@@ -50,10 +50,13 @@ test("packed provider loads both exports, provisions its guest artifact and reso
     expect(missing.stderr).toContain("supervisor artifact is unavailable")
     await writeFile(artifact, source)
 
+    // Regression proof (TypeScript 5.9.3): remove `in out` from AzureSandboxFactoryOptions,
+    // rebuild declarations, then run this test. The annotated constructor call fails with TS2589.
     await writeFile(
       join(directory, "types.ts"),
       `
 import { AzureSandboxFactory, type AzureSandboxFactoryOptions } from "@sixb/sandboxes-azure"
+import { optional, param } from "@sixb/core"
 import type { SandboxFactory } from "@sixb/core/sandboxes"
 const options: AzureSandboxFactoryOptions = {
   subscriptionId: "subscription", resourceGroup: "group", sandboxGroup: "sandboxes",
@@ -61,7 +64,24 @@ const options: AzureSandboxFactoryOptions = {
   credential: { getToken: async () => ({ token: "test", expiresOnTimestamp: 1 }) },
 }
 const factory: SandboxFactory = new AzureSandboxFactory(options)
+const params = { clientId: param("string"), branch: optional(param("string")) }
+const configured: AzureSandboxFactoryOptions<typeof params> = {
+  ...options,
+  params,
+  resolve: ({ params }) => {
+    const clientId: string = params.clientId
+    const branch: string | undefined = params.branch
+    // @ts-expect-error preserve resolver parameter inference in published declarations
+    const invalid: number = params.clientId
+    return { source: { type: "git", url: clientId, revision: branch } }
+  },
+}
+const typed: SandboxFactory<typeof params> = new AzureSandboxFactory(configured)
+// @ts-expect-error a parameterized recipe cannot become an untyped resolver
+const widened: AzureSandboxFactoryOptions = configured
 void factory
+void typed
+void widened
 `
     )
     await writeFile(
