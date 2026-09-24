@@ -252,7 +252,10 @@ export function ConversationPanel({
           <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-[8vh]">
             <div className="w-full max-w-3xl">
               {emptyStateHeader ? <div className="mb-7">{emptyStateHeader}</div> : null}
-              <div>{sandboxRecovery}{renderComposer()}</div>
+              <div>
+                {sandboxRecovery}
+                {renderComposer()}
+              </div>
               {emptyStateFooter ? <div className="mt-4">{emptyStateFooter}</div> : null}
             </div>
           </div>

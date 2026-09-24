@@ -122,3 +122,15 @@ test("compact conversation chrome accepts host workspace actions", () => {
 
   expect(html).toContain('aria-label="Expand conversation"')
 })
+
+test("sandbox recovery remains visible in both empty conversation layouts", () => {
+  // Regression proof: remove sandboxRecovery from either empty composer layout; this fails.
+  for (const centerEmptyState of [false, true]) {
+    const html = renderPanel(null, {
+      centerEmptyState,
+      sandboxRecovery: <div>Sandbox recovery required</div>,
+      composerDisabled: true,
+    })
+    expect(html).toContain("Sandbox recovery required")
+  }
+})
