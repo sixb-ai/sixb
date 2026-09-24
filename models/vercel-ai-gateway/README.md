@@ -73,8 +73,9 @@ const definitions = await gateway.catalog.list()
 await gateway.catalog.refresh()
 ```
 
-The catalog is cached; configure its TTL with `catalogTtlMs`. Workers resolve model metadata once
-per prepared binding. Supply `models` to `createVercelGateway` to override catalog definitions.
+This discovery catalog lists language models. Configure its cache TTL with `catalogTtlMs`.
+Workers resolve model metadata once per prepared binding. Supply `models` to `createVercelGateway`
+to override catalog definitions.
 
 Sixb records Gateway-reported costs, usage, routing, and request IDs. Local cost estimates are
 retained separately when available; calls without reliable pricing are marked unpriceable.
@@ -102,3 +103,46 @@ Automatic projection batching is enabled for known OpenAI embedding models only.
 advertises conservative bounds of 2048 texts, 8191 UTF-8 bytes per text and 300,000 bytes total;
 the indexer also applies smaller local page bounds. Other routes remain individual until their
 limits are known. Inputs are never truncated.
+
+## Decision models
+
+```ts
+const jev = vercelGateway.decision("typesafe-ai/jev")
+// Register in your createSixb() options:
+const models = { decision: [jev] }
+
+// Inside an action or workflow step:
+const result = await sixb.models.decision.evaluate({
+  input: { message: "Please refund the duplicate charge." },
+  questions: {
+    refund: { type: "probability", instructions: "Is a refund requested?" },
+  },
+})
+console.log(result.output.refund.probability)
+```
+
+Decision models use `POST /evaluate` with the same Gateway credentials, base URL, headers and
+fetch configuration. All three Sixb question types (`choice`, `score`, `probability`) are supported;
+state and instructions retain their structured form. Gateway calls probability questions `boolean`;
+Sixb returns their probability without applying a threshold.
+
+Jev independently rounds scores and probabilities to two decimal places. Sixb preserves those
+values and allows the corresponding bounded rounding error when checking distributions and scores.
+
+Pass `{ providerOptions, timeoutMs }` as the second argument to `decision()`. The default inference
+timeout is 30 seconds. Cancellation reaches the transport. There are no automatic inference retries;
+the language-model retry settings do not apply. Context limits are enforced by Gateway without
+client-side truncation. `typesafe-ai/jev` is a Gateway alias, not a pinned TypeSafe version.
+
+The runtime resolves cached catalog pricing before admission and retains one pricing snapshot per
+call. Missing pricing or routing options that may change the tariff leave estimates unavailable;
+enforced cost limits then fail closed. Gateway-reported charges take precedence over estimates.
+Output token usage is retained even when the output tariff is zero. Invalid answers retain available
+usage and billing metadata. Calling `jev.evaluate()` directly bypasses Sixb admission and accounting.
+
+Run the optional live check with a Gateway credential and explicit opt-in. It makes one inference
+request through Sixb with a $0.01 catalog-estimated budget:
+
+```sh
+SIXB_VERCEL_GATEWAY_DECISION_E2E=1 bun --env-file=.env.test test ./models/vercel-ai-gateway/tests/decision.e2e.ts
+```

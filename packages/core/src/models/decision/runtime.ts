@@ -44,12 +44,21 @@ export function createDecisionRuntime(
       const signal = session.signal(input.signal)
       signal.throwIfAborted()
 
-      const model = resolveDecisionModel(catalog, input.model)
-      assertDecisionModel(model)
-      assertDecisionSupport(model, questions)
+      const binding = resolveDecisionModel(catalog, input.model)
+      assertDecisionModel(binding)
+      assertDecisionSupport(binding, questions)
 
       const accounting = await session.accounting()
       accounting.assertHealthy()
+      signal.throwIfAborted()
+      const model = binding.resolve ? await binding.resolve() : binding
+      assertDecisionModel(model)
+      if (model.providerId !== binding.providerId || model.modelId !== binding.modelId) {
+        throw new TypeError(
+          "[SixbModels] Resolved decision model identity does not match the selected model."
+        )
+      }
+      assertDecisionSupport(model, questions)
       signal.throwIfAborted()
       const request = { input: state, questions, signal }
       const callId = await admitDecisionCall(accounting, model, request)
@@ -70,7 +79,11 @@ export function createDecisionRuntime(
 
       let output: DecisionAnswers<typeof input.questions>
       try {
-        output = validateDecisionAnswers(questions, result?.output)
+        output = validateDecisionAnswers(
+          questions,
+          result?.output,
+          model.definition.capabilities.answerDecimalPlaces
+        )
       } catch (cause) {
         throw new DecisionModelResponseError(
           "[SixbModels] Invalid decision response.",
