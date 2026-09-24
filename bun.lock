@@ -243,6 +243,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/monday": {
+      "name": "@sixb/connector-monday",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/notion": {
       "name": "@sixb/connector-notion",
       "version": "0.1.1",
@@ -1641,6 +1656,8 @@
     "@sixb/connector-meta": ["@sixb/connector-meta@workspace:connectors/meta"],
 
     "@sixb/connector-microsoft": ["@sixb/connector-microsoft@workspace:connectors/microsoft"],
+
+    "@sixb/connector-monday": ["@sixb/connector-monday@workspace:connectors/monday"],
 
     "@sixb/connector-notion": ["@sixb/connector-notion@workspace:connectors/notion"],
 

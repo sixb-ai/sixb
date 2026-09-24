@@ -65,6 +65,13 @@ export const connectorCatalog: readonly ConnectorEntry[] = [
     icon: "notion.svg",
   },
   {
+    id: "monday",
+    name: "monday.com",
+    description: "Boards, items, subitems, column values, and updates",
+    category: "Productivity",
+    package: "monday",
+  },
+  {
     id: "github",
     name: "GitHub",
     description: "Repositories, issues, and REST API",

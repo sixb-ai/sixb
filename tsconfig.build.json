@@ -44,6 +44,9 @@
       "path": "connectors/microsoft/tsconfig.build.json"
     },
     {
+      "path": "connectors/monday/tsconfig.build.json"
+    },
+    {
       "path": "connectors/notion/tsconfig.build.json"
     },
     {
