@@ -4,9 +4,9 @@ import { type ScenarioPhase, scenarioTransitions } from "./useStackScenario"
 
 // The return route starts at Build and ends at the PandaDoc connector.
 const returnPath = "M48 131H31Q7 131 7 155V652Q7 672 72 684"
-const sourcePath = "M194 711V677Q194 661 235 640V612"
-const preparePath = "M320 558 293 553Q285 551 285 530L247 523V490"
-const modelPath = "M247 312V261Q260 249 260 238V177"
+const sourcePath = "M194 711V677C194 657 235 657 235 625V612"
+const preparePath = "M320 558L255 546.31Q247 544.87 247 536.87V490"
+const modelPath = "M239 312V200"
 
 export function FrameworkStack({
   activeLayer,
@@ -70,37 +70,31 @@ export function FrameworkStack({
       </defs>
 
       <g className="stack-connections stack-flow" fill="none">
-        <path d="M137 322V263Q137 250 122 239V180" markerEnd={arrow} />
+        <path d="M101 322V175" markerEnd={arrow} />
         <path d={modelPath} markerEnd={blueArrow} className="stack-blue-line stack-quote-related" />
-        <path d="M444 336V254Q444 242 417 232V204" markerEnd={arrow} />
+        <path d="M400 375V229" markerEnd={arrow} />
         <path
           d="M247 549V418"
           markerEnd={blueArrow}
           className="stack-blue-line stack-quote-related"
         />
-        <path d={sourcePath} markerEnd={blueArrow} className="stack-quote-related" />
-        <path d="M100 692Q100 672 175 657Q222 649 235 625" />
-        <path d="M289 729V685Q289 667 258 651Q241 642 235 625" />
-        <path d="M382 746V686Q382 667 288 655Q244 649 235 625" />
-        {phase === "ingest" && (
-          <Pulse path={sourcePath} duration={scenarioTransitions.ingest.duration} />
-        )}
         {phase === "model" && (
           <Pulse path={modelPath} duration={scenarioTransitions.model.duration} />
         )}
       </g>
 
       <g className="stack-stage" data-layer="connect">
-        <Plane
-          points="117,652 462,714 393,797 17,728"
-          front="17,728 393,797 462,714"
-          fill={`url(#${id}-plane)`}
-        />
-        <g className="stack-route" fill="none">
-          <path d="M100 693V674L194 667" />
-          <path d="M194 710V667" />
-          <path d="M289 727V694L194 678" />
-          <path d="M382 744V711L194 678" />
+        <Plane x={17} y={728} fill={`url(#${id}-plane)`} />
+        {/* Draw continuous routes above the plane and behind the connector faces.
+            Each curve meets the shared stem with a vertical tangent. */}
+        <g className="stack-connections stack-flow" fill="none">
+          <path d="M100 692V660C100 645 235 663 235 625" />
+          <path d="M289 729V692C289 664 235 663 235 625" />
+          <path d="M382 746V708C382 668 235 677 235 625" />
+          <path d={sourcePath} markerEnd={blueArrow} className="stack-quote-related" />
+          {phase === "ingest" && (
+            <Pulse path={sourcePath} duration={scenarioTransitions.ingest.duration} />
+          )}
         </g>
         <Integration
           x={82}
@@ -122,17 +116,9 @@ export function FrameworkStack({
       </g>
 
       <g className="stack-stage" data-layer="prepare">
-        <Plane
-          points="131,475 480,538 399,626 21,558"
-          front="21,558 399,626 480,538"
-          fill={`url(#${id}-plane)`}
-        />
+        <Plane x={21} y={558} fill={`url(#${id}-plane)`} />
         <g className="stack-connections" fill="none">
-          <path
-            className="stack-blue-line"
-            d="M173 539 203 546 247 554 303 564"
-            markerEnd={blueArrow}
-          />
+          <path className="stack-blue-line" d="M173 539 303 562.39" markerEnd={blueArrow} />
           <path
             d={preparePath}
             markerEnd={blueArrow}
@@ -143,10 +129,10 @@ export function FrameworkStack({
           )}
         </g>
         <Dataset x={119} y={502} />
-        <Dataset x={337} y={538} />
+        <Dataset x={337} y={541.22} />
         <TransformStep x={200} y={527} variant="filter" />
-        <TransformStep x={257} y={538} variant="transform" />
-        <g transform="translate(221 471)" className="stack-projection">
+        <TransformStep x={257} y={537.25} variant="transform" />
+        <g transform="translate(215 471)" className="stack-projection">
           <rect className="stack-paper" width="64" height="19" rx="3" />
           <text x="32" y="12.5" className="stack-micro stack-blue-text" textAnchor="middle">
             projection
@@ -155,11 +141,7 @@ export function FrameworkStack({
       </g>
 
       <g className="stack-stage" data-layer="model">
-        <Plane
-          points="145,268 491,332 394,450 15,377"
-          front="15,377 394,450 491,332"
-          fill={`url(#${id}-model)`}
-        />
+        <Plane x={15} y={377} fill={`url(#${id}-model)`} />
         <g className="stack-connections stack-model-links" fill="none">
           <path d="M105 353 164 376 240 373" />
           <path d="M240 373 340 397 400 375" />
@@ -200,11 +182,7 @@ export function FrameworkStack({
       </g>
 
       <g className="stack-stage" data-layer="build">
-        <Plane
-          points="131,65 476,127 398,219 25,149"
-          front="25,149 398,219 476,127"
-          fill={`url(#${id}-plane)`}
-        />
+        <Plane x={25} y={149} fill={`url(#${id}-plane)`} />
         <text className="stack-caption" x="144" y="29" textAnchor="middle">
           Apps
         </text>
@@ -229,15 +207,10 @@ export function FrameworkStack({
         <Pulse path={returnPath} duration={scenarioTransitions.publishing.duration} />
       )}
       <g className="stack-leaders" fill="none">
-        {[
-          [476, 135, 162],
-          [491, 340, 377],
-          [480, 546, 559],
-          [462, 722, 730],
-        ].map(([x, y, endY]) => (
+        {[162, 377, 559, 730].map((y) => (
           <g key={y}>
-            <path d={`M${x! + 8} ${y}h12l12 ${endY! - y!}H515`} />
-            <circle cx={x! + 8} cy={y} r="1.6" />
+            <path d={`M483 ${y - 12}h10l12 12h10`} />
+            <circle cx="483" cy={y - 12} r="1.6" />
           </g>
         ))}
       </g>
@@ -372,10 +345,12 @@ function AgentWindow({ x, y, phase }: { x: number; y: number; phase: ScenarioPha
       <g transform="translate(8 5) scale(.014)" className="stack-blue-fill">
         <path d="M15.94,471.64l67.46,455.36,599.79-189.73,380.88-355.72L368.99,153C243.22,266.91,122.33,375.93,15.94,471.64Z" />
       </g>
-      <text x="8" y="29" className="stack-mini-copy">
-        Quote assistant
+      <text x="8" y="25" className="stack-mini-copy">
+        <tspan x="8">Quote</tspan>
+        <tspan x="8" dy="11">
+          assistant
+        </tspan>
       </text>
-      <path className="stack-soft-line" d="M8 36H48" />
       <rect x="8" y="45" width="55" height="16" rx="2" className="stack-blue-fill" stroke="none" />
       <text x="35.5" y="55.5" className="stack-micro stack-white-text" textAnchor="middle">
         {phase === "created"
@@ -469,8 +444,16 @@ function Integration({
   )
 }
 
-function Plane({ points, front, fill }: { points: string; front: string; fill: string }) {
-  const edge = front.split(" ").map((point) => point.split(",").map(Number))
+function Plane({ x, y, fill }: { x: number; y: number; fill: string }) {
+  // All four platforms share the same size, projected axes, and vertical thickness.
+  // Anchor at the front-left corner; only the position varies between layers.
+  const backLeft = [x + 81, y - 88]
+  const backRight = [x + 459, y - 20]
+  const frontRight = [x + 378, y + 68]
+  const frontLeft = [x, y]
+  const points = [backLeft, backRight, frontRight, frontLeft].map((p) => p.join(",")).join(" ")
+  const edge = [frontLeft, frontRight, backRight]
+  const front = edge.map((p) => p.join(",")).join(" ")
   const lower = [...edge]
     .reverse()
     .map(([x, y]) => `${x},${y! + 6}`)
@@ -523,11 +506,12 @@ function Office({ x, y }: { x: number; y: number }) {
 function Dataset({ x, y }: { x: number; y: number }) {
   return (
     <g className="stack-dataset" transform={`translate(${x} ${y})`}>
-      <polygon className="stack-dataset-shadow" points="2,3 93.08,19.83 48.23,64.68 -42.85,47.85" />
+      <polygon className="stack-dataset-shadow" points="2,3 93.08,19.38 48.23,68.11 -42.85,51.73" />
       {/* Extrude vertically in scene space so the table has depth, not just a skewed border. */}
-      <path className="stack-blue-wash" d="M-44.85 30.85 46.23 47.68V57.68L-44.85 40.85Z" />
-      <path className="stack-side" d="M91.08 2.83 46.23 47.68V57.68L91.08 12.83Z" />
-      <g transform="matrix(.92 .17 -.65 .65 0 -14)">
+      <path className="stack-blue-wash" d="M-44.85 34.73 46.23 51.11V61.11L-44.85 44.73Z" />
+      <path className="stack-side" d="M91.08 2.38 46.23 51.11V61.11L91.08 12.38Z" />
+      {/* Match the prepare plane's axes: (378, 68) and (-81, 88). */}
+      <g transform="matrix(.92 .1655 -.65 .70617 0 -14)">
         <rect className="stack-paper" width="99" height="69" />
         <rect className="stack-data-row" y="43" width="99" height="9" stroke="none" />
         <g className="stack-fine-line">
@@ -555,9 +539,9 @@ function TransformStep({
 }) {
   return (
     <g transform={`translate(${x} ${y})`}>
-      <path className="stack-paper" d="m0 5 10 -6 22 4 -9 7Z" />
-      <path className="stack-side" d="m23 10 9 -7v20l-9 7Z" />
-      <path className="stack-paper" d="m0 5 23 5v20L0 25Z" />
+      <path className="stack-paper" d="M0 5 9 -4.78 32 -.64 23 9.14Z" />
+      <path className="stack-side" d="M23 9.14 32 -.64V19.36L23 29.14Z" />
+      <path className="stack-paper" d="M0 5 23 9.14V29.14L0 25Z" />
       <path
         className="stack-fine-line"
         fill="none"
