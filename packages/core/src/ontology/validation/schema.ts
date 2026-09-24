@@ -79,6 +79,10 @@ export function validateSchemaValue(
         }
         return
       }
+      default:
+        // Every primitive validates its values above. Untyped definitions can still carry an
+        // unknown string; it keeps falling through without a check.
+        schema satisfies never
     }
   }
 

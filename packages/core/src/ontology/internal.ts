@@ -1,4 +1,5 @@
 export { schemaFieldsToJsonSchema, schemaRecordToJsonSchema } from "./json-schema"
+export { resolvePropertyQueryCapabilities } from "./query-capabilities"
 export { validateSchemaOrRefValue } from "./refs"
 export { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 export {

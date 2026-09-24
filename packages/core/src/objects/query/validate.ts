@@ -8,6 +8,13 @@ import type {
 } from "../../ontology"
 import { normalizeDecimalValue } from "../../ontology"
 import { formatUnknownObjectTypeMessage } from "../../ontology/errors"
+import {
+  isContainsSchema,
+  isExactSchema,
+  isSortableSchema,
+  isTextSchema,
+  queryScalarKindForSchema,
+} from "../../ontology/query-capabilities"
 import { validatePropertyValue, validateSchemaValue } from "../../ontology/validation"
 import { MAX_VECTOR_K, normalizeVector, vectorConfiguration } from "../vectors/profile"
 import { hasVectorProfile, isVectorProfileQuery } from "../vectors/query"
@@ -703,12 +710,6 @@ function resolveCommonQueryScalarKind(
   return undefined
 }
 
-function queryScalarKindForSchema(schema: Schema): QueryScalarKind | undefined {
-  if (typeof schema === "string") return schema === "fileRef" ? undefined : schema
-  if (schema.type === "enum") return schema.valueType === "integer" ? "integer" : "string"
-  return undefined
-}
-
 function validatePredicateValue(
   propertyId: string,
   value: unknown,
@@ -748,7 +749,7 @@ function validateContainsValue(
     if (!schema) continue
 
     if (typeof schema === "string") {
-      if (schema === "string" || schema === "uuid") {
+      if (isContainsSchema(schema)) {
         if (typeof value !== "string") {
           addIssue(
             ctx,
@@ -1580,39 +1581,6 @@ function resolveSchema(
 
 function isPrimaryExactPredicate(property: Property, op: ObjectQueryPredicate["op"]): boolean {
   return property.primary === true && (op === "eq" || op === "in")
-}
-
-function isTextSchema(schema: Schema): boolean {
-  if (schema === "string") return true
-  return typeof schema !== "string" && schema.type === "enum" && schema.valueType === "string"
-}
-
-function isExactSchema(schema: Schema): boolean {
-  if (typeof schema === "string") return schema !== "fileRef"
-  return schema.type === "enum"
-}
-
-function isSortableSchema(schema: Schema): boolean {
-  if (typeof schema === "string") {
-    return (
-      schema === "string" ||
-      schema === "uuid" ||
-      schema === "integer" ||
-      schema === "double" ||
-      schema === "decimal" ||
-      schema === "date" ||
-      schema === "timestamp"
-    )
-  }
-  return schema.type === "enum"
-}
-
-function isContainsSchema(schema: Schema): boolean {
-  return (
-    schema === "string" ||
-    schema === "uuid" ||
-    (typeof schema !== "string" && (schema.type === "array" || schema.type === "map"))
-  )
 }
 
 function keyForTypeIds(typeIds: readonly string[]): string {

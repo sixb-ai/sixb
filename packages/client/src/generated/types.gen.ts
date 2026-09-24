@@ -8301,6 +8301,15 @@ export type ListObjectTypesResponses = {
         facet?: boolean
         weight?: number
       }
+      /**
+       * What object queries accept for this property, resolved from its schema and query metadata.
+       */
+      capabilities: {
+        operators: Array<"eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "exists" | "contains">
+        sortable: boolean
+        facet: boolean
+        text: boolean
+      }
     }>
     search?: {
       title?: string
@@ -8415,6 +8424,15 @@ export type GetObjectTypeResponses = {
         exact?: boolean
         facet?: boolean
         weight?: number
+      }
+      /**
+       * What object queries accept for this property, resolved from its schema and query metadata.
+       */
+      capabilities: {
+        operators: Array<"eq" | "neq" | "lt" | "lte" | "gt" | "gte" | "in" | "exists" | "contains">
+        sortable: boolean
+        facet: boolean
+        text: boolean
       }
     }>
     search?: {

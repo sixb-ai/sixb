@@ -15,8 +15,7 @@ import { formatValue } from "../formatValue"
 import { humanizeIdentifier } from "../labels"
 
 export type AtlasObjectType = ListObjectTypesResponse[number]
-type QueryMetadata = NonNullable<AtlasObjectType["properties"][number]["query"]>
-export type QueryProperty = AtlasObjectType["properties"][number] & { query?: QueryMetadata }
+export type QueryProperty = AtlasObjectType["properties"][number]
 
 export type QueryFilterOperator =
   | "eq"
@@ -57,6 +56,18 @@ export interface QuickFilterValue {
   count?: number
 }
 
+const filterOperatorOrder = [
+  "eq",
+  "neq",
+  "lt",
+  "lte",
+  "gt",
+  "gte",
+  "contains",
+  "exists",
+  "missing",
+] as const satisfies readonly QueryFilterOperator[]
+
 export const operatorLabels: Record<QueryFilterOperator, string> = {
   eq: "is",
   neq: "is not",
@@ -92,18 +103,15 @@ export function getPropertyLabel(property: Pick<QueryProperty, "id" | "name">): 
 }
 
 export function isFilterableProperty(property: QueryProperty): boolean {
-  return (
-    property.primary === true ||
-    (property.query?.searchable === true && property.query.filterable === true)
-  )
+  return getOperatorsForProperty(property).length > 0
 }
 
 export function isSortableProperty(property: QueryProperty): boolean {
-  return property.query?.searchable === true && property.query.sortable === true
+  return property.capabilities.sortable
 }
 
 export function isFacetProperty(property: QueryProperty): boolean {
-  return property.query?.searchable === true && property.query.facet === true
+  return property.capabilities.facet
 }
 
 export function schemaType(schema: unknown): string | undefined {
@@ -142,41 +150,12 @@ export function isDateSchema(schema: unknown): boolean {
   return type === "date" || type === "timestamp"
 }
 
-function isExactSchema(schema: unknown): boolean {
-  const type = schemaType(schema)
-  if (type === "enum") return true
-  if (typeof schema === "string") return schema !== "fileRef"
-  return false
-}
-
-function isSortableSchema(schema: unknown): boolean {
-  const type = schemaType(schema)
-  return (
-    type === "string" ||
-    type === "uuid" ||
-    type === "integer" ||
-    type === "double" ||
-    type === "decimal" ||
-    type === "date" ||
-    type === "timestamp" ||
-    type === "enum"
-  )
-}
-
-function isContainsSchema(schema: unknown): boolean {
-  const type = schemaType(schema)
-  return type === "string" || type === "uuid" || type === "array" || type === "map"
-}
-
+/** Filter operators Atlas offers, in display order, from the server-resolved query capabilities. */
 export function getOperatorsForProperty(property: QueryProperty): QueryFilterOperator[] {
-  if (property.primary === true && property.query?.filterable !== true) return ["eq"]
-
-  const operators: QueryFilterOperator[] = []
-  if (isExactSchema(property.schema)) operators.push("eq", "neq")
-  if (isSortableSchema(property.schema)) operators.push("lt", "lte", "gt", "gte")
-  if (isContainsSchema(property.schema)) operators.push("contains")
-  if (isExactSchema(property.schema)) operators.push("exists", "missing")
-  return operators
+  const supported = new Set(property.capabilities.operators)
+  return filterOperatorOrder.filter((operator) =>
+    supported.has(operator === "missing" ? "exists" : operator)
+  )
 }
 
 export function operatorRequiresValue(operator: QueryFilterOperator): boolean {

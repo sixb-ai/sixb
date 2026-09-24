@@ -1,6 +1,13 @@
 import { assertEmbeddingModelRef } from "../../models/embedding-model"
 import type { ObjectType, Property, Schema, ValueType } from ".."
 import { OntologyValidationError } from "../errors"
+import {
+  isExactSchema,
+  isFacetSchema,
+  isFilterableSchema,
+  isSortableSchema,
+  isTextSchema,
+} from "../query-capabilities"
 
 type QueryFeature = "filterable" | "sortable" | "text" | "exact" | "facet"
 
@@ -70,13 +77,13 @@ function validatePropertyQueryMetadata(
 
   const schema = resolveQueryableSchema(property, ownerPath, valueTypesById)
 
-  if (query.text && !isTextSearchableSchema(schema)) {
+  if (query.text && !isTextSchema(schema)) {
     throw new OntologyValidationError(
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables text search, but its schema is not string-like`
     )
   }
 
-  if (query.exact && !isExactSearchableSchema(schema)) {
+  if (query.exact && !isExactSchema(schema)) {
     throw new OntologyValidationError(
       `[Sixb] Query metadata for property '${property.id}' on '${ownerPath}' enables exact search, but its schema cannot be exact-matched`
     )
@@ -130,7 +137,7 @@ function validateObjectSearchMetadata(
     for (const id of profile.source) {
       const property = requireObjectProperty(typeId, objectType, id, `search.vectors.${name}`)
       assertStaticSearchProfileProperty(typeId, property, `search.vectors.${name}`)
-      if (!isTextSearchableSchema(resolveQueryableSchema(property, typeId, valueTypesById))) {
+      if (!isTextSchema(resolveQueryableSchema(property, typeId, valueTypesById))) {
         throw new OntologyValidationError(`[Sixb] Vector source must be text: ${typeId}.${id}`)
       }
     }
@@ -141,7 +148,7 @@ function validateObjectSearchMetadata(
     const title = requireObjectProperty(typeId, objectType, search.title, "search.title")
     assertStaticSearchProfileProperty(typeId, title, "search.title")
     const schema = resolveQueryableSchema(title, typeId, valueTypesById)
-    if (!isTextSearchableSchema(schema)) {
+    if (!isTextSchema(schema)) {
       throw new OntologyValidationError(
         `[Sixb] Object type '${typeId}' search.title references '${title.id}', but title fields must be string-like`
       )
@@ -242,42 +249,4 @@ function resolveSchema(
 
   seenValueTypeIds.add(schema.valueTypeId)
   return resolveSchema(resolved, valueTypesById, path, seenValueTypeIds)
-}
-
-function isTextSearchableSchema(schema: Schema): boolean {
-  if (schema === "string") return true
-  return typeof schema !== "string" && schema.type === "enum" && schema.valueType === "string"
-}
-
-function isExactSearchableSchema(schema: Schema): boolean {
-  if (typeof schema === "string") {
-    return schema !== "fileRef"
-  }
-  return schema.type === "enum"
-}
-
-function isFilterableSchema(schema: Schema): boolean {
-  return (
-    isExactSearchableSchema(schema) ||
-    (typeof schema !== "string" && (schema.type === "array" || schema.type === "map"))
-  )
-}
-
-function isSortableSchema(schema: Schema): boolean {
-  if (typeof schema === "string") {
-    return (
-      schema === "string" ||
-      schema === "uuid" ||
-      schema === "integer" ||
-      schema === "double" ||
-      schema === "decimal" ||
-      schema === "date" ||
-      schema === "timestamp"
-    )
-  }
-  return schema.type === "enum"
-}
-
-function isFacetSchema(schema: Schema): boolean {
-  return isExactSearchableSchema(schema)
 }

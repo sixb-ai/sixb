@@ -24849,9 +24849,43 @@
                                 }
                               },
                               "additionalProperties": false
+                            },
+                            "capabilities": {
+                              "type": "object",
+                              "properties": {
+                                "operators": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": [
+                                      "eq",
+                                      "neq",
+                                      "lt",
+                                      "lte",
+                                      "gt",
+                                      "gte",
+                                      "in",
+                                      "exists",
+                                      "contains"
+                                    ]
+                                  }
+                                },
+                                "sortable": {
+                                  "type": "boolean"
+                                },
+                                "facet": {
+                                  "type": "boolean"
+                                },
+                                "text": {
+                                  "type": "boolean"
+                                }
+                              },
+                              "required": ["operators", "sortable", "facet", "text"],
+                              "additionalProperties": false,
+                              "description": "What object queries accept for this property, resolved from its schema and query metadata."
                             }
                           },
-                          "required": ["id", "name"],
+                          "required": ["id", "name", "capabilities"],
                           "additionalProperties": false
                         }
                       },
@@ -25188,9 +25222,43 @@
                               }
                             },
                             "additionalProperties": false
+                          },
+                          "capabilities": {
+                            "type": "object",
+                            "properties": {
+                              "operators": {
+                                "type": "array",
+                                "items": {
+                                  "type": "string",
+                                  "enum": [
+                                    "eq",
+                                    "neq",
+                                    "lt",
+                                    "lte",
+                                    "gt",
+                                    "gte",
+                                    "in",
+                                    "exists",
+                                    "contains"
+                                  ]
+                                }
+                              },
+                              "sortable": {
+                                "type": "boolean"
+                              },
+                              "facet": {
+                                "type": "boolean"
+                              },
+                              "text": {
+                                "type": "boolean"
+                              }
+                            },
+                            "required": ["operators", "sortable", "facet", "text"],
+                            "additionalProperties": false,
+                            "description": "What object queries accept for this property, resolved from its schema and query metadata."
                           }
                         },
-                        "required": ["id", "name"],
+                        "required": ["id", "name", "capabilities"],
                         "additionalProperties": false
                       }
                     },

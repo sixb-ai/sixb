@@ -1,16 +1,5 @@
 import { isPlainRecord } from "../../json"
-
-const PRIMITIVE_SCHEMAS = new Set([
-  "string",
-  "integer",
-  "double",
-  "decimal",
-  "boolean",
-  "date",
-  "timestamp",
-  "uuid",
-  "fileRef",
-])
+import { isPrimitiveSchema } from "../primitives"
 
 /** Validate a declarative schema's shape independently of the primitive that consumes it. */
 export function assertValidSchema(
@@ -20,7 +9,7 @@ export function assertValidSchema(
   visiting: Set<object> = new Set()
 ): void {
   if (typeof schema === "string") {
-    if (PRIMITIVE_SCHEMAS.has(schema)) {
+    if (isPrimitiveSchema(schema)) {
       return
     }
     throw invalid(path)

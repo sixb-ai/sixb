@@ -1,7 +1,8 @@
 import type { ActionDefinitionCatalog } from "../actions"
 import type { LinkPathSelection, LinkPathSelectionMode, ObjectRef } from "../ontology"
+import { isPrimitiveSchema, primitiveTraits } from "../ontology/primitives"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
-import type { ObjectLink, ObjectType } from "../ontology/types"
+import type { ObjectLink, ObjectType, PrimitiveSchema } from "../ontology/types"
 import type {
   ObjectReadLinkDefinitionSelection,
   ObjectReadLinkSelection,
@@ -88,17 +89,6 @@ export function compileShareAccessPlan(input: CompileShareAccessPlanInput): Shar
   return snapshotShareAccessPlan({ grants })
 }
 
-const SHAREABLE_PRIMITIVE_SCHEMAS = new Set([
-  "string",
-  "integer",
-  "double",
-  "decimal",
-  "boolean",
-  "date",
-  "timestamp",
-  "uuid",
-])
-
 /**
  * V1 deliberately excludes references from shared Action params. A delegated caller cannot yet be
  * authorized to resolve arbitrary object or blob references supplied at invocation time.
@@ -112,7 +102,7 @@ function assertShareableActionParams(input: {
   const seenSchemas = new WeakSet<object>()
   const resolvingValueTypes = new Set<string>()
 
-  const reject = (path: string, kind: "objectRef" | "fileRef"): never => {
+  const reject = (path: string, kind: "objectRef" | PrimitiveSchema): never => {
     throw invalid(
       `Share '${input.shareId}' Action '${input.actionId}' parameter '${path}' uses ${kind}. Shared Action parameters cannot contain objectRef or fileRef in V1.`
     )
@@ -126,8 +116,8 @@ function assertShareableActionParams(input: {
 
   const walk = (schema: unknown, path: string): void => {
     if (typeof schema === "string") {
-      if (schema === "fileRef") reject(path, "fileRef")
-      if (!SHAREABLE_PRIMITIVE_SCHEMAS.has(schema)) malformed(path)
+      if (!isPrimitiveSchema(schema)) malformed(path)
+      else if (primitiveTraits(schema)?.shareableParam !== true) reject(path, schema)
       return
     }
     if (!isRecord(schema)) throw malformed(path)

@@ -1,3 +1,4 @@
+import { assertNever } from "../assert-never"
 import { assertAuthorized, isAllowed } from "../authorization"
 import { AuthorizationError } from "../authorization/errors"
 import type { AuthorizationContext } from "../authorization/types"
@@ -602,14 +603,11 @@ function objectStorageForAuthority(
         limits: authority.objectRead.limits,
       })
     default:
-      return assertNever(authority)
+      return assertNever(
+        authority,
+        `[Sixb] Unsupported object reader authority '${String((authority as { type?: unknown }).type)}'.`
+      )
   }
-}
-
-function assertNever(value: never): never {
-  throw new Error(
-    `[Sixb] Unsupported object reader authority '${String((value as { type?: unknown }).type)}'.`
-  )
 }
 
 function ontologySelectionForAuthority(
