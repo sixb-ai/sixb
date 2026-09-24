@@ -83,7 +83,7 @@ export interface PgAuthAccessTokenRow {
   readonly id: string
   readonly name: string
   readonly kind: AccessTokenRecord["kind"]
-  readonly subject_type: AccessTokenRecord["subjectType"]
+  readonly subject_type: AccessTokenRecord["subject"]["type"]
   readonly subject_id: string
   readonly token_hash: string
   readonly group_ids: readonly string[] | string | null
@@ -244,8 +244,7 @@ export function rowToAccessTokenRecord(row: PgAuthAccessTokenRow): AccessTokenRe
     projectId: row.project_id,
     name: row.name,
     kind: row.kind,
-    subjectType: row.subject_type,
-    subjectId: row.subject_id,
+    subject: { type: row.subject_type, id: row.subject_id },
     tokenHash: row.token_hash,
     groupIds: parseOptionalStringArray(row.group_ids),
     createdByPrincipal: principalFromColumns(row),

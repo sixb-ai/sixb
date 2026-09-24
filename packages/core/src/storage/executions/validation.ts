@@ -340,7 +340,7 @@ async function validateCredential(
       `[Sixb] Authority access token '${credential.id}' does not exist in project '${record.projectId}'.`
     )
   }
-  if (token.subjectType !== principal.type || token.subjectId !== principal.id) {
+  if (!principalsEqual(token.subject, principal)) {
     throw new ExecutionStorageError(
       "invalid_credential",
       `[Sixb] Authority access token '${credential.id}' does not belong to principal '${principal.id}'.`

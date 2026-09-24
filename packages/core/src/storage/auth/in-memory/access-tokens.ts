@@ -38,8 +38,11 @@ export class InMemoryAuthAccessTokenStore implements AuthAccessTokenStore {
     const rows = [...this.state.accessTokens.values()]
       .filter((token) => token.projectId === input.projectId)
       .filter((token) => input.kind === undefined || token.kind === input.kind)
-      .filter((token) => input.subjectType === undefined || token.subjectType === input.subjectType)
-      .filter((token) => input.subjectId === undefined || token.subjectId === input.subjectId)
+      .filter(
+        (token) =>
+          input.subject === undefined ||
+          (token.subject.type === input.subject.type && token.subject.id === input.subject.id)
+      )
       .filter((token) => input.includeRevoked || !token.revokedAt)
       .sort((a, b) => compareByCreatedAt(a, b, order))
     const page = rows.slice(offset, input.limit === undefined ? undefined : offset + input.limit)

@@ -851,8 +851,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           name: "Local CLI",
           kind: "personal",
-          subjectType: "user",
-          subjectId: "usr_1",
+          subject: { type: "user", id: "usr_1" },
           tokenHash: "hash-personal",
           groupIds: ["commercial", "commercial", "finance"],
           createdAt: at("2026-05-14T10:01:00.000Z"),
@@ -893,8 +892,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           name: "Sandbox agent",
           kind: "serviceAccount",
-          subjectType: "serviceAccount",
-          subjectId: "svc_ingest",
+          subject: { type: "serviceAccount", id: "svc_ingest" },
           tokenHash: "hash-service",
           createdAt: at("2026-05-14T10:04:00.000Z"),
           expiresAt: at("2026-05-21T10:04:00.000Z"),
@@ -902,8 +900,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         await expect(
           storage.accessTokens.list({
             projectId,
-            subjectType: "serviceAccount",
-            subjectId: "svc_ingest",
+            subject: { type: "serviceAccount", id: "svc_ingest" },
           })
         ).resolves.toMatchObject({
           accessTokens: [{ id: "tok_service" }],
@@ -978,8 +975,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             projectId,
             name: `Token by ${principal.type}`,
             kind: "personal",
-            subjectType: "user",
-            subjectId: "usr_creator",
+            subject: { type: "user", id: "usr_creator" },
             tokenHash: `hash-${tokenId}`,
             createdByPrincipal: principal,
             createdBySessionId: "ses_creator",
@@ -1019,8 +1015,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           projectId,
           name: "Touch token",
           kind: "personal",
-          subjectType: "user",
-          subjectId: "usr_1",
+          subject: { type: "user", id: "usr_1" },
           tokenHash: "hash-touch",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -1066,8 +1061,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             projectId,
             name: `Token ${id}`,
             kind: "personal",
-            subjectType: "user",
-            subjectId: "usr_1",
+            subject: { type: "user", id: "usr_1" },
             tokenHash: `hash-${id}`,
             createdAt: at(`2026-05-14T10:0${index}:00.000Z`),
             expiresAt: at(`2026-05-21T10:0${index}:00.000Z`),
@@ -1182,8 +1176,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             projectId,
             name: "Bad kind",
             kind: "serviceAccount",
-            subjectType: "user",
-            subjectId: "usr_1",
+            subject: { type: "user", id: "usr_1" },
             tokenHash: "hash",
             createdAt: at("2026-05-14T10:00:00.000Z"),
             expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -1196,8 +1189,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             projectId,
             name: "Missing subject",
             kind: "serviceAccount",
-            subjectType: "serviceAccount",
-            subjectId: "svc_missing",
+            subject: { type: "serviceAccount", id: "svc_missing" },
             tokenHash: "hash",
             createdAt: at("2026-05-14T10:00:00.000Z"),
             expiresAt: at("2026-05-21T10:00:00.000Z"),
@@ -1362,8 +1354,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             projectId,
             name: "codex",
             kind: "personal",
-            subjectType: "user",
-            subjectId: "usr_1",
+            subject: { type: "user", id: "usr_1" },
             tokenHash: "access-token-hash",
             createdByPrincipal: { type: "user", id: "usr_1" },
             createdBySessionId: "ses_device",
@@ -1373,7 +1364,10 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         })
 
         expect(completed.authorization).toMatchObject({ status: "consumed" })
-        expect(completed.accessToken).toMatchObject({ id: "tok_device", subjectId: "usr_1" })
+        expect(completed.accessToken).toMatchObject({
+          id: "tok_device",
+          subject: { type: "user", id: "usr_1" },
+        })
         await expectAuthError(
           storage.completeDeviceAuthorization({
             projectId,
@@ -1385,8 +1379,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
               projectId,
               name: "codex",
               kind: "personal",
-              subjectType: "user",
-              subjectId: "usr_1",
+              subject: { type: "user", id: "usr_1" },
               tokenHash: "access-token-hash-2",
               createdBySessionId: "ses_device",
               createdAt: at("2026-05-14T10:03:00.000Z"),

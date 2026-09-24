@@ -33,18 +33,21 @@ export const AuthInvitationDeliverySchema = z.object({
 export const AuthInvitationGroupOptionSchema = AuthGroupOptionSchema
 
 export const AuthAccessTokenKindSchema = z.enum(["personal", "serviceAccount"])
-export const AuthAccessTokenSubjectTypeSchema = z.enum(["user", "serviceAccount"])
 export const AuthAccessTokenStatusSchema = z.enum(["active", "expired", "revoked"])
 export const AuthServiceAccountStatusSchema = z.enum(["active", "suspended"])
 export const AuthUserStatusSchema = z.enum(["active", "suspended"])
+
+export const AuthAccessTokenSubjectSchema = z.object({
+  type: z.enum(["user", "serviceAccount"]),
+  id: z.string(),
+})
 
 export const AuthAccessTokenSchema = z.object({
   id: z.string(),
   name: z.string(),
   kind: AuthAccessTokenKindSchema,
   status: AuthAccessTokenStatusSchema,
-  subjectType: AuthAccessTokenSubjectTypeSchema,
-  subjectId: z.string(),
+  subject: AuthAccessTokenSubjectSchema,
   subjectLabel: z.string().optional(),
   groupIds: z.array(z.string()).optional(),
   createdAt: z.string(),

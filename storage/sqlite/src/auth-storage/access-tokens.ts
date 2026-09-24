@@ -29,10 +29,10 @@ export function createAuthAccessToken(
   const id = assertNonEmpty(input.id, "Access token id")
   const projectId = assertNonEmpty(input.projectId, "Project id")
   const name = assertNonEmpty(input.name, "Access token name")
-  const subjectId = assertNonEmpty(input.subjectId, "Access token subject id")
+  const subjectId = assertNonEmpty(input.subject.id, "Access token subject id")
   const tokenHash = assertNonEmpty(input.tokenHash, "Access token hash")
   assertKindMatchesSubject(input)
-  assertSubjectExists(db, projectId, input.subjectType, subjectId)
+  assertSubjectExists(db, projectId, input.subject.type, subjectId)
   const groupIds = input.groupIds === undefined ? undefined : normalizeGroupIds(input.groupIds)
 
   try {
@@ -59,7 +59,7 @@ export function createAuthAccessToken(
       id,
       name,
       input.kind,
-      input.subjectType,
+      input.subject.type,
       subjectId,
       tokenHash,
       serializeOptionalStringArray(groupIds),
@@ -114,13 +114,9 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
       whereClauses.push("kind = ?")
       args.push(input.kind)
     }
-    if (input.subjectType) {
-      whereClauses.push("subject_type = ?")
-      args.push(input.subjectType)
-    }
-    if (input.subjectId) {
-      whereClauses.push("subject_id = ?")
-      args.push(input.subjectId)
+    if (input.subject) {
+      whereClauses.push("subject_type = ?", "subject_id = ?")
+      args.push(input.subject.type, input.subject.id)
     }
     if (!input.includeRevoked) {
       whereClauses.push("revoked_at IS NULL")
@@ -259,7 +255,7 @@ export class SqliteAuthAccessTokenStore implements AuthAccessTokenStore {
 function assertSubjectExists(
   db: Database,
   projectId: string,
-  subjectType: CreateAuthAccessTokenInput["subjectType"],
+  subjectType: CreateAuthAccessTokenInput["subject"]["type"],
   subjectId: string
 ): void {
   if (subjectType === "user") {
@@ -285,14 +281,14 @@ function assertSubjectExists(
 
 function assertKindMatchesSubject(input: CreateAuthAccessTokenInput): void {
   if (
-    (input.kind === "personal" && input.subjectType === "user") ||
-    (input.kind === "serviceAccount" && input.subjectType === "serviceAccount")
+    (input.kind === "personal" && input.subject.type === "user") ||
+    (input.kind === "serviceAccount" && input.subject.type === "serviceAccount")
   ) {
     return
   }
 
   throw new AuthStorageError(
     "invalid_input",
-    `[Sixb] Access token kind '${input.kind}' cannot target subject type '${input.subjectType}'.`
+    `[Sixb] Access token kind '${input.kind}' cannot target subject type '${input.subject.type}'.`
   )
 }

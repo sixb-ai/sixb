@@ -398,11 +398,11 @@ export function createAccessTokenRecord(
   const id = assertNonEmpty(input.id, "Access token id")
   const projectId = assertNonEmpty(input.projectId, "Project id")
   const name = assertNonEmpty(input.name, "Access token name")
-  const subjectId = assertNonEmpty(input.subjectId, "Access token subject id")
+  const subjectId = assertNonEmpty(input.subject.id, "Access token subject id")
   const tokenHash = assertNonEmpty(input.tokenHash, "Access token hash")
 
-  assertAccessTokenSubject(input.kind, input.subjectType)
-  assertAccessTokenSubjectExists(state, projectId, input.subjectType, subjectId)
+  assertAccessTokenSubject(input.kind, input.subject.type)
+  assertAccessTokenSubjectExists(state, projectId, input.subject.type, subjectId)
 
   const key = accessTokenKey(projectId, id)
   if (state.accessTokens.has(key)) {
@@ -417,8 +417,7 @@ export function createAccessTokenRecord(
     projectId,
     name,
     kind: input.kind,
-    subjectType: input.subjectType,
-    subjectId,
+    subject: { type: input.subject.type, id: subjectId },
     tokenHash,
     groupIds: normalizeOptionalGroupIds(input.groupIds),
     createdByPrincipal: input.createdByPrincipal,
@@ -484,7 +483,7 @@ export function removeGroupMembershipRecord(
 
 function assertAccessTokenSubject(
   kind: CreateAuthAccessTokenInput["kind"],
-  subjectType: CreateAuthAccessTokenInput["subjectType"]
+  subjectType: CreateAuthAccessTokenInput["subject"]["type"]
 ): void {
   if (
     (kind === "personal" && subjectType === "user") ||
@@ -502,7 +501,7 @@ function assertAccessTokenSubject(
 function assertAccessTokenSubjectExists(
   state: AuthStorageState,
   projectId: string,
-  subjectType: CreateAuthAccessTokenInput["subjectType"],
+  subjectType: CreateAuthAccessTokenInput["subject"]["type"],
   subjectId: string
 ): void {
   if (subjectType === "user") {
