@@ -37,6 +37,7 @@ import {
   usableLinkSlotOverride,
 } from "../effective/resolve"
 import { validateEffectiveObject } from "../effective/validate"
+import type { MaterializerAttribution } from "../execution/scope"
 import { stageWorkBounded, validateStagedCardinality } from "../execution/work-executor"
 import {
   appendEffectiveLinkWork,
@@ -55,6 +56,7 @@ export interface ProjectionReplacementPlanInput {
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
   readonly correlationId: string
+  readonly attribution: MaterializerAttribution
   readonly signal?: AbortSignal
 }
 
@@ -163,6 +165,7 @@ function appendObjectChangeWork(
         committedAt: input.identity.committedAt,
         origin: input.origin,
         correlationId: input.correlationId,
+        attribution: input.attribution,
         change,
       })
     )
@@ -360,6 +363,7 @@ function appendLinkChangeWork(
         committedAt: input.identity.committedAt,
         origin: input.origin,
         correlationId: input.correlationId,
+        attribution: input.attribution,
         change,
       })
     )

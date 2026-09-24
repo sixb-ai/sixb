@@ -9,6 +9,7 @@ import {
   objectRefKey,
   telemetryPointKey,
 } from "../../materialization/refs"
+import type { OntologyCommitWrite } from "./commits"
 import {
   type ExactTimeseriesPointWrite,
   type MaterializationCardinalityOccupantWorkRecord,
@@ -107,8 +108,7 @@ export function assertWorkRecord(
       record.draft.commitId !== header.commit.id ||
       record.draft.occurredAt !== header.commit.committedAt ||
       stableJsonStringify(record.draft.origin) !== stableJsonStringify(header.commit.origin) ||
-      stableJsonStringify(record.draft.actor ?? null) !==
-        stableJsonStringify(header.commit.actor ?? null)
+      !sameAttribution(record.draft, header.commit)
     ) {
       throw new MaterializationValidationError("Materialization event work is invalid.")
     }
@@ -312,7 +312,7 @@ function assertOutboxCorrelation(
     value.availableAt !== commit.committedAt ||
     value.createdAt !== commit.committedAt ||
     stableJsonStringify(envelope.origin) !== stableJsonStringify(commit.origin) ||
-    stableJsonStringify(envelope.actor ?? null) !== stableJsonStringify(commit.actor ?? null) ||
+    !sameAttribution(envelope, commit) ||
     !Number.isSafeInteger(envelope.commitOrdinal) ||
     envelope.commitOrdinal < 0 ||
     envelope.id !== createEventId(commit.projectId, commit.id, envelope.commitOrdinal)
@@ -346,4 +346,16 @@ function assertLinkRefEqual(left: OntologyLinkRef, right: OntologyLinkRef, label
   if (linkRefKey(left) !== linkRefKey(right)) {
     invalidCorrelation(`${label} row and expected references differ.`)
   }
+}
+
+/** Events carry exactly the attribution of the commit that produced them. */
+function sameAttribution(
+  event: Pick<OntologyCommitWrite, "requestedBy" | "executor">,
+  commit: Pick<OntologyCommitWrite, "requestedBy" | "executor">
+): boolean {
+  return (
+    stableJsonStringify(event.requestedBy ?? null) ===
+      stableJsonStringify(commit.requestedBy ?? null) &&
+    stableJsonStringify(event.executor) === stableJsonStringify(commit.executor)
+  )
 }

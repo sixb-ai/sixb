@@ -226,13 +226,14 @@ function buildEditCommit(
   context: Pick<MaterializerContext, "projectId" | "projectionRegistry">,
   command: PreparedEditCommit
 ): OntologyCommitWrite {
-  const commit: OntologyCommitWrite = {
+  return {
     projectId: context.projectId,
     id: command.identity.commitId,
     idempotencyKey: command.identity.idempotencyKey,
     requestHash: command.identity.requestHash,
     executionId: command.execution.executionId,
     origin: command.origin,
+    ...command.execution.attribution,
     ontologyRevision: context.projectionRegistry.ontologyRevision,
     intent: {
       kind: "edit",
@@ -244,8 +245,6 @@ function buildEditCommit(
     },
     committedAt: command.identity.committedAt,
   }
-  if (command.execution.actor === undefined) return commit
-  return { ...commit, actor: command.execution.actor }
 }
 
 function editExpectations(input: NormalizedEditCommit) {
@@ -353,13 +352,12 @@ function isRecoverableEditValidation(
 }
 
 function editPlanContext(command: PreparedEditCommit) {
-  const context = {
+  return {
     identity: command.identity,
     origin: command.origin,
     correlationId: command.execution.correlationId,
+    attribution: command.execution.attribution,
   }
-  if (command.execution.actor === undefined) return context
-  return { ...context, actor: command.execution.actor }
 }
 
 async function finalizeEditMaterialization(

@@ -11803,10 +11803,6 @@ export type ListEventsResponses = {
           schemaVersion: 1
           projectId: string
           occurredAt: string
-          actor?: {
-            type: "user" | "serviceAccount" | "system"
-            id: string
-          }
           partitionKey: string
           origin:
             | {
@@ -11839,6 +11835,47 @@ export type ListEventsResponses = {
                       datasetId: string
                       datasetVersionId: string
                       batchOrdinal: number
+                    }
+              }
+          /**
+           * Principal on whose behalf the write ran; absent for automatic or anonymous work.
+           */
+          requestedBy?: {
+            type: "user" | "serviceAccount"
+            id: string
+          }
+          executor:
+            | {
+                type: "request"
+                requestId: string
+              }
+            | {
+                type: "primitive"
+                kind:
+                  | "action"
+                  | "pipeline"
+                  | "projection"
+                  | "rule"
+                  | "sync"
+                  | "webhook"
+                  | "workflow"
+                id: string
+                runId: string
+              }
+            | {
+                type: "agent"
+                runId: string
+              }
+            | {
+                type: "kernel"
+                operation:
+                  | {
+                      type: "ontology.recover"
+                      recoveryId: string
+                    }
+                  | {
+                      type: "ontology.indexVectors"
+                      indexingId: string
                     }
               }
           commitId: string
@@ -11928,10 +11965,6 @@ export type ListEventsResponses = {
           schemaVersion: 1
           projectId: string
           occurredAt: string
-          actor?: {
-            type: "user" | "serviceAccount" | "system"
-            id: string
-          }
           partitionKey: string
           origin:
             | {
@@ -11964,6 +11997,47 @@ export type ListEventsResponses = {
                       datasetId: string
                       datasetVersionId: string
                       batchOrdinal: number
+                    }
+              }
+          /**
+           * Principal on whose behalf the write ran; absent for automatic or anonymous work.
+           */
+          requestedBy?: {
+            type: "user" | "serviceAccount"
+            id: string
+          }
+          executor:
+            | {
+                type: "request"
+                requestId: string
+              }
+            | {
+                type: "primitive"
+                kind:
+                  | "action"
+                  | "pipeline"
+                  | "projection"
+                  | "rule"
+                  | "sync"
+                  | "webhook"
+                  | "workflow"
+                id: string
+                runId: string
+              }
+            | {
+                type: "agent"
+                runId: string
+              }
+            | {
+                type: "kernel"
+                operation:
+                  | {
+                      type: "ontology.recover"
+                      recoveryId: string
+                    }
+                  | {
+                      type: "ontology.indexVectors"
+                      indexingId: string
                     }
               }
           commitId: string
@@ -12053,10 +12127,6 @@ export type ListEventsResponses = {
           schemaVersion: 1
           projectId: string
           occurredAt: string
-          actor?: {
-            type: "user" | "serviceAccount" | "system"
-            id: string
-          }
           partitionKey: string
           origin:
             | {
@@ -12089,6 +12159,47 @@ export type ListEventsResponses = {
                       datasetId: string
                       datasetVersionId: string
                       batchOrdinal: number
+                    }
+              }
+          /**
+           * Principal on whose behalf the write ran; absent for automatic or anonymous work.
+           */
+          requestedBy?: {
+            type: "user" | "serviceAccount"
+            id: string
+          }
+          executor:
+            | {
+                type: "request"
+                requestId: string
+              }
+            | {
+                type: "primitive"
+                kind:
+                  | "action"
+                  | "pipeline"
+                  | "projection"
+                  | "rule"
+                  | "sync"
+                  | "webhook"
+                  | "workflow"
+                id: string
+                runId: string
+              }
+            | {
+                type: "agent"
+                runId: string
+              }
+            | {
+                type: "kernel"
+                operation:
+                  | {
+                      type: "ontology.recover"
+                      recoveryId: string
+                    }
+                  | {
+                      type: "ontology.indexVectors"
+                      indexingId: string
                     }
               }
           commitId: string
@@ -12167,10 +12278,6 @@ export type ListEventsResponses = {
           schemaVersion: 1
           projectId: string
           occurredAt: string
-          actor?: {
-            type: "user" | "serviceAccount" | "system"
-            id: string
-          }
           partitionKey: string
           origin:
             | {
@@ -12203,6 +12310,47 @@ export type ListEventsResponses = {
                       datasetId: string
                       datasetVersionId: string
                       batchOrdinal: number
+                    }
+              }
+          /**
+           * Principal on whose behalf the write ran; absent for automatic or anonymous work.
+           */
+          requestedBy?: {
+            type: "user" | "serviceAccount"
+            id: string
+          }
+          executor:
+            | {
+                type: "request"
+                requestId: string
+              }
+            | {
+                type: "primitive"
+                kind:
+                  | "action"
+                  | "pipeline"
+                  | "projection"
+                  | "rule"
+                  | "sync"
+                  | "webhook"
+                  | "workflow"
+                id: string
+                runId: string
+              }
+            | {
+                type: "agent"
+                runId: string
+              }
+            | {
+                type: "kernel"
+                operation:
+                  | {
+                      type: "ontology.recover"
+                      recoveryId: string
+                    }
+                  | {
+                      type: "ontology.indexVectors"
+                      indexingId: string
                     }
               }
           commitId: string
@@ -12235,10 +12383,6 @@ export type ListEventsResponses = {
           schemaVersion: 1
           projectId: string
           occurredAt: string
-          actor?: {
-            type: "user" | "serviceAccount" | "system"
-            id: string
-          }
           partitionKey: string
           origin:
             | {
@@ -12271,6 +12415,47 @@ export type ListEventsResponses = {
                       datasetId: string
                       datasetVersionId: string
                       batchOrdinal: number
+                    }
+              }
+          /**
+           * Principal on whose behalf the write ran; absent for automatic or anonymous work.
+           */
+          requestedBy?: {
+            type: "user" | "serviceAccount"
+            id: string
+          }
+          executor:
+            | {
+                type: "request"
+                requestId: string
+              }
+            | {
+                type: "primitive"
+                kind:
+                  | "action"
+                  | "pipeline"
+                  | "projection"
+                  | "rule"
+                  | "sync"
+                  | "webhook"
+                  | "workflow"
+                id: string
+                runId: string
+              }
+            | {
+                type: "agent"
+                runId: string
+              }
+            | {
+                type: "kernel"
+                operation:
+                  | {
+                      type: "ontology.recover"
+                      recoveryId: string
+                    }
+                  | {
+                      type: "ontology.indexVectors"
+                      indexingId: string
                     }
               }
           commitId: string
@@ -12363,10 +12548,6 @@ export type ListEventsResponses = {
           schemaVersion: 1
           projectId: string
           occurredAt: string
-          actor?: {
-            type: "user" | "serviceAccount" | "system"
-            id: string
-          }
           partitionKey: string
           origin:
             | {
@@ -12399,6 +12580,47 @@ export type ListEventsResponses = {
                       datasetId: string
                       datasetVersionId: string
                       batchOrdinal: number
+                    }
+              }
+          /**
+           * Principal on whose behalf the write ran; absent for automatic or anonymous work.
+           */
+          requestedBy?: {
+            type: "user" | "serviceAccount"
+            id: string
+          }
+          executor:
+            | {
+                type: "request"
+                requestId: string
+              }
+            | {
+                type: "primitive"
+                kind:
+                  | "action"
+                  | "pipeline"
+                  | "projection"
+                  | "rule"
+                  | "sync"
+                  | "webhook"
+                  | "workflow"
+                id: string
+                runId: string
+              }
+            | {
+                type: "agent"
+                runId: string
+              }
+            | {
+                type: "kernel"
+                operation:
+                  | {
+                      type: "ontology.recover"
+                      recoveryId: string
+                    }
+                  | {
+                      type: "ontology.indexVectors"
+                      indexingId: string
                     }
               }
           commitId: string
@@ -12491,10 +12713,6 @@ export type ListEventsResponses = {
           schemaVersion: 1
           projectId: string
           occurredAt: string
-          actor?: {
-            type: "user" | "serviceAccount" | "system"
-            id: string
-          }
           partitionKey: string
           origin:
             | {
@@ -12527,6 +12745,47 @@ export type ListEventsResponses = {
                       datasetId: string
                       datasetVersionId: string
                       batchOrdinal: number
+                    }
+              }
+          /**
+           * Principal on whose behalf the write ran; absent for automatic or anonymous work.
+           */
+          requestedBy?: {
+            type: "user" | "serviceAccount"
+            id: string
+          }
+          executor:
+            | {
+                type: "request"
+                requestId: string
+              }
+            | {
+                type: "primitive"
+                kind:
+                  | "action"
+                  | "pipeline"
+                  | "projection"
+                  | "rule"
+                  | "sync"
+                  | "webhook"
+                  | "workflow"
+                id: string
+                runId: string
+              }
+            | {
+                type: "agent"
+                runId: string
+              }
+            | {
+                type: "kernel"
+                operation:
+                  | {
+                      type: "ontology.recover"
+                      recoveryId: string
+                    }
+                  | {
+                      type: "ontology.indexVectors"
+                      indexingId: string
                     }
               }
           commitId: string
@@ -12608,10 +12867,6 @@ export type ListEventsResponses = {
           schemaVersion: 1
           projectId: string
           occurredAt: string
-          actor?: {
-            type: "user" | "serviceAccount" | "system"
-            id: string
-          }
           partitionKey: string
           correlationId?: string
           causationId?: string

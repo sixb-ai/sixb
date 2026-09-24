@@ -51,6 +51,8 @@ Materializer      -> semantic planning and cross-store transaction orchestration
 
 Every ontology commit references its immutable execution through `executionId`. Storage providers enforce that reference. `origin` remains the semantic idempotency and run-correlation key: it says which runtime request, Action, projection replacement, or telemetry batch the commit represents; the execution says under which durable authority it ran. Neither field duplicates the other.
 
+A commit and each of its events also carry a copy of two execution facts, so consumers can answer "who changed this" without reading the execution: `requestedBy`, the principal on whose behalf the execution chain runs (absent for automatic, anonymous, or auth-disabled work), and `executor`, the request, primitive run, Agent run, or kernel operation that wrote. Both are derived from the bound scope in `execution/scope.ts`, which is already proven identical to the durable record, so they are a pure function of `executionId` and never caller input. Authority is deliberately not copied: it stays on the execution's `authorizationRef`. Header validation requires an Action or projection origin to name the exact primitive run in `executor`, and provider work requires every event to carry its commit's attribution.
+
 Run records do not duplicate ontology commit ids or semantic commit history. Replacement projections need no resume checkpoint; projection telemetry stores only its next batch/row checkpoint on the run.
 
 Logical origins are unique in the ontology ledger: one commit per Action run, one per replacement

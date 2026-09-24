@@ -539,6 +539,7 @@ function objectCreatedEnvelope(id: string): OntologyMaterializationEvent {
     occurredAt: NOW.toISOString(),
     correlationId: "correlation-1",
     origin: { kind: "runtime", requestId: "request-1" },
+    executor: { type: "request", requestId: "request-1" },
     commitId: "commit-1",
     commitOrdinal: 0,
     type: "object.created",

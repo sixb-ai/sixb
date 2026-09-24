@@ -37,7 +37,8 @@ export interface SqliteOntologyCommitRow {
   readonly origin_run_id: string | null
   readonly origin_batch_ordinal: number | null
   readonly origin: string
-  readonly actor: string | null
+  readonly requested_by: string | null
+  readonly executor: string
   readonly ontology_revision: string
   readonly projection_revision: string | null
   readonly ownership_hash: string | null
@@ -162,9 +163,12 @@ export function commitRecord(row: SqliteOntologyCommitRow): OntologyCommitRecord
     requestHash: row.request_hash,
     executionId: row.execution_id,
     origin: parseJson<OntologyCommitWrite["origin"]>(row.origin),
-    ...(row.actor === null
+    ...(row.requested_by === null
       ? {}
-      : { actor: parseJson<NonNullable<OntologyCommitWrite["actor"]>>(row.actor) }),
+      : {
+          requestedBy: parseJson<NonNullable<OntologyCommitWrite["requestedBy"]>>(row.requested_by),
+        }),
+    executor: parseJson<OntologyCommitWrite["executor"]>(row.executor),
     ontologyRevision: row.ontology_revision,
     ...(row.projection_revision === null ? {} : { projectionRevision: row.projection_revision }),
     ...(row.ownership_hash === null ? {} : { ownershipHash: row.ownership_hash }),

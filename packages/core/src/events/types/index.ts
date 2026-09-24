@@ -14,8 +14,8 @@ import type { WorkflowEvent } from "./workflows"
 
 export type {
   ActionEventOrigin,
-  EventActor,
   EventEnvelope,
+  EventExecutor,
   EventOrigin,
   ProjectionEventOrigin,
   ProjectionTelemetryEventSource,

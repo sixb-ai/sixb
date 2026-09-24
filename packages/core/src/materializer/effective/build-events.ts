@@ -1,4 +1,3 @@
-import type { EventActor } from "../../events/envelope"
 import type {
   EffectiveLinkChange,
   EffectiveObjectChange,
@@ -10,6 +9,7 @@ import type {
   OntologyMaterializationEvent,
   OntologyMaterializationEventDraft,
 } from "../../storage/ontology"
+import type { MaterializerAttribution } from "../execution/scope"
 import { createEventId, materializationEventKindOrdinal } from "../shared/identity"
 
 export interface OrderedMaterializationEventDraft {
@@ -24,7 +24,7 @@ export interface MaterializationEventDraftContext {
   readonly committedAt: string
   readonly correlationId: string
   readonly origin: OntologyMaterializationOrigin
-  readonly actor?: EventActor
+  readonly attribution: MaterializerAttribution
 }
 
 export function buildObjectMaterializationEventDraft(
@@ -162,16 +162,15 @@ function buildTelemetryEventDraft(
 }
 
 function eventDraftBase(context: MaterializationEventDraftContext) {
-  const base = {
+  return {
     schemaVersion: 1 as const,
     projectId: context.projectId,
     occurredAt: context.committedAt,
     correlationId: context.correlationId,
     origin: context.origin,
+    ...context.attribution,
     commitId: context.commitId,
   }
-  if (context.actor === undefined) return base
-  return { ...base, actor: context.actor }
 }
 
 function orderedDraft(

@@ -407,6 +407,7 @@ function projectionCommit(
     requestHash: identity.requestHash,
     executionId: command.scopeExecution.executionId,
     origin,
+    ...command.scopeExecution.attribution,
     ontologyRevision: command.runIdentity.ontologyRevision,
     projectionRevision: command.runIdentity.projectionRevision,
     ownershipHash: command.runIdentity.ownershipHash,
@@ -430,6 +431,7 @@ async function planReadyProjection(
     identity: ready.identity,
     origin,
     correlationId: command.scopeExecution.correlationId,
+    attribution: command.scopeExecution.attribution,
   }
   if (command.signal === undefined) {
     return planProjectionReplacement(context, storage, session, input)

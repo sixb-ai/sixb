@@ -32,7 +32,6 @@ describe("DomainEventService", () => {
     const events = new DomainEventService({ projectId: "project-a", broker })
 
     const [event] = await events.append({
-      actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       events: [
@@ -50,7 +49,6 @@ describe("DomainEventService", () => {
       type: "action.requested",
       topic: "actions",
       partitionKey: "test-action",
-      actor: { type: "system", id: "tests" },
       correlationId: "corr-1",
       causationId: "cause-1",
       metadata: { source: "unit-test" },

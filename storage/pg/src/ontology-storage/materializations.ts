@@ -873,18 +873,20 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
   ): Promise<OntologyCommitRecord> {
     const { commit } = header
     const origin = originColumns(commit.origin)
-    const actor = commit.actor === undefined ? null : jsonParameter(this.sql, commit.actor)
+    const requestedBy =
+      commit.requestedBy === undefined ? null : jsonParameter(this.sql, commit.requestedBy)
     const rows = await this.sql<PgOntologyCommitRow[]>`
       INSERT INTO ontology_commits (
         project_id, id, idempotency_key, request_hash, execution_id,
-        origin_kind, origin_run_id, origin_batch_ordinal, origin, actor,
+        origin_kind, origin_run_id, origin_batch_ordinal, origin, requested_by, executor,
         ontology_revision, projection_revision, ownership_hash,
         intent, result, committed_at
       ) VALUES (
         ${commit.projectId}, ${commit.id}, ${commit.idempotencyKey}, ${commit.requestHash},
         ${commit.executionId},
         ${origin.kind}, ${origin.runId}, ${origin.batchOrdinal},
-        ${jsonParameter(this.sql, commit.origin)}, ${actor}, ${commit.ontologyRevision},
+        ${jsonParameter(this.sql, commit.origin)}, ${requestedBy},
+        ${jsonParameter(this.sql, commit.executor)}, ${commit.ontologyRevision},
         ${commit.projectionRevision ?? null}, ${commit.ownershipHash ?? null},
         ${jsonParameter(this.sql, commit.intent)},
         ${jsonParameter(this.sql, input.finalization.result)}, ${commit.committedAt}

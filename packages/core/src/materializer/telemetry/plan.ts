@@ -1,4 +1,3 @@
-import type { EventActor } from "../../events/envelope"
 import { stableJsonStringify } from "../../json"
 import { MaterializationObjectNotFoundError } from "../../materialization/errors"
 import type {
@@ -30,6 +29,7 @@ import {
 import { diffEffectiveObject } from "../effective/diff"
 import { loadState, oneStateRequest } from "../effective/load-state"
 import { validateEffectiveObject } from "../effective/validate"
+import type { MaterializerAttribution } from "../execution/scope"
 import { stageWorkBounded } from "../execution/work-executor"
 import {
   appendEffectiveObjectWork,
@@ -68,7 +68,7 @@ interface TelemetryPlanContext {
 
 interface TelemetryEventContext {
   readonly correlationId: string
-  readonly actor?: EventActor
+  readonly attribution: MaterializerAttribution
 }
 
 export async function planTelemetryAppend(
@@ -351,15 +351,14 @@ function telemetryEventContext(
   context: Pick<MaterializerContext, "projectId">,
   planContext: TelemetryPlanContext
 ) {
-  const eventContext = {
+  return {
     projectId: context.projectId,
     commitId: planContext.identity.commitId,
     committedAt: planContext.identity.committedAt,
     origin: planContext.origin,
     correlationId: planContext.event.correlationId,
+    attribution: planContext.event.attribution,
   }
-  if (planContext.event.actor === undefined) return eventContext
-  return { ...eventContext, actor: planContext.event.actor }
 }
 
 function emptyTelemetryCounts(): MutableTelemetryPlanCounts {

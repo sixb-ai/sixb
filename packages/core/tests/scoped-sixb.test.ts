@@ -1047,7 +1047,9 @@ describe("direct writes are attributable", () => {
     events: { read(): Promise<readonly StoredDomainEvent[]> },
     primaryId: string
   ) {
-    const isMatch = (event: StoredDomainEvent) =>
+    const isMatch = (
+      event: StoredDomainEvent
+    ): event is Extract<StoredDomainEvent, { type: "object.created" | "object.updated" }> =>
       event.type === "object.created" && event.partitionKey.endsWith(primaryId)
 
     return (
@@ -1058,17 +1060,18 @@ describe("direct writes are attributable", () => {
     ).find(isMatch)
   }
 
-  test("a principal write names its actor, an auth-disabled one names nobody", async () => {
+  test("a principal write names its requester, an auth-disabled one names nobody", async () => {
     const host = createRuntime()
     await seedPrincipal(host)
     const sixb = createTestSixb(host)
 
-    // Auth-disabled execution: no authorization context, so no actor. The absence is the signal —
-    // this write came from an explicitly unrestricted project, not a caller.
+    // Auth-disabled execution: nobody requested it. The absence is the signal — this write came
+    // from an explicitly unrestricted project, not a caller. The executor still says what ran.
     await sixb.objects(Contract).upsert({ properties: { id: "system-write" } })
     const systemEvent = await objectCreatedEvent(sixb.events, "system-write")
     expect(systemEvent?.origin).toMatchObject({ kind: "runtime" })
-    expect(systemEvent?.actor).toBeUndefined()
+    expect(systemEvent?.requestedBy).toBeUndefined()
+    expect(systemEvent?.executor).toMatchObject({ type: "request" })
 
     // The principal travels onto the event, while `origin` still says the write bypassed an action.
     // Governed and direct writes stay distinguishable, and a direct write is now traceable.
@@ -1076,10 +1079,11 @@ describe("direct writes are attributable", () => {
     await editor.objects(Contract).upsert({ properties: { id: "user-write" } })
     const userEvent = await objectCreatedEvent(sixb.events, "user-write")
     expect(userEvent?.origin).toMatchObject({ kind: "runtime" })
-    expect(userEvent?.actor).toEqual({ type: "user", id: "adam" })
+    expect(userEvent?.requestedBy).toEqual({ type: "user", id: "adam" })
+    expect(userEvent?.executor).toMatchObject({ type: "request" })
   })
 
-  test("a service account is recorded as a service actor", async () => {
+  test("a service account is recorded as the requester", async () => {
     const host = createRuntime()
     await seedServiceAccount(host, "svc_ingest")
     const sixb = createTestSixb(host)
@@ -1093,8 +1097,8 @@ describe("direct writes are attributable", () => {
       .objects(Contract)
       .upsert({ properties: { id: "svc-write" } })
 
-    // The actor literals are `Principal["type"]`, so no translation happens on the way in.
-    expect((await objectCreatedEvent(sixb.events, "svc-write"))?.actor).toEqual({
+    // The requester literals are `Principal["type"]`, so no translation happens on the way in.
+    expect((await objectCreatedEvent(sixb.events, "svc-write"))?.requestedBy).toEqual({
       type: "serviceAccount",
       id: "svc_ingest",
     })

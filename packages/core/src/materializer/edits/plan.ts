@@ -1,4 +1,3 @@
-import type { EventActor } from "../../events/envelope"
 import type {
   EffectiveLinkChange,
   EffectiveObjectChange,
@@ -27,6 +26,7 @@ import {
 } from "../effective/build-events"
 import { diffEffectiveLink, diffEffectiveLinkSlot, diffEffectiveObject } from "../effective/diff"
 import { validateEffectiveObject } from "../effective/validate"
+import type { MaterializerAttribution } from "../execution/scope"
 import { stageWorkBounded } from "../execution/work-executor"
 import {
   appendEffectiveLinkWork,
@@ -59,7 +59,7 @@ interface EditPlanContext {
   readonly identity: TimedCommitIdentity
   readonly origin: OntologyMaterializationOrigin
   readonly correlationId: string
-  readonly actor?: EventActor
+  readonly attribution: MaterializerAttribution
 }
 
 export async function stageEditPlan(
@@ -237,15 +237,14 @@ function materializationEventContext(
   context: Pick<MaterializerContext, "projectId">,
   planContext: EditPlanContext
 ) {
-  const base = {
+  return {
     projectId: context.projectId,
     commitId: planContext.identity.commitId,
     committedAt: planContext.identity.committedAt,
     origin: planContext.origin,
     correlationId: planContext.correlationId,
+    attribution: planContext.attribution,
   }
-  if (planContext.actor === undefined) return base
-  return { ...base, actor: planContext.actor }
 }
 
 function sortedObjects(objects: EditWorkingState["objects"]): WorkingObject[] {

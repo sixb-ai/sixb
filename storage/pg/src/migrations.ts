@@ -102,6 +102,9 @@ import agentThreadSandboxStateSql from "./migrations/045-agent-thread-sandbox-st
 import workflowInterventionPrincipalsSql from "./migrations/046-workflow-intervention-principals.sql" with {
   type: "text",
 }
+import ontologyCommitAttributionSql from "./migrations/047-ontology-commit-attribution.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -401,6 +404,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("044-vector-batching", vectorBatchingSql),
     pgSql("045-agent-thread-sandbox-state", agentThreadSandboxStateSql),
     pgSql("046-workflow-intervention-principals", workflowInterventionPrincipalsSql),
+    pgSql("047-ontology-commit-attribution", ontologyCommitAttributionSql),
   ],
 })
 

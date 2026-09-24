@@ -16,6 +16,7 @@ import {
   commitExactObject,
   contractEditHeader,
   contractEditResult,
+  contractExecutor,
   ensureContractExecution,
   type OntologyContractStorage,
 } from "./ontology-contract-fixture"
@@ -145,6 +146,51 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         })
         expect(list).toMatchObject({ total: 1, hasMore: false })
         expect(list.commits.map((commit) => commit.id)).toEqual(["commit-one"])
+      })
+    })
+
+    test("round-trips commit and event attribution exactly", async () => {
+      await withStorage(async (storage) => {
+        // The requester is a real principal: SQL executions reference it by foreign key.
+        if (!storage.auth) throw new Error("The attribution contract requires auth storage.")
+        await storage.auth.users.create({
+          projectId: "contract-project",
+          id: "contract-requester",
+          email: "requester@example.com",
+        })
+        const requestedBy = { type: "user", id: "contract-requester" } as const
+        await commitExactObject(storage, "attributed", { requestedBy })
+        await commitExactObject(storage, "unattributed", { primaryId: "unattributed-device" })
+
+        const attributed = await storage.ontology.commits.getById({
+          projectId: "contract-project",
+          id: "attributed",
+        })
+        expect(attributed?.requestedBy).toEqual(requestedBy)
+        expect(attributed?.executor).toEqual(contractExecutor("attributed"))
+        expect(attributed).not.toHaveProperty("actor")
+        const unattributed = await storage.ontology.commits.getById({
+          projectId: "contract-project",
+          id: "unattributed",
+        })
+        expect(unattributed).not.toHaveProperty("requestedBy")
+        expect(unattributed?.executor).toEqual(contractExecutor("unattributed"))
+
+        const claimed = await storage.ontology.outbox.claim({
+          projectId: "contract-project",
+          now: "2027-01-01T00:00:00.000Z",
+          limit: 10,
+          leaseId: "attribution-check",
+          leaseExpiresAt: "2027-01-01T01:00:00.000Z",
+        })
+        const envelopes = new Map(claimed.map((record) => [record.envelope.commitId, record]))
+        expect(envelopes.get("attributed")?.envelope).toMatchObject({
+          requestedBy,
+          executor: contractExecutor("attributed"),
+        })
+        const unattributedEnvelope = envelopes.get("unattributed")?.envelope
+        expect(unattributedEnvelope?.executor).toEqual(contractExecutor("unattributed"))
+        expect(unattributedEnvelope).not.toHaveProperty("requestedBy")
       })
     })
 
@@ -883,6 +929,12 @@ async function activateEmptyCandidate(
         datasetId: candidate.identity.datasetVersion.datasetId,
         datasetVersionId: candidate.identity.datasetVersion.versionId,
       },
+      executor: {
+        type: "primitive",
+        kind: "projection",
+        id: candidate.source.projectionId,
+        runId: candidate.execution.projectionRunId,
+      },
       ontologyRevision: candidate.identity.ontologyRevision,
       projectionRevision: candidate.identity.projectionRevision,
       ownershipHash: candidate.identity.ownershipHash,
@@ -970,6 +1022,12 @@ function telemetryHeader(
           datasetVersionId: identity.datasetVersion.versionId,
           batchOrdinal: 0,
         },
+      },
+      executor: {
+        type: "primitive",
+        kind: "projection",
+        id: identity.projectionId,
+        runId: projectionRunId,
       },
       ontologyRevision: identity.ontologyRevision,
       projectionRevision: identity.projectionRevision,

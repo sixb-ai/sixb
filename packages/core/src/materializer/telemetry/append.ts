@@ -401,7 +401,7 @@ async function executeTelemetryTransaction(
     origin,
     {
       correlationId: command.execution.correlationId,
-      ...(command.execution.actor === undefined ? {} : { actor: command.execution.actor }),
+      attribution: command.execution.attribution,
     }
   )
   await drainStagedWork(context, storage, session)
@@ -475,25 +475,17 @@ function telemetryCommit(
     requestHash: command.identity.requestHash,
     executionId: command.execution.executionId,
     origin,
+    ...command.execution.attribution,
     ontologyRevision: command.ontologyRevision,
     intent: telemetryCommitIntent(command),
     committedAt: command.identity.committedAt,
   }
-  const withActor = telemetryCommitActor(base, command)
-  if (command.kind === "runtime") return withActor
+  if (command.kind === "runtime") return base
   return {
-    ...withActor,
+    ...base,
     projectionRevision: command.resolvedProjection.projectionRevision,
     ownershipHash: command.resolvedProjection.ownershipHash,
   }
-}
-
-function telemetryCommitActor(
-  commit: OntologyCommitWrite,
-  command: PreparedTelemetryAppend
-): OntologyCommitWrite {
-  if (command.execution.actor === undefined) return commit
-  return { ...commit, actor: command.execution.actor }
 }
 
 function telemetryCommitIntent(command: PreparedTelemetryAppend): TelemetryOntologyCommitIntent {

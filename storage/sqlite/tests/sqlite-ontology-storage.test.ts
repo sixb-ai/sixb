@@ -142,6 +142,7 @@ function atomicStageHeader(): MaterializationPlanHeader {
       requestHash: "hash:atomic-work-stage",
       executionId: "contract-execution:atomic-work-stage",
       origin: { kind: "runtime", requestId: "atomic-work-stage" },
+      executor: { type: "request", requestId: "atomic-work-stage" },
       ontologyRevision: "ontology-contract-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
       committedAt: "2026-01-02T00:00:00.000Z",

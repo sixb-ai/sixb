@@ -38,6 +38,55 @@ function assertCommitEnvelope(commit: OntologyCommitWrite): void {
   assertNonblank(commit.executionId, "Materialization execution id")
   assertNonblank(commit.ontologyRevision, "Materialization ontology revision")
   assertTimestamp(commit.committedAt, "Materialization commit time")
+  assertCommitAttribution(commit)
+}
+
+/** Shape only: the Materializer copies both values from the execution it has already verified. */
+function assertCommitAttribution(commit: OntologyCommitWrite): void {
+  const { requestedBy, executor } = commit
+  if (requestedBy !== undefined) {
+    if (requestedBy.type !== "user" && requestedBy.type !== "serviceAccount") {
+      invalidCorrelation("Materialization requester must be a user or service account.")
+    }
+    assertNonblank(requestedBy.id, "Materialization requester id")
+  }
+
+  switch (executor?.type) {
+    case "request":
+      assertNonblank(executor.requestId, "Materialization executor request id")
+      return
+    case "primitive":
+      assertNonblank(executor.kind, "Materialization executor primitive kind")
+      assertNonblank(executor.id, "Materialization executor primitive id")
+      assertNonblank(executor.runId, "Materialization executor run id")
+      return
+    case "agent":
+      assertNonblank(executor.runId, "Materialization executor Agent run id")
+      return
+    case "kernel":
+      assertNonblank(executor.operation?.type, "Materialization executor kernel operation")
+      return
+    default:
+      invalidCorrelation("Materialization executor is invalid.")
+  }
+}
+
+/** A governed or projected write is attributed to exactly the primitive run that owns it. */
+function assertPrimitiveExecutor(
+  commit: OntologyCommitWrite,
+  kind: "action" | "projection",
+  id: string,
+  runId: string
+): void {
+  const { executor } = commit
+  if (
+    executor.type !== "primitive" ||
+    executor.kind !== kind ||
+    executor.id !== id ||
+    executor.runId !== runId
+  ) {
+    invalidCorrelation(`Commit ${kind} origin does not match its executor.`)
+  }
 }
 
 function assertEditCommit(commit: OntologyCommitWrite, intent: EditOntologyCommitIntent): void {
@@ -47,6 +96,7 @@ function assertEditCommit(commit: OntologyCommitWrite, intent: EditOntologyCommi
     case "action":
       assertNonblank(commit.origin.actionId, "Action origin action id")
       assertNonblank(commit.origin.runId, "Action origin run id")
+      assertPrimitiveExecutor(commit, "action", commit.origin.actionId, commit.origin.runId)
       return
     case "runtime":
       assertNonblank(commit.origin.requestId, "Runtime origin request id")
@@ -77,6 +127,12 @@ function assertProjectionCommit(
   ) {
     invalidCorrelation("Projection commit origin does not match its dataset version.")
   }
+  assertPrimitiveExecutor(
+    commit,
+    "projection",
+    commit.origin.projectionId,
+    commit.origin.projectionRunId
+  )
 }
 
 function assertTelemetryCommit(
@@ -142,6 +198,7 @@ function assertProjectionTelemetryCommit(
   if (origin.batchOrdinal !== source.batchOrdinal) {
     invalidCorrelation("Projection telemetry origin does not match its batch ordinal.")
   }
+  assertPrimitiveExecutor(commit, "projection", origin.projectionId, origin.projectionRunId)
 }
 
 function assertProjectionTelemetryBatch(

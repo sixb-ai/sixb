@@ -441,6 +441,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 46,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "047-ontology-commit-attribution",
+    status: "applied",
+    version: 47,
+  },
 ]
 
 afterEach(async () => {
@@ -486,6 +493,115 @@ describe("SQLite storage migrations", () => {
         { project_id: "p", id: "root", requester_group_ids: "[]" },
         { project_id: "p", id: "task", requester_group_ids: '["finance"]' },
         { project_id: "p", id: "workflow", requester_group_ids: '["finance"]' },
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("attributes existing commits and pending events from their executions", async () => {
+    // Removal proof: drop 047's commit UPDATE; every executor stays the '{}' placeholder.
+    const db = new Database(":memory:")
+    try {
+      db.exec(`
+        CREATE TABLE executions (
+          project_id TEXT, id TEXT, executor_kind TEXT, executor_id TEXT,
+          requested_by_user_id TEXT, requested_by_service_account_id TEXT,
+          authority_primitive_id TEXT, authority_kernel_operation TEXT
+        );
+        CREATE TABLE ontology_commits (
+          project_id TEXT, id TEXT, execution_id TEXT,
+          actor TEXT CHECK (actor IS NULL OR json_valid(actor))
+        );
+        CREATE TABLE ontology_outbox (project_id TEXT, commit_id TEXT, envelope TEXT);
+        INSERT INTO executions VALUES
+          ('p', 'request', 'request', 'req-1', 'alice', NULL, NULL, NULL),
+          ('p', 'service', 'request', 'req-2', NULL, 'svc-import', NULL, NULL),
+          ('p', 'action', 'action', 'run-1', 'alice', NULL, 'approve', NULL),
+          ('p', 'agent', 'agent', 'agent-run', 'alice', NULL, NULL, NULL),
+          ('p', 'scheduled', 'workflow', 'wf-run', NULL, NULL, 'nightly', NULL),
+          ('p', 'recover', 'kernel', 'recovery-1', NULL, NULL, NULL, 'ontology.recover'),
+          ('p', 'index', 'kernel', 'indexing-1', NULL, NULL, NULL, 'ontology.indexVectors');
+        INSERT INTO ontology_commits
+          SELECT project_id, 'c-' || id, id,
+            CASE WHEN id = 'request' THEN '{"id":"alice","type":"user"}' END
+          FROM executions;
+        INSERT INTO ontology_outbox VALUES
+          ('p', 'c-request', '{"id":"e1","actor":{"id":"alice","type":"user"}}'),
+          ('p', 'c-scheduled', '{"id":"e2"}');
+      `)
+      const migration = sqliteStorageMigrations.steps.find(
+        (step) => step.id === "047-ontology-commit-attribution"
+      )!
+      await migration.up(db)
+
+      expect(readMemoryTableColumns(db, "ontology_commits")).not.toContain("actor")
+      const commits = db
+        .query("SELECT id, requested_by, executor FROM ontology_commits ORDER BY id")
+        .all() as { id: string; requested_by: string | null; executor: string }[]
+      expect(
+        commits.map((row) => ({
+          id: row.id,
+          requestedBy: row.requested_by === null ? null : JSON.parse(row.requested_by),
+          executor: JSON.parse(row.executor),
+        }))
+      ).toEqual([
+        {
+          id: "c-action",
+          requestedBy: { type: "user", id: "alice" },
+          executor: { type: "primitive", kind: "action", id: "approve", runId: "run-1" },
+        },
+        {
+          id: "c-agent",
+          requestedBy: { type: "user", id: "alice" },
+          executor: { type: "agent", runId: "agent-run" },
+        },
+        {
+          id: "c-index",
+          requestedBy: null,
+          executor: {
+            type: "kernel",
+            operation: { type: "ontology.indexVectors", indexingId: "indexing-1" },
+          },
+        },
+        {
+          id: "c-recover",
+          requestedBy: null,
+          executor: {
+            type: "kernel",
+            operation: { type: "ontology.recover", recoveryId: "recovery-1" },
+          },
+        },
+        {
+          id: "c-request",
+          requestedBy: { type: "user", id: "alice" },
+          executor: { type: "request", requestId: "req-1" },
+        },
+        {
+          id: "c-scheduled",
+          requestedBy: null,
+          executor: { type: "primitive", kind: "workflow", id: "nightly", runId: "wf-run" },
+        },
+        {
+          id: "c-service",
+          requestedBy: { type: "serviceAccount", id: "svc-import" },
+          executor: { type: "request", requestId: "req-2" },
+        },
+      ])
+
+      const envelopes = db
+        .query("SELECT commit_id, envelope FROM ontology_outbox ORDER BY commit_id")
+        .all() as { commit_id: string; envelope: string }[]
+      expect(envelopes.map((row) => JSON.parse(row.envelope))).toEqual([
+        {
+          id: "e1",
+          requestedBy: { type: "user", id: "alice" },
+          executor: { type: "request", requestId: "req-1" },
+        },
+        {
+          id: "e2",
+          executor: { type: "primitive", kind: "workflow", id: "nightly", runId: "wf-run" },
+        },
       ])
     } finally {
       db.close()
@@ -1619,6 +1735,11 @@ describe("SQLite storage migrations", () => {
         "ontology_source_rows",
         "ontology_sources",
       ])
+      expect(readMemoryTableColumns(db, "ontology_commits")).toEqual(
+        expect.arrayContaining(["execution_id", "requested_by", "executor"])
+      )
+      expect(readMemoryTableColumns(db, "ontology_commits")).not.toContain("actor")
+      expect(readMemoryColumn(db, "ontology_commits", "executor")?.notnull).toBe(1)
       expect(readMemoryTableColumns(db, "objects")).toContain("last_commit_id")
       expect(readMemoryTableColumns(db, "links")).toContain("last_commit_id")
       expect(readMemoryTableColumns(db, "timeseries")).toContain("last_commit_id")

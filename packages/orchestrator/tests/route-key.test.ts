@@ -168,6 +168,7 @@ function materializationCorrelation(id: string) {
   return {
     correlationId: `correlation-${id}`,
     origin: { kind: "runtime" as const, requestId: `request-${id}` },
+    executor: { type: "request" as const, requestId: `request-${id}` },
     commitId: `commit-${id}`,
     commitOrdinal: 0,
   }

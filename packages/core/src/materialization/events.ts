@@ -1,7 +1,8 @@
-import type { EventActor } from "../events/envelope"
+import type { EventExecutor } from "../events/envelope"
 import type { LinkDeletedEventPayload, LinkMutationEventPayload } from "../events/types/links"
 import type { ObjectDeletedEventPayload, ObjectMutationEventPayload } from "../events/types/objects"
 import type { TelemetryAppendedEventPayload } from "../events/types/telemetry"
+import type { AuthorizablePrincipal } from "../execution/types"
 import type { JsonValue } from "../json"
 import type {
   OntologyMaterializationOrigin,
@@ -14,7 +15,10 @@ interface OntologyMaterializationEventBase {
   readonly projectId: string
   readonly occurredAt: string
   readonly correlationId: string
-  readonly actor?: EventActor
+  /** Principal on whose behalf the write ran; absent for automatic or anonymous work. */
+  readonly requestedBy?: AuthorizablePrincipal
+  /** Workload that made the write. */
+  readonly executor: EventExecutor
   readonly origin: OntologyMaterializationOrigin
   readonly commitId: string
   readonly commitOrdinal: number

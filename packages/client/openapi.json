@@ -34988,20 +34988,6 @@
                                   "occurredAt": {
                                     "type": "string"
                                   },
-                                  "actor": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["user", "serviceAccount", "system"]
-                                      },
-                                      "id": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["type", "id"],
-                                    "additionalProperties": false
-                                  },
                                   "partitionKey": {
                                     "type": "string"
                                   },
@@ -35127,6 +35113,125 @@
                                           }
                                         },
                                         "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "requestedBy": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "serviceAccount"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false,
+                                    "description": "Principal on whose behalf the write ran; absent for automatic or anonymous work."
+                                  },
+                                  "executor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["request"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["primitive"]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "action",
+                                              "pipeline",
+                                              "projection",
+                                              "rule",
+                                              "sync",
+                                              "webhook",
+                                              "workflow"
+                                            ]
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "kind", "id", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["agent"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["kernel"]
+                                          },
+                                          "operation": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.recover"]
+                                                  },
+                                                  "recoveryId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "recoveryId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.indexVectors"]
+                                                  },
+                                                  "indexingId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "indexingId"],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["type", "operation"],
                                         "additionalProperties": false
                                       }
                                     ]
@@ -35335,6 +35440,7 @@
                                   "occurredAt",
                                   "partitionKey",
                                   "origin",
+                                  "executor",
                                   "commitId",
                                   "commitOrdinal",
                                   "type",
@@ -35361,20 +35467,6 @@
                                   },
                                   "occurredAt": {
                                     "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["user", "serviceAccount", "system"]
-                                      },
-                                      "id": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["type", "id"],
-                                    "additionalProperties": false
                                   },
                                   "partitionKey": {
                                     "type": "string"
@@ -35501,6 +35593,125 @@
                                           }
                                         },
                                         "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "requestedBy": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "serviceAccount"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false,
+                                    "description": "Principal on whose behalf the write ran; absent for automatic or anonymous work."
+                                  },
+                                  "executor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["request"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["primitive"]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "action",
+                                              "pipeline",
+                                              "projection",
+                                              "rule",
+                                              "sync",
+                                              "webhook",
+                                              "workflow"
+                                            ]
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "kind", "id", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["agent"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["kernel"]
+                                          },
+                                          "operation": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.recover"]
+                                                  },
+                                                  "recoveryId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "recoveryId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.indexVectors"]
+                                                  },
+                                                  "indexingId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "indexingId"],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["type", "operation"],
                                         "additionalProperties": false
                                       }
                                     ]
@@ -35709,6 +35920,7 @@
                                   "occurredAt",
                                   "partitionKey",
                                   "origin",
+                                  "executor",
                                   "commitId",
                                   "commitOrdinal",
                                   "type",
@@ -35735,20 +35947,6 @@
                                   },
                                   "occurredAt": {
                                     "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["user", "serviceAccount", "system"]
-                                      },
-                                      "id": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["type", "id"],
-                                    "additionalProperties": false
                                   },
                                   "partitionKey": {
                                     "type": "string"
@@ -35875,6 +36073,125 @@
                                           }
                                         },
                                         "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "requestedBy": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "serviceAccount"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false,
+                                    "description": "Principal on whose behalf the write ran; absent for automatic or anonymous work."
+                                  },
+                                  "executor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["request"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["primitive"]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "action",
+                                              "pipeline",
+                                              "projection",
+                                              "rule",
+                                              "sync",
+                                              "webhook",
+                                              "workflow"
+                                            ]
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "kind", "id", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["agent"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["kernel"]
+                                          },
+                                          "operation": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.recover"]
+                                                  },
+                                                  "recoveryId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "recoveryId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.indexVectors"]
+                                                  },
+                                                  "indexingId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "indexingId"],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["type", "operation"],
                                         "additionalProperties": false
                                       }
                                     ]
@@ -36052,6 +36369,7 @@
                                   "occurredAt",
                                   "partitionKey",
                                   "origin",
+                                  "executor",
                                   "commitId",
                                   "commitOrdinal",
                                   "type",
@@ -36078,20 +36396,6 @@
                                   },
                                   "occurredAt": {
                                     "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["user", "serviceAccount", "system"]
-                                      },
-                                      "id": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["type", "id"],
-                                    "additionalProperties": false
                                   },
                                   "partitionKey": {
                                     "type": "string"
@@ -36222,6 +36526,125 @@
                                       }
                                     ]
                                   },
+                                  "requestedBy": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "serviceAccount"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false,
+                                    "description": "Principal on whose behalf the write ran; absent for automatic or anonymous work."
+                                  },
+                                  "executor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["request"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["primitive"]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "action",
+                                              "pipeline",
+                                              "projection",
+                                              "rule",
+                                              "sync",
+                                              "webhook",
+                                              "workflow"
+                                            ]
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "kind", "id", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["agent"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["kernel"]
+                                          },
+                                          "operation": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.recover"]
+                                                  },
+                                                  "recoveryId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "recoveryId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.indexVectors"]
+                                                  },
+                                                  "indexingId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "indexingId"],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["type", "operation"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
                                   "commitId": {
                                     "type": "string"
                                   },
@@ -36297,6 +36720,7 @@
                                   "occurredAt",
                                   "partitionKey",
                                   "origin",
+                                  "executor",
                                   "commitId",
                                   "commitOrdinal",
                                   "type",
@@ -36323,20 +36747,6 @@
                                   },
                                   "occurredAt": {
                                     "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["user", "serviceAccount", "system"]
-                                      },
-                                      "id": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["type", "id"],
-                                    "additionalProperties": false
                                   },
                                   "partitionKey": {
                                     "type": "string"
@@ -36463,6 +36873,125 @@
                                           }
                                         },
                                         "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "requestedBy": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "serviceAccount"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false,
+                                    "description": "Principal on whose behalf the write ran; absent for automatic or anonymous work."
+                                  },
+                                  "executor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["request"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["primitive"]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "action",
+                                              "pipeline",
+                                              "projection",
+                                              "rule",
+                                              "sync",
+                                              "webhook",
+                                              "workflow"
+                                            ]
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "kind", "id", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["agent"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["kernel"]
+                                          },
+                                          "operation": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.recover"]
+                                                  },
+                                                  "recoveryId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "recoveryId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.indexVectors"]
+                                                  },
+                                                  "indexingId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "indexingId"],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["type", "operation"],
                                         "additionalProperties": false
                                       }
                                     ]
@@ -36682,6 +37211,7 @@
                                   "occurredAt",
                                   "partitionKey",
                                   "origin",
+                                  "executor",
                                   "commitId",
                                   "commitOrdinal",
                                   "type",
@@ -36708,20 +37238,6 @@
                                   },
                                   "occurredAt": {
                                     "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["user", "serviceAccount", "system"]
-                                      },
-                                      "id": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["type", "id"],
-                                    "additionalProperties": false
                                   },
                                   "partitionKey": {
                                     "type": "string"
@@ -36848,6 +37364,125 @@
                                           }
                                         },
                                         "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "requestedBy": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "serviceAccount"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false,
+                                    "description": "Principal on whose behalf the write ran; absent for automatic or anonymous work."
+                                  },
+                                  "executor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["request"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["primitive"]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "action",
+                                              "pipeline",
+                                              "projection",
+                                              "rule",
+                                              "sync",
+                                              "webhook",
+                                              "workflow"
+                                            ]
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "kind", "id", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["agent"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["kernel"]
+                                          },
+                                          "operation": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.recover"]
+                                                  },
+                                                  "recoveryId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "recoveryId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.indexVectors"]
+                                                  },
+                                                  "indexingId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "indexingId"],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["type", "operation"],
                                         "additionalProperties": false
                                       }
                                     ]
@@ -37067,6 +37702,7 @@
                                   "occurredAt",
                                   "partitionKey",
                                   "origin",
+                                  "executor",
                                   "commitId",
                                   "commitOrdinal",
                                   "type",
@@ -37093,20 +37729,6 @@
                                   },
                                   "occurredAt": {
                                     "type": "string"
-                                  },
-                                  "actor": {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "enum": ["user", "serviceAccount", "system"]
-                                      },
-                                      "id": {
-                                        "type": "string"
-                                      }
-                                    },
-                                    "required": ["type", "id"],
-                                    "additionalProperties": false
                                   },
                                   "partitionKey": {
                                     "type": "string"
@@ -37233,6 +37855,125 @@
                                           }
                                         },
                                         "required": ["kind", "source"],
+                                        "additionalProperties": false
+                                      }
+                                    ]
+                                  },
+                                  "requestedBy": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "enum": ["user", "serviceAccount"]
+                                      },
+                                      "id": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": ["type", "id"],
+                                    "additionalProperties": false,
+                                    "description": "Principal on whose behalf the write ran; absent for automatic or anonymous work."
+                                  },
+                                  "executor": {
+                                    "anyOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["request"]
+                                          },
+                                          "requestId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "requestId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["primitive"]
+                                          },
+                                          "kind": {
+                                            "type": "string",
+                                            "enum": [
+                                              "action",
+                                              "pipeline",
+                                              "projection",
+                                              "rule",
+                                              "sync",
+                                              "webhook",
+                                              "workflow"
+                                            ]
+                                          },
+                                          "id": {
+                                            "type": "string"
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "kind", "id", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["agent"]
+                                          },
+                                          "runId": {
+                                            "type": "string"
+                                          }
+                                        },
+                                        "required": ["type", "runId"],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "enum": ["kernel"]
+                                          },
+                                          "operation": {
+                                            "anyOf": [
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.recover"]
+                                                  },
+                                                  "recoveryId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "recoveryId"],
+                                                "additionalProperties": false
+                                              },
+                                              {
+                                                "type": "object",
+                                                "properties": {
+                                                  "type": {
+                                                    "type": "string",
+                                                    "enum": ["ontology.indexVectors"]
+                                                  },
+                                                  "indexingId": {
+                                                    "type": "string"
+                                                  }
+                                                },
+                                                "required": ["type", "indexingId"],
+                                                "additionalProperties": false
+                                              }
+                                            ]
+                                          }
+                                        },
+                                        "required": ["type", "operation"],
                                         "additionalProperties": false
                                       }
                                     ]
@@ -37426,6 +38167,7 @@
                                   "occurredAt",
                                   "partitionKey",
                                   "origin",
+                                  "executor",
                                   "commitId",
                                   "commitOrdinal",
                                   "type",
@@ -37454,20 +38196,6 @@
                               },
                               "occurredAt": {
                                 "type": "string"
-                              },
-                              "actor": {
-                                "type": "object",
-                                "properties": {
-                                  "type": {
-                                    "type": "string",
-                                    "enum": ["user", "serviceAccount", "system"]
-                                  },
-                                  "id": {
-                                    "type": "string"
-                                  }
-                                },
-                                "required": ["type", "id"],
-                                "additionalProperties": false
                               },
                               "partitionKey": {
                                 "type": "string"

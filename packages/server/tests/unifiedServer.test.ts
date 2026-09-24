@@ -117,6 +117,7 @@ describe("SixbServer API serving", () => {
         projectId: sixb.id,
         correlationId: "correlation-fan-1-rpm",
         origin: { kind: "runtime", requestId: "seed-fan-1-rpm" },
+        executor: { type: "request", requestId: "seed-fan-1-rpm" },
         commitId: "commit-fan-1-rpm",
         commitOrdinal: 0,
         type: "telemetry.appended",
