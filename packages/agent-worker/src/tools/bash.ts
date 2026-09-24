@@ -13,7 +13,11 @@ export const BASH_TOOL_SPEC = {
     type: "object",
     properties: {
       command: { type: "string" },
-      cwd: { type: "string" },
+      cwd: {
+        type: "string",
+        description:
+          "Directory to run the command in. Defaults to the sandbox workspace. Accepts absolute paths or paths relative to the workspace.",
+      },
       timeoutMs: { type: "number" },
     },
     required: ["command"],

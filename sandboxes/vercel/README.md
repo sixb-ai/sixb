@@ -36,6 +36,10 @@ Each ephemeral Sixb agent run creates a fresh Vercel sandbox, materializes skill
 `writeFiles(...)`, runs bash commands via `runCommand(...)`, then permanently deletes the sandbox on
 `destroy()`.
 
+Commands default to the sandbox's working directory. A relative `cwd` such as `"."` or
+`"src"` resolves against that directory; an absolute `cwd` selects that path directly. Callers do
+not need to know Vercel's workspace path.
+
 Creation is ephemeral by default. Opt into named persistence per call, and configure snapshot
 retention on the factory.
 
@@ -197,6 +201,13 @@ behind an environment variable because it consumes metered Vercel Sandbox resour
 
 ```bash
 SIXB_VERCEL_SANDBOX_INTEGRATION=1 bun --filter @sixb/sandboxes-vercel test
+```
+
+The live working-directory regression test also consumes metered sandbox resources. It verifies
+relative file reads with omitted, relative, and absolute working directories:
+
+```bash
+SIXB_VERCEL_SANDBOX_INTEGRATION=1 bun --filter @sixb/sandboxes-vercel test:e2e
 ```
 
 Persistence tests use the installed SDK with a simulated transport: they make no Vercel requests

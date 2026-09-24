@@ -4,6 +4,9 @@ Runs each agent's sandbox tools inside a hardware-isolated
 [smolvm](https://github.com/smol-machines/smolvm) microVM. Drop-in `Sandbox` provider — wire it once
 into `createSixb({ sandboxes })`; nothing else changes.
 
+Commands default to the sandbox's working directory. Relative `cwd` values such as `"."` or
+`"src"` resolve against that directory; absolute paths select a guest directory for that call only.
+
 ## Setup
 
 Two one-time steps.

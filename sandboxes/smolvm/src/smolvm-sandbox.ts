@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto"
-import { dirname } from "node:path"
+import { dirname, posix } from "node:path"
 import {
   type CommandResult,
   type RunCommandOptions,
@@ -164,7 +164,7 @@ export class SmolvmSandbox implements Sandbox {
     }
 
     const env = { ...this.sandboxEnv, ...(options.env ?? {}) }
-    const cwd = options.cwd ?? this.workdir.dir
+    const cwd = posix.resolve(this.workingDirectory, options.cwd ?? ".")
     const timeoutMs = options.timeout ?? this.defaultTimeoutMs
 
     const controller = new AbortController()
