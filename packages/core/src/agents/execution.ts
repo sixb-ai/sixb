@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto"
 import { principalsEqual, SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized, isRuntimeAllowed } from "../authorization"
 import type { AuthorizablePrincipal, ExecutionContext } from "../execution"
@@ -19,7 +18,7 @@ import type {
 import type { AiCostSummary } from "../storage/ai-cost"
 import type { AiModelCallUsage } from "../storage/ai-usage"
 import { AgentRequestError } from "./errors"
-import { createAgentThreadId } from "./ids"
+import { createAgentThreadId, createAgentThreadSandboxName } from "./ids"
 import {
   type RequestAgentRunInput,
   type RequestAgentRunResult,
@@ -34,9 +33,9 @@ export type ExecutionAgentRequestInput = Omit<RequestAgentRunInput, "principal">
 
 /** Execution ownership tokens never leave the storage/worker boundary. */
 function publicThread(thread: AgentThreadRecord): AgentThreadRecord {
-  if (!thread.workspaceState) return thread
-  const { generation, status, initialized } = thread.workspaceState
-  return { ...thread, workspaceState: { generation, status, initialized } }
+  if (!thread.sandboxState) return thread
+  const { name, status, initialized } = thread.sandboxState
+  return { ...thread, sandboxState: { name, status, initialized } }
 }
 export type ListExecutionAgentThreadsInput = Omit<
   ListAgentThreadsInput,
@@ -53,10 +52,10 @@ export type CreateExecutionAgentThreadInput<
 
 export type AgentThreadsRuntime<TParams extends Record<string, unknown> = Record<string, unknown>> =
   {
-    /** Start fresh after an uncertain/expired workspace; never deletes the old generation. */
+    /** Start fresh after uncertain recovery; never deletes the previous sandbox. */
     recreateSandbox(
       threadId: string,
-      input: { readonly expectedGeneration: string }
+      input: { readonly expectedSandboxName: string }
     ): Promise<AgentThreadRecord>
     create(input: CreateExecutionAgentThreadInput<TParams>): Promise<AgentThreadRecord>
     getById(threadId: string): Promise<AgentThreadRecord | null>
@@ -162,14 +161,14 @@ export function createAgentRuntime<
             "storage_unavailable",
             "[Sixb] Agent storage is not configured."
           )
-        const workspaceState = await storage.threads.transitionWorkspace({
+        const sandboxState = await storage.threads.transitionSandbox({
           projectId: runtime.projectId,
           id: threadId,
           action: "recreate",
-          expectedGeneration: input.expectedGeneration,
-          generation: randomUUID(),
+          expectedSandboxName: input.expectedSandboxName,
+          name: createAgentThreadSandboxName(runtime.projectId, threadId),
         })
-        return publicThread({ ...thread, workspaceState })
+        return publicThread({ ...thread, sandboxState })
       },
       create: async (input) => {
         assertNoAgentSelector(input)
@@ -195,7 +194,7 @@ export function createAgentRuntime<
             ? undefined
             : normalizeSandboxBinding(sandbox?.definition, input.sandbox, runtime.ontology)
         return storage.threads.create({
-          ...(binding === undefined ? {} : { sandbox: binding }),
+          ...(binding === undefined ? {} : { sandboxParams: binding }),
           id: input.id ?? createAgentThreadId(),
           projectId: runtime.projectId,
           ownerPrincipal: principal,

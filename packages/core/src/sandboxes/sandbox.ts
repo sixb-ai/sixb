@@ -87,7 +87,7 @@ export interface SandboxSessionOptions {
 export interface CreateSandboxOptions extends SandboxSessionOptions {
   /** Cancel initialization; a provider request already in flight may still finish. */
   readonly signal?: AbortSignal
-  /** Resolved initial contents/setup. When supplied, replaces the factory's static recipe. */
+  /** Replaces static source/setup, including {} to skip both. Required for dynamic recipes. */
   readonly environment?: Pick<SandboxEnvironment, "source" | "setup">
   /** Create new named state; reject an existing name or unsupported persistence before provisioning. */
   readonly persistence?: { readonly name: string }
@@ -146,7 +146,9 @@ export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConf
   /** Common host-side environment recipe. Never a discovered Agent definition. */
   readonly configuration?: SandboxConfig<TParams>
   /** Create an ephemeral sandbox unless persistence is requested. Existing names must fail,
-   * never attach or overwrite. Unsupported providers must reject persistence before provisioning.
+   * never attach or overwrite. Apply the selected source/setup once, after session settings.
+   * Dynamic resolution and source authorization belong to the caller, never the provider.
+   * Unsupported providers must reject persistence before provisioning.
    * A persistent handle targets one session; operations must not automatically resume another VM.
    */
   create(options?: CreateSandboxOptions): Promise<Sandbox>
@@ -157,6 +159,7 @@ export interface SandboxFactory<in out TParams extends ParamsConfig = ParamsConf
    * as missing state. An already running sandbox must be rejected.
    * Returns a handle bound to the resumed session, with no automatic resume on use.
    * Runtime options must be provided again; no creation settings or persistence option are accepted.
+   * Never clone or replay setup on resume.
    */
   resume?(name: string, options?: ResumeSandboxOptions): Promise<Sandbox>
 }

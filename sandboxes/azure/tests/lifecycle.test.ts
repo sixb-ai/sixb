@@ -8,7 +8,7 @@ import { buildGuestArtifact } from "./guest-build"
 
 beforeAll(buildGuestArtifact, 20_000)
 
-const config: AzureSandboxFactoryOptions = {
+const config = {
   subscriptionId: "subscription",
   resourceGroup: "group",
   sandboxGroup: "sandboxes",
@@ -20,7 +20,7 @@ const config: AzureSandboxFactoryOptions = {
   pollIntervalMs: 1,
   provisionTimeoutMs: 1000,
   teardownTimeoutMs: 100,
-}
+} satisfies AzureSandboxFactoryOptions
 const lifecycle = { pollIntervalMs: 1, teardownTimeoutMs: 100 }
 const absent = () => new AzureSandboxRequestError("get", "http", 404)
 function client(overrides: Partial<AzureSandboxClient> = {}): AzureSandboxClient {
@@ -87,6 +87,39 @@ test("factory validates unsupported persistence and network before provisioning"
     () => new AzureSandboxFactory({ ...config, resources: { vcpus: 1, memoryMiB: 0, diskGiB: 1 } })
   ).toThrow("resources")
   expect(fetchSpy).not.toHaveBeenCalled()
+})
+
+test.each([
+  undefined,
+  {},
+  { setup: ["override"] },
+])("factory prepares only the selected environment: %j", async (environment) => {
+  transport((method, path, body) => {
+    if (method === "PUT" && path.endsWith("/files")) return new Response(null, { status: 204 })
+    if (method === "PUT") return Response.json({ id: "sandbox", state: "Running" })
+    const { command } = body as { command: string }
+    return Response.json({
+      exitCode: 0,
+      stdout: command.includes(" init ") ? '{"state":"ready"}' : "",
+      stderr: "",
+    })
+  })
+  const run = spyOn(AzureSandbox.prototype, "runCommand").mockResolvedValue({
+    exitCode: 0,
+    stdout: "",
+    stderr: "",
+    durationMs: 0,
+  })
+  try {
+    const factory = new AzureSandboxFactory({ ...config, setup: ["default"] })
+    await factory.create({ environment })
+    const expected = environment === undefined ? "default" : environment.setup?.[0]
+    expect(run.mock.calls.map(([command, args]) => [command, args])).toEqual(
+      expected ? [["bash", ["-lc", expected]]] : []
+    )
+  } finally {
+    run.mockRestore()
+  }
 })
 
 test("creation waits through transient absence, installs supervisor and snapshots defaults", async () => {

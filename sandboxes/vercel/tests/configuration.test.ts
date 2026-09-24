@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { param } from "@sixb/core"
-import { VercelSandboxFactory } from "../src"
+import { VercelSandboxFactory, type VercelSandboxFactoryOptions } from "../src"
 
 test("carries only common configuration, not provider credentials or infrastructure", () => {
   const factory = new VercelSandboxFactory({
@@ -15,16 +15,18 @@ test("carries only common configuration, not provider credentials or infrastruct
   })
 })
 
-test("preserves legacy native sources without admitting them as managed Git environments", () => {
+test("rejects provider-specific source variants at construction", () => {
   for (const source of [
     { type: "tarball" as const, url: "https://example.com/app.tgz" },
     { type: "git" as const, url: "https://github.com/acme/app.git", password: "private" },
     { type: "git" as const, url: "https://github.com/acme/app.git", depth: 1 },
   ]) {
-    expect(new VercelSandboxFactory({ source }).configuration).toBeUndefined()
-    expect(() => new VercelSandboxFactory({ source, setup: ["bun install"] })).toThrow(
-      "Managed environments require"
-    )
+    expect(
+      () =>
+        new VercelSandboxFactory<Record<never, never>>({ source } as VercelSandboxFactoryOptions<
+          Record<never, never>
+        >)
+    ).toThrow("Invalid sandbox source")
   }
 })
 

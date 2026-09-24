@@ -174,6 +174,37 @@ describe("VercelSandbox", () => {
 })
 
 describe("VercelSandboxFactory", () => {
+  test("prepares static source and setup once through Sixb, never native cloning", async () => {
+    const client = new FakeVercelClient()
+    let received: Parameters<VercelCreateSandbox>[0] | undefined
+    const factory = new VercelSandboxFactory(
+      {
+        source: { type: "git", url: "https://example.com/app.git" },
+        setup: ["prepare"],
+        network: { mode: "all" },
+      },
+      async (params) => {
+        received = params
+        return client
+      }
+    )
+    const sandbox = await factory.create()
+    expect(received).not.toHaveProperty("source")
+    expect(client.commands.map((command) => [command.cmd, command.args])).toEqual([
+      ["git", ["clone", "--", "https://example.com/app.git", "repository"]],
+      ["bash", ["-lc", "prepare"]],
+    ])
+    expect(sandbox.workingDirectory).toBe("/vercel/sandbox/repository")
+    await sandbox.destroy()
+  })
+
+  test("explicit empty environment suppresses static preparation", async () => {
+    const client = new FakeVercelClient()
+    const factory = new VercelSandboxFactory({ setup: ["must-not-run"] }, async () => client)
+    await factory.create({ environment: {} })
+    expect(client.commands).toHaveLength(0)
+  })
+
   test.each([
     true,
     false,

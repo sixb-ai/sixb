@@ -1,6 +1,6 @@
 import type { Database } from "bun:sqlite"
 import type { AgentMessagePart, Principal } from "@sixb/core"
-import { snapshotAgentThreadSandbox } from "@sixb/core/internal/agent-run-storage-provider"
+import { snapshotAgentThreadSandboxParams } from "@sixb/core/internal/agent-run-storage-provider"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
   AGENT_RUN_FAILURE_CODES,
@@ -9,7 +9,7 @@ import {
   type AgentRunDiagnostic,
   type AgentRunRecord,
   type AgentThreadRecord,
-  type AgentWorkspaceState,
+  type AgentThreadSandboxState,
   type ConversationAgentRunSpec,
   coerceAgentRunFinishReason,
   type SubagentRunResult,
@@ -26,7 +26,7 @@ export interface AgentThreadRow {
   owner_principal_id: string
   title: string | null
   sandbox_params: string | null
-  workspace_state: string | null
+  sandbox_state: string | null
   status: AgentThreadRecord["status"]
   active_run_id: string | null
   last_message_at: string | null
@@ -100,14 +100,14 @@ export function rowToThreadRecord(row: AgentThreadRow): AgentThreadRecord {
     projectId: row.project_id,
     ownerPrincipal: { type: row.owner_principal_type, id: row.owner_principal_id },
     title: row.title ?? undefined,
-    ...(row.workspace_state == null
+    ...(row.sandbox_state == null
       ? {}
       : {
-          workspaceState: JSON.parse(row.workspace_state) as AgentWorkspaceState,
+          sandboxState: JSON.parse(row.sandbox_state) as AgentThreadSandboxState,
         }),
     ...(row.sandbox_params == null
       ? {}
-      : { sandbox: snapshotAgentThreadSandbox(JSON.parse(row.sandbox_params)) }),
+      : { sandboxParams: snapshotAgentThreadSandboxParams(JSON.parse(row.sandbox_params)) }),
     status: row.status,
     activeRunId: row.active_run_id,
     lastMessageAt: row.last_message_at ? new Date(row.last_message_at) : undefined,

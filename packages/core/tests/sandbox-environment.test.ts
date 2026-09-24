@@ -1,6 +1,49 @@
 import { expect, test } from "bun:test"
 import type { Sandbox } from "../src/sandboxes"
-import { initializeSandboxEnvironment, sandboxProjectDirectory } from "../src/sandboxes/environment"
+import {
+  initializeSandboxEnvironment,
+  sandboxCreationEnvironment,
+  sandboxProjectDirectory,
+} from "../src/sandboxes/environment"
+
+test("creation selects static defaults, explicit replacements and explicit empty environments", () => {
+  const config = { setup: ["default"] }
+  expect(sandboxCreationEnvironment(config, {})).toEqual(config)
+  expect(sandboxCreationEnvironment(config, { environment: { setup: ["override"] } })).toEqual({
+    setup: ["override"],
+  })
+  expect(sandboxCreationEnvironment(config, { environment: {} })).toEqual({})
+})
+
+test("creation never resolves dynamic recipes without execution authority", () => {
+  const config = {
+    resolve: () => {
+      throw new Error("must not run")
+    },
+  }
+  expect(() => sandboxCreationEnvironment(config, {})).toThrow("execution-resolved")
+  expect(sandboxCreationEnvironment(config, { environment: {} })).toEqual({})
+})
+
+test("creation rejects invalid input, cancellation and denied source access before provisioning", () => {
+  expect(() => sandboxCreationEnvironment({}, { environment: null as never })).toThrow(
+    "environment"
+  )
+  expect(() => sandboxCreationEnvironment({}, { signal: AbortSignal.abort() })).toThrow()
+  const source = { type: "git" as const, url: "https://example.com/app.git" }
+  expect(() => sandboxCreationEnvironment({ source }, {})).toThrow("denies the source")
+  expect(() =>
+    sandboxCreationEnvironment({ source, network: { mode: "all" } }, { network: { mode: "none" } })
+  ).toThrow("denies the source")
+  expect(
+    sandboxCreationEnvironment(
+      { source },
+      {
+        network: { mode: "restricted", allow: [{ name: "source", origin: "https://example.com" }] },
+      }
+    )
+  ).toEqual({ source })
+})
 
 function fixture() {
   const commands: { command: string; args: readonly string[]; cwd?: string }[] = []

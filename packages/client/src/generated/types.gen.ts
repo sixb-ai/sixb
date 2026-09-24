@@ -9860,8 +9860,8 @@ export type ListAgentThreadsResponses = {
    */
   200: {
     threads: Array<{
-      workspaceState?: {
-        generation: string
+      sandboxState?: {
+        name: string
         status: "new" | "busy" | "ready" | "blocked" | "unavailable"
         initialized: boolean
       }
@@ -9872,7 +9872,7 @@ export type ListAgentThreadsResponses = {
         id: string
       }
       title?: string
-      sandbox?: {
+      sandboxParams?: {
         [key: string]:
           | string
           | number
@@ -9953,8 +9953,8 @@ export type CreateAgentThreadResponses = {
    */
   201: {
     thread: {
-      workspaceState?: {
-        generation: string
+      sandboxState?: {
+        name: string
         status: "new" | "busy" | "ready" | "blocked" | "unavailable"
         initialized: boolean
       }
@@ -9965,7 +9965,7 @@ export type CreateAgentThreadResponses = {
         id: string
       }
       title?: string
-      sandbox?: {
+      sandboxParams?: {
         [key: string]:
           | string
           | number
@@ -10025,8 +10025,8 @@ export type GetAgentThreadResponses = {
    * Response for status 200
    */
   200: {
-    workspaceState?: {
-      generation: string
+    sandboxState?: {
+      name: string
       status: "new" | "busy" | "ready" | "blocked" | "unavailable"
       initialized: boolean
     }
@@ -10037,7 +10037,7 @@ export type GetAgentThreadResponses = {
       id: string
     }
     title?: string
-    sandbox?: {
+    sandboxParams?: {
       [key: string]:
         | string
         | number
@@ -10061,7 +10061,7 @@ export type GetAgentThreadResponse = GetAgentThreadResponses[keyof GetAgentThrea
 
 export type RecreateAgentThreadSandboxData = {
   body: {
-    expectedGeneration: string
+    expectedSandboxName: string
   }
   path: {
     threadId: string
@@ -10099,8 +10099,8 @@ export type RecreateAgentThreadSandboxResponses = {
    * Response for status 200
    */
   200: {
-    workspaceState?: {
-      generation: string
+    sandboxState?: {
+      name: string
       status: "new" | "busy" | "ready" | "blocked" | "unavailable"
       initialized: boolean
     }
@@ -10111,7 +10111,7 @@ export type RecreateAgentThreadSandboxResponses = {
       id: string
     }
     title?: string
-    sandbox?: {
+    sandboxParams?: {
       [key: string]:
         | string
         | number

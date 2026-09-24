@@ -239,10 +239,10 @@ export async function retryAgentRun(
 }
 
 function assertSandboxExecutionAvailable(thread: AgentThreadRecord): void {
-  if (thread.workspaceState && !["new", "ready"].includes(thread.workspaceState.status)) {
+  if (thread.sandboxState && !["new", "ready"].includes(thread.sandboxState.status)) {
     throw new AgentRequestError(
       "sandbox_execution_unavailable",
-      "[Sixb] Workspace recovery is required before another run. Reload the thread and explicitly recreate it to start fresh."
+      "[Sixb] Sandbox recovery is required before another run. Reload the thread and explicitly recreate it to start fresh."
     )
   }
 }

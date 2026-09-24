@@ -12,6 +12,7 @@ import {
   type ParamsConfig,
   type SandboxConfig,
   sandboxConfig,
+  sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
 import { defaultAgentImageCandidates, defaultAgentImagePath } from "./agent-image"
 import { isLocalImageArchive, type SmolvmCliConfig } from "./cli"
@@ -70,6 +71,7 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    const environment = sandboxCreationEnvironment(this.configuration, options)
     if (options.persistence !== undefined) {
       throw new SandboxError("[Sandbox] smolvm does not support persistent sandboxes.")
     }
@@ -80,14 +82,12 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
       cli,
       registryHosts: this.defaults.registryHosts ?? DOCKER_HUB_REGISTRY_HOSTS,
       timeout: options.timeout ?? this.defaults.timeout,
-      network: options.network ?? this.defaults.network,
-      env: { ...(this.defaults.env ?? {}), ...(options.env ?? {}) },
+      network: options.network ?? this.configuration.network,
+      env: { ...this.configuration.env, ...options.env },
       workingDirectory: options.workingDirectory,
     })
     try {
-      return options.environment
-        ? await initializeSandboxEnvironment(sandbox, options.environment, options.signal)
-        : sandbox
+      return await initializeSandboxEnvironment(sandbox, environment, options.signal)
     } catch (error) {
       await sandbox.destroy()
       throw error

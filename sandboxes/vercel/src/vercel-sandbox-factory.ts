@@ -12,8 +12,8 @@ import {
   initializeSandboxEnvironment,
   type ParamsConfig,
   type SandboxConfig,
-  type SandboxSource,
   sandboxConfig,
+  sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
 import { Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { toVercelNetworkPolicy } from "./network"
@@ -36,17 +36,6 @@ export type VercelSandboxRuntime = "node26" | "node24" | "node22" | "python3.13"
 
 export const DEFAULT_VERCEL_SANDBOX_RUNTIME: VercelSandboxRuntime = "node24"
 
-export type VercelSandboxSource =
-  | (SandboxSource & {
-      readonly username?: string
-      readonly password?: string
-      readonly depth?: number
-    })
-  | {
-      readonly type: "tarball"
-      readonly url: string
-    }
-
 export interface VercelSandboxCredentials {
   readonly token: string
   readonly teamId: string
@@ -60,15 +49,13 @@ export interface VercelSnapshotRetentionPolicy {
 }
 
 export interface VercelSandboxFactoryOptions<TParams extends ParamsConfig = ParamsConfig>
-  extends Omit<SandboxConfig<TParams>, "source"> {
+  extends SandboxConfig<TParams> {
   /** Stock Vercel runtime. Ignored with `image`/`snapshotId`. Sixb explicitly defaults to node24. */
   readonly runtime?: VercelSandboxRuntime | (string & {})
   /** VCR image reference; agent images need the worker's CLI runtime and shell utilities. */
   readonly image?: string
-  /** Existing snapshot; agent snapshots need the same tools. Exclusive with image/source. */
+  /** Existing snapshot; agent snapshots need the same tools. Exclusive with image/runtime. */
   readonly snapshotId?: string
-  /** Optional git/tarball source cloned or mounted by Vercel at sandbox creation. */
-  readonly source?: VercelSandboxSource
   /** vCPU allocation; memory is 2048 MB per vCPU. */
   readonly resources?: { readonly vcpus: number }
   /** Ports to expose through Vercel sandbox domains. */
@@ -104,43 +91,21 @@ const DEFAULT_SETUP_TIMEOUT_MS = 30_000
 export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
   implements SandboxFactory<TParams>
 {
-  readonly configuration?: SandboxConfig<TParams>
+  readonly configuration: SandboxConfig<TParams>
   constructor(
     private readonly defaults: VercelSandboxFactoryOptions<TParams> = {},
     private readonly createRemote: VercelCreateSandbox = createVercelSandbox,
     private readonly persistentRemote: VercelPersistenceOperations = vercelPersistenceOperations
   ) {
     assertNoLegacyPersistence(defaults)
-    // Preserve native archive/credential options for existing low-level callers. They do not
-    // opt into managed thread environments or weaken their credential-free source contract.
-    const source = defaults.source
-    if (
-      source?.type === "tarball" ||
-      (source?.type === "git" &&
-        (source.username !== undefined ||
-          source.password !== undefined ||
-          source.depth !== undefined))
-    ) {
-      if (
-        defaults.params !== undefined ||
-        defaults.resolve !== undefined ||
-        defaults.setup !== undefined
-      ) {
-        throw new SandboxError(
-          "[Sandbox] Managed environments require a credential-free Git source without provider-specific clone options."
-        )
-      }
-    } else {
-      this.configuration = sandboxConfig<TParams>({ ...defaults, source })
-    }
+    this.configuration = sandboxConfig<TParams>(defaults)
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
+    const environment = sandboxCreationEnvironment(this.configuration, options)
     assertNoLegacyPersistence(this.defaults)
     assertNoLegacyPersistence(options)
-    validateSourceOptions(
-      options.environment ? { ...this.defaults, source: undefined } : this.defaults
-    )
+    validateSourceOptions(this.defaults)
     const resolved = this.runtimeOptions(options)
     if (options.persistence !== undefined) {
       if (
@@ -150,16 +115,11 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
       ) {
         throw new SandboxError("[Sandbox] persistence must contain only a sandbox name.")
       }
-      return this.createPersistent(
-        options.persistence.name,
-        resolved,
-        options.environment,
-        options.signal
-      )
+      return this.createPersistent(options.persistence.name, resolved, environment, options.signal)
     }
     const { env = {}, network = { mode: "none" } } = resolved
     const params = buildCreateParams({
-      defaults: options.environment ? { ...this.defaults, source: undefined } : this.defaults,
+      defaults: this.defaults,
       env,
       network,
       name: `${this.defaults.namePrefix ?? DEFAULT_NAME_PREFIX}${randomUUID()}`,
@@ -180,9 +140,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
         workingDirectory: sandbox.workingDirectory,
         setupTimeoutMs: this.defaults.setupTimeoutMs ?? DEFAULT_SETUP_TIMEOUT_MS,
       })
-      return options.environment
-        ? await initializeSandboxEnvironment(sandbox, options.environment, options.signal)
-        : sandbox
+      return await initializeSandboxEnvironment(sandbox, environment, options.signal)
     } catch (error) {
       await client?.delete().catch(() => {})
       if (error instanceof SandboxError) {
@@ -225,23 +183,23 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
   private runtimeOptions(options: SandboxSessionOptions): SandboxSessionOptions {
     return {
       workingDirectory: options.workingDirectory,
-      env: { ...this.defaults.env, ...options.env },
+      env: { ...this.configuration.env, ...options.env },
       timeout: options.timeout ?? this.defaults.timeout,
-      network: options.network ?? this.defaults.network ?? { mode: "none" },
+      network: options.network ?? this.configuration.network ?? { mode: "none" },
     }
   }
 
   private async createPersistent(
     name: string,
     options: SandboxSessionOptions,
-    environment?: CreateSandboxOptions["environment"],
+    environment: NonNullable<CreateSandboxOptions["environment"]>,
     signal?: AbortSignal
   ): Promise<Sandbox> {
     assertPersistentName(name)
     // Persistent VM defaults contain no run env or authority.
     toVercelNetworkPolicy(options.network ?? { mode: "none" })
     const params = buildCreateParams({
-      defaults: environment ? { ...this.defaults, source: undefined } : this.defaults,
+      defaults: this.defaults,
       env: {},
       network: { mode: "none" },
       name,
@@ -260,9 +218,7 @@ export class VercelSandboxFactory<const TParams extends ParamsConfig = Record<ne
           throw new SandboxError("[Sandbox] Vercel persistent working directory setup failed.")
         }
       }
-      return environment
-        ? await initializeSandboxEnvironment(sandbox, environment, signal)
-        : sandbox
+      return await initializeSandboxEnvironment(sandbox, environment, signal)
     } catch (error) {
       // A failed/uncertain request must never delete a name that another attempt may own.
       await stopFailedPersistentSession(client)
@@ -328,25 +284,10 @@ function buildCreateParams(input: {
 
   return {
     ...base,
-    ...(defaults.source !== undefined ? { source: normalizeSource(defaults.source) } : {}),
     ...(defaults.image !== undefined
       ? { image: defaults.image }
       : { runtime: defaults.runtime ?? DEFAULT_VERCEL_SANDBOX_RUNTIME }),
   } as VercelCreateSandboxParams
-}
-
-function normalizeSource(source: VercelSandboxSource): Record<string, unknown> {
-  if (source.type === "tarball") {
-    return { type: "tarball", url: source.url }
-  }
-  return {
-    type: "git",
-    url: source.url,
-    ...(source.username !== undefined ? { username: source.username } : {}),
-    ...(source.password !== undefined ? { password: source.password } : {}),
-    ...(source.depth !== undefined ? { depth: source.depth } : {}),
-    ...(source.revision !== undefined ? { revision: source.revision } : {}),
-  }
 }
 
 function validateSourceOptions(
@@ -357,7 +298,6 @@ function validateSourceOptions(
   }
   const conflicts = [
     options.image !== undefined ? "image" : undefined,
-    options.source !== undefined ? "source" : undefined,
     options.runtime !== undefined ? "runtime" : undefined,
   ].filter((value): value is string => value !== undefined)
   if (conflicts.length > 0) {

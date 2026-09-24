@@ -14,9 +14,9 @@ import {
   assertCreateAgentContextCheckpointInput,
   assertCreateSubagentRunInput,
   assertSubagentRunResult,
-  snapshotAgentThreadSandbox,
+  snapshotAgentThreadSandboxParams,
   subagentRunMatchesCreateInput,
-  transitionAgentWorkspace,
+  transitionAgentThreadSandbox,
 } from "./provider"
 import type {
   AgentContextCheckpointRecord,
@@ -28,8 +28,8 @@ import type {
   AgentRunStore,
   AgentStorage,
   AgentThreadRecord,
+  AgentThreadSandboxState,
   AgentThreadStore,
-  AgentWorkspaceState,
   AppendAgentMessageInput,
   ConfirmAgentRunExecutionOwnershipInput,
   ConversationAgentRunRecord,
@@ -49,7 +49,7 @@ import type {
   ReclaimAgentRunInput,
   StartAgentRunInput,
   SubagentRunRecord,
-  TransitionAgentWorkspaceInput,
+  TransitionAgentThreadSandboxInput,
 } from "./types"
 import { AGENT_RUN_FAILURE_CODES } from "./types"
 
@@ -122,22 +122,26 @@ export interface InMemoryAgentStorageSnapshot {
 class InMemoryAgentThreadStore implements AgentThreadStore {
   constructor(private readonly state: AgentStoreState) {}
 
-  async transitionWorkspace(input: TransitionAgentWorkspaceInput): Promise<AgentWorkspaceState> {
+  async transitionSandbox(
+    input: TransitionAgentThreadSandboxInput
+  ): Promise<AgentThreadSandboxState> {
     const threadKey = key(input.projectId, input.id)
     const thread = this.state.threads.get(threadKey) ?? null
     const run =
       input.action === "recreate"
         ? null
         : (this.state.runs.get(key(input.projectId, input.runId)) ?? null)
-    const workspaceState = transitionAgentWorkspace(thread, run, input)
+    const sandboxState = transitionAgentThreadSandbox(thread, run, input)
     if (!thread) throw new AgentStorageError("thread_not_found", "[Sixb] Thread not found.")
-    this.state.threads.set(threadKey, { ...thread, workspaceState: clone(workspaceState) })
-    return clone(workspaceState)
+    this.state.threads.set(threadKey, { ...thread, sandboxState: clone(sandboxState) })
+    return clone(sandboxState)
   }
 
   async create(input: CreateAgentThreadInput): Promise<AgentThreadRecord> {
-    const sandbox =
-      input.sandbox === undefined ? undefined : snapshotAgentThreadSandbox(input.sandbox)
+    const sandboxParams =
+      input.sandboxParams === undefined
+        ? undefined
+        : snapshotAgentThreadSandboxParams(input.sandboxParams)
     const threadKey = key(input.projectId, input.id)
     if (this.state.threads.has(threadKey)) {
       throw new AgentStorageError(
@@ -151,7 +155,7 @@ class InMemoryAgentThreadStore implements AgentThreadStore {
       id: input.id,
       projectId: input.projectId,
       ownerPrincipal: clone(input.ownerPrincipal),
-      ...(sandbox === undefined ? {} : { sandbox }),
+      ...(sandboxParams === undefined ? {} : { sandboxParams }),
       ...(input.title === undefined ? {} : { title: input.title }),
       status: input.status ?? "active",
       activeRunId: null,

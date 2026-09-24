@@ -11,41 +11,37 @@ import type {
   AgentMessageRecord,
   AgentRunRecord,
   AgentThreadRecord,
-  AgentThreadSandbox,
-  AgentWorkspaceState,
+  AgentThreadSandboxParams,
+  AgentThreadSandboxState,
   ConversationAgentRunSpec,
   CreateAgentContextCheckpointInput,
   CreateSubagentRunInput,
   SubagentRunRecord,
   SubagentRunResult,
-  TransitionAgentWorkspaceInput,
+  TransitionAgentThreadSandboxInput,
 } from "./types"
 
 /** Shared state machine. Providers must lock the run, then thread, around this decision/write. */
-export function transitionAgentWorkspace(
+export function transitionAgentThreadSandbox(
   thread: AgentThreadRecord | null,
   run: AgentRunRecord | null,
-  input: TransitionAgentWorkspaceInput
-): AgentWorkspaceState {
+  input: TransitionAgentThreadSandboxInput
+): AgentThreadSandboxState {
   const fail = (message: string): never => {
-    throw new AgentStorageError("invalid_state", `[Sixb] Workspace ${message}`)
+    throw new AgentStorageError("invalid_state", `[Sixb] Sandbox ${message}`)
   }
-  if (!thread?.sandbox) return fail("is not configured on this thread.")
-  if (!/^[a-zA-Z0-9-]{1,80}$/.test(input.generation)) return fail("generation is invalid.")
-  const state = thread.workspaceState
+  if (!thread?.sandboxParams) return fail("is not configured on this thread.")
+  if (!/^[a-zA-Z0-9-]{1,80}$/.test(input.name)) return fail("name is invalid.")
+  const state = thread.sandboxState
   if (input.action === "recreate") {
     if (thread.activeRunId !== null) return fail("cannot be recreated during an active run.")
-    if (
-      !state ||
-      state.generation !== input.expectedGeneration ||
-      input.generation === state.generation
-    )
+    if (!state || state.name !== input.expectedSandboxName || input.name === state.name)
       return fail("changed; reload before recreating.")
     if (!["busy", "blocked", "unavailable"].includes(state.status)) {
       return fail("does not require recovery.")
     }
     return {
-      generation: input.generation,
+      name: input.name,
       status: "new",
       initialized: false,
       resetAt: new Date().toISOString(),
@@ -60,20 +56,20 @@ export function transitionAgentWorkspace(
     run.execution?.token !== input.executionToken ||
     run.execution.queueLeaseExpiresAt.getTime() <= Date.now()
   ) {
-    throw new AgentStorageError("execution_lost", "[Sixb] Workspace execution ownership was lost.")
+    throw new AgentStorageError("execution_lost", "[Sixb] Sandbox execution ownership was lost.")
   }
   if (input.action === "acquire") {
     if (state && state.status !== "new" && state.status !== "ready") {
       return fail("requires recovery; previous operations may still be in flight.")
     }
-    if (state && state.generation !== input.generation) return fail("generation changed.")
+    if (state && state.name !== input.name) return fail("name changed.")
     if (!/^[a-f0-9]{64}$/.test(input.sourceFingerprint))
       return fail("source fingerprint is invalid.")
     if (state?.sourceFingerprint && state.sourceFingerprint !== input.sourceFingerprint) {
       return fail("source identity changed; the existing checkout was not opened.")
     }
     return {
-      generation: input.generation,
+      name: input.name,
       status: "busy",
       initialized: state?.initialized ?? false,
       ...(state?.resetAt ? { resetAt: state.resetAt } : {}),
@@ -83,7 +79,7 @@ export function transitionAgentWorkspace(
   }
   if (
     state?.status !== "busy" ||
-    state.generation !== input.generation ||
+    state.name !== input.name ||
     state.owner?.runId !== input.runId ||
     state.owner.executionToken !== input.executionToken
   ) {
@@ -92,22 +88,22 @@ export function transitionAgentWorkspace(
   if (input.action === "replace") {
     if (
       !state.initialized ||
-      input.nextGeneration === state.generation ||
-      !/^[a-zA-Z0-9-]{1,80}$/.test(input.nextGeneration)
+      input.nextName === state.name ||
+      !/^[a-zA-Z0-9-]{1,80}$/.test(input.nextName)
     ) {
-      return fail("replacement requires initialized state and a fresh valid generation.")
+      return fail("replacement requires initialized state and a fresh valid name.")
     }
     // Only the owning worker may report confirmed loss; retain its fence across replacement.
     return {
       ...state,
-      generation: input.nextGeneration,
+      name: input.nextName,
       initialized: false,
       resetAt: new Date().toISOString(),
     }
   }
   if (input.status === "ready" && !input.initialized) return fail("initialization is incomplete.")
   return {
-    generation: state.generation,
+    name: state.name,
     status: input.status,
     initialized: input.initialized,
     sourceFingerprint: state.sourceFingerprint,
@@ -115,8 +111,8 @@ export function transitionAgentWorkspace(
   }
 }
 
-/** Keep caller-controlled binding data separate from future worker-owned sandbox state. */
-export function snapshotAgentThreadSandbox(value: unknown): AgentThreadSandbox {
+/** Snapshot application parameters independently of worker-owned sandbox state. */
+export function snapshotAgentThreadSandboxParams(value: unknown): AgentThreadSandboxParams {
   if (!isPlainRecord(value) || !isJsonObject(value)) {
     throw new AgentStorageError(
       "invalid_input",

@@ -29101,10 +29101,10 @@
                       "items": {
                         "type": "object",
                         "properties": {
-                          "workspaceState": {
+                          "sandboxState": {
                             "type": "object",
                             "properties": {
-                              "generation": {
+                              "name": {
                                 "type": "string"
                               },
                               "status": {
@@ -29115,7 +29115,7 @@
                                 "type": "boolean"
                               }
                             },
-                            "required": ["generation", "status", "initialized"],
+                            "required": ["name", "status", "initialized"],
                             "additionalProperties": false
                           },
                           "id": {
@@ -29142,7 +29142,7 @@
                           "title": {
                             "type": "string"
                           },
-                          "sandbox": {
+                          "sandboxParams": {
                             "type": "object",
                             "additionalProperties": {
                               "description": "Any JSON-compatible value.",
@@ -29402,10 +29402,10 @@
                     "thread": {
                       "type": "object",
                       "properties": {
-                        "workspaceState": {
+                        "sandboxState": {
                           "type": "object",
                           "properties": {
-                            "generation": {
+                            "name": {
                               "type": "string"
                             },
                             "status": {
@@ -29416,7 +29416,7 @@
                               "type": "boolean"
                             }
                           },
-                          "required": ["generation", "status", "initialized"],
+                          "required": ["name", "status", "initialized"],
                           "additionalProperties": false
                         },
                         "id": {
@@ -29443,7 +29443,7 @@
                         "title": {
                           "type": "string"
                         },
-                        "sandbox": {
+                        "sandboxParams": {
                           "type": "object",
                           "additionalProperties": {
                             "description": "Any JSON-compatible value.",
@@ -29604,10 +29604,10 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "workspaceState": {
+                    "sandboxState": {
                       "type": "object",
                       "properties": {
-                        "generation": {
+                        "name": {
                           "type": "string"
                         },
                         "status": {
@@ -29618,7 +29618,7 @@
                           "type": "boolean"
                         }
                       },
-                      "required": ["generation", "status", "initialized"],
+                      "required": ["name", "status", "initialized"],
                       "additionalProperties": false
                     },
                     "id": {
@@ -29645,7 +29645,7 @@
                     "title": {
                       "type": "string"
                     },
-                    "sandbox": {
+                    "sandboxParams": {
                       "type": "object",
                       "additionalProperties": {
                         "description": "Any JSON-compatible value.",
@@ -29789,12 +29789,12 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "expectedGeneration": {
+                  "expectedSandboxName": {
                     "type": "string",
                     "minLength": 1
                   }
                 },
-                "required": ["expectedGeneration"],
+                "required": ["expectedSandboxName"],
                 "additionalProperties": false
               }
             },
@@ -29802,12 +29802,12 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "expectedGeneration": {
+                  "expectedSandboxName": {
                     "type": "string",
                     "minLength": 1
                   }
                 },
-                "required": ["expectedGeneration"],
+                "required": ["expectedSandboxName"],
                 "additionalProperties": false
               }
             },
@@ -29815,12 +29815,12 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "expectedGeneration": {
+                  "expectedSandboxName": {
                     "type": "string",
                     "minLength": 1
                   }
                 },
-                "required": ["expectedGeneration"],
+                "required": ["expectedSandboxName"],
                 "additionalProperties": false
               }
             }
@@ -29834,10 +29834,10 @@
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "workspaceState": {
+                    "sandboxState": {
                       "type": "object",
                       "properties": {
-                        "generation": {
+                        "name": {
                           "type": "string"
                         },
                         "status": {
@@ -29848,7 +29848,7 @@
                           "type": "boolean"
                         }
                       },
-                      "required": ["generation", "status", "initialized"],
+                      "required": ["name", "status", "initialized"],
                       "additionalProperties": false
                     },
                     "id": {
@@ -29875,7 +29875,7 @@
                     "title": {
                       "type": "string"
                     },
-                    "sandbox": {
+                    "sandboxParams": {
                       "type": "object",
                       "additionalProperties": {
                         "description": "Any JSON-compatible value.",

@@ -3,7 +3,7 @@ import { cn } from "@sixb/ui/lib/utils"
 import { MessagesSquare } from "lucide-react"
 import type { ReactNode } from "react"
 import { ConversationPanel } from "./components/ConversationPanel"
-import { WorkspaceRecovery } from "./components/WorkspaceRecovery"
+import { SandboxRecovery } from "./components/SandboxRecovery"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 import { useAgentConversation } from "./hooks/useAgentConversation"
@@ -124,14 +124,14 @@ export function AgentChat({
             : undefined
         }
         onRetry={
-          !conversation.workspaceRecovery &&
+          !conversation.sandboxRecovery &&
           (presentation.kind === "failed" ||
             (presentation.kind === "timeout" && !presentation.hasProgress))
             ? () => conversation.retry(presentation.run)
             : undefined
         }
         onContinue={
-          !conversation.workspaceRecovery &&
+          !conversation.sandboxRecovery &&
           presentation.kind === "timeout" &&
           presentation.hasProgress
             ? conversation.continueAfterTimeout
@@ -152,16 +152,16 @@ export function AgentChat({
         onSend={conversation.send}
         onNewChat={onNavigateHome}
         onSelectThread={onNavigateThread}
-        workspaceRecovery={
-          conversation.workspaceRecovery ? (
-            <WorkspaceRecovery
-              pending={conversation.recreatingWorkspace}
-              error={conversation.workspaceRecoveryError}
+        sandboxRecovery={
+          conversation.sandboxRecovery ? (
+            <SandboxRecovery
+              pending={conversation.recreatingSandbox}
+              error={conversation.sandboxRecoveryError}
               onRecreate={conversation.recreateSandbox}
             />
           ) : undefined
         }
-        composerDisabled={conversation.isRunning || Boolean(conversation.workspaceRecovery)}
+        composerDisabled={conversation.isRunning || Boolean(conversation.sandboxRecovery)}
         composerPending={conversation.composerPending}
         composerRunning={conversation.isRunning}
         composerStopping={conversation.stopping}

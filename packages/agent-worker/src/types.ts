@@ -7,6 +7,7 @@ import type {
   Queues,
   SandboxDefinition,
   SandboxFactory,
+  Sixb,
   SixbDefinitions,
   Storage,
   ValueType,
@@ -80,6 +81,7 @@ export interface AgentWorkerContext {
 
 /** Provider ports activated only after an Agent execution scope is bound. */
 export interface AgentExecutionContext extends AgentWorkerContext {
+  readonly sixb: Sixb
   readonly authorPrincipal?: AuthorizablePrincipal
   readonly blobStorage: BlobStorage
   readonly connector: AgentToolRunContext["connector"]

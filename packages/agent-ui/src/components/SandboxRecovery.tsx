@@ -11,7 +11,7 @@ import {
   Button,
 } from "@sixb/ui/components"
 
-export function WorkspaceRecovery({
+export function SandboxRecovery({
   pending,
   error,
   onRecreate,
@@ -22,21 +22,21 @@ export function WorkspaceRecovery({
 }) {
   return (
     <div className="mx-auto w-full max-w-3xl px-4 py-3 text-sm" role="status">
-      <p className="font-medium">Workspace recovery required</p>
+      <p className="font-medium">Sandbox recovery required</p>
       <p className="text-muted-foreground">
         Recovery failed or the previous operation could not be confirmed. Automatic resume is
         blocked to protect your work.
       </p>
-      {error && <p role="alert">Could not recreate the workspace. Reload and try again.</p>}
+      {error && <p role="alert">Could not recreate the sandbox. Reload and try again.</p>}
       <AlertDialog>
         <AlertDialogTrigger asChild>
           <Button className="mt-2" variant="outline" size="sm" disabled={pending}>
-            {pending ? "Recreating…" : "Start with a fresh workspace"}
+            {pending ? "Recreating…" : "Start with a fresh sandbox"}
           </Button>
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Start with a fresh workspace?</AlertDialogTitle>
+            <AlertDialogTitle>Start with a fresh sandbox?</AlertDialogTitle>
             <AlertDialogDescription>
               The next run will initialize a new environment. Local files from the previous
               workspace will not be copied. Conversation history and published attachments stay
@@ -46,7 +46,7 @@ export function WorkspaceRecovery({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={onRecreate}>Create fresh workspace</AlertDialogAction>
+            <AlertDialogAction onClick={onRecreate}>Create fresh sandbox</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

@@ -95,9 +95,9 @@ export const CreateAgentThreadBodySchema = z
   .strict()
 
 export const AgentThreadSchema = z.object({
-  workspaceState: z
+  sandboxState: z
     .object({
-      generation: z.string(),
+      name: z.string(),
       status: z.enum(["new", "busy", "ready", "blocked", "unavailable"]),
       initialized: z.boolean(),
     })
@@ -106,7 +106,7 @@ export const AgentThreadSchema = z.object({
   projectId: z.string(),
   ownerPrincipal: AgentPrincipalSchema,
   title: z.string().optional(),
-  sandbox: z.record(z.string(), JsonValueSchema).optional(),
+  sandboxParams: z.record(z.string(), JsonValueSchema).optional(),
   status: AgentThreadStatusSchema,
   activeRunId: z.string().nullable(),
   lastMessageAt: z.string().optional(),

@@ -3,6 +3,16 @@ import type { SandboxFactory } from "@sixb/core/sandboxes"
 import { AppleContainerSandbox } from "../src/apple-container-sandbox"
 import { AppleContainerSandboxFactory } from "../src/apple-container-sandbox-factory"
 
+test("rejects dynamic configuration before probing the provider", async () => {
+  const factory = new AppleContainerSandboxFactory({
+    bin: "/nonexistent/sixb-environment-test",
+    resolve: () => {
+      throw new Error("must not resolve")
+    },
+  })
+  await expect(factory.create()).rejects.toThrow("execution-resolved")
+})
+
 test("rejects persistence before provisioning", async () => {
   // Regression proof: remove the factory's persistence guard; rejection/message assertions fail.
   const provision = spyOn(AppleContainerSandbox, "create").mockImplementation(async () => {

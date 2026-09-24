@@ -2,10 +2,15 @@ import { randomUUID } from "node:crypto"
 import { posix } from "node:path"
 import {
   type CreateSandboxOptions,
+  initializeSandboxEnvironment,
+  type ParamsConfig,
   type Sandbox,
+  type SandboxConfig,
   SandboxError,
   type SandboxFactory,
   type SandboxSessionOptions,
+  sandboxConfig,
+  sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
 import {
   type AzureCreateRequest,
@@ -25,16 +30,20 @@ import { resolveNetwork } from "./network"
 import type { AzureSandboxFactoryOptions } from "./options"
 
 /** Ephemeral Azure provider with validated creation-time egress and supervised workloads. */
-export class AzureSandboxFactory implements SandboxFactory {
+export class AzureSandboxFactory<const TParams extends ParamsConfig = Record<never, never>>
+  implements SandboxFactory<TParams>
+{
+  readonly configuration: SandboxConfig<TParams>
   private readonly client
   private readonly lifecycle: AzureLifecycleOptions
   private readonly provisionTimeoutMs: number
-  private readonly source: AzureCreateRequest["sourcesRef"]
+  private readonly imageSource: AzureCreateRequest["sourcesRef"]
   private readonly resources: AzureCreateRequest["resources"]
   private readonly defaults: SandboxSessionOptions
 
-  constructor(options: AzureSandboxFactoryOptions) {
+  constructor(options: AzureSandboxFactoryOptions<TParams>) {
     assertEphemeral(options)
+    this.configuration = sandboxConfig<TParams>(options)
     this.provisionTimeoutMs = positiveMilliseconds(
       options.provisionTimeoutMs ?? 120_000,
       "provisionTimeoutMs"
@@ -46,14 +55,15 @@ export class AzureSandboxFactory implements SandboxFactory {
       ),
       pollIntervalMs: positiveMilliseconds(options.pollIntervalMs ?? 1000, "pollIntervalMs"),
     }
-    this.source = resolveImage(options.image)
+    this.imageSource = resolveImage(options.image)
     this.resources = resolveResources(options.resources)
-    this.defaults = resolveSession({}, options)
+    this.defaults = resolveSession({}, { ...options, ...this.configuration })
     this.client = createAzureSandboxClient(options)
   }
 
   async create(options: CreateSandboxOptions = {}): Promise<Sandbox> {
     assertEphemeral(options)
+    const environment = sandboxCreationEnvironment(this.configuration, options)
     const session = resolveSession(this.defaults, options)
     const attemptId = randomUUID()
     let id: string | undefined
@@ -61,10 +71,14 @@ export class AzureSandboxFactory implements SandboxFactory {
       return await withLifecycleDeadline(
         "provisioning",
         this.provisionTimeoutMs,
-        async (signal) => {
+        async (deadlineSignal) => {
+          const signal = options.signal
+            ? AbortSignal.any([deadlineSignal, options.signal])
+            : deadlineSignal
+          signal.throwIfAborted()
           const resource = await this.client.create(
             {
-              sourcesRef: this.source,
+              sourcesRef: this.imageSource,
               resources: this.resources,
               labels: { "sixb-provider": "azure", "sixb-provisioning-id": attemptId },
               egressPolicy: resolveNetwork(session.network).egress,
@@ -86,7 +100,8 @@ export class AzureSandboxFactory implements SandboxFactory {
             session.network?.mode !== "none"
           )
           signal.throwIfAborted()
-          return new AzureSandbox(id, this.client, session, this.lifecycle, supervisorRoot)
+          const sandbox = new AzureSandbox(id, this.client, session, this.lifecycle, supervisorRoot)
+          return initializeSandboxEnvironment(sandbox, environment, signal)
         }
       )
     } catch (error) {

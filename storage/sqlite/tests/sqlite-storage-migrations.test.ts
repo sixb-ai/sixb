@@ -26,6 +26,38 @@ import {
 import { SqliteMaterializationStateReader } from "../src/ontology-storage/materialization-state"
 
 const tempDirs: string[] = []
+
+test("adds sandbox state after the shipped params migration without changing existing bindings", () => {
+  // Regression proof: fold sandbox_state into 041 or remove 045; this upgrade cannot complete.
+  const db = new Database(":memory:")
+  try {
+    db.exec("CREATE TABLE agent_threads (id TEXT PRIMARY KEY)")
+    const params = sqliteStorageMigrations.steps.find(
+      (step) => step.id === "041-agent-thread-workspaces"
+    )!
+    const state = sqliteStorageMigrations.steps.find(
+      (step) => step.id === "045-agent-thread-sandbox-state"
+    )!
+    params.up(db)
+    db.query("INSERT INTO agent_threads (id, sandbox_params) VALUES (?, ?)").run(
+      "thread",
+      JSON.stringify({ clientId: "acme" })
+    )
+    expect(
+      db
+        .query("PRAGMA table_info(agent_threads)")
+        .all()
+        .map((row) => (row as { name: string }).name)
+    ).not.toContain("sandbox_state")
+    state.up(db)
+    expect(db.query("SELECT sandbox_params, sandbox_state FROM agent_threads").get()).toEqual({
+      sandbox_params: '{"clientId":"acme"}',
+      sandbox_state: null,
+    })
+  } finally {
+    db.close()
+  }
+})
 const LEGACY_WEBHOOK_DELIVERY_FAILURE_CODES = ["webhook.delivery_failed"] as const
 const expectedStorageMigrationRows = [
   {
@@ -335,6 +367,13 @@ const expectedStorageMigrationRows = [
     id: "044-vector-batching",
     status: "applied",
     version: 44,
+  },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "045-agent-thread-sandbox-state",
+    status: "applied",
+    version: 45,
   },
 ]
 

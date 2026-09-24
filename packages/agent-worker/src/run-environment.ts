@@ -1,9 +1,11 @@
-import type { AgentToolRunInfo, Sandbox } from "@sixb/core"
+import type { AgentToolRunInfo, Sandbox, SandboxDefinition } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
+import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
 import type {
   AgentMessageRecord,
+  AgentThreadRecord,
   ConversationAgentRunRecord,
   SubagentRunRecord,
   WorkflowAgentNodeRunRecord,
@@ -18,23 +20,34 @@ import {
   type PreparedAgentAttachmentContext,
   prepareAgentAttachments,
 } from "./attachments"
+import type { AgentContextBudget } from "./context-budget"
+import { prepareAgentConversationContext } from "./context-compaction"
+import { AgentExecutionLostError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { type AgentErrorDetails, modelToolsFromAgentDefinitions } from "./model-adapters"
 import { prepareAgentSandboxApiContext } from "./sandbox-api-context"
 import { AgentSandboxFileRegistry } from "./sandbox-file-registry"
 import type { AgentSandboxHandle } from "./sandbox-handle"
+import { type AgentSandboxLifecycle, openThreadSandbox } from "./sandbox-lifecycle"
+import type { LoadedAgentThreadModelContext } from "./thread-context"
 import { AgentToolArtifactBudget, createAgentToolArtifacts } from "./tools/artifacts"
 import { createBashTool } from "./tools/bash"
 import { createReadTool } from "./tools/read"
 import { AgentToolResultMediaBridge } from "./tools/result-media"
 import { createViewFileTool } from "./tools/view-file"
+import type { AgentTurnRuntime } from "./turn-runtime"
 import type { AgentExecutionContext, AgentTurnContext, AgentWorkerContext } from "./types"
 import { prepareWorkflowInputAttachments } from "./workflow-input-attachments"
-import type { AgentWorkspaceLifecycle } from "./workspace"
 
 export interface AgentExecutionEnvironment {
   readonly turnContext: AgentTurnContext
+  /** Confirm preservation before recording success, cancellation or failure. Idempotent. */
+  beforeFinalize(): Promise<void>
   dispose(): Promise<void>
+}
+
+export interface ConversationAgentExecutionEnvironment extends AgentExecutionEnvironment {
+  readonly threadContext?: LoadedAgentThreadModelContext
 }
 
 interface CreateAgentEnvironmentInput {
@@ -50,7 +63,10 @@ interface CreateAgentEnvironmentInput {
 }
 
 export interface CreateConversationAgentEnvironmentInput extends CreateAgentEnvironmentInput {
-  readonly workspace?: AgentWorkspaceLifecycle
+  readonly thread?: AgentThreadRecord | null
+  readonly sandboxDefinition?: SandboxDefinition
+  /** Run preflight only after current sandbox access has been resolved. */
+  readonly preflight?: { readonly budget: AgentContextBudget; readonly runtime: AgentTurnRuntime }
   readonly run: ConversationAgentRunRecord
   /** Retained model tail selected by preflight. Falls back to storage for direct callers. */
   readonly messages?: readonly AgentMessageRecord[]
@@ -75,61 +91,89 @@ export interface CreateWorkflowAgentNodeEnvironmentInput extends CreateAgentEnvi
 /** Prepare conversation history and attachments, then start the shared agent environment. */
 export async function createConversationAgentEnvironment(
   input: CreateConversationAgentEnvironmentInput
-): Promise<AgentExecutionEnvironment> {
-  const { context, plan, run } = input
-
+): Promise<ConversationAgentExecutionEnvironment> {
+  const { context, plan, run, preflight } = input
   const apiBaseUrl = createAgentApiGatewayBaseUrl({
     apiBaseUrl: context.apiBaseUrl,
     projectId: context.id,
     runId: run.id,
     executionToken: run.execution?.token,
   })
-  const [skills, messages, inlineImages] = await Promise.all([
-    input.skills ?? context.agentSkills,
-    input.messages ??
-      context.storage.agents.messages
-        .list({
-          projectId: context.id,
-          threadId: run.threadId,
-          order: "asc",
+  const persistentSandbox = input.thread?.sandboxParams
+    ? await openThreadSandbox({
+        context,
+        definition: input.sandboxDefinition,
+        thread: input.thread,
+        run,
+        signal: input.signal ?? new AbortController().signal,
+      })
+    : undefined
+  let environment: AgentExecutionEnvironment | undefined
+  try {
+    // Resolve application access before any compaction model call. Once acquired, this
+    // environment owns preservation even if history, attachments or runtime preparation fail.
+    const prepared = preflight
+      ? await prepareAgentConversationContext({
+          context,
+          plan,
+          run,
+          budget: preflight.budget,
+          runtime: preflight.runtime,
+          frameworkTools: input.frameworkTools,
         })
-        .then((history) => history.messages),
-    modelSupportsInlineImages(plan.model),
-  ])
-  const attachmentContext = await prepareAgentAttachments({
-    projectId: context.id,
-    threadId: run.threadId,
-    messages,
-    blobStorage: context.blobStorage,
-    apiBaseUrl,
-    inlineImages,
-    signal: input.signal,
-  })
-
-  const environment = startAgentEnvironment({
-    mode: "conversation",
-    workspace: input.workspace,
-    context,
-    plan,
-    runId: run.id,
-    threadId: run.threadId,
-    toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
-    apiBaseUrl,
-    attachmentContext,
-    skills,
-    frameworkTools: input.frameworkTools,
-    onDetachedTeardown: input.onDetachedTeardown,
-  })
-  if (input.workspace) {
-    try {
+      : undefined
+    const [skills, messages, inlineImages] = await Promise.all([
+      prepared?.skills ?? input.skills ?? context.agentSkills,
+      prepared?.threadContext.retainedMessages ??
+        input.messages ??
+        context.storage.agents.messages
+          .list({ projectId: context.id, threadId: run.threadId, order: "asc" })
+          .then((history) => history.messages),
+      modelSupportsInlineImages(plan.model),
+    ])
+    const attachmentContext = await prepareAgentAttachments({
+      projectId: context.id,
+      threadId: run.threadId,
+      messages,
+      blobStorage: context.blobStorage,
+      apiBaseUrl,
+      inlineImages,
+      signal: input.signal,
+    })
+    environment = startAgentEnvironment({
+      mode: "conversation",
+      persistentSandbox,
+      context,
+      plan,
+      runId: run.id,
+      threadId: run.threadId,
+      toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
+      apiBaseUrl,
+      attachmentContext,
+      skills,
+      frameworkTools: input.frameworkTools,
+      onDetachedTeardown: input.onDetachedTeardown,
+    })
+    if (persistentSandbox) {
       const ready = environment.turnContext.sandboxReady
       if (ready) await waitForAbort(ready, input.signal)
-    } catch (error) {
-      await environment.dispose()
-      throw error
     }
+    return { ...environment, threadContext: prepared?.threadContext }
+  } catch (error) {
+    // Preparation can fail before the worker receives this environment. Preserve here, before
+    // the worker records the run's terminal outcome; a lost execution must touch nothing.
+    try {
+      if (
+        !(error instanceof AgentExecutionLostError) &&
+        !(error instanceof QueueDeliveryLeaseLostError) &&
+        !(input.signal?.reason instanceof QueueDeliveryLeaseLostError)
+      )
+        await persistentSandbox?.save()
+    } finally {
+      await environment?.dispose()
+    }
+    throw error
   }
-  return environment
 }
 
 /** Build an isolated environment for one fresh, headless child Agent. */
@@ -208,7 +252,7 @@ export async function createWorkflowAgentNodeEnvironment(
 }
 
 interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
-  readonly workspace?: AgentWorkspaceLifecycle
+  readonly persistentSandbox?: AgentSandboxLifecycle
   readonly toolRun: AgentToolRunInfo
   readonly actorId?: string
   readonly parentRunId?: string
@@ -292,7 +336,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   for (const frameworkTool of input.frameworkTools ?? []) appendBuiltInTool(tools, frameworkTool)
 
   ready = provisionSandbox({
-    workspace: input.workspace,
+    persistentSandbox: input.persistentSandbox,
     context,
     actorId,
     run: { id: runId, ...(threadId ? { threadId } : {}) },
@@ -311,9 +355,11 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
   }
   ready.then(markSettled, markSettled)
 
+  const beforeFinalize = () => input.persistentSandbox?.save() ?? Promise.resolve()
   return {
+    beforeFinalize,
     turnContext: {
-      ...(input.workspace ? { beforeFinalize: () => input.workspace!.save() } : {}),
+      ...(input.persistentSandbox ? { beforeFinalize } : {}),
       id: context.id,
       ...(context.authorPrincipal === undefined
         ? {}
@@ -328,7 +374,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
         mode,
         instructions: plan.instructions,
         skills,
-        sandboxResetAt: input.workspace?.resetAt,
+        sandboxResetAt: input.persistentSandbox?.resetAt,
       }),
       sandboxReady: ready,
       sandboxWasUsed: () => sandboxWasUsed,
@@ -338,7 +384,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     },
     async dispose() {
       await Promise.all([
-        input.workspace
+        input.persistentSandbox
           ? Promise.resolve()
           : disposeEnvironment(ready, () => settled, input.onDetachedTeardown),
         logSession.flush(),
@@ -358,7 +404,7 @@ function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentConte
 }
 
 interface ProvisionSandboxInput {
-  readonly workspace?: AgentWorkspaceLifecycle
+  readonly persistentSandbox?: AgentSandboxLifecycle
   readonly context: AgentExecutionContext
   readonly actorId?: string
   readonly run: { readonly id: string; readonly threadId?: string }
@@ -373,8 +419,9 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
   let sandbox: Sandbox | null = null
   try {
     sandbox =
-      input.workspace?.sandbox ??
+      input.persistentSandbox?.sandbox ??
       (await context.sandboxes.create({
+        environment: {},
         network: { mode: "restricted", allow: [{ name: "sixb-api", origin: apiOrigin }] },
       }))
     const apiContext = await prepareAgentSandboxApiContext({
@@ -392,10 +439,10 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       env: apiContext.env,
       projectId: context.id,
     })
-    return { sandbox, env: { ...input.workspace?.env, ...apiContext.env } }
+    return { sandbox, env: { ...input.persistentSandbox?.env, ...apiContext.env } }
   } catch (error) {
     // Reclaim a half-created sandbox before propagating to the awaiter.
-    if (!input.workspace) await sandbox?.destroy().catch(() => {})
+    if (!input.persistentSandbox) await sandbox?.destroy().catch(() => {})
     throw error
   }
 }

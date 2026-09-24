@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   type CreateSandboxOptions,
   SandboxError,
@@ -6,10 +6,11 @@ import {
 } from "@sixb/core/sandboxes"
 import { APIError, Sandbox as VercelSdkSandbox } from "@vercel/sandbox"
 import { persistentSandboxError, type VercelPersistenceOperations } from "../src/vercel-persistence"
+import { VercelSandbox } from "../src/vercel-sandbox"
 import { VercelSandboxFactory } from "../src/vercel-sandbox-factory"
 
 /** Exercise the installed SDK over a fake transport, not a fake auto-resume implementation. */
-function fixture() {
+function fixture(setup?: readonly string[]) {
   type Status = "running" | "stopped" | "failed"
   const requests: { path: string; method: string; body: Record<string, unknown> }[] = []
   let status: Status = "running"
@@ -118,6 +119,7 @@ function fixture() {
       snapshotExpiration: 7 * 24 * 60 * 60 * 1000,
       keepLastSnapshots: { count: 1 },
       env: { DEFAULT_ENV: "current" },
+      setup,
     },
     undefined,
     remote
@@ -157,6 +159,36 @@ function fixture() {
 }
 
 describe("Vercel named persistence", () => {
+  test("static setup runs on creation only, never on resume", async () => {
+    // Regression proof: initialize only options.environment; the setup call is missing.
+    const f = fixture(["prepare-once"])
+    const command = spyOn(VercelSandbox.prototype, "runCommand").mockResolvedValue({
+      exitCode: 0,
+      stdout: "",
+      stderr: "",
+      durationMs: 0,
+    })
+    try {
+      const first = await f.factory.create({ persistence: { name: "workspace-1" } })
+      expect(command).toHaveBeenCalledTimes(1)
+      expect(command.mock.calls[0]?.slice(0, 2)).toEqual(["bash", ["-lc", "prepare-once"]])
+      await first.stop()
+      const next = await f.factory.resume("workspace-1")
+      expect(command).toHaveBeenCalledTimes(1)
+      await next.stop()
+    } finally {
+      command.mockRestore()
+    }
+  })
+
+  test("failed static setup stops the obtained session without deleting saved state", async () => {
+    const f = fixture(["prepare-once"])
+    // This transport rejects commands, exercising initialization failure through the real SDK.
+    await expect(f.factory.create({ persistence: { name: "workspace-1" } })).rejects.toThrow()
+    expect(f.requests.some((request) => request.path.includes("session-1/stop"))).toBe(true)
+    expect(f.requests.some((request) => request.method === "DELETE")).toBe(false)
+  })
+
   test.each([
     null,
     false,

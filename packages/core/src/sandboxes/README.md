@@ -2,13 +2,23 @@
 
 Factories define environments; threads retain immutable parameters; runs provide current authority.
 
+- `create()` applies static source/setup. An explicit `environment` replaces both, including `{}`.
+  Dynamic recipes require an execution-resolved environment; providers never invoke resolvers.
+- Selection and validation happen before provisioning. Initial source access must be allowed by
+  the session network policy. Creation runs setup once; resume never replays it.
+- Runs without a thread binding explicitly select `{}`; shared env/network defaults remain session
+  settings, not an implicit project binding. Unsupported provider capabilities fail explicitly.
+
 - [Configuration](./configuration.ts) validates and snapshots recipes, sharing Action parameter
   schemas. Resolvers receive the execution-scoped SDK. Only parameters are stored in `sandbox_params`.
 - [Initialization](./environment.ts) runs once, after session settings are applied. Git uses
   `repository/`; source-free environments use the provider root. Vercel skips native cloning on this
-  path to avoid preparing the source twice. Confirmed loss starts a new generation and replays setup.
-- The worker resolves each run, acquires fenced ownership, executes, cleans transient files and
-  confirms preservation before finalizing. Source identity/revision cannot change on resume.
+  path to avoid preparing the source twice. Confirmed loss uses a fresh name and replays setup.
+- Threads expose immutable `sandboxParams` and worker-owned `sandboxState`; its `name` is the
+  provider's exact persistent name, also checked during transitions and explicit recreation.
+- The conversation environment owns acquisition and preservation, including preparation failures.
+  It resolves access before compaction, drains operations, cleans transient files and confirms
+  preservation before the worker finalizes. Source identity/revision cannot change on resume.
 - Git checkouts exclude `.sixb/agent/` locally before run files are written. Tracked runtime files,
   redirected metadata and repository rules overriding this exclusion block acquisition or saving.
   This prevents accidental staging, not deliberate publication with `git add -f`.
@@ -20,5 +30,5 @@ Factories define environments; threads retain immutable parameters; runs provide
 ## V1 limits
 
 Vercel requests can outlive their worker: storage fencing cannot cancel provider-side work.
-Uncertain generations stay blocked; explicit recreation uses a new name without deleting old state.
+Uncertain sandboxes stay blocked; explicit recreation uses a new name without deleting old state.
 Saved files remain subject to provider retention. Git authentication is a separate slice.

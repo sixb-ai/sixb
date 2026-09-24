@@ -291,9 +291,9 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
 
   describe(label, () => {
     test("replaces lost state only under its current execution fence", async () => {
-      // Regression proof: remove replace's generation/owner guards; the stale attempts succeed.
+      // Regression proof: remove replace's name/owner guards; the stale attempts succeed.
       await withStorage(async (storage, fixture) => {
-        await storage.threads.create(threadInput({ sandbox: {} }))
+        await storage.threads.create(threadInput({ sandboxParams: {} }))
         const run = runInput({ execution: execution("first", new Date("2099-01-01")) })
         await createAndStartRun(storage, fixture, run)
         const acquire = {
@@ -302,43 +302,43 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           action: "acquire" as const,
           runId: run.id,
           executionToken: "first",
-          generation: "generation-1",
+          name: "name-1",
           sourceFingerprint: "a".repeat(64),
         }
-        await storage.threads.transitionWorkspace(acquire)
-        const replace = { ...acquire, action: "replace" as const, nextGeneration: "generation-2" }
-        await expectAgentError(storage.threads.transitionWorkspace(replace), "invalid_state")
-        await storage.threads.transitionWorkspace({
+        await storage.threads.transitionSandbox(acquire)
+        const replace = { ...acquire, action: "replace" as const, nextName: "name-2" }
+        await expectAgentError(storage.threads.transitionSandbox(replace), "invalid_state")
+        await storage.threads.transitionSandbox({
           ...acquire,
           action: "settle",
           status: "ready",
           initialized: true,
         })
-        await expectAgentError(storage.threads.transitionWorkspace(replace), "invalid_state")
-        await storage.threads.transitionWorkspace(acquire)
-        for (const nextGeneration of ["generation-1", "../invalid", ""]) {
+        await expectAgentError(storage.threads.transitionSandbox(replace), "invalid_state")
+        await storage.threads.transitionSandbox(acquire)
+        for (const nextName of ["name-1", "../invalid", ""]) {
           await expectAgentError(
-            storage.threads.transitionWorkspace({ ...replace, nextGeneration }),
+            storage.threads.transitionSandbox({ ...replace, nextName }),
             "invalid_state"
           )
         }
         await expectAgentError(
-          storage.threads.transitionWorkspace({ ...replace, executionToken: "stale" }),
+          storage.threads.transitionSandbox({ ...replace, executionToken: "stale" }),
           "execution_lost"
         )
-        const replacement = await storage.threads.transitionWorkspace(replace)
+        const replacement = await storage.threads.transitionSandbox(replace)
         const resetAt = replacement.resetAt
         expect(replacement).toMatchObject({
-          generation: "generation-2",
+          name: "name-2",
           status: "busy",
           initialized: false,
           owner: { runId: run.id, executionToken: "first" },
           sourceFingerprint: acquire.sourceFingerprint,
           resetAt: expect.any(String),
         })
-        await expectAgentError(storage.threads.transitionWorkspace(replace), "invalid_state")
+        await expectAgentError(storage.threads.transitionSandbox(replace), "invalid_state")
         await expectAgentError(
-          storage.threads.transitionWorkspace({
+          storage.threads.transitionSandbox({
             ...acquire,
             action: "settle",
             status: "ready",
@@ -346,28 +346,28 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           }),
           "invalid_state"
         )
-        await storage.threads.transitionWorkspace({
+        await storage.threads.transitionSandbox({
           ...acquire,
-          generation: "generation-2",
+          name: "name-2",
           action: "settle",
           status: "ready",
           initialized: true,
         })
-        const resumed = await storage.threads.transitionWorkspace({
+        const resumed = await storage.threads.transitionSandbox({
           ...acquire,
-          generation: "generation-2",
+          name: "name-2",
         })
         expect(resumed.resetAt).toBe(resetAt)
-        expect((await storage.threads.getById({ projectId, id: "thr_1" }))?.workspaceState).toEqual(
+        expect((await storage.threads.getById({ projectId, id: "thr_1" }))?.sandboxState).toEqual(
           resumed
         )
       })
     })
 
     test("fences workspace ownership across reclamation and explicit recreation", async () => {
-      // Regression proof: remove the busy-state or owner-token checks in transitionAgentWorkspace.
+      // Regression proof: remove the busy-state or owner-token checks in transitionAgentThreadSandbox.
       await withStorage(async (storage, fixture) => {
-        await storage.threads.create(threadInput({ sandbox: {} }))
+        await storage.threads.create(threadInput({ sandboxParams: {} }))
         const input = runInput({ execution: execution("first", new Date("2099-01-01")) })
         await createTestAgentExecution(fixture, {
           projectId,
@@ -383,32 +383,32 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           action: "acquire" as const,
           runId: input.id,
           executionToken: "first",
-          generation: "generation-1",
+          name: "name-1",
           sourceFingerprint: "a".repeat(64),
         }
         const attempts = await Promise.allSettled([
-          storage.threads.transitionWorkspace(acquire),
-          storage.threads.transitionWorkspace(acquire),
+          storage.threads.transitionSandbox(acquire),
+          storage.threads.transitionSandbox(acquire),
         ])
         expect(attempts.filter((attempt) => attempt.status === "fulfilled")).toHaveLength(1)
         expect(
-          (await storage.threads.getById({ projectId, id: "thr_1" }))?.workspaceState
+          (await storage.threads.getById({ projectId, id: "thr_1" }))?.sandboxState
         ).toMatchObject({ status: "busy", initialized: false })
-        await expectAgentError(storage.threads.transitionWorkspace(acquire), "invalid_state")
+        await expectAgentError(storage.threads.transitionSandbox(acquire), "invalid_state")
         await storage.runs.reclaim({
           projectId,
           id: input.id,
           execution: execution("second", new Date("2099-01-01")),
         })
         await expectAgentError(
-          storage.threads.transitionWorkspace({
+          storage.threads.transitionSandbox({
             ...acquire,
             executionToken: "second",
           }),
           "invalid_state"
         )
         await expectAgentError(
-          storage.threads.transitionWorkspace({
+          storage.threads.transitionSandbox({
             ...acquire,
             action: "settle",
             status: "ready",
@@ -420,29 +420,29 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           projectId,
           id: "thr_1",
           action: "recreate" as const,
-          expectedGeneration: "generation-1",
-          generation: "generation-2",
+          expectedSandboxName: "name-1",
+          name: "name-2",
         }
-        await expectAgentError(storage.threads.transitionWorkspace(recreate), "invalid_state")
+        await expectAgentError(storage.threads.transitionSandbox(recreate), "invalid_state")
         await storage.runs.finish({
           projectId,
           id: input.id,
           executionToken: "second",
           status: "failed",
         })
-        expect(await storage.threads.transitionWorkspace(recreate)).toEqual({
-          generation: "generation-2",
+        expect(await storage.threads.transitionSandbox(recreate)).toEqual({
+          name: "name-2",
           status: "new",
           initialized: false,
           resetAt: expect.any(String),
         })
-        await expectAgentError(storage.threads.transitionWorkspace(recreate), "invalid_state")
+        await expectAgentError(storage.threads.transitionSandbox(recreate), "invalid_state")
       })
     })
 
     test("resumes only confirmed workspace state with the pinned source", async () => {
       await withStorage(async (storage, fixture) => {
-        await storage.threads.create(threadInput({ sandbox: {} }))
+        await storage.threads.create(threadInput({ sandboxParams: {} }))
         const input = runInput({ execution: execution("owner", new Date("2099-01-01")) })
         await createTestAgentExecution(fixture, {
           projectId,
@@ -458,24 +458,24 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
           action: "acquire" as const,
           runId: input.id,
           executionToken: "owner",
-          generation: "generation",
+          name: "name",
           sourceFingerprint: "b".repeat(64),
         }
-        await storage.threads.transitionWorkspace(acquire)
-        await storage.threads.transitionWorkspace({
+        await storage.threads.transitionSandbox(acquire)
+        await storage.threads.transitionSandbox({
           ...acquire,
           action: "settle",
           status: "ready",
           initialized: true,
         })
         await expectAgentError(
-          storage.threads.transitionWorkspace({
+          storage.threads.transitionSandbox({
             ...acquire,
             sourceFingerprint: "c".repeat(64),
           }),
           "invalid_state"
         )
-        expect(await storage.threads.transitionWorkspace(acquire)).toMatchObject({
+        expect(await storage.threads.transitionSandbox(acquire)).toMatchObject({
           status: "busy",
           initialized: true,
         })
@@ -483,25 +483,25 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
     })
 
     test("snapshots workspace bindings without accepting runtime state or credentials", async () => {
-      // Regression proof: remove snapshotAgentThreadSandbox from a provider's thread create.
+      // Regression proof: remove snapshotAgentThreadSandboxParams from a provider's thread create.
       await withStorage(async (storage) => {
-        const sandbox = { clientId: "acme", nested: { branch: "main" } }
-        const record = await storage.threads.create(threadInput({ sandbox }))
-        sandbox.nested.branch = "changed"
+        const sandboxParams = { clientId: "acme", nested: { branch: "main" } }
+        const record = await storage.threads.create(threadInput({ sandboxParams }))
+        sandboxParams.nested.branch = "changed"
         const read = await storage.threads.getById({ projectId, id: record.id })
-        expect(read?.sandbox).toEqual({ clientId: "acme", nested: { branch: "main" } })
-        const mutable = record.sandbox?.nested
+        expect(read?.sandboxParams).toEqual({ clientId: "acme", nested: { branch: "main" } })
+        const mutable = record.sandboxParams?.nested
         if (mutable && typeof mutable === "object" && !Array.isArray(mutable))
           mutable.branch = "tampered"
-        expect((await storage.threads.list({ projectId })).threads[0]?.sandbox).toEqual(
-          read?.sandbox
+        expect((await storage.threads.list({ projectId })).threads[0]?.sandboxParams).toEqual(
+          read?.sandboxParams
         )
         await expectAgentError(
           storage.threads.create(
             threadInput({
               id: "unsafe",
               // @ts-expect-error storage requires a JSON object
-              sandbox: [],
+              sandboxParams: [],
             })
           ),
           "invalid_input"
@@ -511,7 +511,7 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
             threadInput({
               id: "non-json",
               // @ts-expect-error storage accepts normalized JSON, not typed Dates
-              sandbox: { at: new Date() },
+              sandboxParams: { at: new Date() },
             })
           ),
           "invalid_input"
@@ -523,17 +523,17 @@ export function runAgentStorageContractSuite<TStorage extends AgentStorageContra
       // Regression proof: change the memory store key back to projectId + ":" + id.
       await withStorage(async (storage) => {
         await storage.threads.create(
-          threadInput({ projectId: "a:b", id: "c", sandbox: { repo: "one" } })
+          threadInput({ projectId: "a:b", id: "c", sandboxParams: { repo: "one" } })
         )
         await storage.threads.create(
-          threadInput({ projectId: "a", id: "b:c", sandbox: { repo: "two" } })
+          threadInput({ projectId: "a", id: "b:c", sandboxParams: { repo: "two" } })
         )
-        expect((await storage.threads.getById({ projectId: "a:b", id: "c" }))?.sandbox?.repo).toBe(
-          "one"
-        )
-        expect((await storage.threads.getById({ projectId: "a", id: "b:c" }))?.sandbox?.repo).toBe(
-          "two"
-        )
+        expect(
+          (await storage.threads.getById({ projectId: "a:b", id: "c" }))?.sandboxParams?.repo
+        ).toBe("one")
+        expect(
+          (await storage.threads.getById({ projectId: "a", id: "b:c" }))?.sandboxParams?.repo
+        ).toBe("two")
       })
     })
     // ── threads ───────────────────────────────────────────────────────────────────────────────
