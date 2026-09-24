@@ -1,3 +1,4 @@
+export type { VercelGatewayDecisionOptions } from "./decision"
 export type { VercelGatewayEmbeddingOptions } from "./embedding"
 export {
   createVercelGateway,

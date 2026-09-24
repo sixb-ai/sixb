@@ -119,6 +119,13 @@ export function assertDecisionModel(model: DecisionModel): void {
 
   assertCapabilityLimit(capabilities.maxChoices, "maxChoices", 1)
   assertCapabilityLimit(capabilities.maxScoreLevels, "maxScoreLevels", 2)
+  const decimals = capabilities.answerDecimalPlaces
+  if (
+    decimals !== undefined &&
+    (!Number.isSafeInteger(decimals) || decimals < 1 || decimals > 15)
+  ) {
+    fail("Invalid decision answerDecimalPlaces (expected 1–15)")
+  }
 }
 
 function assertCapabilityLimit(value: number | undefined, name: string, minimum: number): void {
@@ -152,21 +159,28 @@ function supportsQuestion(capabilities: DecisionCapabilities, question: Decision
 
 export function validateDecisionAnswers<const Q extends DecisionQuestions>(
   questions: Q,
-  value: unknown
+  value: unknown,
+  answerDecimalPlaces?: number
 ): DecisionAnswers<Q> {
   assertJsonValue(value, "decision output")
   const answers = readRecord(value, "decision output")
   assertExactKeys(answers, Object.keys(questions), "decision output")
 
+  const roundingError = answerDecimalPlaces === undefined ? 0 : 0.5 * 10 ** -answerDecimalPlaces
   for (const [key, question] of Object.entries(questions)) {
-    assertAnswer(question, answers[key], `output.${key}`)
+    assertAnswer(question, answers[key], `output.${key}`, roundingError)
   }
 
   // Validation establishes the mapped type; callers receive an independent JSON snapshot.
   return cloneJsonValue(value) as DecisionAnswers<Q>
 }
 
-function assertAnswer(question: DecisionQuestion, value: unknown, path: string): void {
+function assertAnswer(
+  question: DecisionQuestion,
+  value: unknown,
+  path: string,
+  roundingError: number
+): void {
   const answer = readRecord(value, path)
   if (question.type === "probability") {
     assertExactKeys(answer, ["probability"], path)
@@ -182,10 +196,11 @@ function assertAnswer(question: DecisionQuestion, value: unknown, path: string):
   const distribution =
     question.type === "choice"
       ? validateChoiceAnswer(question, answer, path)
-      : validateScoreAnswer(question, answer, path)
+      : validateScoreAnswer(question, answer, path, roundingError)
 
   const total = distribution.reduce((sum, probability) => sum + probability, 0)
-  if (Math.abs(total - 1) > DISTRIBUTION_TOLERANCE) {
+  const tolerance = Math.max(DISTRIBUTION_TOLERANCE, distribution.length * roundingError)
+  if (Math.abs(total - 1) > tolerance + Number.EPSILON * distribution.length) {
     fail(`${path}.probabilities must sum to one`)
   }
 }
@@ -214,7 +229,8 @@ function validateChoiceAnswer(
 function validateScoreAnswer(
   question: ScoreQuestion,
   answer: Record<string, unknown>,
-  path: string
+  path: string,
+  roundingError: number
 ): number[] {
   if (
     !Array.isArray(answer.probabilities) ||
@@ -225,18 +241,54 @@ function validateScoreAnswer(
 
   const distribution = answer.probabilities.map((value) => readProbability(value, path))
   const expected = distribution.reduce((sum, probability, index) => sum + probability * index, 0)
-  const tolerance = DISTRIBUTION_TOLERANCE * question.levels.length
+  const levels = question.levels.length
+  const [minimum, maximum] = roundingError
+    ? roundedScoreBounds(distribution, roundingError, path)
+    : [expected, expected]
+  const tolerance = roundingError || DISTRIBUTION_TOLERANCE * levels
   if (
     typeof answer.score !== "number" ||
     !Number.isFinite(answer.score) ||
     answer.score < 0 ||
     answer.score > question.levels.length - 1 ||
-    Math.abs(answer.score - expected) > tolerance
+    answer.score < minimum - tolerance - Number.EPSILON * levels ** 2 ||
+    answer.score > maximum + tolerance + Number.EPSILON * levels ** 2
   ) {
     fail(`${path}.score is inconsistent with its distribution`)
   }
 
   return distribution
+}
+
+/** Find possible means without changing the returned probabilities. */
+function roundedScoreBounds(
+  distribution: readonly number[],
+  roundingError: number,
+  path: string
+): readonly [number, number] {
+  const lower = distribution.map((value) => Math.max(0, value - roundingError))
+  const upper = distribution.map((value) => Math.min(1, value + roundingError))
+  const remaining = 1 - lower.reduce((sum, value) => sum + value, 0)
+  const epsilon = Number.EPSILON * distribution.length
+  if (remaining < -epsilon || upper.reduce((sum, value) => sum + value, 0) < 1 - epsilon) {
+    fail(`${path}.probabilities must sum to one`)
+  }
+
+  const base = lower.reduce((sum, value, index) => sum + value * index, 0)
+  function extreme(highestFirst: boolean): number {
+    let mass = Math.max(0, remaining)
+    let mean = base
+    // Start at each probability's lower bound, then allocate exactly the remaining mass.
+    // Filling lower levels first minimizes the mean; filling higher levels maximizes it.
+    for (let offset = 0; offset < distribution.length && mass > 0; offset++) {
+      const index = highestFirst ? distribution.length - 1 - offset : offset
+      const added = Math.min(mass, upper[index]! - lower[index]!)
+      mean += added * index
+      mass -= added
+    }
+    return mean
+  }
+  return [extreme(false), extreme(true)]
 }
 
 function readProbability(value: unknown, path: string): number {

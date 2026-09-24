@@ -51,6 +51,8 @@ export interface DecisionModelDefinition extends ModelDefinition {
     readonly questions: readonly DecisionQuestion["type"][]
     readonly maxChoices?: number
     readonly maxScoreLevels?: number
+    /** Independent decimal rounding of returned scores/probabilities; omitted means strict validation. */
+    readonly answerDecimalPlaces?: number
   }
 }
 
@@ -80,6 +82,8 @@ export interface DecisionModel {
   readonly modelId: string
   readonly definition: DecisionModelDefinition
   readonly costEstimator?: ModelCostEstimator
+  /** Resolve and pin optional metadata/pricing before admission, without inference. */
+  resolve?(): Promise<DecisionModel>
   evaluate(request: DecisionModelRequest): Promise<DecisionModelResult>
 }
 

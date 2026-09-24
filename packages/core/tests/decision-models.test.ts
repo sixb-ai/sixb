@@ -217,6 +217,116 @@ describe("decision evaluation", () => {
   })
 })
 
+test("resolution cannot change the configured decision identity or bypass capabilities", async () => {
+  // Removal proof: remove the identity/capability checks after resolve in decision/runtime.ts.
+  let calls = 0
+  const base = modelWith(async () => {
+    calls++
+    return { output }
+  })
+  for (const change of [{ providerId: "other" }, { modelId: "other" }]) {
+    const resolved = { ...base, ...change, definition: { ...base.definition, ...change } }
+    const { sixb, storage, identity } = setup({ ...base, resolve: async () => resolved })
+    await expect(sixb.models.decision.evaluate({ input: "x", questions })).rejects.toThrow(
+      "identity does not match"
+    )
+    expect(await storage.aiUsage.getLatestForExecution(identity)).toBeNull()
+  }
+  const resolved: DecisionModel = {
+    ...base,
+    definition: { ...base.definition, capabilities: { questions: ["probability"] } },
+  }
+  await expect(
+    setup({ ...base, resolve: async () => resolved }).sixb.models.decision.evaluate({
+      input: "x",
+      questions,
+    })
+  ).rejects.toThrow("does not support")
+  expect(calls).toBe(0)
+})
+
+test("cancellation during resolution prevents decision admission and inference", async () => {
+  let calls = 0
+  const base = modelWith(async () => {
+    calls++
+    return { output }
+  })
+  const controller = new AbortController()
+  const { sixb, storage, identity } = setup({
+    ...base,
+    resolve: async () => {
+      controller.abort(new Error("cancelled while resolving"))
+      return base
+    },
+  })
+  await expect(
+    sixb.models.decision.evaluate({ input: "x", questions, signal: controller.signal })
+  ).rejects.toThrow("cancelled while resolving")
+  expect(calls).toBe(0)
+  expect(await storage.aiUsage.getLatestForExecution(identity)).toBeNull()
+})
+
+test("answer precision permits bounded rounding without normalizing or weakening default validation", () => {
+  const rounded = { ...output, severity: { score: 0.73, probabilities: [0.28, 0.72, 0] } }
+  expect(() => validateDecisionAnswers(questions, rounded)).toThrow("inconsistent")
+  expect(validateDecisionAnswers(questions, rounded, 2)).toEqual(rounded)
+  const thirds = { ...output, severity: { score: 1, probabilities: [0.33, 0.33, 0.33] } }
+  expect(validateDecisionAnswers(questions, thirds, 2)).toEqual(thirds)
+  for (const severity of [
+    { score: 0.9, probabilities: [0.28, 0.72, 0] },
+    { score: 1, probabilities: [0.3, 0.3, 0.3] },
+    { score: -0.01, probabilities: [1, 0, 0] },
+    { score: 2.01, probabilities: [0, 0, 1] },
+    { score: 1, probabilities: [-0.01, 1.01, 0] },
+  ]) {
+    expect(() => validateDecisionAnswers(questions, { ...output, severity }, 2)).toThrow()
+  }
+  const base = modelWith()
+  for (const answerDecimalPlaces of [0, -1, 1.5, 16, Number.NaN]) {
+    expect(() =>
+      createModelCatalog({
+        decision: [
+          {
+            ...base,
+            definition: {
+              ...base.definition,
+              capabilities: { ...base.definition.capabilities, answerDecimalPlaces },
+            },
+          },
+        ],
+      })
+    ).toThrow("answerDecimalPlaces")
+  }
+})
+
+test("rounded scores must be feasible with a normalized underlying distribution", () => {
+  // Removal proof: restore the independent-error tolerance in validateScoreAnswer;
+  // scores 0.2 and 8.8 below are then incorrectly accepted for ten-level scales.
+  const questions = {
+    rating: question.score({
+      instructions: "Rate the impact",
+      levels: ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine"],
+    }),
+  }
+  for (const probabilities of [
+    [1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 1],
+  ]) {
+    const lowEnd = probabilities[0] === 1
+    // At most 0.005 mass can leave the endpoint, moving the mean by at most 9 * 0.005.
+    // The separately rounded score adds another 0.005; inclusive ties tolerate either rule.
+    for (const score of lowEnd ? [0, 0.04, 0.05] : [8.95, 8.96, 9]) {
+      const output = { rating: { score, probabilities } }
+      expect(validateDecisionAnswers(questions, output, 2)).toEqual(output)
+    }
+    for (const score of lowEnd ? [0.06, 0.2] : [8.8, 8.94]) {
+      expect(() =>
+        validateDecisionAnswers(questions, { rating: { score, probabilities } }, 2)
+      ).toThrow("inconsistent")
+    }
+  }
+})
+
 test("output schemas preserve ordinary workflow validation", () => {
   const schemas = decisionOutput(questions)
   for (const [key, schema] of Object.entries(schemas)) {

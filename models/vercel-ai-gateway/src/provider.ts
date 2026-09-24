@@ -1,5 +1,7 @@
 import {
   assertJsonObject,
+  type DecisionModel,
+  type DecisionModelDefinition,
   defineLanguageModel,
   defineModelRateCard,
   type EmbeddingModel,
@@ -27,6 +29,13 @@ import {
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { responsesEvents, responsesInput, responsesUsage } from "@sixb/model-protocols/responses"
+import {
+  createGatewayDecision,
+  type GatewayDecisionResolution,
+  gatewayDecisionDefinition,
+  gatewayDecisionQuestions,
+  type VercelGatewayDecisionOptions,
+} from "./decision"
 import { createGatewayEmbedding, type VercelGatewayEmbeddingOptions } from "./embedding"
 import { withAutomaticPromptCaching } from "./provider-caching"
 import { isStrictGatewaySchema } from "./structured-output"
@@ -72,6 +81,7 @@ export interface VercelGateway extends LanguageModelProvider {
   readonly providerId: typeof PROVIDER_ID
   readonly catalog: VercelGatewayCatalog
   embedding(modelId: string, options: VercelGatewayEmbeddingOptions): EmbeddingModel
+  decision(modelId: string, options?: VercelGatewayDecisionOptions): DecisionModel
 }
 
 export function createVercelGateway(options: VercelGatewayOptions = {}): VercelGateway {
@@ -103,6 +113,79 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
   return Object.assign(model, {
     providerId: PROVIDER_ID as typeof PROVIDER_ID,
     catalog,
+    decision: (modelId: string, decisionOptions: VercelGatewayDecisionOptions = {}) => {
+      const timeoutMs = decisionOptions.timeoutMs ?? 30_000
+      assertPositiveIntegerOption(timeoutMs, "decision.timeoutMs")
+      const providerOptions =
+        decisionOptions.providerOptions && structuredClone(decisionOptions.providerOptions)
+      return createGatewayDecision(
+        modelId,
+        async (input) => {
+          const signal = AbortSignal.any([
+            ...(input.signal ? [input.signal] : []),
+            AbortSignal.timeout(timeoutMs),
+          ])
+          signal.throwIfAborted()
+          const response = await (transport.fetch ?? fetch)(`${transport.baseUrl}/evaluate`, {
+            method: "POST",
+            headers: {
+              ...gatewayHeaders(transport, "application/json"),
+              "content-type": "application/json",
+            },
+            body: JSON.stringify({
+              model: modelId,
+              state: input.input,
+              questions: gatewayDecisionQuestions(input.questions),
+              ...(providerOptions ? { providerOptions } : {}),
+            }),
+            signal,
+          })
+          const errorMetadata = requestErrorMetadata(response)
+          if (!response.ok) {
+            // Upstream error bodies can contain state or credentials; retain only HTTP facts.
+            await response.body?.cancel().catch(() => undefined)
+            throw new ModelProviderError(
+              `[SixbVercelGateway] Evaluation returned HTTP ${response.status}.`,
+              PROVIDER_ID,
+              modelId,
+              { status: response.status, code: "provider_rejection", ...errorMetadata }
+            )
+          }
+          let body: unknown
+          try {
+            body = await response.json()
+          } catch (cause) {
+            signal.throwIfAborted()
+            throw new ModelProviderError(
+              "[SixbVercelGateway] Evaluation returned invalid JSON.",
+              PROVIDER_ID,
+              modelId,
+              { code: "invalid_json", requestId: errorMetadata.requestId, cause }
+            )
+          }
+          const payload = object(body)
+          const rawUsage = object(payload?.usage)
+          const inputTokens = integer(rawUsage?.inputTokens)
+          const outputTokens = integer(rawUsage?.outputTokens)
+          const metadata = payload && gatewayMetadata(payload)
+          return {
+            body,
+            metadata: {
+              usage: {
+                ...(inputTokens === undefined ? {} : { inputTokens }),
+                ...(outputTokens === undefined ? {} : { outputTokens }),
+                ...(rawUsage ? { raw: rawUsage } : {}),
+              },
+              providerIds: gatewayProviderIds(payload, errorMetadata.requestId),
+              ...(string(payload?.model) ? { responseModelId: string(payload?.model) } : {}),
+              reportedCost: gatewayReportedCost(metadata),
+              route: gatewayRoute(metadata),
+            },
+          }
+        },
+        () => catalog.decisionResolution(modelId, providerOptions)
+      )
+    },
     embedding: (modelId: string, embeddingOptions: VercelGatewayEmbeddingOptions) =>
       createGatewayEmbedding(
         modelId,
@@ -176,6 +259,44 @@ function configuredModelDefinitions(
 
 class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
   private readonly rateCards = new Map<string, LanguageModelRateCard>()
+  private readonly decisionDefinitions = new Map<string, DecisionModelDefinition>()
+
+  async decisionResolution(
+    modelId: string,
+    providerOptions: JsonObject | undefined
+  ): Promise<GatewayDecisionResolution> {
+    let definition: DecisionModelDefinition | undefined
+    let card: LanguageModelRateCard | undefined
+    try {
+      await this.load()
+      definition = this.decisionDefinitions.get(modelId)
+      const available = definition && this.rateCards.get(modelId)
+      // Routing overrides may change the model or tariff; reserve only a known fixed route.
+      if (available && hasFixedTokenPricing({ providerOptions })) {
+        card = defineModelRateCard(available)
+      }
+    } catch {
+      console.warn(
+        "[SixbVercelGateway] Decision pricing unavailable; cost limits will fail closed."
+      )
+    }
+    // Each call keeps the same snapshot even if another call refreshes the catalog.
+    return {
+      definition,
+      estimator: {
+        estimateReservation: (tokens) => estimateModelReservation({ ...tokens, rateCard: card }),
+        estimate: ({ usage, responseModelId, route }) =>
+          rateModelCall({
+            usage,
+            rateCard:
+              (!responseModelId || responseModelId === modelId) &&
+              (!route?.modelId || route.modelId === modelId)
+                ? card
+                : undefined,
+          }),
+      },
+    }
+  }
 
   estimateReservation(
     modelId: string,
@@ -282,10 +403,20 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       return definition ? [definition] : []
     })
     const rateCards = new Map<string, LanguageModelRateCard>()
+    const decisions = new Map<string, DecisionModelDefinition>()
     for (const entry of body.data) {
       const model = object(entry)
       const id = string(model?.id)
       const pricing = object(model?.pricing)
+      if (id && model?.type === "evaluation") {
+        decisions.set(
+          id,
+          gatewayDecisionDefinition(id, {
+            ...(string(model.name) ? { name: string(model.name) } : {}),
+            ...(string(model.description) ? { description: string(model.description) } : {}),
+          })
+        )
+      }
       // Embeddings have no generated output tokens; only their input tariff applies.
       const card = modelRateCard(
         model?.type === "embedding" && pricing
@@ -296,6 +427,8 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     }
     this.rateCards.clear()
     for (const [id, card] of rateCards) this.rateCards.set(id, card)
+    this.decisionDefinitions.clear()
+    for (const [id, definition] of decisions) this.decisionDefinitions.set(id, definition)
     const merged = new Map(discovered.map((definition) => [definition.modelId, definition]))
     for (const definition of this.supplied.values()) merged.set(definition.modelId, definition)
     return Object.freeze([...merged.values()])
