@@ -12,12 +12,14 @@ import type {
   TiktokOrganicPostsApi,
   TiktokOrganicProfileApi,
 } from "./organic"
+import type { TiktokPublishingApi } from "./publishing"
 
 export interface TiktokOrganicClient {
   readonly account: TiktokConnectedAccount<"tiktok-account">
   readonly profile: TiktokOrganicProfileApi
   readonly posts: TiktokOrganicPostsApi
   readonly comments: TiktokOrganicCommentsApi
+  readonly publishing: TiktokPublishingApi
 }
 
 export interface TiktokDisplayClient {

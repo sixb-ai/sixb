@@ -125,7 +125,7 @@ async function discoverOrganicAccount(
   const tokenInfo = await http.post<OrganicTokenInfo>(
     "tt_user/token_info/get/",
     { app_id: options.clientId, access_token: credentials.accessToken },
-    { authenticated: false }
+    { authenticated: false, idempotent: true }
   )
   assertNonEmpty(tokenInfo.data.creator_id, "creator_id")
 

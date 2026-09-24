@@ -14,7 +14,7 @@ interface TiktokEnvelope<T> {
   readonly code: number
   readonly message: string
   readonly request_id?: string
-  readonly data: T
+  readonly data?: T
 }
 
 /** Raised for a valid TikTok response whose HTTP status or API envelope reports a failure. */
@@ -41,22 +41,29 @@ export class TiktokHttp {
   ) {}
 
   get<T>(path: string, query: TiktokQuery = {}): Promise<TiktokApiResult<T>> {
-    return this.request<T>("GET", withTiktokQuery(path, query), undefined, true)
+    return this.request<T>("GET", withTiktokQuery(path, query), undefined, true, true)
   }
 
   post<T>(
     path: string,
     body: unknown,
-    options: { readonly authenticated?: boolean } = {}
+    options: { readonly authenticated?: boolean; readonly idempotent?: boolean } = {}
   ): Promise<TiktokApiResult<T>> {
-    return this.request<T>("POST", path, body, options.authenticated ?? true)
+    return this.request<T>(
+      "POST",
+      path,
+      body,
+      options.authenticated ?? true,
+      options.idempotent ?? false
+    )
   }
 
   private async request<T>(
     method: "GET" | "POST",
     path: string,
     body: unknown,
-    authenticated: boolean
+    authenticated: boolean,
+    idempotent: boolean
   ): Promise<TiktokApiResult<T>> {
     for (let authorizationAttempt = 0; ; authorizationAttempt += 1) {
       const token = authenticated ? await this.tokenSource.get() : undefined
@@ -69,7 +76,7 @@ export class TiktokHttp {
               path,
               body,
               { headers: token ? { "Access-Token": token.accessToken } : undefined },
-              { idempotent: true }
+              { idempotent, retryable: idempotent }
             )
 
       const parsed = await readTiktokResponse<T>(response)
@@ -77,7 +84,8 @@ export class TiktokHttp {
 
       if (parsed.error && token && authorizationAttempt === 0 && isTokenFailure(parsed.error)) {
         token.invalidate()
-        continue
+        // A publication must never be replayed, including after token invalidation.
+        if (idempotent) continue
       }
       if (parsed.error) throw parsed.error
       return { data: parsed.data as T, requestId: parsed.requestId }
@@ -179,7 +187,7 @@ async function readTiktokResponse<T>(response: Response): Promise<{
   const envelope = parseEnvelope<T>(body)
   const requestId = envelope?.request_id
 
-  if (!response.ok || !envelope || envelope.code !== 0) {
+  if (!response.ok || !envelope || envelope.code !== 0 || envelope.data === undefined) {
     return {
       requestId,
       error: new TiktokApiError(
@@ -198,7 +206,7 @@ async function readTiktokResponse<T>(response: Response): Promise<{
 
 function parseEnvelope<T>(value: unknown): TiktokEnvelope<T> | undefined {
   if (!isRecord(value)) return undefined
-  if (typeof value.code !== "number" || typeof value.message !== "string" || !("data" in value)) {
+  if (typeof value.code !== "number" || typeof value.message !== "string") {
     return undefined
   }
   return {
