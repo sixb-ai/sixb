@@ -44,9 +44,9 @@ export async function runWritebackPhase(
   let result: JsonValue
   try {
     // Reads are side-effect-free, so the writeback phase can safely enrich its external payload
-    // before the edit batch exists. Exact object and link-scope reads share the edits phase's
-    // recorder and are fenced by the same CAS. Query/list results and telemetry history remain
-    // call-level snapshots by design.
+    // before the edit batch exists. Object, link-scope, and returned query/list rows share the
+    // edits phase's recorder and are fenced by the same CAS. Query membership and telemetry
+    // history remain call-level snapshots.
     const read = toActionReadFacade(input.runtime, input.reads)
     const rawResult = isObjectActionDefinition(input.action)
       ? await handler({

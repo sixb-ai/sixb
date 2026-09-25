@@ -958,6 +958,38 @@ describe("runActionJob", () => {
     expect(updated?.properties.status).toBeUndefined()
   })
 
+  // Returning `objectSet.query()` unwrapped from the core read facade makes this run succeed.
+  test("fences objects an edits query returned against a change made before the commit", async () => {
+    let beforeCommit: (() => Promise<void>) | null = null
+    const summarize = defineAction("summarize")
+      .params({})
+      .edits(async ({ objects, read }) => {
+        const { objects: devices } = await read.objects(Device).query().list()
+        await beforeCommit?.()
+        objects(Sensor).create({
+          id: "summary",
+          name: devices.map((device) => device.properties.name).join(", "),
+        })
+      })
+
+    const { host, sixb } = createSixb([summarize], [Device, Sensor])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    beforeCommit = async () => {
+      await sixb.objects.upsert("Device", { id: "device-1", name: "Renamed mid-run" })
+    }
+
+    await queueActionRun(host, {
+      id: "act_1",
+      actionId: "summarize",
+      subject: { kind: "none" },
+      params: {},
+    })
+    const result = await runStoredActionJob({ host, job: { id: "act_1", actionId: "summarize" } })
+
+    expect(result.status).toBe("failed")
+    expect(await sixb.objects(Sensor).get("summary")).toBeNull()
+  })
+
   test("marks queued runs failed when the action definition is missing", async () => {
     const { host } = createSixb([])
     await queueActionRun(host, {
