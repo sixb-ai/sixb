@@ -1,3 +1,4 @@
+import type { InferObjectProperties } from "./inference"
 import {
   createLinkPathSelection,
   type LinkPathSelectionBuilder,
@@ -7,6 +8,7 @@ import type { ObjectLink, ObjectType, Property } from "./types"
 
 declare const propertyTokenBrand: unique symbol
 declare const linkTokenBrand: unique symbol
+declare const objectPropertiesBrand: unique symbol
 
 /**
  * Strongly-typed handle to a property on a specific object type.
@@ -57,12 +59,49 @@ export type LinkTokenMap<TObjectType extends ObjectType> = {
 /**
  * Object type with property tokens (`p.*`).
  *
- * The original ontology shape is preserved; this only adds typed handles.
+ * The original ontology shape is preserved; this only adds typed handles, and the type-only
+ * property values every row of this object type carries.
  */
 export type ObjectTypeWithPropertyTokens<TObjectType extends ObjectType = ObjectType> =
   TObjectType & {
     readonly p: PropertyTokenMap<TObjectType>
-  }
+  } & ObjectPropertiesMetadata<TObjectType>
+
+/**
+ * Type-only property values of an object type, inferred once where the type is defined so SDK types
+ * read them back by indexed access instead of re-deriving them from `properties`.
+ *
+ * Exported only so declaration files can name it, like the token maps.
+ */
+export type ObjectPropertiesMetadata<TObjectType extends ObjectType> = {
+  readonly [objectPropertiesBrand]?: string extends TObjectType["id"]
+    ? { readonly properties: Record<string, unknown> }
+    : ObjectPropertiesCarrier<TObjectType>
+}
+
+/**
+ * Carrier of an object type's inferred property values.
+ *
+ * When TypeScript relates, or infers between, two instantiations of a generic type it has not been
+ * told the variance of, it measures that variance by probing the type with marker types. A probe
+ * that reached the schema inference over a marker overflowed its depth limits (TS2589), in code as
+ * ordinary as reassigning a query. Declaring this carrier invariant stops every probe here, so an
+ * object type costs no more to relate than its tokens. The loose base type carries a plain record
+ * instead, which a concrete object type's carrier relates to structurally.
+ */
+interface ObjectPropertiesCarrier<in out TObjectType extends ObjectType> {
+  readonly properties: InferObjectProperties<TObjectType>
+}
+
+/**
+ * The property values of an object type, as its rows carry them.
+ *
+ * Reads the type computed once by {@link ObjectTypeWithPropertyTokens}. For the loose base type,
+ * whose property ids are not statically known, it is `Record<string, unknown>`.
+ */
+export type ObjectTypeProperties<TObjectType extends ObjectTypeWithPropertyTokens> = NonNullable<
+  TObjectType[typeof objectPropertiesBrand]
+>["properties"]
 
 /**
  * Object type with property tokens (`p.*`) and link tokens (`l.*`).

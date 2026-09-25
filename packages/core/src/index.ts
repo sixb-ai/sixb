@@ -20,6 +20,7 @@ export type {
   ObjectLink,
   ObjectLinkTargetMetadata,
   ObjectLinkTargetType,
+  ObjectPropertiesMetadata,
   ObjectRef,
   ObjectRefSchema,
   ObjectSchema,

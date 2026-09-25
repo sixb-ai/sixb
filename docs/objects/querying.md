@@ -226,6 +226,35 @@ For a `"many"` link, limit and sort the related objects returned for each parent
 
 Relationship properties, when present, are available as `linkProperties` on the related object.
 
+## Pass queries around
+
+Type a query parameter with `ObjectQueryBuilder` from `@sixb/core`. A helper that takes the
+plain query also accepts one with `expand()`:
+
+```ts
+import type { ObjectQueryBuilder } from "@sixb/core"
+
+async function countOverdue(invoices: ObjectQueryBuilder<typeof Invoice>) {
+  return invoices.where((invoice) => invoice.p.status.eq("overdue")).count()
+}
+
+await countOverdue(sixb.objects(Invoice).query().expand(Invoice.l.customer))
+```
+
+A variable holding a query also accepts a query that reaches the same object type from another
+starting point:
+
+```ts
+let invoices = sixb.objects(Invoice).query()
+if (customerId) {
+  invoices = sixb
+    .objects(Customer)
+    .query()
+    .where((customer) => customer.p.id.eq(customerId))
+    .traverse(Invoice.l.customer, { direction: "incoming" })
+}
+```
+
 ## Count and group results
 
 Use `count()` for the number of matches and `exists()` to check whether any match:

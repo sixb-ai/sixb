@@ -133,9 +133,7 @@ void authoring
 
 // ── Row `.links` typing ──────────────────────────────────────────
 //
-// Extract the row from a built query the same way production reads it: a direct
-// conditional `infer` on the `first()` terminal (never `Awaited<ReturnType<…>>`,
-// which tips this over TS2589). `RowOf` mirrors the client `BuiltRow`. The build
+// The row a built query returns, read from its `first()` terminal. The build
 // thunks are never called — only their return type is read — so this file stays
 // execution-free like the authoring section above.
 type RowOf<TBuilt> = TBuilt extends { first(): Promise<infer TRow> } ? NonNullable<TRow> : never

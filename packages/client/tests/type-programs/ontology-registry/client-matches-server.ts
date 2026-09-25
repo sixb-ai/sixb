@@ -14,15 +14,13 @@ import { Room } from "./ontology/buildings"
 type Equal<A, B> =
   (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false
 type Expect<T extends true> = T
-// Rows, not builders, are compared: relating two builder instantiations makes TypeScript measure
-// the builder's variance, which this program must not depend on.
 type RowOf<TBuilt> = TBuilt extends { first(): Promise<infer TRow> } ? NonNullable<TRow> : never
 
 declare const sixb: Sixb
 
 const onServer = sixb.objects(Room).query().traverse(Room.l.thermostat)
 const inBrowser = objects(Room).query().traverse(Room.l.thermostat)
-type _sameRow = Expect<Equal<RowOf<typeof inBrowser>, RowOf<typeof onServer>>>
+type _sameQuery = Expect<Equal<typeof inBrowser, typeof onServer>>
 type _thermostat = Expect<Equal<RowOf<typeof inBrowser>["objectTypeId"], "Thermostat">>
 
 const expandedOnServer = sixb
@@ -31,9 +29,7 @@ const expandedOnServer = sixb
   .expand(Room.l.thermostat)
   .expand(Room.l.adjacent)
 const expandedInBrowser = objects(Room).query().expand(Room.l.thermostat).expand(Room.l.adjacent)
-type _sameExpandedRow = Expect<
-  Equal<RowOf<typeof expandedInBrowser>, RowOf<typeof expandedOnServer>>
->
+type _sameExpandedQuery = Expect<Equal<typeof expandedInBrowser, typeof expandedOnServer>>
 
 function expandedRowAssertions(row: RowOf<typeof expandedInBrowser>): void {
   const model: string | undefined = row.links.thermostat?.properties.model
