@@ -6,6 +6,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
+  type ReactNode,
   useCallback,
   useEffect,
   useRef,
@@ -59,6 +60,8 @@ export interface AgentSurfaceProps {
   readonly persistenceKey?: string | false
   readonly className?: string
   readonly panelClassName?: string
+  /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
+  readonly welcomeContent?: ReactNode
 }
 
 /**
@@ -89,6 +92,7 @@ export function AgentSurface({
   persistenceKey,
   className,
   panelClassName,
+  welcomeContent,
 }: AgentSurfaceProps) {
   const minimumWidth = Math.min(minDockWidth, maxDockWidth)
   const maximumWidth = Math.max(minDockWidth, maxDockWidth)
@@ -306,6 +310,7 @@ export function AgentSurface({
             context={context}
             threadId={currentThreadId}
             onThreadChange={changeThread}
+            welcomeContent={welcomeContent}
             conversationHeaderActions={
               fullPage && onRequestDock ? (
                 <Button

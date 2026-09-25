@@ -17,14 +17,6 @@ export interface AgentPanelProps {
   readonly documentPreviewHost?: HTMLElement | null
   /** Keep documents beside the chat on desktop instead of opening a modal. */
   readonly splitDocumentPreview?: boolean
-  /** Optional branded content above the centered composer in a new draft. */
-  readonly emptyStateHeader?: ReactNode
-  /** Optional shortcuts below the centered composer in a new draft. */
-  readonly emptyStateFooter?: ReactNode
-  readonly centerEmptyState?: boolean
-  readonly hideHeaderOnEmpty?: boolean
-  /** A labeled history action shown without restoring the full empty-state header. */
-  readonly emptyStateThreadHistoryLabel?: string
   readonly conversationHeaderActions?: ReactNode
   readonly composerPlaceholder?: string
   readonly compact?: boolean
@@ -44,11 +36,6 @@ export function AgentPanel({
   onNewThread,
   documentPreviewHost,
   splitDocumentPreview,
-  emptyStateHeader,
-  emptyStateFooter,
-  centerEmptyState,
-  hideHeaderOnEmpty,
-  emptyStateThreadHistoryLabel,
   conversationHeaderActions,
   composerPlaceholder,
   compact = true,
@@ -77,11 +64,6 @@ export function AgentPanel({
       compact={compact}
       documentPreviewHost={documentPreviewHost}
       splitDocumentPreview={splitDocumentPreview}
-      emptyStateHeader={emptyStateHeader}
-      emptyStateFooter={emptyStateFooter}
-      centerEmptyState={centerEmptyState}
-      hideHeaderOnEmpty={hideHeaderOnEmpty}
-      emptyStateThreadHistoryLabel={emptyStateThreadHistoryLabel}
       conversationHeaderActions={conversationHeaderActions}
       composerPlaceholder={composerPlaceholder}
       welcomeContent={welcomeContent}

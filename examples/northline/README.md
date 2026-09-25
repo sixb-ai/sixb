@@ -22,9 +22,9 @@ credentials.
 - Atlas: <http://localhost:3000>
 - API documentation: <http://localhost:3002/docs>
 
-The Northline home route is a branded assistant landing with a centered prompt and direct shortcuts
-to equipment, service cases, dispatch, and customers. Once it creates a durable thread, navigating
-into the operations app hands that thread to the persistent side dock in the same browser tab.
+The Northline home route is a branded assistant landing with a centered prompt. Once it creates a
+durable thread, navigating into the operations app hands that thread to the persistent side dock in
+the same browser tab.
 
 ### Optional Operations Assistant
 

@@ -5,6 +5,7 @@ import { CustomerAccount } from "../../ontology/customer-account"
 import { Equipment } from "../../ontology/equipment"
 import { ServiceCase } from "../../ontology/service-case"
 import { Technician } from "../../ontology/technician"
+import { NorthlineWordmark } from "./northline-wordmark"
 
 const pageLabels: ReadonlyArray<readonly [prefix: string, label: string]> = [
   ["/service-cases", "Service cases"],
@@ -47,6 +48,7 @@ export function OperationsAssistant() {
       title="Northline Operations Assistant"
       launcherLabel="Ask Northline"
       context={context}
+      welcomeContent={<NorthlineWordmark className="h-10" />}
       fullPage={fullPage}
       panelClassName={fullPage ? "max-md:[&_[data-agent-conversation-header]]:pl-12" : undefined}
       threadId={conversationRoute?.params.id}

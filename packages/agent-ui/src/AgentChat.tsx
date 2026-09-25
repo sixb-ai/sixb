@@ -24,11 +24,6 @@ export interface AgentChatProps {
   readonly documentPreviewHost?: HTMLElement | null
   /** Keep documents beside compact chat on desktop instead of opening a modal. */
   readonly splitDocumentPreview?: boolean
-  readonly emptyStateHeader?: ReactNode
-  readonly emptyStateFooter?: ReactNode
-  readonly centerEmptyState?: boolean
-  readonly hideHeaderOnEmpty?: boolean
-  readonly emptyStateThreadHistoryLabel?: string
   readonly conversationHeaderActions?: ReactNode
   readonly composerPlaceholder?: string
 }
@@ -45,11 +40,6 @@ export function AgentChat({
   documentPreviewRenderers,
   documentPreviewHost,
   splitDocumentPreview = false,
-  emptyStateHeader,
-  emptyStateFooter,
-  centerEmptyState,
-  hideHeaderOnEmpty,
-  emptyStateThreadHistoryLabel,
   conversationHeaderActions,
   composerPlaceholder,
 }: AgentChatProps) {
@@ -181,11 +171,6 @@ export function AgentChat({
         ambientContext={ambientContext}
         compact={compact}
         welcomeContent={welcomeContent}
-        emptyStateHeader={emptyStateHeader}
-        emptyStateFooter={emptyStateFooter}
-        centerEmptyState={centerEmptyState}
-        hideHeaderOnEmpty={hideHeaderOnEmpty}
-        emptyStateThreadHistoryLabel={emptyStateThreadHistoryLabel}
         headerActions={conversationHeaderActions}
       />
     )

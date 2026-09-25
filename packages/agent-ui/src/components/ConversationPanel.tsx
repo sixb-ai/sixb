@@ -84,16 +84,8 @@ export interface ConversationPanelProps {
   readonly composerDraftNonce?: number
   readonly ambientContext?: readonly AgentContextInput[]
   readonly compact?: boolean
+  /** Centered content for an empty conversation. Omit for the agent identity; null hides it. */
   readonly welcomeContent?: ReactNode
-  /** Optional branded content above the composer while a draft has no messages. */
-  readonly emptyStateHeader?: ReactNode
-  /** Optional actions or shortcuts below the composer while a draft has no messages. */
-  readonly emptyStateFooter?: ReactNode
-  /** Center the empty draft as a landing experience instead of using the compact dock layout. */
-  readonly centerEmptyState?: boolean
-  /** Hide conversation controls until the first message is sent. */
-  readonly hideHeaderOnEmpty?: boolean
-  readonly emptyStateThreadHistoryLabel?: string
   readonly headerActions?: ReactNode
 }
 
@@ -150,11 +142,6 @@ export function ConversationPanel({
   ambientContext = [],
   compact = false,
   welcomeContent,
-  emptyStateHeader,
-  emptyStateFooter,
-  centerEmptyState = false,
-  hideHeaderOnEmpty = false,
-  emptyStateThreadHistoryLabel,
   headerActions,
   sandboxRecovery,
 }: ConversationPanelProps) {
@@ -185,13 +172,7 @@ export function ConversationPanel({
       onSelectModel={onSelectModel}
       onSelectReasoning={onSelectReasoning}
       placeholder={composerPlaceholder}
-      className={
-        compact
-          ? centerEmptyState && showWelcome
-            ? "bg-transparent p-0"
-            : "px-4 pt-2 pb-4"
-          : wideClassName
-      }
+      className={compact ? "px-4 pt-2 pb-4" : wideClassName}
       draft={composerDraft}
       draftAttachments={composerDraftAttachments}
       draftContext={composerDraftContext}
@@ -214,65 +195,43 @@ export function ConversationPanel({
       onLoadMoreThreads={onLoadMoreThreads}
       onSelectThread={onSelectThread}
       onNewThread={onNewChat}
-      triggerLabel={showWelcome && hideHeaderOnEmpty ? emptyStateThreadHistoryLabel : undefined}
     />
   )
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      {showWelcome && hideHeaderOnEmpty && emptyStateThreadHistoryLabel ? (
-        <div className="absolute top-3 right-3 z-10 flex items-center gap-1">
+      <header
+        data-agent-conversation-header=""
+        className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", compact && "h-11 py-1.5")}
+      >
+        <div className="ml-auto flex items-center gap-1">
           {headerActions}
           {threadSwitcher}
+          <Button
+            variant="ghost"
+            size="icon-lg"
+            onClick={onNewChat}
+            aria-label="New thread"
+            className="[&_svg]:size-5"
+          >
+            <Plus />
+          </Button>
         </div>
-      ) : null}
-      {showWelcome && hideHeaderOnEmpty ? null : (
-        <header
-          data-agent-conversation-header=""
-          className={cn("flex shrink-0 items-center gap-1 px-2.5 py-2.5", compact && "h-11 py-1.5")}
-        >
-          <div className="ml-auto flex items-center gap-1">
-            {headerActions}
-            {threadSwitcher}
-            <Button
-              variant="ghost"
-              size="icon-lg"
-              onClick={onNewChat}
-              aria-label="New thread"
-              className="[&_svg]:size-5"
-            >
-              <Plus />
-            </Button>
-          </div>
-        </header>
-      )}
+      </header>
 
       {showWelcome ? (
-        centerEmptyState ? (
-          <div className="flex min-h-0 flex-1 items-center justify-center px-4 pb-[8vh]">
-            <div className="w-full max-w-3xl">
-              {emptyStateHeader ? <div className="mb-7">{emptyStateHeader}</div> : null}
-              <div>
-                {sandboxRecovery}
-                {renderComposer()}
-              </div>
-              {emptyStateFooter ? <div className="mt-4">{emptyStateFooter}</div> : null}
-            </div>
+        <div
+          className={cn(
+            "flex min-h-0 flex-1 flex-col",
+            !compact && "md:justify-center md:px-8 md:pb-[25vh] lg:pb-[27vh]"
+          )}
+        >
+          <Welcome agent={agent} compact={compact} content={welcomeContent} />
+          <div className="shrink-0">
+            {sandboxRecovery}
+            {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
           </div>
-        ) : (
-          <div
-            className={cn(
-              "flex min-h-0 flex-1 flex-col",
-              !compact && "md:justify-center md:px-8 md:pb-[25vh] lg:pb-[27vh]"
-            )}
-          >
-            <Welcome agent={agent} compact={compact} content={welcomeContent} />
-            <div className="shrink-0">
-              {sandboxRecovery}
-              {renderComposer("md:bg-transparent md:px-0 md:pt-0 md:pb-0")}
-            </div>
-          </div>
-        )
+        </div>
       ) : (
         <>
           <div className="relative flex min-h-0 flex-1 flex-col">
