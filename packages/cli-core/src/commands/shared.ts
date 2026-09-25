@@ -84,6 +84,11 @@ export function asRecords(value: unknown): Record<string, unknown>[] {
   return Array.isArray(value) ? value.map(asRecord) : []
 }
 
+/** Names of an object type definition's `search.vectors` profiles, in declaration order. */
+export function vectorProfileNames(objectType: Record<string, unknown>): string[] {
+  return Object.keys(asRecord(asRecord(objectType.search).vectors))
+}
+
 export function isFileError(error: unknown, code: string): error is NodeJS.ErrnoException {
   return error instanceof Error && "code" in error && error.code === code
 }

@@ -272,6 +272,7 @@ function formatAlternatives(values) {
 var CLI_LIMITS = {
   list: { default: 20, maximum: 1000 },
   search: { default: 20, maximum: 50 },
+  vectorSearchText: { maximum: 8000 },
   telemetryHistory: { default: 100, maximum: 1000 },
   linkPage: { default: 100, maximum: 1000 },
   inspect: {
@@ -306,7 +307,9 @@ Objects:
   sixb objects inspect <type> <id>    Inspect an object and its related graph in one command
   sixb objects list [options]         Browse materialized objects
   sixb objects get <type> <id>...     Exact lookup through opaque object references
-  sixb objects search <text>          Search visible objects
+  sixb objects search <text>          Search visible objects by id prefix and full text
+  sixb objects search <text> --type <type>
+                                      Semantic search through the type's vector profile
   sixb objects query --file <file|->  Execute query IR from JSON
   sixb objects count --file <file|->  Count a query without returning rows
   sixb objects exists --file <file|-> Test whether a query has a match
@@ -335,11 +338,24 @@ var LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instance
 function renderInstanceHelp(mode) {
   return mode === "sandbox" ? SANDBOX_MAIN_HELP : LOCAL_MAIN_HELP;
 }
+var SEARCH_DETAILS = `Without --type, search matches primary-id prefixes and full-text fields across visible types.
+With --type, the server embeds the text with the profile's model and ranks results by score,
+a cosine similarity where higher is closer. \`sixb ontology list\` shows each type's
+vectorProfiles. To combine semantic search with filters, run
+\`sixb objects query --example vector\`.`;
+var SEARCH_HELP = `Usage:
+  sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]
+  sixb objects search <text> --type <object-type> [--vector-profile <name>] [--limit <1-${CLI_LIMITS.search.maximum}>]
+
+--limit defaults to ${CLI_LIMITS.search.default}. --vector-profile is required when the type declares several
+profiles.
+
+${SEARCH_DETAILS}`;
 var OBJECTS_HELP = `Usage:
   sixb objects inspect <object-type> <primary-id> [options]
   sixb objects list [options]
   sixb objects get <object-type> <primary-id>...
-  sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]
+  sixb objects search <text> [--type <object-type> [--vector-profile <name>]] [--limit <n>]
   sixb objects query --file <path|-> [--include-total|--no-total]
   sixb objects query --example <name>
   sixb objects count --file <path|->
@@ -358,6 +374,11 @@ List options:
   --id-suffix <value>                 Primary-id suffix
   --created-after|--created-before <RFC3339>
   --updated-after|--updated-before <RFC3339>
+
+Search options:
+  --limit <1-${CLI_LIMITS.search.maximum}>                      Defaults to ${CLI_LIMITS.search.default}
+  --type <id>                         Semantic search through this type's vector profile
+  --vector-profile <name>             Required when the type declares several profiles
 
 Links options:
   --link <link-id>
@@ -378,13 +399,13 @@ default and returns a bounded graph.
 Inspect omits materialization timestamps and ontology definitions by default. Use \`--full\` when
 storage timestamps, declared links, or available actions are needed.
 
-Search returns at most ${CLI_LIMITS.search.maximum} matches and defaults to ${CLI_LIMITS.search.default}.
+${SEARCH_DETAILS}
 
 \`objects get\` uses a refs query without identity URL paths. Opaque ids containing :, /, #, ?, or
 % are safe. Identifiers are case-sensitive.`;
 var QUERY_HELP = `Usage:
   sixb objects query --file <path|-> [--include-total|--no-total]
-  sixb objects query --example <exact|filter|incoming|expand|sort|page>
+  sixb objects query --example <exact|filter|incoming|expand|sort|page|vector>
   sixb objects query --example list
 
 Input is a query node. A full {"query": ...} request is also accepted.
@@ -395,7 +416,8 @@ Query nodes compose through input:
   filter    {"kind":"filter","input":<query>,"predicate":<predicate>}
   text      {"kind":"text","input":<query>,"query":"words","fields":["name"]}
   traverse  {"kind":"traverse","input":<query>,"linkId":"link","direction":"outgoing"}
-  vector, set, sort, limit, page, project, and expand are also supported.
+  vector    {"kind":"vector","input":<start|filter>,"vector":"text","profile":"name","k":10}
+  set, sort, limit, page, project, and expand are also supported.
 
 Predicates use op, not kind:
   and/or, not, {"op":"eq","propertyId":"status","value":"open"}, neq, lt, lte, gt, gte,
@@ -405,7 +427,10 @@ Traversal and expansion directions are outgoing or incoming. For incoming relati
 is declared on the child/source type; add sourceObjectTypeId when needed to disambiguate it.
 
 Run \`sixb ontology get <type>\` first; never guess property or link ids. Use refs for exact
-identities. Put limits and pages inside the query tree.`;
+identities. Put limits and pages inside the query tree.
+
+Vector profile names are the keys of the type's search.vectors. Vector input is a start node,
+optionally under filters; k bounds the ranked matches and results carry a score.`;
 var GROUP_HELP = {
   doctor: "Usage: sixb doctor",
   context: "Usage: sixb context",
@@ -472,7 +497,8 @@ var QUERY_EXAMPLES = {
   incoming: '{"kind":"traverse","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment"}',
   expand: `{"kind":"expand","input":{"kind":"refs","refs":[{"objectTypeId":"RepositoryIssue","primaryId":"github:issue:owner/repo#297"}]},"expansions":[{"linkId":"issue","direction":"incoming","sourceObjectTypeId":"RepositoryComment","limit":${CLI_LIMITS.list.default}}]}`,
   sort: `{"kind":"limit","input":{"kind":"sort","input":{"kind":"start","objectTypeId":"Customer"},"fields":[{"kind":"property","propertyId":"name","direction":"asc"}]},"limit":${CLI_LIMITS.list.default}}`,
-  page: `{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":${CLI_LIMITS.list.default}}`
+  page: `{"kind":"page","input":{"kind":"start","objectTypeId":"Customer"},"pageSize":${CLI_LIMITS.list.default}}`,
+  vector: `{"kind":"vector","input":{"kind":"filter","input":{"kind":"start","objectTypeId":"Product"},"predicate":{"op":"eq","propertyId":"status","value":"active"}},"vector":"waterproof trail shoes","profile":"content","k":${CLI_LIMITS.search.default}}`
 };
 var FACETS_EXAMPLE = '{"query":{"kind":"start","objectTypeId":"WorkOrder"},"facets":[{"propertyId":"status","limit":10}]}';
 
@@ -526,6 +552,9 @@ function asRecord2(value) {
 }
 function asRecords(value) {
   return Array.isArray(value) ? value.map(asRecord2) : [];
+}
+function vectorProfileNames(objectType) {
+  return Object.keys(asRecord2(asRecord2(objectType.search).vectors));
 }
 function isFileError(error, code) {
   return error instanceof Error && "code" in error && error.code === code;
@@ -1013,12 +1042,48 @@ async function objectsGet(api, args) {
   }));
 }
 async function objectsSearch(api, args) {
-  if (requestsHelp(args)) {
-    return writeText(`Usage: sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]`);
+  if (requestsHelp(args))
+    return writeText(SEARCH_HELP);
+  const { positionals, options } = parseCommandArgs(args, { "--limit": "string", "--type": "string", "--vector-profile": "string" }, "objects search", 1);
+  const text = positionals[0] ?? "";
+  const limit = integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.search.default), 1, CLI_LIMITS.search.maximum);
+  const objectTypeId = options["--type"];
+  if (!objectTypeId) {
+    if (options["--vector-profile"])
+      fail("--vector-profile requires --type.");
+    return writeJson(await api.get("/api/objects/search", { q: text, limit: String(limit) }));
   }
-  const { positionals, options } = parseCommandArgs(args, { "--limit": "string" }, "objects search", 1);
-  const limit = String(integerInRange("--limit", options["--limit"] ?? String(CLI_LIMITS.search.default), 1, CLI_LIMITS.search.maximum));
-  writeJson(await api.get("/api/objects/search", { q: positionals[0], limit }));
+  if (!text.trim() || text.length > CLI_LIMITS.vectorSearchText.maximum) {
+    fail(`Semantic search text must be nonempty and at most ${CLI_LIMITS.vectorSearchText.maximum} characters.`);
+  }
+  const objectType = asRecord2(await api.get(`/api/object-types/${encodeURIComponent(objectTypeId)}`));
+  const profile = selectVectorProfile(objectTypeId, objectType, options["--vector-profile"]);
+  writeJson(await api.post("/api/objects/query", {
+    query: {
+      kind: "vector",
+      input: { kind: "start", objectTypeId },
+      vector: text,
+      profile,
+      k: limit
+    },
+    includeTotal: false
+  }));
+}
+function selectVectorProfile(objectTypeId, objectType, requested) {
+  const profiles = vectorProfileNames(objectType);
+  if (profiles.length === 0) {
+    fail(`${objectTypeId} has no vector search profile.`, "invalid_arguments", "Omit --type for identifier and full-text search.");
+  }
+  if (requested !== undefined) {
+    if (!profiles.includes(requested)) {
+      fail(`${objectTypeId} has no vector profile '${requested}'. Use ${profiles.join(", ")}.`);
+    }
+    return requested;
+  }
+  if (profiles.length > 1) {
+    fail(`${objectTypeId} has vector profiles ${profiles.join(", ")}. Pass --vector-profile <name>.`);
+  }
+  return profiles[0] ?? "";
 }
 async function objectsQuery(api, args) {
   if (requestsHelp(args))
@@ -1130,11 +1195,13 @@ async function ontology(api, args) {
     return writeJson(value.map((entry) => {
       const type = asRecord2(entry);
       const properties = asRecords(type.properties);
+      const vectorProfiles = vectorProfileNames(type);
       return {
         id: type.id,
         name: type.name,
         description: type.description,
         primaryPropertyId: properties.find((property) => property.primary === true)?.id,
+        ...vectorProfiles.length === 0 ? {} : { vectorProfiles },
         links: asRecords(type.links).map(({ id, name, description, targetObjectTypeId, cardinality }) => ({
           id,
           name,

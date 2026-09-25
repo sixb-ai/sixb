@@ -27,6 +27,7 @@ sixb ontology get Customer
 sixb objects inspect Customer customer-123
 sixb objects list --type Customer
 sixb objects search "Northline"
+sixb objects search "waterproof trail shoes" --type Product
 sixb telemetry latest Device device-1 temperature
 sixb actions list
 sixb actions request send-reminder --file input.json
@@ -36,6 +37,11 @@ sixb workflows start onboarding --file input.json
 sixb workflow-runs get run-456
 sixb files upload ./report.pdf
 ```
+
+`objects search` matches identifiers and full-text fields across visible types. With `--type`, it
+runs a semantic search through that type's vector profile and ranks results by `score`; pass
+`--vector-profile <name>` when the type declares several. `sixb ontology list` shows each type's
+`vectorProfiles`.
 
 Run `sixb <group> --help` for exact arguments and limits.
 

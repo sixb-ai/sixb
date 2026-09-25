@@ -2,6 +2,8 @@
 export const CLI_LIMITS = {
   list: { default: 20, maximum: 1_000 },
   search: { default: 20, maximum: 50 },
+  /** Mirrors the server's vector query text bound so oversized text fails before any request. */
+  vectorSearchText: { maximum: 8_000 },
   telemetryHistory: { default: 100, maximum: 1_000 },
   linkPage: { default: 100, maximum: 1_000 },
   inspect: {
