@@ -16,10 +16,10 @@ import type {
 /**
  * Records the run's edits and commits them through the ontology Materializer.
  *
- * Exact object and link-scope reads performed by the writeback and edits handlers are captured as
- * expected revisions so a commit fails when that state changes. Query/list results and telemetry
- * history stay call-level snapshots. Domain events are durable outbox facts written inside the
- * commit, so this phase never appends events itself.
+ * Object and link-scope reads performed by the writeback and edits handlers, including every object
+ * a query or listing returned, are captured as expected revisions so a commit fails when that state
+ * changes. Query membership and telemetry history stay call-level snapshots. Domain events are
+ * durable outbox facts written inside the commit, so this phase never appends events itself.
  */
 export async function runEditsAndCommitPhase(
   input: PhaseExecutionBase & {

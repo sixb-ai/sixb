@@ -174,8 +174,15 @@ An action with a `customer: param(ref(Customer))` input can reassign an invoice 
 })
 ```
 
-Both changes commit together. If an object or link scope read this way changes before the commit,
-the commit fails rather than overwriting the concurrent change.
+Both changes commit together. If something read this way changes before the commit, the commit
+fails rather than overwriting the concurrent change. This covers objects returned by `get()`,
+`list()`, and `query()` (including expanded objects), and the relationships returned by
+`listLinks()`.
+
+Query results are protected object by object, not as a set: an object that starts matching a
+query after you ran it does not make the commit fail, and neither does a change in a `count()`,
+`exists()`, or `facets()` result. When a decision depends on an object not existing yet, give that
+object a deterministic ID and read it with `get()`: an absent object is protected as well.
 
 When a [projection](../projections/overview.md) also supplies an object, action values take
 precedence by default. A projection using `mostRecent` can make a newer source value effective.

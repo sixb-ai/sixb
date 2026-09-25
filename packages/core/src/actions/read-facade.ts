@@ -15,8 +15,14 @@ import {
   assertTelemetryProperty,
 } from "../ontology/validation"
 import { RuntimeError } from "../runtime/errors"
-import type { ObjectSetListInput } from "../runtime/types"
 import type {
+  ObjectQueryBuilder,
+  ObjectQueryListOptions,
+  ObjectSetListInput,
+} from "../runtime/types"
+import type {
+  ExpandedLinkValue,
+  ExpandedObjectRow,
   ObjectLinkRow,
   ObjectRow,
   TimeseriesHistoryBatchInput,
@@ -53,9 +59,10 @@ export interface ActionTelemetryReadSource {
  *
  * A handler that reads one dependency twice keeps the first observation: the commit must fail when
  * current state no longer matches what the decision was made against, and the later read may already
- * reflect the handler's own intent. Arbitrary query phantoms stay out of this release — `query()` and
- * `list()` results are not turned into dependencies. Telemetry history is also a call-level snapshot,
- * not an edit dependency.
+ * reflect the handler's own intent. Objects returned by `list()` and `query()` are fenced like
+ * concrete reads, but query membership is not yet: an object that starts matching a query after the
+ * read, and aggregate results (`count()`, `exists()`, `facets()`), stay unfenced. Telemetry history
+ * is also a call-level snapshot, not an edit dependency.
  */
 export class ActionReadRecorder {
   private readonly objects = new Map<string, ExpectedObjectRevision>()
@@ -78,6 +85,21 @@ export class ActionReadRecorder {
       version: row.version,
       lastCommitId: row.lastCommitId,
     })
+  }
+
+  /**
+   * Records every object a listing or query returned, including the objects its expansions attached.
+   *
+   * Rows are keyed by their own type: a traversal or subtype query returns objects of a type other
+   * than the one the query started from, and the commit checks each row under its exact identity.
+   */
+  observeObjectRows(rows: readonly ObjectRow[]): void {
+    for (const row of rows) {
+      this.observeObject({ objectTypeId: row.objectTypeId, primaryId: row.primaryId }, row)
+      for (const value of Object.values(row.links ?? {})) {
+        this.observeObjectRows(expandedRows(value))
+      }
+    }
   }
 
   /**
@@ -293,10 +315,18 @@ function createActionReadObjectSetAdapter<TObjectType extends ObjectTypeWithProp
       return readObject(id, () => objectSet.get(id)) as ReturnType<TypedReadObjectSet["get"]>
     },
     query() {
-      return objectSet.query() as ReturnType<TypedReadObjectSet["query"]>
+      const builder = objectSet.query() as ActionQueryBuilder
+      return (options
+        ? observeQueryBuilder(builder, options.recorder)
+        : builder) as unknown as ReturnType<TypedReadObjectSet["query"]>
     },
     list(input) {
-      return objectSet.list(input) as ReturnType<TypedReadObjectSet["list"]>
+      return objectSet.list(input).then((result) => {
+        options?.recorder.observeObjectRows(
+          (result as { readonly objects: readonly ObjectRow[] }).objects
+        )
+        return result
+      }) as ReturnType<TypedReadObjectSet["list"]>
     },
     byId(id) {
       const handle = objectSet.byId(id)
@@ -320,6 +350,68 @@ function createActionReadObjectSetAdapter<TObjectType extends ObjectTypeWithProp
       }
     },
   }
+}
+
+type ActionQueryBuilder = ObjectQueryBuilder<ObjectTypeWithPropertyTokens>
+
+/**
+ * Wraps a query builder so the objects its row terminals return are recorded.
+ *
+ * Every refinement returns a new builder, which is wrapped in turn: an unwrapped step would let a
+ * chained terminal escape the recorder. Typing the result as the full builder makes a method added
+ * to the builder later fail to compile here instead of silently bypassing the recorder.
+ */
+function observeQueryBuilder(
+  builder: ActionQueryBuilder,
+  recorder: ActionReadRecorder
+): ActionQueryBuilder {
+  const refine =
+    <TArgs extends unknown[]>(refinement: (...args: TArgs) => unknown) =>
+    (...args: TArgs) =>
+      observeQueryBuilder(refinement(...args) as ActionQueryBuilder, recorder)
+
+  return {
+    get ir() {
+      return builder.ir
+    },
+    where: refine(builder.where.bind(builder)),
+    search: refine(builder.search.bind(builder)),
+    vector: refine(builder.vector.bind(builder)),
+    // Overloaded: `bind` keeps only the last signature, so the full overload set is restored here.
+    traverse: refine(builder.traverse.bind(builder)) as unknown as ActionQueryBuilder["traverse"],
+    expand: refine(builder.expand.bind(builder)) as unknown as ActionQueryBuilder["expand"],
+    orderBy: refine(builder.orderBy.bind(builder)),
+    orderByRelevance: refine(builder.orderByRelevance.bind(builder)),
+    limit: refine(builder.limit.bind(builder)),
+    page: refine(builder.page.bind(builder)),
+    validate: () => builder.validate(),
+    explain: () => builder.explain(),
+    formatExplanation: () => builder.formatExplanation(),
+    list: (async (listOptions?: ObjectQueryListOptions) => {
+      const result = await builder.list(listOptions)
+      recorder.observeObjectRows(result.objects as unknown as readonly ObjectRow[])
+      return result
+    }) as ActionQueryBuilder["list"],
+    first: async () => {
+      const row = await builder.first()
+      if (row) recorder.observeObjectRows([row as unknown as ObjectRow])
+      return row
+    },
+    // Aggregates return no rows to fence; protecting their result needs query-level dependencies.
+    count: () => builder.count(),
+    exists: () => builder.exists(),
+    facets: (input) => builder.facets(input),
+  }
+}
+
+function expandedRows(value: ExpandedLinkValue): readonly ObjectRow[] {
+  if (value === null) return []
+  return isExpandedRowList(value) ? value : [value]
+}
+
+// `Array.isArray` does not narrow a readonly array out of a union.
+function isExpandedRowList(value: ExpandedLinkValue): value is readonly ExpandedObjectRow[] {
+  return Array.isArray(value)
 }
 
 function toLinkSnapshot(row: ObjectLinkRow): EffectiveLinkSnapshot | null {

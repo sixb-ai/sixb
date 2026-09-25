@@ -735,6 +735,54 @@ describe("Action read dependency capture", () => {
     expect(reads.dependencies().linkScopes.map((scope) => scope.linkId)).toEqual(["reviewers"])
   })
 
+  // Reading `list()` and `query()` straight from the object set (the pre-fix facade) fails these.
+  test("records the objects a listing or query returned, including expanded ones", async () => {
+    const { host, sixb } = createRuntime()
+    const invoice = await seedInvoice(sixb)
+    const customer = await sixb.objects.upsert("Customer", { id: "cus_1", name: "Ada" })
+    await sixb.objects.upsertLink("Invoice", "inv_1", "customer", {
+      targetTypeId: "Customer",
+      targetId: "cus_1",
+    })
+    const expected = (row: ObjectRow) => ({
+      ref: { objectTypeId: row.objectTypeId, primaryId: row.primaryId },
+      exists: true,
+      version: row.version,
+      lastCommitId: row.lastCommitId,
+    })
+
+    const listing = createFacade(host, sixb)
+    await listing.facade.objects(Invoice).list()
+    expect(listing.reads.dependencies().objects).toEqual([expected(invoice)])
+
+    const expanded = createFacade(host, sixb)
+    await expanded.facade.objects(Invoice).query().expand(Invoice.l.customer).limit(1).list()
+    expect(expanded.reads.dependencies().objects).toEqual([expected(invoice), expected(customer)])
+
+    const traversed = createFacade(host, sixb)
+    await traversed.facade.objects(Invoice).query().traverse(Invoice.l.customer).first()
+    expect(traversed.reads.dependencies().objects).toEqual([expected(customer)])
+  })
+
+  test("a returned object that changes before the commit rejects it", async () => {
+    const { host, sixb } = createRuntime()
+    await seedInvoice(sixb)
+    await startActionRun(host, "act_query")
+    const { facade, reads } = createFacade(host, sixb)
+
+    const { objects } = await facade.objects(Invoice).query().list()
+    expect(objects.map((object) => object.properties.status)).toEqual(["draft"])
+
+    await sixb.objects.upsert("Invoice", { id: "inv_1", amount: 100, status: "void" })
+
+    const batch = await recordEdits({ runId: "act_query" }, ({ objects }) => {
+      objects(Invoice).byId("inv_1").update({ status: "paid" })
+    })
+    await expect(
+      commit(host, { runId: "act_query", batch, dependencies: reads.dependencies() })
+    ).rejects.toBeInstanceOf(MaterializationConflictError)
+  })
+
   test("captured dependencies protect the commit that follows them", async () => {
     const { host, sixb } = createRuntime()
     await seedInvoice(sixb)
