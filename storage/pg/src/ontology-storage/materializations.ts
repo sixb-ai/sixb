@@ -1,8 +1,4 @@
-import type {
-  EffectiveChangeCounts,
-  ExpectedLinkRevision,
-  ExpectedObjectRevision,
-} from "@sixb/core/internal/materialization"
+import type { EffectiveChangeCounts } from "@sixb/core/internal/materialization"
 import {
   assertPinnedDatasetWatermark,
   linkRefKey,
@@ -16,6 +12,9 @@ import {
   telemetryPointSortKey,
 } from "@sixb/core/internal/materialization"
 import {
+  assertExpectedLinkRevision,
+  assertExpectedLinkScopeRevision,
+  assertExpectedObjectRevision,
   assertMaterializationFinalizationCorrelation,
   assertMaterializationHeader,
   assertMaterializationLaneCompletion,
@@ -126,23 +125,21 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         true
       )
       for (const expected of input.expected.objects) {
-        this.assertObject(objectRevisions.get(objectRefKey(expected.ref)) ?? null, expected)
+        assertExpectedObjectRevision(
+          objectRevisions.get(objectRefKey(expected.ref)) ?? null,
+          expected
+        )
       }
       const linkRevisions = await reader.effectiveLinkLastCommits(
         input.expected.links.map((expected) => expected.ref),
         true
       )
       for (const expected of input.expected.links) {
-        this.assertLink(linkRevisions.get(linkRefKey(expected.ref)), expected)
+        assertExpectedLinkRevision(linkRevisions.get(linkRefKey(expected.ref)), expected)
       }
       const linkScopeRevisions = await reader.linkScopeRevisions(input.expected.linkScopes)
       for (const [index, expected] of input.expected.linkScopes.entries()) {
-        if (linkScopeRevisions[index]?.fingerprint !== expected.fingerprint) {
-          throw new MaterializationConflictError(
-            "effective-state",
-            `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
-          )
-        }
+        assertExpectedLinkScopeRevision(linkScopeRevisions[index]?.fingerprint, expected)
       }
       const points = await reader.exactPoints(input.expected.points, true)
       const pointRevisions = new Map(
@@ -510,48 +507,6 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
       throw new MaterializationConflictError(
         "projection-fence",
         `Source '${expected.source.projectionId}' changed.`
-      )
-    }
-  }
-
-  private assertObject(
-    row: { readonly version: number; readonly lastCommitId: string | null } | null,
-    expected: ExpectedObjectRevision
-  ): void {
-    if (!expected.exists) {
-      if (row) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          `Expected object ${objectRefKey(expected.ref)} to be absent.`
-        )
-      }
-      return
-    }
-    if (!row || row.version !== expected.version || row.lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        `Expected object ${objectRefKey(expected.ref)} changed.`
-      )
-    }
-  }
-
-  private assertLink(
-    lastCommitId: string | null | undefined,
-    expected: ExpectedLinkRevision
-  ): void {
-    if (!expected.exists) {
-      if (lastCommitId !== undefined) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          `Expected link ${linkRefKey(expected.ref)} to be absent.`
-        )
-      }
-      return
-    }
-    if (lastCommitId === undefined || lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        `Expected link ${linkRefKey(expected.ref)} changed.`
       )
     }
   }

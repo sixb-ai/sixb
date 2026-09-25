@@ -174,15 +174,25 @@ An action with a `customer: param(ref(Customer))` input can reassign an invoice 
 })
 ```
 
-Both changes commit together. If something read this way changes before the commit, the commit
-fails rather than overwriting the concurrent change. This covers objects returned by `get()`,
-`list()`, and `query()` (including expanded objects), and the relationships returned by
-`listLinks()`.
+Both changes commit together. If something read this way changes before the commit, nothing is
+committed and the run fails with [`action.read_conflict`](../errors/overview.md#error-catalog), so
+a concurrent change is never overwritten. This covers the action's target object, reads made in
+`.writeback()` and `.edits()`, objects returned by `get()`, `list()`, and `query()` (including
+expanded objects), and the relationships returned by `listLinks()`. Request a new run to act on the
+current data; if the action has a `.writeback()`, check the external system first.
 
 Query results are protected object by object, not as a set: an object that starts matching a
 query after you ran it does not make the commit fail, and neither does a change in a `count()`,
-`exists()`, or `facets()` result. When a decision depends on an object not existing yet, give that
-object a deterministic ID and read it with `get()`: an absent object is protected as well.
+`exists()`, or `facets()` result. Two patterns cover what a set check would:
+
+- **Uniqueness:** when a decision depends on an object not existing yet, give that object a
+  deterministic ID and read it with `get()`. An absent object is protected as well.
+- **Coverage:** to handle every new object, such as classifying each new contact, run an
+  idempotent action per object from a workflow that a [rule](../rules/overview.md#start-a-workflow)
+  starts when the object matches, instead of scanning with a query.
+
+If a worker stops after `.writeback()` succeeded, the resumed run does not call it again and only
+checks what `.edits()` reads.
 
 When a [projection](../projections/overview.md) also supplies an object, action values take
 precedence by default. A projection using `mostRecent` can make a newer source value effective.

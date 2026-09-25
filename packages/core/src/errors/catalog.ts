@@ -14,6 +14,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Action execution failed.",
     retryable: false,
   },
+  "action.read_conflict": {
+    publicMessage: "Data the Action read changed before its commit.",
+    retryable: true,
+  },
   "agent.execution_failed": {
     publicMessage: "Agent execution failed.",
     retryable: false,

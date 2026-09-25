@@ -954,6 +954,16 @@ describe("runActionJob", () => {
     })
 
     expect(result.status).toBe("failed")
+    if ("error" in result) {
+      expect(result.error).toMatchObject({
+        code: "action.read_conflict",
+        message: "Data the Action read changed before its commit.",
+        retryable: true,
+        details: { actionId: "captureSensorName", runId: "act_1", phase: "commit" },
+      })
+      // The changed object's identity stays in the native conflict reported to onError.
+      expect(JSON.stringify(result.error)).not.toContain("sensor-1")
+    }
     const updated = await deviceObjects(sixb).get("device-1")
     expect(updated?.properties.status).toBeUndefined()
   })
@@ -987,6 +997,7 @@ describe("runActionJob", () => {
     const result = await runStoredActionJob({ host, job: { id: "act_1", actionId: "summarize" } })
 
     expect(result.status).toBe("failed")
+    if ("error" in result) expect(result.error.code).toBe("action.read_conflict")
     expect(await sixb.objects(Sensor).get("summary")).toBeNull()
   })
 

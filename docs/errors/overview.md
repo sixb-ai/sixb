@@ -33,6 +33,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
 | `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `details.phase` and the native error reported to `onError`. |
+| `action.read_conflict` | Yes | Data the Action read changed before its commit, so nothing was committed. | Request a new run; if the Action has a writeback, check the external system first. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
 | `ai.usage_limit_exceeded` | No | An applicable AI usage limit has no capacity for another model call. | Wait until `details.resetAt`, or raise or disable the applicable limit policy. |
 | `ai.usage_limit_unavailable` | Yes | Sixb could not evaluate an applicable AI usage limit safely. | Restore complete accounting or the limit storage provider, then retry. |

@@ -64,6 +64,9 @@ import type {
 import type { OntologyMaterializationEvent } from "../outbox"
 import {
   appendScopeSnapshot,
+  assertExpectedLinkRevision,
+  assertExpectedLinkScopeRevision,
+  assertExpectedObjectRevision,
   assertMaterializationHeader,
   finishScopeAccumulator,
   type ProviderMaterializationTransactionLifecycle,
@@ -217,12 +220,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         expectedScopeRevisions.get(key) ??
         this.computeEffectiveLinkScope(input.commit.projectId, expected.source, expected.linkId)
       expectedScopeRevisions.set(key, current)
-      if (current.fingerprint !== expected.fingerprint) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
-        )
-      }
+      assertExpectedLinkScopeRevision(current.fingerprint, expected)
     }
     for (const expected of input.expected.points) this.assertPoint(expected, input.commit.projectId)
 
@@ -1039,20 +1037,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       expected.ref.objectTypeId,
       expected.ref.primaryId
     )
-    if (!expected.exists) {
-      if (row)
-        throw new MaterializationConflictError(
-          "effective-state",
-          `Expected object ${objectRefKey(expected.ref)} to be absent.`
-        )
-      return
-    }
-    if (!row || row.version !== expected.version || row.lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        `Expected object ${objectRefKey(expected.ref)} changed.`
-      )
-    }
+    assertExpectedObjectRevision(row ?? null, expected)
   }
 
   private async assertLink(expected: ExpectedLinkRevision, projectId: string): Promise<void> {
@@ -1067,20 +1052,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       targetTypeId: expected.ref.target.objectTypeId,
       targetId: expected.ref.target.primaryId,
     })
-    if (!expected.exists) {
-      if (row)
-        throw new MaterializationConflictError(
-          "effective-state",
-          `Expected link ${linkRefKey(expected.ref)} to be absent.`
-        )
-      return
-    }
-    if (!row || row.lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        `Expected link ${linkRefKey(expected.ref)} changed.`
-      )
-    }
+    assertExpectedLinkRevision(row?.lastCommitId, expected)
   }
 
   private assertPoint(expected: ExpectedTimeseriesPointRevision, projectId: string): void {

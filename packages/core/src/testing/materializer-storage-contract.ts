@@ -13,7 +13,11 @@ import {
 import type { TrustedPrimitiveRef } from "../execution"
 import { restoreTrustedPrimitiveExecutionScope } from "../execution/durable"
 import { createTestingScope } from "../execution/scopes"
-import type { OntologyMaterializer } from "../materializer"
+import type {
+  ExpectedLinkRevision,
+  ExpectedObjectRevision,
+  OntologyMaterializer,
+} from "../materializer"
 import {
   createLinkScopeFingerprint,
   createOntologyMaterializer,
@@ -747,6 +751,84 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
     }
   })
 
+  test(`${name} rejects stale object and link expectations as expectation conflicts`, async () => {
+    // Action runs report exactly this conflict kind as `action.read_conflict`. Throw a stale
+    // expectation as another kind from any provider and this fails for that provider.
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    const runtimeMaterializer = createOntologyMaterializer({
+      projectId: "materializer-storage-contract",
+      ontology,
+      projections,
+      storage,
+      dependencies: { clock: () => new Date("2026-02-01T12:00:00.000Z") },
+    }).withScope(runtimeScope())
+    const device = { objectTypeId: Device.id, primaryId: "device" }
+    const peerLink = {
+      source: device,
+      linkId: "peers",
+      target: { objectTypeId: Device.id, primaryId: "peer" },
+    }
+    const commitExpecting = (
+      requestId: string,
+      expected: {
+        readonly expectedObjects: readonly ExpectedObjectRevision[]
+        readonly expectedLinks: readonly ExpectedLinkRevision[]
+      }
+    ) =>
+      runtimeMaterializer.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId },
+        operations: [
+          {
+            id: "rename",
+            kind: "object.patch",
+            ref: device,
+            set: { name: requestId },
+            unset: [],
+            reset: [],
+          },
+        ],
+        ...expected,
+        expectedLinkScopes: [],
+      })
+
+    try {
+      await runtimeMaterializer.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "expectation-setup" },
+        operations: [
+          { id: "device", kind: "object.create", ref: device, properties: { name: "device" } },
+          {
+            id: "peer",
+            kind: "object.create",
+            ref: peerLink.target,
+            properties: { name: "peer" },
+          },
+          { id: "link", kind: "link.upsert", ref: peerLink },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+
+      await expect(
+        commitExpecting("stale-object", {
+          expectedObjects: [{ ref: device, exists: false }],
+          expectedLinks: [],
+        })
+      ).rejects.toMatchObject({ kind: "expectation" })
+      await expect(
+        commitExpecting("stale-link", {
+          expectedObjects: [],
+          expectedLinks: [{ ref: peerLink, exists: false }],
+        })
+      ).rejects.toMatchObject({ kind: "expectation" })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
   test(`${name} fences projected cardinality-many link scopes by fingerprint`, async () => {
     const createdStorage = await provider.createStorage()
     const storage = requireContractStorage(createdStorage)
@@ -886,9 +968,9 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         expectedLinkScopes: [],
       })
 
-      await expect(commitObservation("stale-many-scope-action", "must not commit")).rejects.toThrow(
-        "Expected link scope changed"
-      )
+      const stale = commitObservation("stale-many-scope-action", "must not commit")
+      await expect(stale).rejects.toThrow("Expected link scope changed")
+      await expect(stale).rejects.toMatchObject({ kind: "expectation" })
       expect(
         await storage.objects.getByPrimaryId({
           projectId: "materializer-storage-contract",
