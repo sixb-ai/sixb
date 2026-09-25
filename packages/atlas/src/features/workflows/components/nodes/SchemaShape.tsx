@@ -13,6 +13,7 @@ import {
   Paperclip,
   Tag,
   Type,
+  UserRound,
 } from "lucide-react"
 import type { ComponentType, ReactNode } from "react"
 
@@ -168,6 +169,8 @@ function describePrimitive(primitive: string): DescribedSchema {
       return { label: "uuid", icon: Fingerprint }
     case "fileRef":
       return { label: "file", icon: Paperclip }
+    case "userRef":
+      return { label: "user", icon: UserRound }
     default:
       return { label: primitive, icon: FileText, iconClass: "text-muted-foreground" }
   }

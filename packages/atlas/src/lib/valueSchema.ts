@@ -1,3 +1,4 @@
+import type { UserRef } from "@sixb/core"
 import { type FileRef, isFileRef } from "@sixb/core/blob-storage"
 
 /**
@@ -42,6 +43,7 @@ export type ValueSchemaNode =
         | "date"
         | "timestamp"
         | "fileRef"
+        | "userRef"
     }
   | { readonly kind: "enum" }
   | { readonly kind: "objectRef"; readonly objectTypeId: string }
@@ -68,6 +70,7 @@ const primitiveKinds = new Set<string>([
   "date",
   "timestamp",
   "fileRef",
+  "userRef",
 ])
 
 export function valueSchema(
@@ -152,6 +155,13 @@ export function objectRefAt(node: ValueSchemaNode, value: unknown): ObjectRefVal
   return typeof objectTypeId === "string" && typeof primaryId === "string"
     ? { objectTypeId, primaryId }
     : null
+}
+
+/** The user ref at a `userRef` position, or null when the value does not match the schema. */
+export function userRefAt(node: ValueSchemaNode, value: unknown): UserRef | null {
+  if (node.kind !== "userRef" || !isRecord(value)) return null
+  const { type, id } = value
+  return type === "user" && typeof id === "string" && id.length > 0 ? { type, id } : null
 }
 
 /**
