@@ -10,7 +10,6 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type MembershipPolicyDefinition,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -36,7 +35,7 @@ function createRuntime(
   options: { readonly membershipPolicies?: readonly MembershipPolicyDefinition[] } = {}
 ) {
   const storage = new InMemoryStorage()
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),

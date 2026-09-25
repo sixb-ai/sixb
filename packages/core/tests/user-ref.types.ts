@@ -35,7 +35,7 @@ export type UserRefInference = [
   Expect<Equal<TaskProperties["reviewers"], UserRef[] | undefined>>,
 ]
 
-export function userRefPredicates(where: ObjectWhereBuilder<typeof Task, []>): void {
+export function userRefPredicates(where: ObjectWhereBuilder<typeof Task>): void {
   where.p.assignee.eq({ type: "user", id: "usr_1" })
   where.p.assignee.in([userRef("usr_1"), null])
   where.p.reviewers.contains({ type: "user", id: "usr_1" })

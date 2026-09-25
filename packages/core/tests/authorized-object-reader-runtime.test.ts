@@ -183,8 +183,8 @@ describe("AuthorizedObjectReader runtime binding", () => {
       objectReader: foreignReader,
     } as SixbRuntimeContext
 
-    expect(() =>
-      createBoundSixb<readonly []>(runtime, {} as SixbDependencies, boundScope.execution)
-    ).toThrow("AuthorizedObjectReader is not bound to this exact execution authority")
+    expect(() => createBoundSixb(runtime, {} as SixbDependencies, boundScope.execution)).toThrow(
+      "AuthorizedObjectReader is not bound to this exact execution authority"
+    )
   })
 })

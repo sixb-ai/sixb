@@ -8,7 +8,7 @@ import type {
   OntologyOperationOutcome,
 } from "../../materializer"
 import type { ModelsRuntime } from "../../models/generation-types"
-import type { ObjectType, Property, ValueType } from "../../ontology"
+import type { ObjectType, Property } from "../../ontology"
 import type { InferPropertyUnit, InferPropertyValue } from "../../ontology/inference"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type {
@@ -19,10 +19,7 @@ import type {
 } from "../../runtime/types"
 import type { ActionPrimitiveSchemaValues } from "./params"
 
-export type ActionTargetObject<
-  TObjectType extends ObjectType = ObjectType,
-  _TValueTypes extends readonly ValueType[] = readonly ValueType[],
-> = {
+export type ActionTargetObject<TObjectType extends ObjectType = ObjectType> = {
   readonly primaryId: string
   readonly objectTypeId: TObjectType["id"]
   readonly properties: ActionTargetPropertyBag<TObjectType>
@@ -79,11 +76,8 @@ export interface ActionRunPhaseInfo {
   readonly idempotencyKey: string
 }
 
-export interface ActionReadObjectByIdHandle<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-> {
-  get(): Promise<TwinObject<TObjectType, TValueTypes> | null>
+export interface ActionReadObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens> {
+  get(): Promise<TwinObject<TObjectType> | null>
   listLinks(link?: ActionLinkTokenForObjectType<TObjectType>): Promise<
     readonly {
       readonly linkId: string
@@ -94,15 +88,11 @@ export interface ActionReadObjectByIdHandle<
   >
 }
 
-export interface ActionReadObjectSet<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens = TObjectType,
-> {
-  get(id: string): Promise<TwinObject<TObjectType, TValueTypes> | null>
-  query(): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
-  list(input?: ObjectSetListInput): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
-  byId(id: string): ActionReadObjectByIdHandle<TObjectType, TValueTypes>
+export interface ActionReadObjectSet<TObjectType extends ObjectTypeWithPropertyTokens> {
+  get(id: string): Promise<TwinObject<TObjectType> | null>
+  query(): ObjectQueryBuilder<TObjectType>
+  list(input?: ObjectSetListInput): Promise<ListResult<TwinObject<TObjectType>>>
+  byId(id: string): ActionReadObjectByIdHandle<TObjectType>
 }
 
 /** A telemetry-mode ontology property accepted by Action history reads. */
@@ -139,7 +129,6 @@ export interface ActionTelemetryHistoryBatchInput<
 export type ActionTelemetryHistoryBatchResult<
   TSeries extends
     readonly ActionTelemetryHistorySeriesInput[] = readonly ActionTelemetryHistorySeriesInput[],
-  TValueTypes extends readonly ValueType[] = readonly ValueType[],
 > = {
   readonly [TIndex in keyof TSeries]: TSeries[TIndex] extends ActionTelemetryHistorySeriesInput<
     infer TProperty
@@ -148,17 +137,15 @@ export type ActionTelemetryHistoryBatchResult<
         readonly objectId: TSeries[TIndex]["objectId"]
         readonly property: TProperty
         readonly points: readonly {
-          readonly value: InferPropertyValue<TProperty["property"], TValueTypes>
+          readonly value: InferPropertyValue<TProperty["property"]>
           readonly at: Date
-          readonly unit?: InferPropertyUnit<TProperty["property"], TValueTypes>
+          readonly unit?: InferPropertyUnit<TProperty["property"]>
         }[]
       }
     : never
 }
 
-export type ActionTelemetryReadFacade<
-  TValueTypes extends readonly ValueType[] = readonly ValueType[],
-> = {
+export type ActionTelemetryReadFacade = {
   /**
    * Read several telemetry series in one provider call.
    *
@@ -167,20 +154,17 @@ export type ActionTelemetryReadFacade<
    */
   historyBatch<const TSeries extends readonly ActionTelemetryHistorySeriesInput[]>(
     input: ActionTelemetryHistoryBatchInput<TSeries>
-  ): Promise<ActionTelemetryHistoryBatchResult<TSeries, TValueTypes>>
+  ): Promise<ActionTelemetryHistoryBatchResult<TSeries>>
 }
 
-export interface ActionReadFacade<TValueTypes extends readonly ValueType[] = readonly ValueType[]> {
-  readonly telemetry: ActionTelemetryReadFacade<TValueTypes>
+export interface ActionReadFacade {
+  readonly telemetry: ActionTelemetryReadFacade
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
-  ): ActionReadObjectSet<TObjectType, TValueTypes, ObjectTypeWithPropertyTokens>
+  ): ActionReadObjectSet<TObjectType>
 }
 
-export interface ActionTelemetryObjectSet<
-  _TObjectType extends ObjectTypeWithPropertyTokens,
-  _TValueTypes extends readonly ValueType[],
-> {
+export interface ActionTelemetryObjectSet<_TObjectType extends ObjectTypeWithPropertyTokens> {
   appendTelemetryBatch(
     items: readonly {
       id: string
@@ -193,15 +177,13 @@ export interface ActionTelemetryObjectSet<
 /** Immutable blob operations available to action writeback and effects handlers. */
 export type ActionBlobContext = Pick<BlobStorage, "put" | "open" | "stat">
 
-export interface ActionRuntimeFacade<
-  TValueTypes extends readonly ValueType[] = readonly ValueType[],
-> {
+export interface ActionRuntimeFacade {
   readonly blobs: ActionBlobContext
   readonly models: ModelsRuntime
   readonly connector: ConnectorRuntime
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
-  ): ActionTelemetryObjectSet<TObjectType, TValueTypes>
+  ): ActionTelemetryObjectSet<TObjectType>
 }
 
 /**

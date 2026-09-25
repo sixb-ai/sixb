@@ -1,5 +1,4 @@
 import { type AgentExecutionAuthorization, agentServiceAccountId } from "../agents/authority"
-import type { OntologySource } from "../ontology"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import type { ExecutionRecord } from "../storage/executions"
 import { ExecutionStorageError } from "../storage/executions"
@@ -99,7 +98,7 @@ export function bindDurableAgentExecution(
     readonly runId: string
     readonly authorization: AgentExecutionAuthorization
   }
-): Sixb<readonly OntologySource[]> {
+): Sixb {
   const scope = restoreAgentExecutionScope(input)
   const sixb = host.withScope(scope)
   if (!isBoundSixb(sixb)) {

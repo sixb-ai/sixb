@@ -82,7 +82,7 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
  */
 export async function createSixb<const TParams extends ParamsConfig = ParamsConfig>(
   options: CreateSixbOptions<TParams>
-): Promise<SixbHost<readonly OntologySource[], TParams>> {
+): Promise<SixbHost<TParams>> {
   assertNoAgentDefinitions(options)
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
 
@@ -100,7 +100,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
   // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
   // used to *replace* discovery instead, silently and undocumented.
-  return new SixbHost<readonly OntologySource[], TParams>({
+  return new SixbHost<TParams>({
     id: options.id,
     ontology: allSources,
     broker: options.broker,

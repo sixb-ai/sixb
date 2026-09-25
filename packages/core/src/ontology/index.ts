@@ -57,6 +57,7 @@ export type {
   PropertyQueryMetadata,
   Schema,
   SixbObjectTypeMap,
+  SixbValueTypeMap,
   ValueType,
   ValueTypeRefSchema,
 } from "./types"

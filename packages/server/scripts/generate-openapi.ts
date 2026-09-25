@@ -48,7 +48,7 @@ async function main() {
     properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
   })
 
-  const host: SixbHost<readonly OntologySource[]> = new SixbHost<readonly OntologySource[]>({
+  const host: SixbHost = new SixbHost({
     id: "openapi-gen",
     ontology: [System] as readonly OntologySource[],
     broker: new InMemoryBroker(),

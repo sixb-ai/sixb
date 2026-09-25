@@ -6,7 +6,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   SixbHost,
   type SixbHostOptions,
 } from "@sixb/core"
@@ -360,10 +359,8 @@ describe("/ws/events subscriptions", () => {
   })
 })
 
-function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbHostOptions<TOntologySources>
-): SixbHost<TOntologySources> {
-  return new SixbHost<TOntologySources>(options)
+function createSixbInstance(options: SixbHostOptions): SixbHost {
+  return new SixbHost(options)
 }
 
 class SlowLatestCursorBroker extends InMemoryBroker {
@@ -380,12 +377,12 @@ class FailingLatestCursorBroker extends InMemoryBroker {
 }
 
 async function withWsServer(
-  run: (context: { baseUrl: string; sixb: SixbHost<readonly OntologySource[]> }) => Promise<void>,
+  run: (context: { baseUrl: string; sixb: SixbHost }) => Promise<void>,
   options: { readonly broker?: InMemoryBroker } = {}
 ): Promise<void> {
   const port = await getFreePort()
   const baseUrl = `http://127.0.0.1:${port}`
-  const sixb = createSixbInstance<readonly OntologySource[]>({
+  const sixb = createSixbInstance({
     id: "ws-test-project",
     ontology: [],
     broker: options.broker ?? new InMemoryBroker(),

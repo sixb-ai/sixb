@@ -29,15 +29,12 @@ import { createSyncsRuntime, type SyncsRuntime } from "../syncs/execution"
 import { createWorkflowsRuntime, type WorkflowsRuntime } from "../workflows/execution"
 import type { SixbDefinitions } from "./definitions"
 import { shareOntologyMutationRuntime } from "./ontology-mutations"
-import type { OntologySource, SixbRuntimeContext } from "./types"
+import type { SixbRuntimeContext } from "./types"
 
 /** Domain SDK bound to one immutable execution and one registered runtime authority. */
-export interface Sixb<
-  TOntologySources extends readonly OntologySource[] = readonly OntologySource[],
-  TParams extends Record<string, unknown> = Record<string, unknown>,
-> {
+export interface Sixb<TParams extends Record<string, unknown> = Record<string, unknown>> {
   readonly execution: ExecutionContext
-  readonly objects: ObjectsRuntime<TOntologySources>
+  readonly objects: ObjectsRuntime
   readonly actions: ActionsRuntime
   readonly datasets: DatasetsRuntime
   readonly workflows: WorkflowsRuntime
@@ -71,14 +68,11 @@ export interface SixbDependencies {
   readonly lakeStorage: LakeStorage
 }
 
-export function createBoundSixb<
-  TOntologySources extends readonly OntologySource[],
-  TParams extends Record<string, unknown> = Record<string, unknown>,
->(
+export function createBoundSixb<TParams extends Record<string, unknown> = Record<string, unknown>>(
   runtime: SixbRuntimeContext,
   dependencies: SixbDependencies,
   execution: ExecutionContext
-): Sixb<TOntologySources, TParams> {
+): Sixb<TParams> {
   resolveExecutionScopeAuthorization(runtime.projectId, {
     execution,
     authorization: runtime.runtimeAuthorization,
@@ -87,9 +81,9 @@ export function createBoundSixb<
     reader: runtime.objectReader,
     scope: { execution, authorization: runtime.runtimeAuthorization },
   })
-  const sixb: Sixb<TOntologySources, TParams> = {
+  const sixb: Sixb<TParams> = {
     execution,
-    ...createExecutionFacades<TOntologySources, TParams>(runtime, execution, dependencies),
+    ...createExecutionFacades<TParams>(runtime, execution, dependencies),
   }
   shareOntologyMutationRuntime(runtime, sixb)
   if (dependencies.connectorConnections) {
@@ -103,23 +97,19 @@ export function createBoundSixb<
 }
 
 /** Internal nominal guard for execution boundaries that accept a narrow structural host. */
-export function isBoundSixb<
-  TOntologySources extends readonly OntologySource[] = readonly OntologySource[],
-  TParams extends Record<string, unknown> = Record<string, unknown>,
->(value: unknown): value is Sixb<TOntologySources, TParams> {
+export function isBoundSixb<TParams extends Record<string, unknown> = Record<string, unknown>>(
+  value: unknown
+): value is Sixb<TParams> {
   return typeof value === "object" && value !== null && boundSixbInstances.has(value)
 }
 
-function createExecutionFacades<
-  TOntologySources extends readonly OntologySource[],
-  TParams extends Record<string, unknown>,
->(
+function createExecutionFacades<TParams extends Record<string, unknown>>(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   dependencies: SixbDependencies
-): Omit<Sixb<TOntologySources, TParams>, "execution"> {
+): Omit<Sixb<TParams>, "execution"> {
   return {
-    objects: createObjectsRuntime<TOntologySources>(runtime, execution),
+    objects: createObjectsRuntime(runtime, execution),
     actions: createActionsRuntime(runtime, execution),
     datasets: createDatasetsRuntime(
       runtime,

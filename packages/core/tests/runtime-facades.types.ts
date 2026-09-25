@@ -1,7 +1,7 @@
-import type { AgentRunView, OntologySource, Sixb, SixbHostView } from "../src"
+import type { AgentRunView, Sixb, SixbHostView } from "../src"
 import type { AgentThreadRecord } from "../src/storage"
 
-declare const sixb: Sixb<readonly OntologySource[]>
+declare const sixb: Sixb
 declare const host: SixbHostView
 declare const thread: AgentThreadRecord
 declare const run: AgentRunView

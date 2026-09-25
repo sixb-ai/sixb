@@ -5,7 +5,6 @@
  * reads the same series back through `getTelemetryHistoryBatch`, both keyed by the property token.
  */
 import type { TelemetryPointWrite } from "../../materialization/model"
-import type { ValueType } from "../../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import {
   assertPropertyTokenBelongsToObjectType,
@@ -20,13 +19,13 @@ import type {
 import type { ResolvedObjectContext } from "../context"
 import { getTelemetryHistoryBatch, writeTelemetryBatch } from "../telemetry"
 
-export function createTelemetryChannel<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
->(ctx: ResolvedObjectContext, primaryId: string) {
+export function createTelemetryChannel<TObjectType extends ObjectTypeWithPropertyTokens>(
+  ctx: ResolvedObjectContext,
+  primaryId: string
+) {
   return <TToken extends TelemetryPropertyToken<TObjectType>>(
     property: TToken
-  ): TelemetryChannel<TToken, TValueTypes> => {
+  ): TelemetryChannel<TToken> => {
     const { objectType } = ctx
     assertPropertyTokenBelongsToObjectType(objectType, property)
     assertTelemetryProperty(property.property)
@@ -84,6 +83,6 @@ export function createTelemetryChannel<
     }
 
     // Cast needed: generic token inference boundary — TToken is narrower than what `channel` sees
-    return channel as unknown as TelemetryChannel<TToken, TValueTypes>
+    return channel as unknown as TelemetryChannel<TToken>
   }
 }

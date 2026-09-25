@@ -6,7 +6,6 @@
  * are validated server-side; failures surface as `SixbQueryError`.
  */
 
-import type { SixbObjectTypeMap } from "@sixb/core/ontology"
 import type {
   ObjectQuery,
   ObjectQueryBuilder,
@@ -44,15 +43,8 @@ export interface SixbQueryClientOptions {
   client?: Client
 }
 
-// Value types are typed as "none registered": custom value-type refs resolve
-// like a runtime without them, and the empty tuple keeps property-value
-// inference shallow enough for TypeScript's recursion limits.
-type ClientRegisteredObjectTypes<TObjectType extends ObjectTypeWithPropertyTokens> =
-  | TObjectType
-  | Extract<SixbObjectTypeMap[keyof SixbObjectTypeMap], ObjectTypeWithPropertyTokens>
-
 export type ClientObjectQueryBuilder<TObjectType extends ObjectTypeWithPropertyTokens> =
-  ObjectQueryBuilder<TObjectType, ClientRegisteredObjectTypes<TObjectType>, readonly []>
+  ObjectQueryBuilder<TObjectType>
 
 export function objects<TObjectType extends ObjectTypeWithPropertyTokens>(
   objectType: TObjectType,
@@ -60,7 +52,7 @@ export function objects<TObjectType extends ObjectTypeWithPropertyTokens>(
 ): { query: () => ClientObjectQueryBuilder<TObjectType> } {
   return {
     query: () =>
-      createObjectQueryBuilder<TObjectType, ClientRegisteredObjectTypes<TObjectType>, readonly []>({
+      createObjectQueryBuilder<TObjectType>({
         query: { kind: "start", objectTypeId: objectType.id },
         executor: createHttpQueryExecutor(options?.client),
       }),

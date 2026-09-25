@@ -244,7 +244,7 @@ describe("SixbHost pipeline registration", () => {
     const runtimeDeps = createTestRuntimeDeps()
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [
           rawOrdersDataset,
@@ -257,7 +257,7 @@ describe("SixbHost pipeline registration", () => {
       })
     ).toThrow(RuntimeError)
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [
           rawOrdersDataset,
@@ -275,7 +275,7 @@ describe("SixbHost pipeline registration", () => {
     const pipeline = definePipeline("empty-pipeline")
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset, canonicalOrdersDataset],
         pipelines: [pipeline],
@@ -283,7 +283,7 @@ describe("SixbHost pipeline registration", () => {
       })
     ).toThrow(RuntimeError)
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset, canonicalOrdersDataset],
         pipelines: [pipeline],
@@ -301,7 +301,7 @@ describe("SixbHost pipeline registration", () => {
     const pipeline = definePipeline("orders").then(firstStep).then(secondStep)
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
         pipelines: [pipeline],
@@ -309,7 +309,7 @@ describe("SixbHost pipeline registration", () => {
       })
     ).toThrow(RuntimeError)
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset, canonicalOrdersDataset, orderInsightsDataset],
         pipelines: [pipeline],
@@ -329,7 +329,7 @@ describe("SixbHost pipeline registration", () => {
     const pipeline = definePipeline("orders").then(step)
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [canonicalOrdersDataset],
         pipelines: [pipeline],
@@ -337,7 +337,7 @@ describe("SixbHost pipeline registration", () => {
       })
     ).toThrow(RuntimeError)
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [canonicalOrdersDataset],
         pipelines: [pipeline],
@@ -352,7 +352,7 @@ describe("SixbHost pipeline registration", () => {
     const pipeline = definePipeline("orders").then(makeRunStep())
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset],
         pipelines: [pipeline],
@@ -360,7 +360,7 @@ describe("SixbHost pipeline registration", () => {
       })
     ).toThrow(RuntimeError)
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset],
         pipelines: [pipeline],
@@ -376,7 +376,7 @@ describe("SixbHost pipeline registration", () => {
     const pipeline = definePipeline("orders").when(missing).then(makeRunStep())
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset, canonicalOrdersDataset],
         pipelines: [pipeline],

@@ -307,7 +307,7 @@ describe("SixbHost dataset registration", () => {
 
   test("rejects duplicate dataset ids", () => {
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [
           rawOrdersDataset,
@@ -327,14 +327,14 @@ describe("SixbHost dataset registration", () => {
       .intoDataset(rawOrdersDataset)
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         syncs: [sync],
         ...createTestRuntimeDeps(),
       })
     ).toThrow(RuntimeError)
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         syncs: [sync],
         ...createTestRuntimeDeps(),
@@ -350,7 +350,7 @@ describe("SixbHost dataset registration", () => {
     const pipeline = definePipeline("normalize-orders").then(step)
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset],
         pipelines: [pipeline],
@@ -358,7 +358,7 @@ describe("SixbHost dataset registration", () => {
       })
     ).toThrow(RuntimeError)
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset],
         pipelines: [pipeline],

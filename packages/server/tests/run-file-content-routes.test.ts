@@ -13,7 +13,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -51,7 +50,7 @@ const runFileViewerRole = defineRole("run-file.viewer", {
 async function createRunFileApi(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const blobStorage = new InMemoryBlobStorage()
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: "test-project",
     ontology: [Document],
     actions: [extractDocument],

@@ -15,7 +15,6 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type MembershipPolicyDefinition,
-  type OntologySource,
   prop,
   type RoleDefinition,
   type SixbAuthConfig,
@@ -69,7 +68,7 @@ function createRuntime(
     allowedDomains: ["acme.com"],
     sendMagicLink,
   })
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),

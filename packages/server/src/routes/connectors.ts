@@ -1,4 +1,4 @@
-import type { OntologySource, SixbHostView } from "@sixb/core"
+import type { SixbHostView } from "@sixb/core"
 import { isOAuthConnectorDefinition } from "@sixb/core/internal/connector-connections"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
@@ -10,7 +10,7 @@ import { ConnectorParamsSchema, ConnectorSchema } from "../schemas/connectors"
 function serializeConnector(
   connector: ReturnType<SixbHostView["definitions"]["connectors"]["list"]>[number],
   host: SixbHostView,
-  execution: Sixb<readonly OntologySource[]>
+  execution: Sixb
 ) {
   return {
     id: connector.id,

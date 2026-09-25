@@ -14,7 +14,7 @@ import { BrokerCursorExpiredError, BrokerError } from "../src/broker"
 import { DEFAULT_EVENTS_RETENTION_MS, EVENTS_STREAM } from "../src/events"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
-const hosts: SixbHost<readonly []>[] = []
+const hosts: SixbHost[] = []
 const nowSpy = () => spyOn(Date, "now")
 let clock: ReturnType<typeof nowSpy> | undefined
 afterEach(async () => {

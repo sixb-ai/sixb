@@ -1,11 +1,4 @@
-import type {
-  DomainEventLog,
-  OntologySource,
-  Queues,
-  Sixb,
-  SixbDefinitions,
-  Storage,
-} from "@sixb/core"
+import type { DomainEventLog, Queues, Sixb, SixbDefinitions, Storage } from "@sixb/core"
 import { reportRunFailure } from "@sixb/core/internal/error-reporting"
 import { isSixbError } from "@sixb/core/internal/errors"
 import type { LoggingService } from "@sixb/core/internal/logging"
@@ -248,7 +241,7 @@ function freshWorkflowExecution(queueLeaseExpiresAt: string): WorkflowRunExecuti
 function buildWorkflowContext(
   host: WorkflowWorkerHost,
   workflowRuns: WorkflowRunStorage,
-  sixb: Sixb<readonly OntologySource[]>
+  sixb: Sixb
 ): WorkflowWorkerContext {
   return {
     projectId: host.id,

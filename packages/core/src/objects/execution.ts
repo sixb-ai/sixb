@@ -4,19 +4,10 @@ import {
   assertAuthorizedObjectReaderBinding,
   getAuthorizedOntologyView,
 } from "../execution/authorized-object-reader"
-import type { ValueType } from "../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import { assertObjectTypeRegistered } from "../ontology/validation/properties"
 import { shareOntologyMutationRuntime } from "../runtime/ontology-mutations"
-import type {
-  ListResult,
-  ObjectByIdHandle,
-  ObjectSet,
-  OntologySource,
-  RegisteredObjectType,
-  RegisteredValueTypes,
-  SixbRuntimeContext,
-} from "../runtime/types"
+import type { ListResult, ObjectByIdHandle, ObjectSet, SixbRuntimeContext } from "../runtime/types"
 import type {
   LinkDirection,
   ObjectLinkRow,
@@ -83,46 +74,31 @@ export interface ExecutionObjectOperations {
   ): Promise<void>
 }
 
-export interface ExecutionObjectByIdHandle<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-> {
-  vector: ObjectByIdHandle<TObjectType, TValueTypes>["vector"]
-  get: ObjectByIdHandle<TObjectType, TValueTypes>["get"]
-  listLinks: ObjectByIdHandle<TObjectType, TValueTypes>["listLinks"]
-  requestAction: ObjectByIdHandle<TObjectType, TValueTypes>["requestAction"]
-  requestActionAndWait: ObjectByIdHandle<TObjectType, TValueTypes>["requestActionAndWait"]
-  link: ObjectByIdHandle<TObjectType, TValueTypes>["link"]
-  unlink: ObjectByIdHandle<TObjectType, TValueTypes>["unlink"]
-  delete: ObjectByIdHandle<TObjectType, TValueTypes>["delete"]
-  restore: ObjectByIdHandle<TObjectType, TValueTypes>["restore"]
-  telemetry: ObjectByIdHandle<TObjectType, TValueTypes>["telemetry"]
+export interface ExecutionObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens> {
+  vector: ObjectByIdHandle<TObjectType>["vector"]
+  get: ObjectByIdHandle<TObjectType>["get"]
+  listLinks: ObjectByIdHandle<TObjectType>["listLinks"]
+  requestAction: ObjectByIdHandle<TObjectType>["requestAction"]
+  requestActionAndWait: ObjectByIdHandle<TObjectType>["requestActionAndWait"]
+  link: ObjectByIdHandle<TObjectType>["link"]
+  unlink: ObjectByIdHandle<TObjectType>["unlink"]
+  delete: ObjectByIdHandle<TObjectType>["delete"]
+  restore: ObjectByIdHandle<TObjectType>["restore"]
+  telemetry: ObjectByIdHandle<TObjectType>["telemetry"]
 }
 
-export interface ExecutionObjectSet<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens = TObjectType,
-> {
-  get: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["get"]
-  list: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["list"]
-  query: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["query"]
-  requestAction: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["requestAction"]
-  requestActionAndWait: ObjectSet<
-    TObjectType,
-    TValueTypes,
-    TRegisteredObjectTypes
-  >["requestActionAndWait"]
-  upsert: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["upsert"]
-  upsertLink: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["upsertLink"]
-  removeLink: ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>["removeLink"]
-  appendTelemetryBatch: ObjectSet<
-    TObjectType,
-    TValueTypes,
-    TRegisteredObjectTypes
-  >["appendTelemetryBatch"]
+export interface ExecutionObjectSet<TObjectType extends ObjectTypeWithPropertyTokens> {
+  get: ObjectSet<TObjectType>["get"]
+  list: ObjectSet<TObjectType>["list"]
+  query: ObjectSet<TObjectType>["query"]
+  requestAction: ObjectSet<TObjectType>["requestAction"]
+  requestActionAndWait: ObjectSet<TObjectType>["requestActionAndWait"]
+  upsert: ObjectSet<TObjectType>["upsert"]
+  upsertLink: ObjectSet<TObjectType>["upsertLink"]
+  removeLink: ObjectSet<TObjectType>["removeLink"]
+  appendTelemetryBatch: ObjectSet<TObjectType>["appendTelemetryBatch"]
 
-  byId(id: string): ExecutionObjectByIdHandle<TObjectType, TValueTypes>
+  byId(id: string): ExecutionObjectByIdHandle<TObjectType>
 }
 
 /** Public input for querying physical links incident to an object query result. */
@@ -131,15 +107,10 @@ export type ObjectQueryLinksInput = Omit<ExecuteObjectQueryLinksInput, "projectI
 /** Public result returned by {@link ObjectsRuntime.queryLinks}. */
 export type ObjectQueryLinksResult = ExecuteObjectQueryLinksResult
 
-export interface ObjectsRuntime<TOntologySources extends readonly OntologySource[]>
-  extends ExecutionObjectOperations {
-  <TObjectType extends RegisteredObjectType<TOntologySources>>(
+export interface ObjectsRuntime extends ExecutionObjectOperations {
+  <TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
-  ): ExecutionObjectSet<
-    TObjectType,
-    RegisteredValueTypes<TOntologySources>,
-    RegisteredObjectType<TOntologySources>
-  >
+  ): ExecutionObjectSet<TObjectType>
   executeQuery(input: Omit<ExecuteObjectQueryInput, "projectId">): Promise<ExecuteObjectQueryResult>
   queryLinks(input: ObjectQueryLinksInput): Promise<ObjectQueryLinksResult>
   count(input: Omit<ExecuteObjectCountInput, "projectId">): Promise<ExecuteObjectCountResult>
@@ -170,10 +141,10 @@ export interface ObjectsRuntime<TOntologySources extends readonly OntologySource
   }): Promise<TimeseriesPoint | null>
 }
 
-export function createObjectsRuntime<TOntologySources extends readonly OntologySource[]>(
+export function createObjectsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext
-): ObjectsRuntime<TOntologySources> {
+): ObjectsRuntime {
   const runtimeAuthorization = runtime.runtimeAuthorization
   const objectReader = runtime.objectReader
   assertAuthorizedObjectReaderBinding({
@@ -199,17 +170,13 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
   Object.freeze(capturedRuntime)
   const ontologyView = () => getAuthorizedOntologyView(objectReader)
   const objects = Object.assign(
-    <TObjectType extends RegisteredObjectType<TOntologySources>>(objectType: TObjectType) => {
+    <TObjectType extends ObjectTypeWithPropertyTokens>(objectType: TObjectType) => {
       assertObjectTypeRegistered(capturedRuntime.ontology.getObjectTypesById(), objectType)
-      return createObjectSet<
-        TObjectType,
-        RegisteredObjectType<TOntologySources>,
-        RegisteredValueTypes<TOntologySources>
-      >({ ...capturedRuntime, execution, objectType }) as ExecutionObjectSet<
-        TObjectType,
-        RegisteredValueTypes<TOntologySources>,
-        RegisteredObjectType<TOntologySources>
-      >
+      return createObjectSet<TObjectType>({
+        ...capturedRuntime,
+        execution,
+        objectType,
+      }) as ExecutionObjectSet<TObjectType>
     },
     {
       listTypes: () => ontologyView().listObjectTypes(),
@@ -319,5 +286,5 @@ export function createObjectsRuntime<TOntologySources extends readonly OntologyS
     }
   )
 
-  return objects as ObjectsRuntime<TOntologySources>
+  return objects as ObjectsRuntime
 }

@@ -1,5 +1,6 @@
 import { OntologyValidationError } from "./errors"
 import type { InferSchema } from "./inference"
+import type { RegisteredValueTypes } from "./registered"
 import type { ObjectType, Schema, ValueType } from "./types"
 import { isRecord, validateSchemaValue } from "./validation"
 
@@ -17,7 +18,7 @@ export type SchemaOrRef = Schema | ObjectRefSchema
 
 export type InferSchemaOrRef<
   TSchema extends SchemaOrRef,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > =
   TSchema extends ObjectRefSchema<infer TObjectTypeId>
     ? ObjectRef<TObjectTypeId>

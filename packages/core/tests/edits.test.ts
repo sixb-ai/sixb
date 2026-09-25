@@ -1,12 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  defineObjectType,
-  link,
-  MaterializationConflictError,
-  type OntologySource,
-  prop,
-  SixbHost,
-} from "../src"
+import { defineObjectType, link, MaterializationConflictError, prop, SixbHost } from "../src"
 import {
   ActionReadRecorder,
   commitActionEdits,
@@ -61,7 +54,7 @@ const ONTOLOGY = [Invoice, Customer, RecurringInvoice] as const
 
 function createRuntime() {
   const deps = createTestRuntimeDeps()
-  const host = new SixbHost<readonly OntologySource[]>({
+  const host = new SixbHost({
     id: "edits-tests",
     ontology: ONTOLOGY,
     ...deps,
@@ -503,7 +496,7 @@ describe("Action commit retries", () => {
           }, options as never)
       },
     }) as unknown as Storage
-    const host = new SixbHost<readonly OntologySource[]>({
+    const host = new SixbHost({
       id: "edits-tests",
       ontology: ONTOLOGY,
       ...deps,

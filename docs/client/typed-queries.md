@@ -35,7 +35,7 @@ Define ontology types imported by frontend code through `@sixb/core/ontology`. T
 import { defineObjectType, prop } from "@sixb/core/ontology"
 ```
 
-For precise linked-object types, run `bun sixb typegen` before a standalone TypeScript check. `dev`, `build`, and `check` generate these types automatically.
+Queries are typed exactly as they are on the server. For precise linked-object types, run `bun sixb typegen` before a standalone TypeScript check. `dev`, `build`, and `check` generate these types automatically.
 
 ## React hooks
 

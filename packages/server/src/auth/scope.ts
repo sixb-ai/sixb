@@ -1,4 +1,3 @@
-import type { OntologySource } from "@sixb/core"
 import type { RequestExecutionAuthorization, Sixb } from "@sixb/core/internal/request-execution"
 import type { AgentRunRecord, ConversationAgentRunRecord } from "@sixb/core/storage"
 
@@ -9,7 +8,7 @@ import type { AgentRunRecord, ConversationAgentRunRecord } from "@sixb/core/stor
  * requests, and absent only for public routes that do not execute protected domain operations.
  */
 export interface RequestAuthState {
-  readonly sixb: Sixb<readonly OntologySource[]> | null
+  readonly sixb: Sixb | null
   /** Present for requests proxied through the run-scoped agent API gateway. */
   readonly agentRun?: ConversationAgentRunRecord
   /** Identifies which kind of active agent execution owns a gateway request. */
@@ -60,7 +59,7 @@ export function requestAuthState(context: unknown): RequestAuthState {
   }
 }
 
-export function requireRequestSixb(context: unknown): Sixb<readonly OntologySource[]> {
+export function requireRequestSixb(context: unknown): Sixb {
   const sixb = requestAuthState(context).sixb
   if (!sixb) {
     throw new Error("[SixbServer] Execution scope is not available for this route.")

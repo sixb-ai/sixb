@@ -18,7 +18,7 @@ import type { LogsRuntime } from "../logging/execution"
 import type { ModelsRuntime } from "../models/generation-types"
 import type { LanguageModel } from "../models/language-model"
 import type { ObjectsRuntime } from "../objects/execution"
-import type { InferSchemaOrRef, ObjectRef, OntologySource, SchemaOrRef } from "../ontology"
+import type { InferSchemaOrRef, ObjectRef, SchemaOrRef } from "../ontology"
 import type { PipelinesRuntime } from "../pipelines/execution"
 import type { ProjectionsRuntime } from "../projections/execution"
 import type { RulesRuntime } from "../rules/execution"
@@ -62,7 +62,7 @@ export interface StepRunContext<TInput extends Record<string, unknown>> {
  */
 export interface WorkflowRuntimeFacade {
   readonly models: ModelsRuntime
-  readonly objects: ObjectsRuntime<readonly OntologySource[]>
+  readonly objects: ObjectsRuntime
   readonly actions: ActionsRuntime
   readonly agent: AgentRuntime
   readonly datasets: DatasetsRuntime

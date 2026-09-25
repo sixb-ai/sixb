@@ -10,7 +10,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
@@ -91,7 +90,7 @@ async function createHarness() {
   exchangedCallbackParameters = undefined
   discoveredContext = undefined
   const storage = new InMemoryStorage()
-  const host = new SixbHost<readonly OntologySource[]>({
+  const host = new SixbHost({
     id: "test-project",
     ontology: [],
     connectors: [connector],
@@ -129,7 +128,7 @@ async function createHarness() {
 
 async function createStaticHarness() {
   const storage = new InMemoryStorage()
-  const host = new SixbHost<readonly OntologySource[]>({
+  const host = new SixbHost({
     id: "test-project",
     ontology: [],
     connectors: [staticConnector],

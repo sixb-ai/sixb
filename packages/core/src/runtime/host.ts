@@ -93,12 +93,9 @@ import { createBoundSixb, type Sixb, type SixbDependencies } from "./sixb"
 import { StorageReadiness } from "./storage-readiness"
 import type { OntologySource, SixbHostContext, SixbRuntimeContext } from "./types"
 
-export interface SixbHostOptions<
-  TOntologySources extends readonly OntologySource[],
-  in out TParams extends ParamsConfig = ParamsConfig,
-> {
+export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsConfig> {
   id?: string
-  ontology: TOntologySources
+  ontology: readonly OntologySource[]
   broker: Broker
   storage: Storage
   lakeStorage: LakeStorage
@@ -136,10 +133,10 @@ export interface SixbHostOptions<
   auth?: SixbAuthConfig
 }
 
-export class SixbHost<
-  TOntologySources extends readonly OntologySource[] = readonly OntologySource[],
-  TParams extends ParamsConfig = ParamsConfig,
-> {
+// Invariant by declaration, like `SixbHostOptions`: left to measurement, TypeScript probes `TParams`
+// through the whole bound SDK and overflows (TS2589) on code as ordinary as a function typed to
+// return `SixbHost` that returns `new SixbHost(options)`.
+export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   readonly projectId: string
   private readonly webhookRegistry: WebhookRegistry
   private readonly hostContext: SixbHostContext
@@ -163,7 +160,7 @@ export class SixbHost<
   readonly scheduler: SchedulerController
   readonly auth: AuthRuntime
 
-  constructor(options: SixbHostOptions<TOntologySources, TParams>) {
+  constructor(options: SixbHostOptions<TParams>) {
     const errorReporter = attachSixbErrorReporter(this, options.onError)
     this.projectId = options.id ?? "default"
     this.broker = options.broker
@@ -267,7 +264,7 @@ export class SixbHost<
   }
 
   /** Bind an existing opaque scope. This method never creates or escalates authority. */
-  withScope(scope: ExecutionScope): Sixb<TOntologySources, InferSandboxParams<TParams>> {
+  withScope(scope: ExecutionScope): Sixb<InferSandboxParams<TParams>> {
     const capturedScope = captureExecutionScope(scope)
     const authorization = resolveExecutionScopeAuthorization(this.projectId, capturedScope)
     if (authorization.type === "unrestricted" && authorization.ref.type === "kernel") {
@@ -301,7 +298,7 @@ export class SixbHost<
         notifyCommittedFacts: () => this.committedFacts.notify(),
       })
     )
-    return createBoundSixb<TOntologySources, InferSandboxParams<TParams>>(
+    return createBoundSixb<InferSandboxParams<TParams>>(
       runtime,
       this.sixbDependencies(),
       capturedScope.execution

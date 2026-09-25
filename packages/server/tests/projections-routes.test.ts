@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test"
 import type {
   AuthorizationContext,
   ObjectProjectionDefinition,
-  OntologySource,
   ProjectionDefinition,
   TelemetryProjectionDefinition,
 } from "@sixb/core"
@@ -108,14 +107,12 @@ function authzViewing(...objectTypeIds: string[]): AuthorizationContext {
   }
 }
 
-function createSixbStub(
-  projectionRuns: Partial<ProjectionRunStorage>
-): SixbHost<readonly OntologySource[]> {
+function createSixbStub(projectionRuns: Partial<ProjectionRunStorage>): SixbHost {
   const storage = new InMemoryStorage()
   if (!storage.projectionRuns) throw new Error("Expected projection run storage")
   Object.assign(storage.projectionRuns, projectionRuns)
 
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: "my-app",
     ontology: [],
     broker: new InMemoryBroker(),
@@ -141,10 +138,7 @@ function createSixbStub(
   return sixb
 }
 
-function appWithAuthz(
-  sixb: SixbHost<readonly OntologySource[]>,
-  authz: AuthorizationContext | null
-) {
+function appWithAuthz(sixb: SixbHost, authz: AuthorizationContext | null) {
   const app = new Elysia()
   app.derive(({ request }) => ({
     sixb: bindRequestExecution(sixb, {

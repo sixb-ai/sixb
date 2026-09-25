@@ -6,7 +6,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -45,7 +44,7 @@ interface OpenApiDocument {
 }
 
 function createDocsApi() {
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: "test-project",
     ontology: [Device],
     broker: new InMemoryBroker(),

@@ -279,7 +279,7 @@ describe("SixbHost sync registration", () => {
     const runtimeDeps = createTestRuntimeDeps()
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset, rawOrdersCopyDataset],
         syncs,
@@ -297,7 +297,7 @@ describe("SixbHost sync registration", () => {
       .intoDataset(rawOrdersDataset)
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset],
         syncs: [sync],
@@ -317,7 +317,7 @@ describe("SixbHost sync registration", () => {
       .intoDataset(keyedOrdersDataset)
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [keyedOrdersDataset],
         syncs: [first, second],
@@ -340,7 +340,7 @@ describe("SixbHost sync registration", () => {
     const pipeline = definePipeline("orders-pipeline").then(step)
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [rawOrdersDataset, keyedOrdersDataset],
         syncs: [sync],
@@ -360,7 +360,7 @@ describe("SixbHost sync registration", () => {
     })
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [],
         datasets: [unkeyedRegisteredCopy],
         syncs: [sync],
@@ -388,7 +388,7 @@ describe("SixbHost sync registration", () => {
       .points({ objectId: "room_id", at: "observed_at", value: "temperature" })
 
     expect(() =>
-      createTestSixb<readonly []>({
+      createTestSixb({
         ontology: [RoomReading] as never,
         datasets: [readings],
         syncs: [sync],

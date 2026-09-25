@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
-import type { OntologySource, RuleDefinition } from "../src"
+import type { RuleDefinition } from "../src"
 import {
   createSixb,
   defineObjectType,
@@ -296,10 +296,8 @@ async function createTempProjectRoot(): Promise<string> {
   return projectRoot
 }
 
-function createRuntimeWithRules(
-  rules: readonly RuleDefinition[]
-): SixbHost<readonly OntologySource[]> {
-  return new SixbHost<readonly OntologySource[]>({
+function createRuntimeWithRules(rules: readonly RuleDefinition[]): SixbHost {
+  return new SixbHost({
     ontology: [Transaction, Document],
     rules,
     ...createTestRuntimeDeps(),

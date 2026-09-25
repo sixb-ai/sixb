@@ -1,5 +1,4 @@
 import {
-  type OntologySource,
   type Principal,
   type SixbHostView,
   SYSTEM_PRINCIPAL,
@@ -177,7 +176,7 @@ function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
-function principalForExecution(sixb: Sixb<readonly OntologySource[]>): Principal {
+function principalForExecution(sixb: Sixb): Principal {
   return sixb.execution.requestedBy ?? SYSTEM_PRINCIPAL
 }
 

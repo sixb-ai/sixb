@@ -16,7 +16,6 @@ import {
   isInterventionDefinition,
   isStepDefinition,
   isWorkflowDefinition,
-  type OntologySource,
   param,
   prop,
   RuntimeError,
@@ -743,7 +742,7 @@ describe("SixbHost workflow registration", () => {
 
     expect(
       () =>
-        new SixbHost<readonly OntologySource[]>({
+        new SixbHost({
           ontology: [Transaction, Invoice],
           workflows: [workflow],
           ...createTestRuntimeDeps(),
@@ -766,7 +765,7 @@ describe("SixbHost workflow registration", () => {
 
     expect(
       () =>
-        new SixbHost<readonly OntologySource[]>({
+        new SixbHost({
           ontology: [Transaction, Invoice],
           models: { language: [workflowModel] },
           workflows: [workflow],
@@ -794,7 +793,7 @@ describe("SixbHost workflow registration", () => {
 
     expect(
       () =>
-        new SixbHost<readonly OntologySource[]>({
+        new SixbHost({
           ontology: [Transaction, Invoice],
           workflows: [workflow],
           ...createTestRuntimeDeps(),
@@ -848,7 +847,7 @@ describe("SixbHost workflow registration", () => {
 
     expect(
       () =>
-        new SixbHost<readonly OntologySource[]>({
+        new SixbHost({
           ontology: [Transaction, Invoice],
           workflows: [workflow],
           ...createTestRuntimeDeps(),

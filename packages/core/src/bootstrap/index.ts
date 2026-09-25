@@ -15,6 +15,7 @@ export type {
   GenerateOntologyTypeManifestResult,
   OntologyTypeManifestDiscovery,
   OntologyTypeManifestEntry,
+  OntologyValueTypeManifestEntry,
 } from "./ontology-type-manifest"
 export {
   discoverOntologyTypeManifest,

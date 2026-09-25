@@ -9,7 +9,6 @@ import type { AuthorizationContext } from "../../authorization"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ExecutionContext } from "../../execution"
 import { assertAuthorizedObjectReaderBinding } from "../../execution/authorized-object-reader"
-import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { shareOntologyMutationRuntime } from "../../runtime/ontology-mutations"
@@ -32,17 +31,13 @@ import { createObjectByIdHandle } from "./object-handle"
 import { createObjectQueryBuilder } from "./query-builder"
 import { createRuntimeQueryExecutor } from "./runtime-query-executor"
 
-export function createObjectSet<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
->(
+export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens>(
   params: SixbRuntimeContext & {
     readonly execution: ExecutionContext
     readonly objectType: TObjectType
     readonly authorization?: AuthorizationContext
   }
-): ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes> {
+): ObjectSet<TObjectType> {
   assertAuthorizedObjectReaderBinding({
     reader: params.objectReader,
     scope: { execution: params.execution, authorization: params.runtimeAuthorization },
@@ -97,21 +92,21 @@ export function createObjectSet<
         objectTypeId: objectType.id,
         primaryId: id,
       })
-      return row ? (row as unknown as TwinObject<TObjectType, TValueTypes>) : null
+      return row ? (row as unknown as TwinObject<TObjectType>) : null
     },
 
     upsert: async (input: { properties: Record<string, unknown> }) => {
       const row = await upsertObjectLeaf(resolvedCtx, input.properties)
-      return row as unknown as TwinObject<TObjectType, TValueTypes>
+      return row as unknown as TwinObject<TObjectType>
     },
 
     query: () =>
-      createObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>({
+      createObjectQueryBuilder<TObjectType>({
         query: { kind: "start", objectTypeId: objectType.id },
         executor: queryExecutor,
       }),
 
-    byId: (id: string) => createObjectByIdHandle<TObjectType, TValueTypes>(resolvedCtx, id),
+    byId: (id: string) => createObjectByIdHandle<TObjectType>(resolvedCtx, id),
 
     list: async (input?: ObjectSetListInput) => {
       const result = await objectReader.list({
@@ -129,9 +124,7 @@ export function createObjectSet<
       })
 
       return {
-        objects: result.objects.map(
-          (row) => row as unknown as TwinObject<TObjectType, TValueTypes>
-        ),
+        objects: result.objects.map((row) => row as unknown as TwinObject<TObjectType>),
         hasMore: result.hasMore,
         total: result.total ?? result.objects.length,
       }
@@ -230,5 +223,5 @@ export function createObjectSet<
     },
   }
 
-  return objectSet as unknown as ObjectSet<TObjectType, TValueTypes, TRegisteredObjectTypes>
+  return objectSet as unknown as ObjectSet<TObjectType>
 }

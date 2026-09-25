@@ -1,80 +1,13 @@
-import { defineObjectType, link, type ObjectQueryBuilder, prop } from "../src"
+/**
+ * Recursion stress for expanded rows: a polymorphic id-only target, "many" arrays mapped over, and
+ * a five-deep self-cycle. The owner link names its targets by id, so they resolve through the
+ * generated registry — the path every app with `sixb typegen` takes.
+ */
+import type { ObjectQueryBuilder } from "@sixb/core"
+import { StressFolder, StressProject, StressTeam, StressUser } from "./ontology/stress"
 
-const StressDepartment = defineObjectType({
-  id: "StressDepartment",
-  name: "Department",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("name", "string", { required: true }),
-  ],
-})
-
-const StressSkill = defineObjectType({
-  id: "StressSkill",
-  name: "Skill",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("name", "string", { required: true }),
-  ],
-})
-
-const StressUser = defineObjectType({
-  id: "StressUser",
-  name: "User",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("email", "string", { required: true }),
-  ],
-  links: [
-    link.self("manager", { cardinality: "one" }),
-    link("department", StressDepartment, { cardinality: "one" }),
-    link("skills", StressSkill, { cardinality: "many" }),
-  ],
-})
-
-const StressTeam = defineObjectType({
-  id: "StressTeam",
-  name: "Team",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("slug", "string", { required: true }),
-  ],
-  links: [link("members", StressUser, { cardinality: "many" })],
-})
-
-const StressProject = defineObjectType({
-  id: "StressProject",
-  name: "Project",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("name", "string", { required: true }),
-  ],
-  links: [link.ref("owner", ["StressUser", "StressTeam"], { cardinality: "one" })],
-})
-
-const StressFolder = defineObjectType({
-  id: "StressFolder",
-  name: "Folder",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("name", "string", { required: true }),
-  ],
-  links: [
-    link.self("parent", { cardinality: "one" }),
-    link.self("children", { cardinality: "many" }),
-  ],
-})
-
-type StressRegistry =
-  | typeof StressDepartment
-  | typeof StressFolder
-  | typeof StressProject
-  | typeof StressSkill
-  | typeof StressTeam
-  | typeof StressUser
-
-declare const projects: ObjectQueryBuilder<typeof StressProject, StressRegistry, []>
-declare const folders: ObjectQueryBuilder<typeof StressFolder, StressRegistry, []>
+declare const projects: ObjectQueryBuilder<typeof StressProject>
+declare const folders: ObjectQueryBuilder<typeof StressFolder>
 
 type RowOf<TBuilt> = TBuilt extends { first(): Promise<infer TRow> } ? NonNullable<TRow> : never
 

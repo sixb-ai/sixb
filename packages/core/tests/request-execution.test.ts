@@ -1,13 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { AuthorizationError, type OntologySource, SixbHost } from "../src"
+import { AuthorizationError, SixbHost } from "../src"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const principal = { type: "user", id: "user-1" } as const
 
-function createRuntime(): SixbHost<readonly OntologySource[]> {
-  return new SixbHost<readonly OntologySource[]>({
+function createRuntime(): SixbHost {
+  return new SixbHost({
     id: "request-boundary-test",
     ontology: [],
     ...createTestRuntimeDeps(),

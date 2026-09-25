@@ -2,7 +2,6 @@ import type { AuthorizationContext } from "../authorization"
 import { createTestingScope } from "../execution/scopes"
 import type { ExecutionScope } from "../execution/types"
 import { bindModelExecutionAttempt } from "../models/execution/binding"
-import type { OntologySource } from "../ontology"
 import { SixbHost, type SixbHostOptions } from "../runtime/host"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 
@@ -26,12 +25,10 @@ export interface TestExecutionHost {
   withScope(scope: ExecutionScope): object
 }
 
-export function createTestSixb<
-  TOntologySources extends readonly OntologySource[] = readonly OntologySource[],
->(
-  hostOrOptions: TestExecutionHost | SixbHostOptions<TOntologySources>,
+export function createTestSixb(
+  hostOrOptions: TestExecutionHost | SixbHostOptions,
   options: TestExecutionOptions = {}
-): Sixb<TOntologySources> {
+): Sixb {
   const host: TestExecutionHost =
     "withScope" in hostOrOptions ? hostOrOptions : new SixbHost(hostOrOptions)
   const sixb = host.withScope(
@@ -43,7 +40,7 @@ export function createTestSixb<
       ...(options.correlationId === undefined ? {} : { correlationId: options.correlationId }),
     })
   )
-  if (!isBoundSixb<TOntologySources>(sixb)) {
+  if (!isBoundSixb(sixb)) {
     throw new Error("[Sixb] Test host did not return an execution-bound Sixb SDK.")
   }
   bindModelExecutionAttempt(sixb.models, {

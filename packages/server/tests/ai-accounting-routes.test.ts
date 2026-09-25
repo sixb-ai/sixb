@@ -101,11 +101,8 @@ async function createApp(inlineCost = false) {
   return aiRoutes(createHost(storage))
 }
 
-function createHost(
-  storage: InMemoryStorage,
-  groups: readonly GroupDefinition[] = []
-): SixbHost<readonly []> {
-  return new SixbHost<readonly []>({
+function createHost(storage: InMemoryStorage, groups: readonly GroupDefinition[] = []): SixbHost {
+  return new SixbHost({
     id: projectId,
     ontology: [] as const,
     storage,
@@ -118,7 +115,7 @@ function createHost(
   })
 }
 
-function aiRoutes(host: SixbHost<readonly []>, authorization?: AuthorizationContext) {
+function aiRoutes(host: SixbHost, authorization?: AuthorizationContext) {
   const app = new Elysia()
   app.derive(({ request }) => ({
     sixb: bindRequestExecution(host, {

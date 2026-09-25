@@ -1,5 +1,5 @@
 import type { RestRetryPolicy } from "@sixb/connector-rest"
-import type { Logger, OntologySource, Sixb } from "@sixb/core"
+import type { Logger, Sixb } from "@sixb/core"
 import type { PandaDocClient } from "./client"
 
 export type PandaDocKeyResolver = string | (() => string | Promise<string>)
@@ -108,7 +108,7 @@ export interface PandaDocWebhookEventContext {
   readonly event: PandaDocWebhookEvent
   readonly events: readonly PandaDocWebhookEvent[]
   readonly request: Request
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: Sixb
   readonly logger: Logger
   client(): Promise<PandaDocClient>
 }

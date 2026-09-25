@@ -1,6 +1,5 @@
 import type {
   OntologyDefinitionCatalog,
-  OntologySource,
   Queues,
   Sixb,
   SixbFailure,
@@ -25,7 +24,7 @@ export interface WorkflowWorkerContext {
   readonly storage: Storage
   readonly queues: Queues
   readonly workflowRuns: WorkflowRunStorage
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: Sixb
   readonly logging?: LoggingService
 }
 

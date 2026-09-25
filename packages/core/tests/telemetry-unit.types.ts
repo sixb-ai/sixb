@@ -53,14 +53,13 @@ type _referencedTemperatureUnit = Expect<
   >
 >
 
-declare const count: TelemetryChannel<typeof device.p.count, ValueTypes>
-declare const active: TelemetryChannel<typeof device.p.active, ValueTypes>
-declare const plainReading: TelemetryChannel<typeof device.p.reading, ValueTypes>
-declare const directTemperature: TelemetryChannel<typeof device.p.temperature, ValueTypes>
-declare const referencedTemperature: TelemetryChannel<
-  typeof device.p.referencedTemperature,
-  ValueTypes
->
+// Channels resolve value types through the generated registry, which this program leaves empty.
+// A semantic type reached through a referenced value type is covered where one is registered:
+// `packages/client/tests/type-programs/ontology-registry/telemetry-units.ts`.
+declare const count: TelemetryChannel<typeof device.p.count>
+declare const active: TelemetryChannel<typeof device.p.active>
+declare const plainReading: TelemetryChannel<typeof device.p.reading>
+declare const directTemperature: TelemetryChannel<typeof device.p.temperature>
 
 async function contract(): Promise<void> {
   const at = new Date("2026-01-01T00:00:00Z")
@@ -79,19 +78,14 @@ async function contract(): Promise<void> {
   await active.append({ value: "true", at })
 
   await directTemperature.append({ value: 20, at, unit: "degreeCelsius" })
-  await referencedTemperature.append({ value: 293.15, at, unit: "kelvin" })
   // @ts-expect-error A direct semantic type requires a unit.
   await directTemperature.append({ value: 20, at })
-  // @ts-expect-error A referenced semantic type requires a unit.
-  await referencedTemperature.append({ value: 20, at })
   // @ts-expect-error Temperature cannot use pressure units.
   await directTemperature.append({ value: 20, at, unit: "millibar" })
-  // @ts-expect-error A referenced temperature cannot use pressure units either.
-  await referencedTemperature.append({ value: 20, at, unit: "millibar" })
 
   const points = await count.history()
   type _historyUnit = Expect<Equal<(typeof points)[number]["unit"], undefined>>
-  const temperaturePoints = await referencedTemperature.history()
+  const temperaturePoints = await directTemperature.history()
   type _temperatureHistoryUnit = Expect<
     Equal<(typeof temperaturePoints)[number]["unit"], UnitsOf<"Temperature"> | undefined>
   >

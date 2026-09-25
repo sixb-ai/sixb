@@ -26,7 +26,6 @@ import {
   InMemoryQueues,
   interventionField,
   link,
-  type OntologySource,
   param,
   prop,
   SixbHost,
@@ -47,10 +46,8 @@ import { SqliteStorage } from "@sixb/sqlite"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbHostOptions<TOntologySources>
-): SixbHost<TOntologySources> {
-  return new SixbHost<TOntologySources>(options)
+function createSixbInstance(options: SixbHostOptions): SixbHost {
+  return new SixbHost(options)
 }
 
 const Space = defineObjectType({
@@ -216,10 +213,7 @@ async function getFreePort(): Promise<number> {
   })
 }
 
-async function seedPendingReviewIntervention(
-  sixb: SixbHost<readonly OntologySource[]>,
-  suffix: string
-) {
+async function seedPendingReviewIntervention(sixb: SixbHost, suffix: string) {
   const workflowRuns = sixb.storage.workflowRuns
   const workflowInterventions = sixb.storage.workflowInterventions
   if (!workflowRuns || !workflowInterventions) {
@@ -310,17 +304,13 @@ async function seedPendingReviewIntervention(
 
 describe("SixbServer HTTP contract", () => {
   async function withHttpContractServer(
-    run: (context: {
-      baseUrl: string
-      events: DomainEventLog
-      sixb: SixbHost<readonly OntologySource[]>
-    }) => Promise<void>
+    run: (context: { baseUrl: string; events: DomainEventLog; sixb: SixbHost }) => Promise<void>
   ): Promise<void> {
     const tempRoot = await mkdtemp(join(tmpdir(), "sixb-http-contract-"))
 
     const lakeStorage = new InMemoryLakeStorage()
     const storage: Storage = new SqliteStorage()
-    const sixb = createSixbInstance<readonly OntologySource[]>({
+    const sixb = createSixbInstance({
       id: "contract-project",
       ontology: [Space, Device],
       actions: [setSpeed, renameDevice, syncDeviceLabel, createMaintenanceRun],

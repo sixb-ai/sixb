@@ -9,7 +9,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -39,7 +38,7 @@ const invoiceViewer = defineRole("invoice.viewer", {
 
 function createApp() {
   const storage = new InMemoryStorage()
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: "object-search-tests",
     ontology: [Invoice],
     broker: new InMemoryBroker(),

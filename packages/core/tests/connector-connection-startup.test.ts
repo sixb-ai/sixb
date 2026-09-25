@@ -31,7 +31,7 @@ describe("connector connection startup validation", () => {
     const harness = createHarness()
     expect(
       () =>
-        new SixbHost<readonly []>({
+        new SixbHost({
           ontology: [],
           connectors: [harness.connector],
           connectorConnections: {
@@ -49,7 +49,7 @@ describe("connector connection startup validation", () => {
     })
     expect(
       () =>
-        new SixbHost<readonly []>({
+        new SixbHost({
           ontology: [],
           connectors: [staticConnector],
           connectorConnections: { encryptionKey: "unused" },
@@ -68,7 +68,7 @@ describe("connector connection startup validation", () => {
 
     expect(
       () =>
-        new SixbHost<readonly []>({
+        new SixbHost({
           ontology: [],
           connectors: [harness.connector],
           datasets: [dataset],
@@ -88,7 +88,7 @@ describe("connector connection startup validation", () => {
     })
     expect(
       () =>
-        new SixbHost<readonly []>({
+        new SixbHost({
           ontology: [],
           connectors: [harness.connector],
           connectorConnections: { encryptionKey },

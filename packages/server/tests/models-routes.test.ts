@@ -7,7 +7,6 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type ModelCatalogInput,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -38,7 +37,7 @@ const Invoice = defineObjectType({
 })
 
 function createApp(models?: ModelCatalogInput) {
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: "model-route-tests",
     ontology: [Invoice],
     broker: new InMemoryBroker(),
