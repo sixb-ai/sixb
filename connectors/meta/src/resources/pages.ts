@@ -27,6 +27,7 @@ interface RawPage {
   readonly id: string
   readonly name?: string
   readonly access_token?: string
+  readonly tasks?: readonly string[]
   readonly instagram_business_account?: {
     readonly id: string
     readonly username?: string
@@ -41,6 +42,7 @@ function toFacebookPage(raw: RawPage): MetaFacebookPage {
     id: raw.id,
     name: raw.name,
     access_token: raw.access_token,
+    tasks: raw.tasks,
     instagram_business_account: raw.instagram_business_account,
   }
 }

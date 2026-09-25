@@ -9,10 +9,12 @@ import {
   nodePath,
   paginate,
   readInsights,
+  readJson,
   readObject,
   readPage,
   withQuery,
 } from "../http"
+import { allowedKeys, integer, nonEmpty, scopeContext, write } from "../publishing"
 import type { InsightsQuery, MetaInsight, MetaPage } from "../types/common"
 import type {
   InstagramMediaApi,
@@ -23,11 +25,15 @@ import type {
   MetaInstagramUser,
   StoriesListOptions,
 } from "../types/instagram"
+import type { MetaInstagramPublishingLimit, MetaResourceOptions } from "../types/publishing"
+import { createInstagramContainer } from "./instagram-publishing"
 
 export function createInstagramUserApi(
   context: MetaHttpContext,
-  igUserId: string
+  igUserId: string,
+  options?: MetaResourceOptions
 ): InstagramUserApi {
+  context = scopeContext(context, options)
   const userPath = nodePath(igUserId, "igUserId")
 
   return {
@@ -38,9 +44,28 @@ export function createInstagramUserApi(
       return context.http.get(requested).then((response) => readObject(response, toInstagramUser))
     },
     media: {
+      create: (input) => createInstagramContainer(context, userPath, input),
+      publish: (input) => {
+        allowedKeys(input, ["creation_id"])
+        nonEmpty(input.creation_id, "creation_id")
+        return write(context, `${userPath}/media_publish`, input)
+      },
       list: (options) => listMedia(context, `${userPath}/media`, options, options?.after),
       listAll: (options) =>
         paginate((after) => listMedia(context, `${userPath}/media`, options, after)),
+    },
+    contentPublishingLimit: {
+      get: (query) => {
+        if (query?.since !== undefined) integer(query.since, "since", 0)
+        return context.http
+          .get(
+            withQuery(`${userPath}/content_publishing_limit`, {
+              fields: "quota_usage,config",
+              since: query?.since,
+            })
+          )
+          .then(readJson<MetaInstagramPublishingLimit>)
+      },
     },
     stories: {
       list: (options) => listStories(context, `${userPath}/stories`, options, options?.after),
@@ -55,10 +80,20 @@ export function createInstagramUserApi(
 
 export function createInstagramMediaApi(
   context: MetaHttpContext,
-  mediaId: string
+  mediaId: string,
+  options?: MetaResourceOptions
 ): InstagramMediaApi {
+  context = scopeContext(context, options)
   const path = `${nodePath(mediaId, "mediaId")}/insights`
   return {
+    get: (query) =>
+      context.http
+        .get(
+          withQuery(nodePath(mediaId, "mediaId"), {
+            fields: (query?.fields ?? DEFAULT_INSTAGRAM_MEDIA_FIELDS).join(","),
+          })
+        )
+        .then((response) => readObject(response, toMedia)),
     insights: {
       get: ({ metrics }) => getInsights(context, path, { metrics }),
     },

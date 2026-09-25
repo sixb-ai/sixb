@@ -11,6 +11,7 @@ import {
   toUnixSeconds,
   withQuery,
 } from "../http"
+import { scopeContext } from "../publishing"
 import type { InsightsQuery, MetaInsight, MetaPage } from "../types/common"
 import type {
   FacebookPageApi,
@@ -19,16 +20,19 @@ import type {
   MetaFacebookPost,
   PostsListOptions,
 } from "../types/facebook"
+import { createFacebookPost, createFacebookPublishingApi } from "./facebook-publishing"
 
 export function createFacebookPageApi(
   context: MetaHttpContext,
   pageId: string,
   options?: { readonly accessToken?: string }
 ): FacebookPageApi {
+  context = scopeContext(context, options)
   const page = nodePath(pageId, "pageId")
   const init = authInit(options?.accessToken)
 
   return {
+    ...createFacebookPublishingApi(context, page),
     get: (getOptions) => {
       const requested = withQuery(page, {
         fields: (getOptions?.fields ?? DEFAULT_FACEBOOK_PAGE_FIELDS).join(","),
@@ -38,6 +42,7 @@ export function createFacebookPageApi(
         .then((response) => readObject(response, toPageProfile))
     },
     posts: {
+      create: (input) => createFacebookPost(context, page, input),
       list: (listOptions) =>
         listPosts(context, `${page}/published_posts`, listOptions, listOptions?.after, init),
       listAll: (listOptions) =>

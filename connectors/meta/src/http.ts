@@ -24,12 +24,13 @@ const THROTTLING_ERROR_CODES = new Set([4, 17, 32, 613])
 
 export interface MetaHttpContext {
   readonly http: RestClient
+  readonly uploadHttp: RestClient
   readonly retry: MetaRetryController
   readonly observe: MetaResponseObserver
   readonly signal: AbortSignal
 }
 
-/** Raised when the Graph API returns a non-2xx response. The raw error body is preserved. */
+/** A rejected or invalid Meta response. The HTTP status and raw body are preserved. */
 export class MetaApiError extends Error {
   readonly name = "MetaApiError"
   readonly headers: readonly MetaHeader[]
@@ -133,13 +134,19 @@ export function createMetaResponseObserver(
       if (!handler || observed.has(response)) return
       observed.add(response)
       const headers = toMetaHeaders(response.headers)
-      await handler({
-        path,
-        method,
-        status: response.status,
-        headers,
-        usage: parseMetaUsage(response.headers),
-      })
+      try {
+        await handler({
+          path,
+          method,
+          status: response.status,
+          headers,
+          usage: parseMetaUsage(response.headers),
+        })
+      } catch {
+        // Telemetry must not hide a successful mutation and cause a caller to publish again.
+        // Do not log the thrown value: it may contain tokens or signed media URLs.
+        console.warn("[SixbMeta] onResponse failed; the HTTP result is still returned.")
+      }
     },
     async observeBatch(path, status, headers, batchIndex) {
       if (!handler) return

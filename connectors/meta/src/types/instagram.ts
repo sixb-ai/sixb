@@ -1,4 +1,10 @@
 import type { InsightsQuery, MetaInsight, MetaPage, MetaPaginationOptions } from "./common"
+import type {
+  CreateInstagramContainerInput,
+  MetaCreatedObject,
+  MetaInstagramContainerCreated,
+  MetaInstagramPublishingLimit,
+} from "./publishing"
 
 /** The IG User profile node (`GET /{ig-user-id}`). */
 export interface MetaInstagramUser {
@@ -61,10 +67,18 @@ export interface InstagramUserApi {
   /** `GET /{ig-user-id}` — the IG User profile node. */
   get(options?: { readonly fields?: readonly string[] }): Promise<MetaInstagramUser>
   readonly media: {
+    /** Create an unpublished container. Video processing is asynchronous. */
+    create(input: CreateInstagramContainerInput): Promise<MetaInstagramContainerCreated>
+    /** Publish a ready container; returns the published media ID, not the container ID. */
+    publish(input: { readonly creation_id: string }): Promise<MetaCreatedObject>
     /** One page of `GET /{ig-user-id}/media`. */
     list(options?: MediaListOptions): Promise<MetaPage<MetaInstagramMedia>>
     /** Every media item, following `paging.next` across all pages. */
     listAll(options?: MediaListOptions): AsyncIterable<MetaInstagramMedia>
+  }
+  readonly contentPublishingLimit: {
+    /** since is a Unix timestamp within the last 24 hours; omitted means the rolling day. */
+    get(options?: { readonly since?: number }): Promise<MetaInstagramPublishingLimit>
   }
   readonly stories: {
     /** One page of `GET /{ig-user-id}/stories`. */
@@ -80,6 +94,7 @@ export interface InstagramUserApi {
 
 /** Scope for a single IG media node and its insights edge. */
 export interface InstagramMediaApi {
+  get(options?: { readonly fields?: readonly string[] }): Promise<MetaInstagramMedia>
   readonly insights: {
     /** `GET /{ig-media-id}/insights`. */
     get(options: { readonly metrics: readonly string[] }): Promise<readonly MetaInsight[]>

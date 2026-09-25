@@ -20,7 +20,7 @@ export type MetaConnector = ConnectorAdapter<"meta", MetaClient>
 /**
  * Meta connector built on `@sixb/connector-rest`.
  *
- * Returns a typed, read-only client over the Graph API for Facebook Pages and
+ * Returns a typed client over the Graph API for Facebook Pages and
  * Instagram Business/Creator accounts. The default user/system token authorizes
  * Page discovery and Instagram reads; scope Facebook Page reads with a Page access
  * token via `client.facebook(id, { accessToken })`.
@@ -96,12 +96,19 @@ export function meta(options: MetaConnectorOptions): MetaConnector {
     timeoutMs: options.timeoutMs,
   })
 
+  const uploadHttp = rest({
+    baseUrl: "https://rupload.facebook.com/",
+    headers: { Authorization: `OAuth ${options.accessToken}` },
+    timeoutMs: options.timeoutMs,
+  })
+
   return {
     type: "meta",
     async connect(context) {
       const connectedHttp = observeMetaResponses(await http.connect(context), observe)
       return createMetaClient({
         http: connectedHttp,
+        uploadHttp: observeMetaResponses(await uploadHttp.connect(context), observe),
         retry,
         observe,
         signal: context.signal,
