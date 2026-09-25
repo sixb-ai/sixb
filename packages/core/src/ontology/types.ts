@@ -42,6 +42,11 @@ export interface ValueTypeRefSchema {
   valueTypeId: string
   /** Type-level: fully resolved schema for direct inference. Populated by codegen. */
   _resolved?: Schema
+  /**
+   * The referenced value type's `semanticType`, carried next to `_resolved` so a value type that
+   * is registered only through this ref keeps its unit constraint. Populated by `valueTypeRef(VT)`.
+   */
+  _semanticType?: QuantitativeTypeId
 }
 
 /**

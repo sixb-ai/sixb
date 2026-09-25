@@ -26,7 +26,8 @@ export const Sensor = defineObjectType({
 ```
 
 Use a numeric schema such as `"double"`, `"integer"`, or `"decimal"`. For measurements reused
-across types, you can also put `semanticType` on an exported [value type](value-types.md).
+across types, you can also put `semanticType` on a [value type](value-types.md): every property
+that references it with `valueTypeRef()` takes units from that quantity.
 
 ## Supply a unit
 

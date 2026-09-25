@@ -23,6 +23,7 @@ import {
   ProjectionValidationError,
   prop,
   ref,
+  valueTypeRef,
 } from "../src"
 import { EVENTS_STREAM } from "../src/events"
 import { InMemoryConnectorConnectionStorage } from "../src/storage/connector-connections"
@@ -1776,6 +1777,64 @@ export const setTemperature = defineAction("setTemperature")
         ontologies: [Room],
         datasets: [readings],
         projections: [valid],
+        ...createTestRuntimeDeps(),
+      })
+    ).resolves.toBeDefined()
+  })
+
+  // Remove the `semanticType` spread from `extractValueTypesFromSchema` in
+  // `src/ontology/registry.ts` to see this fail: the value type registered through its ref loses
+  // "Temperature" and the projection is accepted without a unit field.
+  test("requires a unit field for a value type registered only through its ref", async () => {
+    const projectRoot = await createTempProjectRoot()
+    const AmbientTemperature = defineValueType({
+      id: "lib:AmbientTemperature",
+      name: "AmbientTemperature",
+      schema: "double",
+      semanticType: "Temperature",
+    })
+    const Room = defineObjectType({
+      id: "Room",
+      name: "Room",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("ambient", valueTypeRef(AmbientTemperature), { mode: "telemetry" }),
+      ],
+    })
+    const readings = defineDataset("room-readings", {
+      schema: [
+        col("room_id", "string"),
+        col("observed_at", "timestamp"),
+        col("ambient", "float64"),
+        col("ambient_unit", "string"),
+      ],
+    })
+    const projection = (unit: boolean) =>
+      defineProjection("room-ambient", Room)
+        .fromDataset(readings)
+        .points({
+          objectId: "room_id",
+          at: "observed_at",
+          properties: { ambient: unit ? { value: "ambient", unit: "ambient_unit" } : "ambient" },
+        })
+
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [readings],
+        projections: [projection(false)],
+        ...createTestRuntimeDeps(),
+      })
+    ).rejects.toThrow(
+      'property "ambient" requires a unit field because it uses semantic type "Temperature"'
+    )
+    await expect(
+      createSixb({
+        projectRoot,
+        ontologies: [Room],
+        datasets: [readings],
+        projections: [projection(true)],
         ...createTestRuntimeDeps(),
       })
     ).resolves.toBeDefined()

@@ -68,9 +68,11 @@ function isOntologyDocumentSource(
  * via `valueTypeRef` nodes that carry a `_resolved` schema.
  *
  * This enables auto-registration: when codegen emits `valueTypeRef(VT)`,
- * it stores the resolved schema inline. We extract it here so the runtime
- * `valueTypesById` registry is populated without requiring users to pass
- * ValueTypes explicitly.
+ * it stores the resolved schema (and the semantic type, if any) inline. We
+ * extract them here so the runtime `valueTypesById` registry is populated
+ * without requiring users to pass ValueTypes explicitly. Unit validation reads
+ * the semantic type from that registry, so dropping it would make a
+ * unit-bearing value type reject every unit.
  */
 function extractValueTypesFromSchema(
   schema: Schema,
@@ -89,6 +91,7 @@ function extractValueTypesFromSchema(
         id: schema.valueTypeId,
         name: localName,
         schema: schema._resolved,
+        ...(schema._semanticType === undefined ? {} : { semanticType: schema._semanticType }),
       })
       extractValueTypesFromSchema(schema._resolved, collected, seen)
     }

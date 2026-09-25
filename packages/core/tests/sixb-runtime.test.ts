@@ -1301,6 +1301,74 @@ describe("SixbHost runtime", () => {
         })
       ).rejects.toThrow("Unknown valueTypeRef")
     })
+
+    // Regression: auto-registration kept only `{ id, name, schema }`, so a value type defined
+    // outside `ontology/` lost its semantic type and every unit was rejected. To check this guard,
+    // drop the `semanticType` spread from `extractValueTypesFromSchema` in
+    // `src/ontology/registry.ts`: the unit append fails with "cannot accept a unit" and the
+    // unitless append resolves instead of rejecting.
+    const AmbientTemperature = defineValueType({
+      id: "lib:AmbientTemperature",
+      name: "AmbientTemperature",
+      schema: "double",
+      semanticType: "Temperature",
+    })
+    const Probe = defineObjectType({
+      id: "Probe",
+      name: "Probe",
+      properties: [
+        prop("id", "string", { required: true, primary: true }),
+        prop("ambient", valueTypeRef(AmbientTemperature), { mode: "telemetry" }),
+      ],
+    })
+
+    test("keeps the semantic type of a value type registered only through its ref", async () => {
+      const sixb = createTestSixb({ ontology: [Probe], ...createTestRuntimeDeps() })
+      await sixb.objects(Probe).upsert({ properties: { id: "probe:1" } })
+      const ambient = sixb.objects(Probe).byId("probe:1").telemetry(Probe.p.ambient)
+      const at = new Date("2026-01-01T00:00:00Z")
+
+      await ambient.append({ value: 21.5, unit: "degreeCelsius", at })
+      expect(await ambient.history()).toEqual([{ value: 21.5, unit: "degreeCelsius", at }])
+
+      // @ts-expect-error The referenced semantic type requires a unit.
+      await expect(ambient.append({ value: 21.5, at })).rejects.toThrow(
+        "Missing unit for telemetry property Probe.ambient"
+      )
+      await expect(
+        ambient.append({ value: 21.5, unit: "millibar" as unknown as "degreeCelsius", at })
+      ).rejects.toThrow("Invalid unit")
+    })
+
+    test("an explicitly registered value type overrides the semantic type on the ref", async () => {
+      const Unitless = defineValueType({
+        id: AmbientTemperature.id,
+        name: "Unitless ambient",
+        schema: "double",
+      })
+      const sixb = createTestSixb({
+        ontology: [
+          defineOntology({
+            id: "explicit-value-type",
+            version: "1.0.0",
+            objectTypes: [Probe],
+            valueTypes: [Unitless],
+          }),
+        ],
+        ...createTestRuntimeDeps(),
+      })
+      await sixb.objects(Probe).upsert({ properties: { id: "probe:1" } })
+      const ambient = sixb.objects(Probe).byId("probe:1").telemetry(Probe.p.ambient)
+      const at = new Date("2026-01-01T00:00:00Z")
+
+      // Types resolve value types through the generated registry, which does not see a value type
+      // registered on this runtime only, so the channel is still typed from the ref.
+      // @ts-expect-error The ref carries a semantic type, so its type requires a unit.
+      await ambient.append({ value: 21.5, at })
+      await expect(ambient.append({ value: 21.5, unit: "degreeCelsius", at })).rejects.toThrow(
+        "cannot accept a unit"
+      )
+    })
   })
 
   test("supports id-based runtime APIs for server usage", async () => {

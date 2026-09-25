@@ -629,10 +629,17 @@ export const link: LinkBuilder = Object.assign(linkImpl, {
 export function valueTypeRef<const TId extends string>(
   valueTypeId: TId
 ): ValueTypeRefSchema & { valueTypeId: TId }
-// 2. ValueType object (concise, self-contained)
+// 2. ValueType object (concise, self-contained: carries the schema and the semantic type)
 export function valueTypeRef<const TVT extends ValueType>(
   valueType: TVT
-): { type: "valueTypeRef"; valueTypeId: TVT["id"]; _resolved: TVT["schema"] }
+): TVT extends { semanticType: infer TSemanticType extends QuantitativeTypeId }
+  ? {
+      type: "valueTypeRef"
+      valueTypeId: TVT["id"]
+      _resolved: TVT["schema"]
+      _semanticType: TSemanticType
+    }
+  : { type: "valueTypeRef"; valueTypeId: TVT["id"]; _resolved: TVT["schema"] }
 // 3. String id + explicit schema (escape hatch)
 export function valueTypeRef<const TId extends string, const TResolved extends Schema>(
   valueTypeId: TId,
@@ -653,6 +660,9 @@ export function valueTypeRef(
     type: "valueTypeRef",
     valueTypeId: idOrValueType.id,
     _resolved: idOrValueType.schema,
+    ...(idOrValueType.semanticType === undefined
+      ? {}
+      : { _semanticType: idOrValueType.semanticType }),
   }
 }
 
