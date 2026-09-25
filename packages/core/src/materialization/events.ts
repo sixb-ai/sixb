@@ -1,13 +1,34 @@
-import type { EventExecutor } from "../events/envelope"
 import type { LinkDeletedEventPayload, LinkMutationEventPayload } from "../events/types/links"
 import type { ObjectDeletedEventPayload, ObjectMutationEventPayload } from "../events/types/objects"
 import type { TelemetryAppendedEventPayload } from "../events/types/telemetry"
-import type { AuthorizablePrincipal } from "../execution/types"
+import type {
+  AuthorizablePrincipal,
+  KernelOperation,
+  TrustedPrimitiveKind,
+} from "../execution/types"
 import type { JsonValue } from "../json"
 import type {
   OntologyMaterializationOrigin,
   OntologyMaterializationPropertyChangeMap,
 } from "./model"
+
+/**
+ * Workload that made an ontology change, copied from its execution.
+ *
+ * It names what ran; `requestedBy` names on whose behalf. A primitive carries its definition id so
+ * a consumer can tell which workflow, sync, or webhook wrote without reading the run. An Agent
+ * `runId` is its Agent run, or the step run of a Workflow Agent step.
+ */
+export type EventExecutor =
+  | { readonly type: "request"; readonly requestId: string }
+  | {
+      readonly type: "primitive"
+      readonly kind: TrustedPrimitiveKind
+      readonly id: string
+      readonly runId: string
+    }
+  | { readonly type: "agent"; readonly runId: string }
+  | { readonly type: "kernel"; readonly operation: KernelOperation }
 
 interface OntologyMaterializationEventBase {
   readonly id: string

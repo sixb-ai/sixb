@@ -12,10 +12,10 @@ import type { SyncEvent } from "./syncs"
 import type { TelemetryEvent } from "./telemetry"
 import type { WorkflowEvent } from "./workflows"
 
+export type { EventExecutor } from "../../materialization/events"
 export type {
   ActionEventOrigin,
   EventEnvelope,
-  EventExecutor,
   EventOrigin,
   ProjectionEventOrigin,
   ProjectionTelemetryEventSource,
