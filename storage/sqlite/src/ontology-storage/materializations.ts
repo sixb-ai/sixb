@@ -1,8 +1,4 @@
 import type { Database } from "bun:sqlite"
-import type {
-  ExpectedLinkRevision,
-  ExpectedObjectRevision,
-} from "@sixb/core/internal/materialization"
 import {
   assertPinnedDatasetWatermark,
   linkRefKey,
@@ -16,6 +12,9 @@ import {
   telemetryPointSortKey,
 } from "@sixb/core/internal/materialization"
 import {
+  assertExpectedLinkRevision,
+  assertExpectedLinkScopeRevision,
+  assertExpectedObjectRevision,
   assertMaterializationFinalizationCorrelation,
   assertMaterializationHeader,
   assertMaterializationLaneCompletion,
@@ -100,16 +99,15 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       const reader = new SqliteMaterializationStateReader(this.db, input.commit.projectId)
       for (const expected of input.expected.sources)
         this.assertSource(expected, input.commit.projectId)
-      for (const expected of input.expected.objects) this.assertObject(reader, expected)
-      for (const expected of input.expected.links) this.assertLink(reader, expected)
+      for (const expected of input.expected.objects) {
+        assertExpectedObjectRevision(reader.effectiveObjectRevision(expected.ref), expected)
+      }
+      for (const expected of input.expected.links) {
+        assertExpectedLinkRevision(reader.effectiveLinkLastCommit(expected.ref), expected)
+      }
       const linkScopeRevisions = reader.linkScopeRevisions(input.expected.linkScopes)
       for (const [index, expected] of input.expected.linkScopes.entries()) {
-        if (linkScopeRevisions[index]?.fingerprint !== expected.fingerprint) {
-          throw new MaterializationConflictError(
-            "effective-state",
-            `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
-          )
-        }
+        assertExpectedLinkScopeRevision(linkScopeRevisions[index]?.fingerprint, expected)
       }
       for (const expected of input.expected.points) {
         const point = reader.exactPoint(expected.series, expected.at)
@@ -445,50 +443,6 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       throw new MaterializationConflictError(
         "projection-fence",
         `Source '${expected.source.projectionId}' changed.`
-      )
-    }
-  }
-
-  private assertObject(
-    reader: SqliteMaterializationStateReader,
-    expected: ExpectedObjectRevision
-  ): void {
-    const row = reader.effectiveObjectRevision(expected.ref)
-    if (!expected.exists) {
-      if (row) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          `Expected object ${objectRefKey(expected.ref)} to be absent.`
-        )
-      }
-      return
-    }
-    if (!row || row.version !== expected.version || row.lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        `Expected object ${objectRefKey(expected.ref)} changed.`
-      )
-    }
-  }
-
-  private assertLink(
-    reader: SqliteMaterializationStateReader,
-    expected: ExpectedLinkRevision
-  ): void {
-    const lastCommitId = reader.effectiveLinkLastCommit(expected.ref)
-    if (!expected.exists) {
-      if (lastCommitId !== undefined) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          `Expected link ${linkRefKey(expected.ref)} to be absent.`
-        )
-      }
-      return
-    }
-    if (lastCommitId === undefined || lastCommitId !== expected.lastCommitId) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        `Expected link ${linkRefKey(expected.ref)} changed.`
       )
     }
   }

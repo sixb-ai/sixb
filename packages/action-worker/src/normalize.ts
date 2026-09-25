@@ -1,3 +1,4 @@
+import { isMaterializationConflictError } from "@sixb/core"
 import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import {
   createSixbError,
@@ -20,7 +21,12 @@ export function throwIfAborted(signal: AbortSignal): void {
   }
 }
 
-/** Translate work performed by an Action phase without misclassifying its bookkeeping. */
+/**
+ * Translate work performed by an Action phase without misclassifying its bookkeeping.
+ *
+ * Every expectation an Action commit carries comes from the Action's own reads, so an expectation
+ * conflict at commit is a read conflict: the run can be requested again against current state.
+ */
 export function translateActionPhaseError(
   error: unknown,
   phase: Exclude<ActionRunPhase, "request" | "enqueue" | "cancelled">,
@@ -33,24 +39,23 @@ export function translateActionPhaseError(
   if (input.signal.aborted || (isSixbError(error) && error.code === "internal.unexpected")) {
     return error
   }
+  const details = { actionId: input.actionId, runId: input.runId, phase }
+  if (phase === "commit" && isMaterializationConflictError(error) && error.kind === "expectation") {
+    return createSixbError("action.read_conflict", error.message, { cause: error, details })
+  }
 
   return createSixbError(
     "action.phase_failed",
     summarizeErrorMessage(error, "Action phase execution failed."),
-    {
-      cause: error,
-      details: {
-        actionId: input.actionId,
-        runId: input.runId,
-        phase,
-      },
-    }
+    { cause: error, details }
   )
 }
 
 /** Recover the native phase error for direct callers and error-monitoring integrations. */
 export function unwrapActionPhaseError(error: unknown): unknown {
-  return isSixbError(error) && error.code === "action.phase_failed" && error.cause !== undefined
+  return isSixbError(error) &&
+    (error.code === "action.phase_failed" || error.code === "action.read_conflict") &&
+    error.cause !== undefined
     ? error.cause
     : error
 }

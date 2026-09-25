@@ -7,6 +7,8 @@ export type MaterializationConflictKind =
   | "execution-lost"
   | "run-correlation"
   | "effective-state"
+  /** A state the commit was told to expect (an Action's reads) no longer matches. */
+  | "expectation"
   | "timeseries-point"
   | "outbox-lease"
 

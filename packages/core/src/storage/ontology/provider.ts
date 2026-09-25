@@ -6,10 +6,13 @@ import {
 } from "../../materialization/errors"
 import type {
   EffectiveLinkSnapshot,
+  ExpectedLinkRevision,
+  ExpectedLinkScopeRevision,
+  ExpectedObjectRevision,
   OntologyLinkRef,
   OntologyObjectRef,
 } from "../../materialization/model"
-import { projectionEntityKey } from "../../materialization/refs"
+import { linkRefKey, objectRefKey, projectionEntityKey } from "../../materialization/refs"
 import type { OntologyCommitOriginSelector, OntologyCommitWrite } from "./commits"
 import type {
   FinalizeMaterializationInput,
@@ -483,6 +486,61 @@ export function sameNonnegativeCounts(actual: object, expected: object): boolean
 
 export function effectiveConflict(message: string): MaterializationConflictError {
   return new MaterializationConflictError("effective-state", message)
+}
+
+/**
+ * Rejects a commit whose expected object no longer matches its current effective row.
+ *
+ * Every provider checks commit expectations through these helpers, so a failed expectation is always
+ * the `expectation` conflict kind: an Action run reports exactly that kind as a read conflict.
+ */
+export function assertExpectedObjectRevision(
+  current: { readonly version: number; readonly lastCommitId: string | null } | null,
+  expected: ExpectedObjectRevision
+): void {
+  if (!expected.exists) {
+    if (current) {
+      throw expectationConflict(`Expected object ${objectRefKey(expected.ref)} to be absent.`)
+    }
+    return
+  }
+  if (
+    !current ||
+    current.version !== expected.version ||
+    current.lastCommitId !== expected.lastCommitId
+  ) {
+    throw expectationConflict(`Expected object ${objectRefKey(expected.ref)} changed.`)
+  }
+}
+
+/** `currentLastCommitId` is `undefined` when the link has no effective row. */
+export function assertExpectedLinkRevision(
+  currentLastCommitId: string | null | undefined,
+  expected: ExpectedLinkRevision
+): void {
+  if (!expected.exists) {
+    if (currentLastCommitId !== undefined) {
+      throw expectationConflict(`Expected link ${linkRefKey(expected.ref)} to be absent.`)
+    }
+    return
+  }
+  if (currentLastCommitId === undefined || currentLastCommitId !== expected.lastCommitId) {
+    throw expectationConflict(`Expected link ${linkRefKey(expected.ref)} changed.`)
+  }
+}
+
+export function assertExpectedLinkScopeRevision(
+  currentFingerprint: string | undefined,
+  expected: ExpectedLinkScopeRevision
+): void {
+  if (currentFingerprint === expected.fingerprint) return
+  throw expectationConflict(
+    `Expected link scope changed for ${expected.source.objectTypeId}:${expected.source.primaryId}.${expected.linkId}.`
+  )
+}
+
+function expectationConflict(message: string): MaterializationConflictError {
+  return new MaterializationConflictError("expectation", message)
 }
 
 export function materializationWorkColumns(record: MaterializationWorkRecord): {

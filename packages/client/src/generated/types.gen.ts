@@ -9523,6 +9523,7 @@ export type ListActionRunsResponses = {
           | "runtime.cancelled"
           | "queue.enqueue_failed"
           | "action.phase_failed"
+          | "action.read_conflict"
         message: string
         retryable: boolean
         at: string
@@ -9619,6 +9620,7 @@ export type GetActionRunResponses = {
         | "runtime.cancelled"
         | "queue.enqueue_failed"
         | "action.phase_failed"
+        | "action.read_conflict"
       message: string
       retryable: boolean
       at: string
@@ -9668,6 +9670,7 @@ export type GetActionRunResponses = {
               | "runtime.cancelled"
               | "queue.enqueue_failed"
               | "action.phase_failed"
+              | "action.read_conflict"
             message: string
             retryable: boolean
             at: string
@@ -9695,6 +9698,7 @@ export type GetActionRunResponses = {
               | "runtime.cancelled"
               | "queue.enqueue_failed"
               | "action.phase_failed"
+              | "action.read_conflict"
             message: string
             retryable: boolean
             at: string

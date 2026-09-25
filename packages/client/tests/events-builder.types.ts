@@ -350,7 +350,8 @@ events
       | "internal.unexpected"
       | "runtime.cancelled"
       | "queue.enqueue_failed"
-      | "action.phase_failed" = event.payload.error.code
+      | "action.phase_failed"
+      | "action.read_conflict" = event.payload.error.code
     const message: string = event.payload.error.message
     // @ts-expect-error — Action lifecycle failures expose only their primitive's code union.
     const datasetCode: "dataset.not_found" = event.payload.error.code
