@@ -14,6 +14,7 @@ import type {
   ObjectQueryExecutorFacetRequest,
   ObjectQueryExecutorLinkValue,
   ObjectQueryExecutorRow,
+  ObjectQueryRow,
   ObjectTypeWithPropertyTokens,
 } from "@sixb/core/query"
 import { createObjectQueryBuilder } from "@sixb/core/query"
@@ -43,8 +44,10 @@ export interface SixbQueryClientOptions {
   client?: Client
 }
 
-export type ClientObjectQueryBuilder<TObjectType extends ObjectTypeWithPropertyTokens> =
-  ObjectQueryBuilder<TObjectType>
+export type ClientObjectQueryBuilder<
+  TObjectType extends ObjectTypeWithPropertyTokens,
+  TRow = ObjectQueryRow<TObjectType>,
+> = ObjectQueryBuilder<TObjectType, TRow>
 
 export function objects<TObjectType extends ObjectTypeWithPropertyTokens>(
   objectType: TObjectType,

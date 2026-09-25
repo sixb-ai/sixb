@@ -30,6 +30,7 @@ export { isObjectRefSchema, objectRef, ref } from "./refs"
 export type {
   LinkToken,
   LinkTokenMap,
+  ObjectPropertiesMetadata,
   ObjectTypeWithPropertyTokens,
   ObjectTypeWithTokens,
   PropertyToken,

@@ -31,9 +31,8 @@ import type {
   ValidatedObjectQuery,
 } from "../objects/query"
 import type { ObjectVectorHandle, VectorProfileName } from "../objects/vectors/types"
-import type { ObjectLinkTargetType, ObjectRef, ObjectType, Property } from "../ontology"
+import type { ObjectLinkTargetType, ObjectRef, Property } from "../ontology"
 import type {
-  InferObjectProperties,
   InferPropertyUnit,
   InferPropertyValue,
   InferTelemetryBatchProperties,
@@ -41,7 +40,12 @@ import type {
 } from "../ontology/inference"
 import type { RegisteredObjectType } from "../ontology/registered"
 import type { OntologyDocumentInput, OntologyRegistry, OntologySource } from "../ontology/registry"
-import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
+import type {
+  LinkToken,
+  ObjectTypeProperties,
+  ObjectTypeWithPropertyTokens,
+  PropertyToken,
+} from "../ontology/tokens"
 import type { Queues } from "../queues"
 import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
 // ── Shared runtime context ──────────────────────────────────
@@ -92,27 +96,43 @@ export type BatchItemResult<T> =
 // Re-export for backward compatibility — canonical definitions live in ontology/registry.ts
 export type { OntologyDocumentInput, OntologySource }
 
-// A type alias, not an interface: relating two generic-interface
-// instantiations makes TypeScript measure the interface's variance by probing
-// it with marker types, and `InferObjectProperties<marker>` overflows its
-// recursion limits (TS2589) in consumers like `rows.map(...)`. The alias
-// relates structurally, which stays within limits.
-export type TwinObject<TObjectType extends ObjectType> = {
+// ── Rows ────────────────────────────────────────────────────
+//
+// Rows read `properties` from the type inferred where the object type is defined
+// (`ObjectTypeProperties`), never from the schema, so relating two rows — or anything returning
+// them — costs no schema inference. Rows and query builders also declare their variance, so
+// TypeScript never measures it: a measurement that overflows (TS2589) caches the variance it gave
+// up on, under which a plain query once passed for an expanded one.
+
+/** One stored object. Covariant: a row of an object type is a row of the loose base type. */
+export type TwinObject<out TObjectType extends ObjectTypeWithPropertyTokens> = {
   primaryId: string
   objectTypeId: TObjectType["id"]
-  properties: InferObjectProperties<TObjectType>
+  properties: ObjectTypeProperties<TObjectType>
   createdAt: Date
   updatedAt: Date
 }
 
-type MaterializedObjectRow<TObjectType extends Pick<ObjectType, "id" | "properties">> = {
-  primaryId: string
-  objectTypeId: TObjectType["id"]
-  properties: InferObjectProperties<TObjectType>
-  createdAt: Date
-  updatedAt: Date
-}
+/** A row returned by an object query, before any `.expand(...)`. */
+export type ObjectQueryRow<TObjectType extends ObjectTypeWithPropertyTokens> =
+  TwinObject<TObjectType> & {
+    /** Relevance, present when the query ranks its results (`search`, `vector`). */
+    score?: number
+  }
 
+/**
+ * An object attached under a row's `.links` by `.expand(...)`, before any nested expansion. The
+ * executor attaches `linkProperties` only when the relationship carries metadata.
+ */
+export type ObjectExpansionRow<TObjectType extends ObjectTypeWithPropertyTokens> =
+  TwinObject<TObjectType> & {
+    linkProperties?: Record<string, unknown>
+  }
+
+/**
+ * Flattens a row built from intersections, so editors show its fields instead of the aliases it was
+ * built from. The `& {}` is what makes TypeScript print the fields.
+ */
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
 
 export type { ObjectRef }
@@ -330,9 +350,9 @@ export interface TelemetryHistoryInput {
  * same series back, typed through the same token, instead of sending the caller under the typed
  * surface to `sixb.storage.timeseries`.
  */
-// A type alias for the same reason as `TwinObject` above: `history()` puts
-// `InferPropertyValue` in an output position, and probing a generic interface's variance there
-// overflows TS's recursion limits (TS2589) in consumers as ordinary as `points.map(...)`.
+// A type alias, not an interface: `history()` puts `InferPropertyValue` in an output position, and
+// probing a generic interface's variance there overflows TS's recursion limits (TS2589) in consumers
+// as ordinary as `points.map(...)`.
 export type TelemetryChannel<TToken extends AnyPropertyToken> = {
   append(input: TelemetryAppendInput<TToken>): Promise<void>
   /**
@@ -343,10 +363,10 @@ export type TelemetryChannel<TToken extends AnyPropertyToken> = {
    *
    * The point shape is written inline rather than extracted into a named alias. One more level of
    * alias indirection around `InferPropertyValue` in this output position overflows TS's instantiation
-   * depth (TS2589) in consumers as ordinary as `points.map(...)` — the same budget the note on
-   * `TwinObject` describes. `unit` is inferred through the same token as `append` writes it, rather
-   * than widened to `string`: a read that kept `value` precise and gave up on `unit` would be an
-   * arbitrary line, and both are the current ontology's view of a series it validated on write.
+   * depth (TS2589) in consumers as ordinary as `points.map(...)`. `unit` is inferred through the
+   * same token as `append` writes it, rather than widened to `string`: a read that kept `value`
+   * precise and gave up on `unit` would be an arbitrary line, and both are the current ontology's
+   * view of a series it validated on write.
    */
   history(input?: TelemetryHistoryInput): Promise<
     readonly {
@@ -423,40 +443,55 @@ type LinkTargetObjectTypeId<TLinkToken> =
         : never
     : never
 
-type ObjectTypeForRegisteredId<TObjectTypeId extends string> = [
-  Extract<RegisteredObjectType, { id: TObjectTypeId }>,
-] extends [never]
-  ? ObjectTypeWithPropertyTokens
+type ObjectTypeForRegisteredId<
+  TObjectTypeId extends string,
+  TFallback extends ObjectTypeWithPropertyTokens,
+> = [Extract<RegisteredObjectType, { id: TObjectTypeId }>] extends [never]
+  ? TFallback
   : Extract<RegisteredObjectType, { id: TObjectTypeId }>
 
 /**
  * Resolve an object type named by id, as seen from `TSource`.
  *
  * A self-reference (`link.self(...)`, or traversing one backwards) names the source's own id, so it
- * resolves to the source without the generated registry; every other id goes through the registry.
+ * resolves to the source. Every other id resolves through the generated registry first: a type
+ * reached through a link is then the very type the app imports and passes to `objects(...)`, which
+ * matters because builders are invariant in their object type. `TFallback` applies when the
+ * registry does not know the id — without a manifest, or for a stale one.
  */
-type ObjectTypeForId<TSource extends ObjectTypeWithPropertyTokens, TObjectTypeId extends string> = [
-  TObjectTypeId,
-] extends [TSource["id"]]
+type ObjectTypeForId<
+  TSource extends ObjectTypeWithPropertyTokens,
+  TObjectTypeId extends string,
+  TFallback extends ObjectTypeWithPropertyTokens = ObjectTypeWithPropertyTokens,
+> = [TObjectTypeId] extends [TSource["id"]]
   ? [TSource["id"]] extends [TObjectTypeId]
     ? TSource
-    : ObjectTypeForRegisteredId<TObjectTypeId>
-  : ObjectTypeForRegisteredId<TObjectTypeId>
+    : ObjectTypeForRegisteredId<TObjectTypeId, TFallback>
+  : ObjectTypeForRegisteredId<TObjectTypeId, TFallback>
 
 type DirectObjectTypeForLink<TLinkToken> =
   TLinkToken extends LinkToken<string, string, LinkTargetObjectTypeIdValue, infer TLink>
     ? Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>
     : never
 
-type ObjectTypeForLinkTarget<TSource extends ObjectTypeWithPropertyTokens, TLinkToken> = [
-  DirectObjectTypeForLink<TLinkToken>,
-] extends [never]
-  ? ObjectTypeForId<TSource, LinkTargetObjectTypeId<TLinkToken>>
-  : DirectObjectTypeForLink<TLinkToken>
+/**
+ * The object type a link token points to: the registered type, else the target `link(id, Target)`
+ * captured, else the loose base type.
+ */
+type ObjectTypeForLinkTarget<
+  TSource extends ObjectTypeWithPropertyTokens,
+  TLinkToken,
+> = ObjectTypeForId<
+  TSource,
+  LinkTargetObjectTypeId<TLinkToken>,
+  [DirectObjectTypeForLink<TLinkToken>] extends [never]
+    ? ObjectTypeWithPropertyTokens
+    : DirectObjectTypeForLink<TLinkToken>
+>
 
 /**
  * True when the target type is a concrete ontology type rather than the degraded
- * generic base. Direct ObjectType links resolve before this point; unresolved
+ * generic base. Registered and direct targets resolve before this point; unresolved
  * id-only refs fall back to the base type, whose property ids are `string`.
  * Instantiating the typed token map over the broad `Property` union there
  * overflows TypeScript (the same reason `UntypedPropertyPredicate` exists). The
@@ -480,17 +515,12 @@ export type ObjectExpandOptions<TObjectType extends ObjectTypeWithPropertyTokens
   orderBy?: readonly ObjectExpansionSort<TObjectType>[]
 }
 
-// ── Expansion shape accumulation (the typed `.links` row) ───────────────────
+// ── Expansion rows (the typed `.links` map) ─────────────────
 //
-// Each `.expand(link, …)` widens an accumulator type, keyed by link id, with a
-// branded {@link ExpansionNode} capturing the resolved target type, cardinality,
-// and the nested expansions. The accumulator materializes into the row's `links`
-// via {@link ObjectQueryRow}. The discipline that keeps this within TypeScript's
-// recursion limits (proven on the real ADN graph): recursion lives ONLY in the
-// lazily-evaluated row types below, never in constraints (which are eager); the
-// builders are type aliases; targets resolve through direct metadata first and
-// the id registry second; and the row is read through a direct conditional
-// `infer` (see `BuiltRow`).
+// A builder carries the row its terminals return. Each `.expand(link, …)` intersects that row with
+// one `.links` entry, typed from the link's resolved target and cardinality; a nested callback
+// returns a builder carrying the child row. The row is covariant, so an expanded query still passes
+// where the plain query is expected.
 
 /**
  * Cardinality declared on a link token's underlying link; absent cardinality is
@@ -507,101 +537,11 @@ type LinkTokenCardinality<TLinkToken> =
 type LinkTokenId<TLinkToken> =
   TLinkToken extends LinkToken<string, infer TLinkId, LinkTargetObjectTypeIdValue> ? TLinkId : never
 
-type LinkTokenSourceObjectTypeId<TLinkToken> =
-  TLinkToken extends LinkToken<infer TObjectTypeId, string, LinkTargetObjectTypeIdValue>
-    ? TObjectTypeId
-    : string
-
-type ObjectLinkCardinality<TLink> = TLink extends { cardinality: infer TCardinality extends string }
-  ? TCardinality
-  : "many"
-
-type ObjectLinkTarget<TSource extends ObjectTypeWithPropertyTokens, TLink> = [
-  Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>,
-] extends [never]
-  ? TLink extends {
-      targetObjectTypeId: infer TTargetObjectTypeId extends LinkTargetObjectTypeIdValue
-    }
-    ? ObjectTypeForId<TSource, ResolveTargetTypeId<TTargetObjectTypeId>>
-    : ObjectTypeWithPropertyTokens
-  : Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>
-
-type ObjectLinkById<
-  TObjectType extends Pick<ObjectType, "links">,
-  TLinkId extends string,
-> = Extract<TObjectType["links"][number], { id: TLinkId }>
-
-type HasKnownObjectLinkIds<TObjectType extends Pick<ObjectType, "links">> =
-  string extends TObjectType["links"][number]["id"] ? false : true
-
-/**
- * A branded accumulator entry for one expanded link. Unconstrained on purpose —
- * keeping recursion out of constraints is what avoids TS2589.
- */
-type ExpansionNode<TLinkToken, TTarget, TCardinality, TChildren> = {
-  readonly __linkToken: TLinkToken
-  readonly __target: TTarget
-  readonly __cardinality: TCardinality
-  readonly __children: TChildren
-}
-
-/** The single-key accumulator contribution of one `.expand(link, …)` call from `TSource`. */
-type ExpansionEntry<
-  TSource extends ObjectTypeWithPropertyTokens,
-  TLinkToken extends LinkToken<string, string, LinkTargetObjectTypeIdValue>,
-  TChild,
-> = {
-  [K in TLinkToken["id"]]: ExpansionNode<
-    TLinkToken,
-    ObjectTypeForLinkTarget<TSource, TLinkToken>,
-    LinkTokenCardinality<TLinkToken>,
-    TChild
-  >
-}
-
-type ExpansionNodeForSource<TNode, TObjectType extends ObjectTypeWithPropertyTokens> =
-  TNode extends ExpansionNode<infer TLinkToken, infer TTarget, infer TCardinality, infer TChildren>
-    ? LinkTokenId<TLinkToken> extends infer TLinkId extends string
-      ? HasKnownObjectLinkIds<TObjectType> extends true
-        ? [ObjectLinkById<TObjectType, TLinkId>] extends [never]
-          ? never
-          : ExpansionNode<
-              TLinkToken,
-              ObjectLinkTarget<TObjectType, ObjectLinkById<TObjectType, TLinkId>>,
-              ObjectLinkCardinality<ObjectLinkById<TObjectType, TLinkId>>,
-              TChildren
-            >
-        : LinkTokenSourceObjectTypeId<TLinkToken> extends TObjectType["id"]
-          ? ExpansionNode<TLinkToken, TTarget, TCardinality, TChildren>
-          : never
-      : never
-    : never
-
-type ExpansionLinksForSource<TLinks, TObjectType extends ObjectTypeWithPropertyTokens> = {
-  [K in keyof TLinks as [ExpansionNodeForSource<TLinks[K], TObjectType>] extends [never]
-    ? never
-    : K]: ExpansionNodeForSource<TLinks[K], TObjectType>
-}
-
-/** Materialize one accumulated expansion entry into its row value. */
-type ExpandedLinkType<TNode> =
-  TNode extends ExpansionNode<unknown, infer TTarget, infer TCardinality, infer TChildren>
-    ? TCardinality extends "one"
-      ? ExpandedRowType<TTarget, TChildren> | null
-      : ExpandedRowType<TTarget, TChildren>[]
-    : never
-
-/**
- * An expanded child row: the target object, optional edge `linkProperties` (the
- * executor attaches it only when the relationship carries metadata), and its own
- * nested `links` (present only when the child was itself expanded). The recursion
- * is confined to this lazily-evaluated position.
- */
 /**
  * Loud row substituted for a `.expand()` whose target type is MISSING from an
  * otherwise-present ontology manifest (a stale manifest, or a wrong link target
  * id). Reading a real property is then a compile error pointing at the fix,
- * instead of the old silent `Record<string, unknown>`. The no-manifest loose
+ * instead of a silent `Record<string, unknown>`. The no-manifest loose
  * default stays graceful — this only fires when the registry is concrete yet the
  * target id is absent, i.e. precision was expected but lost.
  */
@@ -613,145 +553,98 @@ type UnresolvedExpansionRow = {
   }
   createdAt: Date
   updatedAt: Date
-}
-
-type ExpandedRowType<TTarget, TChildren> = TTarget extends ObjectTypeWithPropertyTokens
-  ? string extends TTarget["id"]
-    ? // Target degraded to the loose base. Distinguish the two causes:
-      string extends RegisteredObjectType["id"]
-      ? // No manifest at all → graceful loose default (unchanged, non-breaking).
-        ExpandedRowForSource<
-          TTarget,
-          ExpansionLinksForSource<TChildren, TTarget>,
-          { linkProperties?: Record<string, unknown> }
-        >
-      : // Manifest present but this target id is absent → loud (was silent).
-        UnresolvedExpansionRow
-    : ExpandedRowForSource<
-        TTarget,
-        ExpansionLinksForSource<TChildren, TTarget>,
-        { linkProperties?: Record<string, unknown> }
-      >
-  : never
-
-type ExpandedRowForSource<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TLinks,
-  TExtra = unknown,
-> = Simplify<
-  MaterializedObjectRow<TObjectType> &
-    TExtra &
-    ([keyof TLinks] extends [never]
-      ? unknown
-      : { links: { [K in keyof TLinks]: ExpandedLinkType<TLinks[K]> } })
->
-
-/**
- * The terminal row of a query: the matched object, plus a typed `links` map once
- * the query accumulated expansions. A query with no `.expand(...)` returns the
- * plain materialized row, so existing `list`/`first` consumers are unchanged.
- */
-export type ObjectQueryRow<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TLinks,
-> = TObjectType extends ObjectTypeWithPropertyTokens
-  ? ExpandedRowForSource<TObjectType, ExpansionLinksForSource<TLinks, TObjectType>> & {
-      score?: number
-    }
-  : never
-
-/**
- * Builder passed to the nested `.expand(..., (e) => …)` callback. Exposes only
- * `expand`, resolving the next target type from direct metadata or the id
- * registry so deeper hops stay typed and accumulating `TAccumulated` so the
- * nested `.links` shape is recovered from the callback's return.
- *
- * A type alias (not an interface) so relating two instantiations stays
- * structural — the same discipline `TwinObject` follows to avoid TS2589
- * (see the note above `TwinObject`). The only recursion is in the lazily
- * evaluated return/callback positions.
- *
- * When the target type is the degraded base (an unresolved id-only target), the
- * builder collapses to the untyped, non-generic {@link UntypedExpandBuilder}:
- * nested expansion still works, just without target-specific link/property
- * checking, and — crucially — without the self-referential generic instantiation
- * over the broad base type that would otherwise overflow TypeScript.
- */
-export type ObjectExpandBuilder<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TAccumulated = unknown,
-> =
-  HasKnownObjectType<TObjectType> extends false
-    ? UntypedExpandBuilder
-    : {
-        // Phantom accumulator — never set at runtime. It is the only direct,
-        // covariant site `TAccumulated` appears in, so the nested callback's
-        // `TChild` is inferable from the returned builder even after the
-        // degradation conditional above resolves (which otherwise buries the
-        // accumulator inside `expand`'s return and defeats inference).
-        readonly __links?: TAccumulated
-        expand<
-          TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
-          TChild = unknown,
-        >(
-          link: TLinkToken,
-          build: ObjectExpandNested<TObjectType, TLinkToken, TChild>
-        ): ObjectExpandBuilder<
-          TObjectType,
-          TAccumulated & ExpansionEntry<TObjectType, TLinkToken, TChild>
-        >
-        expand<
-          TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
-          TChild = unknown,
-        >(
-          link: TLinkToken,
-          options?: ObjectExpandOptions<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
-          build?: ObjectExpandNested<TObjectType, TLinkToken, TChild>
-        ): ObjectExpandBuilder<
-          TObjectType,
-          TAccumulated & ExpansionEntry<TObjectType, TLinkToken, TChild>
-        >
-      }
-
-/**
- * Loose expand builder for degraded targets. Non-generic and self-referential,
- * so it never instantiates the typed token machinery over the broad base type.
- * Nested expansions still run; their shape simply degrades to the loose row.
- */
-type UntypedExpandBuilder = {
-  expand(
-    link: LinkToken,
-    optionsOrBuild?:
-      | ObjectExpandOptions<ObjectTypeWithPropertyTokens>
-      | ((nested: UntypedExpandBuilder) => UntypedExpandBuilder),
-    build?: (nested: UntypedExpandBuilder) => UntypedExpandBuilder
-  ): UntypedExpandBuilder
+  linkProperties?: Record<string, unknown>
 }
 
 /**
- * The nested-expansion callback for a link token's resolved target type. `TChild`
- * is inferred from the returned builder's accumulator, recovering the nested
- * `.links` shape; on the degraded path the builder collapses and `TChild` stays
- * its `unknown` default.
+ * The row an expanded target contributes before its own nested expansions. A polymorphic target
+ * (`link(id, [A, B])`) yields a union of rows, discriminated by `objectTypeId`.
+ */
+type ExpandedTargetRow<TTarget extends ObjectTypeWithPropertyTokens> =
+  TTarget extends ObjectTypeWithPropertyTokens
+    ? HasKnownObjectType<TTarget> extends true
+      ? ObjectExpansionRow<TTarget>
+      : // The target degraded to the loose base. Without a manifest that is the expected loose
+        // row; with one, the target is missing from it.
+        string extends RegisteredObjectType["id"]
+        ? ObjectExpansionRow<TTarget>
+        : UnresolvedExpansionRow
+    : never
+
+/** The `.links` entry one `.expand(link, …)` adds: `Target | null` for `"one"`, else `Target[]`. */
+type ObjectExpansionLinks<TLinkToken, TChildRow> = {
+  links: {
+    [K in LinkTokenId<TLinkToken>]: LinkTokenCardinality<TLinkToken> extends "one"
+      ? Simplify<TChildRow> | null
+      : Simplify<TChildRow>[]
+  }
+}
+
+/**
+ * Add the `.links` entry of one expansion to `TRow`. Distributes over a polymorphic row, so a
+ * nested expansion declared on one member type (`owner.expand(User.l.region)`) only reaches the
+ * rows of that type.
+ */
+type WithExpansion<
+  TRow,
+  TLinkToken extends LinkToken<string, string, LinkTargetObjectTypeIdValue>,
+  TChildRow,
+> = TRow extends { objectTypeId: infer TObjectTypeId }
+  ? TLinkToken["objectTypeId"] extends TObjectTypeId
+    ? TRow & ObjectExpansionLinks<TLinkToken, TChildRow>
+    : TRow
+  : TRow
+
+/**
+ * The nested-expansion callback for a link token's resolved target type. `TChildRow`
+ * is inferred from the returned builder, recovering the nested `.links` shape.
  *
  * Kept a plain (non-conditional) function type on purpose: wrapping the callback
  * in a `TLinkToken extends … ? … : never` conditional blocks inference of
- * `TChild` from the argument, so it would silently fall back to `unknown`.
+ * `TChildRow` from the argument, so it would silently fall back to its default.
  */
 type ObjectExpandNested<
   TSource extends ObjectTypeWithPropertyTokens,
   TLinkToken extends LinkToken<string, string, LinkTargetObjectTypeIdValue>,
-  TChild,
+  TChildRow,
 > = (
   nested: ObjectExpandBuilder<ObjectTypeForLinkTarget<TSource, TLinkToken>>
-) => ObjectExpandBuilder<ObjectTypeForLinkTarget<TSource, TLinkToken>, TChild>
+) => ObjectExpandBuilder<ObjectTypeForLinkTarget<TSource, TLinkToken>, TChildRow>
 
+/**
+ * Builder passed to the nested `.expand(..., (e) => …)` callback. Exposes only `expand`; each call
+ * adds a `.links` entry to `TRow`, the row this expanded target contributes to its parent.
+ */
+export interface ObjectExpandBuilder<
+  in out TObjectType extends ObjectTypeWithPropertyTokens,
+  out TRow = ExpandedTargetRow<TObjectType>,
+> {
+  expand<
+    TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
+    TChildRow = ExpandedTargetRow<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
+  >(
+    link: TLinkToken,
+    build: ObjectExpandNested<TObjectType, TLinkToken, TChildRow>
+  ): ObjectExpandBuilder<TObjectType, WithExpansion<TRow, TLinkToken, TChildRow>>
+  expand<
+    TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
+    TChildRow = ExpandedTargetRow<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
+  >(
+    link: TLinkToken,
+    options?: ObjectExpandOptions<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
+    build?: ObjectExpandNested<TObjectType, TLinkToken, TChildRow>
+  ): ObjectExpandBuilder<TObjectType, WithExpansion<TRow, TLinkToken, TChildRow>>
+}
+
+/**
+ * Executable object query rooted at `TObjectType`, returning `TRow` rows.
+ *
+ * Invariant in the object type, whose predicates and tokens it both accepts and produces, and
+ * covariant in the row.
+ */
 export interface ObjectQueryBuilder<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  // Accumulated expansion shape, widened by each `.expand(...)` and materialized
-  // into the row's `links` by the `list`/`first` terminals. Empty `{}` until the
-  // first expand; `traverse` resets it (the new result type has its own links).
-  TLinks = unknown,
+  in out TObjectType extends ObjectTypeWithPropertyTokens,
+  out TRow = ObjectQueryRow<TObjectType>,
 > {
   /** Normalized provider-neutral query IR. */
   readonly ir: ObjectQuery
@@ -761,20 +654,20 @@ export interface ObjectQueryBuilder<
     where: (
       builder: ObjectWhereBuilder<TObjectType>
     ) => ObjectWhereClause<TObjectType> | readonly ObjectWhereClause<TObjectType>[]
-  ): ObjectQueryBuilder<TObjectType, TLinks>
+  ): ObjectQueryBuilder<TObjectType, TRow>
 
   /** Search configured text fields at the current object type. */
   search(
     query: string,
     options?: { fields?: readonly ObjectSetQueryPropertyToken<TObjectType>[] }
-  ): ObjectQueryBuilder<TObjectType, TLinks>
+  ): ObjectQueryBuilder<TObjectType, TRow>
 
   /** Search a profile; text is embedded server-side with its configured model. */
   vector(
     profile: VectorProfileName<TObjectType>,
     vector: string,
     options: { k: number }
-  ): ObjectQueryBuilder<TObjectType, TLinks>
+  ): ObjectQueryBuilder<TObjectType, TRow>
 
   /** Follow an outgoing link and make the linked object type the current result type. */
   traverse<TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>>(
@@ -793,42 +686,42 @@ export interface ObjectQueryBuilder<
    * changing the result type — the additive counterpart to `traverse` (which
    * replaces the set). The callback nests deeper hops.
    *
-   * Each call widens `TLinks`, so `list`/`first` rows gain a typed `.links` entry
-   * for this link (cardinality `"one"` → `Target | null`, `"many"` → `Target[]`,
-   * each carrying optional `linkProperties` and its own nested `.links`). Nested
-   * targets stay precise when the link uses direct object targets or when the id
-   * target resolves through the registry, and otherwise degrade to the loose base.
+   * Each call adds a typed `.links` entry to the rows `list`/`first` return
+   * (cardinality `"one"` → `Target | null`, `"many"` → `Target[]`, each carrying
+   * optional `linkProperties` and its own nested `.links`). Targets are precise
+   * when they are registered or linked directly, and otherwise degrade to the
+   * loose base.
    */
   expand<
     TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
-    TChild = unknown,
+    TChildRow = ExpandedTargetRow<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
   >(
     link: TLinkToken,
-    build: ObjectExpandNested<TObjectType, TLinkToken, TChild>
-  ): ObjectQueryBuilder<TObjectType, TLinks & ExpansionEntry<TObjectType, TLinkToken, TChild>>
+    build: ObjectExpandNested<TObjectType, TLinkToken, TChildRow>
+  ): ObjectQueryBuilder<TObjectType, WithExpansion<TRow, TLinkToken, TChildRow>>
   expand<
     TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
-    TChild = unknown,
+    TChildRow = ExpandedTargetRow<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
   >(
     link: TLinkToken,
     options?: ObjectExpandOptions<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
-    build?: ObjectExpandNested<TObjectType, TLinkToken, TChild>
-  ): ObjectQueryBuilder<TObjectType, TLinks & ExpansionEntry<TObjectType, TLinkToken, TChild>>
+    build?: ObjectExpandNested<TObjectType, TLinkToken, TChildRow>
+  ): ObjectQueryBuilder<TObjectType, WithExpansion<TRow, TLinkToken, TChildRow>>
 
   /** Add property ordering at the current object type. */
   orderBy(
     property: ObjectSetQueryPropertyToken<TObjectType>,
     direction?: ObjectQuerySortDirection
-  ): ObjectQueryBuilder<TObjectType, TLinks>
+  ): ObjectQueryBuilder<TObjectType, TRow>
 
   /** Add relevance ordering for providers that support ranked search. */
-  orderByRelevance(direction?: ObjectQuerySortDirection): ObjectQueryBuilder<TObjectType, TLinks>
+  orderByRelevance(direction?: ObjectQuerySortDirection): ObjectQueryBuilder<TObjectType, TRow>
 
   /** Bound the result count. */
-  limit(limit: number): ObjectQueryBuilder<TObjectType, TLinks>
+  limit(limit: number): ObjectQueryBuilder<TObjectType, TRow>
 
   /** Request one page of results. */
-  page(input: { pageSize: number; pageToken?: string }): ObjectQueryBuilder<TObjectType, TLinks>
+  page(input: { pageSize: number; pageToken?: string }): ObjectQueryBuilder<TObjectType, TRow>
 
   /** Validate this query against the registered ontology. */
   validate(): ValidatedObjectQuery
@@ -840,21 +733,15 @@ export interface ObjectQueryBuilder<
   formatExplanation(): string
 
   /** Execute this query and return matching objects (rows carry `.links` when expanded). */
-  list(): Promise<ListResult<ObjectQueryRow<TObjectType, TLinks>>>
+  list(): Promise<ListResult<Simplify<TRow>>>
   list(options: {
     includeTotal: false
     signal?: AbortSignal
-  }): Promise<ListResultWithoutTotal<ObjectQueryRow<TObjectType, TLinks>>>
-  list(options: {
-    includeTotal?: true
-    signal?: AbortSignal
-  }): Promise<ListResult<ObjectQueryRow<TObjectType, TLinks>>>
+  }): Promise<ListResultWithoutTotal<Simplify<TRow>>>
+  list(options: { includeTotal?: true; signal?: AbortSignal }): Promise<ListResult<Simplify<TRow>>>
   list(
     options?: ObjectQueryListOptions
-  ): Promise<
-    | ListResult<ObjectQueryRow<TObjectType, TLinks>>
-    | ListResultWithoutTotal<ObjectQueryRow<TObjectType, TLinks>>
-  >
+  ): Promise<ListResult<Simplify<TRow>> | ListResultWithoutTotal<Simplify<TRow>>>
 
   /** Count the matching objects without returning rows. */
   count(): Promise<number>
@@ -866,7 +753,7 @@ export interface ObjectQueryBuilder<
   facets(input: readonly ObjectQueryFacetInput<TObjectType>[]): Promise<ObjectQueryFacetResult[]>
 
   /** Execute this query with an outer limit of one and return the first object. */
-  first(): Promise<ObjectQueryRow<TObjectType, TLinks> | null>
+  first(): Promise<Simplify<TRow> | null>
 }
 
 export interface ObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens> {
@@ -951,9 +838,7 @@ export interface ObjectSet<TObjectType extends ObjectTypeWithPropertyTokens> {
   get(id: string): Promise<TwinObject<TObjectType> | null>
 
   /** Upsert object state facts (latest projection). */
-  upsert(input: {
-    properties: InferObjectProperties<TObjectType>
-  }): Promise<TwinObject<TObjectType>>
+  upsert(input: { properties: ObjectTypeProperties<TObjectType> }): Promise<TwinObject<TObjectType>>
 
   /** Build an executable provider-neutral object query rooted at this object type. */
   query(): ObjectQueryBuilder<TObjectType>

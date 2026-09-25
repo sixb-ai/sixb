@@ -26,7 +26,7 @@
  * ```
  */
 
-import type { ObjectTypeWithPropertyTokens, ObjectTypeWithTokens, PropertyTokenMap } from "./tokens"
+import type { ObjectTypeWithPropertyTokens, ObjectTypeWithTokens } from "./tokens"
 import { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 import type {
   EnumSchema,
@@ -450,18 +450,12 @@ export type DirectLinkTarget<
   TId extends string,
   TName extends string,
   TProperties extends Property[],
-> = {
+> = ObjectTypeWithPropertyTokens<{
   id: TId
   name: TName
   properties: TProperties
   links: ObjectLink[]
-  readonly p: PropertyTokenMap<{
-    id: TId
-    name: TName
-    properties: TProperties
-    links: ObjectLink[]
-  }>
-}
+}>
 
 type DirectLinkTargetFor<TTarget extends ObjectType> = TTarget extends ObjectTypeWithPropertyTokens
   ? DirectLinkTarget<TTarget["id"], TTarget["name"], TTarget["properties"]>

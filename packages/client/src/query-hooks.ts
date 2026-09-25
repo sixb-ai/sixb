@@ -575,23 +575,8 @@ function isGeneratedObjectRead(query: { readonly queryKey: readonly unknown[] })
 // position, constraining on its overloaded members, or extracting via
 // `ReturnType` all overflow TypeScript's recursion depth on real ontologies.
 
-/**
- * Result row type of a built query, taken from its `first()` terminal.
- * Rebuilt as an anonymous structural type: relating the generic `TwinObject`
- * reference itself in deep contexts (e.g. `rows.map(...)` callbacks) can
- * overflow TypeScript's recursion limits.
- */
-type BuiltRow<TBuilt> = TBuilt extends { first(): Promise<infer TRow> }
-  ? NonNullable<TRow> extends { objectTypeId: infer TObjectTypeId; properties: infer TProperties }
-    ? {
-        primaryId: string
-        objectTypeId: TObjectTypeId
-        properties: TProperties
-        createdAt: Date
-        updatedAt: Date
-      } & (NonNullable<TRow> extends { links: infer TLinks } ? { links: TLinks } : unknown)
-    : never
-  : never
+/** Result row type of a built query, `.links` included, as its `first()` terminal returns it. */
+type BuiltRow<TBuilt> = TBuilt extends { first(): Promise<infer TRow | null> } ? TRow : never
 
 /**
  * Common TanStack passthrough options. For anything beyond these (`select`,

@@ -31,21 +31,17 @@ const fromSixb = sixb.objects(Room).query().traverse(Room.l.thermostat)
 const fromWorkflow = workflow.objects(Room).query().traverse(Room.l.thermostat)
 const fromAction = read.objects(Room).query().traverse(Room.l.thermostat)
 
-// Rows, not builders, are compared: relating two builder instantiations — even identical ones —
-// makes TypeScript measure the builder's variance, which is the TS2589 this program must not hit.
-type _workflowMatchesSixb = Expect<Equal<RowOf<typeof fromWorkflow>, RowOf<typeof fromSixb>>>
-type _actionMatchesSixb = Expect<Equal<RowOf<typeof fromAction>, RowOf<typeof fromSixb>>>
+type _workflowMatchesSixb = Expect<Equal<typeof fromWorkflow, typeof fromSixb>>
+type _actionMatchesSixb = Expect<Equal<typeof fromAction, typeof fromSixb>>
 // The id-only target resolves to the registered object type, not the loose base.
-type _thermostat = Expect<
-  Equal<RowOf<typeof fromSixb>, RowOf<ObjectQueryBuilder<typeof Thermostat>>>
->
+type _thermostat = Expect<Equal<typeof fromSixb, ObjectQueryBuilder<typeof Thermostat>>>
 
 // Traversing an id-only link backwards resolves its source through the registry too.
 const backToRooms = read
   .objects(Thermostat)
   .query()
   .traverse(Room.l.thermostat, { direction: "incoming" })
-type _incoming = Expect<Equal<RowOf<typeof backToRooms>, RowOf<ObjectQueryBuilder<typeof Room>>>>
+type _incoming = Expect<Equal<typeof backToRooms, ObjectQueryBuilder<typeof Room>>>
 
 // ── Expanded rows ──────────────────────────────────────────────────────────
 

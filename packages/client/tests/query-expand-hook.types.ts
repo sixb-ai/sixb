@@ -1,12 +1,11 @@
-// Typecheck-only proof for the `BuiltRow.links` hook typing: a row coming
-// out of `useObjectsQuery`/`useObjectsInfinite` must carry PRECISE nested
-// `.links` AND survive `.map()`/`.flatMap()` over the result set WITHOUT tripping
-// TS2589. The builder-path proof (object-query-expand-recursion.types.ts) only
-// exercises `first()`/`RowOf`; the hook path re-attaches the full `ExpandedLinkType`
-// recursion via `BuiltRow`'s `& { links: TLinks }` passthrough (query-hooks.ts),
-// which is exactly the recursion-prone combo real app code hits in components.
-// This mirrors that stress (polymorphic target, "many" arrays, 5-deep self-cycle)
-// through the hooks. Augmentation injects the ontology so nested targets resolve.
+// Typecheck-only proof for the hook row typing: a row coming out of
+// `useObjectsQuery`/`useObjectsInfinite` must carry PRECISE nested `.links` AND
+// survive `.map()`/`.flatMap()` over the result set WITHOUT tripping TS2589. The
+// builder-path proof (type-programs/ontology-registry/object-query-expand-recursion.ts)
+// only exercises `first()`/`RowOf`; this one reads rows through the hooks' `BuiltRow`
+// (query-hooks.ts), the path real app code takes in components. It mirrors that
+// stress (polymorphic target, "many" arrays, 5-deep self-cycle) through the hooks.
+// Augmentation injects the ontology so nested targets resolve.
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
 import { objects } from "../src/query"
 import { useObjectsInfinite, useObjectsQuery } from "../src/query-hooks"
