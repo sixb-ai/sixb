@@ -135,6 +135,12 @@ export type InferPropertyValue<
   ? InferSchema<TProperty["schema"], TValueTypes> | null
   : InferSchema<TProperty["schema"], TValueTypes>
 
+/**
+ * A registered value type wins over the semantic type carried on the ref, as it does at runtime:
+ * the registry keeps an explicit value type and only auto-registers the ref's copy when none
+ * exists. `valueTypeRef(VT)` carries `_semanticType` so a value type that is not registered
+ * (defined outside `ontology/`) still constrains units.
+ */
 type InferPropertySemanticTypeFromValueTypeRef<
   TProperty extends Pick<Property, "schema">,
   TValueTypes extends readonly ValueType[],
@@ -142,11 +148,15 @@ type InferPropertySemanticTypeFromValueTypeRef<
   type: "valueTypeRef"
   valueTypeId: infer TValueTypeId extends string
 }
-  ? ResolveValueType<TValueTypes, TValueTypeId> extends {
-      semanticType: infer TSemanticType extends QuantitativeTypeId
-    }
-    ? TSemanticType
-    : never
+  ? [ResolveValueType<TValueTypes, TValueTypeId>] extends [never]
+    ? TProperty["schema"] extends { _semanticType: infer TSemanticType extends QuantitativeTypeId }
+      ? TSemanticType
+      : never
+    : ResolveValueType<TValueTypes, TValueTypeId> extends {
+          semanticType: infer TSemanticType extends QuantitativeTypeId
+        }
+      ? TSemanticType
+      : never
   : never
 
 export type InferPropertySemanticType<
@@ -210,22 +220,19 @@ export type InferTelemetryPropertyIds<TObjectType extends { properties: readonly
  *
  * Iterates over the extracted telemetry property union directly (via `as P["id"]` remapping)
  * so that `P` is already resolved — avoids repeated indexed access through the token map
- * which would cause TS2589 on object types with many telemetry properties.
+ * which would cause TS2589 on object types with many telemetry properties. The semantic type is
+ * resolved as for a single append, so a batch requires exactly the units `telemetry()` does.
  */
 export type InferTelemetryBatchProperties<
   TObjectType extends { properties: readonly Property[] },
   TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = {
-  [P in Extract<
-    TObjectType["properties"][number],
-    { mode: "telemetry" }
-  > as P["id"]]?: P["semanticType"] extends QuantitativeTypeId
-    ? { value: InferPropertyValue<P, TValueTypes>; unit: UnitsOf<P["semanticType"]> }
-    : P["schema"] extends { type: "valueTypeRef"; valueTypeId: infer TVtId extends string }
-      ? ResolveValueType<TValueTypes, TVtId> extends {
-          semanticType: infer TSem extends QuantitativeTypeId
-        }
-        ? { value: InferPropertyValue<P, TValueTypes>; unit: UnitsOf<TSem> }
-        : InferPropertyValue<P, TValueTypes>
-      : InferPropertyValue<P, TValueTypes>
+  [P in Extract<TObjectType["properties"][number], { mode: "telemetry" }> as P["id"]]?: [
+    InferPropertySemanticType<P, TValueTypes>,
+  ] extends [never]
+    ? InferPropertyValue<P, TValueTypes>
+    : {
+        value: InferPropertyValue<P, TValueTypes>
+        unit: UnitsOf<InferPropertySemanticType<P, TValueTypes>>
+      }
 }
