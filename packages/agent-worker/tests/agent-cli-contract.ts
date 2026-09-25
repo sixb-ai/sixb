@@ -102,6 +102,26 @@ const objectTypes = [
     ],
     actions: [],
   },
+  {
+    id: "Product",
+    name: "Product",
+    description: "A catalog product",
+    properties: [{ id: "sku", name: "SKU", primary: true, schema: "string" }],
+    search: { vectors: { content: vectorProfile(["title", "description"]) } },
+    links: [],
+    actions: [],
+  },
+  {
+    id: "SupportArticle",
+    name: "Support article",
+    description: "A help center article",
+    properties: [{ id: "slug", name: "Slug", primary: true, schema: "string" }],
+    search: {
+      vectors: { body: vectorProfile(["body"]), title: vectorProfile(["title"]) },
+    },
+    links: [],
+    actions: [],
+  },
 ] as const
 
 const objects = [
@@ -138,6 +158,7 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         ["objects", "--help"],
         ["objects", "inspect", "--help"],
         ["objects", "query", "--help"],
+        ["objects", "search", "--help"],
         // Regression: before the shared parser fix, trailing --help executed a query.
         ["objects", "get", "Customer", "alice", "--help"],
         ["telemetry", "--help"],
@@ -165,6 +186,9 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
       expect(queryHelp.stdout).toContain("directions are outgoing or incoming")
       expect(queryHelp.stdout).toContain('"op":"eq"')
       expect(queryHelp.stdout).toContain("sourceObjectTypeId")
+      expect(queryHelp.stdout).toContain('"kind":"vector"')
+      const searchHelp = await runCli(implementation, ["objects", "search", "--help"])
+      expect(searchHelp.stdout).toContain("--vector-profile <name>")
 
       const actionsHelp = await runCli(implementation, ["actions", "--help"])
       expect(actionsHelp.stdout).toContain("--file <path|->")
@@ -178,6 +202,19 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
         kind: "page",
         input: { kind: "start", objectTypeId: "Customer" },
         pageSize: 20,
+      })
+      const vectorExample = await runCli(implementation, [
+        "objects",
+        "query",
+        "--example",
+        "vector",
+      ])
+      expect(JSON.parse(vectorExample.stdout)).toMatchObject({
+        kind: "vector",
+        input: { kind: "filter", input: { kind: "start", objectTypeId: "Product" } },
+        vector: "waterproof trail shoes",
+        profile: "content",
+        k: 20,
       })
       const facetsExample = await runCli(implementation, ["objects", "facets", "--example"])
       expect(JSON.parse(facetsExample.stdout)).toEqual({
@@ -269,6 +306,14 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           {
             args: ["objects", "search", "customer", "--limit", "51"],
             message: "--limit must be an integer from 1 through 50.",
+          },
+          {
+            args: ["objects", "search", "shoes", "--vector-profile", "content"],
+            message: "--vector-profile requires --type.",
+          },
+          {
+            args: ["objects", "search", "  ", "--type", "Product"],
+            message: "Semantic search text must be nonempty and at most 8000 characters.",
           },
           {
             args: ["action-runs", "list", "--status", "waiting"],
@@ -669,10 +714,116 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
           actions: [],
         })
         expect(compactTypes[0].properties).toBeUndefined()
+        const vectorProfiles = Object.fromEntries(
+          compactTypes.map((type: { id: string; vectorProfiles?: string[] }) => [
+            type.id,
+            type.vectorProfiles,
+          ])
+        )
+        expect(vectorProfiles.Product).toEqual(["content"])
+        expect(vectorProfiles.SupportArticle).toEqual(["body", "title"])
+        expect(vectorProfiles.Customer).toBeUndefined()
         expect(JSON.parse(full.stdout)[0].properties[0]).toMatchObject({
           id: "alarmId",
           primary: true,
         })
+      } finally {
+        api.close()
+      }
+    })
+
+    test("runs semantic search as one vector query on the type's declared profile", async () => {
+      const api = startTestApi((request) => {
+        if (request.method === "GET" && request.url.pathname.startsWith("/api/object-types/")) {
+          const objectTypeId = decodeURIComponent(
+            request.url.pathname.slice("/api/object-types/".length)
+          )
+          const definition = objectTypes.find((value) => value.id === objectTypeId)
+          return definition ? json(definition) : json({ error: "Object type not found" }, 404)
+        }
+        if (request.method === "POST" && request.url.pathname === "/api/objects/query") {
+          return json({
+            objects: [{ ...object("Product", "sku-1", { sku: "sku-1" }), score: 0.91 }],
+            hasMore: false,
+          })
+        }
+      })
+      try {
+        const single = await runCli(
+          implementation,
+          ["objects", "search", "waterproof trail shoes", "--type", "Product", "--limit", "5"],
+          apiEnv(api)
+        )
+        expect(single.exitCode).toBe(0)
+        expect(single.stderr).toBe("")
+        expect(JSON.parse(single.stdout).objects[0]).toMatchObject({
+          primaryId: "sku-1",
+          score: 0.91,
+        })
+        expect(api.requests.map(({ method, url }) => `${method} ${url.pathname}`)).toEqual([
+          "GET /api/object-types/Product",
+          "POST /api/objects/query",
+        ])
+        expect(api.requests[1]?.body).toEqual({
+          query: {
+            kind: "vector",
+            input: { kind: "start", objectTypeId: "Product" },
+            vector: "waterproof trail shoes",
+            profile: "content",
+            k: 5,
+          },
+          includeTotal: false,
+        })
+
+        const chosen = await runCli(
+          implementation,
+          [
+            "objects",
+            "search",
+            "reset password",
+            "--type",
+            "SupportArticle",
+            "--vector-profile=title",
+          ],
+          apiEnv(api)
+        )
+        expect(chosen.exitCode).toBe(0)
+        expect(asRecord(asRecord(api.requests.at(-1)?.body).query)).toMatchObject({
+          profile: "title",
+          k: 20,
+        })
+
+        api.requests.length = 0
+        const refusals = [
+          {
+            args: ["objects", "search", "reset password", "--type", "SupportArticle"],
+            error: {
+              message:
+                "SupportArticle has vector profiles body, title. Pass --vector-profile <name>.",
+            },
+          },
+          {
+            args: ["objects", "search", "shoes", "--type", "Product", "--vector-profile", "body"],
+            error: { message: "Product has no vector profile 'body'. Use content." },
+          },
+          {
+            args: ["objects", "search", "northline", "--type", "Customer"],
+            error: {
+              message: "Customer has no vector search profile.",
+              hint: "Omit --type for identifier and full-text search.",
+            },
+          },
+        ] as const
+        for (const { args, error } of refusals) {
+          const result = await runCli(implementation, args, apiEnv(api))
+          expect(result.exitCode).toBe(2)
+          expect(result.stdout).toBe("")
+          expect(JSON.parse(result.stderr)).toEqual({
+            error: { code: "invalid_arguments", ...error },
+          })
+        }
+        // Each refusal reads the type definition and never issues a query.
+        expect(api.requests.map(({ method }) => method)).toEqual(["GET", "GET", "GET"])
       } finally {
         api.close()
       }
@@ -1160,6 +1311,13 @@ function edge(
     target: { objectTypeId: targetTypeId, primaryId: targetId },
     createdAt: "2026-01-01T00:00:00.000Z",
     updatedAt: "2026-01-02T00:00:00.000Z",
+  }
+}
+
+function vectorProfile(source: readonly string[]) {
+  return {
+    source,
+    model: { providerId: "test", modelId: "embedding", dimensions: 3 },
   }
 }
 

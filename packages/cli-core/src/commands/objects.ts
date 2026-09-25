@@ -11,13 +11,14 @@ import {
 import { inspectGraph } from "../graph"
 import { fail, writeJson, writeText } from "../output"
 import { CLI_LIMITS, DEFAULT_LIST_ORDER, DEFAULT_OBJECT_ORDER_BY } from "../policies"
-import { FACETS_EXAMPLE, OBJECTS_HELP, QUERY_EXAMPLES, QUERY_HELP } from "./metadata"
+import { FACETS_EXAMPLE, OBJECTS_HELP, QUERY_EXAMPLES, QUERY_HELP, SEARCH_HELP } from "./metadata"
 import {
   asRecord,
   normalizeWindowOptions,
   parseQueryOptions,
   readJson,
   singleFileOption,
+  vectorProfileNames,
 } from "./shared"
 
 export async function objects(api: ApiClient, args: readonly string[]): Promise<void> {
@@ -155,24 +156,74 @@ async function objectsGet(api: ApiClient, args: readonly string[]): Promise<void
 }
 
 async function objectsSearch(api: ApiClient, args: readonly string[]): Promise<void> {
-  if (requestsHelp(args)) {
-    return writeText(`Usage: sixb objects search <text> [--limit <1-${CLI_LIMITS.search.maximum}>]`)
-  }
+  if (requestsHelp(args)) return writeText(SEARCH_HELP)
   const { positionals, options } = parseCommandArgs(
     args,
-    { "--limit": "string" },
+    { "--limit": "string", "--type": "string", "--vector-profile": "string" },
     "objects search",
     1
   )
-  const limit = String(
-    integerInRange(
-      "--limit",
-      options["--limit"] ?? String(CLI_LIMITS.search.default),
-      1,
-      CLI_LIMITS.search.maximum
-    )
+  const text = positionals[0] ?? ""
+  const limit = integerInRange(
+    "--limit",
+    options["--limit"] ?? String(CLI_LIMITS.search.default),
+    1,
+    CLI_LIMITS.search.maximum
   )
-  writeJson(await api.get("/api/objects/search", { q: positionals[0], limit }))
+  const objectTypeId = options["--type"]
+  if (!objectTypeId) {
+    if (options["--vector-profile"]) fail("--vector-profile requires --type.")
+    return writeJson(await api.get("/api/objects/search", { q: text, limit: String(limit) }))
+  }
+  if (!text.trim() || text.length > CLI_LIMITS.vectorSearchText.maximum) {
+    fail(
+      `Semantic search text must be nonempty and at most ${CLI_LIMITS.vectorSearchText.maximum} characters.`
+    )
+  }
+  const objectType = asRecord(
+    await api.get(`/api/object-types/${encodeURIComponent(objectTypeId)}`)
+  )
+  const profile = selectVectorProfile(objectTypeId, objectType, options["--vector-profile"])
+  writeJson(
+    await api.post("/api/objects/query", {
+      query: {
+        kind: "vector",
+        input: { kind: "start", objectTypeId },
+        vector: text,
+        profile,
+        k: limit,
+      },
+      includeTotal: false,
+    })
+  )
+}
+
+/** Profiles are chosen by name, so a type with several must never be searched by guesswork. */
+function selectVectorProfile(
+  objectTypeId: string,
+  objectType: Record<string, unknown>,
+  requested: string | undefined
+): string {
+  const profiles = vectorProfileNames(objectType)
+  if (profiles.length === 0) {
+    fail(
+      `${objectTypeId} has no vector search profile.`,
+      "invalid_arguments",
+      "Omit --type for identifier and full-text search."
+    )
+  }
+  if (requested !== undefined) {
+    if (!profiles.includes(requested)) {
+      fail(`${objectTypeId} has no vector profile '${requested}'. Use ${profiles.join(", ")}.`)
+    }
+    return requested
+  }
+  if (profiles.length > 1) {
+    fail(
+      `${objectTypeId} has vector profiles ${profiles.join(", ")}. Pass --vector-profile <name>.`
+    )
+  }
+  return profiles[0] ?? ""
 }
 
 async function objectsQuery(api: ApiClient, args: readonly string[]): Promise<void> {

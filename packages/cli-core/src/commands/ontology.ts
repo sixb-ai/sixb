@@ -2,7 +2,7 @@ import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
 import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
-import { asRecord, asRecords } from "./shared"
+import { asRecord, asRecords, vectorProfileNames } from "./shared"
 
 export async function ontology(api: ApiClient, args: readonly string[]): Promise<void> {
   const [sub, ...rest] = args
@@ -18,11 +18,13 @@ export async function ontology(api: ApiClient, args: readonly string[]): Promise
       value.map((entry) => {
         const type = asRecord(entry)
         const properties = asRecords(type.properties)
+        const vectorProfiles = vectorProfileNames(type)
         return {
           id: type.id,
           name: type.name,
           description: type.description,
           primaryPropertyId: properties.find((property) => property.primary === true)?.id,
+          ...(vectorProfiles.length === 0 ? {} : { vectorProfiles }),
           links: asRecords(type.links).map(
             ({ id, name, description, targetObjectTypeId, cardinality }) => ({
               id,
