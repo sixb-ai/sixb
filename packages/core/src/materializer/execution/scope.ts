@@ -1,4 +1,3 @@
-import type { EventExecutor } from "../../events/envelope"
 import { resolveExecutionScopeAuthorization } from "../../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../../execution/durable"
 import type {
@@ -10,6 +9,7 @@ import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../materialization/errors"
+import type { EventExecutor } from "../../materialization/events"
 import type {
   CreateExecutionInput,
   ExecutionRecord,

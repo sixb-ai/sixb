@@ -1,5 +1,5 @@
-import type { EventExecutor } from "../../events/envelope"
 import type { AuthorizablePrincipal } from "../../execution/types"
+import type { EventExecutor } from "../../materialization/events"
 import type {
   EditCommitResult,
   OntologyMaterializationOrigin,
