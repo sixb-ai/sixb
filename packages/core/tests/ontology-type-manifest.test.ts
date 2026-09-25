@@ -61,6 +61,67 @@ describe("ontology type manifest", () => {
     expect(content).toContain('declare module "@sixb/core/ontology"')
   })
 
+  test("registers value types from the same exports runtime discovery registers", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "sixb-type-manifest-value-types-"))
+    tempDirs.push(projectRoot)
+    await mkdir(join(projectRoot, "ontology"), { recursive: true })
+
+    await writeFile(
+      join(projectRoot, "ontology", "values.ts"),
+      [
+        'export const Azimuth = { id: "Azimuth", name: "Azimuth", schema: "double" }',
+        'const Money = { id: "Money", name: "Money", schema: "decimal" }',
+        'const Rate = { id: "Rate", name: "Rate", schema: "double" }',
+        "export const Shared = [Money]",
+        "export const AppOntology = {",
+        '  id: "app",',
+        '  version: "1.0.0",',
+        "  objectTypes: [],",
+        "  valueTypes: [Rate],",
+        "}",
+        // Re-exporting a definition registers it once.
+        "export const AzimuthAlias = Azimuth",
+        "",
+      ].join("\n"),
+      "utf-8"
+    )
+
+    const result = await generateOntologyTypeManifest({ projectRoot })
+    const content = await readFile(result.path, "utf-8")
+
+    expect(result.valueTypeEntries.map((entry) => entry.valueTypeId)).toEqual([
+      "Azimuth",
+      "Money",
+      "Rate",
+    ])
+    expect(content).toContain("interface SixbValueTypeMap {")
+    expect(content).toContain('"Azimuth": typeof import("../../ontology/values")["Azimuth"]')
+    expect(content).toContain(
+      '"Money": Extract<(typeof import("../../ontology/values")["Shared"])[number], { id: "Money" }>'
+    )
+    expect(content).toContain(
+      '"Rate": Extract<(typeof import("../../ontology/values")["AppOntology"])["valueTypes"][number], { id: "Rate" }>'
+    )
+  })
+
+  test("rejects two value types exported under the same id", async () => {
+    const projectRoot = await mkdtemp(join(tmpdir(), "sixb-type-manifest-duplicate-value-type-"))
+    tempDirs.push(projectRoot)
+    await mkdir(join(projectRoot, "ontology"), { recursive: true })
+    await writeFile(
+      join(projectRoot, "ontology", "a.ts"),
+      'export const Money = { id: "Money", name: "Money", schema: "decimal" }'
+    )
+    await writeFile(
+      join(projectRoot, "ontology", "b.ts"),
+      'export const Money = { id: "Money", name: "Money", schema: "double" }'
+    )
+
+    await expect(generateOntologyTypeManifest({ projectRoot })).rejects.toThrow(
+      '[Sixb] Duplicate ontology value type id "Money"'
+    )
+  })
+
   test("skips writing when there is no ontology directory", async () => {
     const projectRoot = await mkdtemp(join(tmpdir(), "sixb-type-manifest-empty-"))
     tempDirs.push(projectRoot)

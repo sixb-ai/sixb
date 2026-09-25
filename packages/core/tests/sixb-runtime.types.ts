@@ -9,6 +9,19 @@ import {
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
+const Thermostat = defineObjectType({
+  id: "Thermostat",
+  name: "Thermostat",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("externalId", "string", {
+      required: true,
+      query: { searchable: true, filterable: true, exact: true, facet: true },
+    }),
+    prop("name", "string", { required: true }),
+  ],
+})
+
 const Room = defineObjectType({
   id: "Room",
   name: "Room",
@@ -24,20 +37,7 @@ const Room = defineObjectType({
       semanticType: "Temperature",
     }),
   ],
-  links: [link.ref("hasThermostat", "Thermostat", { cardinality: "one" })],
-})
-
-const Thermostat = defineObjectType({
-  id: "Thermostat",
-  name: "Thermostat",
-  properties: [
-    prop("id", "string", { required: true, primary: true }),
-    prop("externalId", "string", {
-      required: true,
-      query: { searchable: true, filterable: true, exact: true, facet: true },
-    }),
-    prop("name", "string", { required: true }),
-  ],
+  links: [link("hasThermostat", Thermostat, { cardinality: "one" })],
 })
 
 const Buildings = defineOntology({

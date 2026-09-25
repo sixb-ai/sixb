@@ -215,7 +215,7 @@ const principal = { type: "user", id: "adam" } as const
 // SixbHost<three-type tuple> in a type position (alias, param, ReturnType) trips
 // TS2589 instantiation depth. Inference handles it fine.
 function createRuntime() {
-  return new SixbHost<readonly [typeof Contract, typeof SignedContract, typeof Invoice]>({
+  return new SixbHost({
     ontology: [Contract, SignedContract, Invoice],
     datasets: [ContractsDataset, InvoicesDataset],
     actions: [sendContract, archiveInvoice],

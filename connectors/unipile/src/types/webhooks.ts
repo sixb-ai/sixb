@@ -1,4 +1,4 @@
-import type { Logger, OntologySource, Sixb } from "@sixb/core"
+import type { Logger, Sixb } from "@sixb/core"
 import type { UnipileClient } from "./client"
 import type { UnipileCursorOptions, UnipileCursorPage, UnipileTimestamp } from "./common"
 import type { UnipileMessageAttachment } from "./messages"
@@ -151,7 +151,7 @@ export type UnipileWebhookEvent =
 export interface UnipileEventContext {
   readonly event: UnipileWebhookEvent
   readonly request: Request
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: Sixb
   readonly logger: Logger
   client(): Promise<UnipileClient>
 }

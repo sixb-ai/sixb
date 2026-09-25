@@ -1,10 +1,10 @@
-import type { OntologySource, Sixb } from "@sixb/core"
+import type { Sixb } from "@sixb/core"
 import { AccessRequest } from "./ontology/access-request"
 import { AdminNote } from "./ontology/admin-note"
 import { Note } from "./ontology/note"
 
 type SeedRuntime = {
-  readonly objects: Pick<Sixb<readonly OntologySource[]>["objects"], "upsert">
+  readonly objects: Pick<Sixb["objects"], "upsert">
 }
 
 export async function seedAuthExampleObjects(sixb: SeedRuntime): Promise<void> {

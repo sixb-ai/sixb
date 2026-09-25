@@ -1,7 +1,6 @@
 import { randomUUID } from "node:crypto"
 import type { AuthorizationContext } from "../authorization"
 import { bindModelExecutionAttempt } from "../models/execution/binding"
-import type { OntologySource } from "../ontology"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
 import {
   objectReadScopeForAccessPlan,
@@ -97,7 +96,7 @@ export interface RequestExecutionHost {
 export function bindRequestExecution(
   host: RequestExecutionHost,
   input: BindRequestExecutionInput
-): Sixb<readonly OntologySource[]> {
+): Sixb {
   const requestId = requestIdentifier(input.request)
   const correlationId = correlationIdentifier(input.request, requestId)
   const scope = createRequestScope(host.id, requestId, correlationId, input.authorization)

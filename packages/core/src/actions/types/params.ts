@@ -1,4 +1,5 @@
 import type { ValueType } from "../../ontology"
+import type { RegisteredValueTypes } from "../../ontology/registered"
 import type {
   InferParams,
   ParamConfig,
@@ -18,5 +19,5 @@ export type ActionPrimitiveSchemaValues = ParamPrimitiveSchemaValues
 /** Action-facing compatibility name for the shared parameter inference contract. */
 export type InferActionParams<
   TParams extends ActionParamsConfig,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = InferParams<TParams, TValueTypes>

@@ -942,8 +942,8 @@ function createRuntime(
     pipelines?: readonly PipelineDefinition[]
     connectors?: readonly ConnectorDefinition[]
   } = {}
-): SixbHost<readonly [typeof Account]> {
-  return new SixbHost<readonly [typeof Account]>({
+): SixbHost {
+  return new SixbHost({
     ontology: [Account],
     ...options,
     ...createTestRuntimeDeps(),

@@ -1,4 +1,4 @@
-import type { OntologySource, Property, SixbHostView, ValueType } from "@sixb/core"
+import type { Property, SixbHostView, ValueType } from "@sixb/core"
 import { resolvePropertyQueryCapabilities } from "@sixb/core/internal/ontology"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
@@ -66,7 +66,7 @@ function serializeSearch(
 }
 
 function serializeObjectType(
-  execution: Sixb<readonly OntologySource[]>,
+  execution: Sixb,
   valueTypesById: ReadonlyMap<string, ValueType>,
   objectType: ReturnType<SixbHostView["definitions"]["ontology"]["listObjectTypes"]>[number]
 ) {

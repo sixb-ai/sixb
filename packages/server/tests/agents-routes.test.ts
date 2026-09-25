@@ -11,7 +11,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   param,
   prop,
   SixbHost,
@@ -120,7 +119,7 @@ const agentOnlyRunner = defineRole("agent-only.runner", {
 function createRuntime(options: { readonly auth?: boolean; readonly sandbox?: boolean } = {}) {
   const storage = new InMemoryStorage()
   const queues = new InMemoryQueues()
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: "agent-route-tests",
     ontology: [Invoice],
     models: { language: [model] },

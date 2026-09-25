@@ -12,7 +12,6 @@ import {
   InMemoryStorage,
   type LogRunRef,
   noopLoggerProvider,
-  type OntologySource,
   SixbHost,
   type SixbHostOptions,
 } from "@sixb/core"
@@ -269,7 +268,7 @@ async function readLogs(
 }
 
 async function seed(
-  sixb: SixbHost<readonly OntologySource[]>,
+  sixb: SixbHost,
   run: LogRunRef,
   message: string,
   level: "debug" | "info" | "warn" | "error"
@@ -279,18 +278,12 @@ async function seed(
   await session.flush()
 }
 
-function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbHostOptions<TOntologySources>
-): SixbHost<TOntologySources> {
-  return new SixbHost<TOntologySources>(options)
+function createSixbInstance(options: SixbHostOptions): SixbHost {
+  return new SixbHost(options)
 }
 
 async function withServer(
-  run: (context: {
-    baseUrl: string
-    sixb: SixbHost<readonly OntologySource[]>
-    server: SixbServer
-  }) => Promise<void>,
+  run: (context: { baseUrl: string; sixb: SixbHost; server: SixbServer }) => Promise<void>,
   options: { readonly broker?: InMemoryBroker } = {}
 ): Promise<void> {
   const port = await getFreePort()
@@ -318,13 +311,13 @@ function createTestSixb(
     readonly storage?: InMemoryStorage
     readonly auth?: boolean
   } = {}
-): SixbHost<readonly OntologySource[]> {
+): SixbHost {
   const logsViewers = defineGroup("logs-viewers")
   const logsObserver = defineRole("logs.observer", {
     grantedTo: [logsViewers],
     grants: [can.observe("logs")],
   })
-  return createSixbInstance<readonly OntologySource[]>({
+  return createSixbInstance({
     id: "logs-test-project",
     ontology: [],
     broker,
@@ -434,10 +427,7 @@ function authzWithLogs(): AuthorizationContext {
   }
 }
 
-function logRoutesWithAuthz(
-  sixb: SixbHost<readonly OntologySource[]>,
-  authz: AuthorizationContext
-) {
+function logRoutesWithAuthz(sixb: SixbHost, authz: AuthorizationContext) {
   const app = new Elysia()
   app.derive(({ request }) => ({
     sixb: bindRequestExecution(sixb, {

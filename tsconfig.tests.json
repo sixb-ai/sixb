@@ -29,5 +29,8 @@
     "sandboxes/*/tests/**/*.ts",
     "loggers/*/tests/**/*.ts",
     "auth/*/tests/**/*.ts"
-  ]
+  ],
+  // Each type program owns an ambient ontology registry, so `typecheck:tests` checks it as its own
+  // program after this one instead of leaking that registry into every test file here.
+  "exclude": ["*/*/tests/type-programs/**"]
 }

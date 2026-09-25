@@ -10,7 +10,6 @@ import type {
 import { createLinkScopeFingerprint } from "../materializer"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
-import type { ValueType } from "../ontology/types"
 import {
   assertPropertyTokenBelongsToObjectType,
   assertTelemetryProperty,
@@ -181,7 +180,7 @@ export function createActionReadFacade(
 
 function createActionTelemetryReadFacade(
   source: ActionTelemetryReadSource | undefined
-): ActionTelemetryReadFacade<readonly ValueType[]> {
+): ActionTelemetryReadFacade {
   const facade = {
     async historyBatch(input: {
       readonly series: readonly ActionTelemetryHistorySeriesInput[]
@@ -241,7 +240,7 @@ function createActionTelemetryReadFacade(
 
   // Cast needed at the generic token boundary: the implementation deliberately manipulates raw
   // provider values while the public facade maps every tuple position back to its property token.
-  return facade as unknown as ActionTelemetryReadFacade<readonly ValueType[]>
+  return facade as unknown as ActionTelemetryReadFacade
 }
 
 function assertTelemetryBatchResultMatchesRequest(
@@ -277,12 +276,8 @@ function createActionReadObjectSetAdapter<TObjectType extends ObjectTypeWithProp
   objectType: TObjectType,
   objectSet: ActionReadObjectSetSource,
   options: ActionReadFacadeOptions | undefined
-): ActionReadObjectSet<TObjectType, readonly ValueType[], ObjectTypeWithPropertyTokens> {
-  type TypedReadObjectSet = ActionReadObjectSet<
-    TObjectType,
-    readonly ValueType[],
-    ObjectTypeWithPropertyTokens
-  >
+): ActionReadObjectSet<TObjectType> {
+  type TypedReadObjectSet = ActionReadObjectSet<TObjectType>
 
   async function readObject(id: string, read: () => Promise<unknown>): Promise<unknown> {
     const row = await read()

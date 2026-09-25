@@ -607,10 +607,7 @@ describe("authorized ontology view", () => {
 
     // Regression proof: reconstructing the runtime with `{ ...runtime }` after binding reads the
     // accessor a second time before any terminal runs and fails this test.
-    const objects = createObjectsRuntime<readonly [typeof CatalogOntology]>(
-      runtime,
-      scope.execution
-    )
+    const objects = createObjectsRuntime(runtime, scope.execution)
     const proposals = objects(Proposal)
 
     expect(await proposals.get("proposal-1")).toBeNull()

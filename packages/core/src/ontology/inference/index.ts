@@ -13,6 +13,7 @@ import type {
   ValueTypeRefSchema,
 } from ".."
 import type { DecimalValue } from "../decimal"
+import type { RegisteredValueTypes } from "../registered"
 import type { QuantitativeTypeId, UnitsOf } from "../units"
 import type { UserRef } from "../user-ref"
 
@@ -20,7 +21,8 @@ type Simplify<T> = { [K in keyof T]: T[K] } & {}
 
 /**
  * Look up a referenced value type by `id` from the value-type tuple passed
- * into the inference utilities.
+ * into the inference utilities — the generated registry unless a caller passes
+ * its own tuple.
  */
 type ResolveValueType<
   TValueTypes extends readonly ValueType[],
@@ -31,13 +33,17 @@ type ResolveValueType<
  * Resolve `{ type: "valueTypeRef" }` recursively.
  *
  * Unknown references intentionally degrade to `unknown` so type-level callsites
- * can decide how strict they want to be.
+ * can decide how strict they want to be. The `[never]` guard is what keeps that
+ * promise: an unresolved lookup is `never`, and a distributive check over `never`
+ * would yield `never` — a value assignable to everything.
  */
 type InferValueTypeRef<TValueTypeId extends string, TValueTypes extends readonly ValueType[]> =
   ResolveValueType<TValueTypes, TValueTypeId> extends infer TValueType
-    ? TValueType extends ValueType
-      ? InferSchema<TValueType["schema"], TValueTypes>
-      : unknown
+    ? [TValueType] extends [never]
+      ? unknown
+      : TValueType extends ValueType
+        ? InferSchema<TValueType["schema"], TValueTypes>
+        : unknown
     : unknown
 
 type RequiredFieldIds<TFields extends Record<string, ObjectFieldSchema>> = {
@@ -107,7 +113,7 @@ type InferValueTypeRefSchema<
  */
 export type InferSchema<
   TSchema extends Schema,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = TSchema extends PrimitiveSchema
   ? PrimitiveSchemaValueMap[TSchema]
   : TSchema extends ComplexSchema
@@ -119,7 +125,7 @@ export type InferSchema<
 /** Property-level value inference with nullable support. */
 export type InferPropertyValue<
   TProperty extends Pick<Property, "schema" | "nullable">,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = TProperty["nullable"] extends true
   ? InferSchema<TProperty["schema"], TValueTypes> | null
   : InferSchema<TProperty["schema"], TValueTypes>
@@ -140,7 +146,7 @@ type InferPropertySemanticTypeFromValueTypeRef<
 
 export type InferPropertySemanticType<
   TProperty extends Pick<Property, "schema" | "semanticType">,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = TProperty["semanticType"] extends QuantitativeTypeId
   ? TProperty["semanticType"]
   : InferPropertySemanticTypeFromValueTypeRef<TProperty, TValueTypes>
@@ -154,7 +160,7 @@ export type InferPropertySemanticType<
  */
 export type InferPropertyUnit<
   TProperty extends Pick<Property, "schema" | "semanticType">,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > =
   InferPropertySemanticType<TProperty, TValueTypes> extends infer TSemanticType extends
     QuantitativeTypeId
@@ -165,7 +171,7 @@ export type InferPropertyUnit<
 
 export type InferObjectProperties<
   TObjectType extends { properties: readonly Property[] },
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > =
   // Object types whose property ids are not statically known (the broad
   // `ObjectTypeWithPropertyTokens` base, e.g. as a generic constraint or
@@ -203,7 +209,7 @@ export type InferTelemetryPropertyIds<TObjectType extends { properties: readonly
  */
 export type InferTelemetryBatchProperties<
   TObjectType extends { properties: readonly Property[] },
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = {
   [P in Extract<
     TObjectType["properties"][number],

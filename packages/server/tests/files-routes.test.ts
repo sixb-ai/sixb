@@ -8,7 +8,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -119,7 +118,7 @@ class TestDirectBlobStorage extends InMemoryBlobStorage implements DirectUploadB
 }
 
 function createFilesApi(blobStorage = new InMemoryBlobStorage()) {
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: "test-project",
     ontology: [Document],
     broker: new InMemoryBroker(),

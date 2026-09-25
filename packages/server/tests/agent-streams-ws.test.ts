@@ -8,7 +8,6 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type JsonValue,
-  type OntologySource,
   type Principal,
   SixbHost,
   type SixbHostOptions,
@@ -280,7 +279,7 @@ describe("/ws/agents", () => {
 
 describe("canAccessAgentRunStream", () => {
   test("allows owners and rejects other authenticated principals", async () => {
-    const sixb = createSixbInstance<readonly OntologySource[]>({
+    const sixb = createSixbInstance({
       id: projectId,
       ontology: [],
       broker: new InMemoryBroker(),
@@ -328,7 +327,7 @@ describe("canAccessAgentRunStream", () => {
   })
 
   test("rejects unknown run ids instead of authorizing them through a supplied thread", async () => {
-    const sixb = createSixbInstance<readonly OntologySource[]>({
+    const sixb = createSixbInstance({
       id: projectId,
       ontology: [],
       broker: new InMemoryBroker(),
@@ -353,7 +352,7 @@ describe("canAccessAgentRunStream", () => {
 
 describe("canAccessAgentThreadActivity", () => {
   test("filters project activity by durable run, thread, project, and owner", async () => {
-    const sixb = createSixbInstance<readonly OntologySource[]>({
+    const sixb = createSixbInstance({
       id: projectId,
       ontology: [],
       broker: new InMemoryBroker(),
@@ -409,10 +408,7 @@ describe("canAccessAgentThreadActivity", () => {
   })
 })
 
-function requestSdk(
-  sixb: SixbHost<readonly OntologySource[]>,
-  authorization: AuthorizationContext
-) {
+function requestSdk(sixb: SixbHost, authorization: AuthorizationContext) {
   return bindRequestExecution(sixb, {
     request: new Request("http://localhost/ws/agents", {
       headers: { "x-request-id": "req_agent_stream_test" },
@@ -421,27 +417,22 @@ function requestSdk(
   })
 }
 
-function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbHostOptions<TOntologySources>
-): SixbHost<TOntologySources> {
-  return new SixbHost<TOntologySources>(options)
+function createSixbInstance(options: SixbHostOptions): SixbHost {
+  return new SixbHost(options)
 }
 
 async function withAgentWsServer(
-  run: (context: { baseUrl: string; sixb: SixbHost<readonly OntologySource[]> }) => Promise<void>
+  run: (context: { baseUrl: string; sixb: SixbHost }) => Promise<void>
 ): Promise<void>
 async function withAgentWsServer(
   options: { readonly auth?: boolean },
-  run: (context: { baseUrl: string; sixb: SixbHost<readonly OntologySource[]> }) => Promise<void>
+  run: (context: { baseUrl: string; sixb: SixbHost }) => Promise<void>
 ): Promise<void>
 async function withAgentWsServer(
   optionsOrRun:
     | { readonly auth?: boolean }
-    | ((context: { baseUrl: string; sixb: SixbHost<readonly OntologySource[]> }) => Promise<void>),
-  maybeRun?: (context: {
-    baseUrl: string
-    sixb: SixbHost<readonly OntologySource[]>
-  }) => Promise<void>
+    | ((context: { baseUrl: string; sixb: SixbHost }) => Promise<void>),
+  maybeRun?: (context: { baseUrl: string; sixb: SixbHost }) => Promise<void>
 ): Promise<void> {
   const options = typeof optionsOrRun === "function" ? {} : optionsOrRun
   const run = typeof optionsOrRun === "function" ? optionsOrRun : maybeRun
@@ -451,7 +442,7 @@ async function withAgentWsServer(
 
   const port = await getFreePort()
   const baseUrl = `http://127.0.0.1:${port}`
-  const sixb = createSixbInstance<readonly OntologySource[]>({
+  const sixb = createSixbInstance({
     id: projectId,
     ontology: [],
     broker: new InMemoryBroker(),
@@ -478,7 +469,7 @@ async function withAgentWsServer(
 }
 
 async function appendAgentStreamRecord(
-  sixb: SixbHost<readonly OntologySource[]>,
+  sixb: SixbHost,
   input:
     | { readonly type: "agent.run.started"; readonly runId: string }
     | { readonly type: "agent.ui.chunk"; readonly runId: string; readonly chunkIndex: number }
@@ -505,7 +496,7 @@ async function appendAgentStreamRecord(
 }
 
 async function advanceDurableRun(
-  sixb: SixbHost<readonly OntologySource[]>,
+  sixb: SixbHost,
   input:
     | { readonly type: "agent.run.started"; readonly runId: string }
     | { readonly type: "agent.ui.chunk"; readonly runId: string; readonly chunkIndex: number }
@@ -727,7 +718,7 @@ function authz(principal: Principal, canRunAgent = false): AuthorizationContext 
   }
 }
 
-function agentStorage(sixb: SixbHost<readonly OntologySource[]>): AgentStorage {
+function agentStorage(sixb: SixbHost): AgentStorage {
   if (!sixb.storage.agents) {
     throw new Error("Expected test Sixb instance to include agent storage")
   }

@@ -20,7 +20,7 @@ Run these from your project root:
 | `sixb init [directory]` | Initialize a project in a directory. |
 | `sixb dev` | Start local API, Atlas, app, and workers. |
 | `sixb build` | Build the runtime and browser assets into `.sixb/dist`. |
-| `sixb typegen` | Generate ontology types for client queries. |
+| `sixb typegen` | Generate ontology types for typed queries. |
 | `sixb check` | Validate the project and check provider health. |
 | `sixb db migrate` | Apply storage migrations. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |

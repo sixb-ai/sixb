@@ -51,7 +51,7 @@ const magicLinkStrategy: MagicLinkAuthStrategy = {
 }
 
 async function seedAuthenticatedUser(
-  sixb: SixbHost<readonly []>,
+  sixb: SixbHost,
   deps: ReturnType<typeof createTestRuntimeDeps>,
   params: { readonly userId: string; readonly email: string; readonly groupIds: readonly string[] }
 ): Promise<Request> {
@@ -113,7 +113,7 @@ function createInviteRuntime(options: { readonly strategy?: MagicLinkAuthStrateg
         throw new Error("unused")
       },
     } satisfies MagicLinkAuthStrategy)
-  const sixb = new SixbHost<readonly []>({
+  const sixb = new SixbHost({
     id: "project-a",
     ontology: [] as const,
     ...deps,
@@ -874,7 +874,7 @@ describe("SixbHost auth runtime", () => {
 
     expect(
       () =>
-        new SixbHost<readonly []>({
+        new SixbHost({
           ontology: [] as const,
           ...deps,
           auth: strategy,
@@ -1290,7 +1290,7 @@ describe("SixbHost auth runtime", () => {
     const deps = createTestRuntimeDeps()
     expect(
       () =>
-        new SixbHost<readonly []>({
+        new SixbHost({
           ontology: [] as const,
           ...deps,
           auth: { strategy: authStrategy, session: { cacheTtlMs: -1 } },
@@ -1400,7 +1400,7 @@ describe("SixbHost auth runtime", () => {
 
 function createMemberRuntime() {
   const deps = createTestRuntimeDeps()
-  const sixb = new SixbHost<readonly []>({
+  const sixb = new SixbHost({
     id: "project-a",
     ontology: [] as const,
     ...deps,
@@ -1422,7 +1422,7 @@ function createMemberRuntime() {
 
 async function seedMember(
   deps: ReturnType<typeof createTestRuntimeDeps>,
-  sixb: SixbHost<readonly []>,
+  sixb: SixbHost,
   params: {
     readonly userId: string
     readonly email: string

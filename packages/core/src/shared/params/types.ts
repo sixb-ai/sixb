@@ -6,6 +6,7 @@ import type {
   SchemaOrRef,
   ValueType,
 } from "../../ontology"
+import type { RegisteredValueTypes } from "../../ontology/registered"
 import type { QuantitativeTypeId } from "../../ontology/units"
 
 type Simplify<T> = { [K in keyof T]: T[K] } & {}
@@ -57,14 +58,14 @@ type InferStructuredParamValue<
 
 type InferParamSchemaValue<
   TSchema extends SchemaOrRef,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = TSchema extends keyof ParamPrimitiveSchemaValues
   ? ParamPrimitiveSchemaValues[TSchema]
   : InferStructuredParamValue<TSchema, TValueTypes>
 
 type InferParamValue<
   TParam extends ParamConfig,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = TParam["nullable"] extends true
   ? InferParamSchemaValue<TParam["schema"], TValueTypes> | null
   : InferParamSchemaValue<TParam["schema"], TValueTypes>
@@ -72,7 +73,7 @@ type InferParamValue<
 /** Infer the validated runtime input represented by a parameter config. */
 export type InferParams<
   TParams extends ParamsConfig,
-  TValueTypes extends readonly ValueType[] = [],
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
 > = string extends keyof TParams
   ? Record<string, unknown>
   : Simplify<

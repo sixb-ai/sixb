@@ -114,25 +114,24 @@ export type EditablePropertyId<TObjectType extends ObjectType> =
 
 type StaticPropertyMap<
   TProperties extends readonly Property[],
-  TValueTypes extends readonly ValueType[],
   TMode extends "create" | "update",
 > = string extends TProperties[number]["id"]
   ? Record<string, unknown>
   : Simplify<{
       [TProp in TProperties[number] as TMode extends "create"
         ? CreatablePropertyId<TProp>
-        : SettablePropertyId<TProp>]?: InferPropertyValue<TProp, TValueTypes>
+        : SettablePropertyId<TProp>]?: InferPropertyValue<TProp>
     }>
 
-export type EditCreateProperties<
-  TObjectType extends ObjectType,
-  TValueTypes extends readonly ValueType[] = [],
-> = StaticPropertyMap<TObjectType["properties"], TValueTypes, "create">
+export type EditCreateProperties<TObjectType extends ObjectType> = StaticPropertyMap<
+  TObjectType["properties"],
+  "create"
+>
 
-export type EditUpdateProperties<
-  TObjectType extends ObjectType,
-  TValueTypes extends readonly ValueType[] = [],
-> = StaticPropertyMap<TObjectType["properties"], TValueTypes, "update">
+export type EditUpdateProperties<TObjectType extends ObjectType> = StaticPropertyMap<
+  TObjectType["properties"],
+  "update"
+>
 
 type LinkProperties<TLink extends { properties?: readonly Property[] }> = TLink extends {
   properties: infer TProperties extends readonly Property[]
@@ -147,23 +146,18 @@ type RequiredLinkPropertyId<TProperty extends Property> = TProperty extends { re
   ? LinkPropertyId<TProperty>
   : never
 
-type EditLinkProperties<
-  TLink extends { properties?: readonly Property[] },
-  TValueTypes extends readonly ValueType[],
-> = string extends LinkProperties<TLink>[number]["id"]
-  ? Record<string, unknown>
-  : Simplify<
-      {
-        [TProp in LinkProperties<TLink>[number] as RequiredLinkPropertyId<TProp>]: InferPropertyValue<
-          TProp,
-          TValueTypes
-        >
-      } & {
-        [TProp in LinkProperties<TLink>[number] as TProp extends { required: true }
-          ? never
-          : LinkPropertyId<TProp>]?: InferPropertyValue<TProp, TValueTypes>
-      }
-    >
+type EditLinkProperties<TLink extends { properties?: readonly Property[] }> =
+  string extends LinkProperties<TLink>[number]["id"]
+    ? Record<string, unknown>
+    : Simplify<
+        {
+          [TProp in LinkProperties<TLink>[number] as RequiredLinkPropertyId<TProp>]: InferPropertyValue<TProp>
+        } & {
+          [TProp in LinkProperties<TLink>[number] as TProp extends { required: true }
+            ? never
+            : LinkPropertyId<TProp>]?: InferPropertyValue<TProp>
+        }
+      >
 
 type RequiredLinkPropertyIds<TLink extends { properties?: readonly Property[] }> =
   LinkProperties<TLink>[number] extends infer TProperty extends Property
@@ -191,34 +185,32 @@ type EditLinkTargetRef<TLinkToken extends LinkToken<string, string, string | rea
     ? EditObjectRef<string>
     : EditObjectRef<ResolveTargetObjectTypeId<TLinkToken["targetObjectTypeId"]>>
 
-type EditLinkOptionsArg<
-  TLinkToken extends LinkToken<string, string, string | readonly string[]>,
-  TValueTypes extends readonly ValueType[],
-> = string extends TLinkToken["id"]
-  ? [options?: { readonly properties?: Readonly<Record<string, unknown>> }]
-  : HasLinkProperties<TLinkToken["link"]> extends false
-    ? [options?: { readonly properties?: never }]
-    : HasRequiredLinkProperties<TLinkToken["link"]> extends true
-      ? [
-          options: {
-            readonly properties: EditLinkProperties<TLinkToken["link"], TValueTypes>
-          },
-        ]
-      : [
-          options?: {
-            readonly properties?: EditLinkProperties<TLinkToken["link"], TValueTypes>
-          },
-        ]
+type EditLinkOptionsArg<TLinkToken extends LinkToken<string, string, string | readonly string[]>> =
+  string extends TLinkToken["id"]
+    ? [options?: { readonly properties?: Readonly<Record<string, unknown>> }]
+    : HasLinkProperties<TLinkToken["link"]> extends false
+      ? [options?: { readonly properties?: never }]
+      : HasRequiredLinkProperties<TLinkToken["link"]> extends true
+        ? [
+            options: {
+              readonly properties: EditLinkProperties<TLinkToken["link"]>
+            },
+          ]
+        : [
+            options?: {
+              readonly properties?: EditLinkProperties<TLinkToken["link"]>
+            },
+          ]
 
 export interface RecordEditsOptions {
   readonly runId: string
   readonly valueTypesById?: ReadonlyMap<string, ValueType>
 }
 
-export interface RecordEditsContext<TValueTypes extends readonly ValueType[] = []> {
+export interface RecordEditsContext {
   objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
     objectType: TObjectType
-  ): EditObjectSetRecorder<TObjectType, TValueTypes>
+  ): EditObjectSetRecorder<TObjectType>
 }
 
 export type RecordEditsHandlerResult = ReturnType<() => void>
@@ -226,26 +218,18 @@ export type RecordEditsHandlerResult = ReturnType<() => void>
 export type RecordEditsHandlerReturn = RecordEditsHandlerResult | Promise<RecordEditsHandlerResult>
 
 export type RecordEditsHandler<
-  TValueTypes extends readonly ValueType[] = [],
   TResult extends RecordEditsHandlerReturn = RecordEditsHandlerReturn,
-> = (ctx: RecordEditsContext<TValueTypes>) => TResult
+> = (ctx: RecordEditsContext) => TResult
 
-export interface EditObjectSetRecorder<
-  TObjectType extends ObjectType,
-  TValueTypes extends readonly ValueType[] = [],
-> {
-  byId(primaryId: string): EditObjectHandle<TObjectType, TValueTypes>
+export interface EditObjectSetRecorder<TObjectType extends ObjectType> {
+  byId(primaryId: string): EditObjectHandle<TObjectType>
 
-  create(
-    properties: EditCreateProperties<TObjectType, TValueTypes>
-  ): EditObjectHandle<TObjectType, TValueTypes>
+  create(properties: EditCreateProperties<TObjectType>): EditObjectHandle<TObjectType>
 }
 
-export interface EditObjectHandle<
-  TObjectType extends ObjectType = ObjectType,
-  TValueTypes extends readonly ValueType[] = [],
-> extends TypedEditObjectRef<TObjectType> {
-  update(properties: EditUpdateProperties<TObjectType, TValueTypes>): void
+export interface EditObjectHandle<TObjectType extends ObjectType = ObjectType>
+  extends TypedEditObjectRef<TObjectType> {
+  update(properties: EditUpdateProperties<TObjectType>): void
 
   /** Clears managed values, leaving the property absent from managed authority. */
   unset(...propertyIds: readonly EditablePropertyId<TObjectType>[]): void
@@ -260,7 +244,7 @@ export interface EditObjectHandle<
   link<const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>>(
     link: TLinkToken,
     target: EditLinkTargetRef<TLinkToken>,
-    ...options: EditLinkOptionsArg<TLinkToken, TValueTypes>
+    ...options: EditLinkOptionsArg<TLinkToken>
   ): void
 
   unlink<const TLinkToken extends LinkToken<TObjectType["id"], string, string | readonly string[]>>(

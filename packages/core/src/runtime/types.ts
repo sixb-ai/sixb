@@ -31,7 +31,7 @@ import type {
   ValidatedObjectQuery,
 } from "../objects/query"
 import type { ObjectVectorHandle, VectorProfileName } from "../objects/vectors/types"
-import type { ObjectLinkTargetType, ObjectRef, ObjectType, Property, ValueType } from "../ontology"
+import type { ObjectLinkTargetType, ObjectRef, ObjectType, Property } from "../ontology"
 import type {
   InferObjectProperties,
   InferPropertyUnit,
@@ -39,6 +39,7 @@ import type {
   InferTelemetryBatchProperties,
   InferTelemetryPropertyIds,
 } from "../ontology/inference"
+import type { RegisteredObjectType } from "../ontology/registered"
 import type { OntologyDocumentInput, OntologyRegistry, OntologySource } from "../ontology/registry"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../ontology/tokens"
 import type { Queues } from "../queues"
@@ -91,46 +92,23 @@ export type BatchItemResult<T> =
 // Re-export for backward compatibility — canonical definitions live in ontology/registry.ts
 export type { OntologyDocumentInput, OntologySource }
 
-type ObjectTypeFromSource<TSource> = TSource extends {
-  objectTypes: infer TObjectTypes extends readonly ObjectTypeWithPropertyTokens[]
-}
-  ? TObjectTypes[number]
-  : TSource extends ObjectTypeWithPropertyTokens
-    ? TSource
-    : never
-
-type ValueTypeFromSource<TSource> = TSource extends {
-  valueTypes: infer TValueTypes extends readonly ValueType[]
-}
-  ? TValueTypes[number]
-  : never
-
-export type RegisteredObjectType<TOntologySources extends readonly OntologySource[]> =
-  ObjectTypeFromSource<TOntologySources[number]>
-
-export type RegisteredValueTypes<TOntologySources extends readonly OntologySource[]> =
-  readonly ValueTypeFromSource<TOntologySources[number]>[]
-
 // A type alias, not an interface: relating two generic-interface
 // instantiations makes TypeScript measure the interface's variance by probing
 // it with marker types, and `InferObjectProperties<marker>` overflows its
 // recursion limits (TS2589) in consumers like `rows.map(...)`. The alias
 // relates structurally, which stays within limits.
-export type TwinObject<TObjectType extends ObjectType, TValueTypes extends readonly ValueType[]> = {
+export type TwinObject<TObjectType extends ObjectType> = {
   primaryId: string
   objectTypeId: TObjectType["id"]
-  properties: InferObjectProperties<TObjectType, TValueTypes>
+  properties: InferObjectProperties<TObjectType>
   createdAt: Date
   updatedAt: Date
 }
 
-type MaterializedObjectRow<
-  TObjectType extends Pick<ObjectType, "id" | "properties">,
-  TValueTypes extends readonly ValueType[],
-> = {
+type MaterializedObjectRow<TObjectType extends Pick<ObjectType, "id" | "properties">> = {
   primaryId: string
   objectTypeId: TObjectType["id"]
-  properties: InferObjectProperties<TObjectType, TValueTypes>
+  properties: InferObjectProperties<TObjectType>
   createdAt: Date
   updatedAt: Date
 }
@@ -167,43 +145,34 @@ type PropertyById<
 type PropertyWhereValue<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
-  TValueTypes extends readonly ValueType[],
-> = InferPropertyValue<PropertyById<TObjectType, TPropertyId>, TValueTypes>
+> = InferPropertyValue<PropertyById<TObjectType, TPropertyId>>
 
 type PropertyWhereContainsValue<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
-  TValueTypes extends readonly ValueType[],
 > =
-  NonNullable<PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>> extends string
+  NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends string
     ? string
-    : NonNullable<
-          PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
-        > extends readonly (infer TItem)[]
+    : NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends readonly (infer TItem)[]
       ? TItem
-      : NonNullable<PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>> extends Record<
-            string,
-            unknown
-          >
+      : NonNullable<PropertyWhereValue<TObjectType, TPropertyId>> extends Record<string, unknown>
         ? string
         : never
 
 type PropertyWhereComparisonClause<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
-  TValueTypes extends readonly ValueType[],
 > = Omit<ObjectQueryPredicateComparison, "propertyId" | "value"> & {
   propertyId: TPropertyId
-  value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
+  value: PropertyWhereValue<TObjectType, TPropertyId>
 }
 
 type PropertyWhereInClause<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
-  TValueTypes extends readonly ValueType[],
 > = Omit<ObjectQueryPredicateIn, "propertyId" | "values"> & {
   propertyId: TPropertyId
-  values: readonly PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>[]
+  values: readonly PropertyWhereValue<TObjectType, TPropertyId>[]
 }
 
 type PropertyWhereExistsClause<
@@ -216,49 +185,44 @@ type PropertyWhereExistsClause<
 type PropertyWhereContainsClause<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
-  TValueTypes extends readonly ValueType[],
 > = Omit<ObjectQueryPredicateContains, "propertyId" | "value"> & {
   propertyId: TPropertyId
-  value: PropertyWhereContainsValue<TObjectType, TPropertyId, TValueTypes>
+  value: PropertyWhereContainsValue<TObjectType, TPropertyId>
 }
 
 /** Predicate operators exposed on `where` builder properties. */
 type PropertyPredicate<
   TObjectType extends ObjectTypeWithPropertyTokens,
   TPropertyId extends TObjectType["properties"][number]["id"],
-  TValueTypes extends readonly ValueType[],
 > = {
   eq(
-    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "eq" }
+    value: PropertyWhereValue<TObjectType, TPropertyId>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "eq" }
   neq(
-    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "neq" }
+    value: PropertyWhereValue<TObjectType, TPropertyId>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "neq" }
   lt(
-    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "lt" }
+    value: PropertyWhereValue<TObjectType, TPropertyId>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "lt" }
   lte(
-    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "lte" }
+    value: PropertyWhereValue<TObjectType, TPropertyId>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "lte" }
   gt(
-    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "gt" }
+    value: PropertyWhereValue<TObjectType, TPropertyId>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "gt" }
   gte(
-    value: PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>
-  ): PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes> & { op: "gte" }
+    value: PropertyWhereValue<TObjectType, TPropertyId>
+  ): PropertyWhereComparisonClause<TObjectType, TPropertyId> & { op: "gte" }
   in(
-    values: readonly PropertyWhereValue<TObjectType, TPropertyId, TValueTypes>[]
-  ): PropertyWhereInClause<TObjectType, TPropertyId, TValueTypes>
+    values: readonly PropertyWhereValue<TObjectType, TPropertyId>[]
+  ): PropertyWhereInClause<TObjectType, TPropertyId>
   exists(value?: boolean): PropertyWhereExistsClause<TObjectType, TPropertyId>
   contains(
-    value: PropertyWhereContainsValue<TObjectType, TPropertyId, TValueTypes>
-  ): PropertyWhereContainsClause<TObjectType, TPropertyId, TValueTypes>
+    value: PropertyWhereContainsValue<TObjectType, TPropertyId>
+  ): PropertyWhereContainsClause<TObjectType, TPropertyId>
 }
 
-type PropertyWhereClause<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-> =
+type PropertyWhereClause<TObjectType extends ObjectTypeWithPropertyTokens> =
   HasKnownPropertyIds<TObjectType> extends false
     ?
         | ObjectQueryPredicateComparison
@@ -267,10 +231,10 @@ type PropertyWhereClause<
         | ObjectQueryPredicateContains
     : {
         [TPropertyId in TObjectType["properties"][number]["id"]]:
-          | PropertyWhereComparisonClause<TObjectType, TPropertyId, TValueTypes>
-          | PropertyWhereInClause<TObjectType, TPropertyId, TValueTypes>
+          | PropertyWhereComparisonClause<TObjectType, TPropertyId>
+          | PropertyWhereInClause<TObjectType, TPropertyId>
           | PropertyWhereExistsClause<TObjectType, TPropertyId>
-          | PropertyWhereContainsClause<TObjectType, TPropertyId, TValueTypes>
+          | PropertyWhereContainsClause<TObjectType, TPropertyId>
       }[TObjectType["properties"][number]["id"]]
 
 /**
@@ -297,16 +261,13 @@ type HasKnownPropertyIds<TObjectType extends ObjectTypeWithPropertyTokens> =
   string extends TObjectType["properties"][number]["id"] ? false : true
 
 /** Typed ObjectSet where predicate. Serialized shape matches object query IR predicates. */
-export type ObjectWhereClause<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-> =
-  | PropertyWhereClause<TObjectType, TValueTypes>
+export type ObjectWhereClause<TObjectType extends ObjectTypeWithPropertyTokens> =
+  | PropertyWhereClause<TObjectType>
   | (Omit<ObjectQueryPredicateGroup, "items"> & {
-      items: readonly ObjectWhereClause<TObjectType, TValueTypes>[]
+      items: readonly ObjectWhereClause<TObjectType>[]
     })
   | (Omit<ObjectQueryPredicateNot, "item"> & {
-      item: ObjectWhereClause<TObjectType, TValueTypes>
+      item: ObjectWhereClause<TObjectType>
     })
 
 /**
@@ -314,28 +275,18 @@ export type ObjectWhereClause<
  *
  * Example: `(r) => r.p.externalId.eq("RM-101")`
  */
-export type ObjectWhereBuilder<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-> = {
+export type ObjectWhereBuilder<TObjectType extends ObjectTypeWithPropertyTokens> = {
   p: HasKnownPropertyIds<TObjectType> extends false
     ? Record<string, UntypedPropertyPredicate>
     : {
         [TPropertyId in TObjectType["properties"][number]["id"]]: PropertyPredicate<
           TObjectType,
-          TPropertyId,
-          TValueTypes
+          TPropertyId
         >
       }
-  and(
-    ...items: readonly ObjectWhereClause<TObjectType, TValueTypes>[]
-  ): ObjectWhereClause<TObjectType, TValueTypes>
-  or(
-    ...items: readonly ObjectWhereClause<TObjectType, TValueTypes>[]
-  ): ObjectWhereClause<TObjectType, TValueTypes>
-  not(
-    item: ObjectWhereClause<TObjectType, TValueTypes>
-  ): ObjectWhereClause<TObjectType, TValueTypes>
+  and(...items: readonly ObjectWhereClause<TObjectType>[]): ObjectWhereClause<TObjectType>
+  or(...items: readonly ObjectWhereClause<TObjectType>[]): ObjectWhereClause<TObjectType>
+  not(item: ObjectWhereClause<TObjectType>): ObjectWhereClause<TObjectType>
 }
 
 export type TelemetryPropertyToken<TObjectType extends ObjectTypeWithPropertyTokens> =
@@ -354,19 +305,16 @@ export type ObjectSetQueryPropertyToken<TObjectType extends ObjectTypeWithProper
  * - if property has a semantic type, unit is required
  * - otherwise unit is disallowed
  */
-type TelemetryUnitField<TToken extends AnyPropertyToken, TValueTypes extends readonly ValueType[]> =
+type TelemetryUnitField<TToken extends AnyPropertyToken> =
   // If a property does not map to a semantic type, units are disallowed.
-  InferPropertyUnit<TToken["property"], TValueTypes> extends never
+  InferPropertyUnit<TToken["property"]> extends never
     ? { unit?: never }
-    : { unit: InferPropertyUnit<TToken["property"], TValueTypes> }
+    : { unit: InferPropertyUnit<TToken["property"]> }
 
-export type TelemetryAppendInput<
-  TToken extends AnyPropertyToken,
-  TValueTypes extends readonly ValueType[],
-> = {
-  value: InferPropertyValue<TToken["property"], TValueTypes>
+export type TelemetryAppendInput<TToken extends AnyPropertyToken> = {
+  value: InferPropertyValue<TToken["property"]>
   at: Date
-} & TelemetryUnitField<TToken, TValueTypes>
+} & TelemetryUnitField<TToken>
 
 export interface TelemetryHistoryInput {
   readonly from?: Date
@@ -385,11 +333,8 @@ export interface TelemetryHistoryInput {
 // A type alias for the same reason as `TwinObject` above: `history()` puts
 // `InferPropertyValue` in an output position, and probing a generic interface's variance there
 // overflows TS's recursion limits (TS2589) in consumers as ordinary as `points.map(...)`.
-export type TelemetryChannel<
-  TToken extends AnyPropertyToken,
-  TValueTypes extends readonly ValueType[],
-> = {
-  append(input: TelemetryAppendInput<TToken, TValueTypes>): Promise<void>
+export type TelemetryChannel<TToken extends AnyPropertyToken> = {
+  append(input: TelemetryAppendInput<TToken>): Promise<void>
   /**
    * Points for this series, oldest first unless `order: "desc"`.
    *
@@ -405,9 +350,9 @@ export type TelemetryChannel<
    */
   history(input?: TelemetryHistoryInput): Promise<
     readonly {
-      readonly value: InferPropertyValue<TToken["property"], TValueTypes>
+      readonly value: InferPropertyValue<TToken["property"]>
       readonly at: Date
-      readonly unit?: InferPropertyUnit<TToken["property"], TValueTypes>
+      readonly unit?: InferPropertyUnit<TToken["property"]>
     }[]
   >
 }
@@ -478,23 +423,35 @@ type LinkTargetObjectTypeId<TLinkToken> =
         : never
     : never
 
-type ObjectTypeForId<
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-  TObjectTypeId extends string,
-> = [Extract<TRegisteredObjectTypes, { id: TObjectTypeId }>] extends [never]
+type ObjectTypeForRegisteredId<TObjectTypeId extends string> = [
+  Extract<RegisteredObjectType, { id: TObjectTypeId }>,
+] extends [never]
   ? ObjectTypeWithPropertyTokens
-  : Extract<TRegisteredObjectTypes, { id: TObjectTypeId }>
+  : Extract<RegisteredObjectType, { id: TObjectTypeId }>
+
+/**
+ * Resolve an object type named by id, as seen from `TSource`.
+ *
+ * A self-reference (`link.self(...)`, or traversing one backwards) names the source's own id, so it
+ * resolves to the source without the generated registry; every other id goes through the registry.
+ */
+type ObjectTypeForId<TSource extends ObjectTypeWithPropertyTokens, TObjectTypeId extends string> = [
+  TObjectTypeId,
+] extends [TSource["id"]]
+  ? [TSource["id"]] extends [TObjectTypeId]
+    ? TSource
+    : ObjectTypeForRegisteredId<TObjectTypeId>
+  : ObjectTypeForRegisteredId<TObjectTypeId>
 
 type DirectObjectTypeForLink<TLinkToken> =
   TLinkToken extends LinkToken<string, string, LinkTargetObjectTypeIdValue, infer TLink>
     ? Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>
     : never
 
-type ObjectTypeForLinkTarget<
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-  TLinkToken,
-> = [DirectObjectTypeForLink<TLinkToken>] extends [never]
-  ? ObjectTypeForId<TRegisteredObjectTypes, LinkTargetObjectTypeId<TLinkToken>>
+type ObjectTypeForLinkTarget<TSource extends ObjectTypeWithPropertyTokens, TLinkToken> = [
+  DirectObjectTypeForLink<TLinkToken>,
+] extends [never]
+  ? ObjectTypeForId<TSource, LinkTargetObjectTypeId<TLinkToken>>
   : DirectObjectTypeForLink<TLinkToken>
 
 /**
@@ -559,13 +516,13 @@ type ObjectLinkCardinality<TLink> = TLink extends { cardinality: infer TCardinal
   ? TCardinality
   : "many"
 
-type ObjectLinkTarget<TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens, TLink> = [
+type ObjectLinkTarget<TSource extends ObjectTypeWithPropertyTokens, TLink> = [
   Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>,
 ] extends [never]
   ? TLink extends {
       targetObjectTypeId: infer TTargetObjectTypeId extends LinkTargetObjectTypeIdValue
     }
-    ? ObjectTypeForId<TRegisteredObjectTypes, ResolveTargetTypeId<TTargetObjectTypeId>>
+    ? ObjectTypeForId<TSource, ResolveTargetTypeId<TTargetObjectTypeId>>
     : ObjectTypeWithPropertyTokens
   : Extract<ObjectLinkTargetType<TLink>, ObjectTypeWithPropertyTokens>
 
@@ -581,72 +538,57 @@ type HasKnownObjectLinkIds<TObjectType extends Pick<ObjectType, "links">> =
  * A branded accumulator entry for one expanded link. Unconstrained on purpose —
  * keeping recursion out of constraints is what avoids TS2589.
  */
-type ExpansionNode<TLinkToken, TRegisteredObjectTypes, TTarget, TCardinality, TChildren> = {
+type ExpansionNode<TLinkToken, TTarget, TCardinality, TChildren> = {
   readonly __linkToken: TLinkToken
-  readonly __registeredObjectTypes: TRegisteredObjectTypes
   readonly __target: TTarget
   readonly __cardinality: TCardinality
   readonly __children: TChildren
 }
 
-/** The single-key accumulator contribution of one `.expand(link, …)` call. */
+/** The single-key accumulator contribution of one `.expand(link, …)` call from `TSource`. */
 type ExpansionEntry<
+  TSource extends ObjectTypeWithPropertyTokens,
   TLinkToken extends LinkToken<string, string, LinkTargetObjectTypeIdValue>,
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
   TChild,
 > = {
   [K in TLinkToken["id"]]: ExpansionNode<
     TLinkToken,
-    TRegisteredObjectTypes,
-    ObjectTypeForLinkTarget<TRegisteredObjectTypes, TLinkToken>,
+    ObjectTypeForLinkTarget<TSource, TLinkToken>,
     LinkTokenCardinality<TLinkToken>,
     TChild
   >
 }
 
-type ExpansionNodeForSource<TNode, TObjectType extends Pick<ObjectType, "id" | "links">> =
-  TNode extends ExpansionNode<
-    infer TLinkToken,
-    infer TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-    infer TTarget,
-    infer TCardinality,
-    infer TChildren
-  >
+type ExpansionNodeForSource<TNode, TObjectType extends ObjectTypeWithPropertyTokens> =
+  TNode extends ExpansionNode<infer TLinkToken, infer TTarget, infer TCardinality, infer TChildren>
     ? LinkTokenId<TLinkToken> extends infer TLinkId extends string
       ? HasKnownObjectLinkIds<TObjectType> extends true
         ? [ObjectLinkById<TObjectType, TLinkId>] extends [never]
           ? never
           : ExpansionNode<
               TLinkToken,
-              TRegisteredObjectTypes,
-              ObjectLinkTarget<TRegisteredObjectTypes, ObjectLinkById<TObjectType, TLinkId>>,
+              ObjectLinkTarget<TObjectType, ObjectLinkById<TObjectType, TLinkId>>,
               ObjectLinkCardinality<ObjectLinkById<TObjectType, TLinkId>>,
               TChildren
             >
         : LinkTokenSourceObjectTypeId<TLinkToken> extends TObjectType["id"]
-          ? ExpansionNode<TLinkToken, TRegisteredObjectTypes, TTarget, TCardinality, TChildren>
+          ? ExpansionNode<TLinkToken, TTarget, TCardinality, TChildren>
           : never
       : never
     : never
 
-type ExpansionLinksForSource<TLinks, TObjectType extends Pick<ObjectType, "id" | "links">> = {
+type ExpansionLinksForSource<TLinks, TObjectType extends ObjectTypeWithPropertyTokens> = {
   [K in keyof TLinks as [ExpansionNodeForSource<TLinks[K], TObjectType>] extends [never]
     ? never
     : K]: ExpansionNodeForSource<TLinks[K], TObjectType>
 }
 
 /** Materialize one accumulated expansion entry into its row value. */
-type ExpandedLinkType<TNode, TValueTypes extends readonly ValueType[]> =
-  TNode extends ExpansionNode<
-    unknown,
-    infer TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-    infer TTarget,
-    infer TCardinality,
-    infer TChildren
-  >
+type ExpandedLinkType<TNode> =
+  TNode extends ExpansionNode<unknown, infer TTarget, infer TCardinality, infer TChildren>
     ? TCardinality extends "one"
-      ? ExpandedRowType<TTarget, TChildren, TValueTypes, TRegisteredObjectTypes> | null
-      : ExpandedRowType<TTarget, TChildren, TValueTypes, TRegisteredObjectTypes>[]
+      ? ExpandedRowType<TTarget, TChildren> | null
+      : ExpandedRowType<TTarget, TChildren>[]
     : never
 
 /**
@@ -673,44 +615,35 @@ type UnresolvedExpansionRow = {
   updatedAt: Date
 }
 
-type ExpandedRowType<
-  TTarget,
-  TChildren,
-  TValueTypes extends readonly ValueType[],
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-> =
-  TTarget extends Pick<ObjectType, "id" | "properties" | "links">
-    ? string extends TTarget["id"]
-      ? // Target degraded to the loose base. Distinguish the two causes:
-        string extends TRegisteredObjectTypes["id"]
-        ? // No manifest at all → graceful loose default (unchanged, non-breaking).
-          ExpandedRowForSource<
-            TTarget,
-            TValueTypes,
-            ExpansionLinksForSource<TChildren, TTarget>,
-            { linkProperties?: Record<string, unknown> }
-          >
-        : // Manifest present but this target id is absent → loud (was silent).
-          UnresolvedExpansionRow
-      : ExpandedRowForSource<
+type ExpandedRowType<TTarget, TChildren> = TTarget extends ObjectTypeWithPropertyTokens
+  ? string extends TTarget["id"]
+    ? // Target degraded to the loose base. Distinguish the two causes:
+      string extends RegisteredObjectType["id"]
+      ? // No manifest at all → graceful loose default (unchanged, non-breaking).
+        ExpandedRowForSource<
           TTarget,
-          TValueTypes,
           ExpansionLinksForSource<TChildren, TTarget>,
           { linkProperties?: Record<string, unknown> }
         >
-    : never
+      : // Manifest present but this target id is absent → loud (was silent).
+        UnresolvedExpansionRow
+    : ExpandedRowForSource<
+        TTarget,
+        ExpansionLinksForSource<TChildren, TTarget>,
+        { linkProperties?: Record<string, unknown> }
+      >
+  : never
 
 type ExpandedRowForSource<
-  TObjectType extends Pick<ObjectType, "id" | "properties" | "links">,
-  TValueTypes extends readonly ValueType[],
+  TObjectType extends ObjectTypeWithPropertyTokens,
   TLinks,
   TExtra = unknown,
 > = Simplify<
-  MaterializedObjectRow<TObjectType, TValueTypes> &
+  MaterializedObjectRow<TObjectType> &
     TExtra &
     ([keyof TLinks] extends [never]
       ? unknown
-      : { links: { [K in keyof TLinks]: ExpandedLinkType<TLinks[K], TValueTypes> } })
+      : { links: { [K in keyof TLinks]: ExpandedLinkType<TLinks[K]> } })
 >
 
 /**
@@ -720,10 +653,9 @@ type ExpandedRowForSource<
  */
 export type ObjectQueryRow<
   TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
   TLinks,
 > = TObjectType extends ObjectTypeWithPropertyTokens
-  ? ExpandedRowForSource<TObjectType, TValueTypes, ExpansionLinksForSource<TLinks, TObjectType>> & {
+  ? ExpandedRowForSource<TObjectType, ExpansionLinksForSource<TLinks, TObjectType>> & {
       score?: number
     }
   : never
@@ -747,7 +679,6 @@ export type ObjectQueryRow<
  */
 export type ObjectExpandBuilder<
   TObjectType extends ObjectTypeWithPropertyTokens,
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
   TAccumulated = unknown,
 > =
   HasKnownObjectType<TObjectType> extends false
@@ -764,25 +695,21 @@ export type ObjectExpandBuilder<
           TChild = unknown,
         >(
           link: TLinkToken,
-          build: ObjectExpandNested<TLinkToken, TRegisteredObjectTypes, TChild>
+          build: ObjectExpandNested<TObjectType, TLinkToken, TChild>
         ): ObjectExpandBuilder<
           TObjectType,
-          TRegisteredObjectTypes,
-          TAccumulated & ExpansionEntry<TLinkToken, TRegisteredObjectTypes, TChild>
+          TAccumulated & ExpansionEntry<TObjectType, TLinkToken, TChild>
         >
         expand<
           TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
           TChild = unknown,
         >(
           link: TLinkToken,
-          options?: ObjectExpandOptions<
-            ObjectTypeForLinkTarget<TRegisteredObjectTypes, TLinkToken>
-          >,
-          build?: ObjectExpandNested<TLinkToken, TRegisteredObjectTypes, TChild>
+          options?: ObjectExpandOptions<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
+          build?: ObjectExpandNested<TObjectType, TLinkToken, TChild>
         ): ObjectExpandBuilder<
           TObjectType,
-          TRegisteredObjectTypes,
-          TAccumulated & ExpansionEntry<TLinkToken, TRegisteredObjectTypes, TChild>
+          TAccumulated & ExpansionEntry<TObjectType, TLinkToken, TChild>
         >
       }
 
@@ -812,24 +739,15 @@ type UntypedExpandBuilder = {
  * `TChild` from the argument, so it would silently fall back to `unknown`.
  */
 type ObjectExpandNested<
+  TSource extends ObjectTypeWithPropertyTokens,
   TLinkToken extends LinkToken<string, string, LinkTargetObjectTypeIdValue>,
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
   TChild,
 > = (
-  nested: ObjectExpandBuilder<
-    ObjectTypeForLinkTarget<TRegisteredObjectTypes, TLinkToken>,
-    TRegisteredObjectTypes
-  >
-) => ObjectExpandBuilder<
-  ObjectTypeForLinkTarget<TRegisteredObjectTypes, TLinkToken>,
-  TRegisteredObjectTypes,
-  TChild
->
+  nested: ObjectExpandBuilder<ObjectTypeForLinkTarget<TSource, TLinkToken>>
+) => ObjectExpandBuilder<ObjectTypeForLinkTarget<TSource, TLinkToken>, TChild>
 
 export interface ObjectQueryBuilder<
   TObjectType extends ObjectTypeWithPropertyTokens,
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
   // Accumulated expansion shape, widened by each `.expand(...)` and materialized
   // into the row's `links` by the `list`/`first` terminals. Empty `{}` until the
   // first expand; `traverse` resets it (the new result type has its own links).
@@ -841,44 +759,34 @@ export interface ObjectQueryBuilder<
   /** Add a typed property predicate at the current object type. */
   where(
     where: (
-      builder: ObjectWhereBuilder<TObjectType, TValueTypes>
-    ) =>
-      | ObjectWhereClause<TObjectType, TValueTypes>
-      | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
+      builder: ObjectWhereBuilder<TObjectType>
+    ) => ObjectWhereClause<TObjectType> | readonly ObjectWhereClause<TObjectType>[]
+  ): ObjectQueryBuilder<TObjectType, TLinks>
 
   /** Search configured text fields at the current object type. */
   search(
     query: string,
     options?: { fields?: readonly ObjectSetQueryPropertyToken<TObjectType>[] }
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
+  ): ObjectQueryBuilder<TObjectType, TLinks>
 
   /** Search a profile; text is embedded server-side with its configured model. */
   vector(
     profile: VectorProfileName<TObjectType>,
     vector: string,
     options: { k: number }
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
+  ): ObjectQueryBuilder<TObjectType, TLinks>
 
   /** Follow an outgoing link and make the linked object type the current result type. */
   traverse<TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>>(
     link: TLinkToken,
     options?: { direction?: "outgoing" }
-  ): ObjectQueryBuilder<
-    ObjectTypeForLinkTarget<TRegisteredObjectTypes, TLinkToken>,
-    TRegisteredObjectTypes,
-    TValueTypes
-  >
+  ): ObjectQueryBuilder<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>
 
   /** Follow an incoming link and make the link source object type the current result type. */
   traverse<TLinkToken extends LinkToken<string, string, TObjectType["id"] | readonly string[]>>(
     link: TLinkToken,
     options: { direction: "incoming" }
-  ): ObjectQueryBuilder<
-    ObjectTypeForId<TRegisteredObjectTypes, TLinkToken["objectTypeId"]>,
-    TRegisteredObjectTypes,
-    TValueTypes
-  >
+  ): ObjectQueryBuilder<ObjectTypeForId<TObjectType, TLinkToken["objectTypeId"]>>
 
   /**
    * Attach an outgoing link's target objects to each row under `.links`, without
@@ -896,46 +804,31 @@ export interface ObjectQueryBuilder<
     TChild = unknown,
   >(
     link: TLinkToken,
-    build: ObjectExpandNested<TLinkToken, TRegisteredObjectTypes, TChild>
-  ): ObjectQueryBuilder<
-    TObjectType,
-    TRegisteredObjectTypes,
-    TValueTypes,
-    TLinks & ExpansionEntry<TLinkToken, TRegisteredObjectTypes, TChild>
-  >
+    build: ObjectExpandNested<TObjectType, TLinkToken, TChild>
+  ): ObjectQueryBuilder<TObjectType, TLinks & ExpansionEntry<TObjectType, TLinkToken, TChild>>
   expand<
     TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>,
     TChild = unknown,
   >(
     link: TLinkToken,
-    options?: ObjectExpandOptions<ObjectTypeForLinkTarget<TRegisteredObjectTypes, TLinkToken>>,
-    build?: ObjectExpandNested<TLinkToken, TRegisteredObjectTypes, TChild>
-  ): ObjectQueryBuilder<
-    TObjectType,
-    TRegisteredObjectTypes,
-    TValueTypes,
-    TLinks & ExpansionEntry<TLinkToken, TRegisteredObjectTypes, TChild>
-  >
+    options?: ObjectExpandOptions<ObjectTypeForLinkTarget<TObjectType, TLinkToken>>,
+    build?: ObjectExpandNested<TObjectType, TLinkToken, TChild>
+  ): ObjectQueryBuilder<TObjectType, TLinks & ExpansionEntry<TObjectType, TLinkToken, TChild>>
 
   /** Add property ordering at the current object type. */
   orderBy(
     property: ObjectSetQueryPropertyToken<TObjectType>,
     direction?: ObjectQuerySortDirection
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
+  ): ObjectQueryBuilder<TObjectType, TLinks>
 
   /** Add relevance ordering for providers that support ranked search. */
-  orderByRelevance(
-    direction?: ObjectQuerySortDirection
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
+  orderByRelevance(direction?: ObjectQuerySortDirection): ObjectQueryBuilder<TObjectType, TLinks>
 
   /** Bound the result count. */
-  limit(limit: number): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
+  limit(limit: number): ObjectQueryBuilder<TObjectType, TLinks>
 
   /** Request one page of results. */
-  page(input: {
-    pageSize: number
-    pageToken?: string
-  }): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes, TLinks>
+  page(input: { pageSize: number; pageToken?: string }): ObjectQueryBuilder<TObjectType, TLinks>
 
   /** Validate this query against the registered ontology. */
   validate(): ValidatedObjectQuery
@@ -947,20 +840,20 @@ export interface ObjectQueryBuilder<
   formatExplanation(): string
 
   /** Execute this query and return matching objects (rows carry `.links` when expanded). */
-  list(): Promise<ListResult<ObjectQueryRow<TObjectType, TValueTypes, TLinks>>>
+  list(): Promise<ListResult<ObjectQueryRow<TObjectType, TLinks>>>
   list(options: {
     includeTotal: false
     signal?: AbortSignal
-  }): Promise<ListResultWithoutTotal<ObjectQueryRow<TObjectType, TValueTypes, TLinks>>>
+  }): Promise<ListResultWithoutTotal<ObjectQueryRow<TObjectType, TLinks>>>
   list(options: {
     includeTotal?: true
     signal?: AbortSignal
-  }): Promise<ListResult<ObjectQueryRow<TObjectType, TValueTypes, TLinks>>>
+  }): Promise<ListResult<ObjectQueryRow<TObjectType, TLinks>>>
   list(
     options?: ObjectQueryListOptions
   ): Promise<
-    | ListResult<ObjectQueryRow<TObjectType, TValueTypes, TLinks>>
-    | ListResultWithoutTotal<ObjectQueryRow<TObjectType, TValueTypes, TLinks>>
+    | ListResult<ObjectQueryRow<TObjectType, TLinks>>
+    | ListResultWithoutTotal<ObjectQueryRow<TObjectType, TLinks>>
   >
 
   /** Count the matching objects without returning rows. */
@@ -973,16 +866,13 @@ export interface ObjectQueryBuilder<
   facets(input: readonly ObjectQueryFacetInput<TObjectType>[]): Promise<ObjectQueryFacetResult[]>
 
   /** Execute this query with an outer limit of one and return the first object. */
-  first(): Promise<ObjectQueryRow<TObjectType, TValueTypes, TLinks> | null>
+  first(): Promise<ObjectQueryRow<TObjectType, TLinks> | null>
 }
 
-export interface ObjectByIdHandle<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-> {
+export interface ObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens> {
   vector(profile: VectorProfileName<TObjectType>): ObjectVectorHandle
   /** Get the object at this id, or null if it doesn't exist. */
-  get(): Promise<TwinObject<TObjectType, TValueTypes> | null>
+  get(): Promise<TwinObject<TObjectType> | null>
 
   /** List links from this object, optionally filtered by link token. */
   listLinks(link?: LinkTokenForObjectType<TObjectType>): Promise<readonly ObjectLinkRow[]>
@@ -1053,36 +943,32 @@ export interface ObjectByIdHandle<
   /** Read and write telemetry for one telemetry-mode property token. */
   telemetry<TToken extends TelemetryPropertyToken<TObjectType>>(
     property: TToken
-  ): TelemetryChannel<TToken, TValueTypes>
+  ): TelemetryChannel<TToken>
 }
 
-export interface ObjectSet<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens = TObjectType,
-> {
+export interface ObjectSet<TObjectType extends ObjectTypeWithPropertyTokens> {
   /** Get an object by id, or null if it doesn't exist. */
-  get(id: string): Promise<TwinObject<TObjectType, TValueTypes> | null>
+  get(id: string): Promise<TwinObject<TObjectType> | null>
 
   /** Upsert object state facts (latest projection). */
   upsert(input: {
-    properties: InferObjectProperties<TObjectType, TValueTypes>
-  }): Promise<TwinObject<TObjectType, TValueTypes>>
+    properties: InferObjectProperties<TObjectType>
+  }): Promise<TwinObject<TObjectType>>
 
   /** Build an executable provider-neutral object query rooted at this object type. */
-  query(): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+  query(): ObjectQueryBuilder<TObjectType>
 
   /** Bind operations to a specific object id. */
-  byId(id: string): ObjectByIdHandle<TObjectType, TValueTypes>
+  byId(id: string): ObjectByIdHandle<TObjectType>
 
   /** List stored objects of this type with storage-system filtering and pagination. */
-  list(input?: ObjectSetListInput): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+  list(input?: ObjectSetListInput): Promise<ListResult<TwinObject<TObjectType>>>
 
   /** Append telemetry for multiple objects in a single batch. */
   appendTelemetryBatch(
     items: readonly {
       id: string
-      properties: InferTelemetryBatchProperties<TObjectType, TValueTypes>
+      properties: InferTelemetryBatchProperties<TObjectType>
       at?: Date
     }[]
   ): Promise<void>

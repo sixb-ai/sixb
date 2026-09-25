@@ -6,7 +6,6 @@ import {
   defineAction,
   defineObjectType,
   link,
-  type OntologySource,
   optional,
   param,
   prop,
@@ -112,7 +111,7 @@ interface TestLineItemSet {
 }
 
 function createRuntime() {
-  return new SixbHost<readonly OntologySource[]>({
+  return new SixbHost({
     id: "delegated-sixb-test",
     ontology: [Proposal, ArchivedProposal, LineItem],
     actions: [approveProposal, rejectProposal],

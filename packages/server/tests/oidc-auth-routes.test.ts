@@ -14,7 +14,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -90,7 +89,7 @@ function createRuntime(options: { readonly failInvitationDelivery?: boolean } = 
   const storage = new InMemoryStorage()
   const client = new FakeOidcClient()
   const invitationMessages: SendOidcInvitationInput[] = []
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),

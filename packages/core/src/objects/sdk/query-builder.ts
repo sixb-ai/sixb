@@ -6,7 +6,6 @@
  * `ObjectQueryExecutor` — the server runtime executor or the HTTP client
  * executor — so the same builder serves both sides.
  */
-import type { ValueType } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import type {
@@ -39,23 +38,15 @@ type QueryBuilderParams = {
   executor: ObjectQueryExecutor
 }
 
-export function createObjectQueryBuilder<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
->(
+export function createObjectQueryBuilder<TObjectType extends ObjectTypeWithPropertyTokens>(
   params: QueryBuilderParams
-): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
-  return new ObjectQueryBuilderImpl<TObjectType, TRegisteredObjectTypes, TValueTypes>(
+): ObjectQueryBuilder<TObjectType> {
+  return new ObjectQueryBuilderImpl<TObjectType>(
     params
-  ) as unknown as ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+  ) as unknown as ObjectQueryBuilder<TObjectType>
 }
 
-class ObjectQueryBuilderImpl<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TRegisteredObjectTypes extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
-> {
+class ObjectQueryBuilderImpl<TObjectType extends ObjectTypeWithPropertyTokens> {
   constructor(private readonly params: QueryBuilderParams) {}
 
   get ir(): ObjectQuery {
@@ -64,14 +55,11 @@ class ObjectQueryBuilderImpl<
 
   where(
     whereFn: (
-      builder: ObjectWhereBuilder<TObjectType, TValueTypes>
-    ) =>
-      | ObjectWhereClause<TObjectType, TValueTypes>
-      | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
-    const predicate = resolveWhere<TObjectType, TValueTypes>(whereFn)
-    if (!predicate)
-      return this as unknown as ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+      builder: ObjectWhereBuilder<TObjectType>
+    ) => ObjectWhereClause<TObjectType> | readonly ObjectWhereClause<TObjectType>[]
+  ): ObjectQueryBuilder<TObjectType> {
+    const predicate = resolveWhere<TObjectType>(whereFn)
+    if (!predicate) return this as unknown as ObjectQueryBuilder<TObjectType>
 
     return this.withQuery({
       kind: "filter",
@@ -83,7 +71,7 @@ class ObjectQueryBuilderImpl<
   search(
     query: string,
     options?: { fields?: readonly PropertyToken<TObjectType["id"], string>[] }
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+  ): ObjectQueryBuilder<TObjectType> {
     return this.withQuery({
       kind: "text",
       input: this.ir,
@@ -92,11 +80,7 @@ class ObjectQueryBuilderImpl<
     })
   }
 
-  vector(
-    profile: string,
-    vector: string,
-    options: { k: number }
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+  vector(profile: string, vector: string, options: { k: number }): ObjectQueryBuilder<TObjectType> {
     if (typeof profile !== "string" || typeof vector !== "string") {
       throw new Error("[Sixb] Vector search requires a named profile and search text")
     }
@@ -112,25 +96,21 @@ class ObjectQueryBuilderImpl<
   traverse(
     link: LinkToken<TObjectType["id"], string, string>,
     options?: { direction?: "outgoing" }
-  ): ObjectQueryBuilder<ObjectTypeWithPropertyTokens, TRegisteredObjectTypes, TValueTypes>
+  ): ObjectQueryBuilder<ObjectTypeWithPropertyTokens>
   traverse(
     link: LinkToken<string, string, TObjectType["id"] | readonly TObjectType["id"][]>,
     options: { direction: "incoming" }
-  ): ObjectQueryBuilder<ObjectTypeWithPropertyTokens, TRegisteredObjectTypes, TValueTypes>
+  ): ObjectQueryBuilder<ObjectTypeWithPropertyTokens>
   traverse(
     link: LinkToken,
     options: { direction?: ObjectQueryDirection } = {}
-  ): ObjectQueryBuilder<ObjectTypeWithPropertyTokens, TRegisteredObjectTypes, TValueTypes> {
+  ): ObjectQueryBuilder<ObjectTypeWithPropertyTokens> {
     const direction = options.direction ?? "outgoing"
     if (direction === "outgoing") {
       requireSingleTargetObjectTypeId(link)
     }
 
-    return new ObjectQueryBuilderImpl<
-      ObjectTypeWithPropertyTokens,
-      TRegisteredObjectTypes,
-      TValueTypes
-    >({
+    return new ObjectQueryBuilderImpl<ObjectTypeWithPropertyTokens>({
       ...this.params,
       query: {
         kind: "traverse",
@@ -142,18 +122,14 @@ class ObjectQueryBuilderImpl<
         // matching the result type the fluent API advertises.
         ...(direction === "incoming" ? { sourceObjectTypeId: link.objectTypeId } : {}),
       },
-    }) as unknown as ObjectQueryBuilder<
-      ObjectTypeWithPropertyTokens,
-      TRegisteredObjectTypes,
-      TValueTypes
-    >
+    }) as unknown as ObjectQueryBuilder<ObjectTypeWithPropertyTokens>
   }
 
   expand(
     link: LinkToken<string, string, string | readonly string[]>,
     optionsOrBuild?: ObjectExpandOptions<ObjectTypeWithPropertyTokens> | NestedExpandBuild,
     build?: NestedExpandBuild
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+  ): ObjectQueryBuilder<TObjectType> {
     return this.withQuery({
       kind: "expand",
       input: this.ir,
@@ -164,7 +140,7 @@ class ObjectQueryBuilderImpl<
   orderBy(
     property: PropertyToken<TObjectType["id"], string>,
     direction?: ObjectQuerySortDirection
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+  ): ObjectQueryBuilder<TObjectType> {
     return this.withQuery(
       appendSortField(this.ir, {
         kind: "property",
@@ -174,9 +150,7 @@ class ObjectQueryBuilderImpl<
     )
   }
 
-  orderByRelevance(
-    direction?: ObjectQuerySortDirection
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+  orderByRelevance(direction?: ObjectQuerySortDirection): ObjectQueryBuilder<TObjectType> {
     return this.withQuery(
       appendSortField(this.ir, {
         kind: "relevance",
@@ -185,7 +159,7 @@ class ObjectQueryBuilderImpl<
     )
   }
 
-  limit(limit: number): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+  limit(limit: number): ObjectQueryBuilder<TObjectType> {
     return this.withQuery({
       kind: "limit",
       input: this.ir,
@@ -193,10 +167,7 @@ class ObjectQueryBuilderImpl<
     })
   }
 
-  page(input: {
-    pageSize: number
-    pageToken?: string
-  }): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
+  page(input: { pageSize: number; pageToken?: string }): ObjectQueryBuilder<TObjectType> {
     return this.withQuery({
       kind: "page",
       input: this.ir,
@@ -227,28 +198,25 @@ class ObjectQueryBuilderImpl<
     return formatObjectQueryExplanation(this.explain())
   }
 
-  async list(): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+  async list(): Promise<ListResult<TwinObject<TObjectType>>>
   async list(options: {
     includeTotal: false
     signal?: AbortSignal
-  }): Promise<ListResultWithoutTotal<TwinObject<TObjectType, TValueTypes>>>
+  }): Promise<ListResultWithoutTotal<TwinObject<TObjectType>>>
   async list(options: {
     includeTotal?: true
     signal?: AbortSignal
-  }): Promise<ListResult<TwinObject<TObjectType, TValueTypes>>>
+  }): Promise<ListResult<TwinObject<TObjectType>>>
   async list(
     options?: ObjectQueryListOptions
   ): Promise<
-    | ListResult<TwinObject<TObjectType, TValueTypes>>
-    | ListResultWithoutTotal<TwinObject<TObjectType, TValueTypes>>
+    ListResult<TwinObject<TObjectType>> | ListResultWithoutTotal<TwinObject<TObjectType>>
   > {
     const result = await this.params.executor.list(this.ir, {
       includeTotal: options?.includeTotal,
       signal: options?.signal,
     })
-    const objects = result.objects.map(
-      (row) => row as unknown as TwinObject<TObjectType, TValueTypes>
-    )
+    const objects = result.objects.map((row) => row as unknown as TwinObject<TObjectType>)
 
     if (options?.includeTotal === false) {
       return {
@@ -286,26 +254,21 @@ class ObjectQueryBuilderImpl<
     )
   }
 
-  async first(): Promise<TwinObject<TObjectType, TValueTypes> | null> {
+  async first(): Promise<TwinObject<TObjectType> | null> {
     const result = await this.params.executor.list({ kind: "limit", input: this.ir, limit: 1 })
     const row = result.objects[0]
-    return row ? (row as unknown as TwinObject<TObjectType, TValueTypes>) : null
+    return row ? (row as unknown as TwinObject<TObjectType>) : null
   }
 
-  private withQuery(
-    query: ObjectQuery
-  ): ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes> {
-    return new ObjectQueryBuilderImpl<TObjectType, TRegisteredObjectTypes, TValueTypes>({
+  private withQuery(query: ObjectQuery): ObjectQueryBuilder<TObjectType> {
+    return new ObjectQueryBuilderImpl<TObjectType>({
       ...this.params,
       query,
-    }) as unknown as ObjectQueryBuilder<TObjectType, TRegisteredObjectTypes, TValueTypes>
+    }) as unknown as ObjectQueryBuilder<TObjectType>
   }
 }
 
-type AnyExpandBuilder = ObjectExpandBuilder<
-  ObjectTypeWithPropertyTokens,
-  ObjectTypeWithPropertyTokens
->
+type AnyExpandBuilder = ObjectExpandBuilder<ObjectTypeWithPropertyTokens>
 type NestedExpandBuild = (nested: AnyExpandBuilder) => AnyExpandBuilder
 
 /**

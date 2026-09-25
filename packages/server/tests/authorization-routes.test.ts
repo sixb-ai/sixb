@@ -22,7 +22,6 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   link,
-  type OntologySource,
   type PipelineDefinition,
   prop,
   ref,
@@ -172,7 +171,7 @@ const contractIngestor = defineRole("contract.ingestor", {
 
 async function createRuntime(options: { readonly auth?: boolean } = {}) {
   const storage = new InMemoryStorage()
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: "test-project",
     ontology: [Contract, Invoice],
     datasets: [OrdersDataset, CustomersDataset],

@@ -416,12 +416,21 @@ export interface ObjectType {
  * Ambient id-to-object-type index for app ontology definitions.
  *
  * Sixb generates a `.sixb/types/ontology.d.ts` module augmentation that adds
- * entries here, letting client-side query types resolve string link targets
- * like `"Customer"` to the exported `Customer` object type without changing the
- * runtime ontology shape.
+ * entries here. Every typed surface — `sixb.objects(...)`, Action reads, the
+ * client query builder — resolves string link targets like `"Customer"` through
+ * it, without changing the runtime ontology shape.
  */
 // biome-ignore lint/suspicious/noEmptyInterface: App code augments this interface.
 export interface SixbObjectTypeMap {}
+
+/**
+ * Ambient id-to-value-type index, generated alongside {@link SixbObjectTypeMap}.
+ *
+ * It types properties declared with a string-only `valueTypeRef("id")`, whose
+ * schema is not carried by the reference itself.
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: App code augments this interface.
+export interface SixbValueTypeMap {}
 
 /**
  * Root ontology document for object type modeling.

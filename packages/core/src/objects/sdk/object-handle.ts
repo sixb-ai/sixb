@@ -5,7 +5,7 @@
  */
 
 import type { ActionDefinition } from "../../actions"
-import type { ObjectLink, ObjectRef, ValueType } from "../../ontology"
+import type { ObjectLink, ObjectRef } from "../../ontology"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import { assertLinkTokenBelongsToObjectType } from "../../ontology/validation"
@@ -23,10 +23,10 @@ import { createTelemetryChannel } from "./telemetry-channel"
 type ObjectRefInput = ObjectRef
 type AnyLinkToken = LinkToken<string, string, string | readonly string[], ObjectLink>
 
-export function createObjectByIdHandle<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
->(ctx: ExecutionObjectContext, primaryId: string): ObjectByIdHandle<TObjectType, TValueTypes> {
+export function createObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens>(
+  ctx: ExecutionObjectContext,
+  primaryId: string
+): ObjectByIdHandle<TObjectType> {
   const objectHandle = {
     vector: (profileName: string) => createObjectVectorHandle(ctx, primaryId, profileName),
     get: async () => {
@@ -34,7 +34,7 @@ export function createObjectByIdHandle<
         objectTypeId: ctx.objectType.id,
         primaryId,
       })
-      return row ? (row as unknown as TwinObject<TObjectType, TValueTypes>) : null
+      return row ? (row as unknown as TwinObject<TObjectType>) : null
     },
 
     listLinks: async (linkToken?: AnyLinkToken) => {
@@ -129,8 +129,8 @@ export function createObjectByIdHandle<
       })
     },
 
-    telemetry: createTelemetryChannel<TObjectType, TValueTypes>(ctx, primaryId),
+    telemetry: createTelemetryChannel<TObjectType>(ctx, primaryId),
   }
 
-  return objectHandle as unknown as ObjectByIdHandle<TObjectType, TValueTypes>
+  return objectHandle as unknown as ObjectByIdHandle<TObjectType>
 }

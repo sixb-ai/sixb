@@ -17,7 +17,6 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   link,
-  type OntologySource,
   prop,
   SixbHost,
   SYSTEM_PRINCIPAL,
@@ -618,10 +617,10 @@ async function createGatewayRuntime(
   readonly executionToken: string
   readonly runId: string
   readonly storage: InMemoryStorage
-  readonly sixb: SixbHost<readonly OntologySource[]>
+  readonly sixb: SixbHost
 }> {
   const storage = new InMemoryStorage()
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: PROJECT_ID,
     ontology: [Contract, Device, PrivateNote],
     actions: [labelDevice],

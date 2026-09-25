@@ -1,4 +1,3 @@
-import type { OntologySource } from "@sixb/core"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 
 export function safeSend(target: { send: (message: string) => void }, payload: unknown): void {
@@ -16,10 +15,10 @@ export function wsStateKey(ws: object): object {
 }
 
 /** The execution SDK attached once when the WebSocket request crosses the auth boundary. */
-export function wsRequestSixb(ws: object): Sixb<readonly OntologySource[]> | null {
+export function wsRequestSixb(ws: object): Sixb | null {
   const data = (
     ws as {
-      data?: { sixb?: Sixb<readonly OntologySource[]> | null }
+      data?: { sixb?: Sixb | null }
     }
   ).data
   return data?.sixb ?? null

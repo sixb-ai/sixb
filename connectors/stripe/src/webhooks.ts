@@ -1,4 +1,4 @@
-import type { Logger, OntologySource, Sixb } from "@sixb/core"
+import type { Logger, Sixb } from "@sixb/core"
 import {
   defineWebhook,
   resolveWebhookVerification,
@@ -29,7 +29,7 @@ export const STRIPE_CONNECTOR_WEBHOOK: WebhookVerificationSubject = {
 export interface StripeEventContext {
   readonly event: StripeEvent
   readonly request: Request
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: Sixb
   readonly logger: Logger
   /** Resolves the Stripe client lazily, only if the handler needs to read current state. */
   client(): Promise<StripeClient>

@@ -3,6 +3,7 @@ import { dirname, extname, join, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { OntologyDocumentInput } from "../ontology/registry"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
+import type { ValueType } from "../ontology/types"
 import { RuntimeError } from "../runtime/errors"
 
 const moduleExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"])
@@ -14,8 +15,17 @@ export interface OntologyTypeManifestEntry {
   readonly typeExpression: string
 }
 
+/** A value type the manifest registers, so a string-only `valueTypeRef("id")` is typed. */
+export interface OntologyValueTypeManifestEntry {
+  readonly valueTypeId: string
+  readonly modulePath: string
+  readonly exportName: string
+  readonly typeExpression: string
+}
+
 export interface OntologyTypeManifestDiscovery {
   readonly entries: readonly OntologyTypeManifestEntry[]
+  readonly valueTypeEntries: readonly OntologyValueTypeManifestEntry[]
   readonly moduleCount: number
 }
 
@@ -37,7 +47,8 @@ export async function discoverOntologyTypeManifest(
   const ontologyDir = join(resolvedProjectRoot, "ontology")
   const modulePaths = await listModuleFiles(ontologyDir)
   const entries = new Map<string, OntologyTypeManifestEntry>()
-  const seenObjectTypes = new Set<unknown>()
+  const valueTypeEntries = new Map<string, OntologyValueTypeManifestEntry>()
+  const seen = new Set<unknown>()
 
   for (const modulePath of modulePaths) {
     const moduleSpecifier = toGeneratedModuleSpecifier({
@@ -56,13 +67,17 @@ export async function discoverOntologyTypeManifest(
         modulePath,
         moduleSpecifier,
         entries,
-        seenObjectTypes,
+        valueTypeEntries,
+        seen,
       })
     }
   }
 
   return {
     entries: [...entries.values()].sort((a, b) => a.objectTypeId.localeCompare(b.objectTypeId)),
+    valueTypeEntries: [...valueTypeEntries.values()].sort((a, b) =>
+      a.valueTypeId.localeCompare(b.valueTypeId)
+    ),
     moduleCount: modulePaths.length,
   }
 }
@@ -89,7 +104,7 @@ export async function generateOntologyTypeManifest(
     }
   }
 
-  const content = renderOntologyTypeManifest(discovery.entries)
+  const content = renderOntologyTypeManifest(discovery)
   await mkdir(dirname(outFile), { recursive: true })
   const written = await writeFileIfChanged(outFile, content)
 
@@ -101,98 +116,114 @@ export async function generateOntologyTypeManifest(
   }
 }
 
+/**
+ * Mirrors what runtime discovery registers from an `ontology/` module: exported object types and
+ * value types, the ones an exported ontology document carries, and those inside exported arrays.
+ */
 function collectManifestEntries(input: {
   readonly exportedValue: unknown
   readonly exportName: string
   readonly modulePath: string
   readonly moduleSpecifier: string
   readonly entries: Map<string, OntologyTypeManifestEntry>
-  readonly seenObjectTypes: Set<unknown>
+  readonly valueTypeEntries: Map<string, OntologyValueTypeManifestEntry>
+  readonly seen: Set<unknown>
 }): void {
-  if (isObjectTypeWithPropertyTokens(input.exportedValue)) {
-    addManifestEntry({
-      objectType: input.exportedValue,
-      modulePath: input.modulePath,
-      exportName: input.exportName,
-      typeExpression: `typeof import(${JSON.stringify(input.moduleSpecifier)})[${JSON.stringify(
-        input.exportName
-      )}]`,
-      entries: input.entries,
-      seenObjectTypes: input.seenObjectTypes,
-    })
-    return
+  const exported = `(typeof import(${JSON.stringify(input.moduleSpecifier)})[${JSON.stringify(
+    input.exportName
+  )}])`
+  const add = (value: unknown, typeExpression: (id: string) => string): void => {
+    if (isObjectTypeWithPropertyTokens(value)) {
+      addManifestEntry({
+        kind: "object type",
+        definition: value,
+        entry: {
+          objectTypeId: value.id,
+          modulePath: input.modulePath,
+          exportName: input.exportName,
+          typeExpression: typeExpression(value.id),
+        },
+        idOf: (entry) => entry.objectTypeId,
+        entries: input.entries,
+        seen: input.seen,
+      })
+    } else if (isValueType(value)) {
+      addManifestEntry({
+        kind: "value type",
+        definition: value,
+        entry: {
+          valueTypeId: value.id,
+          modulePath: input.modulePath,
+          exportName: input.exportName,
+          typeExpression: typeExpression(value.id),
+        },
+        idOf: (entry) => entry.valueTypeId,
+        entries: input.valueTypeEntries,
+        seen: input.seen,
+      })
+    }
   }
 
   if (isOntologyDocumentInput(input.exportedValue)) {
     for (const objectType of input.exportedValue.objectTypes) {
-      addManifestEntry({
+      add(
         objectType,
-        modulePath: input.modulePath,
-        exportName: input.exportName,
-        typeExpression: `Extract<(typeof import(${JSON.stringify(
-          input.moduleSpecifier
-        )})[${JSON.stringify(input.exportName)}])["objectTypes"][number], { id: ${JSON.stringify(
-          objectType.id
-        )} }>`,
-        entries: input.entries,
-        seenObjectTypes: input.seenObjectTypes,
-      })
+        (id) => `Extract<${exported}["objectTypes"][number], { id: ${JSON.stringify(id)} }>`
+      )
+    }
+    for (const valueType of input.exportedValue.valueTypes ?? []) {
+      add(
+        valueType,
+        (id) => `Extract<${exported}["valueTypes"][number], { id: ${JSON.stringify(id)} }>`
+      )
     }
     return
   }
 
   if (Array.isArray(input.exportedValue)) {
     for (const item of input.exportedValue) {
-      if (!isObjectTypeWithPropertyTokens(item)) continue
-      addManifestEntry({
-        objectType: item,
-        modulePath: input.modulePath,
-        exportName: input.exportName,
-        typeExpression: `Extract<(typeof import(${JSON.stringify(
-          input.moduleSpecifier
-        )})[${JSON.stringify(input.exportName)}])[number], { id: ${JSON.stringify(item.id)} }>`,
-        entries: input.entries,
-        seenObjectTypes: input.seenObjectTypes,
-      })
+      add(item, (id) => `Extract<${exported}[number], { id: ${JSON.stringify(id)} }>`)
     }
-  }
-}
-
-function addManifestEntry(input: {
-  readonly objectType: ObjectTypeWithPropertyTokens
-  readonly modulePath: string
-  readonly exportName: string
-  readonly typeExpression: string
-  readonly entries: Map<string, OntologyTypeManifestEntry>
-  readonly seenObjectTypes: Set<unknown>
-}): void {
-  if (input.seenObjectTypes.has(input.objectType)) {
     return
   }
-  input.seenObjectTypes.add(input.objectType)
 
-  const existing = input.entries.get(input.objectType.id)
-  const entry: OntologyTypeManifestEntry = {
-    objectTypeId: input.objectType.id,
-    modulePath: input.modulePath,
-    exportName: input.exportName,
-    typeExpression: input.typeExpression,
+  add(
+    input.exportedValue,
+    () =>
+      `typeof import(${JSON.stringify(input.moduleSpecifier)})[${JSON.stringify(input.exportName)}]`
+  )
+}
+
+function addManifestEntry<TEntry extends { readonly modulePath: string }>(input: {
+  readonly kind: "object type" | "value type"
+  readonly definition: unknown
+  readonly entry: TEntry
+  readonly idOf: (entry: TEntry) => string
+  readonly entries: Map<string, TEntry>
+  readonly seen: Set<unknown>
+}): void {
+  // The same definition re-exported from several places is one registration.
+  if (input.seen.has(input.definition)) {
+    return
   }
+  input.seen.add(input.definition)
 
+  const id = input.idOf(input.entry)
+  const existing = input.entries.get(id)
   if (!existing) {
-    input.entries.set(input.objectType.id, entry)
+    input.entries.set(id, input.entry)
     return
   }
 
   throw new RuntimeError(
-    `[Sixb] Duplicate ontology object type id "${input.objectType.id}" while generating `.concat(
+    `[Sixb] Duplicate ontology ${input.kind} id "${id}" while generating `.concat(
       `the type manifest: ${relative(process.cwd(), existing.modulePath)} and `,
-      `${relative(process.cwd(), input.modulePath)}.`
+      `${relative(process.cwd(), input.entry.modulePath)}.`
     )
   )
 }
 
-function renderOntologyTypeManifest(entries: readonly OntologyTypeManifestEntry[]): string {
+function renderOntologyTypeManifest(discovery: OntologyTypeManifestDiscovery): string {
   const lines = [
     "// This file is auto-generated by Sixb.",
     "// Do not edit this file directly.",
@@ -201,8 +232,14 @@ function renderOntologyTypeManifest(entries: readonly OntologyTypeManifestEntry[
     "  interface SixbObjectTypeMap {",
   ]
 
-  for (const entry of entries) {
+  for (const entry of discovery.entries) {
     lines.push(`    ${JSON.stringify(entry.objectTypeId)}: ${entry.typeExpression}`)
+  }
+
+  lines.push("  }", "  interface SixbValueTypeMap {")
+
+  for (const entry of discovery.valueTypeEntries) {
+    lines.push(`    ${JSON.stringify(entry.valueTypeId)}: ${entry.typeExpression}`)
   }
 
   lines.push("  }", "}", "", "export {}", "")
@@ -306,6 +343,21 @@ function isObjectTypeWithPropertyTokens(value: unknown): value is ObjectTypeWith
     Array.isArray(value.properties) &&
     Array.isArray(value.links) &&
     isRecord(value.p)
+  )
+}
+
+/** Same shape test runtime discovery applies to an exported value type. */
+function isValueType(value: unknown): value is ValueType {
+  if (!isRecord(value)) {
+    return false
+  }
+
+  return (
+    typeof value.id === "string" &&
+    typeof value.name === "string" &&
+    "schema" in value &&
+    !Array.isArray(value.properties) &&
+    !Array.isArray(value.objectTypes)
   )
 }
 

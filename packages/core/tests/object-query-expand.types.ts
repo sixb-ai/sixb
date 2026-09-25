@@ -8,8 +8,10 @@
  *
  * The row-typing section asserts each `.expand(...)` widens the row's
  * `.links` (cardinality `"one"` → `Target | null`, `"many"` → `Target[]`, with
- * optional `.linkProperties` and nested `.links`). Direct ObjectType links are
- * precise without a generated registry; id-only refs still use the registry.
+ * optional `.linkProperties` and nested `.links`). This program has no generated
+ * ontology registry: direct ObjectType links and self-links are precise without
+ * one. Id-only refs resolve through the registry, covered in
+ * `packages/client/tests/type-programs/ontology-registry`.
  */
 import { defineObjectType, link, type ObjectQueryBuilder, prop } from "../src"
 
@@ -81,19 +83,8 @@ const Project = defineObjectType({
   ],
 })
 
-type AppRegistry =
-  | typeof Project
-  | typeof Opportunity
-  | typeof Company
-  | typeof Contact
-  | typeof Folder
-  | typeof ProjectFolder
-
-// Server path: `objects(T)` binds the full registry, so nested targets resolve.
-declare const projects: ObjectQueryBuilder<typeof Project, AppRegistry, []>
-declare const folders: ObjectQueryBuilder<typeof Folder, AppRegistry, []>
-// Client path with no full registry. Direct ObjectType links still resolve.
-declare const startTypeOnly: ObjectQueryBuilder<typeof Project, typeof Project, []>
+declare const projects: ObjectQueryBuilder<typeof Project>
+declare const folders: ObjectQueryBuilder<typeof Folder>
 
 function authoring(): void {
   // 2-hop, precise: Project -> opportunity -> { company, contact }.
@@ -109,7 +100,7 @@ function authoring(): void {
     orderBy: [{ property: Opportunity.p.createdAt, direction: "desc" }],
   })
 
-  // Self-cycle resolves by id against the registry — no infinite instantiation.
+  // A self-cycle resolves to the source type itself — no registry, no infinite instantiation.
   folders.expand(Folder.l.parent, (p) => p.expand(Folder.l.parent))
 
   // `.expand` is additive: the result type stays Project (only the accumulated
@@ -130,7 +121,7 @@ function authoring(): void {
   // @ts-expect-error — `name` is a Project property, not on the Opportunity target.
   projects.expand(Project.l.opportunity, { orderBy: [{ property: Project.p.name }] })
 
-  startTypeOnly.expand(Project.l.opportunity, (o) =>
+  projects.expand(Project.l.opportunity, (o) =>
     o.expand(
       // @ts-expect-error — direct target metadata resolves Opportunity without a registry.
       Folder.l.parent
@@ -214,7 +205,9 @@ function plainRowAssertions(row: PlainRow): void {
 }
 void plainRowAssertions
 
-// Self-cycle: Folder.parent → Folder.parent resolves by id, no infinite depth.
+// Self-cycle: Folder.parent → Folder.parent resolves to Folder, no infinite depth.
+// Guard: resolve every id through the registry alone (`ObjectTypeForId` in runtime/types.ts) and,
+// with no registry in this program, these rows degrade to the loose base and fail.
 const builtFolders = folders.expand(Folder.l.parent, (p) => p.expand(Folder.l.parent))
 type FolderRow = RowOf<typeof builtFolders>
 function folderRowAssertions(row: FolderRow): void {
@@ -224,8 +217,8 @@ function folderRowAssertions(row: FolderRow): void {
 }
 void folderRowAssertions
 
-// Client path with direct ObjectType targets: no generated registry is needed.
-const builtDirectClient = startTypeOnly.expand(Project.l.opportunity)
+// Direct ObjectType targets: no generated registry is needed.
+const builtDirectClient = projects.expand(Project.l.opportunity)
 type DirectClientRow = RowOf<typeof builtDirectClient>
 function directClientRowAssertions(row: DirectClientRow): void {
   const _id: "Opportunity" = row.links.opportunity!.objectTypeId

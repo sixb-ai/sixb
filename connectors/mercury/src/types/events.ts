@@ -1,4 +1,4 @@
-import type { Logger, OntologySource, Sixb } from "@sixb/core"
+import type { Logger, Sixb } from "@sixb/core"
 import type { MercuryClient } from "./client"
 import type { MercuryCursorOptions, MercuryPageCursors, MercuryTimestamp } from "./common"
 
@@ -48,7 +48,7 @@ export interface MercuryEventListOptions extends MercuryCursorOptions {
 export interface MercuryEventContext {
   readonly event: MercuryEvent
   readonly request: Request
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: Sixb
   readonly logger: Logger
   /** Resolves the Mercury client lazily, only if the handler needs to read back. */
   client(): Promise<MercuryClient>

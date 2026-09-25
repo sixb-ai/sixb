@@ -50,8 +50,8 @@ export interface EventsFilterSpec extends EventSelectorSpec {}
 
 // ── Payload typing ──────────────────────────────────────────────────────────
 // Flat, named conditionals keyed on the channel — never a recursive resolver —
-// and `TValueTypes` is always pinned to `readonly []` so property-value
-// inference stays shallow enough for TypeScript's recursion limits (no TS2589).
+// so property-value inference stays shallow enough for TypeScript's recursion
+// limits (no TS2589).
 
 type Override<TBase, TPatch> = Omit<TBase, keyof TPatch> & TPatch
 
@@ -103,7 +103,7 @@ type TelemetryEventForProperty<TToken extends PropertyToken | undefined> =
         {
           payload: Override<
             StoredTelemetryEvent["payload"],
-            { value: InferPropertyValue<TProperty, readonly []> }
+            { value: InferPropertyValue<TProperty> }
           >
         }
       >
@@ -116,10 +116,7 @@ type ObjectPropertiesEventOf<
 > = Override<
   TEvent,
   {
-    payload: Override<
-      TEvent["payload"],
-      { properties: InferObjectProperties<TObjectType, readonly []> }
-    >
+    payload: Override<TEvent["payload"], { properties: InferObjectProperties<TObjectType> }>
   }
 >
 

@@ -6,7 +6,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   SixbHost,
   type SixbHostOptions,
 } from "@sixb/core"
@@ -14,10 +13,8 @@ import type { DomainEventService } from "@sixb/core/internal/events"
 import { SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbHostOptions<TOntologySources>
-): SixbHost<TOntologySources> {
-  return new SixbHost<TOntologySources>(options)
+function createSixbInstance(options: SixbHostOptions): SixbHost {
+  return new SixbHost(options)
 }
 
 async function getFreePort(): Promise<number> {
@@ -100,7 +97,7 @@ describe("SixbServer API serving", () => {
     const port = await getFreePort()
     const baseUrl = `http://127.0.0.1:${port}`
 
-    const sixb = createSixbInstance<readonly OntologySource[]>({
+    const sixb = createSixbInstance({
       id: "test-project",
       ontology: [],
       broker: new InMemoryBroker(),

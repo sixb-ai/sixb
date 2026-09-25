@@ -9,7 +9,6 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   isAllowed,
-  type OntologySource,
   resolveAuthorizationContext,
   type SixbHost,
 } from "@sixb/core"
@@ -31,11 +30,7 @@ async function createAuthExampleRuntime() {
   })
 }
 
-function atlasContext(
-  host: SixbHost<readonly OntologySource[]>,
-  groupIds: readonly string[],
-  userId = "atlas-user"
-) {
+function atlasContext(host: SixbHost, groupIds: readonly string[], userId = "atlas-user") {
   return resolveAuthorizationContext({
     principal: { type: "user", id: userId },
     groupIds,

@@ -185,6 +185,12 @@ const buildingLegacy = defineObjectType({
 type BuildingLegacyProps = InferObjectProperties<typeof buildingLegacy, [typeof temperatureReading]>
 type _legacyTempType = Expect<Equal<NonNullable<BuildingLegacyProps["currentTemperature"]>, number>>
 
+// An id nothing registers degrades to `unknown`, never to `never`: a `never` value is assignable to
+// every type, so a misspelled or unregistered id would type-check any use of the property.
+// Guard: drop the `[TValueType] extends [never]` check in `InferValueTypeRef` and this fails.
+type UnregisteredLegacyProps = InferObjectProperties<typeof buildingLegacy>
+type _unregisteredTempType = Expect<Equal<UnregisteredLegacyProps["currentTemperature"], unknown>>
+
 const invoice = defineObjectType({
   id: "invoice",
   name: "Invoice",

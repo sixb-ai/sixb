@@ -13,7 +13,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -60,7 +59,7 @@ function createRuntime(
     rateLimit: options.rateLimit,
     sendMagicLink,
   })
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),

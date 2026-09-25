@@ -185,6 +185,12 @@ const { objects: openInvoices } = await sixb
 The token identifies which relationship to follow. Use a link with a single target type for
 outgoing typed traversal; wildcard links cannot be traversed with this builder.
 
+A link declared with an imported object type or `link.self()` is typed as written. A link that
+names its target by ID (`link.ref()`) is typed from the ontology types Sixb generates: `dev`,
+`build`, and `check` keep them current, and `bun sixb typegen` refreshes them before a standalone
+TypeScript check. The same query has the same type in Actions, Workflows, Agent tools, and
+[browser queries](../client/typed-queries.md).
+
 ## Include related objects
 
 `expand()` keeps the objects you queried and includes related objects under `.links`.

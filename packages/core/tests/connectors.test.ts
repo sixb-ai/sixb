@@ -1,12 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  ConnectorNotFoundError,
-  defineConnector,
-  defineObjectType,
-  type OntologySource,
-  prop,
-  SixbHost,
-} from "../src"
+import { ConnectorNotFoundError, defineConnector, defineObjectType, prop, SixbHost } from "../src"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -63,7 +56,7 @@ describe("connectors", () => {
       },
     })
 
-    const host = new SixbHost<readonly OntologySource[]>({
+    const host = new SixbHost({
       ontology: [Room],
       connectors: [erpDb],
       ...createTestRuntimeDeps(),

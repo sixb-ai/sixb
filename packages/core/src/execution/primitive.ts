@@ -1,5 +1,4 @@
 import { bindModelExecutionAttempt, type ModelExecutionAttempt } from "../models/execution/binding"
-import type { OntologySource } from "../ontology"
 import type { OntologyMutationRuntime } from "../runtime/ontology-mutations"
 import { getOntologyMutationRuntime } from "../runtime/ontology-mutations"
 import { isBoundSixb, type Sixb } from "../runtime/sixb"
@@ -14,7 +13,7 @@ export interface PrimitiveExecutionHost {
 }
 
 export interface BoundPrimitiveExecution {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: Sixb
   /** Internal mutation port guarded by the same runtime authority as `sixb`. */
   readonly ontologyMutations: OntologyMutationRuntime
 }

@@ -7,7 +7,6 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
-  type OntologySource,
   prop,
   SixbHost,
 } from "@sixb/core"
@@ -34,7 +33,7 @@ const Device = defineObjectType({
 
 function createRuntime() {
   const storage = new InMemoryStorage()
-  const sixb = new SixbHost<readonly OntologySource[]>({
+  const sixb = new SixbHost({
     id: projectId,
     ontology: [Device],
     broker: new InMemoryBroker(),

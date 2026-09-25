@@ -6,7 +6,6 @@
  * on demand through a Proxy, so no runtime ontology access is required —
  * property names are constrained at compile time and validated server-side.
  */
-import type { ValueType } from "../../ontology"
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type { ObjectWhereBuilder, ObjectWhereClause } from "../../runtime/types"
 import type { ObjectQueryPredicate } from "../query"
@@ -47,8 +46,7 @@ function createPropertyPredicate(propertyId: string) {
 
 export function createWhereBuilder<
   TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
->(): ObjectWhereBuilder<TObjectType, TValueTypes> {
+>(): ObjectWhereBuilder<TObjectType> {
   const p = new Proxy(
     {},
     {
@@ -62,21 +60,16 @@ export function createWhereBuilder<
     and: (...items: readonly ObjectQueryPredicate[]) => ({ op: "and", items }),
     or: (...items: readonly ObjectQueryPredicate[]) => ({ op: "or", items }),
     not: (item: ObjectQueryPredicate) => ({ op: "not", item }),
-  } as ObjectWhereBuilder<TObjectType, TValueTypes>
+  } as ObjectWhereBuilder<TObjectType>
 }
 
-export function resolveWhere<
-  TObjectType extends ObjectTypeWithPropertyTokens,
-  TValueTypes extends readonly ValueType[],
->(
+export function resolveWhere<TObjectType extends ObjectTypeWithPropertyTokens>(
   whereFn?: (
-    builder: ObjectWhereBuilder<TObjectType, TValueTypes>
-  ) =>
-    | ObjectWhereClause<TObjectType, TValueTypes>
-    | readonly ObjectWhereClause<TObjectType, TValueTypes>[]
+    builder: ObjectWhereBuilder<TObjectType>
+  ) => ObjectWhereClause<TObjectType> | readonly ObjectWhereClause<TObjectType>[]
 ): ObjectQueryPredicate | undefined {
   if (!whereFn) return undefined
-  const whereBuilder = createWhereBuilder<TObjectType, TValueTypes>()
+  const whereBuilder = createWhereBuilder<TObjectType>()
   const whereInput = whereFn(whereBuilder)
   if (!whereInput) return undefined
   const predicates = (

@@ -49,8 +49,6 @@ export type {
   ObjectWhereClause,
   OntologyDocumentInput,
   OntologySource,
-  RegisteredObjectType,
-  RegisteredValueTypes,
   TelemetryAppendInput,
   TelemetryChannel,
   TelemetryHistoryInput,

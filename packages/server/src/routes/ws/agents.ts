@@ -1,4 +1,3 @@
-import type { OntologySource } from "@sixb/core"
 import {
   AGENT_ACTIVITY_STREAM_ID,
   type AgentRunActivityEvent,
@@ -81,7 +80,7 @@ export function parseAgentStreamMessage(payload: unknown):
 }
 
 export async function canAccessAgentRunStream(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: Sixb,
   runId: string
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const run = await sixb.agent.runs.getById(runId)
@@ -92,7 +91,7 @@ export async function canAccessAgentRunStream(
 }
 
 export async function canAccessAgentThreadActivity(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: Sixb,
   event: AgentRunActivityEvent
 ): Promise<boolean> {
   const run = await sixb.agent.runs.getById(event.runId)
@@ -308,7 +307,7 @@ async function subscribeAgentActivity(
 }
 
 async function sendVisibleActivityRecords(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: Sixb,
   ws: { send: (message: string) => void },
   records: readonly BrokerRecord[]
 ): Promise<void> {
@@ -398,7 +397,7 @@ function stopSubscription(state: AgentStreamSubscriptionState | undefined): void
 }
 
 async function sendRunSnapshot(
-  sixb: Sixb<readonly OntologySource[]>,
+  sixb: Sixb,
   ws: { send: (message: string) => void },
   runId: string
 ): Promise<boolean> {

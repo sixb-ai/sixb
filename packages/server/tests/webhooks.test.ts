@@ -9,7 +9,6 @@ import {
   InMemoryStorage,
   type LogEntry,
   type LoggerProvider,
-  type OntologySource,
   type SixbErrorContext,
   type SixbErrorHandler,
   SixbHost,
@@ -19,10 +18,8 @@ import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
-function createSixbInstance<TOntologySources extends readonly OntologySource[]>(
-  options: SixbHostOptions<TOntologySources>
-): SixbHost<TOntologySources> {
-  return new SixbHost<TOntologySources>(options)
+function createSixbInstance(options: SixbHostOptions): SixbHost {
+  return new SixbHost(options)
 }
 
 describe("webhook routes", () => {
@@ -651,7 +648,7 @@ describe("webhook routes", () => {
 })
 
 function createWebhookApp(
-  connectors: SixbHostOptions<readonly OntologySource[]>["connectors"],
+  connectors: SixbHostOptions["connectors"],
   storage = new InMemoryStorage(),
   logger?: LoggerProvider
 ) {
@@ -659,12 +656,12 @@ function createWebhookApp(
 }
 
 function createWebhookRuntime(
-  connectors: SixbHostOptions<readonly OntologySource[]>["connectors"],
+  connectors: SixbHostOptions["connectors"],
   storage = new InMemoryStorage(),
   logger?: LoggerProvider,
   onError?: SixbErrorHandler
 ) {
-  const sixb = createSixbInstance<readonly OntologySource[]>({
+  const sixb = createSixbInstance({
     id: "test-project",
     ontology: [],
     broker: new InMemoryBroker(),

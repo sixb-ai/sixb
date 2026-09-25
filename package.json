@@ -31,7 +31,7 @@
     "test:all": "bun run test && bun run test:e2e",
     "lint": "biome check auth/*/src packages/*/src models/*/src connectors/*/src sandboxes/*/src",
     "typecheck": "bun run build:types && bun run typecheck:tests && bun run typecheck:template && bun run typecheck:examples",
-    "typecheck:tests": "tsc -p tsconfig.tests.json",
+    "typecheck:tests": "tsc -p tsconfig.tests.json && bun sixb typegen --entry packages/client/tests/type-programs/ontology-registry/sixb.config.ts && tsc -p packages/client/tests/type-programs/ontology-registry",
     "typecheck:template": "tsc -p packages/create-sixb/tsconfig.json",
     "typecheck:examples": "bun --filter '@sixb/docs' --filter '@sixb/example-*' typecheck",
     "link-cli": "ln -sf \"$(pwd)/packages/cli/src/index.tsx\" ~/.bun/bin/sixb && echo 'Linked sixb CLI to ~/.bun/bin/sixb'",

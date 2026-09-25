@@ -1,6 +1,6 @@
 import type { ConnectorConnectionMetadata, ConnectorDefinition } from "../connectors/types"
 import type { Logger } from "../logging"
-import type { OntologySource, Sixb } from "../runtime"
+import type { Sixb } from "../runtime"
 
 export type WebhookBodyFormat = "json" | "text" | "raw"
 
@@ -57,7 +57,7 @@ export interface WebhookVerifyContext {
 
 /** Handler input bound to the durable Webhook run admitted for this delivery. */
 export interface WebhookHandlerContext<TBody, TClient> extends WebhookVerifyContext {
-  readonly sixb: Sixb<readonly OntologySource[]>
+  readonly sixb: Sixb
   readonly logger: Logger
   readonly body: TBody
   /** Resolve selected managed connections for an external account in this connector. */

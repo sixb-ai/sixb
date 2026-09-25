@@ -6,7 +6,6 @@ import type {
   DomainEventLog,
   ModelsRuntime,
   ObjectsRuntime,
-  OntologySource,
   SixbDefinitions,
   Storage,
 } from "@sixb/core"
@@ -22,7 +21,7 @@ import type {
 /** Execution-bound primitives exposed to Action phase handlers. */
 export interface ActionExecutionFacade {
   readonly models: ModelsRuntime
-  readonly objects: ObjectsRuntime<readonly OntologySource[]>
+  readonly objects: ObjectsRuntime
   readonly actions: ActionsRuntime
   readonly connector: ConnectorRuntime
   readonly blobs: BlobsRuntime

@@ -388,7 +388,7 @@ const commandTree: readonly CommandNode[] = [
     rootHelpLabel: "worker-group [types...]",
   }),
   command("check", "Validate project configuration and health", { options: ["entry"] }),
-  command("typegen", "Generate ontology types for client query inference", { options: ["entry"] }),
+  command("typegen", "Generate ontology types for typed queries", { options: ["entry"] }),
   command("build", "Build runtime and production UI/app assets", { options: ["entry", "outdir"] }),
   {
     name: "db",
