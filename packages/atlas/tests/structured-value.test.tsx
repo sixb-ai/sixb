@@ -107,6 +107,34 @@ describe("StructuredValue with a declared schema", () => {
     ).not.toContain(fileMarker)
   })
 
+  test("renders declared users as user chips, and never guesses one by shape", () => {
+    const user = { type: "user", id: "usr_1" }
+    // Only the user chip and its debug form draw the sky user icon.
+    const userMarker = "text-sky-600"
+    const schema = fieldRecordSchema({
+      assignee: "userRef",
+      reviewers: { type: "array", items: "userRef" },
+    })
+    const markup = render({ assignee: user, reviewers: [user] }, schema)
+    expect(markup.split(userMarker)).toHaveLength(3)
+    expect(markup).toContain("usr_1")
+    expect(
+      renderToStaticMarkup(
+        <StructuredValue value={{ assignee: user }} schema={valueSchema(schema)} variant="debug" />
+      )
+    ).toContain(userMarker)
+
+    expect(render({ assignee: user })).not.toContain(userMarker)
+    const record = fieldRecordSchema({
+      assignee: {
+        type: "object",
+        properties: { type: { schema: "string" }, id: { schema: "string" } },
+      },
+    })
+    expect(render({ assignee: user }, record)).not.toContain(userMarker)
+    expect(render({ assignee: "usr_1" }, schema)).not.toContain(userMarker)
+  })
+
   test("renders a declared ref whose value does not match as a plain value", () => {
     const schema = fieldRecordSchema({ room: { type: "objectRef", objectTypeId: "Room" } })
     const markup = render({ room: "room-1" }, schema)

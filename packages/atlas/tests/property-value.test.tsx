@@ -69,6 +69,26 @@ describe("object detail property values", () => {
     expect(markup).toContain("download.jpeg")
   })
 
+  test("renders declared users as user chips, singly or as a list", () => {
+    const user = { type: "user", id: "usr_1" }
+    const userMarker = "text-sky-600"
+    const single = render(user, "userRef")
+    expect(single).toContain(userMarker)
+    expect(single).toContain(">usr_1<")
+    const list = render([user, { type: "user", id: "usr_2" }], { type: "array", items: "userRef" })
+    expect(list.split(userMarker)).toHaveLength(3)
+    expect(list).toContain(">usr_2<")
+
+    // A record shaped like a user, or a value that does not match, stays text.
+    const record = {
+      type: "object",
+      properties: { type: { schema: "string" }, id: { schema: "string" } },
+    }
+    expect(render(user, record)).not.toContain(userMarker)
+    expect(render("usr_1", "userRef")).not.toContain(userMarker)
+    expect(render([user, "usr_2"], { type: "array", items: "userRef" })).not.toContain(userMarker)
+  })
+
   test("renders values whose schema Atlas cannot read generically", () => {
     const unresolved = { type: "valueTypeRef", valueTypeId: "Scan" }
     expect(render(fileRef, unresolved)).not.toContain(attachmentMarker)

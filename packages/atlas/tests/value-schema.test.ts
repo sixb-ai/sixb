@@ -9,6 +9,7 @@ import {
   fileRefAt,
   objectRefAt,
   ontologySchemas,
+  userRefAt,
   valueSchema,
 } from "../src/lib/valueSchema"
 
@@ -28,6 +29,7 @@ describe("describeValueSchema", () => {
     expect(kindOf("string")).toBe("string")
     expect(kindOf("timestamp")).toBe("timestamp")
     expect(kindOf("fileRef")).toBe("fileRef")
+    expect(kindOf("userRef")).toBe("userRef")
     expect(kindOf({ type: "enum", valueType: "string", values: ["a"] })).toBe("enum")
     expect(describeValueSchema(valueSchema({ type: "objectRef", objectTypeId: "Room" }))).toEqual({
       kind: "objectRef",
@@ -40,7 +42,7 @@ describe("describeValueSchema", () => {
 
   test("describes what Atlas cannot read as unknown, never as a guess", () => {
     expect(kindOf(undefined)).toBe("unknown")
-    expect(kindOf("userRef")).toBe("unknown")
+    expect(kindOf("geoPoint")).toBe("unknown")
     expect(kindOf({ type: "somethingNew" })).toBe("unknown")
     expect(kindOf({ type: "valueTypeRef", valueTypeId: "NotLoaded" })).toBe("unknown")
   })
@@ -112,6 +114,22 @@ describe("walking a value against its schema", () => {
     expect(fileRefAt(describeValueSchema(valueSchema("fileRef")), fileRef)).toEqual(fileRef)
     expect(fileRefAt(describeValueSchema(valueSchema("fileRef")), "report.pdf")).toBeNull()
     expect(fileRefAt(declaredRecord, fileRef)).toBeNull()
+  })
+
+  test("recognizes users only at declared positions and only when the value matches", () => {
+    const user = { type: "user", id: "usr_1" } as const
+    const declaredUser = describeValueSchema(valueSchema("userRef"))
+    const declaredRecord = describeValueSchema(
+      valueSchema({
+        type: "object",
+        properties: { type: { schema: "string" }, id: { schema: "string" } },
+      })
+    )
+    expect(userRefAt(declaredUser, user)).toEqual(user)
+    expect(userRefAt(declaredUser, "usr_1")).toBeNull()
+    expect(userRefAt(declaredUser, { type: "service", id: "svc_1" })).toBeNull()
+    expect(userRefAt(declaredUser, { type: "user", id: "" })).toBeNull()
+    expect(userRefAt(declaredRecord, user)).toBeNull()
   })
 })
 

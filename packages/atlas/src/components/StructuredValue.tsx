@@ -1,3 +1,4 @@
+import type { UserRef } from "@sixb/core"
 import { type FileRef, fileNameFor, isFileRef } from "@sixb/core/blob-storage"
 import { cn } from "@sixb/ui/lib/utils"
 import {
@@ -21,8 +22,10 @@ import {
   fileRefAt,
   type ObjectRefValue,
   objectRefAt,
+  userRefAt,
   type ValueSchema,
 } from "../lib/valueSchema"
+import { DebugUserRef, UserRefChip } from "./UserRefChip"
 
 export interface FileContentLinks {
   readonly inlineUrl: string
@@ -37,10 +40,11 @@ export type StructuredValueVariant = "default" | "debug"
  * Renders a JSON-like value as a readable tree.
  *
  * Pass `schema` whenever the value was declared with one (object properties,
- * action params, workflow and node IO): object references and files are then
- * recognized only where the schema declares them. Without a schema the value is
- * open — arbitrary output nobody declared — and refs and files are recognized
- * by shape, which is the only signal available.
+ * action params, workflow and node IO): object references, users, and files are
+ * then recognized only where the schema declares them. Without a schema the
+ * value is open — arbitrary output nobody declared — and object references and
+ * files are recognized by shape, which is the only signal available. Users never
+ * are.
  */
 export function StructuredValue({
   value,
@@ -69,6 +73,14 @@ export function StructuredValue({
       <DebugObjectRef objectTypeId={objectTypeId} primaryId={primaryId} />
     ) : (
       <ObjectRefChip objectTypeId={objectTypeId} primaryId={primaryId} />
+    )
+  }
+
+  if (position.userRef) {
+    return variant === "debug" ? (
+      <DebugUserRef userRef={position.userRef} />
+    ) : (
+      <UserRefChip userRef={position.userRef} />
     )
   }
 
@@ -164,6 +176,22 @@ function RunValue({
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         {label ? <FieldLabel>{label}</FieldLabel> : null}
         <ObjectRefChip objectTypeId={objectTypeId} primaryId={primaryId} />
+      </div>
+    )
+  }
+
+  if (position.userRef) {
+    if (variant === "debug") {
+      return (
+        <DebugField label={label}>
+          <DebugUserRef userRef={position.userRef} />
+        </DebugField>
+      )
+    }
+    return (
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        {label ? <FieldLabel>{label}</FieldLabel> : null}
+        <UserRefChip userRef={position.userRef} />
       </div>
     )
   }
@@ -536,6 +564,7 @@ function CopyButton({ text }: { text: string }) {
 interface ValuePosition {
   readonly objectRef: ObjectRefValue | null
   readonly fileRef: FileRef | null
+  readonly userRef: UserRef | null
   /** Schema of a child; `undefined` (open) below an open value. */
   readonly child: (key: string) => ValueSchema | undefined
 }
@@ -549,6 +578,8 @@ function readPosition(value: unknown, schema: ValueSchema | undefined): ValuePos
     return {
       objectRef: isObjectRef(value) ? value : null,
       fileRef: isFileRef(value) ? value : null,
+      // Only a declared `userRef` is a user: `{ type: "user", id }` is too common a shape to guess.
+      userRef: null,
       child: () => undefined,
     }
   }
@@ -556,6 +587,7 @@ function readPosition(value: unknown, schema: ValueSchema | undefined): ValuePos
   return {
     objectRef: objectRefAt(node, value),
     fileRef: fileRefAt(node, value),
+    userRef: userRefAt(node, value),
     child: (key) => childValueSchema(node, key),
   }
 }
