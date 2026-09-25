@@ -1,4 +1,9 @@
 import type { InsightsQuery, MetaInsight, MetaPage, MetaPaginationOptions } from "./common"
+import type {
+  CreateFacebookPostInput,
+  FacebookPublishingApi,
+  MetaCreatedObject,
+} from "./publishing"
 
 /** An attachment on a Facebook Page post. All attachments are returned, not just the first. */
 export interface MetaFacebookAttachment {
@@ -61,10 +66,12 @@ export interface MetaFacebookPageProfile {
 }
 
 /** Scope for a Facebook Page node. */
-export interface FacebookPageApi {
+export interface FacebookPageApi extends FacebookPublishingApi {
   /** `GET /{page-id}` — the Page profile node. */
   get(options?: { readonly fields?: readonly string[] }): Promise<MetaFacebookPageProfile>
   readonly posts: {
+    /** POST /{page-id}/feed, including posts with previously uploaded photos. */
+    create(input: CreateFacebookPostInput): Promise<MetaCreatedObject>
     /** One page of `GET /{page-id}/published_posts`. */
     list(options?: PostsListOptions): Promise<MetaPage<MetaFacebookPost>>
     /** Every post, following `paging.next` across all pages. */

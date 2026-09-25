@@ -1,13 +1,15 @@
 # @sixb/connector-meta
 
 A Meta connector for Sixb, built on `@sixb/connector-rest`. It is a thin,
-read-only, one-to-one client over the Graph API for Facebook Pages and Instagram
+typed, one-to-one client over the Graph API for Facebook Pages and Instagram
 Business/Creator accounts — one method per node/edge, nothing more.
 
 - **Pages** — list Facebook Pages and their linked Instagram accounts (`/me/accounts`)
 - **Instagram** — read the user profile, list media and stories, read account- and media-level insights
 - **Facebook** — read the Page profile, list published Page posts, read Page-level insights
 - **Batch** — combine up to 50 independent Graph reads, with an optional token per sub-request
+- **Publishing** — Instagram images, Reels and carousels; Facebook photos, multi-photo posts,
+  videos and Reels, with explicit upload and status operations
 
 The connector stays metric-agnostic and returns Graph responses faithfully: it does
 not flatten attachments, coerce timestamps, reorder insights, or bake in a metric
@@ -42,7 +44,9 @@ export const metaConnector = defineConnector(
 **Tokens.** The `accessToken` authorizes Page discovery (`/me/accounts`) and Instagram
 reads. `/me/accounts` returns a per-Page access token on each Page — pass it to
 `client.facebook(id, { accessToken })` for Page-level reads. The connector does not
-refresh tokens; supply a valid long-lived token.
+refresh tokens; supply a valid long-lived token. Instagram user, media and container scopes and
+`facebookVideo()` also accept `{ accessToken }`. Publishing requires the appropriate write
+permissions, not just a token that can read the account.
 
 ## Client API
 
@@ -123,11 +127,10 @@ do {
 } while (after)
 ```
 
-Instagram's `/media` edge supports cursor pagination, not time-based pagination. Meta's
-[official Instagram API collection](https://www.postman.com/meta/instagram/documentation/6yqw8pt/instagram-api)
-documents the User Insights edge as the only Instagram edge with time-based pagination for
-Facebook Login. The connector therefore does not send undocumented `since` or `until` parameters
-to `/media`.
+The connector currently exposes only cursor pagination for Instagram `/media`. Its
+[endpoint reference](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media/)
+documents `since`/`until`, while Meta's general guide limits time-based pagination to insights.
+Time-window inputs are not exposed by this package.
 
 ### Batch reads
 
@@ -173,9 +176,133 @@ Meta's valid metric set changes frequently. Notable recent changes:
 
 Validate metric names against the live Graph API for your `graphVersion`.
 
+## Publishing
+
+Publishing uses Facebook Login: Instagram must be a professional account linked to a Page.
+Request `instagram_basic`, `instagram_content_publish` and `pages_read_engagement` for Instagram;
+`pages_manage_posts` and `pages_read_engagement` for Facebook; `pages_show_list` for discovery.
+Business Manager assignments may require additional permissions. The token owner needs the
+appropriate content-creation task. Request `fields: ["id", "tasks"]` on `pages.list()` to inspect
+Page tasks. External customer accounts may require Advanced Access, App Review and Business
+Verification. Page Publishing Authorization and two-factor requirements can also block publishing.
+
+New publishing inputs use Meta's field names. Responses retain distinct container, media, photo,
+video and post IDs. No method waits for processing or automatically publishes an uploaded asset.
+
+### Instagram
+
+```ts
+const ig = meta.instagram(igUserId, { accessToken: pageAccessToken })
+const container = await ig.media.create({
+  image_url: "https://cdn.example.com/photo.jpg",
+  caption: "Our latest collection",
+  alt_text: "A linen jacket",
+})
+const status = await meta.instagramContainer(container.id, {
+  accessToken: pageAccessToken,
+}).get()
+if (status.status_code === "FINISHED") {
+  const published = await ig.media.publish({ creation_id: container.id })
+  // Persist published.id separately from container.id.
+}
+```
+
+- **Reel:** `media.create({ media_type: "REELS", video_url, caption, share_to_feed })`.
+- **Carousel:** create image/video containers with `is_carousel_item: true` (video children use
+  `media_type: "VIDEO"`), then create `{ media_type: "CAROUSEL", children: [id1, id2], caption }`.
+  Publish the parent. A carousel has 2–10 children; captions belong to the parent.
+- **Binary video:** create with `upload_type: "resumable"` instead of `video_url`, then call
+  `instagramContainer(id, { accessToken }).upload(uri, { file: Bun.file(path) })` using the returned
+  `uri`. The transfer also accepts `{ file_url }`.
+- **Status:** `instagramContainer(id).get()` returns `status_code` and `status`.
+  `IN_PROGRESS` is pending, `FINISHED` is ready, `PUBLISHED` is already published;
+  `ERROR` and `EXPIRED` need application handling. Meta recommends checking once per minute,
+  for at most five minutes. Persist the ID so processing can be checked later.
+- **Quota:** `ig.contentPublishingLimit.get()` returns the native `data` envelope with
+  `quota_usage` and `config`. Use the returned limit: Meta's documentation disagrees on 50 vs 100.
+- **Published media:** `instagramMedia(id, { accessToken }).get()` includes the permalink.
+
+Containers expire after 24 hours; creation is separately limited to 400 containers per rolling day.
+Create containers near the intended publish time. Instagram scheduling is application-owned.
+
+### Facebook
+
+```ts
+const page = meta.facebook(pageId, { accessToken: pageAccessToken })
+const first = await page.photos.create({ url: firstPhotoUrl, published: false })
+const second = await page.photos.create({ url: secondPhotoUrl, published: false })
+const post = await page.posts.create({
+  message: "Our latest collection",
+  attached_media: [{ media_fbid: first.id }, { media_fbid: second.id }],
+})
+```
+
+Single photos can be published directly with `photos.create({ url, caption, alt_text_custom })`.
+Use `source: Blob` instead of `url` for multipart uploads. An unpublished photo response may
+omit `post_id`.
+
+Videos use `videos.create({ file_url, title, description })` or `{ source: Blob, ... }`.
+These direct uploads are distinct from Reels and do not expose Facebook's chunked video or
+app-scoped upload-handle protocols.
+
+```ts
+const session = await page.reels.start()
+await page.reels.upload(session, { file_url: videoUrl })
+await page.reels.finish({
+  video_id: session.video_id,
+  video_state: "PUBLISHED",
+  description: "Behind the scenes",
+})
+const video = await meta.facebookVideo(session.video_id, {
+  accessToken: pageAccessToken,
+}).get()
+// Inspect video.status.publishing_phase; success:true alone is not visibility confirmation.
+```
+
+Reel transfers accept `{ file: Blob, offset?: number }` as well. Pass the complete original file;
+the connector sends its suffix from `offset`. For Facebook resume, use the server's
+`status.uploading_phase.bytes_transfered`. Transfer calls use the returned Meta upload URL,
+OAuth headers, and reject redirects.
+
+Facebook supports native scheduling: photos/posts/videos require `published: false` with
+`scheduled_publish_time` (Unix seconds); Reels require `video_state: "SCHEDULED"`.
+Allowed time windows vary by endpoint and are enforced by Meta. For scheduled multi-photo posts,
+upload photos with `published: false, temporary: true` and pass
+`unpublished_content_type: "SCHEDULED"` to `posts.create()`.
+
+### Media and recovery
+
+Hosted media must remain accessible to Meta without authentication headers until processing
+finishes. Facebook hosted Reels reject Meta CDN URLs and hosts that block its crawler.
+Instagram feed images require JPEG (up to 8 MB, ratio 4:5–1.91:1); its media reference currently
+limits Reels to 300 MB and 3 seconds–15 minutes. Facebook photos allow up to 10 MB, and its Reels
+guide specifies 3–90 seconds. Codec and format details are in the references below. The connector
+validates request structure, not remote file contents; conversion and media inspection belong
+in the application.
+
+**Writes are never automatically retried**, including by custom retry policies. A timeout may
+mean the write succeeded remotely. Save intermediate IDs and inspect status before retrying;
+without an ID the outcome may remain unknown. Instagram and Facebook are independent publications.
+In particular, Graph `4/2207051` is an anti-spam restriction, not ordinary quota exhaustion.
+Upload failures and malformed acknowledgements retain their body in `MetaApiError`, even on
+HTTP 200. There is no universal exactly-once publication guarantee.
+
+This API covers images, Reels, carousels and Page videos; Stories, product tags, partnership labels,
+editing/deletion and cross-platform orchestration are not included. Existing reads remain on the
+default Graph version; choose `graphVersion` explicitly for your integration and verify publishing
+with designated test accounts before production.
+
+Official references: [Instagram publishing](https://developers.facebook.com/documentation/instagram-platform/content-publishing/),
+[Instagram media inputs](https://developers.facebook.com/documentation/instagram-platform/instagram-graph-api/reference/ig-user/media/),
+[Facebook photos](https://developers.facebook.com/docs/graph-api/reference/page/photos/),
+[Page videos](https://developers.facebook.com/docs/graph-api/reference/page/videos/),
+[Facebook Reels](https://developers.facebook.com/documentation/video-api/guides/reels-publishing/).
+Some older examples disagree with the endpoint references on limits; quota/config responses
+and the selected API version take precedence.
+
 ## Throttling and usage
 
-In addition to network failures, HTTP `429`, and `5xx`, the default policy retries Graph throttling
+For reads, in addition to network failures, HTTP `429`, and `5xx`, the default policy retries Graph throttling
 codes `4`, `17`, `32`, and `613`, including when Meta returns them with HTTP `400`. Retries remain
 bounded by `retry.maxRetries`; customize `shouldRetry` or `delayMs` when a project needs a different
 backoff policy.
@@ -195,16 +322,19 @@ meta({
 
 The connector reports quota signals but does not choose account pacing, persistence, or circuit
 breaker policy for the project.
+An `onResponse` exception for an HTTP response emits a prefixed warning and does not discard
+the response, so telemetry failures cannot hide a successful publication.
 
 ## Notes
 
-- **Read-only.** Every Graph operation is a read. Batch execution uses Meta's required outer
-  `POST`, but the connector only accepts `GET` sub-requests.
+- **Read-only batch.** Batch execution uses Meta's required outer `POST`, but only accepts
+  `GET` sub-requests. Publishing uses separate operations with no automatic replay.
 - **Faithful responses.** Attachments are returned as a full array, timestamps as raw
   API strings, and insights in API order. Flatten or normalize in your project layer.
 - **No account orchestration.** Deduping Pages/accounts and filtering to a specific
   Page or Instagram account is project policy — build it on top of `pages.listAll()`.
-- **No media time window.** Meta does not officially support time-based pagination on the
-  Instagram `/media` edge; filter cursor-paginated results in the project layer.
-- **Webhooks** are out of scope (this is a sync/read use case). They can be added later
+- **Media time windows.** The connector currently exposes cursor pagination on Instagram
+  `/media`. Its current endpoint reference documents `since`/`until`, while the general guide
+  disagrees; time-window inputs are not exposed by this package.
+- **Webhooks** are not exposed by this connector. They can be added later
   via `defineWebhook` from `@sixb/core`.

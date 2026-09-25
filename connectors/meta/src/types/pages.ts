@@ -15,6 +15,8 @@ export interface MetaFacebookPage {
   readonly name?: string
   /** Page access token — use it to scope `client.facebook(id, { accessToken })` reads. */
   readonly access_token?: string
+  /** Page tasks granted to the token owner, including PROFILE_PLUS_* task names. */
+  readonly tasks?: readonly string[]
   readonly instagram_business_account?: MetaInstagramAccount
 }
 

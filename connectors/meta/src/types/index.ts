@@ -46,3 +46,4 @@ export type {
   PagesApi,
   PagesListOptions,
 } from "./pages"
+export type * from "./publishing"
