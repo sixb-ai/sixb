@@ -88,31 +88,16 @@ test("thread history shows a rotating active count while runs are in flight", ()
   expect(html).not.toContain("lucide-history")
 })
 
-test("a centered empty draft can supply branded content and hide conversation chrome", () => {
-  const html = renderPanel(null, {
-    centerEmptyState: true,
-    hideHeaderOnEmpty: true,
-    emptyStateHeader: <div>Northline Mechanical</div>,
-    emptyStateFooter: <a href="/equipment">Equipment</a>,
-    composerPlaceholder: "Ask Northline",
-  })
+test("an empty conversation shows host welcome content in place of the agent name", () => {
+  const html = renderPanel(null, { welcomeContent: <div>Northline Mechanical</div> })
 
   expect(html).toContain("Northline Mechanical")
-  expect(html).toContain('href="/equipment"')
-  expect(html).toContain('placeholder="Ask Northline"')
-  expect(html).not.toContain("data-agent-conversation-header")
+  expect(html).not.toContain(">Operations Assistant</p>")
 })
 
-test("a centered empty draft can expose labeled history without restoring its header", () => {
-  const html = renderPanel(null, {
-    centerEmptyState: true,
-    hideHeaderOnEmpty: true,
-    emptyStateThreadHistoryLabel: "Recent conversations",
-  })
-
-  expect(html).toContain("Recent conversations")
-  expect(html).toContain('aria-label="Thread history. Current: New thread"')
-  expect(html).not.toContain("data-agent-conversation-header")
+test("an empty conversation falls back to the agent name, and null welcome content hides it", () => {
+  expect(renderPanel(null)).toContain(">Operations Assistant</p>")
+  expect(renderPanel(null, { welcomeContent: null })).not.toContain(">Operations Assistant</p>")
 })
 
 test("compact conversation chrome accepts host workspace actions", () => {
@@ -123,14 +108,11 @@ test("compact conversation chrome accepts host workspace actions", () => {
   expect(html).toContain('aria-label="Expand conversation"')
 })
 
-test("sandbox recovery remains visible in both empty conversation layouts", () => {
-  // Regression proof: remove sandboxRecovery from either empty composer layout; this fails.
-  for (const centerEmptyState of [false, true]) {
-    const html = renderPanel(null, {
-      centerEmptyState,
-      sandboxRecovery: <div>Sandbox recovery required</div>,
-      composerDisabled: true,
-    })
-    expect(html).toContain("Sandbox recovery required")
-  }
+test("sandbox recovery remains visible in an empty conversation", () => {
+  // Regression proof: remove sandboxRecovery from the empty composer layout; this fails.
+  const html = renderPanel(null, {
+    sandboxRecovery: <div>Sandbox recovery required</div>,
+    composerDisabled: true,
+  })
+  expect(html).toContain("Sandbox recovery required")
 })

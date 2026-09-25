@@ -26,7 +26,6 @@ export interface AgentThreadSwitcherProps {
   readonly onLoadMoreThreads?: () => void
   readonly onSelectThread: (threadId: string) => void
   readonly onNewThread?: () => void
-  readonly triggerLabel?: string
 }
 
 export function AgentThreadSwitcher({
@@ -41,7 +40,6 @@ export function AgentThreadSwitcher({
   onLoadMoreThreads,
   onSelectThread,
   onNewThread,
-  triggerLabel,
 }: AgentThreadSwitcherProps) {
   const [open, setOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
@@ -76,7 +74,6 @@ export function AgentThreadSwitcher({
     matchingThreads.filter((thread) => thread.id !== currentVisible?.id)
   )
   const archivedCount = shownThreads.filter((thread) => thread.status === "archived").length
-  const showTriggerText = Boolean(triggerLabel)
   const historyLabel =
     runningThreadCount > 0
       ? `${runningThreadCount} ${runningThreadCount === 1 ? "thread" : "threads"} running. Open thread history. Current: ${agentThreadTitle(currentThread)}`
@@ -107,10 +104,10 @@ export function AgentThreadSwitcher({
         <Button
           type="button"
           variant="ghost"
-          size={showTriggerText ? "sm" : "icon-lg"}
+          size="icon-lg"
           aria-label={historyLabel}
           title={runningThreadCount > 0 ? `${runningThreadCount} running` : "Thread history"}
-          className={cn(showTriggerText && "gap-2 px-3", "[&_svg]:size-5")}
+          className="[&_svg]:size-5"
         >
           {runningThreadCount > 0 ? (
             <span
@@ -126,7 +123,6 @@ export function AgentThreadSwitcher({
           ) : (
             <History />
           )}
-          {triggerLabel ? <span>{triggerLabel}</span> : null}
         </Button>
       </DialogTrigger>
       <DialogContent

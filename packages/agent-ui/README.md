@@ -34,9 +34,6 @@ export function InvoiceSidebar({ invoice }: { invoice: ObjectRef }) {
 | `threadId` | Controlled thread. Omit to let the panel own its current thread. |
 | `defaultThreadId`, `onThreadChange` | For remembering where a user left off. |
 | `welcomeContent` | Custom React content centered above the composer in an empty conversation. Omit for the default agent name; pass `null` to leave it empty. |
-
-| `centerEmptyState`, `hideHeaderOnEmpty` | Turn a new draft into a focused landing composer. |
-| `emptyStateHeader`, `emptyStateFooter` | Add host branding and shortcuts around that composer. |
 | `composerPlaceholder` | Customize the prompt shown in the empty composer. |
 
 Use a logo, text, or your own component for the welcome area:
@@ -46,7 +43,7 @@ Use a logo, text, or your own component for the welcome area:
 ```
 
 The panel handles centering; your content controls its own styling. It disappears when the
-conversation starts. `AgentChat` also accepts `welcomeContent`.
+conversation starts. `AgentChat` and `AgentSurface` also accept `welcomeContent`.
 
 A context entry is either an object reference or a piece of app state:
 

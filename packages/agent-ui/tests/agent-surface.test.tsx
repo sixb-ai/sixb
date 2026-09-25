@@ -1,11 +1,21 @@
 import { expect, test } from "bun:test"
+import { getAgentOptions } from "@sixb/client/hooks"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { AgentSurface, type AgentSurfaceMode } from "../src"
+import { AgentSurface, type AgentSurfaceMode, type AgentSurfaceProps } from "../src"
 
-function renderSurface(mode?: AgentSurfaceMode, fullPage = false, canDock = true): string {
+function renderSurface(
+  mode?: AgentSurfaceMode,
+  fullPage = false,
+  canDock = true,
+  overrides: Partial<AgentSurfaceProps> = {}
+): string {
   const queryClient = new QueryClient()
+  queryClient.setQueryData(getAgentOptions().queryKey, {
+    name: "Sixb",
+    model: { provider: "test", modelId: "test-model" },
+  })
   return renderToStaticMarkup(
     createElement(
       QueryClientProvider,
@@ -16,6 +26,7 @@ function renderSurface(mode?: AgentSurfaceMode, fullPage = false, canDock = true
         onRequestDock: canDock ? () => {} : undefined,
         title: "Operations Assistant",
         launcherLabel: "Ask Operations",
+        ...overrides,
       })
     )
   )
@@ -61,4 +72,14 @@ test("full-page mode omits the dock action when the host cannot navigate back", 
   expect(renderSurface("dock", true, false)).not.toContain(
     'aria-label="Move assistant to side panel"'
   )
+})
+
+test("the adaptive surface passes host welcome content to its conversation", () => {
+  // Dropping welcomeContent from AgentSurface's AgentPanel falls back to the agent name here.
+  const dock = renderSurface("dock", false, true, {
+    welcomeContent: <p>Northline Mechanical</p>,
+  })
+
+  expect(dock).toContain("<p>Northline Mechanical</p>")
+  expect(dock).not.toContain(">Sixb</p>")
 })
