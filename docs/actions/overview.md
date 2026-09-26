@@ -141,8 +141,6 @@ automatically.
 Inside `.edits()`, use `objects(Type)` to create an object or get an edit handle with `.byId(id)`.
 These methods stage changes synchronously; all edits commit together after the handler returns.
 Use `read.objects(Type)` when you need to read existing values or relationships.
-`read`, a workflow step's `sixb` and the runtime from `createSixb()` are all an `ObjectReader`, so
-a read helper that takes one works in each of them, and its reads stay protected when it gets `read`.
 
 | Method | Purpose |
 | --- | --- |
@@ -176,31 +174,27 @@ An action with a `customer: param(ref(Customer))` input can reassign an invoice 
 })
 ```
 
-Both changes commit together. If something read this way changes before the commit, nothing is
-committed and the run fails with [`action.read_conflict`](../errors/overview.md#error-catalog), so
-a concurrent change is never overwritten. This covers the action's target object, reads made in
-`.writeback()` and `.edits()`, objects returned by `get()`, `list()`, and `query()` (including
-expanded objects), and the relationships returned by `listLinks()`. Request a new run to act on the
-current data; if the action has a `.writeback()`, check the external system first.
-
-Query results are protected object by object, not as a set: an object that starts matching a
-query after you ran it does not make the commit fail, and neither does a change in a `count()`,
-`exists()`, or `facets()` result. Two patterns cover what a set check would:
-
-- **Uniqueness:** when a decision depends on an object not existing yet, give that object a
-  deterministic ID and read it with `get()`. An absent object is protected as well.
-- **Coverage:** to handle every new object, such as classifying each new contact, run an
-  idempotent action per object from a workflow that a [rule](../rules/overview.md#start-a-workflow)
-  starts when the object matches, instead of scanning with a query.
-
-If a worker stops after `.writeback()` succeeded, the resumed run does not call it again and only
-checks what `.edits()` reads.
+Both changes commit together.
 
 When a [projection](../projections/overview.md) also supplies an object, action values take
 precedence by default. A projection using `mostRecent` can make a newer source value effective.
 Use `reset()` to return a property to its projected value. For a cardinality-one relationship,
 unlinking also hides later projected targets. Use `resetLink()` to return the choice of target
 to the projection.
+
+## Concurrent changes
+
+If data the action read through `read` changes before the commit, nothing is committed and the
+run fails with [`action.read_conflict`](../errors/overview.md#error-catalog). Request a new run;
+if the action has a `.writeback()`, its external call already ran.
+
+| Checked | Not checked |
+| --- | --- |
+| The target object and `get()`, even for a missing object | Objects that start matching a query later |
+| `list()`, `query()`, and expanded objects | `count()`, `exists()`, and `facets()` |
+| `listLinks()` | Telemetry history |
+
+To depend on an object not existing yet, give it a deterministic ID and read it with `get()`.
 
 ## Use your action
 

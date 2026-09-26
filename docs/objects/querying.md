@@ -185,11 +185,8 @@ const { objects: openInvoices } = await sixb
 The token identifies which relationship to follow. Use a link with a single target type for
 outgoing typed traversal; wildcard links cannot be traversed with this builder.
 
-A link declared with an imported object type or `link.self()` is typed as written. A link that
-names its target by ID (`link.ref()`) is typed from the ontology types Sixb generates: `dev`,
-`build`, and `check` keep them current, and `bun sixb typegen` refreshes them before a standalone
-TypeScript check. The same query has the same type in Actions, Workflows, Agent tools, and
-[browser queries](../client/typed-queries.md).
+Traversal through a [`link.ref()`](../ontology/links.md#other-targets) is typed from generated
+ontology types. Run `bun sixb typegen` before a standalone TypeScript check.
 
 ## Include related objects
 
@@ -228,8 +225,8 @@ Relationship properties, when present, are available as `linkProperties` on the 
 
 ## Pass queries around
 
-Type a query parameter with `ObjectQueryBuilder` from `@sixb/core`. A helper that takes the
-plain query also accepts one with `expand()`:
+Type a query parameter as `ObjectQueryBuilder`. It accepts any query that returns that type,
+including one with `expand()` or one reached through `traverse()`:
 
 ```ts
 import type { ObjectQueryBuilder } from "@sixb/core"
@@ -239,20 +236,13 @@ async function countOverdue(invoices: ObjectQueryBuilder<typeof Invoice>) {
 }
 
 await countOverdue(sixb.objects(Invoice).query().expand(Invoice.l.customer))
-```
-
-A variable holding a query also accepts a query that reaches the same object type from another
-starting point:
-
-```ts
-let invoices = sixb.objects(Invoice).query()
-if (customerId) {
-  invoices = sixb
+await countOverdue(
+  sixb
     .objects(Customer)
     .query()
-    .where((customer) => customer.p.id.eq(customerId))
+    .where((customer) => customer.p.id.eq("cust-001"))
     .traverse(Invoice.l.customer, { direction: "incoming" })
-}
+)
 ```
 
 ## Count and group results
