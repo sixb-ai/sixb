@@ -423,7 +423,7 @@ describe("auth.createAuthorizationContext", () => {
     }
   }
 
-  test("resolves the context from an authenticated request", async () => {
+  test("resolves the context for an authenticated caller", async () => {
     const { sixb, deps } = createRuntime()
     const { request, sessionId } = await seedAuthenticatedUser(sixb.id, deps, {
       userId: "adam",
@@ -431,7 +431,11 @@ describe("auth.createAuthorizationContext", () => {
       groupIds: ["commercial"],
     })
 
-    const context = await sixb.auth.createAuthorizationContext(request)
+    const session = await sixb.auth.getSession(request)
+    if (!session.authenticated) {
+      throw new Error("Expected an authenticated session.")
+    }
+    const context = sixb.auth.contextFromSession(session)
 
     expect(context.principal).toEqual({ type: "user", id: "adam" })
     expect(context.sessionId).toBe(sessionId)
@@ -443,31 +447,5 @@ describe("auth.createAuthorizationContext", () => {
     expect(context.grants["run:sync"]).toEqual(new Set(["sync-contracts"]))
     expect(context.grants["run:pipeline"]).toEqual(new Set(["pipeline-contracts"]))
     expect(context.grants["run:agent"]).toBe(true)
-  })
-
-  test("rejects unauthenticated requests", async () => {
-    const { sixb } = createRuntime()
-
-    expect(
-      sixb.auth.createAuthorizationContext(new Request("http://localhost/api/objects"))
-    ).rejects.toThrow("[Sixb] Authentication is required.")
-  })
-
-  test("contextFromSession matches the request-based context", async () => {
-    const { sixb, deps } = createRuntime()
-    const { request } = await seedAuthenticatedUser(sixb.id, deps, {
-      userId: "adam",
-      email: "adam@example.com",
-      groupIds: ["commercial", "finance"],
-    })
-
-    const session = await sixb.auth.getSession(request)
-    if (!session.authenticated) {
-      throw new Error("Expected an authenticated session.")
-    }
-
-    expect(sixb.auth.contextFromSession(session)).toEqual(
-      await sixb.auth.createAuthorizationContext(request)
-    )
   })
 })

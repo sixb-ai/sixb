@@ -7,6 +7,7 @@ import {
   SixbHost,
 } from "../src"
 import {
+  type AuthenticatedUserRequestSession,
   createAccessTokenCredential,
   createCsrfCookieHeader,
   createSessionCookieHeader,
@@ -50,11 +51,28 @@ const magicLinkStrategy: MagicLinkAuthStrategy = {
   },
 }
 
+async function resolveCaller(
+  sixb: SixbHost,
+  request: Request
+): Promise<AuthenticatedUserRequestSession> {
+  const session = await sixb.auth.getSession(request, { credentialSource: "any" })
+  if (!session.authenticated || !("user" in session)) {
+    throw new Error(`Expected an authenticated user, got ${JSON.stringify(session)}`)
+  }
+  return session
+}
+
+const invitationDestination = {
+  audience: "atlas",
+  requestOrigin: "http://localhost",
+  returnTo: "/",
+} as const
+
 async function seedAuthenticatedUser(
   sixb: SixbHost,
   deps: ReturnType<typeof createTestRuntimeDeps>,
   params: { readonly userId: string; readonly email: string; readonly groupIds: readonly string[] }
-): Promise<Request> {
+): Promise<AuthenticatedUserRequestSession> {
   const credential = createSessionCredential(`ses_${params.userId}`)
   await deps.storage.auth.users.create({
     id: params.userId,
@@ -80,9 +98,12 @@ async function seedAuthenticatedUser(
     expiresAt: new Date("2099-05-16T10:00:00.000Z"),
   })
 
-  return new Request("http://localhost/api/auth/invitations", {
-    headers: { cookie: `sixb_session=${credential.cookieValue}` },
-  })
+  return resolveCaller(
+    sixb,
+    new Request("http://localhost/api/auth/invitations", {
+      headers: { cookie: `sixb_session=${credential.cookieValue}` },
+    })
+  )
 }
 
 function createInviteRuntime(options: { readonly strategy?: MagicLinkAuthStrategy } = {}) {
@@ -235,7 +256,7 @@ describe("SixbHost auth runtime", () => {
       reason: "missing_cookie",
     })
 
-    const session = await sixb.auth.getSession(request, { credentialSource: "accessToken" })
+    const session = await sixb.auth.getSession(request, { credentialSource: "any" })
     expect(session).toMatchObject({
       authenticated: true,
       credentialSource: "accessToken",
@@ -342,7 +363,9 @@ describe("SixbHost auth runtime", () => {
       headers: { cookie: `sixb_session=${sessionCredential.cookieValue}` },
     })
 
-    const personal = await sixb.auth.createPersonalAccessToken(request, {
+    const caller = await resolveCaller(sixb, request)
+
+    const personal = await sixb.auth.createPersonalAccessToken(caller, {
       name: "Local CLI",
       groupIds: [],
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -354,7 +377,7 @@ describe("SixbHost auth runtime", () => {
       groupIds: [],
     })
 
-    const serviceAccount = await sixb.auth.createServiceAccount(request, {
+    const serviceAccount = await sixb.auth.createServiceAccount(caller, {
       id: "svc_agent",
       name: "Sandbox agent",
       groupIds: ["commercial"],
@@ -365,7 +388,7 @@ describe("SixbHost auth runtime", () => {
     })
     expect(serviceAccount.groupMemberships).toMatchObject([{ groupId: "commercial" }])
 
-    const serviceToken = await sixb.auth.createServiceAccountAccessToken(request, {
+    const serviceToken = await sixb.auth.createServiceAccountAccessToken(caller, {
       serviceAccountId: "svc_agent",
       name: "Agent token",
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
@@ -376,7 +399,7 @@ describe("SixbHost auth runtime", () => {
       subject: { type: "serviceAccount", id: "svc_agent" },
     })
 
-    await sixb.auth.revokeServiceAccountAccessToken(request, {
+    await sixb.auth.revokeServiceAccountAccessToken(caller, {
       serviceAccountId: "svc_agent",
       tokenId: serviceToken.accessToken.id,
     })
@@ -440,35 +463,37 @@ describe("SixbHost auth runtime", () => {
 
     // Cannot escalate a personal token or a new service account beyond the
     // caller's own groups.
+    const caller = await resolveCaller(sixb, request)
+
     await expect(
-      sixb.auth.createPersonalAccessToken(request, {
+      sixb.auth.createPersonalAccessToken(caller, {
         name: "Escalated",
         groupIds: ["finance"],
         expiresAt: new Date("2099-05-16T10:00:00.000Z"),
       })
     ).rejects.toThrow("cannot be assigned")
     await expect(
-      sixb.auth.createServiceAccount(request, { name: "Nope", groupIds: ["finance"] })
+      sixb.auth.createServiceAccount(caller, { name: "Nope", groupIds: ["finance"] })
     ).rejects.toThrow("cannot be assigned")
 
     // Cannot mint, list, disable, or revoke tokens for a service account whose
     // groups it does not fully hold — reported as "not found" to avoid probing.
     await expect(
-      sixb.auth.createServiceAccountAccessToken(request, {
+      sixb.auth.createServiceAccountAccessToken(caller, {
         serviceAccountId: "svc_priv",
         name: "Stolen",
         expiresAt: new Date("2099-05-16T10:00:00.000Z"),
       })
     ).rejects.toThrow("not found")
     await expect(
-      sixb.auth.listServiceAccountAccessTokens(request, { serviceAccountId: "svc_priv" })
+      sixb.auth.listServiceAccountAccessTokens(caller, { serviceAccountId: "svc_priv" })
     ).rejects.toThrow("not found")
     await expect(
-      sixb.auth.disableServiceAccount(request, { serviceAccountId: "svc_priv" })
+      sixb.auth.disableServiceAccount(caller, { serviceAccountId: "svc_priv" })
     ).rejects.toThrow("not found")
 
     // Listing hides the unmanageable account entirely.
-    await expect(sixb.auth.listServiceAccounts(request)).resolves.toEqual({ serviceAccounts: [] })
+    await expect(sixb.auth.listServiceAccounts(caller)).resolves.toEqual({ serviceAccounts: [] })
   })
 
   test("resolves sessions and cookie names by audience", async () => {
@@ -581,62 +606,22 @@ describe("SixbHost auth runtime", () => {
     ).resolves.toEqual({ authenticated: false, reason: "suspended_user" })
   })
 
-  test("creates security contexts with correlation ids", async () => {
-    const deps = createTestRuntimeDeps()
-    const sixb = new SixbHost({
-      id: "project-a",
-      ontology: [],
-      ...deps,
-      auth: authStrategy,
-    })
-    const credential = createSessionCredential("ses_1")
-
-    await deps.storage.auth.users.create({
-      id: "usr_1",
-      projectId: sixb.id,
-      email: "ava@acme.com",
-    })
-    await deps.storage.auth.sessions.create({
-      id: credential.sessionId,
-      projectId: sixb.id,
-      userId: "usr_1",
-      strategyId: "test",
-      audience: "atlas",
-      tokenHash: credential.tokenHash,
-      createdAt: new Date("2026-05-16T10:00:00.000Z"),
-      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
-    })
-
-    const context = await sixb.auth.createSecurityContext(
-      new Request("http://localhost/api/project", {
-        headers: {
-          cookie: `sixb_session=${credential.cookieValue}`,
-          "x-correlation-id": "corr_1",
-        },
-      })
-    )
-
-    expect(context).toEqual({
-      principal: { type: "user", id: "usr_1" },
-      sessionId: "ses_1",
-      projectId: "project-a",
-      correlationId: "corr_1",
-    })
-  })
-
   test("creates invitations with creator metadata and sends a magic link", async () => {
     const { deps, sixb, requests } = createInviteRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
     })
 
-    const result = await sixb.auth.invite(request, {
-      email: " Ava@Acme.COM ",
-      groups: [commercial],
-      returnTo: "/objects?tab=all",
-    })
+    const result = await sixb.auth.invite(
+      caller,
+      {
+        email: " Ava@Acme.COM ",
+        groups: [commercial],
+      },
+      { ...invitationDestination, returnTo: "/objects?tab=all" }
+    )
 
     expect(result.delivery.status).toBe("sent")
     expect(result.invitation).toMatchObject({
@@ -675,23 +660,31 @@ describe("SixbHost auth runtime", () => {
       },
     }
     const { deps, sixb } = createInviteRuntime({ strategy })
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
     })
 
-    const concealed = await sixb.auth.invite(request, {
-      email: "ava@acme.com",
-      groups: [commercial],
-    })
+    const concealed = await sixb.auth.invite(
+      caller,
+      {
+        email: "ava@acme.com",
+        groups: [commercial],
+      },
+      invitationDestination
+    )
     expect(concealed.delivery).toEqual({ status: "sent" })
 
-    const revealed = await sixb.auth.invite(request, {
-      email: "ava@acme.com",
-      groups: [commercial],
-      revealLink: true,
-    })
+    const revealed = await sixb.auth.invite(
+      caller,
+      {
+        email: "ava@acme.com",
+        groups: [commercial],
+        revealLink: true,
+      },
+      invitationDestination
+    )
     expect(revealed.delivery.link?.url).toContain("token=secret")
   })
 
@@ -713,17 +706,21 @@ describe("SixbHost auth runtime", () => {
       },
     }
     const { deps, sixb } = createInviteRuntime({ strategy })
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
     })
 
     await expect(
-      sixb.auth.invite(request, {
-        email: "ava@example.com",
-        groups: [commercial],
-      })
+      sixb.auth.invite(
+        caller,
+        {
+          email: "ava@example.com",
+          groups: [commercial],
+        },
+        invitationDestination
+      )
     ).rejects.toThrow("not allowed by the active auth strategy")
     await expect(deps.storage.auth.invitations.list({ projectId: sixb.id })).resolves.toMatchObject(
       { total: 0 }
@@ -745,17 +742,21 @@ describe("SixbHost auth runtime", () => {
       },
     }
     const { deps, sixb } = createInviteRuntime({ strategy })
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
     })
 
     await expect(
-      sixb.auth.invite(request, {
-        email: "ava@acme.com",
-        groups: [commercial],
-      })
+      sixb.auth.invite(
+        caller,
+        {
+          email: "ava@acme.com",
+          groups: [commercial],
+        },
+        invitationDestination
+      )
     ).rejects.toThrow("delivery was skipped")
 
     await expect(deps.storage.auth.invitations.list({ projectId: sixb.id })).resolves.toMatchObject(
@@ -768,25 +769,33 @@ describe("SixbHost auth runtime", () => {
 
   test("rejects invalid or unauthorized invitation input before writing", async () => {
     const { deps, sixb } = createInviteRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
     })
 
     await expect(
-      sixb.auth.invite(request, {
-        email: "ava@acme.com",
-        groups: [commercial],
-        groupIds: ["commercial"],
-      })
+      sixb.auth.invite(
+        caller,
+        {
+          email: "ava@acme.com",
+          groups: [commercial],
+          groupIds: ["commercial"],
+        },
+        invitationDestination
+      )
     ).rejects.toThrow("cannot provide both groups and groupIds")
 
     await expect(
-      sixb.auth.invite(request, {
-        email: "ava@acme.com",
-        groups: [finance],
-      })
+      sixb.auth.invite(
+        caller,
+        {
+          email: "ava@acme.com",
+          groups: [finance],
+        },
+        invitationDestination
+      )
     ).rejects.toThrow("not allowed")
 
     await expect(deps.storage.auth.invitations.list({ projectId: sixb.id })).resolves.toMatchObject(
@@ -798,7 +807,7 @@ describe("SixbHost auth runtime", () => {
 
   test("lists and revokes invitations through membership policy scope", async () => {
     const { deps, sixb } = createInviteRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
@@ -824,17 +833,17 @@ describe("SixbHost auth runtime", () => {
       expiresAt: new Date("2099-05-16T10:00:00.000Z"),
     })
 
-    const list = await sixb.auth.listInvitations(request, { order: "asc" })
+    const list = await sixb.auth.listInvitations(caller, { order: "asc" })
 
     expect(list.invitations.map((invitation) => invitation.id)).toEqual([
       "inv_commercial",
       "inv_empty",
     ])
     await expect(
-      sixb.auth.revokeInvitation(request, { invitationId: "inv_finance" })
+      sixb.auth.revokeInvitation(caller, { invitationId: "inv_finance" })
     ).rejects.toThrow("not allowed")
     await expect(
-      sixb.auth.revokeInvitation(request, { invitationId: "inv_commercial" })
+      sixb.auth.revokeInvitation(caller, { invitationId: "inv_commercial" })
     ).resolves.toMatchObject({
       invitation: {
         id: "inv_commercial",
@@ -845,7 +854,7 @@ describe("SixbHost auth runtime", () => {
 
   test("does not revoke accepted invitations", async () => {
     const { deps, sixb } = createInviteRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
@@ -864,7 +873,7 @@ describe("SixbHost auth runtime", () => {
     })
 
     await expect(
-      sixb.auth.revokeInvitation(request, { invitationId: "inv_accepted" })
+      sixb.auth.revokeInvitation(caller, { invitationId: "inv_accepted" })
     ).rejects.toThrow("already accepted")
   })
 
@@ -904,7 +913,7 @@ describe("SixbHost auth runtime", () => {
     ).toBe(true)
   })
 
-  test("caches resolved sessions and re-validates after invalidation", async () => {
+  test("caches resolved sessions and re-validates after revocation", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new SixbHost({ ontology: [], ...deps, auth: authStrategy })
     const credential = createSessionCredential("ses_cache")
@@ -942,8 +951,14 @@ describe("SixbHost auth runtime", () => {
     // Second resolution served from cache — storage hit only once.
     expect(findCalls).toBe(1)
 
-    sixb.auth.invalidateSession(credential.sessionId)
-    await expect(sixb.auth.getSession(request())).resolves.toMatchObject({ authenticated: true })
+    // Revocation evicts the cached session, so the next request sees the revoked row.
+    // Reproduce: drop the cache invalidation in AuthRuntime.revokeSession; this stays authenticated.
+    const caller = await resolveCaller(sixb, request())
+    await expect(sixb.auth.revokeSession(caller, credential.sessionId)).resolves.toBe(true)
+    await expect(sixb.auth.getSession(request())).resolves.toMatchObject({
+      authenticated: false,
+      reason: "invalid_session",
+    })
     expect(findCalls).toBe(2)
   })
 
@@ -1449,13 +1464,13 @@ async function seedMember(
 describe("SixbHost auth member management", () => {
   test("membership options expose assignable groups and capabilities", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
     })
 
-    const options = await sixb.auth.getMembershipOptions(request)
+    const options = await sixb.auth.getMembershipOptions(caller)
 
     expect(options.groups.map((group) => group.id).sort()).toEqual(["commercial", "finance"])
     expect(options.capabilities).toEqual({ invite: true, assignGroups: true, suspend: true })
@@ -1463,7 +1478,7 @@ describe("SixbHost auth member management", () => {
 
   test("lists members in scope, hides out-of-scope users, and includes group-less members", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
@@ -1486,7 +1501,7 @@ describe("SixbHost auth member management", () => {
       groupIds: ["commercial", "engineering"],
     })
 
-    const list = await sixb.auth.listMembers(request, { order: "asc" })
+    const list = await sixb.auth.listMembers(caller, { order: "asc" })
     const ids = list.members.map((member) => member.user.id)
 
     expect(ids).toContain("usr_commercial")
@@ -1500,7 +1515,7 @@ describe("SixbHost auth member management", () => {
 
   test("member capabilities reflect status and self-protection", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_self",
       email: "self@acme.com",
       groupIds: ["commercial"],
@@ -1517,7 +1532,7 @@ describe("SixbHost auth member management", () => {
       status: "suspended",
     })
 
-    const list = await sixb.auth.listMembers(request, { order: "asc" })
+    const list = await sixb.auth.listMembers(caller, { order: "asc" })
     const capabilities = new Map(
       list.members.map((member) => [member.user.id, member.capabilities])
     )
@@ -1541,7 +1556,7 @@ describe("SixbHost auth member management", () => {
 
   test("assigns and removes a member's groups within scope", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
@@ -1552,7 +1567,7 @@ describe("SixbHost auth member management", () => {
       groupIds: ["commercial"],
     })
 
-    const result = await sixb.auth.updateMemberGroups(request, {
+    const result = await sixb.auth.updateMemberGroups(caller, {
       userId: "usr_target",
       groupIds: ["finance"],
     })
@@ -1565,7 +1580,7 @@ describe("SixbHost auth member management", () => {
 
   test("rejects group assignment outside scope and unknown groups", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
@@ -1577,16 +1592,16 @@ describe("SixbHost auth member management", () => {
     })
 
     await expect(
-      sixb.auth.updateMemberGroups(request, { userId: "usr_target", groupIds: ["engineering"] })
+      sixb.auth.updateMemberGroups(caller, { userId: "usr_target", groupIds: ["engineering"] })
     ).rejects.toThrow("not allowed to assign")
     await expect(
-      sixb.auth.updateMemberGroups(request, { userId: "usr_target", groupIds: ["ghost"] })
+      sixb.auth.updateMemberGroups(caller, { userId: "usr_target", groupIds: ["ghost"] })
     ).rejects.toThrow("Unknown group")
   })
 
   test("treats out-of-scope and missing targets identically", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
@@ -1598,26 +1613,26 @@ describe("SixbHost auth member management", () => {
     })
 
     await expect(
-      sixb.auth.updateMemberGroups(request, { userId: "usr_out", groupIds: ["commercial"] })
+      sixb.auth.updateMemberGroups(caller, { userId: "usr_out", groupIds: ["commercial"] })
     ).rejects.toThrow("not found")
-    await expect(sixb.auth.suspendMember(request, { userId: "usr_missing" })).rejects.toThrow(
+    await expect(sixb.auth.suspendMember(caller, { userId: "usr_missing" })).rejects.toThrow(
       "not found"
     )
   })
 
   test("blocks removing your own groups but allows adding in-scope groups", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_self",
       email: "self@acme.com",
       groupIds: ["commercial"],
     })
 
     await expect(
-      sixb.auth.updateMemberGroups(request, { userId: "usr_self", groupIds: [] })
+      sixb.auth.updateMemberGroups(caller, { userId: "usr_self", groupIds: [] })
     ).rejects.toThrow("cannot remove their own groups")
 
-    const result = await sixb.auth.updateMemberGroups(request, {
+    const result = await sixb.auth.updateMemberGroups(caller, {
       userId: "usr_self",
       groupIds: ["commercial", "finance"],
     })
@@ -1626,7 +1641,7 @@ describe("SixbHost auth member management", () => {
 
   test("suspends and reactivates an in-scope member and stops their sessions", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_admin",
       email: "admin@acme.com",
       groupIds: ["security-admins"],
@@ -1663,7 +1678,7 @@ describe("SixbHost auth member management", () => {
       authenticated: true,
     })
 
-    const suspended = await sixb.auth.suspendMember(request, { userId: "usr_target" })
+    const suspended = await sixb.auth.suspendMember(caller, { userId: "usr_target" })
     expect(suspended.user.status).toBe("suspended")
     expect(suspended.groupIds).toEqual(["commercial"])
 
@@ -1674,7 +1689,7 @@ describe("SixbHost auth member management", () => {
       reason: "invalid_session",
     })
 
-    const reactivated = await sixb.auth.reactivateMember(request, { userId: "usr_target" })
+    const reactivated = await sixb.auth.reactivateMember(caller, { userId: "usr_target" })
     expect(reactivated.user.status).toBe("active")
     // Reactivation does not restore sessions.
     await expect(sixb.auth.getSession(targetRequest())).resolves.toMatchObject({
@@ -1684,7 +1699,7 @@ describe("SixbHost auth member management", () => {
 
   test("blocks suspending yourself", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_self",
       email: "self@acme.com",
       groupIds: ["commercial"],
@@ -1698,14 +1713,14 @@ describe("SixbHost auth member management", () => {
     // A session hands ids, not definitions, so both forms have to answer the same thing.
     expect(capabilities.covers("suspend", [commercial.id])).toBe(true)
 
-    await expect(sixb.auth.suspendMember(request, { userId: "usr_self" })).rejects.toThrow(
+    await expect(sixb.auth.suspendMember(caller, { userId: "usr_self" })).rejects.toThrow(
       "cannot suspend themselves"
     )
   })
 
   test("a caller without a membership policy manages nobody", async () => {
     const { deps, sixb } = createMemberRuntime()
-    const request = await seedAuthenticatedUser(sixb, deps, {
+    const caller = await seedAuthenticatedUser(sixb, deps, {
       userId: "usr_plain",
       email: "plain@acme.com",
       groupIds: ["finance"],
@@ -1716,10 +1731,10 @@ describe("SixbHost auth member management", () => {
       groupIds: ["commercial"],
     })
 
-    const options = await sixb.auth.getMembershipOptions(request)
+    const options = await sixb.auth.getMembershipOptions(caller)
     expect(options.capabilities).toEqual({ invite: false, assignGroups: false, suspend: false })
-    await expect(sixb.auth.listMembers(request)).resolves.toMatchObject({ members: [], total: 0 })
-    await expect(sixb.auth.suspendMember(request, { userId: "usr_target" })).rejects.toThrow(
+    await expect(sixb.auth.listMembers(caller)).resolves.toMatchObject({ members: [], total: 0 })
+    await expect(sixb.auth.suspendMember(caller, { userId: "usr_target" })).rejects.toThrow(
       "not found"
     )
   })

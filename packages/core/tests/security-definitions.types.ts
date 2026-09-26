@@ -1,4 +1,4 @@
-import type { AuthSessionAudience, SecurityContext } from "../src"
+import type { AuthSessionAudience } from "../src"
 import { agent, applications, can, defineGroup, defineMembershipPolicy } from "../src"
 
 type Equal<A, B> =
@@ -51,12 +51,3 @@ defineMembershipPolicy("invalid-membership", {
   // @ts-expect-error can accepts membership operations, not arbitrary strings
   can: ["delete"],
 })
-
-const context: SecurityContext = {
-  principal: { type: "system", id: "system" },
-  projectId: "default",
-  correlationId: "corr_1",
-}
-
-// @ts-expect-error SecurityContext must not carry userId in issue 173
-context.userId

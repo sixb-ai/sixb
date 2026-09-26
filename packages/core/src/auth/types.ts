@@ -30,13 +30,6 @@ export function principalsEqual(left: Principal, right: Principal): boolean {
   return left.type === right.type && left.id === right.id
 }
 
-export interface SecurityContext {
-  readonly principal: Principal
-  readonly sessionId?: string
-  readonly projectId: string
-  readonly correlationId: string
-}
-
 export type AuthStrategyKind = "magicLink" | "oidc" | "dev" | "disabled"
 
 export interface AuthStrategy {
@@ -225,7 +218,6 @@ export interface InviteUserInput {
   readonly groups?: readonly GroupDefinition[]
   readonly groupIds?: readonly string[]
   readonly expiresAt?: Date
-  readonly returnTo?: string
   /** Reveal the delivered link once in the result. Defaults to false. */
   readonly revealLink?: boolean
 }
@@ -368,7 +360,8 @@ export interface ReactivateMemberResult {
   readonly groupIds: readonly string[]
 }
 
-export type AuthCredentialSource = "session" | "accessToken" | "any"
+/** `"session"` reads only the cookie; `"any"` reads a bearer access token, else the cookie. */
+export type AuthCredentialSource = "session" | "any"
 
 export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions {
   readonly credentialSource?: AuthCredentialSource
@@ -376,12 +369,11 @@ export interface AuthSessionResolutionOptions extends AuthSessionAudienceOptions
   readonly sessionActivity?: "foreground"
 }
 
-export interface InviteUserOptions extends AuthSessionAudienceOptions {
-  readonly delivery?: {
-    readonly audience?: AuthSessionAudience
-    readonly requestOrigin?: string
-    readonly returnTo?: string
-  }
+/** Where an invitation link sends its recipient. */
+export interface InvitationDestination {
+  readonly audience: AuthSessionAudience
+  readonly requestOrigin: string
+  readonly returnTo: string
 }
 
 export interface RevokeInvitationInput {
@@ -521,9 +513,7 @@ export type SixbAuthConfig =
 
 export type AuthSessionFailureReason =
   | "auth_disabled"
-  | "missing_credentials"
   | "missing_cookie"
-  | "missing_access_token"
   | "invalid_cookie"
   | "invalid_access_token"
   | "invalid_session"
