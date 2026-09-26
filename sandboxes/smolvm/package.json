@@ -31,14 +31,10 @@
       "default": "./dist/index.js"
     }
   },
-  "bin": {
-    "sixb-agent-image": "./scripts/build-agent-image.ts"
-  },
   "scripts": {
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "agent:image": "bun scripts/build-agent-image.ts",
     "prepack": "bun run build"
   },
   "peerDependencies": {
@@ -59,8 +55,6 @@
   "files": [
     "dist",
     "src",
-    "scripts",
-    "agent-image",
     "README.md",
     "LICENSE"
   ]

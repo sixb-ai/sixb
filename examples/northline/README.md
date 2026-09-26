@@ -65,10 +65,11 @@ Use the smolvm provider when hosting Northline so every agent run executes in a 
 microVM instead of seeing the host filesystem. The Linux host must expose `/dev/kvm` to the Sixb
 service user, and the `smolvm` binary must be on that user's `PATH`.
 
-Build the included agent image once with Docker or Podman:
+Save the [Sixb agent image](../../sandboxes/agent-image/README.md) once with Docker or Podman:
 
 ```bash
-bun sandboxes/smolvm/scripts/build-agent-image.ts --out /opt/sixb/agent.tar
+docker pull ghcr.io/sixb-ai/sixb-agent:1.2.0
+docker save ghcr.io/sixb-ai/sixb-agent:1.2.0 -o /opt/sixb/agent.tar
 ```
 
 Then start the hosted example with smolvm selected and an API origin reachable from inside the VM:
@@ -81,9 +82,8 @@ AI_GATEWAY_API_KEY=your_key \
 bun --filter @sixb/example-northline dev
 ```
 
-`SIXB_AGENT_IMAGE` is optional when the image already exists in smolvm's managed Sixb cache. Do not
-use a localhost API origin: inside a microVM, localhost refers to the guest itself. Sandbox egress
-is restricted to the configured Sixb API hostname. See the
+Do not use a localhost API origin: inside a microVM, localhost refers to the guest itself. Sandbox
+egress is restricted to the configured Sixb API hostname. See the
 [smolvm sandbox guide](../../docs/sandboxes/smolvm.md) for installation, cross-building, and image
 options.
 

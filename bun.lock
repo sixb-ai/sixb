@@ -1003,9 +1003,6 @@
     "sandboxes/smolvm": {
       "name": "@sixb/sandboxes-smolvm",
       "version": "0.1.5",
-      "bin": {
-        "sixb-agent-image": "./scripts/build-agent-image.ts",
-      },
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
