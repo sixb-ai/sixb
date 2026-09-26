@@ -1,0 +1,108 @@
+#!/opt/sixb/python/bin/python
+"""Render a document to PDF and bounded PNG previews without overwriting prior output."""
+
+import argparse
+import json
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import zipfile
+from pathlib import Path
+
+
+def run(command):
+    result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        raise RuntimeError(f"{command[0]} failed: {(result.stderr or result.stdout)[-4000:]}")
+    return result
+
+
+def render(source, output, first=1, last=None, max_pages=30, size=1600):
+    source = source.resolve(strict=True)
+    output = output.resolve()
+    if source.suffix.lower() not in {".pdf", ".pptx", ".docx", ".xlsx"}:
+        raise ValueError("Supported formats: PDF, PPTX, DOCX, XLSX")
+    if source.suffix.lower() != ".pdf":
+        required = {".pptx": "ppt/presentation.xml", ".docx": "word/document.xml", ".xlsx": "xl/workbook.xml"}
+        # LibreOffice can interpret a plain-text file renamed to .pptx as a text document.
+        # Require an actual OOXML package so successful conversion verifies the requested format.
+        if not zipfile.is_zipfile(source):
+            raise ValueError("Office input must be a valid OOXML ZIP package")
+        with zipfile.ZipFile(source) as package:
+            if not {"[Content_Types].xml", required[source.suffix.lower()]}.issubset(package.namelist()):
+                raise ValueError("Office package does not match its file extension")
+    if not 1 <= max_pages <= 200 or not 320 <= size <= 3000:
+        raise ValueError("max-pages must be 1–200 and size must be 320–3000")
+    # A fresh directory prevents a failed converter from being mistaken for an old successful run.
+    # It is removed on failure, so the same directory can be used for a retry.
+    output.mkdir(parents=True, exist_ok=False)
+    try:
+        return render_into(source, output, first, last, max_pages, size)
+    except BaseException:
+        shutil.rmtree(output, ignore_errors=True)
+        raise
+
+
+def render_into(source, output, first, last, max_pages, size):
+    pdf = output / "document.pdf"
+    if source.suffix.lower() == ".pdf":
+        shutil.copyfile(source, pdf)
+    else:
+        with tempfile.TemporaryDirectory(prefix="sixb-office-") as temp:
+            scratch = Path(temp)
+            profile = (scratch / "profile").as_uri()
+            run([
+                "libreoffice", f"-env:UserInstallation={profile}", "--headless",
+                "--convert-to", "pdf", "--outdir", str(scratch), str(source),
+            ])
+            converted = scratch / f"{source.stem}.pdf"
+            if not converted.is_file() or converted.stat().st_size == 0:
+                raise RuntimeError("LibreOffice did not produce a PDF")
+            shutil.copyfile(converted, pdf)
+
+    # Count pages with Poppler, the engine that renders them, so both agree on what the PDF contains.
+    # Corrupt and password-protected PDFs surface as ordinary command failures.
+    count = int(re.search(r"^Pages:\s+(\d+)$", run(["pdfinfo", str(pdf)]).stdout, re.M)[1])
+    last = count if last is None else last
+    if not 1 <= first <= last <= count:
+        raise ValueError(f"Page range must be within 1–{count}")
+    if last - first + 1 > max_pages:
+        raise ValueError(f"Requested {last - first + 1} previews; select a page range or increase --max-pages")
+    run([
+        "pdftoppm", "-png", "-scale-to", str(size), "-f", str(first), "-l", str(last),
+        str(pdf), str(output / "page"),
+    ])
+    pages = sorted(output.glob("page-*.png"), key=lambda p: int(p.stem.rsplit("-", 1)[1]))
+    if len(pages) != last - first + 1 or any(p.stat().st_size == 0 for p in pages):
+        raise RuntimeError("Renderer did not produce every requested page")
+    result = {
+        "source": str(source), "pdf": str(pdf), "totalPages": count,
+        "firstPage": first, "lastPage": last, "complete": first == 1 and last == count,
+        "pages": [str(page) for page in pages],
+    }
+    (output / "manifest.json").write_text(json.dumps(result, indent=2) + "\n")
+    return result
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("input", type=Path)
+    parser.add_argument("--output-dir", type=Path, required=True, help="New directory inside the workspace")
+    parser.add_argument("--first-page", type=int, default=1)
+    parser.add_argument("--last-page", type=int)
+    parser.add_argument("--max-pages", type=int, default=30)
+    parser.add_argument("--size", type=int, default=1600, help="Maximum PNG width/height")
+    args = parser.parse_args()
+    try:
+        result = render(args.input, args.output_dir, args.first_page, args.last_page, args.max_pages, args.size)
+        print(json.dumps(result, indent=2))
+    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+        print(f"[SixbRender] {error}", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -1,0 +1,3 @@
+#!/bin/sh
+# Keep pip and python on the same writable, sandbox-local environment.
+exec /opt/sixb/python/bin/python3 -m pip "$@"

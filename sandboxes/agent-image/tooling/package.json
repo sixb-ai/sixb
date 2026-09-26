@@ -1,0 +1,8 @@
+{
+  "name": "sixb-agent-image-tools",
+  "private": true,
+  "dependencies": {
+    "pptxgenjs": "4.0.1",
+    "playwright": "1.63.0"
+  }
+}
