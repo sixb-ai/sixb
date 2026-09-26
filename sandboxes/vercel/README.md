@@ -196,18 +196,12 @@ bun --filter @sixb/sandboxes-vercel test
 bun --filter @sixb/sandboxes-vercel typecheck
 ```
 
-The regular test suite uses fakes and does not require Vercel credentials. A live smoke test is gated
-behind an environment variable because it consumes metered Vercel Sandbox resources:
+The regular test suite uses fakes and does not require Vercel credentials. Live smoke tests,
+including working-directory resolution, are gated behind an environment variable because they
+consume metered Vercel Sandbox resources:
 
 ```bash
 SIXB_VERCEL_SANDBOX_INTEGRATION=1 bun --filter @sixb/sandboxes-vercel test
-```
-
-The live working-directory regression test also consumes metered sandbox resources. It verifies
-relative file reads with omitted, relative, and absolute working directories:
-
-```bash
-SIXB_VERCEL_SANDBOX_INTEGRATION=1 bun --filter @sixb/sandboxes-vercel test:e2e
 ```
 
 Persistence tests use the installed SDK with a simulated transport: they make no Vercel requests
