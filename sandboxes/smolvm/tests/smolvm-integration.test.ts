@@ -12,9 +12,7 @@ import { SmolvmSandbox, type SmolvmSandboxOptions } from "../src/smolvm-sandbox"
  * built-in busybox rootfs, so the test needs no Docker and no prebuilt archive
  * in CI. It validates the real lifecycle, in-guest file materialization via
  * writeFiles, --workdir, --env, exit codes, and stream separation end to end.
- * The rootfs ships busybox `sh` (not bash), so commands use `sh`. (The factory
- * defaults to the managed runtime-v1 image; that path is covered by the manual
- * build + docs.)
+ * The rootfs ships busybox `sh` (not bash), so commands use `sh`.
  */
 const available = probeSmolvm("smolvm").ok
 const guard = available ? describe : describe.skip

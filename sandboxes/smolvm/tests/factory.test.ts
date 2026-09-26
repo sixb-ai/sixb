@@ -6,6 +6,7 @@ import { SmolvmSandboxFactory } from "../src/smolvm-sandbox-factory"
 test("rejects dynamic configuration before probing the provider", async () => {
   const factory = new SmolvmSandboxFactory({
     bin: "/nonexistent/sixb-environment-test",
+    image: null,
     resolve: () => {
       throw new Error("must not resolve")
     },
@@ -21,6 +22,7 @@ test("rejects persistence before provisioning", async () => {
   try {
     const factory: SandboxFactory = new SmolvmSandboxFactory({
       bin: "/nonexistent/sixb-persistence-test",
+      image: null,
     })
     expect(factory.resume).toBeUndefined()
     await expect(factory.create({ persistence: { name: "workspace" } })).rejects.toThrow(
