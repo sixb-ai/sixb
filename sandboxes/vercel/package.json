@@ -34,7 +34,6 @@
     "build": "bun ../../scripts/build-package.ts",
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "test:e2e": "bun test ./tests/vercel-cwd.e2e.ts",
     "prepack": "bun run build"
   },
   "dependencies": {
