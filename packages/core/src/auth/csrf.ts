@@ -14,20 +14,29 @@ export function isCsrfExemptMethod(method: string): boolean {
 
 export function verifyDoubleSubmitCsrf(
   request: Request,
-  options: { readonly cookieName: string; readonly headerName?: string }
+  options: { readonly cookieName: string }
 ): boolean {
   if (isCsrfExemptMethod(request.method)) {
     return true
   }
 
-  const cookieValue = getCookie(request, options.cookieName)
-  const headerValue = request.headers.get(options.headerName ?? CSRF_HEADER_NAME)
+  return verifyCsrfToken(request, {
+    cookieName: options.cookieName,
+    token: request.headers.get(CSRF_HEADER_NAME),
+  })
+}
 
-  if (!cookieValue || !headerValue) {
+/** Match a submitted CSRF token (header or form field) against the request's CSRF cookie. */
+export function verifyCsrfToken(
+  request: Request,
+  options: { readonly cookieName: string; readonly token: string | null }
+): boolean {
+  const cookieValue = getCookie(request, options.cookieName)
+  if (!cookieValue || !options.token) {
     return false
   }
 
-  return safeEqual(cookieValue, headerValue)
+  return safeEqual(cookieValue, options.token)
 }
 
 function safeEqual(left: string, right: string): boolean {

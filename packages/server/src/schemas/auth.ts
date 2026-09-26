@@ -301,7 +301,6 @@ export const AuthSignOutResponseSchema = z.object({
 export const CreateDeviceAuthorizationBodySchema = z.object({
   clientName: z.string().trim().min(1).max(100),
   tokenName: z.string().trim().min(1).max(100),
-  expiresIn: z.literal("90d").optional(),
 })
 
 export const CreateDeviceAuthorizationResponseSchema = z.object({

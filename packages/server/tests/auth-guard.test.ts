@@ -369,7 +369,7 @@ describe("server auth guard", () => {
       new Request("http://localhost/api/auth/device-authorizations", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientName: "sixb CLI", tokenName: "codex", expiresIn: "90d" }),
+        body: JSON.stringify({ clientName: "sixb CLI", tokenName: "codex" }),
       })
     )
     expect(started.status).toBe(201)
@@ -450,6 +450,39 @@ describe("server auth guard", () => {
       })
     )
     expect(await replayed.json()).toEqual({ status: "expired" })
+  })
+
+  // Reproduce: drop the try/catch around approve/deny in POST /auth/device and this returns 500.
+  test("renders the expired page when a device authorization was already decided", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const started = await app.fetch(
+      new Request("http://localhost/api/auth/device-authorizations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clientName: "sixb CLI", tokenName: "codex" }),
+      })
+    )
+    const { userCode } = (await started.json()) as { readonly userCode: string }
+    const decide = (decision: "approve" | "deny") =>
+      app.fetch(
+        new Request("http://localhost/auth/device", {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+          },
+          body: new URLSearchParams({ userCode, decision, csrfToken: "csrf_1" }),
+        })
+      )
+
+    expect((await decide("approve")).status).toBe(200)
+    const late = await decide("deny")
+    expect(late.status).toBe(400)
+    expect(await late.text()).toContain("This authorization has expired")
   })
 
   test("renews session and CSRF cookies on foreground protected requests", async () => {
