@@ -9,7 +9,9 @@ import {
   type InferPropertyValue,
   type InferSchema,
   type InferTelemetryPropertyIds,
+  OntologyRegistry,
   prop,
+  type Schema,
   type UnitsOf,
   valueTypeRef,
 } from "../src"
@@ -205,6 +207,28 @@ type InvoiceProps = InferObjectProperties<typeof invoice>
 type _invoicePdfType = Expect<Equal<NonNullable<InvoiceProps["pdf"]>, FileRef>>
 type _invoicePhotosType = Expect<Equal<NonNullable<InvoiceProps["photos"]>, FileRef[]>>
 
+// A schema typed as the whole `Schema` union has no inferable value, so its values are `unknown`
+// and the object type stays usable: registering it already reads its properties.
+// Guard: drop the `Schema extends TSchema` check in `InferSchema` and this fails with TS2589.
+function anySchema(): Schema {
+  return "string"
+}
+
+const flexible = defineObjectType({
+  id: "flexible",
+  name: "Flexible",
+  properties: [
+    prop("id", "string", { required: true }),
+    prop("value", anySchema()),
+    prop("tags", { type: "array", items: anySchema() }),
+  ],
+})
+
+type FlexibleProps = InferObjectProperties<typeof flexible>
+type _flexibleValue = Expect<Equal<FlexibleProps["value"], unknown>>
+type _flexibleTags = Expect<Equal<FlexibleProps["tags"], unknown[] | undefined>>
+const flexibleRegistry = new OntologyRegistry({ sources: [flexible] })
+
 void validRoom
 void validNullableRoom
 void invalidRoomUnknownProperty
@@ -215,3 +239,4 @@ void invalidTelemetryUnit
 void exactAmount
 void impreciseAmount
 void unbrandedAmount
+void flexibleRegistry

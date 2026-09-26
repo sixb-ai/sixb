@@ -131,10 +131,8 @@ function registryFor(
   query: Record<string, boolean>,
   mode: "static" | "telemetry" = "static"
 ): OntologyRegistry {
-  // The property schema is the whole `Schema` union, whose values cannot be inferred (TS2589). A
-  // non-literal id keeps the object type loose, so its rows are never inferred from that schema.
   const objectType = defineObjectType({
-    id: "item" as string,
+    id: "item",
     name: "Item",
     properties: [
       prop("id", "string", { required: true, primary: true }),
