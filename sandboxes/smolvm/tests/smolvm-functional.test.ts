@@ -76,6 +76,21 @@ describe("SmolvmSandbox functional (faithful guest emulation)", () => {
     return new SmolvmSandboxFactory({ bin, image: "node:22-slim", timeout: 10_000, env })
   }
 
+  // Regression check: pass `files` to buildWriteFilesScript without resolving their paths in
+  // writeFiles; the script then runs from "/" and the relative file lands outside the workspace.
+  test("writes relative file paths into workingDirectory", async () => {
+    const sandbox = await factory().create()
+    try {
+      await sandbox.writeFiles([{ path: "nested/relative.txt", contents: "in-workspace" }])
+
+      const cat = await sandbox.runCommand("cat", ["nested/relative.txt"])
+      expect(cat.exitCode).toBe(0)
+      expect(cat.stdout).toBe("in-workspace")
+    } finally {
+      await sandbox.destroy()
+    }
+  })
+
   test("separates stdout/stderr and reports the real exit code", async () => {
     const sandbox = await factory().create()
     try {

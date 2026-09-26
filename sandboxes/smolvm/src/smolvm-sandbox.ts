@@ -200,13 +200,22 @@ export class SmolvmSandbox implements Sandbox {
     }
     // The guest filesystem is isolated from the host, so materialize files by executing an in-guest
     // script that base64-decodes each payload into place. Run from "/" (always present) because a
-    // target directory may not exist yet; the script mkdir -p's each one.
+    // target directory may not exist yet; the script mkdir -p's each one. That is why relative paths
+    // are resolved against workingDirectory here rather than by the guest shell.
     const result = await exec({
       argv: buildExecArgv(this.cli, {
         id: this.id,
         cwd: "/",
         command: "sh",
-        args: ["-c", buildWriteFilesScript(files)],
+        args: [
+          "-c",
+          buildWriteFilesScript(
+            files.map((file) => ({
+              ...file,
+              path: posix.resolve(this.workingDirectory, file.path),
+            }))
+          ),
+        ],
         env: {},
       }),
       cwd: this.workdir.dir,
