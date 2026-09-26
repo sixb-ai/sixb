@@ -1,7 +1,6 @@
 import { createHash } from "node:crypto"
 import type { SixbHostView } from "@sixb/core"
 import {
-  CSRF_HEADER_NAME,
   generateCsrfToken,
   getCookie,
   isCsrfExemptMethod,
@@ -95,7 +94,6 @@ export class SharedAccessBoundary {
       !isCsrfExemptMethod(request.method) &&
       !verifyDoubleSubmitCsrf(request, {
         cookieName: sharedCookieNames(selectedGrantId).csrf,
-        headerName: CSRF_HEADER_NAME,
       })
     ) {
       return { kind: "deny", response: sharedAccessForbiddenResponse() }
@@ -182,7 +180,6 @@ export class SharedAccessBoundary {
     if (
       !verifyDoubleSubmitCsrf(request, {
         cookieName: sharedCookieNames(grantId).csrf,
-        headerName: CSRF_HEADER_NAME,
       })
     ) {
       return { kind: "csrf" }

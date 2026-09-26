@@ -1093,10 +1093,6 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100
-                  },
-                  "expiresIn": {
-                    "type": "string",
-                    "enum": ["90d"]
                   }
                 },
                 "required": ["clientName", "tokenName"],
@@ -1116,10 +1112,6 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100
-                  },
-                  "expiresIn": {
-                    "type": "string",
-                    "enum": ["90d"]
                   }
                 },
                 "required": ["clientName", "tokenName"],
@@ -1139,10 +1131,6 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100
-                  },
-                  "expiresIn": {
-                    "type": "string",
-                    "enum": ["90d"]
                   }
                 },
                 "required": ["clientName", "tokenName"],

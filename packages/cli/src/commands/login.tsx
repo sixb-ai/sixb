@@ -72,7 +72,6 @@ async function authorizeDevice(apiUrl: string, tokenName: string): Promise<strin
     await api.post("/api/auth/device-authorizations", {
       clientName: "sixb CLI",
       tokenName,
-      expiresIn: "90d",
     }),
     apiUrl
   )

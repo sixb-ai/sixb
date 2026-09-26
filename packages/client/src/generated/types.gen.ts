@@ -293,7 +293,6 @@ export type CreateDeviceAuthorizationData = {
   body: {
     clientName: string
     tokenName: string
-    expiresIn?: "90d"
   }
   path?: never
   query?: never

@@ -18,6 +18,7 @@ import {
   type MagicLinkAuthStrategy,
   type MemberSummary,
   shouldUseSecureCookies,
+  verifyCsrfToken,
   verifyDoubleSubmitCsrf,
 } from "@sixb/core/internal/auth"
 import {
@@ -336,16 +337,8 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         if (!sessionCanAccessApplication(host, session, authOptions.audience)) {
           return authPageResponse("<h1>Access denied</h1>", 403)
         }
-        const csrfHeaders = new Headers(request.headers)
-        csrfHeaders.set("x-sixb-csrf", parsed.csrfToken)
-        if (
-          !verifyDoubleSubmitCsrf(
-            new Request(request.url, { method: "POST", headers: csrfHeaders }),
-            {
-              cookieName: host.auth.getCookieOptions(authOptions).csrfCookieName,
-            }
-          )
-        ) {
+        const csrfCookieName = host.auth.getCookieOptions(authOptions).csrfCookieName
+        if (!verifyCsrfToken(request, { cookieName: csrfCookieName, token: parsed.csrfToken })) {
           return authPageResponse("<h1>Invalid authorization request</h1>", 403)
         }
         const storage = requireAuthStorage(host)
@@ -354,22 +347,35 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           userCode: parsed.userCode,
         })
         if (!authorization) return authPageResponse("<h1>Invalid authorization</h1>", 400)
-        if (parsed.decision === "approve") {
-          await storage.deviceAuthorizations.approve({
-            projectId: host.id,
-            id: authorization.id,
-            userId: session.user.id,
-            sessionId: session.session.id,
-            approvedAt: new Date(),
-          })
-          return authPageResponse("<h1>Device authorized</h1><p>You can close this window.</p>")
+        const decidedAt = new Date()
+        try {
+          if (parsed.decision === "approve") {
+            await storage.deviceAuthorizations.approve({
+              projectId: host.id,
+              id: authorization.id,
+              userId: session.user.id,
+              sessionId: session.session.id,
+              approvedAt: decidedAt,
+            })
+          } else {
+            await storage.deviceAuthorizations.deny({
+              projectId: host.id,
+              id: authorization.id,
+              deniedAt: decidedAt,
+            })
+          }
+        } catch (error) {
+          // The authorization expired or was decided after this page rendered.
+          if (error instanceof AuthStorageError && error.code === "invalid_device_authorization") {
+            return authPageResponse("<h1>This authorization has expired</h1>", 400)
+          }
+          throw error
         }
-        await storage.deviceAuthorizations.deny({
-          projectId: host.id,
-          id: authorization.id,
-          deniedAt: new Date(),
-        })
-        return authPageResponse("<h1>Authorization denied</h1><p>You can close this window.</p>")
+        return authPageResponse(
+          parsed.decision === "approve"
+            ? "<h1>Device authorized</h1><p>You can close this window.</p>"
+            : "<h1>Authorization denied</h1><p>You can close this window.</p>"
+        )
       },
       {
         body: t.Object({

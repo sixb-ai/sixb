@@ -32,6 +32,7 @@ export {
   CSRF_HEADER_NAME,
   generateCsrfToken,
   isCsrfExemptMethod,
+  verifyCsrfToken,
   verifyDoubleSubmitCsrf,
 } from "./csrf"
 export type { AuthRuntimeErrorCode } from "./errors"
