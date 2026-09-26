@@ -413,7 +413,6 @@ export type {
   MembershipCapabilities,
   MembershipOperationCapabilities,
   Principal,
-  SecurityContext,
   SixbAuthConfig,
 } from "./auth"
 export {

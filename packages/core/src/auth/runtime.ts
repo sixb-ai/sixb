@@ -60,12 +60,12 @@ import type {
   GetInvitationOptionsResult,
   GetMembershipOptionsResult,
   InvitationDeliveryAuthStrategy,
+  InvitationDestination,
   InvitationGroupOption,
   InvitationRecipientStatus,
   InviteDeliveryResult,
   InviteDeliveryStatus,
   InviteUserInput,
-  InviteUserOptions,
   InviteUserResult,
   ListInvitationsInput,
   ListInvitationsResult,
@@ -77,7 +77,6 @@ import type {
   ListServiceAccountsResult,
   MemberSummary,
   MembershipCapabilities,
-  Principal,
   ReactivateMemberInput,
   ReactivateMemberResult,
   ResolvedAuthConfig,
@@ -87,10 +86,10 @@ import type {
   RevokePersonalAccessTokenInput,
   RevokeServiceAccountAccessTokenInput,
   RevokeServiceAccountAccessTokenResult,
-  SecurityContext,
   SixbAuthConfig,
   SuspendMemberInput,
   SuspendMemberResult,
+  UnauthenticatedAuthSession,
   UpdateMemberGroupsInput,
   UpdateMemberGroupsResult,
 } from "./types"
@@ -101,7 +100,6 @@ import {
   resolveAuthConfig,
   resolveAuthSessionAudience,
   resolveInvitationExpiresAt,
-  sanitizeReturnTo,
 } from "./validation"
 
 export {
@@ -212,7 +210,7 @@ export class AuthRuntime {
   ): Promise<AuthSessionResult>
   async getSession(
     request: Request,
-    options: AuthSessionResolutionOptions & { readonly credentialSource: "accessToken" | "any" }
+    options: AuthSessionResolutionOptions & { readonly credentialSource: "any" }
   ): Promise<AuthRequestResult>
   async getSession(
     request: Request,
@@ -227,21 +225,16 @@ export class AuthRuntime {
     }
 
     const audience = resolveAuthSessionAudience(options.audience)
-    const credentialSource = options.credentialSource ?? "session"
 
-    if (credentialSource !== "session") {
-      const authorizationHeader = request.headers.get("authorization")
+    if (options.credentialSource === "any") {
       const tokenValue = getBearerAccessTokenValue(request)
       if (tokenValue) {
         return this.resolveAccessTokenSession(request, tokenValue)
       }
 
-      if (authorizationHeader) {
+      // An Authorization header that is not a usable token never falls back to the cookie.
+      if (request.headers.get("authorization")) {
         return { authenticated: false, reason: "invalid_access_token" }
-      }
-
-      if (credentialSource === "accessToken") {
-        return { authenticated: false, reason: "missing_access_token" }
       }
     }
 
@@ -312,23 +305,10 @@ export class AuthRuntime {
       sessionRenewed = true
     }
 
-    const user = await storage.users.getById({
-      projectId: this.projectId,
-      id: session.userId,
-    })
-
-    if (!user) {
-      return { authenticated: false, reason: "missing_user" }
+    const member = await this.loadActiveUser(storage, session.userId)
+    if (!member.authenticated) {
+      return member
     }
-
-    if (user.status === "suspended") {
-      return { authenticated: false, reason: "suspended_user" }
-    }
-
-    const memberships = await storage.groupMemberships.listForUser({
-      projectId: this.projectId,
-      userId: user.id,
-    })
 
     if (!sessionRenewed) {
       await this.touchSessionLastSeen(storage, session, now)
@@ -337,10 +317,10 @@ export class AuthRuntime {
     const result: AuthenticatedAuthSession = {
       authenticated: true,
       credentialSource: "session",
-      principal: { type: "user", id: user.id },
-      user,
+      principal: { type: "user", id: member.user.id },
+      user: member.user,
       session,
-      groupIds: memberships.map((membership) => membership.groupId),
+      groupIds: member.groupIds,
     }
 
     this.sessionCache?.set({
@@ -399,34 +379,18 @@ export class AuthRuntime {
     await this.touchAccessTokenLastUsed(storage, accessToken, request, now)
 
     if (accessToken.subject.type === "user") {
-      const user = await storage.users.getById({
-        projectId: this.projectId,
-        id: accessToken.subject.id,
-      })
-
-      if (!user) {
-        return { authenticated: false, reason: "missing_user" }
+      const member = await this.loadActiveUser(storage, accessToken.subject.id)
+      if (!member.authenticated) {
+        return member
       }
-
-      if (user.status === "suspended") {
-        return { authenticated: false, reason: "suspended_user" }
-      }
-
-      const memberships = await storage.groupMemberships.listForUser({
-        projectId: this.projectId,
-        userId: user.id,
-      })
 
       return {
         authenticated: true,
         credentialSource: "accessToken",
-        principal: { type: "user", id: user.id },
-        user,
+        principal: { type: "user", id: member.user.id },
+        user: member.user,
         accessToken,
-        groupIds: constrainTokenGroupIds(
-          memberships.map((membership) => membership.groupId),
-          accessToken
-        ),
+        groupIds: constrainTokenGroupIds(member.groupIds, accessToken),
       }
     }
 
@@ -461,12 +425,32 @@ export class AuthRuntime {
     }
   }
 
-  /**
-   * Evict a session from the in-process cache. Call this when a session is revoked
-   * (e.g. sign-out) so the cached result is dropped before its TTL would expire.
-   */
-  invalidateSession(sessionId: string): void {
-    this.sessionCache?.invalidate(sessionId)
+  /** Resolve a user and their current groups the same way for every credential. */
+  private async loadActiveUser(
+    storage: AuthStorage,
+    userId: string
+  ): Promise<
+    | UnauthenticatedAuthSession
+    | { readonly authenticated: true; readonly user: UserRecord; readonly groupIds: string[] }
+  > {
+    const user = await storage.users.getById({ projectId: this.projectId, id: userId })
+    if (!user) {
+      return { authenticated: false, reason: "missing_user" }
+    }
+
+    if (user.status === "suspended") {
+      return { authenticated: false, reason: "suspended_user" }
+    }
+
+    const memberships = await storage.groupMemberships.listForUser({
+      projectId: this.projectId,
+      userId,
+    })
+    return {
+      authenticated: true,
+      user,
+      groupIds: memberships.map((membership) => membership.groupId),
+    }
   }
 
   // Best-effort refresh of `lastSeenAt` for the active-sessions view. Throttled,
@@ -511,101 +495,27 @@ export class AuthRuntime {
     }
   }
 
-  async requirePrincipal(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
-  ): Promise<Principal> {
-    const session = await this.getSession(request, options)
-    if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
-    }
-
-    return session.principal
-  }
-
-  async requireUser(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
-  ): Promise<AuthenticatedAuthSession> {
-    const session = await this.getSession(request, { ...options, credentialSource: "session" })
-    if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
-    }
-
-    return session
-  }
-
-  async requireUserRequest(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
-  ): Promise<AuthenticatedUserRequestSession> {
-    const session = await this.getSession(request, { ...options, credentialSource: "any" })
-    if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
-    }
-
-    if (!isAuthenticatedUserRequestSession(session)) {
-      throw new AuthRuntimeError("authorization_denied", "[Sixb] User authentication is required.")
-    }
-
-    return session
-  }
-
-  async createSecurityContext(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
-  ): Promise<SecurityContext> {
-    const session = await this.requireUser(request, options)
-    return {
-      principal: session.principal,
-      sessionId: session.session.id,
-      projectId: this.projectId,
-      correlationId: resolveCorrelationId(request),
-    }
-  }
-
   /**
-   * Resolve the authenticated principal's authorization context for a request.
-   *
-   * Grants resolve eagerly (`groups -> roles -> grants`, subtype-expanded), so the returned
-   * context supports synchronous checks when Core binds a request execution SDK.
-   */
-  async createAuthorizationContext(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
-  ): Promise<AuthorizationContext> {
-    const session = await this.getSession(request, options)
-    if (!session.authenticated) {
-      throw new AuthRuntimeError("authentication_required", "[Sixb] Authentication is required.")
-    }
-
-    return this.contextFromSession(session)
-  }
-
-  /**
-   * Build an authorization context from an already-resolved session, so callers
-   * that resolve the session themselves (e.g. the server auth guard) don't read
-   * the request twice.
+   * Resolve a caller's authorization context. Grants resolve eagerly
+   * (`groups -> roles -> grants`, subtype-expanded), so checks against it are synchronous.
    */
   contextFromSession(session: AuthenticatedRequestAuthSession): AuthorizationContext {
     return resolveAuthorizationContext({
       principal: session.principal,
-      sessionId: session.credentialSource === "session" ? session.session.id : undefined,
+      sessionId: callerSessionId(session),
       groupIds: session.groupIds,
       roles: this.security.listResolvedRoles(),
     })
   }
 
   async listPersonalAccessTokens(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession
   ): Promise<ListPersonalAccessTokensResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const result = await storage.accessTokens.list({
       projectId: this.projectId,
       kind: "personal",
-      subject: { type: "user", id: session.user.id },
+      subject: { type: "user", id: caller.user.id },
       includeRevoked: true,
       order: "desc",
       limit: 100,
@@ -615,14 +525,12 @@ export class AuthRuntime {
   }
 
   async createPersonalAccessToken(
-    request: Request,
-    input: CreatePersonalAccessTokenInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: CreatePersonalAccessTokenInput
   ): Promise<CreateAccessTokenResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     // A personal token can only carry groups the caller currently belongs to.
-    const groupIds = constrainRequestedGroupIds(input.groupIds, session.groupIds, {
+    const groupIds = constrainRequestedGroupIds(input.groupIds, caller.groupIds, {
       subject: "personal access token",
     })
     const credential = createAccessTokenCredential("personal")
@@ -631,11 +539,11 @@ export class AuthRuntime {
       projectId: this.projectId,
       name: input.name,
       kind: "personal",
-      subject: { type: "user", id: session.user.id },
+      subject: { type: "user", id: caller.user.id },
       tokenHash: credential.tokenHash,
       groupIds,
-      createdByPrincipal: session.principal,
-      createdBySessionId: session.credentialSource === "session" ? session.session.id : undefined,
+      createdByPrincipal: caller.principal,
+      createdBySessionId: callerSessionId(caller),
       createdAt: new Date(),
       expiresAt: input.expiresAt,
     })
@@ -644,11 +552,9 @@ export class AuthRuntime {
   }
 
   async revokePersonalAccessToken(
-    request: Request,
-    input: RevokePersonalAccessTokenInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: RevokePersonalAccessTokenInput
   ): Promise<RevokeAccessTokenResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const token = await storage.accessTokens.getById({
       projectId: this.projectId,
@@ -660,7 +566,7 @@ export class AuthRuntime {
       !token ||
       token.kind !== "personal" ||
       token.subject.type !== "user" ||
-      token.subject.id !== session.user.id
+      token.subject.id !== caller.user.id
     ) {
       throw missingAccessTokenError(input.tokenId, this.projectId)
     }
@@ -675,10 +581,8 @@ export class AuthRuntime {
   }
 
   async listServiceAccounts(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession
   ): Promise<ListServiceAccountsResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const result = await storage.serviceAccounts.list({
       projectId: this.projectId,
@@ -696,21 +600,19 @@ export class AuthRuntime {
     // listing never leaks the groups of more-privileged accounts.
     return {
       serviceAccounts: withGroups.filter(({ groupIds }) =>
-        callerCanManageServiceAccount(session.groupIds, groupIds)
+        callerCanManageServiceAccount(caller.groupIds, groupIds)
       ),
     }
   }
 
   async createServiceAccount(
-    request: Request,
-    input: CreateServiceAccountInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: CreateServiceAccountInput
   ): Promise<CreateServiceAccountResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     // A caller can only place a service account in groups it itself belongs to.
     const groupIds =
-      constrainRequestedGroupIds(input.groupIds, session.groupIds, {
+      constrainRequestedGroupIds(input.groupIds, caller.groupIds, {
         subject: "service account",
       }) ?? []
     const now = new Date()
@@ -719,8 +621,8 @@ export class AuthRuntime {
       projectId: this.projectId,
       name: input.name,
       description: input.description,
-      createdByPrincipal: session.principal,
-      createdBySessionId: session.credentialSource === "session" ? session.session.id : undefined,
+      createdByPrincipal: caller.principal,
+      createdBySessionId: callerSessionId(caller),
       createdAt: now,
       updatedAt: now,
     })
@@ -741,15 +643,13 @@ export class AuthRuntime {
   }
 
   async disableServiceAccount(
-    request: Request,
-    input: DisableServiceAccountInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: DisableServiceAccountInput
   ): Promise<DisableServiceAccountResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const { serviceAccount, groupIds } = await this.requireManageableServiceAccount(
       storage,
-      session.groupIds,
+      caller.groupIds,
       input.serviceAccountId
     )
     const updated = await storage.serviceAccounts.update({
@@ -763,15 +663,13 @@ export class AuthRuntime {
   }
 
   async listServiceAccountAccessTokens(
-    request: Request,
-    input: ListServiceAccountAccessTokensInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: ListServiceAccountAccessTokensInput
   ): Promise<ListServiceAccountAccessTokensResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const { serviceAccount } = await this.requireManageableServiceAccount(
       storage,
-      session.groupIds,
+      caller.groupIds,
       input.serviceAccountId
     )
     const result = await storage.accessTokens.list({
@@ -787,14 +685,12 @@ export class AuthRuntime {
   }
 
   async createServiceAccountAccessToken(
-    request: Request,
-    input: CreateServiceAccountAccessTokenInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: CreateServiceAccountAccessTokenInput
   ): Promise<CreateServiceAccountAccessTokenResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const { serviceAccount, groupIds: serviceAccountGroupIds } =
-      await this.requireManageableServiceAccount(storage, session.groupIds, input.serviceAccountId)
+      await this.requireManageableServiceAccount(storage, caller.groupIds, input.serviceAccountId)
 
     if (serviceAccount.status === "suspended") {
       throw new AuthStorageError(
@@ -818,8 +714,8 @@ export class AuthRuntime {
       subject: { type: "serviceAccount", id: serviceAccount.id },
       tokenHash: credential.tokenHash,
       groupIds,
-      createdByPrincipal: session.principal,
-      createdBySessionId: session.credentialSource === "session" ? session.session.id : undefined,
+      createdByPrincipal: caller.principal,
+      createdBySessionId: callerSessionId(caller),
       createdAt: new Date(),
       expiresAt: input.expiresAt,
     })
@@ -828,15 +724,13 @@ export class AuthRuntime {
   }
 
   async revokeServiceAccountAccessToken(
-    request: Request,
-    input: RevokeServiceAccountAccessTokenInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: RevokeServiceAccountAccessTokenInput
   ): Promise<RevokeServiceAccountAccessTokenResult> {
-    const session = await this.requireUserRequest(request, options)
     const storage = this.requireAuthStorage()
     const { serviceAccount } = await this.requireManageableServiceAccount(
       storage,
-      session.groupIds,
+      caller.groupIds,
       input.serviceAccountId
     )
     const token = await storage.accessTokens.getById({
@@ -910,11 +804,9 @@ export class AuthRuntime {
   }
 
   async getInvitationOptions(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession
   ): Promise<GetInvitationOptionsResult> {
-    const session = await this.requireUser(request, options)
-    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
     const inviteScope = scope.operations.invite
     const groups = this.scopedGroupOptions(inviteScope.groupIds)
     const hasInviteMembershipPolicy = inviteScope.policyIds.length > 0
@@ -947,11 +839,9 @@ export class AuthRuntime {
   }
 
   async getMembershipOptions(
-    request: Request,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession
   ): Promise<GetMembershipOptionsResult> {
-    const session = await this.requireUser(request, options)
-    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
 
     return {
       // The member-admin edit-groups dialog assigns from the `assignGroups` scope.
@@ -961,13 +851,11 @@ export class AuthRuntime {
   }
 
   async listMembers(
-    request: Request,
-    input: ListMembersInput = {},
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: ListMembersInput = {}
   ): Promise<ListMembersResult> {
-    const session = await this.requireUser(request, options)
     const storage = this.requireAuthStorage()
-    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
     const { limit, offset } = normalizePagination(input)
 
     // First slice loads all users, attaches groups, then filters and paginates in
@@ -990,7 +878,7 @@ export class AuthRuntime {
         continue
       }
 
-      const isSelf = user.id === session.user.id
+      const isSelf = user.id === caller.user.id
       members.push({
         user,
         groupIds,
@@ -1009,13 +897,11 @@ export class AuthRuntime {
   }
 
   async updateMemberGroups(
-    request: Request,
-    input: UpdateMemberGroupsInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: UpdateMemberGroupsInput
   ): Promise<UpdateMemberGroupsResult> {
-    const session = await this.requireUser(request, options)
     const storage = this.requireAuthStorage()
-    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
     const userId = assertNonEmpty(input.userId, "User id")
 
     // The target must exist and every group it currently holds must be assignable
@@ -1045,7 +931,7 @@ export class AuthRuntime {
 
     // Self-protection: a caller may add in-scope groups to themselves but may not
     // remove any of their own current groups, so they cannot lock themselves out.
-    if (user.id === session.user.id && removals.length > 0) {
+    if (user.id === caller.user.id && removals.length > 0) {
       throw new AuthRuntimeError(
         "authorization_denied",
         "[Sixb] The current user cannot remove their own groups."
@@ -1072,7 +958,7 @@ export class AuthRuntime {
 
     // The user's cached session carries its old groups; drop it so the next
     // request resolves the updated membership.
-    this.invalidateUserSessions(user.id)
+    this.sessionCache?.invalidateUser(user.id)
 
     const groupIds = (
       await storage.groupMemberships.listForUser({ projectId: this.projectId, userId: user.id })
@@ -1082,17 +968,15 @@ export class AuthRuntime {
   }
 
   async suspendMember(
-    request: Request,
-    input: SuspendMemberInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: SuspendMemberInput
   ): Promise<SuspendMemberResult> {
-    const session = await this.requireUser(request, options)
     const storage = this.requireAuthStorage()
-    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
     const userId = assertNonEmpty(input.userId, "User id")
     const { user, groupIds } = await this.requireManageableMember(storage, scope, "suspend", userId)
 
-    if (user.id === session.user.id) {
+    if (user.id === caller.user.id) {
       throw new AuthRuntimeError(
         "authorization_denied",
         "[Sixb] The current user cannot suspend themselves."
@@ -1106,19 +990,17 @@ export class AuthRuntime {
     })
     // Storage revoked the user's sessions; drop cached copies so the suspended
     // user stops authenticating immediately.
-    this.invalidateUserSessions(user.id)
+    this.sessionCache?.invalidateUser(user.id)
 
     return { user: suspended, groupIds }
   }
 
   async reactivateMember(
-    request: Request,
-    input: ReactivateMemberInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: ReactivateMemberInput
   ): Promise<ReactivateMemberResult> {
-    const session = await this.requireUser(request, options)
     const storage = this.requireAuthStorage()
-    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
     const userId = assertNonEmpty(input.userId, "User id")
     const { user, groupIds } = await this.requireManageableMember(storage, scope, "suspend", userId)
 
@@ -1133,9 +1015,49 @@ export class AuthRuntime {
     return { user: reactivated, groupIds }
   }
 
-  /** Drop cached sessions for a user after a membership or status change. */
-  invalidateUserSessions(userId: string): void {
-    this.sessionCache?.invalidateUser(userId)
+  /** The caller's active sessions across every audience, most recently active first. */
+  async listSessions(caller: AuthenticatedUserRequestSession): Promise<readonly SessionRecord[]> {
+    return this.requireAuthStorage().sessions.listActiveByUserId({
+      projectId: this.projectId,
+      userId: caller.user.id,
+      now: new Date(),
+    })
+  }
+
+  /**
+   * End one of the caller's own sessions. Returns false for a missing session or one that belongs
+   * to another user, so a caller cannot probe other accounts.
+   */
+  async revokeSession(
+    caller: AuthenticatedUserRequestSession,
+    sessionId: string
+  ): Promise<boolean> {
+    const storage = this.requireAuthStorage()
+    const session = await storage.sessions.getById({ projectId: this.projectId, id: sessionId })
+    if (!session || session.userId !== caller.user.id) {
+      return false
+    }
+
+    await storage.sessions.revoke({
+      projectId: this.projectId,
+      id: sessionId,
+      revokedAt: new Date(),
+    })
+    this.sessionCache?.invalidate(sessionId)
+    return true
+  }
+
+  /** End every active session of the caller, across audiences. Returns how many ended. */
+  async revokeAllSessions(caller: AuthenticatedUserRequestSession): Promise<number> {
+    const revoked = await this.requireAuthStorage().sessions.revokeActiveForUser({
+      projectId: this.projectId,
+      userId: caller.user.id,
+      revokedAt: new Date(),
+    })
+    for (const session of revoked) {
+      this.sessionCache?.invalidate(session.id)
+    }
+    return revoked.length
   }
 
   private scopedGroupOptions(groupIds: ReadonlySet<string>): InvitationGroupOption[] {
@@ -1194,15 +1116,14 @@ export class AuthRuntime {
   }
 
   async invite(
-    request: Request,
+    caller: AuthenticatedUserRequestSession,
     input: InviteUserInput,
-    options: InviteUserOptions = {}
+    destination: InvitationDestination
   ): Promise<InviteUserResult> {
-    const session = await this.requireUser(request, options)
     const authStorage = this.requireAuthStorage()
     const now = new Date()
     const groupIds = this.resolveInviteGroupIds(input)
-    this.assertCanManageInvitationGroups(session.groupIds, groupIds)
+    this.assertCanManageInvitationGroups(caller.groupIds, groupIds)
 
     const strategy = this.getStrategy()
     if (!isInvitationDeliveryAuthStrategy(strategy)) {
@@ -1213,18 +1134,15 @@ export class AuthRuntime {
     }
 
     await this.assertCanInviteRecipient(strategy, authStorage, input.email, now)
-    const deliveryAudience = resolveAuthSessionAudience(
-      options.delivery?.audience ?? options.audience
-    )
-    this.assertInvitationApplicationAccess(groupIds, deliveryAudience)
+    this.assertInvitationApplicationAccess(groupIds, destination.audience)
 
     const invitation = await authStorage.invitations.createOrUpdateActive({
       id: `inv_${randomUUID()}`,
       projectId: this.projectId,
       email: input.email,
       groupIds,
-      createdByPrincipal: session.principal,
-      createdBySessionId: session.session.id,
+      createdByPrincipal: caller.principal,
+      createdBySessionId: callerSessionId(caller),
       createdAt: now,
       updatedAt: now,
       expiresAt: resolveInvitationExpiresAt(input.expiresAt, now),
@@ -1236,9 +1154,9 @@ export class AuthRuntime {
         projectId: this.projectId,
         authStorage,
         invitation,
-        audience: deliveryAudience,
-        returnTo: options.delivery?.returnTo ?? sanitizeReturnTo(input.returnTo),
-        requestOrigin: options.delivery?.requestOrigin ?? new URL(request.url).origin,
+        audience: destination.audience,
+        returnTo: destination.returnTo,
+        requestOrigin: destination.requestOrigin,
         revealLink: input.revealLink,
         now,
       })
@@ -1267,11 +1185,9 @@ export class AuthRuntime {
   }
 
   async listInvitations(
-    request: Request,
-    input: ListInvitationsInput = {},
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: ListInvitationsInput = {}
   ): Promise<ListInvitationsResult> {
-    const session = await this.requireUser(request, options)
     const authStorage = this.requireAuthStorage()
     const { limit, offset } = normalizePagination(input)
     const result = await authStorage.invitations.list({
@@ -1280,7 +1196,7 @@ export class AuthRuntime {
       statuses: input.statuses,
       order: input.order,
     })
-    const scope = this.resolveMembershipPolicyScopeForUser(session.groupIds)
+    const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
     const manageable = result.invitations.filter((invitation) =>
       canPerformMembershipOperation(scope, "invite", invitation.groupIds)
     )
@@ -1294,11 +1210,9 @@ export class AuthRuntime {
   }
 
   async revokeInvitation(
-    request: Request,
-    input: RevokeInvitationInput,
-    options: AuthSessionResolutionOptions = {}
+    caller: AuthenticatedUserRequestSession,
+    input: RevokeInvitationInput
   ): Promise<RevokeInvitationResult> {
-    const session = await this.requireUser(request, options)
     const authStorage = this.requireAuthStorage()
     const invitationId = assertNonEmpty(input.invitationId, "Invitation id")
     const invitation = await authStorage.invitations.getById({
@@ -1313,7 +1227,7 @@ export class AuthRuntime {
       )
     }
 
-    this.assertCanManageInvitationGroups(session.groupIds, invitation.groupIds)
+    this.assertCanManageInvitationGroups(caller.groupIds, invitation.groupIds)
 
     if (invitation.status !== "pending") {
       throw new AuthRuntimeError(
@@ -1485,16 +1399,9 @@ export class AuthRuntime {
   }
 }
 
-function resolveCorrelationId(request: Request): string {
-  return (
-    request.headers.get("x-correlation-id") ?? request.headers.get("x-request-id") ?? randomUUID()
-  )
-}
-
-function isAuthenticatedUserRequestSession(
-  session: AuthenticatedRequestAuthSession
-): session is AuthenticatedUserRequestSession {
-  return session.principal.type === "user"
+/** The interactive session a caller authenticated with, when it used one. */
+function callerSessionId(caller: AuthenticatedRequestAuthSession): string | undefined {
+  return caller.credentialSource === "session" ? caller.session.id : undefined
 }
 
 function constrainTokenGroupIds(

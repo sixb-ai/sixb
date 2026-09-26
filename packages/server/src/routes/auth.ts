@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
 import type { AuthSessionAudience, GroupDefinition, SixbHostView } from "@sixb/core"
 import {
+  type AuthenticatedAuthSession,
   type AuthenticatedUserRequestSession,
-  type AuthRequestResult,
   AuthRuntimeError,
   clearCsrfCookieHeader,
   clearSessionCookieHeader,
@@ -49,6 +49,7 @@ import {
   type SixbAuthExperienceOptions,
 } from "../auth/experience"
 import { ClientAddressRateLimiter } from "../auth/rate-limit"
+import { requestCaller } from "../auth/scope"
 import { hasForegroundSessionActivity } from "../auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "../auth/session-cookies"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
@@ -498,23 +499,10 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         }
 
         if (session.authenticated) {
-          await host.storage.auth?.sessions.revoke({
-            projectId: host.id,
-            id: session.session.id,
-            revokedAt: new Date(),
-          })
-          // Drop the cached session immediately so it isn't honored for the cache TTL.
-          host.auth.invalidateSession(session.session.id)
+          await host.auth.revokeSession(session, session.session.id)
         }
 
-        const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
-        headers.append("set-cookie", clearSessionCookieHeader({ request, options: cookieOptions }))
-        headers.append("set-cookie", clearCsrfCookieHeader({ request, options: cookieOptions }))
-
-        return new Response(JSON.stringify({ success: true }), {
-          status: 200,
-          headers,
-        })
+        return signedOutResponse(request, cookieOptions, { success: true })
       },
       {
         response: {
@@ -531,19 +519,13 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/sessions",
-      async ({ request }) => {
-        const authOptions = resolveAuthOptions(options, request)
-        const session = await host.auth.getSession(request, authOptions)
-        if (!session.authenticated) {
-          return jsonResponse({ error: "Authentication required" }, 401)
+      async (context) => {
+        const session = requireSessionCaller(context)
+        if (session instanceof Response) {
+          return session
         }
 
-        const sessions = await requireAuthStorage(host).sessions.listActiveByUserId({
-          projectId: host.id,
-          userId: session.user.id,
-          now: new Date(),
-        })
-
+        const sessions = await host.auth.listSessions(session)
         return jsonResponse(
           {
             sessions: sessions.map((entry) => ({
@@ -574,40 +556,22 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/sessions/:sessionId/revoke",
-      async ({ request, params }) => {
-        const authOptions = resolveAuthOptions(options, request)
-        const session = await host.auth.getSession(request, authOptions)
-        const cookieOptions = host.auth.getCookieOptions(authOptions)
-        if (!session.authenticated) {
-          return jsonResponse({ error: "Authentication required" }, 401)
-        }
-        if (!verifyDoubleSubmitCsrf(request, { cookieName: cookieOptions.csrfCookieName })) {
-          return jsonResponse({ error: "CSRF verification failed" }, 403)
+      async ({ request, params, ...context }) => {
+        const session = requireSessionCaller(context)
+        if (session instanceof Response) {
+          return session
         }
 
         const { sessionId } = RevokeAuthSessionParamsSchema.parse(params)
-        const storage = requireAuthStorage(host)
-        const target = await storage.sessions.getById({ projectId: host.id, id: sessionId })
-        // Only the caller's own sessions are revocable. A missing or foreign
-        // session id returns the same 404 so it cannot probe other accounts.
-        if (!target || target.userId !== session.user.id) {
+        if (!(await host.auth.revokeSession(session, sessionId))) {
           return jsonResponse({ error: "Session not found" }, 404)
         }
 
-        await storage.sessions.revoke({ projectId: host.id, id: sessionId, revokedAt: new Date() })
-        host.auth.invalidateSession(sessionId)
-
-        const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
-        // Revoking the session backing this request also clears its cookies.
-        if (sessionId === session.session.id) {
-          headers.append(
-            "set-cookie",
-            clearSessionCookieHeader({ request, options: cookieOptions })
-          )
-          headers.append("set-cookie", clearCsrfCookieHeader({ request, options: cookieOptions }))
+        if (sessionId !== session.session.id) {
+          return jsonResponse({ success: true }, 200)
         }
-
-        return new Response(JSON.stringify({ success: true }), { status: 200, headers })
+        const cookieOptions = host.auth.getCookieOptions(resolveAuthOptions(options, request))
+        return signedOutResponse(request, cookieOptions, { success: true })
       },
       {
         params: RevokeAuthSessionParamsSchema,
@@ -627,37 +591,17 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/sign-out-all",
-      async ({ request }) => {
-        const authOptions = resolveAuthOptions(options, request)
-        const session = await host.auth.getSession(request, authOptions)
-        const cookieOptions = host.auth.getCookieOptions(authOptions)
-        if (!session.authenticated) {
-          return jsonResponse({ error: "Authentication required" }, 401)
-        }
-        if (!verifyDoubleSubmitCsrf(request, { cookieName: cookieOptions.csrfCookieName })) {
-          return jsonResponse({ error: "CSRF verification failed" }, 403)
+      async ({ request, ...context }) => {
+        const session = requireSessionCaller(context)
+        if (session instanceof Response) {
+          return session
         }
 
-        // Global sign-out: revoke every active session for the user across all
-        // audiences. Other audiences' cookies remain client-side but their
-        // sessions are revoked, so the next request re-authenticates.
-        const revoked = await requireAuthStorage(host).sessions.revokeActiveForUser({
-          projectId: host.id,
-          userId: session.user.id,
-          revokedAt: new Date(),
-        })
-        for (const revokedSession of revoked) {
-          host.auth.invalidateSession(revokedSession.id)
-        }
-
-        const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
-        headers.append("set-cookie", clearSessionCookieHeader({ request, options: cookieOptions }))
-        headers.append("set-cookie", clearCsrfCookieHeader({ request, options: cookieOptions }))
-
-        return new Response(JSON.stringify({ success: true, revokedCount: revoked.length }), {
-          status: 200,
-          headers,
-        })
+        // Other audiences' cookies stay in their browsers, but their sessions are revoked, so the
+        // next request there re-authenticates.
+        const revokedCount = await host.auth.revokeAllSessions(session)
+        const cookieOptions = host.auth.getCookieOptions(resolveAuthOptions(options, request))
+        return signedOutResponse(request, cookieOptions, { success: true, revokedCount })
       },
       {
         response: {
@@ -675,20 +619,11 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/access-management-options",
-      async ({ request }) => {
+      async (context) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, {
-              ...authOptions,
-              credentialSource: "any",
-            })
-          )
-          if (session instanceof Response) {
-            return session
-          }
+          const caller = requireUserCaller(context)
 
-          const assignableGroupIds = new Set(session.groupIds)
+          const assignableGroupIds = new Set(caller.groupIds)
 
           return jsonResponse(
             {
@@ -722,25 +657,16 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/access-tokens",
-      async ({ request }) => {
+      async ({ ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, {
-              ...authOptions,
-              credentialSource: "any",
-            })
-          )
-          if (session instanceof Response) {
-            return session
-          }
+          const caller = requireUserCaller(context)
 
-          const { accessTokens } = await host.auth.listPersonalAccessTokens(request, authOptions)
+          const { accessTokens } = await host.auth.listPersonalAccessTokens(caller)
 
           return jsonResponse(
             {
               accessTokens: accessTokens.map((accessToken) =>
-                serializeAccessToken(accessToken, { subjectLabel: session.user.email })
+                serializeAccessToken(accessToken, { subjectLabel: caller.user.email })
               ),
             },
             200
@@ -765,33 +691,24 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/access-tokens",
-      async ({ request, body }) => {
+      async ({ body, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
           const parsed = CreateAuthPersonalAccessTokenBodySchema.parse(body)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, {
-              ...authOptions,
-              credentialSource: "any",
-            })
-          )
-          if (session instanceof Response) {
-            return session
-          }
+          const caller = requireUserCaller(context)
 
           const expiresAt = parseRequiredFutureDate(parsed.expiresAt)
-          const result = await host.auth.createPersonalAccessToken(
-            request,
-            { name: parsed.name, expiresAt, groupIds: parsed.groupIds },
-            authOptions
-          )
+          const result = await host.auth.createPersonalAccessToken(caller, {
+            name: parsed.name,
+            expiresAt,
+            groupIds: parsed.groupIds,
+          })
 
           // The raw token is only returned on creation. Storage keeps a hash, so
           // Atlas can never reveal it again after this response leaves the page.
           return jsonResponse(
             {
               accessToken: serializeAccessToken(result.accessToken, {
-                subjectLabel: session.user.email,
+                subjectLabel: caller.user.email,
               }),
               tokenValue: result.tokenValue,
             },
@@ -820,29 +737,16 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/access-tokens/:tokenId/revoke",
-      async ({ request, params }) => {
+      async ({ params, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, {
-              ...authOptions,
-              credentialSource: "any",
-            })
-          )
-          if (session instanceof Response) {
-            return session
-          }
+          const caller = requireUserCaller(context)
 
           const { tokenId } = RevokeAuthAccessTokenParamsSchema.parse(params)
-          const result = await host.auth.revokePersonalAccessToken(
-            request,
-            { tokenId },
-            authOptions
-          )
+          const result = await host.auth.revokePersonalAccessToken(caller, { tokenId })
           return jsonResponse(
             {
               accessToken: serializeAccessToken(result.accessToken, {
-                subjectLabel: session.user.email,
+                subjectLabel: caller.user.email,
               }),
             },
             200
@@ -870,15 +774,10 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/service-accounts",
-      async ({ request }) => {
+      async ({ ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
-          )
-          if (session instanceof Response) return session
-
-          const { serviceAccounts } = await host.auth.listServiceAccounts(request, authOptions)
+          const caller = requireUserCaller(context)
+          const { serviceAccounts } = await host.auth.listServiceAccounts(caller)
 
           return jsonResponse(
             {
@@ -909,25 +808,16 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/service-accounts",
-      async ({ request, body }) => {
+      async ({ body, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsed = CreateAuthServiceAccountBodySchema.parse(body)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
-          )
-          if (session instanceof Response) return session
-
-          const result = await host.auth.createServiceAccount(
-            request,
-            {
-              id: parsed.id,
-              name: parsed.name,
-              description: optionalTrimmed(parsed.description),
-              groupIds: parsed.groupIds,
-            },
-            { ...authOptions, credentialSource: "any" }
-          )
+          const result = await host.auth.createServiceAccount(caller, {
+            id: parsed.id,
+            name: parsed.name,
+            description: optionalTrimmed(parsed.description),
+            groupIds: parsed.groupIds,
+          })
 
           return jsonResponse(
             {
@@ -961,20 +851,11 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/service-accounts/:serviceAccountId/disable",
-      async ({ request, params }) => {
+      async ({ params, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
-          )
-          if (session instanceof Response) return session
-
+          const caller = requireUserCaller(context)
           const { serviceAccountId } = AuthServiceAccountParamsSchema.parse(params)
-          const result = await host.auth.disableServiceAccount(
-            request,
-            { serviceAccountId },
-            authOptions
-          )
+          const result = await host.auth.disableServiceAccount(caller, { serviceAccountId })
 
           return jsonResponse(
             {
@@ -1005,19 +886,13 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/service-accounts/:serviceAccountId/access-tokens",
-      async ({ request, params }) => {
+      async ({ params, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
-          )
-          if (session instanceof Response) return session
-
+          const caller = requireUserCaller(context)
           const { serviceAccountId } = AuthServiceAccountParamsSchema.parse(params)
           const { serviceAccount, accessTokens } = await host.auth.listServiceAccountAccessTokens(
-            request,
-            { serviceAccountId },
-            authOptions
+            caller,
+            { serviceAccountId }
           )
 
           return jsonResponse(
@@ -1051,27 +926,18 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/service-accounts/:serviceAccountId/access-tokens",
-      async ({ request, params, body }) => {
+      async ({ params, body, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsedParams = AuthServiceAccountParamsSchema.parse(params)
           const parsed = CreateAuthServiceAccountAccessTokenBodySchema.parse(body)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
-          )
-          if (session instanceof Response) return session
-
           const expiresAt = parseRequiredFutureDate(parsed.expiresAt)
-          const result = await host.auth.createServiceAccountAccessToken(
-            request,
-            {
-              serviceAccountId: parsedParams.serviceAccountId,
-              name: parsed.name,
-              expiresAt,
-              groupIds: parsed.groupIds,
-            },
-            { ...authOptions, credentialSource: "any" }
-          )
+          const result = await host.auth.createServiceAccountAccessToken(caller, {
+            serviceAccountId: parsedParams.serviceAccountId,
+            name: parsed.name,
+            expiresAt,
+            groupIds: parsed.groupIds,
+          })
 
           return jsonResponse(
             {
@@ -1107,20 +973,14 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/service-accounts/:serviceAccountId/access-tokens/:tokenId/revoke",
-      async ({ request, params }) => {
+      async ({ params, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsed = RevokeAuthServiceAccountAccessTokenParamsSchema.parse(params)
-          const session = requireAuthenticatedUserSession(
-            await host.auth.getSession(request, { ...authOptions, credentialSource: "any" })
-          )
-          if (session instanceof Response) return session
-
-          const result = await host.auth.revokeServiceAccountAccessToken(
-            request,
-            { serviceAccountId: parsed.serviceAccountId, tokenId: parsed.tokenId },
-            authOptions
-          )
+          const result = await host.auth.revokeServiceAccountAccessToken(caller, {
+            serviceAccountId: parsed.serviceAccountId,
+            tokenId: parsed.tokenId,
+          })
 
           return jsonResponse(
             {
@@ -1153,9 +1013,9 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/invitations",
-      async ({ request, body }) => {
+      async ({ request, body, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsed = CreateAuthInvitationBodySchema.parse(body)
           const deliveryContext = resolveInvitationDeliveryContext(options, request, {
             destinationId: parsed.destinationId,
@@ -1166,22 +1026,14 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           }
 
           const result = await host.auth.invite(
-            request,
+            caller,
             {
               email: parsed.email,
               groupIds: parsed.groupIds,
               expiresAt: parseDate(parsed.expiresAt),
-              returnTo: deliveryContext.returnTo,
               revealLink: parsed.revealLink,
             },
-            {
-              ...authOptions,
-              delivery: {
-                audience: deliveryContext.audience,
-                returnTo: deliveryContext.returnTo,
-                requestOrigin: deliveryContext.requestOrigin,
-              },
-            }
+            deliveryContext
           )
 
           return jsonResponse(
@@ -1216,12 +1068,12 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/invitation-options",
-      async ({ request }) => {
+      async ({ request, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           return jsonResponse(
             {
-              ...(await host.auth.getInvitationOptions(request, authOptions)),
+              ...(await host.auth.getInvitationOptions(caller)),
               ...options.getInvitationDestinationOptions(request),
             },
             200
@@ -1245,21 +1097,17 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/invitations",
-      async ({ request, query }) => {
+      async ({ query, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsed = ListAuthInvitationsQuerySchema.parse(query)
-          const result = await host.auth.listInvitations(
-            request,
-            {
-              email: parsed.email,
-              statuses: parsed.status ? [parsed.status] : undefined,
-              limit: parseOptionalInt(parsed.limit),
-              offset: parseOptionalInt(parsed.offset),
-              order: parsed.order,
-            },
-            authOptions
-          )
+          const result = await host.auth.listInvitations(caller, {
+            email: parsed.email,
+            statuses: parsed.status ? [parsed.status] : undefined,
+            limit: parseOptionalInt(parsed.limit),
+            offset: parseOptionalInt(parsed.offset),
+            order: parsed.order,
+          })
 
           return jsonResponse(
             {
@@ -1292,17 +1140,13 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/invitations/:invitationId/revoke",
-      async ({ request, params }) => {
+      async ({ params, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsed = RevokeAuthInvitationParamsSchema.parse(params)
-          const result = await host.auth.revokeInvitation(
-            request,
-            {
-              invitationId: parsed.invitationId,
-            },
-            authOptions
-          )
+          const result = await host.auth.revokeInvitation(caller, {
+            invitationId: parsed.invitationId,
+          })
 
           return jsonResponse(
             {
@@ -1334,10 +1178,10 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/membership-options",
-      async ({ request }) => {
+      async ({ ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
-          return jsonResponse(await host.auth.getMembershipOptions(request, authOptions), 200)
+          const caller = requireUserCaller(context)
+          return jsonResponse(await host.auth.getMembershipOptions(caller), 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1357,19 +1201,15 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .get(
       "/api/auth/members",
-      async ({ request, query }) => {
+      async ({ query, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsed = ListAuthMembersQuerySchema.parse(query)
-          const result = await host.auth.listMembers(
-            request,
-            {
-              limit: parseOptionalInt(parsed.limit),
-              offset: parseOptionalInt(parsed.offset),
-              order: parsed.order,
-            },
-            authOptions
-          )
+          const result = await host.auth.listMembers(caller, {
+            limit: parseOptionalInt(parsed.limit),
+            offset: parseOptionalInt(parsed.offset),
+            order: parsed.order,
+          })
 
           return jsonResponse(
             {
@@ -1400,16 +1240,15 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .patch(
       "/api/auth/members/:userId/groups",
-      async ({ request, params, body }) => {
+      async ({ params, body, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsedParams = AuthMemberParamsSchema.parse(params)
           const parsed = UpdateAuthMemberGroupsBodySchema.parse(body)
-          const result = await host.auth.updateMemberGroups(
-            request,
-            { userId: parsedParams.userId, groupIds: parsed.groupIds },
-            authOptions
-          )
+          const result = await host.auth.updateMemberGroups(caller, {
+            userId: parsedParams.userId,
+            groupIds: parsed.groupIds,
+          })
 
           return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
         } catch (error) {
@@ -1437,15 +1276,11 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/members/:userId/suspend",
-      async ({ request, params }) => {
+      async ({ params, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsed = AuthMemberParamsSchema.parse(params)
-          const result = await host.auth.suspendMember(
-            request,
-            { userId: parsed.userId },
-            authOptions
-          )
+          const result = await host.auth.suspendMember(caller, { userId: parsed.userId })
 
           return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
         } catch (error) {
@@ -1471,15 +1306,11 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/members/:userId/reactivate",
-      async ({ request, params }) => {
+      async ({ params, ...context }) => {
         try {
-          const authOptions = resolveAuthOptions(options, request)
+          const caller = requireUserCaller(context)
           const parsed = AuthMemberParamsSchema.parse(params)
-          const result = await host.auth.reactivateMember(
-            request,
-            { userId: parsed.userId },
-            authOptions
-          )
+          const result = await host.auth.reactivateMember(caller, { userId: parsed.userId })
 
           return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
         } catch (error) {
@@ -2535,29 +2366,38 @@ function optionalTrimmed(value: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined
 }
 
-// Token and service-account management can be driven by a personal access
-// token (for CLI credential rotation) as well as a browser session, so reject
-// unauthenticated requests with 401 and non-user principals (service-account
-// tokens) with 403. Service-account tokens are runtime credentials and must not
-// mint or manage further credentials.
-function requireAuthenticatedUserSession(
-  session: AuthRequestResult
-): AuthenticatedUserRequestSession | Response {
-  if (!session.authenticated) {
-    return jsonResponse({ error: "Authentication required" }, 401)
+// Management routes act for the caller the guard resolved: a browser session, or a personal access
+// token on bearer routes. Service-account tokens are runtime credentials and must not mint or
+// manage further credentials. The route's catch maps these errors to 401 and 403.
+function requireUserCaller(context: unknown): AuthenticatedUserRequestSession {
+  const caller = requestCaller(context)
+  if (!caller) {
+    throw new AuthRuntimeError("authentication_required", "Authentication required")
   }
-
-  if (!isAuthenticatedUserSession(session)) {
-    return jsonResponse({ error: "User authentication is required" }, 403)
+  if (!("user" in caller)) {
+    throw new AuthRuntimeError("authorization_denied", "User authentication is required")
   }
-
-  return session
+  return caller
 }
 
-function isAuthenticatedUserSession(
-  session: AuthRequestResult & { readonly authenticated: true }
-): session is AuthenticatedUserRequestSession {
-  return session.principal.type === "user"
+// Session management routes are cookie-only; the guard rejects tokens before they get here.
+function requireSessionCaller(context: unknown): AuthenticatedAuthSession | Response {
+  const caller = requestCaller(context)
+  return caller?.credentialSource === "session"
+    ? caller
+    : jsonResponse({ error: "Authentication required" }, 401)
+}
+
+// Ending the session behind this request also clears its cookies.
+function signedOutResponse(
+  request: Request,
+  cookieOptions: ResolvedCookieOptions,
+  body: Record<string, unknown>
+): Response {
+  const headers = new Headers({ "content-type": "application/json; charset=utf-8" })
+  headers.append("set-cookie", clearSessionCookieHeader({ request, options: cookieOptions }))
+  headers.append("set-cookie", clearCsrfCookieHeader({ request, options: cookieOptions }))
+  return new Response(JSON.stringify(body), { status: 200, headers })
 }
 
 function serializeInvitation(invitation: InvitationRecord) {

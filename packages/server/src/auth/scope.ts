@@ -1,5 +1,7 @@
+import type { AuthenticatedRequestAuthSession } from "@sixb/core/internal/auth"
 import type { RequestExecutionAuthorization, Sixb } from "@sixb/core/internal/request-execution"
 import type { AgentRunRecord, ConversationAgentRunRecord } from "@sixb/core/storage"
+import type { ServerAuthGuardDecision } from "./guard"
 
 /**
  * Per-request authorization state attached by the server's auth derive.
@@ -65,4 +67,13 @@ export function requireRequestSixb(context: unknown): Sixb {
     throw new Error("[SixbServer] Execution scope is not available for this route.")
   }
   return sixb
+}
+
+/**
+ * The caller the auth guard resolved for this request. Null on public routes, for shared-access and
+ * agent-gateway requests, and when auth is disabled.
+ */
+export function requestCaller(context: unknown): AuthenticatedRequestAuthSession | null {
+  const auth = (context as { readonly auth?: ServerAuthGuardDecision }).auth
+  return auth?.kind === "allow" ? auth.session : null
 }
