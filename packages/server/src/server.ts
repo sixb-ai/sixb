@@ -1,8 +1,9 @@
 import { cors } from "@elysiajs/cors"
 import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
-import { CSRF_HEADER_NAME } from "@sixb/core/internal/auth"
+import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import type { Server } from "bun"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
@@ -24,6 +25,11 @@ import {
   resolveApiBrowserPublicOrigin,
   type SixbApiBrowserPolicy,
 } from "./auth/browser-origin"
+import {
+  type ClientAddressResolver,
+  createClientAddressResolver,
+  PRIVATE_NETWORKS,
+} from "./auth/client-address"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "./auth/csrf"
 import type { SixbAuthExperienceOptions } from "./auth/experience"
 import { ServerAuthGuard } from "./auth/guard"
@@ -61,6 +67,11 @@ export interface SixbServerOptions {
   authExperience?: SixbAuthExperienceOptions
   /** Optional server limits for short-lived shared-access sessions. */
   sharedAccess?: SixbSharedAccessOptions
+  /**
+   * Proxies whose `x-forwarded-for` entries identify the client: IP addresses, CIDR ranges, or
+   * `"private"` for loopback, private, and link-local networks. Defaults to `["private"]`.
+   */
+  trustedProxies?: readonly string[]
 }
 
 export function createSixbServer(options: SixbServerOptions): SixbServer {
@@ -77,6 +88,7 @@ export class SixbServer {
   private readonly authRedirectContextResolver: ResolveAuthRedirectContext
   private readonly authExperience?: SixbAuthExperienceOptions
   private readonly sharedAccessOptions: SixbSharedAccessOptions
+  private readonly resolveClientAddress: ClientAddressResolver
   private app: SixbApp | null = null
   private bunServer: ReturnType<typeof Bun.serve> | null = null
   private maintenance: OntologyMaintenanceHandle | null = null
@@ -93,6 +105,9 @@ export class SixbServer {
     )
     this.authExperience = options.authExperience
     this.sharedAccessOptions = options.sharedAccess ?? {}
+    this.resolveClientAddress = createClientAddressResolver(
+      options.trustedProxies ?? [PRIVATE_NETWORKS]
+    )
   }
 
   getHost(): SixbHostView {
@@ -154,6 +169,7 @@ export class SixbServer {
       this.bunServer = startApiServer(this.app, {
         host: this.hostname,
         port: this.port,
+        resolveClientAddress: this.resolveClientAddress,
       })
     } catch (error) {
       this.app = null
@@ -498,12 +514,20 @@ function startApiServer(
   options: {
     readonly host: string
     readonly port: number
+    readonly resolveClientAddress: ClientAddressResolver
   }
 ) {
   const bunServer = Bun.serve({
     port: options.port,
     hostname: options.host,
-    fetch: (request) => app.fetch(request),
+    fetch: (request: Request, server: Server<unknown>) => {
+      const socketAddress = server.requestIP(request)?.address
+      if (socketAddress) {
+        const forwardedFor = request.headers.get("x-forwarded-for")
+        setRequestClientAddress(request, options.resolveClientAddress(socketAddress, forwardedFor))
+      }
+      return app.fetch(request)
+    },
     websocket: getElysiaWsHandler(app),
   } as Parameters<typeof Bun.serve>[0])
 

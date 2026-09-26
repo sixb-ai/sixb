@@ -122,7 +122,7 @@ import type { SixbServerOptions } from "@sixb/server"
 
 - **`createSixbServer(options)`** -- Entrypoint for starting the API/auth/ws/docs server.
 - **`SixbServer`** -- Manages the server lifecycle (`start`, `stop`).
-- **`SixbServerOptions`** -- Config: `host` and `browser` (required), `port` (default 3000), `hostname` (default `"0.0.0.0"`), `quiet`.
+- **`SixbServerOptions`** -- Config: `host` and `browser` (required), `port` (default 3000), `hostname` (default `"0.0.0.0"`), `quiet`, `trustedProxies` (default `["private"]`: loopback, private, and link-local networks whose `x-forwarded-for` entries identify the client).
 
 ## OpenAPI
 

@@ -15,6 +15,7 @@ export {
   isValidAuthSessionAudience,
   resolveAuthSessionAudience,
 } from "./audience"
+export { getRequestClientAddress, setRequestClientAddress } from "./client-address"
 export {
   clearCsrfCookieHeader,
   clearSessionCookieHeader,

@@ -452,6 +452,39 @@ describe("server auth guard", () => {
     expect(await replayed.json()).toEqual({ status: "expired" })
   })
 
+  // Reproduce: skip the limiter in POST /api/auth/device-authorizations, or resolve the leftmost
+  // x-forwarded-for entry (the old behavior); either way the 11th request returns 201.
+  test("limits device authorizations per client address behind a trusted proxy", async () => {
+    const { sixb } = createRuntime({ auth: true })
+    const port = await getFreePort()
+    const server = new SixbServer({
+      host: sixb,
+      hostname: "127.0.0.1",
+      port,
+      quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
+    })
+    await server.start()
+
+    try {
+      // The test connects from loopback, a trusted proxy, so the appended entry is the client.
+      const start = (forwardedFor: string) =>
+        fetch(`http://127.0.0.1:${port}/api/auth/device-authorizations`, {
+          method: "POST",
+          headers: { "content-type": "application/json", "x-forwarded-for": forwardedFor },
+          body: JSON.stringify({ clientName: "sixb CLI", tokenName: "codex" }),
+        })
+
+      for (let attempt = 0; attempt < 10; attempt += 1) {
+        expect((await start(`198.51.100.${attempt}, 203.0.113.7`)).status).toBe(201)
+      }
+      expect((await start("203.0.113.7")).status).toBe(429)
+      expect((await start("203.0.113.8")).status).toBe(201)
+    } finally {
+      await server.stop()
+    }
+  })
+
   // Reproduce: drop the try/catch around approve/deny in POST /auth/device and this returns 500.
   test("renders the expired page when a device authorization was already decided", async () => {
     const { sixb, storage } = createRuntime({ auth: true })

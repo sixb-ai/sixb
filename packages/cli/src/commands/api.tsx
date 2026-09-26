@@ -18,6 +18,7 @@ export interface ApiOptions {
   apiPublicOrigin?: string
   atlasPublicOrigin?: string
   appPublicOrigin?: string
+  trustedProxies?: string
 }
 
 export async function runApi(options: ApiOptions = {}) {
@@ -66,6 +67,10 @@ export async function runApi(options: ApiOptions = {}) {
       hasCustomApp,
     })
 
+    const trustedProxies = (options.trustedProxies ?? process.env.SIXB_TRUSTED_PROXIES ?? "")
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
     server = createSixbServer({
       host: sixb,
       port: topology.apiPort,
@@ -76,6 +81,7 @@ export async function runApi(options: ApiOptions = {}) {
         allowedOrigins: topology.allowedBrowserOrigins,
       },
       ...(hasAuthExperience ? { authExperience: { outdir: authExperienceOutdir } } : {}),
+      ...(trustedProxies.length > 0 ? { trustedProxies } : {}),
     })
     await server.start()
 
