@@ -1,0 +1,3 @@
+#!/bin/sh
+# Invoke the venv directly: a symlink outside it does not retain Python's venv discovery.
+exec /opt/sixb/python/bin/python3 "$@"
