@@ -110,17 +110,22 @@ type InferValueTypeRefSchema<
  * Convert ontology schema definitions into runtime value types.
  *
  * This is the core typing bridge used by the future object SDK APIs.
+ *
+ * A schema typed as the whole `Schema` union (a helper returning `Schema`, say) infers `unknown`:
+ * its array, map and object children are `Schema` again, so inferring it never terminates.
  */
 export type InferSchema<
   TSchema extends Schema,
   TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
-> = TSchema extends PrimitiveSchema
-  ? PrimitiveSchemaValueMap[TSchema]
-  : TSchema extends ComplexSchema
-    ? InferComplexSchema<TSchema, TValueTypes>
-    : TSchema extends ValueTypeRefSchema
-      ? InferValueTypeRefSchema<TSchema, TValueTypes>
-      : never
+> = Schema extends TSchema
+  ? unknown
+  : TSchema extends PrimitiveSchema
+    ? PrimitiveSchemaValueMap[TSchema]
+    : TSchema extends ComplexSchema
+      ? InferComplexSchema<TSchema, TValueTypes>
+      : TSchema extends ValueTypeRefSchema
+        ? InferValueTypeRefSchema<TSchema, TValueTypes>
+        : never
 
 /** Property-level value inference with nullable support. */
 export type InferPropertyValue<
