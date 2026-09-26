@@ -1,0 +1,129 @@
+name: Agent image
+
+# Builds and verifies sandboxes/agent-image on native amd64 and arm64 runners. On main, publishes
+# ghcr.io/sixb-ai/sixb-agent:<VERSION> as a multi-platform image. Published versions are immutable:
+# bump sandboxes/agent-image/VERSION to release a change.
+
+on:
+  pull_request:
+    paths:
+      - sandboxes/agent-image/**
+      - .github/workflows/agent-image.yml
+  push:
+    branches:
+      - main
+    paths:
+      - sandboxes/agent-image/**
+      - .github/workflows/agent-image.yml
+  workflow_dispatch:
+
+concurrency:
+  group: agent-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/sixb-ai/sixb-agent
+
+jobs:
+  version:
+    name: Resolve version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      publish: ${{ steps.version.outputs.publish }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - id: version
+        name: Check whether this version is published
+        run: |
+          version=$(cat sandboxes/agent-image/VERSION)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          elif docker manifest inspect "$IMAGE:$version" > /dev/null 2>&1; then
+            echo "::notice::$IMAGE:$version is already published; bump VERSION to release changes."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  build:
+    name: Build and verify (${{ matrix.arch }})
+    needs: version
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: .bun-version
+
+      - name: Build
+        run: |
+          docker build --platform linux/${{ matrix.arch }} \
+            --label org.opencontainers.image.source=https://github.com/${{ github.repository }} \
+            --label org.opencontainers.image.version=${{ needs.version.outputs.version }} \
+            -t sixb-agent:ci sandboxes/agent-image
+
+      - name: Verify
+        run: bun sandboxes/agent-image/verify.ts --image sixb-agent:ci --output "$RUNNER_TEMP/verify"
+
+      - name: Upload verification artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-image-verification-${{ matrix.arch }}
+          path: ${{ runner.temp }}/verify
+          if-no-files-found: ignore
+
+      - name: Log in to GHCR
+        if: needs.version.outputs.publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push
+        if: needs.version.outputs.publish == 'true'
+        run: |
+          docker tag sixb-agent:ci "$IMAGE:${{ needs.version.outputs.version }}-${{ matrix.arch }}"
+          docker push "$IMAGE:${{ needs.version.outputs.version }}-${{ matrix.arch }}"
+
+  publish:
+    name: Publish multi-platform image
+    needs: [version, build]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create manifest
+        run: |
+          version=${{ needs.version.outputs.version }}
+          docker buildx imagetools create -t "$IMAGE:$version" "$IMAGE:$version-amd64" "$IMAGE:$version-arm64"
+          digest=$(docker buildx imagetools inspect "$IMAGE:$version" --format '{{json .Manifest}}' | jq -r .digest)
+          echo "Published \`$IMAGE:$version\` (\`$IMAGE@$digest\`)" >> "$GITHUB_STEP_SUMMARY"

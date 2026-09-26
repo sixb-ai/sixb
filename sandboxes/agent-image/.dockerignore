@@ -1,0 +1,8 @@
+**
+!Dockerfile
+!profile.sh
+!requirements.lock
+!tooling/package.json
+!tooling/bun.lock
+!scripts/**
+**/__pycache__
