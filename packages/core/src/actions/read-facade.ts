@@ -8,6 +8,8 @@ import type {
   OntologyObjectRef,
 } from "../materializer"
 import { createLinkScopeFingerprint } from "../materializer"
+import { decorateObjectQueryExecutor } from "../objects/sdk/query-builder"
+import type { ObjectQueryExecutor } from "../objects/sdk/query-executor"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import {
@@ -15,11 +17,7 @@ import {
   assertTelemetryProperty,
 } from "../ontology/validation"
 import { RuntimeError } from "../runtime/errors"
-import type {
-  ObjectQueryBuilder,
-  ObjectQueryListOptions,
-  ObjectSetListInput,
-} from "../runtime/types"
+import type { ObjectReader, ObjectReadSet } from "../runtime/types"
 import type {
   ExpandedLinkValue,
   ExpandedObjectRow,
@@ -31,20 +29,9 @@ import type {
 import type { ActionReadDependencies } from "./commit-edits"
 import type {
   ActionReadFacade,
-  ActionReadObjectSet,
   ActionTelemetryHistorySeriesInput,
   ActionTelemetryReadFacade,
 } from "./types"
-
-export type ActionReadObjectSetSource = {
-  get(id: string): Promise<unknown>
-  query(): unknown
-  list(input?: ObjectSetListInput): Promise<unknown>
-  byId(id: string): {
-    get(): Promise<unknown>
-    listLinks(link?: { readonly id: string }): Promise<unknown>
-  }
-}
 
 /** Runtime leaves used by the Action telemetry read adapter. */
 export interface ActionTelemetryReadSource {
@@ -180,24 +167,18 @@ export interface ActionReadFacadeOptions {
   readonly telemetry?: ActionTelemetryReadSource
 }
 
+/** Exposes `reader`'s object reads to an Action handler; with `options`, each read is recorded. */
 export function createActionReadFacade(
-  createObjectSet: <const TObjectType extends ObjectTypeWithPropertyTokens>(
-    objectType: TObjectType
-  ) => ActionReadObjectSetSource,
+  reader: ObjectReader,
   options?: ActionReadFacadeOptions
 ): ActionReadFacade {
-  const facade = {
+  return {
     telemetry: createActionTelemetryReadFacade(options?.telemetry),
     objects<const TObjectType extends ObjectTypeWithPropertyTokens>(objectType: TObjectType) {
-      return createActionReadObjectSetAdapter<TObjectType>(
-        objectType,
-        createObjectSet(objectType),
-        options
-      )
+      const objectSet = reader.objects(objectType)
+      return options ? recordObjectReads(objectType, objectSet, options) : objectSet
     },
   }
-
-  return facade as ActionReadFacade
 }
 
 function createActionTelemetryReadFacade(
@@ -294,114 +275,86 @@ function assertTelemetryBatchResultMatchesRequest(
   }
 }
 
-function createActionReadObjectSetAdapter<TObjectType extends ObjectTypeWithPropertyTokens>(
+function recordObjectReads<TObjectType extends ObjectTypeWithPropertyTokens>(
   objectType: TObjectType,
-  objectSet: ActionReadObjectSetSource,
-  options: ActionReadFacadeOptions | undefined
-): ActionReadObjectSet<TObjectType> {
-  type TypedReadObjectSet = ActionReadObjectSet<TObjectType>
-
-  async function readObject(id: string, read: () => Promise<unknown>): Promise<unknown> {
-    const row = await read()
-    options?.recorder.observeObject(
-      { objectTypeId: objectType.id, primaryId: id },
-      (row ?? null) as ObjectRow | null
-    )
-    return row
-  }
+  objectSet: ObjectReadSet<TObjectType>,
+  options: ActionReadFacadeOptions
+): ObjectReadSet<TObjectType> {
+  const { recorder } = options
+  const ref = (primaryId: string): OntologyObjectRef => ({
+    objectTypeId: objectType.id,
+    primaryId,
+  })
 
   return {
-    get(id) {
-      return readObject(id, () => objectSet.get(id)) as ReturnType<TypedReadObjectSet["get"]>
+    async get(id) {
+      const row = await objectSet.get(id)
+      recorder.observeObject(ref(id), row && storageRow(row))
+      return row
     },
     query() {
-      const builder = objectSet.query() as ActionQueryBuilder
-      return (options
-        ? observeQueryBuilder(builder, options.recorder)
-        : builder) as unknown as ReturnType<TypedReadObjectSet["query"]>
+      // Recording at the executor covers every terminal of every refinement, present and future.
+      return decorateObjectQueryExecutor(objectSet.query(), (executor) =>
+        recordingExecutor(executor, recorder)
+      )
     },
-    list(input) {
-      return objectSet.list(input).then((result) => {
-        options?.recorder.observeObjectRows(
-          (result as { readonly objects: readonly ObjectRow[] }).objects
-        )
-        return result
-      }) as ReturnType<TypedReadObjectSet["list"]>
+    async list(input) {
+      const result = await objectSet.list(input)
+      recorder.observeObjectRows(result.objects.map(storageRow))
+      return result
     },
     byId(id) {
       const handle = objectSet.byId(id)
       return {
-        get() {
-          return readObject(id, () => handle.get()) as ReturnType<
-            ReturnType<TypedReadObjectSet["byId"]>["get"]
-          >
+        async get() {
+          const row = await handle.get()
+          recorder.observeObject(ref(id), row && storageRow(row))
+          return row
         },
         async listLinks(link) {
-          const rows = (await handle.listLinks(link)) as readonly ObjectLinkRow[]
-          options?.recorder.observeLinkScopes(
-            { objectTypeId: objectType.id, primaryId: id },
+          const rows = await handle.listLinks(link)
+          recorder.observeLinkScopes(
+            ref(id),
             link ? [link.id] : options.resolveLinkIds(objectType.id),
             rows
           )
-          return rows as unknown as Awaited<
-            ReturnType<ReturnType<TypedReadObjectSet["byId"]>["listLinks"]>
-          >
+          return rows
         },
       }
     },
   }
 }
 
-type ActionQueryBuilder = ObjectQueryBuilder<ObjectTypeWithPropertyTokens>
+/**
+ * Delegates to `executor` and records the objects its row queries return.
+ *
+ * Aggregates (`count()`, `exists()`, `facets()`) return no rows to fence; protecting their result
+ * needs query-level dependencies.
+ */
+function recordingExecutor(
+  executor: ObjectQueryExecutor,
+  recorder: ActionReadRecorder
+): ObjectQueryExecutor {
+  return {
+    async list(query, listOptions) {
+      const result = await executor.list(query, listOptions)
+      recorder.observeObjectRows(result.objects.map(storageRow))
+      return result
+    },
+    count: (query) => executor.count(query),
+    exists: (query) => executor.exists(query),
+    facets: (query, facets) => executor.facets(query, facets),
+    validate: executor.validate?.bind(executor),
+    explain: executor.explain?.bind(executor),
+  }
+}
 
 /**
- * Wraps a query builder so the objects its row terminals return are recorded.
- *
- * Every refinement returns a new builder, which is wrapped in turn: an unwrapped step would let a
- * chained terminal escape the recorder. Typing the result as the full builder makes a method added
- * to the builder later fail to compile here instead of silently bypassing the recorder.
+ * Runtime reads return storage rows; the SDK row types only leave out the commit fields a fence
+ * needs.
  */
-function observeQueryBuilder(
-  builder: ActionQueryBuilder,
-  recorder: ActionReadRecorder
-): ActionQueryBuilder {
-  const refine =
-    <TArgs extends unknown[]>(refinement: (...args: TArgs) => unknown) =>
-    (...args: TArgs) =>
-      observeQueryBuilder(refinement(...args) as ActionQueryBuilder, recorder)
-
-  return {
-    get ir() {
-      return builder.ir
-    },
-    where: refine(builder.where.bind(builder)),
-    search: refine(builder.search.bind(builder)),
-    vector: refine(builder.vector.bind(builder)),
-    // Overloaded: `bind` keeps only the last signature, so the full overload set is restored here.
-    traverse: refine(builder.traverse.bind(builder)) as unknown as ActionQueryBuilder["traverse"],
-    expand: refine(builder.expand.bind(builder)) as unknown as ActionQueryBuilder["expand"],
-    orderBy: refine(builder.orderBy.bind(builder)),
-    orderByRelevance: refine(builder.orderByRelevance.bind(builder)),
-    limit: refine(builder.limit.bind(builder)),
-    page: refine(builder.page.bind(builder)),
-    validate: () => builder.validate(),
-    explain: () => builder.explain(),
-    formatExplanation: () => builder.formatExplanation(),
-    list: (async (listOptions?: ObjectQueryListOptions) => {
-      const result = await builder.list(listOptions)
-      recorder.observeObjectRows(result.objects as unknown as readonly ObjectRow[])
-      return result
-    }) as ActionQueryBuilder["list"],
-    first: async () => {
-      const row = await builder.first()
-      if (row) recorder.observeObjectRows([row as unknown as ObjectRow])
-      return row
-    },
-    // Aggregates return no rows to fence; protecting their result needs query-level dependencies.
-    count: () => builder.count(),
-    exists: () => builder.exists(),
-    facets: (input) => builder.facets(input),
-  }
+function storageRow(row: object): ObjectRow {
+  return row as ObjectRow
 }
 
 function expandedRows(value: ExpandedLinkValue): readonly ObjectRow[] {

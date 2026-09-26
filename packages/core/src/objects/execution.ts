@@ -7,7 +7,14 @@ import {
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import { assertObjectTypeRegistered } from "../ontology/validation/properties"
 import { shareOntologyMutationRuntime } from "../runtime/ontology-mutations"
-import type { ListResult, ObjectByIdHandle, ObjectSet, SixbRuntimeContext } from "../runtime/types"
+import type {
+  ListResult,
+  ObjectByIdHandle,
+  ObjectReadByIdHandle,
+  ObjectReadSet,
+  ObjectSet,
+  SixbRuntimeContext,
+} from "../runtime/types"
 import type {
   LinkDirection,
   ObjectLinkRow,
@@ -74,10 +81,9 @@ export interface ExecutionObjectOperations {
   ): Promise<void>
 }
 
-export interface ExecutionObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens> {
+export interface ExecutionObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens>
+  extends ObjectReadByIdHandle<TObjectType> {
   vector: ObjectByIdHandle<TObjectType>["vector"]
-  get: ObjectByIdHandle<TObjectType>["get"]
-  listLinks: ObjectByIdHandle<TObjectType>["listLinks"]
   requestAction: ObjectByIdHandle<TObjectType>["requestAction"]
   requestActionAndWait: ObjectByIdHandle<TObjectType>["requestActionAndWait"]
   link: ObjectByIdHandle<TObjectType>["link"]
@@ -87,10 +93,8 @@ export interface ExecutionObjectByIdHandle<TObjectType extends ObjectTypeWithPro
   telemetry: ObjectByIdHandle<TObjectType>["telemetry"]
 }
 
-export interface ExecutionObjectSet<TObjectType extends ObjectTypeWithPropertyTokens> {
-  get: ObjectSet<TObjectType>["get"]
-  list: ObjectSet<TObjectType>["list"]
-  query: ObjectSet<TObjectType>["query"]
+export interface ExecutionObjectSet<TObjectType extends ObjectTypeWithPropertyTokens>
+  extends ObjectReadSet<TObjectType> {
   requestAction: ObjectSet<TObjectType>["requestAction"]
   requestActionAndWait: ObjectSet<TObjectType>["requestActionAndWait"]
   upsert: ObjectSet<TObjectType>["upsert"]

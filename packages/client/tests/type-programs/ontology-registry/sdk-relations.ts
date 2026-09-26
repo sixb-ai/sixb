@@ -8,7 +8,7 @@
  *
  * Guards, each case checked alone with TypeScript 5.9.3 (`bun run typecheck:tests`):
  * - make `TwinObject` (packages/core/src/runtime/types.ts) read `InferObjectProperties` instead of
- *   `ObjectTypeProperties`: both reassignments, the Workflow façade and the loose row fail with
+ *   `ObjectTypeProperties`: both reassignments, the shared read helper and the loose row fail with
  *   TS2589;
  * - make `ObjectPropertiesMetadata` (packages/core/src/ontology/tokens.ts) hold
  *   `InferObjectProperties` instead of `ObjectPropertiesCarrier`: the incoming reassignment and the
@@ -18,13 +18,17 @@ import { objects } from "@sixb/client/query"
 import type {
   ActionReadFacade,
   ObjectQueryBuilder,
+  ObjectReader,
   ObjectTypeWithPropertyTokens,
+  Sixb,
   TwinObject,
   WorkflowRuntimeFacade,
 } from "@sixb/core"
 import { Contact, EmailMessage, EmailThread, Project } from "./ontology/correspondence"
 
 declare const workflow: WorkflowRuntimeFacade
+declare const read: ActionReadFacade
+declare const sixb: Sixb
 
 // ── A query reassigned from another root ───────────────────────────────────
 
@@ -53,11 +57,20 @@ export function threadsQuery(messageId: string) {
   return threads
 }
 
-// ── A Workflow façade passed where an Action reader is expected ────────────
+// ── One read helper for an Action, a Workflow step and the runtime ─────────
 
-export function workflowReader(sixb: WorkflowRuntimeFacade): Pick<ActionReadFacade, "objects"> {
-  return sixb
+function messagesToReview(reader: ObjectReader) {
+  return reader
+    .objects(EmailMessage)
+    .query()
+    .where((message) => message.p.assignmentStatus.eq("needs_review"))
+    .list()
 }
+export const sharedReads = [
+  messagesToReview(read),
+  messagesToReview(workflow),
+  messagesToReview(sixb),
+]
 
 // ── An expanded query passed where the plain query is expected ─────────────
 
