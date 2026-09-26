@@ -17,61 +17,47 @@ Two one-time steps.
 curl -sSL https://smolmachines.com/install.sh | bash
 ```
 
-**2. Build the agent image** (needs Docker or Podman):
+**2. Save the [Sixb agent image](../agent-image/README.md) as a local archive** (needs Docker or
+Podman on the machine that saves it):
 
 ```bash
-bunx -p @sixb/sandboxes-smolvm sixb-agent-image
+mkdir -p ~/.cache/sixb
+docker pull ghcr.io/sixb-ai/sixb-agent:1.2.0
+docker save ghcr.io/sixb-ai/sixb-agent:1.2.0 -o ~/.cache/sixb/sixb-agent.tar
 ```
 
-This builds [`agent-image/Dockerfile`](./agent-image/Dockerfile) — pinned Node 22 on Alpine plus
-Bash, Git, certificates, ripgrep, and Python — and caches the versioned image at
-`~/.cache/sixb/smolvm/sixb-agent-runtime-v1.tar`. Alpine's BusyBox base supplies the standard file
-utilities used by reads and output collection.
+A local archive boots offline, with no registry access. Save it on a machine with the same
+architecture as the smolvm host, or add `--platform linux/amd64` / `linux/arm64` to `docker pull`.
+The host that runs sandboxes needs only smolvm and the `.tar`.
 
 ## Use
 
 ```ts
+import { homedir } from "node:os"
 import { createSixb } from "@sixb/core"
 import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 
-createSixb({ sandboxes: new SmolvmSandboxFactory() })
+createSixb({
+  sandboxes: new SmolvmSandboxFactory({ image: `${homedir()}/.cache/sixb/sixb-agent.tar` }),
+})
 ```
 
-Each run boots a microVM from the cached image, runs the agent's sandbox tools, and destroys it.
-Networking is locked to the sixb gateway — no open internet. Boot (~0.7 s) overlaps the model's
-first response, so it's effectively instant. If a setup step is missing, `create()` throws a message
-telling you exactly what to run.
+Each run boots a microVM from the image, runs the agent's sandbox tools, and destroys it.
+Networking is locked to the sixb gateway — no open internet. Boot time scales with image size: the
+agent image takes about 20 seconds per run on Apple silicon. If the archive is missing, `create()`
+throws a message telling you what to run.
 
-## Custom tools
+## Custom images
 
-Edit the Dockerfile and rebuild. Custom images used by agents need Bash, standard file utilities,
-CA certificates, and Bun 1.3+ or Node 22+. `curl` and `jq` are not required. Keep the image lean —
-boot time scales with image size, and run-time installs will not work because egress is locked down.
-
-```bash
-# edit agent-image/Dockerfile, then:
-bun --filter @sixb/sandboxes-smolvm agent:image
-```
-
-## Production (no Docker on the server)
-
-Docker is only needed to *build* the image. The server needs only the smolvm binary and the `.tar`. Build for the server's architecture on any machine with Docker, copy it over, and point `image` at it.
-
-```bash
-bunx -p @sixb/sandboxes-smolvm sixb-agent-image --platform linux/amd64
-# Built agent image -> ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar
-scp ~/.cache/sixb/smolvm/sixb-agent-runtime-v1-amd64.tar server:/opt/sixb/agent.tar
-```
-
-```ts
-new SmolvmSandboxFactory({ image: "/opt/sixb/agent.tar" })
-```
+Any image works if it has Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+.
+Extend the agent image with `FROM ghcr.io/sixb-ai/sixb-agent:1.2.0`, or use a smaller image for
+faster boots. Run-time installs will not work because egress is locked down.
 
 ## Options
 
 | Option | Default | Notes |
 | --- | --- | --- |
-| `image` | cached managed archive | A local `.tar` path (offline), or a registry ref like `node:22` (pulled at boot). |
+| `image` | required | A local `.tar` path (offline), a registry ref (pulled at boot), or `null` for a bare busybox machine that cannot run the agent CLI. |
 | `timeout` | — | Per-command timeout, in ms. |
 | `overlayGiB` | smolvm default (2) | Writable-layer disk size; raise to avoid "no space left". |
 | `env` | `{}` | Env merged into every run. |

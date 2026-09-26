@@ -14,7 +14,6 @@ import {
   sandboxConfig,
   sandboxCreationEnvironment,
 } from "@sixb/core/sandboxes"
-import { defaultAgentImageCandidates, defaultAgentImagePath } from "./agent-image"
 import { isLocalImageArchive, type SmolvmCliConfig } from "./cli"
 import { DOCKER_HUB_REGISTRY_HOSTS } from "./network"
 import { probeSmolvm, type SmolvmProbe } from "./preflight"
@@ -23,14 +22,12 @@ import { SmolvmSandbox } from "./smolvm-sandbox"
 export interface SmolvmSandboxFactoryOptions<in out TParams extends ParamsConfig = ParamsConfig>
   extends SandboxConfig<TParams> {
   /**
-   * Image the VM boots from. Defaults to the managed agent archive built by
-   * `bunx -p @sixb/sandboxes-smolvm sixb-agent-image` (offline, fast, strict egress); a cross-built
-   * `sixb-agent-runtime-v1-<arch>.tar` in the cache is picked up automatically. Set a
-   * different local `.tar` path, or a registry reference (e.g. `node:22`) to pull
-   * at boot. Pass `null` for a bare machine (built-in busybox rootfs, fully
-   * offline, no image).
+   * Image the VM boots from: a local `docker save` archive (`.tar`, boots offline), a registry
+   * reference (pulled at boot; add its hosts to `registryHosts`), or `null` for a bare machine
+   * (built-in busybox rootfs, which cannot run the agent CLI). Agents need Bash, standard file
+   * utilities, CA certificates, and Bun 1.3+ or Node 22+ — the Sixb agent image has all of them.
    */
-  readonly image?: string | null
+  readonly image: string | null
   /** smolvm binary name or absolute path. Defaults to "smolvm" (resolved on PATH). */
   readonly bin?: string
   /** `--storage` GiB: OCI layers + container data (smolvm default 20). */
@@ -66,7 +63,7 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
   private cli: SmolvmCliConfig | undefined
   private probe: SmolvmProbe | undefined
 
-  constructor(private readonly defaults: SmolvmSandboxFactoryOptions<TParams> = {}) {
+  constructor(private readonly defaults: SmolvmSandboxFactoryOptions<TParams>) {
     this.configuration = sandboxConfig<TParams>(defaults)
   }
 
@@ -97,10 +94,9 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
     }
   }
 
-  /** Resolve the smolvm CLI config once, picking the default image archive lazily. */
   private resolveCli(): SmolvmCliConfig {
     if (this.cli === undefined) {
-      const image = resolveImage(this.defaults.image)
+      const image = this.defaults.image ?? undefined
       this.cli = {
         bin: this.defaults.bin ?? DEFAULT_BIN,
         ...(image !== undefined ? { image } : {}),
@@ -124,26 +120,8 @@ export class SmolvmSandboxFactory<const TParams extends ParamsConfig = Record<ne
     const image = cli.image
     if (image !== undefined && isLocalImageArchive(image) && !existsSync(image)) {
       throw new SandboxIsolationUnavailableError(
-        `[Sandbox] agent image not found at ${image}. Build it once with \`bunx -p @sixb/sandboxes-smolvm sixb-agent-image\` (requires Docker or Podman), or set \`image\` to a prebuilt .tar or a registry reference.`
+        `[Sandbox] image archive not found at ${image}. Save one with \`docker save <image> -o ${image}\`, or set \`image\` to a registry reference.`
       )
     }
   }
-}
-
-/**
- * Resolve the configured image option into a CLI image:
- * - `undefined` -> the managed agent archive (prefers an existing
- *   `sixb-agent-runtime-v1.tar`, else a cross-built `sixb-agent-runtime-v1-<arch>.tar`; falls back
- *   to the managed path).
- * - `null`      -> bare machine (no image; built-in busybox rootfs, fully offline).
- * - string      -> used as-is (a local `.tar` path or a registry reference).
- */
-function resolveImage(image: string | null | undefined): string | undefined {
-  if (image === null) {
-    return undefined
-  }
-  if (image !== undefined) {
-    return image
-  }
-  return defaultAgentImageCandidates().find((path) => existsSync(path)) ?? defaultAgentImagePath()
 }

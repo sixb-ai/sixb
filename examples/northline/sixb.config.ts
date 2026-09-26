@@ -25,7 +25,10 @@ export const sixb = createSixb({
   queues: new InMemoryQueues(),
   sandboxes:
     process.env.SIXB_SANDBOX_PROVIDER === "smolvm"
-      ? new SmolvmSandboxFactory({ image: process.env.SIXB_AGENT_IMAGE, timeout: 30_000 })
+      ? new SmolvmSandboxFactory({
+          image: process.env.SIXB_AGENT_IMAGE ?? "/opt/sixb/agent.tar",
+          timeout: 30_000,
+        })
       : new LocalSandboxFactory({ timeout: 30_000 }),
   onError(error, context) {
     let failure: string
