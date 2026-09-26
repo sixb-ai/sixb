@@ -32,6 +32,7 @@ import {
   parseAccessTokenValue,
 } from "./access-tokens"
 import type { AuthSessionAudience } from "./audience"
+import { getRequestClientAddress } from "./client-address"
 import {
   getCookie,
   type ResolvedAuthCookieOptions,
@@ -503,7 +504,7 @@ export class AuthRuntime {
         id: accessToken.id,
         lastUsedAt: now,
         userAgent: request.headers.get("user-agent")?.trim() || undefined,
-        ipAddress: resolveRequestIpAddress(request),
+        ipAddress: getRequestClientAddress(request),
       })
     } catch {
       // Touch is non-critical; ignore failures so auth still succeeds.
@@ -1494,14 +1495,6 @@ function isAuthenticatedUserRequestSession(
   session: AuthenticatedRequestAuthSession
 ): session is AuthenticatedUserRequestSession {
   return session.principal.type === "user"
-}
-
-function resolveRequestIpAddress(request: Request): string | undefined {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    request.headers.get("x-real-ip")?.trim() ||
-    undefined
-  )
 }
 
 function constrainTokenGroupIds(

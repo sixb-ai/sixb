@@ -54,6 +54,11 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Public custom app origin",
     kind: "string",
   },
+  "trusted-proxies": {
+    syntax: "--trusted-proxies <ranges>",
+    summary: "Proxies trusted for client addresses (default: private)",
+    kind: "string",
+  },
   profile: { syntax: "--profile <name>", summary: "Use a saved API profile", kind: "string" },
   "api-url": {
     syntax: "--api-url <url>",
@@ -227,6 +232,7 @@ const commandTree: readonly CommandNode[] = [
       "api-public-origin",
       "atlas-public-origin",
       "app-public-origin",
+      "trusted-proxies",
     ],
   }),
   command("atlas", "Start production Atlas UI server", {

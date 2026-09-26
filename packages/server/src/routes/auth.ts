@@ -12,6 +12,7 @@ import {
   createSessionCredential,
   generateCsrfToken,
   getCookie,
+  getRequestClientAddress,
   type InviteDeliveryResult,
   isMagicLinkAuthStrategy,
   isOidcAuthStrategy,
@@ -47,6 +48,7 @@ import {
   customAuthExperienceResponse,
   type SixbAuthExperienceOptions,
 } from "../auth/experience"
+import { ClientAddressRateLimiter } from "../auth/rate-limit"
 import { hasForegroundSessionActivity } from "../auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "../auth/session-cookies"
 import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
@@ -132,6 +134,10 @@ export interface AuthRoutesOptions {
 }
 
 export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: AuthRoutesOptions) {
+  const deviceAuthorizationLimiter = new ClientAddressRateLimiter(
+    DEVICE_AUTHORIZATIONS_PER_ADDRESS,
+    DEVICE_AUTHORIZATION_TTL_MS
+  )
   return app
     .get(
       "/auth/assets/*",
@@ -148,6 +154,19 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       async ({ body, request }) => {
         const parsed = CreateDeviceAuthorizationBodySchema.parse(body)
         const now = new Date()
+        // Creation is unauthenticated and the project-wide pending cap is shared, so one address
+        // must not be able to fill it.
+        if (
+          !deviceAuthorizationLimiter.tryConsume(getRequestClientAddress(request), now.getTime())
+        ) {
+          return jsonResponse(
+            {
+              error:
+                "[SixbServer] Too many device authorizations from this address. Try again later.",
+            },
+            429
+          )
+        }
         const id = `dva_${randomUUID()}`
         const deviceCode = `${id}.${randomBytes(32).toString("base64url")}`
         const userCode = createDeviceUserCode()
@@ -1743,6 +1762,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
 }
 
 const DEVICE_AUTHORIZATION_TTL_MS = 10 * 60 * 1000
+const DEVICE_AUTHORIZATIONS_PER_ADDRESS = 10
 const DEVICE_ACCESS_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS = 2
 const DEVICE_USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789"
@@ -1886,19 +1906,14 @@ async function completeMagicLinkCallback(input: {
   }
 }
 
-// Best-effort client metadata for the active-sessions view. `x-forwarded-for`
-// only reflects the real client behind a trusted proxy; both values are display
-// only and never used for authorization.
+// Client metadata for the active-sessions view. Display only; never used for authorization.
 function resolveSessionDevice(request: Request): {
   readonly userAgent?: string
   readonly ipAddress?: string
 } {
   return {
     userAgent: request.headers.get("user-agent")?.trim() || undefined,
-    ipAddress:
-      request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-      request.headers.get("x-real-ip")?.trim() ||
-      undefined,
+    ipAddress: getRequestClientAddress(request),
   }
 }
 

@@ -62,6 +62,9 @@ Public-origin flags have matching environment variables:
 | `--api-public-origin` | `SIXB_API_PUBLIC_ORIGIN` |
 | `--atlas-public-origin` | `SIXB_ATLAS_PUBLIC_ORIGIN` |
 | `--app-public-origin` | `SIXB_APP_PUBLIC_ORIGIN` |
+| `--trusted-proxies` | `SIXB_TRUSTED_PROXIES` |
+
+`sixb api` accepts `--trusted-proxies` to choose which proxies identify the client address; see [Run behind a proxy](../deployment/overview.md#run-behind-a-proxy).
 
 The API requires API and Atlas origins, plus the app origin when serving a built custom app. Atlas, the app server, and agent workers need the API origin. Flags override environment variables.
 

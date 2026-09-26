@@ -22,6 +22,18 @@ Omit the app origin if your project has no custom app. Origins contain only the 
 
 Serve these public origins over HTTPS. Atlas and the custom app connect to the API; they do not serve API routes themselves.
 
+## Run behind a proxy
+
+The API records each client's IP address for sessions and access tokens, and limits CLI login requests per address. Behind a reverse proxy or load balancer, it reads the client from `X-Forwarded-For`, but only the entries appended by proxies it trusts. Entries a client sends itself are ignored.
+
+By default the API trusts proxies on loopback, private, and link-local networks. This covers a proxy on the same host (such as Caddy or nginx), Docker and Kubernetes networking, and most hosting platforms. If a proxy with a public address sits in front, such as a CDN, add its ranges:
+
+```bash
+export SIXB_TRUSTED_PROXIES=private,173.245.48.0/20,103.21.244.0/22
+```
+
+The value is a comma-separated list of IP addresses, CIDR ranges, and `private`; it replaces the default. If sessions show your proxy's address instead of the client's, that proxy is missing from the list.
+
 ## Build and validate
 
 Build the runtime and browser assets, then validate the deployed configuration. This example runs migrations as a separate release step:
