@@ -4,6 +4,9 @@ Runs each agent's sandbox tools inside a local [Apple Container](https://github.
 container. Drop-in `Sandbox` provider - wire it once into `createSixb({ sandboxes })`; agent code
 still uses the provider-neutral Sixb sandbox contract.
 
+Commands default to the sandbox's working directory. Relative `cwd` values such as `"."` or
+`"src"` resolve against that directory; absolute paths select a guest directory for that call only.
+
 ## Setup
 
 Install Apple Container on an Apple silicon Mac running macOS 26 or newer, then make sure the

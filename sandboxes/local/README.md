@@ -6,6 +6,9 @@ Runs each agent's sandbox tools on the host machine, confined by the OS sandbox 
 available: `sandbox-exec` (seatbelt) on macOS, `bwrap` (bubblewrap) on Linux. Drop-in `Sandbox`
 provider — wire it once into `createSixb({ sandboxes })` and nothing else changes.
 
+Commands default to the sandbox's working directory. Relative `cwd` values such as `"."` or
+`"src"` resolve against that directory; absolute paths override it for that call only.
+
 For agent use, the host needs Bash with `BASH_ENV` support, standard file utilities, CA
 certificates, and Bun 1.3+ or Node 22+. The provider does not install or modify host tools. `curl`
 and `jq` are not required.

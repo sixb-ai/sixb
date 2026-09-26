@@ -36,6 +36,10 @@ Each ephemeral Sixb agent run creates a fresh Vercel sandbox, materializes skill
 `writeFiles(...)`, runs bash commands via `runCommand(...)`, then permanently deletes the sandbox on
 `destroy()`.
 
+Commands default to the sandbox's working directory. A relative `cwd` such as `"."` or
+`"src"` resolves against that directory; an absolute `cwd` selects that path directly. Callers do
+not need to know Vercel's workspace path.
+
 Creation is ephemeral by default. Opt into named persistence per call, and configure snapshot
 retention on the factory.
 
@@ -192,8 +196,9 @@ bun --filter @sixb/sandboxes-vercel test
 bun --filter @sixb/sandboxes-vercel typecheck
 ```
 
-The regular test suite uses fakes and does not require Vercel credentials. A live smoke test is gated
-behind an environment variable because it consumes metered Vercel Sandbox resources:
+The regular test suite uses fakes and does not require Vercel credentials. Live smoke tests,
+including working-directory resolution, are gated behind an environment variable because they
+consume metered Vercel Sandbox resources:
 
 ```bash
 SIXB_VERCEL_SANDBOX_INTEGRATION=1 bun --filter @sixb/sandboxes-vercel test

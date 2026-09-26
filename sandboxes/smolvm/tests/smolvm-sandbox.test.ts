@@ -58,6 +58,33 @@ async function readCalls(): Promise<string[]> {
 }
 
 describe("SmolvmSandbox lifecycle", () => {
+  // Regression check: restore `options.cwd ?? this.workdir.dir` in runCommand;
+  // the fake CLI must then receive incorrect relative --workdir arguments.
+  test("resolves command working directories before invoking the CLI", async () => {
+    const bin = await makeFakeSmolvm()
+    const sandbox = await SmolvmSandbox.create({
+      cli: { bin },
+      id: "cwd-test",
+      workingDirectory: dir,
+    })
+    try {
+      for (const [cwd, expected] of [
+        [undefined, sandbox.workingDirectory],
+        [".", sandbox.workingDirectory],
+        ["nested", `${sandbox.workingDirectory}/nested`],
+        ["./nested/..", sandbox.workingDirectory],
+        ["/tmp", "/tmp"],
+      ] as const) {
+        await sandbox.runCommand("pwd", [], { cwd })
+        expect((await readCalls()).at(-1)).toBe(
+          `machine exec --name cwd-test --workdir ${expected} -- pwd`
+        )
+      }
+    } finally {
+      await sandbox.destroy()
+    }
+  })
+
   test("create issues machine create then start, and reports running", async () => {
     const bin = await makeFakeSmolvm()
     const sandbox = await SmolvmSandbox.create({

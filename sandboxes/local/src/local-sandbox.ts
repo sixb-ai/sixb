@@ -122,7 +122,7 @@ export class LocalSandbox implements Sandbox {
 
     const argv = this.buildArgv(command, args)
     const env = this.mergeEnv(options.env)
-    const cwd = options.cwd ?? this.workingDirectory
+    const cwd = resolve(this.workingDirectory, options.cwd ?? ".")
     const timeoutMs = options.timeout ?? this.defaultTimeoutMs
 
     const controller = new AbortController()
