@@ -2,7 +2,6 @@ import type {
   ActionDefinition,
   ActionObjectSubject,
   ActionReadFacade,
-  ActionReadObjectSetSource,
   ActionRuntimeFacade,
   ActionSubject,
   ActionTargetObject,
@@ -46,18 +45,15 @@ export function toActionReadFacade(
   runtime: RunActionJobInput["runtime"],
   recorder: ActionReadRecorder
 ): ActionReadFacade {
-  return createActionReadFacade(
-    (objectType) => runtime.sixb.objects(objectType) as ActionReadObjectSetSource,
-    {
-      recorder,
-      resolveLinkIds: (objectTypeId) =>
-        runtime.sixb.objects.resolveType(objectTypeId).links.map((definition) => definition.id),
-      telemetry: {
-        resolveObjectType: (objectTypeId) => runtime.sixb.objects.resolveType(objectTypeId),
-        getHistoryBatch: (input) => runtime.sixb.objects.getTelemetryHistoryBatch(input),
-      },
-    }
-  )
+  return createActionReadFacade(runtime.sixb, {
+    recorder,
+    resolveLinkIds: (objectTypeId) =>
+      runtime.sixb.objects.resolveType(objectTypeId).links.map((definition) => definition.id),
+    telemetry: {
+      resolveObjectType: (objectTypeId) => runtime.sixb.objects.resolveType(objectTypeId),
+      getHistoryBatch: (input) => runtime.sixb.objects.getTelemetryHistoryBatch(input),
+    },
+  })
 }
 
 function toActionTargetObject(

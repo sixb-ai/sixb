@@ -141,6 +141,8 @@ automatically.
 Inside `.edits()`, use `objects(Type)` to create an object or get an edit handle with `.byId(id)`.
 These methods stage changes synchronously; all edits commit together after the handler returns.
 Use `read.objects(Type)` when you need to read existing values or relationships.
+`read`, a workflow step's `sixb` and the runtime from `createSixb()` are all an `ObjectReader`, so
+a read helper that takes one works in each of them, and its reads stay protected when it gets `read`.
 
 | Method | Purpose |
 | --- | --- |

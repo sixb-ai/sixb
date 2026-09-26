@@ -533,7 +533,7 @@ describe("Action commit retries", () => {
 describe("Action read dependency capture", () => {
   function createFacade(host: EditsHost, sixb: EditsRuntime) {
     const reads = new ActionReadRecorder()
-    const facade = createActionReadFacade((objectType) => sixb.objects(objectType), {
+    const facade = createActionReadFacade(sixb, {
       recorder: reads,
       resolveLinkIds: (objectTypeId) =>
         host.definitions.ontology
@@ -616,8 +616,10 @@ describe("Action read dependency capture", () => {
     const reads = new ActionReadRecorder()
     let providerResults: readonly TimeseriesHistoryBatchResult[] = []
     const facade = createActionReadFacade(
-      () => {
-        throw new Error("Object reads are not expected in this test.")
+      {
+        objects() {
+          throw new Error("Object reads are not expected in this test.")
+        },
       },
       {
         recorder: reads,
@@ -762,6 +764,22 @@ describe("Action read dependency capture", () => {
     const traversed = createFacade(host, sixb)
     await traversed.facade.objects(Invoice).query().traverse(Invoice.l.customer).first()
     expect(traversed.reads.dependencies().objects).toEqual([expected(customer)])
+  })
+
+  // Drop `validate` and `explain` from the recording executor and this fails.
+  test("a recorded query keeps the runtime's validation, explanation and aggregates", async () => {
+    const { host, sixb } = createRuntime()
+    await seedInvoice(sixb)
+    const { facade, reads } = createFacade(host, sixb)
+    const recorded = facade.objects(Invoice).query().limit(5)
+    const direct = sixb.objects(Invoice).query().limit(5)
+
+    expect(recorded.validate()).toEqual(direct.validate())
+    expect(recorded.explain()).toEqual(direct.explain())
+    expect(await recorded.count()).toBe(1)
+    expect(await recorded.exists()).toBe(true)
+    // Aggregates return no rows, so nothing is recorded.
+    expect(reads.dependencies().objects).toEqual([])
   })
 
   test("a returned object that changes before the commit rejects it", async () => {

@@ -10,13 +10,8 @@ import type {
 import type { ModelsRuntime } from "../../models/generation-types"
 import type { ObjectType, Property } from "../../ontology"
 import type { InferPropertyUnit, InferPropertyValue } from "../../ontology/inference"
-import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
-import type {
-  ListResult,
-  ObjectQueryBuilder,
-  ObjectSetListInput,
-  TwinObject,
-} from "../../runtime/types"
+import type { ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
+import type { ObjectReader } from "../../runtime/types"
 import type { ActionPrimitiveSchemaValues } from "./params"
 
 export type ActionTargetObject<TObjectType extends ObjectType = ObjectType> = {
@@ -63,36 +58,10 @@ export type ActionBinding<TObjectType extends ObjectType = ObjectType> =
   | { readonly kind: "global" }
   | { readonly kind: "object"; readonly objectType: TObjectType }
 
-type ActionLinkTokenForObjectType<TObjectType extends ObjectTypeWithPropertyTokens> = LinkToken<
-  TObjectType["id"],
-  TObjectType["links"][number]["id"],
-  TObjectType["links"][number]["targetObjectTypeId"],
-  TObjectType["links"][number]
->
-
 export interface ActionRunPhaseInfo {
   readonly id: string
   readonly startedAt: Date
   readonly idempotencyKey: string
-}
-
-export interface ActionReadObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens> {
-  get(): Promise<TwinObject<TObjectType> | null>
-  listLinks(link?: ActionLinkTokenForObjectType<TObjectType>): Promise<
-    readonly {
-      readonly linkId: string
-      readonly targetTypeId: string
-      readonly targetId: string
-      readonly properties?: Readonly<Record<string, unknown>>
-    }[]
-  >
-}
-
-export interface ActionReadObjectSet<TObjectType extends ObjectTypeWithPropertyTokens> {
-  get(id: string): Promise<TwinObject<TObjectType> | null>
-  query(): ObjectQueryBuilder<TObjectType>
-  list(input?: ObjectSetListInput): Promise<ListResult<TwinObject<TObjectType>>>
-  byId(id: string): ActionReadObjectByIdHandle<TObjectType>
 }
 
 /** A telemetry-mode ontology property accepted by Action history reads. */
@@ -157,11 +126,12 @@ export type ActionTelemetryReadFacade = {
   ): Promise<ActionTelemetryHistoryBatchResult<TSeries>>
 }
 
-export interface ActionReadFacade {
+/**
+ * The `read` an Action handler receives. What it reads through `objects(Type)` is recorded, and
+ * the commit fails if any of it changed first.
+ */
+export interface ActionReadFacade extends ObjectReader {
   readonly telemetry: ActionTelemetryReadFacade
-  objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
-    objectType: TObjectType
-  ): ActionReadObjectSet<TObjectType>
 }
 
 export interface ActionTelemetryObjectSet<_TObjectType extends ObjectTypeWithPropertyTokens> {

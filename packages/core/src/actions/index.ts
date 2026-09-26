@@ -9,7 +9,6 @@ export { commitActionEdits, findActionEditCommit } from "./commit-edits"
 export { ActionDefinitionError, ActionEditCommitError } from "./errors"
 export type {
   ActionReadFacadeOptions,
-  ActionReadObjectSetSource,
   ActionTelemetryReadSource,
 } from "./read-facade"
 export { ActionReadRecorder, createActionReadFacade } from "./read-facade"
@@ -38,8 +37,6 @@ export type {
   ActionParamsConfig,
   ActionPhaseCommit,
   ActionReadFacade,
-  ActionReadObjectByIdHandle,
-  ActionReadObjectSet,
   ActionRunPhaseInfo,
   ActionRuntimeFacade,
   ActionSubject,

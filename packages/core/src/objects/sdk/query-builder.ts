@@ -8,6 +8,7 @@
  */
 import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
+import { RuntimeError } from "../../runtime/errors"
 import type {
   ListResult,
   ListResultWithoutTotal,
@@ -46,8 +47,32 @@ export function createObjectQueryBuilder<TObjectType extends ObjectTypeWithPrope
   ) as unknown as ObjectQueryBuilder<TObjectType>
 }
 
+/**
+ * Returns the same query running through the executor `decorate` wraps around the builder's own.
+ *
+ * Refinements copy their builder's executor, so every query derived from the result, and every
+ * terminal it runs, goes through the decorated executor too.
+ */
+export function decorateObjectQueryExecutor<TObjectType extends ObjectTypeWithPropertyTokens>(
+  builder: ObjectQueryBuilder<TObjectType>,
+  decorate: (executor: ObjectQueryExecutor) => ObjectQueryExecutor
+): ObjectQueryBuilder<TObjectType> {
+  // Narrowed from `unknown`: narrowing the builder interface to the class relates both structures.
+  const source: unknown = builder
+  if (!(source instanceof ObjectQueryBuilderImpl)) {
+    throw new RuntimeError(
+      "[Sixb] Only query builders created by createObjectQueryBuilder can change executor."
+    )
+  }
+  return new ObjectQueryBuilderImpl<TObjectType>({
+    ...source.params,
+    executor: decorate(source.params.executor),
+  }) as unknown as ObjectQueryBuilder<TObjectType>
+}
+
 class ObjectQueryBuilderImpl<TObjectType extends ObjectTypeWithPropertyTokens> {
-  constructor(private readonly params: QueryBuilderParams) {}
+  /** Not private because `decorateObjectQueryExecutor` reads it; the class is not exported. */
+  constructor(readonly params: QueryBuilderParams) {}
 
   get ir(): ObjectQuery {
     return normalizeObjectQuery(this.params.query)

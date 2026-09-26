@@ -756,13 +756,48 @@ export interface ObjectQueryBuilder<
   first(): Promise<Simplify<TRow> | null>
 }
 
-export interface ObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens> {
-  vector(profile: VectorProfileName<TObjectType>): ObjectVectorHandle
+/** Reads bound to one object id. */
+export interface ObjectReadByIdHandle<out TObjectType extends ObjectTypeWithPropertyTokens> {
   /** Get the object at this id, or null if it doesn't exist. */
   get(): Promise<TwinObject<TObjectType> | null>
 
   /** List links from this object, optionally filtered by link token. */
   listLinks(link?: LinkTokenForObjectType<TObjectType>): Promise<readonly ObjectLinkRow[]>
+}
+
+/**
+ * The reads of an object set, declared once: `sixb.objects(Type)`, a Workflow step's
+ * `sixb.objects(Type)` and an Action's `read.objects(Type)` add only their own writes on top.
+ */
+export interface ObjectReadSet<in out TObjectType extends ObjectTypeWithPropertyTokens> {
+  /** Get an object by id, or null if it doesn't exist. */
+  get(id: string): Promise<TwinObject<TObjectType> | null>
+
+  /** Build an executable provider-neutral object query rooted at this object type. */
+  query(): ObjectQueryBuilder<TObjectType>
+
+  /** Bind reads to a specific object id. */
+  byId(id: string): ObjectReadByIdHandle<TObjectType>
+
+  /** List stored objects of this type with storage-system filtering and pagination. */
+  list(input?: ObjectSetListInput): Promise<ListResult<TwinObject<TObjectType>>>
+}
+
+/**
+ * Reads objects without writing them.
+ *
+ * An Action's `read`, a Workflow step's `sixb` and a `Sixb` runtime are all object readers, so a
+ * helper that takes an `ObjectReader` works in each of them.
+ */
+export interface ObjectReader {
+  objects<const TObjectType extends ObjectTypeWithPropertyTokens>(
+    objectType: TObjectType
+  ): ObjectReadSet<TObjectType>
+}
+
+export interface ObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyTokens>
+  extends ObjectReadByIdHandle<TObjectType> {
+  vector(profile: VectorProfileName<TObjectType>): ObjectVectorHandle
 
   /** Create or update a link from the current object to a target object. */
   link<TLinkToken extends LinkTokenForObjectType<TObjectType>>(
@@ -833,21 +868,13 @@ export interface ObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyToke
   ): TelemetryChannel<TToken>
 }
 
-export interface ObjectSet<TObjectType extends ObjectTypeWithPropertyTokens> {
-  /** Get an object by id, or null if it doesn't exist. */
-  get(id: string): Promise<TwinObject<TObjectType> | null>
-
+export interface ObjectSet<TObjectType extends ObjectTypeWithPropertyTokens>
+  extends ObjectReadSet<TObjectType> {
   /** Upsert object state facts (latest projection). */
   upsert(input: { properties: ObjectTypeProperties<TObjectType> }): Promise<TwinObject<TObjectType>>
 
-  /** Build an executable provider-neutral object query rooted at this object type. */
-  query(): ObjectQueryBuilder<TObjectType>
-
   /** Bind operations to a specific object id. */
   byId(id: string): ObjectByIdHandle<TObjectType>
-
-  /** List stored objects of this type with storage-system filtering and pagination. */
-  list(input?: ObjectSetListInput): Promise<ListResult<TwinObject<TObjectType>>>
 
   /** Append telemetry for multiple objects in a single batch. */
   appendTelemetryBatch(
