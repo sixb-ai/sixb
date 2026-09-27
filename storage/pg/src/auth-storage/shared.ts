@@ -487,7 +487,10 @@ export async function createSession(
         expires_at,
         absolute_expires_at,
         user_agent,
-        ip_address
+        ip_address,
+        client_name,
+        access_expires_at,
+        refresh_token_hash
       ) VALUES (
         ${projectId},
         ${id},
@@ -499,7 +502,10 @@ export async function createSession(
         ${input.expiresAt},
         ${input.absoluteExpiresAt ?? null},
         ${input.userAgent ?? null},
-        ${input.ipAddress ?? null}
+        ${input.ipAddress ?? null},
+        ${input.bearer ? assertNonEmpty(input.bearer.clientName, "Session client name") : null},
+        ${input.bearer?.accessExpiresAt ?? null},
+        ${input.bearer ? assertNonEmpty(input.bearer.refreshTokenHash, "Refresh token hash") : null}
       )
       RETURNING *
     `

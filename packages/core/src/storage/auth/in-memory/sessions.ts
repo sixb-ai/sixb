@@ -1,6 +1,11 @@
 import type { AuthSessionAudience } from "../../../auth/audience"
 import { AuthStorageError } from "../errors"
-import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "../types"
+import type {
+  AuthSessionStore,
+  CreateAuthSessionInput,
+  RotateSessionRefreshTokenResult,
+  SessionRecord,
+} from "../types"
 import type { AuthStorageState } from "./shared"
 import {
   cloneDate,
@@ -73,6 +78,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     const session = this.state.sessions.get(sessionKey(params.projectId, params.id))
     if (
       !session ||
+      session.bearer ||
       session.audience !== params.audience ||
       session.tokenHash !== params.tokenHash ||
       !isActiveSession(session, params.now)
@@ -81,6 +87,67 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     }
 
     return cloneRecord(session)
+  }
+
+  async findValidByAccessTokenHash(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly tokenHash: string
+    readonly now: Date
+  }): Promise<SessionRecord | null> {
+    const session = this.state.sessions.get(sessionKey(params.projectId, params.id))
+    if (
+      !session?.bearer ||
+      session.tokenHash !== params.tokenHash ||
+      session.bearer.accessExpiresAt <= params.now ||
+      !isActiveSession(session, params.now)
+    ) {
+      return null
+    }
+
+    return cloneRecord(session)
+  }
+
+  async rotateRefreshToken(
+    params: Parameters<AuthSessionStore["rotateRefreshToken"]>[0]
+  ): Promise<RotateSessionRefreshTokenResult> {
+    const key = sessionKey(params.projectId, params.id)
+    const session = this.state.sessions.get(key)
+    if (!session?.bearer || !isActiveSession(session, params.now)) {
+      return { status: "invalid" }
+    }
+
+    const { bearer } = session
+    const replacedRecently =
+      bearer.previousRefreshTokenHash === params.refreshTokenHash &&
+      bearer.refreshedAt !== undefined &&
+      params.now.getTime() - bearer.refreshedAt.getTime() <= params.reuseGraceMs
+    if (bearer.refreshTokenHash !== params.refreshTokenHash && !replacedRecently) {
+      if (bearer.previousRefreshTokenHash !== params.refreshTokenHash) {
+        return { status: "invalid" }
+      }
+      this.state.sessions.set(key, cloneRecord({ ...session, revokedAt: cloneDate(params.now) }))
+      return { status: "reused" }
+    }
+
+    const requestedExpiresAt = session.absoluteExpiresAt
+      ? new Date(Math.min(params.next.expiresAt.getTime(), session.absoluteExpiresAt.getTime()))
+      : params.next.expiresAt
+    const next: SessionRecord = {
+      ...session,
+      tokenHash: params.next.tokenHash,
+      expiresAt: new Date(Math.max(session.expiresAt.getTime(), requestedExpiresAt.getTime())),
+      lastSeenAt: cloneDate(params.now),
+      bearer: {
+        clientName: bearer.clientName,
+        accessExpiresAt: cloneDate(params.next.accessExpiresAt),
+        refreshTokenHash: params.next.refreshTokenHash,
+        previousRefreshTokenHash: bearer.refreshTokenHash,
+        refreshedAt: cloneDate(params.now),
+      },
+    }
+    this.state.sessions.set(key, cloneRecord(next))
+    return { status: "rotated", session: cloneRecord(next) }
   }
 
   async renewIfValid(params: {
@@ -95,6 +162,7 @@ export class InMemoryAuthSessionStore implements AuthSessionStore {
     const session = this.state.sessions.get(key)
     if (
       !session ||
+      session.bearer ||
       session.audience !== params.audience ||
       session.tokenHash !== params.tokenHash ||
       !isActiveSession(session, params.now)

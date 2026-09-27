@@ -111,6 +111,7 @@ import workflowInterventionPrincipalsSql from "./migrations/046-workflow-interve
 import ontologyCommitAttributionSql from "./migrations/047-ontology-commit-attribution.sql" with {
   type: "text",
 }
+import nativeSessionsSql from "./migrations/049-native-sessions.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -214,6 +215,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("046-workflow-intervention-principals", workflowInterventionPrincipalsSql),
     sqliteSql("047-ontology-commit-attribution", ontologyCommitAttributionSql),
     sqliteSql("048-file-upload-sessions", fileUploadSessionsSql),
+    sqliteSql("049-native-sessions", nativeSessionsSql),
   ],
 })
 

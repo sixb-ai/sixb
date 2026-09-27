@@ -22,10 +22,7 @@ import {
   toIso,
 } from "./shared"
 
-export function createAuthAccessToken(
-  db: Database,
-  input: CreateAuthAccessTokenInput
-): AccessTokenRecord {
+function createAuthAccessToken(db: Database, input: CreateAuthAccessTokenInput): AccessTokenRecord {
   const id = assertNonEmpty(input.id, "Access token id")
   const projectId = assertNonEmpty(input.projectId, "Project id")
   const name = assertNonEmpty(input.name, "Access token name")

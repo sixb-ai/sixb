@@ -6,7 +6,6 @@ import {
   AuthRuntimeError,
   clearCsrfCookieHeader,
   clearSessionCookieHeader,
-  createAccessTokenCredential,
   createCsrfCookieHeader,
   createSessionCookieHeader,
   createSessionCredential,
@@ -59,6 +58,7 @@ import {
   AuthServiceAccountParamsSchema,
   AuthSessionResponseSchema,
   AuthSignOutResponseSchema,
+  BearerSessionTokensSchema,
   CreateAuthInvitationBodySchema,
   CreateAuthInvitationResponseSchema,
   CreateAuthPersonalAccessTokenBodySchema,
@@ -85,6 +85,7 @@ import {
   ListAuthServiceAccountsResponseSchema,
   ListAuthSessionsResponseSchema,
   ReactivateAuthMemberResponseSchema,
+  RefreshAuthSessionBodySchema,
   RevokeAuthAccessTokenParamsSchema,
   RevokeAuthAccessTokenResponseSchema,
   RevokeAuthInvitationParamsSchema,
@@ -179,8 +180,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             deviceCodeHash: hashDeviceCode(deviceCode),
             userCode,
             clientName: parsed.clientName,
-            tokenName: parsed.tokenName,
-            tokenExpiresAt: new Date(now.getTime() + DEVICE_ACCESS_TOKEN_TTL_MS),
             createdAt: now,
             expiresAt,
           })
@@ -217,7 +216,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     )
     .post(
       "/api/auth/device-authorizations/token",
-      async ({ body }) => {
+      async ({ body, request }) => {
         const { deviceCode } = ExchangeDeviceAuthorizationBodySchema.parse(body)
         const id = parseDeviceAuthorizationId(deviceCode)
         if (!id) return jsonResponse({ status: "expired" as const }, 200)
@@ -244,25 +243,18 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         if (!authorization.approvedUserId || !authorization.approvedSessionId) {
           return jsonResponse({ status: "expired" as const }, 200)
         }
-        const credential = createAccessTokenCredential("personal")
+        const { session, tokens } = host.auth.prepareBearerSession({
+          userId: authorization.approvedUserId,
+          clientName: authorization.clientName,
+          now,
+        })
         try {
           await storage.completeDeviceAuthorization({
             projectId: host.id,
             id,
             deviceCodeHash: hashDeviceCode(deviceCode),
             completedAt: now,
-            accessToken: {
-              id: credential.tokenId,
-              projectId: host.id,
-              name: authorization.tokenName,
-              kind: "personal",
-              subject: { type: "user", id: authorization.approvedUserId },
-              tokenHash: credential.tokenHash,
-              createdByPrincipal: { type: "user", id: authorization.approvedUserId },
-              createdBySessionId: authorization.approvedSessionId,
-              createdAt: now,
-              expiresAt: authorization.tokenExpiresAt,
-            },
+            session: { ...session, ...resolveSessionDevice(request) },
           })
         } catch (error) {
           if (error instanceof AuthStorageError && error.code === "invalid_device_authorization") {
@@ -271,7 +263,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           throw error
         }
         return jsonResponse(
-          { status: "approved" as const, accessToken: credential.tokenValue },
+          { status: "approved" as const, ...bearerTokensBody(tokens, session.bearer, now) },
           200
         )
       },
@@ -282,6 +274,27 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Exchange an approved device authorization",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "exchangeDeviceAuthorization",
+        },
+      }
+    )
+    .post(
+      "/api/auth/refresh",
+      async ({ body }) => {
+        const { refreshToken } = RefreshAuthSessionBodySchema.parse(body)
+        const refreshed = await host.auth.refreshSession(refreshToken)
+        const bearer = refreshed?.session.bearer
+        if (!refreshed || !bearer?.refreshedAt) {
+          return jsonResponse({ error: "Invalid refresh token" }, 401)
+        }
+        return jsonResponse(bearerTokensBody(refreshed.tokens, bearer, bearer.refreshedAt), 200)
+      },
+      {
+        body: RefreshAuthSessionBodySchema,
+        response: { 200: BearerSessionTokensSchema, 401: ErrorResponseSchema },
+        detail: {
+          summary: "Refresh a native client's session tokens",
+          tags: [OPENAPI_TAGS.authSessions.name],
+          operationId: "refreshAuthSession",
         },
       }
     )
@@ -329,10 +342,9 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         const response = authPageResponse(
           [
             "<h1>Authorize this device?</h1>",
-            `<p><strong>${escapeHtml(authorization.clientName)}</strong> is requesting access.</p>`,
+            `<p><strong>${escapeHtml(authorization.clientName)}</strong> is requesting to sign in as you.</p>`,
             `<p>Code: <strong>${escapeHtml(authorization.userCode)}</strong></p>`,
-            `<p>Token: ${escapeHtml(authorization.tokenName)}</p>`,
-            `<p>Expires: ${escapeHtml(authorization.tokenExpiresAt.toLocaleDateString("en-US"))}</p>`,
+            "<p>It stays signed in until you sign it out or it goes unused for a while.</p>",
             groups,
             '<form method="post" action="/auth/device">',
             `<input type="hidden" name="userCode" value="${escapeHtml(userCode)}">`,
@@ -487,10 +499,17 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       "/api/auth/sign-out",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        const session = await host.auth.getSession(request, authOptions)
+        const result = await host.auth.getSession(request, {
+          ...authOptions,
+          credentialSource: "any",
+        })
+        // Access tokens are not sessions; revoke those through their own route.
+        const session =
+          result.authenticated && result.credentialSource === "session" ? result : null
         const cookieOptions = host.auth.getCookieOptions(authOptions)
         if (
-          session.authenticated &&
+          session &&
+          !session.session.bearer &&
           !verifyDoubleSubmitCsrf(request, {
             cookieName: cookieOptions.csrfCookieName,
           })
@@ -498,7 +517,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           return jsonResponse({ error: "CSRF verification failed" }, 403)
         }
 
-        if (session.authenticated) {
+        if (session) {
           await host.auth.revokeSession(session, session.session.id)
         }
 
@@ -537,6 +556,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               lastSeenAt: entry.lastSeenAt ? toIsoString(entry.lastSeenAt) : undefined,
               userAgent: entry.userAgent,
               ipAddress: entry.ipAddress,
+              clientName: entry.bearer?.clientName,
             })),
           },
           200
@@ -1594,7 +1614,6 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
 
 const DEVICE_AUTHORIZATION_TTL_MS = 10 * 60 * 1000
 const DEVICE_AUTHORIZATIONS_PER_ADDRESS = 10
-const DEVICE_ACCESS_TOKEN_TTL_MS = 90 * 24 * 60 * 60 * 1000
 const DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS = 2
 const DEVICE_USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789"
 
@@ -1734,6 +1753,18 @@ async function completeMagicLinkCallback(input: {
     return response
   } catch {
     return await invalidMagicLinkResponse(input.options, input.authRedirectHint)
+  }
+}
+
+function bearerTokensBody(
+  tokens: { readonly accessToken: string; readonly refreshToken: string },
+  bearer: { readonly accessExpiresAt: Date },
+  issuedAt: Date
+) {
+  return {
+    accessToken: tokens.accessToken,
+    refreshToken: tokens.refreshToken,
+    expiresIn: Math.round((bearer.accessExpiresAt.getTime() - issuedAt.getTime()) / 1000),
   }
 }
 

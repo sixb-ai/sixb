@@ -96,7 +96,7 @@ sixb profile list
 sixb profile use production
 ```
 
-For an authenticated API, login opens the browser for approval. Use `--token-stdin` to supply an existing token without browser approval. A local API with authentication disabled needs no token.
+For an authenticated API, login opens the browser for approval and signs the CLI in as you. The sign-in renews itself while you use it and ends after the API's idle timeout (30 days by default) without use. It appears in your sessions in Atlas, and `sixb logout` signs it out. Use `--token-stdin` to supply an existing token without browser approval. A local API with authentication disabled needs no token.
 
 Use `--profile <name>` on a remote command to select another saved instance. For automation, set `SIXB_API_URL` and `SIXB_API_TOKEN`. Use `sixb logout` to remove the selected profile.
 

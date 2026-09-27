@@ -425,8 +425,11 @@ export function createSession(
       expires_at,
       absolute_expires_at,
       user_agent,
-      ip_address
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ip_address,
+      client_name,
+      access_expires_at,
+      refresh_token_hash
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `
   ).run(
     projectId,
@@ -439,7 +442,10 @@ export function createSession(
     toIso(input.expiresAt),
     input.absoluteExpiresAt ? toIso(input.absoluteExpiresAt) : null,
     input.userAgent ?? null,
-    input.ipAddress ?? null
+    input.ipAddress ?? null,
+    input.bearer ? assertNonEmpty(input.bearer.clientName, "Session client name") : null,
+    input.bearer ? toIso(input.bearer.accessExpiresAt) : null,
+    input.bearer ? assertNonEmpty(input.bearer.refreshTokenHash, "Refresh token hash") : null
   )
 
   const session = getSessionById(db, { projectId, id })

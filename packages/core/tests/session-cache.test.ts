@@ -15,6 +15,7 @@ function fakeSession(id: string): AuthenticatedAuthSession {
 const base = {
   sessionId: "ses_1",
   tokenHash: "hash_1",
+  transport: "cookie",
   audience: "atlas",
 } as const
 
@@ -75,6 +76,22 @@ describe("SessionCache", () => {
     expect(cache.get({ ...base, audience: "app", nowMs: 1 })).toBeUndefined()
   })
 
+  test("answers a bearer token only from a bearer entry, and not past its access expiry", () => {
+    const cache = new SessionCache(60_000)
+    const session = fakeSession("usr_1")
+    const bearerSession = {
+      ...session,
+      session: { ...session.session, bearer: { accessExpiresAt: new Date(3_000) } },
+    } as unknown as AuthenticatedAuthSession
+    cache.set({ ...base, session: bearerSession, nowMs: 0, sessionExpiresAtMs: 1_000_000 })
+
+    expect(cache.get({ ...base, nowMs: 1 })).toBeUndefined()
+    cache.set({ ...base, session: bearerSession, nowMs: 0, sessionExpiresAtMs: 1_000_000 })
+    const bearer = { sessionId: "ses_1", tokenHash: "hash_1", transport: "bearer" } as const
+    expect(cache.get({ ...bearer, nowMs: 2_999 })).toBe(bearerSession)
+    expect(cache.get({ ...bearer, nowMs: 3_000 })).toBeUndefined()
+  })
+
   test("invalidate and clear drop entries", () => {
     const cache = new SessionCache(5_000)
     cache.set({ ...base, session: fakeSession("usr_1"), nowMs: 0, sessionExpiresAtMs: 1_000_000 })
@@ -101,13 +118,31 @@ describe("SessionCache", () => {
     cache.set(mk("c")) // evicts "a" (oldest)
 
     expect(
-      cache.get({ sessionId: "a", tokenHash: "h_a", audience: "atlas", nowMs: 1 })
+      cache.get({
+        sessionId: "a",
+        tokenHash: "h_a",
+        transport: "cookie",
+        audience: "atlas",
+        nowMs: 1,
+      })
     ).toBeUndefined()
     expect(
-      cache.get({ sessionId: "b", tokenHash: "h_b", audience: "atlas", nowMs: 1 })
+      cache.get({
+        sessionId: "b",
+        tokenHash: "h_b",
+        transport: "cookie",
+        audience: "atlas",
+        nowMs: 1,
+      })
     ).toBeDefined()
     expect(
-      cache.get({ sessionId: "c", tokenHash: "h_c", audience: "atlas", nowMs: 1 })
+      cache.get({
+        sessionId: "c",
+        tokenHash: "h_c",
+        transport: "cookie",
+        audience: "atlas",
+        nowMs: 1,
+      })
     ).toBeDefined()
   })
 })

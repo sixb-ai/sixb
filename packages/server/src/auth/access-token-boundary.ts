@@ -1,4 +1,4 @@
-import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
+import { type AuthenticatedRequestAuthSession, isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { matchesPathPattern, normalizeRoutePath, SIXB_API_ROUTES } from "@sixb/core/internal/http"
 import {
   SIXB_BEARER_SECURITY_REQUIREMENT,
@@ -7,8 +7,6 @@ import {
   SIXB_SHARED_READ_SECURITY_REQUIREMENT,
 } from "../openapi/security"
 import type { RouteAccess } from "./public-routes"
-
-export type AuthCredentialSource = "session" | "accessToken"
 
 export interface AccessTokenRoute {
   readonly operationId: string
@@ -73,11 +71,15 @@ export function isAccessTokenRoute(request: Request): boolean {
   )
 }
 
-export function shouldVerifyCsrfForAuthSource(
-  route: RouteAccess,
-  source: AuthCredentialSource
-): boolean {
-  // CSRF protects ambient browser cookies. Bearer tokens are explicit request
-  // credentials, so they skip CSRF while still requiring execution-bound authorization.
-  return route.csrfProtected && source === "session"
+/** How a request carried its credential: an ambient browser cookie, or an explicit bearer token. */
+export type CredentialTransport = "cookie" | "bearer"
+
+export function credentialTransport(caller: AuthenticatedRequestAuthSession): CredentialTransport {
+  return caller.credentialSource === "session" && !caller.session.bearer ? "cookie" : "bearer"
+}
+
+export function shouldVerifyCsrf(route: RouteAccess, transport: CredentialTransport): boolean {
+  // CSRF protects ambient browser cookies. A bearer token (a native client's session or an access
+  // token) is an explicit request credential, so it skips CSRF.
+  return route.csrfProtected && transport === "cookie"
 }

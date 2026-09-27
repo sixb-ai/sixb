@@ -25,7 +25,7 @@ async function listProfiles(options: ProfileCommandOptions): Promise<void> {
       current: name === config.currentProfile,
       projectId: profile.projectId,
       apiUrl: profile.apiUrl,
-      authenticated: Boolean(profile.token),
+      authenticated: Boolean(profile.token ?? profile.session),
     }))
 
   if (options.json) {
@@ -59,7 +59,7 @@ async function showProfile(options: ProfileCommandOptions): Promise<void> {
     current: name === config.currentProfile,
     projectId: profile.projectId,
     apiUrl: profile.apiUrl,
-    authenticated: Boolean(profile.token),
+    authenticated: Boolean(profile.token ?? profile.session),
   }
 
   if (options.json) {

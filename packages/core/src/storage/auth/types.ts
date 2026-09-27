@@ -65,7 +65,29 @@ export interface SessionRecord {
   // view. Display only — never used for authorization.
   readonly userAgent?: string
   readonly ipAddress?: string
+  /** Present when a native client holds the session as bearer tokens instead of a cookie. */
+  readonly bearer?: BearerSessionState
 }
+
+/**
+ * A native client's credentials for its session. `tokenHash` on the session is the current access
+ * token's hash; the refresh token rotates on every refresh.
+ */
+export interface BearerSessionState {
+  /** Self-reported client label, such as "sixb CLI on alex-mbp". Display only. */
+  readonly clientName: string
+  readonly accessExpiresAt: Date
+  readonly refreshTokenHash: string
+  /** The refresh token the last rotation replaced, accepted briefly in case its response was lost. */
+  readonly previousRefreshTokenHash?: string
+  readonly refreshedAt?: Date
+}
+
+export type RotateSessionRefreshTokenResult =
+  | { readonly status: "rotated"; readonly session: SessionRecord }
+  /** A replaced refresh token came back after the grace window; the session is now revoked. */
+  | { readonly status: "reused" }
+  | { readonly status: "invalid" }
 
 export interface AccessTokenRecord {
   readonly id: string
@@ -147,8 +169,6 @@ export interface DeviceAuthorizationRecord {
   readonly deviceCodeHash: string
   readonly userCode: string
   readonly clientName: string
-  readonly tokenName: string
-  readonly tokenExpiresAt: Date
   readonly status: DeviceAuthorizationStatus
   readonly approvedUserId?: string
   readonly approvedSessionId?: string
@@ -272,6 +292,7 @@ export interface CreateAuthSessionInput {
   readonly absoluteExpiresAt?: Date
   readonly userAgent?: string
   readonly ipAddress?: string
+  readonly bearer?: Pick<BearerSessionState, "clientName" | "accessExpiresAt" | "refreshTokenHash">
 }
 
 export interface CreateAuthAccessTokenInput {
@@ -382,8 +403,6 @@ export interface CreateDeviceAuthorizationInput {
   readonly deviceCodeHash: string
   readonly userCode: string
   readonly clientName: string
-  readonly tokenName: string
-  readonly tokenExpiresAt: Date
   readonly createdAt: Date
   readonly expiresAt: Date
 }
@@ -392,13 +411,14 @@ export interface CompleteDeviceAuthorizationInput {
   readonly projectId: string
   readonly id: string
   readonly deviceCodeHash: string
-  readonly accessToken: CreateAuthAccessTokenInput
+  /** The bearer session to start for the approving user. */
+  readonly session: CreateAuthSessionInput & { readonly bearer: BearerSessionState }
   readonly completedAt: Date
 }
 
 export interface CompleteDeviceAuthorizationResult {
   readonly authorization: DeviceAuthorizationRecord
-  readonly accessToken: AccessTokenRecord
+  readonly session: SessionRecord
 }
 
 export interface CompleteMagicLinkSignInInput {
@@ -520,6 +540,7 @@ export interface AuthSessionStore {
     readonly userId: string
     readonly now: Date
   }): Promise<readonly SessionRecord[]>
+  /** A live browser (cookie) session whose secret hashes to `tokenHash`. */
   findValidByTokenHash(params: {
     readonly projectId: string
     readonly id: string
@@ -527,6 +548,31 @@ export interface AuthSessionStore {
     readonly tokenHash: string
     readonly now: Date
   }): Promise<SessionRecord | null>
+  /** A live bearer session whose current, unexpired access token hashes to `tokenHash`. */
+  findValidByAccessTokenHash(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly tokenHash: string
+    readonly now: Date
+  }): Promise<SessionRecord | null>
+  /**
+   * Atomically replace a live bearer session's tokens. The current refresh token rotates; the one
+   * it replaced also rotates within `reuseGraceMs` of that replacement. Presenting it later revokes
+   * the session. `next.expiresAt` extends the idle deadline, never past the absolute one.
+   */
+  rotateRefreshToken(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly refreshTokenHash: string
+    readonly now: Date
+    readonly reuseGraceMs: number
+    readonly next: {
+      readonly tokenHash: string
+      readonly accessExpiresAt: Date
+      readonly refreshTokenHash: string
+      readonly expiresAt: Date
+    }
+  }): Promise<RotateSessionRefreshTokenResult>
   renewIfValid(params: {
     readonly projectId: string
     readonly id: string

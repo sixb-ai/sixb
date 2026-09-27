@@ -292,7 +292,6 @@ export type ObjectQuerySortField =
 export type CreateDeviceAuthorizationData = {
   body: {
     clientName: string
-    tokenName: string
   }
   path?: never
   query?: never
@@ -352,13 +351,49 @@ export type ExchangeDeviceAuthorizationResponses = {
         status: "expired"
       }
     | {
-        status: "approved"
         accessToken: string
+        refreshToken: string
+        expiresIn: number
+        status: "approved"
       }
 }
 
 export type ExchangeDeviceAuthorizationResponse =
   ExchangeDeviceAuthorizationResponses[keyof ExchangeDeviceAuthorizationResponses]
+
+export type RefreshAuthSessionData = {
+  body: {
+    refreshToken: string
+  }
+  path?: never
+  query?: never
+  url: "/api/auth/refresh"
+}
+
+export type RefreshAuthSessionErrors = {
+  /**
+   * Response for status 401
+   */
+  401: {
+    error: string
+  }
+}
+
+export type RefreshAuthSessionError = RefreshAuthSessionErrors[keyof RefreshAuthSessionErrors]
+
+export type RefreshAuthSessionResponses = {
+  /**
+   * Response for status 200
+   */
+  200: {
+    accessToken: string
+    refreshToken: string
+    expiresIn: number
+  }
+}
+
+export type RefreshAuthSessionResponse =
+  RefreshAuthSessionResponses[keyof RefreshAuthSessionResponses]
 
 export type GetAuthSessionData = {
   body?: never
@@ -459,6 +494,7 @@ export type ListAuthSessionsResponses = {
       lastSeenAt?: string
       userAgent?: string
       ipAddress?: string
+      clientName?: string
     }>
   }
 }

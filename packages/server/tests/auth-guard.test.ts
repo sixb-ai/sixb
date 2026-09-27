@@ -358,7 +358,7 @@ describe("server auth guard", () => {
     expect(response.headers.get("set-cookie")).toContain("sixb_csrf=")
   })
 
-  test("completes the one-time device authorization flow", async () => {
+  test("signs a device in as a bearer session that refreshes and signs out", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage)
     const app = createSixbApi(
@@ -369,7 +369,7 @@ describe("server auth guard", () => {
       new Request("http://localhost/api/auth/device-authorizations", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientName: "sixb CLI", tokenName: "codex" }),
+        body: JSON.stringify({ clientName: "sixb CLI on alex-mbp" }),
       })
     )
     expect(started.status).toBe(201)
@@ -431,16 +431,57 @@ describe("server auth guard", () => {
     const token = (await exchanged.json()) as {
       readonly status: string
       readonly accessToken: string
+      readonly refreshToken: string
+      readonly expiresIn: number
     }
-    expect(token.status).toBe("approved")
-    expect(token.accessToken).toStartWith("sixb_pat_")
+    expect(token).toMatchObject({ status: "approved", expiresIn: 900 })
+    expect(token.accessToken).toStartWith("sixb_at_")
+    expect(token.refreshToken).toStartWith("sixb_rt_")
 
-    const authenticated = await app.fetch(
-      new Request("http://localhost/api/project", {
-        headers: { authorization: `Bearer ${token.accessToken}` },
+    const bearer = (accessToken: string, path: string, method = "GET") =>
+      app.fetch(
+        new Request(`http://localhost${path}`, {
+          method,
+          headers: { authorization: `Bearer ${accessToken}` },
+        })
+      )
+    // Unlike a personal access token, the session reaches every route, and needs no CSRF token.
+    const sessions = await bearer(token.accessToken, "/api/auth/sessions")
+    expect(sessions.status).toBe(200)
+    const listed = (await sessions.json()) as {
+      readonly sessions: ReadonlyArray<{ readonly id: string; readonly clientName?: string }>
+    }
+    const cliSession = listed.sessions.find((entry) => entry.clientName === "sixb CLI on alex-mbp")
+    expect(cliSession).toMatchObject({ current: true })
+    const created = await app.fetch(
+      new Request("http://localhost/api/auth/access-tokens", {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token.accessToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ name: "ci", expiresAt: "2099-01-01T00:00:00.000Z" }),
       })
     )
-    expect(authenticated.status).toBe(200)
+    expect(created.status).toBe(201)
+
+    const refreshed = await app.fetch(
+      new Request("http://localhost/api/auth/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ refreshToken: token.refreshToken }),
+      })
+    )
+    expect(refreshed.status).toBe(200)
+    const next = (await refreshed.json()) as { readonly accessToken: string }
+    expect((await bearer(token.accessToken, "/api/project")).status).toBe(401)
+    expect((await bearer(next.accessToken, "/api/project")).status).toBe(200)
+
+    expect((await bearer(next.accessToken, "/api/auth/sign-out", "POST")).status).toBe(200)
+    expect((await bearer(next.accessToken, "/api/project")).status).toBe(401)
+    await expect(
+      storage.auth.sessions.getById({ projectId: sixb.id, id: cliSession?.id ?? "" })
+    ).resolves.toMatchObject({ revokedAt: expect.any(Date) })
 
     const replayed = await app.fetch(
       new Request("http://localhost/api/auth/device-authorizations/token", {
@@ -472,7 +513,7 @@ describe("server auth guard", () => {
         fetch(`http://127.0.0.1:${port}/api/auth/device-authorizations`, {
           method: "POST",
           headers: { "content-type": "application/json", "x-forwarded-for": forwardedFor },
-          body: JSON.stringify({ clientName: "sixb CLI", tokenName: "codex" }),
+          body: JSON.stringify({ clientName: "sixb CLI on alex-mbp" }),
         })
 
       for (let attempt = 0; attempt < 10; attempt += 1) {
@@ -496,7 +537,7 @@ describe("server auth guard", () => {
       new Request("http://localhost/api/auth/device-authorizations", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ clientName: "sixb CLI", tokenName: "codex" }),
+        body: JSON.stringify({ clientName: "sixb CLI on alex-mbp" }),
       })
     )
     const { userCode } = (await started.json()) as { readonly userCode: string }

@@ -9,10 +9,7 @@ import {
   type SixbHostView,
 } from "@sixb/core"
 import { Elysia } from "elysia"
-import {
-  isAccessTokenRoute,
-  shouldVerifyCsrfForAuthSource,
-} from "../src/auth/access-token-boundary"
+import { isAccessTokenRoute, shouldVerifyCsrf } from "../src/auth/access-token-boundary"
 import { classifyRoute } from "../src/auth/public-routes"
 import { registerShareGrantRoutes } from "../src/routes/share-grants"
 
@@ -229,11 +226,11 @@ describe("shared-access grant routes", () => {
     expect(isAccessTokenRoute(requests.issue)).toBe(true)
     expect(isAccessTokenRoute(requests.list)).toBe(true)
     expect(isAccessTokenRoute(requests.revoke)).toBe(true)
-    expect(shouldVerifyCsrfForAuthSource(classifyRoute(requests.issue), "session")).toBe(true)
-    expect(shouldVerifyCsrfForAuthSource(classifyRoute(requests.revoke), "session")).toBe(true)
-    expect(shouldVerifyCsrfForAuthSource(classifyRoute(requests.list), "session")).toBe(false)
-    expect(shouldVerifyCsrfForAuthSource(classifyRoute(requests.issue), "accessToken")).toBe(false)
-    expect(shouldVerifyCsrfForAuthSource(classifyRoute(requests.revoke), "accessToken")).toBe(false)
+    expect(shouldVerifyCsrf(classifyRoute(requests.issue), "cookie")).toBe(true)
+    expect(shouldVerifyCsrf(classifyRoute(requests.revoke), "cookie")).toBe(true)
+    expect(shouldVerifyCsrf(classifyRoute(requests.list), "cookie")).toBe(false)
+    expect(shouldVerifyCsrf(classifyRoute(requests.issue), "bearer")).toBe(false)
+    expect(shouldVerifyCsrf(classifyRoute(requests.revoke), "bearer")).toBe(false)
   })
 })
 

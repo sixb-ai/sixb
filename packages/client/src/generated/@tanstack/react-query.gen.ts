@@ -118,6 +118,7 @@ import {
   reactivateAuthMember,
   reauthorizeConnectorConnection,
   recreateAgentThreadSandbox,
+  refreshAuthSession,
   removeObjectLink,
   requestAction,
   requestPipelineRun,
@@ -455,6 +456,9 @@ import type {
   RecreateAgentThreadSandboxData,
   RecreateAgentThreadSandboxError,
   RecreateAgentThreadSandboxResponse,
+  RefreshAuthSessionData,
+  RefreshAuthSessionError,
+  RefreshAuthSessionResponse,
   RemoveObjectLinkData,
   RemoveObjectLinkError,
   RemoveObjectLinkResponse,
@@ -582,6 +586,33 @@ export const exchangeDeviceAuthorizationMutation = (
   > = {
     mutationFn: async (fnOptions) => {
       const { data } = await exchangeDeviceAuthorization({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
+}
+
+/**
+ * Refresh a native client's session tokens
+ */
+export const refreshAuthSessionMutation = (
+  options?: Partial<Options<RefreshAuthSessionData>>
+): UseMutationOptions<
+  RefreshAuthSessionResponse,
+  RefreshAuthSessionError,
+  Options<RefreshAuthSessionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RefreshAuthSessionResponse,
+    RefreshAuthSessionError,
+    Options<RefreshAuthSessionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await refreshAuthSession({
         ...options,
         ...fnOptions,
         throwOnError: true,

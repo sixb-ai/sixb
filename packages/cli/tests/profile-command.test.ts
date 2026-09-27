@@ -97,17 +97,25 @@ describe("sixb profile commands", () => {
     expect(help.stderr).toBe("")
   })
 
-  test("authorizes login in the browser and stores the exchanged token", async () => {
+  test("signs in through the browser, renews the session, and signs out", async () => {
     const env: Record<string, string | undefined> = {
       ...(await tempConfigEnvironment()),
       SIXB_CLI_NO_BROWSER: "1",
     }
+    const calls: string[] = []
+    let currentAccessToken = "access-1"
     const server = Bun.serve({
       hostname: "127.0.0.1",
       port: 0,
-      fetch(request) {
+      async fetch(request) {
         const url = new URL(request.url)
+        calls.push(
+          `${request.method} ${url.pathname} ${request.headers.get("authorization") ?? ""}`
+        )
         if (url.pathname === "/api/auth/device-authorizations") {
+          expect(await request.json()).toMatchObject({
+            clientName: expect.stringMatching(/^sixb CLI on /),
+          })
           return Response.json(
             {
               deviceCode: "dva_test.device-secret",
@@ -121,35 +129,74 @@ describe("sixb profile commands", () => {
           )
         }
         if (url.pathname === "/api/auth/device-authorizations/token") {
-          return Response.json({ status: "approved", accessToken: "browser-token" })
+          // Expires within the CLI's renewal margin, so the next command refreshes first.
+          return Response.json({
+            status: "approved",
+            accessToken: "access-1",
+            refreshToken: "refresh-1",
+            expiresIn: 30,
+          })
         }
-        if (request.headers.get("authorization") !== "Bearer browser-token") {
+        if (url.pathname === "/api/auth/refresh") {
+          expect(await request.json()).toEqual({ refreshToken: "refresh-1" })
+          currentAccessToken = "access-2"
+          return Response.json({
+            accessToken: "access-2",
+            refreshToken: "refresh-2",
+            expiresIn: 900,
+          })
+        }
+        if (request.headers.get("authorization") !== `Bearer ${currentAccessToken}`) {
           return Response.json({ error: "Unauthorized" }, { status: 401 })
         }
+        if (url.pathname === "/api/auth/sign-out") return Response.json({ success: true })
         return Response.json({ id: "browser-project" })
       },
     })
     servers.push(server)
     const apiUrl = `http://127.0.0.1:${server.port}`
+    const configPath = join(env.XDG_CONFIG_HOME!, "sixb", "config.json")
 
-    const result = await runCliToCompletion({
+    const login = await runCliToCompletion({
       cmd: ["bun", cliEntry, "login", apiUrl, "--profile", "codex", "--json"],
       cwd: repoRoot,
       env,
     })
-
-    assertCliSucceeded(result)
-    expect(result.stderr).toContain(`Opening ${apiUrl}/auth/device?user_code=BCDF-HJKM`)
-    expect(result.stderr).toContain("Confirm code: BCDF-HJKM")
-    expect(JSON.parse(result.stdout)).toEqual({
+    assertCliSucceeded(login)
+    expect(login.stderr).toContain(`Opening ${apiUrl}/auth/device?user_code=BCDF-HJKM`)
+    expect(login.stderr).toContain("Confirm code: BCDF-HJKM")
+    expect(JSON.parse(login.stdout)).toEqual({
       profile: "codex",
       projectId: "browser-project",
       apiUrl,
       authenticated: true,
     })
-    expect(await readFile(join(env["XDG_CONFIG_HOME"]!, "sixb", "config.json"), "utf8")).toContain(
-      "browser-token"
-    )
+    expect(JSON.parse(await readFile(configPath, "utf8")).profiles.codex.session).toMatchObject({
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+    })
+
+    const project = await runCliToCompletion({
+      cmd: ["bun", cliEntry, "project", "show"],
+      cwd: repoRoot,
+      env,
+    })
+    assertCliSucceeded(project)
+    expect(JSON.parse(project.stdout)).toEqual({ id: "browser-project" })
+    expect(calls.slice(-2)).toEqual(["POST /api/auth/refresh ", "GET /api/project Bearer access-2"])
+    expect(JSON.parse(await readFile(configPath, "utf8")).profiles.codex.session).toMatchObject({
+      accessToken: "access-2",
+      refreshToken: "refresh-2",
+    })
+
+    const logout = await runCliToCompletion({
+      cmd: ["bun", cliEntry, "logout", "--profile", "codex", "--json"],
+      cwd: repoRoot,
+      env,
+    })
+    assertCliSucceeded(logout)
+    expect(calls.at(-1)).toBe("POST /api/auth/sign-out Bearer access-2")
+    expect(JSON.parse(await readFile(configPath, "utf8"))).toEqual({ version: 1, profiles: {} })
   }, 20_000)
 
   test("imports a token, stores a profile, and dispatches instance commands", async () => {

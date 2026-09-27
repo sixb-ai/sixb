@@ -22,7 +22,7 @@ import {
   runImmediateTransaction,
   type SqliteStoreConnection,
 } from "../transactions"
-import { createAuthAccessToken, SqliteAuthAccessTokenStore } from "./access-tokens"
+import { SqliteAuthAccessTokenStore } from "./access-tokens"
 import {
   getDeviceAuthorizationById,
   SqliteAuthDeviceAuthorizationStore,
@@ -118,7 +118,7 @@ export class SqliteAuthStorage implements AuthStorage {
         )
       }
       assertCompletableDeviceAuthorization(authorization, input)
-      const accessToken = createAuthAccessToken(this.db, input.accessToken)
+      const session = createSession(this.db, input.session)
       this.db
         .query(`
         UPDATE auth_device_authorizations
@@ -132,7 +132,7 @@ export class SqliteAuthStorage implements AuthStorage {
           status: "consumed",
           consumedAt: new Date(input.completedAt),
         },
-        accessToken,
+        session,
       }
     })
   }
@@ -850,10 +850,8 @@ function assertCompletableDeviceAuthorization(
     authorization.expiresAt <= input.completedAt ||
     !authorization.approvedUserId ||
     !authorization.approvedSessionId ||
-    input.accessToken.projectId !== input.projectId ||
-    input.accessToken.subject.type !== "user" ||
-    input.accessToken.subject.id !== authorization.approvedUserId ||
-    input.accessToken.createdBySessionId !== authorization.approvedSessionId
+    input.session.projectId !== input.projectId ||
+    input.session.userId !== authorization.approvedUserId
   ) {
     throw new AuthStorageError(
       "invalid_device_authorization",

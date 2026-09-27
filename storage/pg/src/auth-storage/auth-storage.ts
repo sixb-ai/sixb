@@ -113,7 +113,7 @@ export class PgAuthStorage implements AuthStorage {
         )
       }
       assertCompletableDeviceAuthorization(authorization, input)
-      const accessToken = await new PgAuthAccessTokenStore(tx).create(input.accessToken)
+      const session = await createSession(tx, input.session)
       const [consumed] = await tx`
         UPDATE auth_device_authorizations
         SET status = 'consumed', consumed_at = ${input.completedAt}
@@ -132,7 +132,7 @@ export class PgAuthStorage implements AuthStorage {
           status: "consumed" as const,
           consumedAt: new Date(input.completedAt),
         },
-        accessToken,
+        session,
       }
     })
   }
@@ -869,10 +869,8 @@ function assertCompletableDeviceAuthorization(
     authorization.expiresAt <= input.completedAt ||
     !authorization.approvedUserId ||
     !authorization.approvedSessionId ||
-    input.accessToken.projectId !== input.projectId ||
-    input.accessToken.subject.type !== "user" ||
-    input.accessToken.subject.id !== authorization.approvedUserId ||
-    input.accessToken.createdBySessionId !== authorization.approvedSessionId
+    input.session.projectId !== input.projectId ||
+    input.session.userId !== authorization.approvedUserId
   ) {
     throw new AuthStorageError(
       "invalid_device_authorization",

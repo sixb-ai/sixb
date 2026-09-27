@@ -331,6 +331,9 @@ import type {
   RecreateAgentThreadSandboxData,
   RecreateAgentThreadSandboxErrors,
   RecreateAgentThreadSandboxResponses,
+  RefreshAuthSessionData,
+  RefreshAuthSessionErrors,
+  RefreshAuthSessionResponses,
   RemoveObjectLinkData,
   RemoveObjectLinkErrors,
   RemoveObjectLinkResponses,
@@ -458,6 +461,25 @@ export const exchangeDeviceAuthorization = <ThrowOnError extends boolean = false
 ) =>
   (options.client ?? client).post<ExchangeDeviceAuthorizationResponses, unknown, ThrowOnError>({
     url: "/api/auth/device-authorizations/token",
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...options.headers,
+    },
+  })
+
+/**
+ * Refresh a native client's session tokens
+ */
+export const refreshAuthSession = <ThrowOnError extends boolean = false>(
+  options: Options<RefreshAuthSessionData, ThrowOnError>
+) =>
+  (options.client ?? client).post<
+    RefreshAuthSessionResponses,
+    RefreshAuthSessionErrors,
+    ThrowOnError
+  >({
+    url: "/api/auth/refresh",
     ...options,
     headers: {
       "Content-Type": "application/json",

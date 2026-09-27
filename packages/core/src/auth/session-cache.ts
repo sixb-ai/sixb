@@ -3,6 +3,7 @@ import type { AuthenticatedAuthSession } from "./types"
 
 interface SessionCacheEntry {
   readonly tokenHash: string
+  readonly transport: "cookie" | "bearer"
   readonly audience: AuthSessionAudience
   readonly session: AuthenticatedAuthSession
   readonly expiresAtMs: number
@@ -11,11 +12,18 @@ interface SessionCacheEntry {
 export interface SessionCacheGetInput {
   readonly sessionId: string
   readonly tokenHash: string
-  readonly audience: AuthSessionAudience
+  /** A cookie is only ever answered from a cookie entry, and a bearer token from a bearer entry. */
+  readonly transport: "cookie" | "bearer"
+  /** The browser audience a cookie was read for. Bearer sessions carry their own. */
+  readonly audience?: AuthSessionAudience
   readonly nowMs: number
 }
 
-export interface SessionCacheSetInput extends SessionCacheGetInput {
+export interface SessionCacheSetInput {
+  readonly sessionId: string
+  readonly tokenHash: string
+  readonly audience: AuthSessionAudience
+  readonly nowMs: number
   readonly session: AuthenticatedAuthSession
   readonly sessionExpiresAtMs: number
   readonly sessionAbsoluteExpiresAtMs?: number
@@ -30,7 +38,7 @@ export interface SessionCacheSetInput extends SessionCacheGetInput {
  * API stalls. Caching the resolved result for a short TTL collapses those reads to one
  * per session per window.
  *
- * Safety: entries are pinned to the exact token hash + audience that produced them and
+ * Safety: entries are pinned to the exact token hash, transport, and audience that produced them and
  * are never served past the session's rolling or absolute deadline. The short TTL bounds how long
  * a revoked session can linger; sign-out additionally invalidates eagerly via
  * {@link SessionCache.invalidate}.
@@ -52,7 +60,8 @@ export class SessionCache {
     if (
       entry.expiresAtMs <= input.nowMs ||
       entry.tokenHash !== input.tokenHash ||
-      entry.audience !== input.audience
+      entry.transport !== input.transport ||
+      (input.audience !== undefined && entry.audience !== input.audience)
     ) {
       this.entries.delete(input.sessionId)
       return undefined
@@ -62,11 +71,13 @@ export class SessionCache {
   }
 
   set(input: SessionCacheSetInput): void {
-    // Never let a cached session outlive the real session it represents.
+    // Never let a cached session outlive the real session, or a bearer session its access token.
+    const bearer = input.session.session.bearer
     const expiresAtMs = Math.min(
       input.nowMs + this.ttlMs,
       input.sessionExpiresAtMs,
-      input.sessionAbsoluteExpiresAtMs ?? Number.POSITIVE_INFINITY
+      input.sessionAbsoluteExpiresAtMs ?? Number.POSITIVE_INFINITY,
+      bearer?.accessExpiresAt.getTime() ?? Number.POSITIVE_INFINITY
     )
     if (expiresAtMs <= input.nowMs) {
       return
@@ -76,6 +87,7 @@ export class SessionCache {
     this.entries.delete(input.sessionId)
     this.entries.set(input.sessionId, {
       tokenHash: input.tokenHash,
+      transport: bearer ? "bearer" : "cookie",
       audience: input.audience,
       session: input.session,
       expiresAtMs,

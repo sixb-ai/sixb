@@ -1,8 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  isAccessTokenRoute,
-  shouldVerifyCsrfForAuthSource,
-} from "../src/auth/access-token-boundary"
+import { isAccessTokenRoute, shouldVerifyCsrf } from "../src/auth/access-token-boundary"
 import { classifyRoute } from "../src/auth/public-routes"
 
 function request(method: string, path: string): Request {
@@ -103,9 +100,9 @@ describe("access token auth boundary", () => {
     const readRoute = classifyRoute(request("GET", "/api/objects"))
     const mutationRoute = classifyRoute(request("POST", "/api/objects/query"))
 
-    expect(shouldVerifyCsrfForAuthSource(readRoute, "session")).toBe(false)
-    expect(shouldVerifyCsrfForAuthSource(mutationRoute, "session")).toBe(true)
-    expect(shouldVerifyCsrfForAuthSource(mutationRoute, "accessToken")).toBe(false)
+    expect(shouldVerifyCsrf(readRoute, "cookie")).toBe(false)
+    expect(shouldVerifyCsrf(mutationRoute, "cookie")).toBe(true)
+    expect(shouldVerifyCsrf(mutationRoute, "bearer")).toBe(false)
   })
 
   test("classifies infrastructure probes explicitly as public", () => {

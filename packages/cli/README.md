@@ -243,8 +243,10 @@ sixb objects inspect Customer customer-123
 
 An auth-disabled local API stores a tokenless profile. Authenticated APIs use a short-lived device
 code: the browser approves the request through the existing session, and the CLI stores the
-one-time personal access token only after validating it against `/api/project`. Use `--token-stdin`
-for automation or when you already have a token.
+session's tokens only after validating them against `/api/project`. The access token lasts 15
+minutes; each command renews it with the refresh token when it is about to expire, so one login
+lasts until the session goes unused past its idle timeout (30 days by default). `sixb logout` ends
+the session on the server. Use `--token-stdin` for automation or when you already have a token.
 
 Remote target resolution is deterministic:
 

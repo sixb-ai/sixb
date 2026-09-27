@@ -45,8 +45,6 @@ export class InMemoryAuthDeviceAuthorizationStore implements AuthDeviceAuthoriza
       deviceCodeHash: assertNonEmpty(input.deviceCodeHash, "Device code hash"),
       userCode: assertNonEmpty(input.userCode, "User code"),
       clientName: assertNonEmpty(input.clientName, "Client name"),
-      tokenName: assertNonEmpty(input.tokenName, "Token name"),
-      tokenExpiresAt: new Date(input.tokenExpiresAt),
       status: "pending",
       createdAt: new Date(input.createdAt),
       expiresAt: new Date(input.expiresAt),

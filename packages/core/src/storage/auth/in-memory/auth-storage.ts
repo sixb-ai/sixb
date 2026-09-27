@@ -30,7 +30,6 @@ import {
   cloneRecord,
   consumeMagicLinkRecord,
   consumeOidcAttemptRecord,
-  createAccessTokenRecord,
   createAuthStorageState,
   createSessionRecord,
   deviceAuthorizationKey,
@@ -138,24 +137,22 @@ export class InMemoryAuthStorage implements AuthStorage {
       )
     }
     if (
-      input.accessToken.projectId !== input.projectId ||
-      input.accessToken.subject.type !== "user" ||
-      input.accessToken.subject.id !== authorization.approvedUserId ||
-      input.accessToken.createdBySessionId !== authorization.approvedSessionId
+      input.session.projectId !== input.projectId ||
+      input.session.userId !== authorization.approvedUserId
     ) {
       throw new AuthStorageError(
         "invalid_device_authorization",
-        "[Sixb] Device access token is invalid."
+        "[Sixb] Device session is invalid."
       )
     }
-    const accessToken = createAccessTokenRecord(this.state, input.accessToken)
+    const session = createSessionRecord(this.state, input.session)
     const consumed = {
       ...authorization,
       status: "consumed" as const,
       consumedAt: new Date(input.completedAt),
     }
     this.state.deviceAuthorizations.set(key, cloneRecord(consumed))
-    return { authorization: cloneRecord(consumed), accessToken: cloneRecord(accessToken) }
+    return { authorization: cloneRecord(consumed), session: cloneRecord(session) }
   }
 
   async completeMagicLinkSignIn(

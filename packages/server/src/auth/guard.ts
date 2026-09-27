@@ -3,7 +3,7 @@ import {
   type AuthenticatedRequestAuthSession,
   verifyDoubleSubmitCsrf,
 } from "@sixb/core/internal/auth"
-import { isAccessTokenRoute, shouldVerifyCsrfForAuthSource } from "./access-token-boundary"
+import { credentialTransport, isAccessTokenRoute, shouldVerifyCsrf } from "./access-token-boundary"
 import { sessionCanAccessApplication } from "./application-access"
 import { BrowserOriginError, type ResolveRequestAuthContext } from "./browser-origin"
 import { classifyRoute } from "./public-routes"
@@ -86,7 +86,10 @@ export class ServerAuthGuard {
       return { kind: "deny", response: jsonAuthRequiredResponse() }
     }
 
-    if (!sessionCanAccessApplication(this.host, session, authContext.audience)) {
+    // A native client's session names its own application; it sends no browser origin.
+    const audience =
+      session.credentialSource === "session" ? session.session.audience : authContext.audience
+    if (!sessionCanAccessApplication(this.host, session, audience)) {
       return {
         kind: "deny",
         response: jsonForbiddenResponse("Application access is not allowed"),
@@ -101,14 +104,16 @@ export class ServerAuthGuard {
     }
 
     if (
-      shouldVerifyCsrfForAuthSource(route, session.credentialSource) &&
+      shouldVerifyCsrf(route, credentialTransport(session)) &&
       !this.verifyCsrf(request, session)
     ) {
       return { kind: "deny", response: jsonCsrfFailedResponse() }
     }
 
+    // Browser sessions renew on foreground use; native sessions renew by refreshing their tokens.
     if (
       session.credentialSource === "session" &&
+      credentialTransport(session) === "cookie" &&
       route.kind !== "websocket" &&
       !isSessionTerminationRequest(request) &&
       hasForegroundSessionActivity(request)

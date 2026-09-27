@@ -339,6 +339,7 @@ describe("Postgres storage migrations", () => {
             "046-workflow-intervention-principals",
             "047-ontology-commit-attribution",
             "048-file-upload-sessions",
+            "049-native-sessions",
           ],
         },
       ])
@@ -678,6 +679,13 @@ describe("Postgres storage migrations", () => {
           id: "048-file-upload-sessions",
           status: "applied",
           version: 48,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "049-native-sessions",
+          status: "applied",
+          version: 49,
         },
       ])
     })
@@ -2555,6 +2563,13 @@ describe("Postgres storage migrations", () => {
           id: "048-file-upload-sessions",
           status: "applied",
           version: 48,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "049-native-sessions",
+          status: "applied",
+          version: 49,
         },
       ])
     } finally {
