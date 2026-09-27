@@ -1,6 +1,6 @@
 import { AuthorizationError, type SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -48,7 +48,7 @@ export function registerEventRoutes(app: Elysia, _host: SixbHostView) {
         summary: "Read domain events",
         tags: [OPENAPI_TAGS.events.name],
         operationId: "listEvents",
-        security: bearerSecurityRequirement("listEvents"),
+        security: accessTokenSecurityRequirement("listEvents"),
       },
     }
   )

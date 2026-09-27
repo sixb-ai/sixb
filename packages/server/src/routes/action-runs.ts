@@ -2,7 +2,7 @@ import type { SixbHostView } from "@sixb/core"
 import type { ActionRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import {
   createContextualFileContentResponse,
@@ -168,7 +168,7 @@ export function registerActionRunRoutes(app: Elysia, host: SixbHostView) {
           summary: "List action run history",
           tags: [OPENAPI_TAGS.actionRuns.name],
           operationId: "listActionRuns",
-          security: bearerSecurityRequirement("listActionRuns"),
+          security: accessTokenSecurityRequirement("listActionRuns"),
         },
       }
     )
@@ -206,7 +206,7 @@ export function registerActionRunRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get action run detail",
           tags: [OPENAPI_TAGS.actionRuns.name],
           operationId: "getActionRun",
-          security: bearerSecurityRequirement("getActionRun"),
+          security: accessTokenSecurityRequirement("getActionRun"),
         },
       }
     )
@@ -221,7 +221,7 @@ export function registerActionRunRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get action run file content",
           tags: ["Actions"],
           operationId: "getActionRunFileContent",
-          security: bearerSecurityRequirement("getActionRunFileContent"),
+          security: accessTokenSecurityRequirement("getActionRunFileContent"),
           responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
@@ -237,7 +237,7 @@ export function registerActionRunRoutes(app: Elysia, host: SixbHostView) {
           summary: "Head action run file content",
           tags: ["Actions"],
           operationId: "headActionRunFileContent",
-          security: bearerSecurityRequirement("headActionRunFileContent"),
+          security: accessTokenSecurityRequirement("headActionRunFileContent"),
           responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }

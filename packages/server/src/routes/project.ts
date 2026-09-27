@@ -1,6 +1,6 @@
 import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ProjectInfoResponseSchema } from "../schemas/project"
 export function registerProjectRoutes(app: Elysia, host: SixbHostView) {
@@ -10,7 +10,7 @@ export function registerProjectRoutes(app: Elysia, host: SixbHostView) {
       summary: "Get current project metadata",
       tags: [OPENAPI_TAGS.project.name],
       operationId: "getProjectInfo",
-      security: bearerSecurityRequirement("getProjectInfo"),
+      security: accessTokenSecurityRequirement("getProjectInfo"),
     },
   })
 }

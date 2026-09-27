@@ -12,11 +12,17 @@
         "name": "x-sixb-csrf",
         "description": "Required for cookie-authenticated mutating requests. Use the csrfToken returned by the corresponding session endpoint."
       },
-      "sixbBearer": {
+      "sixbSession": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Sixb session access token",
+        "description": "A signed-in native client's session access token, from device login and renewed through /api/auth/refresh. Accepted wherever a browser session is; browsers authenticate with the session cookie instead."
+      },
+      "sixbAccessToken": {
         "type": "http",
         "scheme": "bearer",
         "bearerFormat": "Sixb access token",
-        "description": "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on routes that explicitly document this scheme."
+        "description": "A personal access token or service-account token, for scripts and services. Accepted only on routes that document this scheme. A native client's session token uses sixbSession instead."
       },
       "sixbSharedGrant": {
         "type": "apiKey",
@@ -904,6 +910,11 @@
       }
     }
   },
+  "security": [
+    {
+      "sixbSession": []
+    }
+  ],
   "tags": [
     {
       "name": "Project",
@@ -1077,6 +1088,7 @@
         "summary": "Start device authorization",
         "tags": ["Auth Sessions"],
         "operationId": "createDeviceAuthorization",
+        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -1189,6 +1201,7 @@
         "summary": "Exchange an approved device authorization",
         "tags": ["Auth Sessions"],
         "operationId": "exchangeDeviceAuthorization",
+        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -1306,6 +1319,7 @@
         "summary": "Refresh a native client's session tokens",
         "tags": ["Auth Sessions"],
         "operationId": "refreshAuthSession",
+        "security": [],
         "requestBody": {
           "required": true,
           "content": {
@@ -1399,6 +1413,12 @@
         "summary": "Get current auth session",
         "tags": ["Auth Sessions"],
         "operationId": "getAuthSession",
+        "security": [
+          {
+            "sixbSession": []
+          },
+          {}
+        ],
         "responses": {
           "200": {
             "description": "Response for status 200",
@@ -1499,7 +1519,11 @@
         "security": [
           {
             "sixbCsrf": []
-          }
+          },
+          {
+            "sixbSession": []
+          },
+          {}
         ],
         "responses": {
           "200": {
@@ -1625,6 +1649,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -1718,6 +1745,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -1785,7 +1815,10 @@
         "operationId": "getAuthAccessManagementOptions",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -1866,7 +1899,10 @@
         "operationId": "listAuthAccessTokens",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -2002,7 +2038,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -2251,7 +2290,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -2428,7 +2470,10 @@
         "operationId": "listAuthServiceAccounts",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -2543,7 +2588,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -2760,7 +2808,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -2899,7 +2950,10 @@
         "operationId": "listAuthServiceAccountAccessTokens",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -3080,7 +3134,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -3357,7 +3414,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -3544,6 +3604,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -4194,6 +4257,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -4624,6 +4690,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -4843,6 +4912,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -4992,6 +5064,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -5140,7 +5215,10 @@
         "operationId": "getAiAccountingOverview",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -6286,7 +6364,10 @@
         "operationId": "listAiModelCalls",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -7233,7 +7314,10 @@
         "operationId": "listAiLimitPolicies",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -7476,7 +7560,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -8063,7 +8150,10 @@
         "operationId": "getAiLimitStatus",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -8544,7 +8634,10 @@
         "operationId": "getAiLimitSubjectOptions",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -8674,7 +8767,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -9090,7 +9186,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -9200,7 +9299,10 @@
         "operationId": "listAiModelCallGroups",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -9763,7 +9865,10 @@
         "operationId": "getProjectInfo",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -10308,6 +10413,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -10473,6 +10581,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -11352,6 +11463,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -12286,6 +12400,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -12980,6 +13097,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -13683,6 +13803,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -15825,6 +15948,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -17328,6 +17454,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -17429,7 +17558,10 @@
         "operationId": "listWorkflows",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -17892,7 +18024,10 @@
         "operationId": "getWorkflow",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -18975,6 +19110,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -19353,6 +19491,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -19646,7 +19787,10 @@
         "operationId": "listWorkflowRuns",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -19899,7 +20043,10 @@
         "operationId": "getWorkflowRun",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -20449,7 +20596,10 @@
         "operationId": "getWorkflowAgentNodeExecution",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -21226,7 +21376,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -21805,7 +21958,10 @@
         "operationId": "getWorkflowRunFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -21924,7 +22080,10 @@
         "operationId": "headWorkflowRunFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -22029,7 +22188,10 @@
         "operationId": "getWorkflowNodeRunFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -22157,7 +22319,10 @@
         "operationId": "headWorkflowNodeRunFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -22274,7 +22439,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -23685,7 +23853,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -24018,7 +24189,10 @@
         "operationId": "listSharedAccessGrants",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -24302,7 +24476,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -24769,7 +24946,8 @@
         "security": [
           {
             "sixbCsrf": []
-          }
+          },
+          {}
         ],
         "parameters": [
           {
@@ -24863,7 +25041,10 @@
         "operationId": "listObjectTypes",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -25227,7 +25408,10 @@
         "operationId": "getObjectType",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -25616,7 +25800,10 @@
         "operationId": "searchObjects",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -25728,7 +25915,10 @@
         "operationId": "listObjects",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -25929,7 +26119,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": [],
@@ -26018,7 +26211,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": [],
@@ -26089,7 +26285,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": [],
@@ -26178,7 +26377,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": [],
@@ -26267,7 +26469,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": [],
@@ -26335,7 +26540,10 @@
         "operationId": "getObjectFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -26455,7 +26663,10 @@
         "operationId": "headObjectFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -26561,7 +26772,10 @@
         "operationId": "getObject",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -26649,7 +26863,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -26811,7 +27028,10 @@
         "operationId": "listActions",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -26905,7 +27125,10 @@
         "operationId": "getAction",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -27029,7 +27252,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": [],
@@ -27293,7 +27519,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -27396,6 +27625,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -27621,6 +27853,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -27759,6 +27994,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -27913,6 +28151,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -28167,6 +28408,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -28293,7 +28537,10 @@
         "operationId": "listActionRuns",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -28590,7 +28837,10 @@
         "operationId": "getActionRun",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -29034,7 +29284,10 @@
         "operationId": "getActionRunFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -29153,7 +29406,10 @@
         "operationId": "headActionRunFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -29520,6 +29776,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "requestBody": {
@@ -30031,6 +30290,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -30996,6 +31258,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -32017,7 +32282,10 @@
         "operationId": "getAgentMessageFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -32144,7 +32412,10 @@
         "operationId": "headAgentMessageFileContent",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "responses": {
@@ -32258,6 +32529,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -32714,6 +32988,9 @@
         "security": [
           {
             "sixbCsrf": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -34131,7 +34408,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -34311,7 +34591,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -34443,7 +34726,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -34607,7 +34893,10 @@
             "sixbCsrf": []
           },
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": [],
@@ -34870,7 +35159,10 @@
         "operationId": "getTelemetryHistory",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -35019,7 +35311,10 @@
         "operationId": "getLatestTelemetry",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           },
           {
             "sixbSharedGrant": []
@@ -35132,7 +35427,10 @@
         "operationId": "listEvents",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [
@@ -38739,7 +39037,10 @@
         "operationId": "listLogs",
         "security": [
           {
-            "sixbBearer": []
+            "sixbAccessToken": []
+          },
+          {
+            "sixbSession": []
           }
         ],
         "parameters": [

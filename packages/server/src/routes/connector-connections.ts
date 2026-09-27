@@ -6,7 +6,7 @@ import {
   handleConnectorRouteError,
   serializeConnectorConnection,
 } from "../connectors/http"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -90,7 +90,7 @@ export function registerConnectorConnectionRoutes(app: Elysia, host: SixbHostVie
           summary: "Disconnect a connector account",
           tags: [OPENAPI_TAGS.connectorConnections.name],
           operationId: "disconnectConnectorConnection",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -128,7 +128,7 @@ export function registerConnectorConnectionRoutes(app: Elysia, host: SixbHostVie
           summary: "Revoke a connector authorization",
           tags: [OPENAPI_TAGS.connectorConnections.name],
           operationId: "revokeConnectorConnection",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

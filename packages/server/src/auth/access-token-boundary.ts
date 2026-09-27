@@ -1,8 +1,8 @@
 import { type AuthenticatedRequestAuthSession, isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { matchesPathPattern, normalizeRoutePath, SIXB_API_ROUTES } from "@sixb/core/internal/http"
 import {
-  SIXB_BEARER_SECURITY_REQUIREMENT,
-  SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT,
+  SIXB_ACCESS_TOKEN_MUTATION_SECURITY_REQUIREMENT,
+  SIXB_ACCESS_TOKEN_READ_SECURITY_REQUIREMENT,
   SIXB_SHARED_MUTATION_SECURITY_REQUIREMENT,
   SIXB_SHARED_READ_SECURITY_REQUIREMENT,
 } from "../openapi/security"
@@ -15,16 +15,16 @@ export interface AccessTokenRoute {
   readonly sharedSession: boolean
 }
 
-// The routes that accept bearer access tokens: the `accessToken` projection of the canonical
-// SIXB_API_ROUTES table in @sixb/core. `isAccessTokenRoute` enforces this list at request time and
-// `bearerSecurityRequirement` derives each route's OpenAPI security entry from it, so the enforced
-// boundary and the documented contract cannot drift apart. The agent gateway allow-list is the
-// `agentApi` projection of the same table, which the table's load-time invariant keeps a strict
-// subset of this one.
+// The routes that accept personal and service-account access tokens: the `accessToken` projection
+// of the canonical SIXB_API_ROUTES table in @sixb/core. `isAccessTokenRoute` enforces this list at
+// request time and `accessTokenSecurityRequirement` derives each route's OpenAPI security entry
+// from it, so the enforced boundary and the documented contract cannot drift apart. The agent
+// gateway allow-list is the `agentApi` projection of the same table, which the table's load-time
+// invariant keeps a strict subset of this one.
 //
-// Bearer tokens should only reach routes that enforce execution-bound authority. Admin, browser,
-// webhook, and WebSocket routes stay session-only because bearer access is intentionally absent
-// from SIXB_API_ROUTES.
+// Access tokens should only reach routes that enforce execution-bound authority. Admin, browser,
+// webhook, and WebSocket routes stay session-only because access-token use is intentionally absent
+// from SIXB_API_ROUTES. A native client's session, though also a bearer token, is a session.
 export const ACCESS_TOKEN_ROUTES: readonly AccessTokenRoute[] = SIXB_API_ROUTES.filter(
   (route) => route.accessToken
 ).map((route) => ({
@@ -35,23 +35,22 @@ export const ACCESS_TOKEN_ROUTES: readonly AccessTokenRoute[] = SIXB_API_ROUTES.
 }))
 
 /**
- * OpenAPI security requirement for a bearer-capable route, derived from the
- * canonical table. Reads (CSRF-exempt methods) accept a bearer token only;
- * mutations accept either a CSRF token (cookie sessions) or a bearer token.
- * Throws when the operation is not a registered bearer route, so a route can
- * never claim bearer access without being added to the boundary.
+ * OpenAPI security requirement for a route that accepts access tokens, derived from the canonical
+ * table: an access token or a session, plus the CSRF token for a browser session's mutations.
+ * Throws when the operation is not a registered access-token route, so a route can never claim
+ * access-token use without being added to the boundary.
  */
-export function bearerSecurityRequirement(operationId: string) {
+export function accessTokenSecurityRequirement(operationId: string) {
   const route = ACCESS_TOKEN_ROUTES.find((candidate) => candidate.operationId === operationId)
   if (!route) {
     throw new Error(
-      `[SixbServer] '${operationId}' is not a registered bearer route. Add it to ACCESS_TOKEN_ROUTES.`
+      `[SixbServer] '${operationId}' is not a registered access-token route. Add it to ACCESS_TOKEN_ROUTES.`
     )
   }
 
   const standard = isCsrfExemptMethod(route.method)
-    ? SIXB_BEARER_SECURITY_REQUIREMENT
-    : SIXB_CSRF_OR_BEARER_SECURITY_REQUIREMENT
+    ? SIXB_ACCESS_TOKEN_READ_SECURITY_REQUIREMENT
+    : SIXB_ACCESS_TOKEN_MUTATION_SECURITY_REQUIREMENT
   if (!route.sharedSession) return standard
   return [
     ...standard,

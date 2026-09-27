@@ -15,7 +15,7 @@ import type {
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import {
   createContextualFileContentResponse,
@@ -335,7 +335,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Search objects",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "searchObjects",
-          security: bearerSecurityRequirement("searchObjects"),
+          security: accessTokenSecurityRequirement("searchObjects"),
         },
       }
     )
@@ -393,7 +393,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "List objects",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "listObjects",
-          security: bearerSecurityRequirement("listObjects"),
+          security: accessTokenSecurityRequirement("listObjects"),
         },
       }
     )
@@ -428,7 +428,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Query objects",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "queryObjects",
-          security: bearerSecurityRequirement("queryObjects"),
+          security: accessTokenSecurityRequirement("queryObjects"),
           requestBody: {
             required: true,
             content: {
@@ -518,7 +518,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Query object links",
           tags: [OPENAPI_TAGS.links.name],
           operationId: "queryObjectLinks",
-          security: bearerSecurityRequirement("queryObjectLinks"),
+          security: accessTokenSecurityRequirement("queryObjectLinks"),
           requestBody: {
             required: true,
             content: {
@@ -587,7 +587,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Count objects",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "countObjects",
-          security: bearerSecurityRequirement("countObjects"),
+          security: accessTokenSecurityRequirement("countObjects"),
           requestBody: {
             required: true,
             content: {
@@ -670,7 +670,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Check object existence",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "existsObjects",
-          security: bearerSecurityRequirement("existsObjects"),
+          security: accessTokenSecurityRequirement("existsObjects"),
           requestBody: {
             required: true,
             content: {
@@ -757,7 +757,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Facet objects",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "facetObjects",
-          security: bearerSecurityRequirement("facetObjects"),
+          security: accessTokenSecurityRequirement("facetObjects"),
           requestBody: {
             required: true,
             content: {
@@ -821,7 +821,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get object file content",
           tags: [OPENAPI_TAGS.objectFiles.name],
           operationId: "getObjectFileContent",
-          security: bearerSecurityRequirement("getObjectFileContent"),
+          security: accessTokenSecurityRequirement("getObjectFileContent"),
           responses: fileContentGetResponses(),
         },
       }
@@ -840,7 +840,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Head object file content",
           tags: [OPENAPI_TAGS.objectFiles.name],
           operationId: "headObjectFileContent",
-          security: bearerSecurityRequirement("headObjectFileContent"),
+          security: accessTokenSecurityRequirement("headObjectFileContent"),
           responses: fileContentHeadResponses(),
         },
       }
@@ -876,7 +876,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get object by id",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "getObject",
-          security: bearerSecurityRequirement("getObject"),
+          security: accessTokenSecurityRequirement("getObject"),
         },
       }
     )
@@ -915,7 +915,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           summary: "Create or update object",
           tags: [OPENAPI_TAGS.objects.name],
           operationId: "upsertObject",
-          security: bearerSecurityRequirement("upsertObject"),
+          security: accessTokenSecurityRequirement("upsertObject"),
         },
       }
     )

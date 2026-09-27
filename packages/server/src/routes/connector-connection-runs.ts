@@ -13,7 +13,7 @@ import {
   serializeConnectorConnection,
   serializeConnectorConnectionRun,
 } from "../connectors/http"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -132,7 +132,7 @@ export function registerConnectorConnectionRunRoutes(
           summary: "Start a connector connection run",
           tags: [OPENAPI_TAGS.connectorConnectionRuns.name],
           operationId: "startConnectorConnectionRun",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -209,7 +209,7 @@ export function registerConnectorConnectionRunRoutes(
           summary: "Add a connector connection from an existing authorization",
           tags: [OPENAPI_TAGS.connectorConnectionRuns.name],
           operationId: "addConnectorConnection",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -249,7 +249,7 @@ export function registerConnectorConnectionRunRoutes(
           summary: "Select a connector account",
           tags: [OPENAPI_TAGS.connectorConnectionRuns.name],
           operationId: "selectConnectorConnectionRunAccount",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -309,7 +309,7 @@ export function registerConnectorConnectionRunRoutes(
           summary: "Reauthorize a connector connection",
           tags: [OPENAPI_TAGS.connectorConnectionRuns.name],
           operationId: "reauthorizeConnectorConnection",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

@@ -9,9 +9,9 @@ import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage
 import { createFileUploadId, createUploadExpiresAt } from "@sixb/core/internal/storage"
 import { type FileUploadSession, FileUploadSessionError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
 import {
@@ -91,7 +91,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Upload a file",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "uploadFileRaw",
-          security: bearerSecurityRequirement("uploadFileRaw"),
+          security: accessTokenSecurityRequirement("uploadFileRaw"),
           requestBody: {
             required: true,
             content: {
@@ -174,7 +174,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Create a staged file upload",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "createFileUpload",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -255,7 +255,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Upload staged file content through Sixb",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "uploadFileContent",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
           requestBody: {
             required: true,
             content: {
@@ -328,7 +328,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Sign a staged multipart upload part",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "signFileUploadPart",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -401,7 +401,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Complete a staged file upload",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "completeFileUpload",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -459,7 +459,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           summary: "Abort a staged file upload",
           tags: [OPENAPI_TAGS.files.name],
           operationId: "abortFileUpload",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

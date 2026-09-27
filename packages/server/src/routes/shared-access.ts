@@ -8,7 +8,7 @@ import {
   sharedAccessUnauthenticatedResponse,
   sharedAccessUnavailableResponse,
 } from "../auth/shared-access"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_CSRF_SECURITY_SCHEME_ID } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -112,7 +112,8 @@ export function registerSharedAccessRoutes(app: Elysia, boundary: SharedAccessBo
           summary: "Sign out a shared-access session",
           tags: [OPENAPI_TAGS.sharedAccess.name],
           operationId: "signOutSharedAccess",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          // Succeeds for anyone; a Share's session cookie also needs its CSRF token.
+          security: [{ [SIXB_CSRF_SECURITY_SCHEME_ID]: [] }, {}],
         },
       }
     )

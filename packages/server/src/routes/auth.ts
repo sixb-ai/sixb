@@ -30,7 +30,7 @@ import {
   type UserRecord,
 } from "@sixb/core/storage"
 import { type Elysia, t } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { sessionCanAccessApplication } from "../auth/application-access"
 import {
   type AuthInvitationDestinationOptions,
@@ -51,7 +51,11 @@ import { ClientAddressRateLimiter } from "../auth/rate-limit"
 import { requestCaller } from "../auth/scope"
 import { hasForegroundSessionActivity } from "../auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "../auth/session-cookies"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import {
+  SIXB_OPTIONAL_SESSION_MUTATION_SECURITY_REQUIREMENT,
+  SIXB_OPTIONAL_SESSION_SECURITY_REQUIREMENT,
+  SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+} from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AuthMemberParamsSchema,
@@ -211,6 +215,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Start device authorization",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "createDeviceAuthorization",
+          security: [],
         },
       }
     )
@@ -274,6 +279,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Exchange an approved device authorization",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "exchangeDeviceAuthorization",
+          security: [],
         },
       }
     )
@@ -295,6 +301,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Refresh a native client's session tokens",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "refreshAuthSession",
+          security: [],
         },
       }
     )
@@ -470,6 +477,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Get current auth session",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "getAuthSession",
+          security: SIXB_OPTIONAL_SESSION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -510,7 +518,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Sign out current auth session",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "signOut",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_OPTIONAL_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -583,7 +591,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Revoke one of the current user's sessions",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "revokeAuthSession",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -611,7 +619,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Sign out the current user everywhere (all devices and apps)",
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "signOutAll",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -649,7 +657,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Get auth access-token management options",
           tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "getAuthAccessManagementOptions",
-          security: bearerSecurityRequirement("getAuthAccessManagementOptions"),
+          security: accessTokenSecurityRequirement("getAuthAccessManagementOptions"),
         },
       }
     )
@@ -683,7 +691,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "List personal access tokens for the current user",
           tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "listAuthAccessTokens",
-          security: bearerSecurityRequirement("listAuthAccessTokens"),
+          security: accessTokenSecurityRequirement("listAuthAccessTokens"),
         },
       }
     )
@@ -729,7 +737,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Create a personal access token",
           tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "createAuthPersonalAccessToken",
-          security: bearerSecurityRequirement("createAuthPersonalAccessToken"),
+          security: accessTokenSecurityRequirement("createAuthPersonalAccessToken"),
         },
       }
     )
@@ -766,7 +774,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Revoke one of the current user's personal access tokens",
           tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "revokeAuthAccessToken",
-          security: bearerSecurityRequirement("revokeAuthAccessToken"),
+          security: accessTokenSecurityRequirement("revokeAuthAccessToken"),
         },
       }
     )
@@ -800,7 +808,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "List auth service accounts",
           tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "listAuthServiceAccounts",
-          security: bearerSecurityRequirement("listAuthServiceAccounts"),
+          security: accessTokenSecurityRequirement("listAuthServiceAccounts"),
         },
       }
     )
@@ -843,7 +851,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Create an auth service account",
           tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "createAuthServiceAccount",
-          security: bearerSecurityRequirement("createAuthServiceAccount"),
+          security: accessTokenSecurityRequirement("createAuthServiceAccount"),
         },
       }
     )
@@ -878,7 +886,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Disable an auth service account",
           tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "disableAuthServiceAccount",
-          security: bearerSecurityRequirement("disableAuthServiceAccount"),
+          security: accessTokenSecurityRequirement("disableAuthServiceAccount"),
         },
       }
     )
@@ -918,7 +926,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "List access tokens for an auth service account",
           tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "listAuthServiceAccountAccessTokens",
-          security: bearerSecurityRequirement("listAuthServiceAccountAccessTokens"),
+          security: accessTokenSecurityRequirement("listAuthServiceAccountAccessTokens"),
         },
       }
     )
@@ -965,7 +973,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Create an access token for an auth service account",
           tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "createAuthServiceAccountAccessToken",
-          security: bearerSecurityRequirement("createAuthServiceAccountAccessToken"),
+          security: accessTokenSecurityRequirement("createAuthServiceAccountAccessToken"),
         },
       }
     )
@@ -1005,7 +1013,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Revoke an access token for an auth service account",
           tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "revokeAuthServiceAccountAccessToken",
-          security: bearerSecurityRequirement("revokeAuthServiceAccountAccessToken"),
+          security: accessTokenSecurityRequirement("revokeAuthServiceAccountAccessToken"),
         },
       }
     )
@@ -1060,7 +1068,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Create an auth invitation",
           tags: [OPENAPI_TAGS.authInvitations.name],
           operationId: "createAuthInvitation",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -1170,7 +1178,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Revoke an auth invitation",
           tags: [OPENAPI_TAGS.authInvitations.name],
           operationId: "revokeAuthInvitation",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -1268,7 +1276,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Update an auth member's groups",
           tags: [OPENAPI_TAGS.authMembers.name],
           operationId: "updateAuthMemberGroups",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -1298,7 +1306,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Suspend an auth member",
           tags: [OPENAPI_TAGS.authMembers.name],
           operationId: "suspendAuthMember",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -1328,7 +1336,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Reactivate an auth member",
           tags: [OPENAPI_TAGS.authMembers.name],
           operationId: "reactivateAuthMember",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

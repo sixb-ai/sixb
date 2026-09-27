@@ -1,6 +1,6 @@
 import { logLevelsAtOrAbove, type SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -53,7 +53,7 @@ export function registerLogRoutes(app: Elysia, _host: SixbHostView) {
         summary: "Read run logs",
         tags: [OPENAPI_TAGS.logs.name],
         operationId: "listLogs",
-        security: bearerSecurityRequirement("listLogs"),
+        security: accessTokenSecurityRequirement("listLogs"),
       },
     }
   )

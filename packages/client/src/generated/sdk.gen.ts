@@ -494,6 +494,7 @@ export const getAuthSession = <ThrowOnError extends boolean = false>(
   options?: Options<GetAuthSessionData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<GetAuthSessionResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/auth/session",
     ...options,
   })
@@ -505,7 +506,10 @@ export const signOut = <ThrowOnError extends boolean = false>(
   options?: Options<SignOutData, ThrowOnError>
 ) =>
   (options?.client ?? client).post<SignOutResponses, SignOutErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/sign-out",
     ...options,
   })
@@ -517,6 +521,7 @@ export const listAuthSessions = <ThrowOnError extends boolean = false>(
   options?: Options<ListAuthSessionsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListAuthSessionsResponses, ListAuthSessionsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/auth/sessions",
     ...options,
   })
@@ -532,7 +537,10 @@ export const revokeAuthSession = <ThrowOnError extends boolean = false>(
     RevokeAuthSessionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/sessions/{sessionId}/revoke",
     ...options,
   })
@@ -544,7 +552,10 @@ export const signOutAll = <ThrowOnError extends boolean = false>(
   options?: Options<SignOutAllData, ThrowOnError>
 ) =>
   (options?.client ?? client).post<SignOutAllResponses, SignOutAllErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/sign-out-all",
     ...options,
   })
@@ -560,7 +571,10 @@ export const getAuthAccessManagementOptions = <ThrowOnError extends boolean = fa
     GetAuthAccessManagementOptionsErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/access-management-options",
     ...options,
   })
@@ -576,7 +590,10 @@ export const listAuthAccessTokens = <ThrowOnError extends boolean = false>(
     ListAuthAccessTokensErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/access-tokens",
     ...options,
   })
@@ -594,6 +611,7 @@ export const createAuthPersonalAccessToken = <ThrowOnError extends boolean = fal
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/auth/access-tokens",
@@ -618,6 +636,7 @@ export const revokeAuthAccessToken = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/auth/access-tokens/{tokenId}/revoke",
     ...options,
@@ -634,7 +653,10 @@ export const listAuthServiceAccounts = <ThrowOnError extends boolean = false>(
     ListAuthServiceAccountsErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/service-accounts",
     ...options,
   })
@@ -652,6 +674,7 @@ export const createAuthServiceAccount = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/auth/service-accounts",
@@ -676,6 +699,7 @@ export const disableAuthServiceAccount = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/auth/service-accounts/{serviceAccountId}/disable",
     ...options,
@@ -692,7 +716,10 @@ export const listAuthServiceAccountAccessTokens = <ThrowOnError extends boolean 
     ListAuthServiceAccountAccessTokensErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens",
     ...options,
   })
@@ -710,6 +737,7 @@ export const createAuthServiceAccountAccessToken = <ThrowOnError extends boolean
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens",
@@ -734,6 +762,7 @@ export const revokeAuthServiceAccountAccessToken = <ThrowOnError extends boolean
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens/{tokenId}/revoke",
     ...options,
@@ -749,7 +778,11 @@ export const listAuthInvitations = <ThrowOnError extends boolean = false>(
     ListAuthInvitationsResponses,
     ListAuthInvitationsErrors,
     ThrowOnError
-  >({ url: "/api/auth/invitations", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/invitations",
+    ...options,
+  })
 
 /**
  * Create an auth invitation
@@ -762,7 +795,10 @@ export const createAuthInvitation = <ThrowOnError extends boolean = false>(
     CreateAuthInvitationErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/invitations",
     ...options,
     headers: {
@@ -781,7 +817,11 @@ export const getAuthInvitationOptions = <ThrowOnError extends boolean = false>(
     GetAuthInvitationOptionsResponses,
     GetAuthInvitationOptionsErrors,
     ThrowOnError
-  >({ url: "/api/auth/invitation-options", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/invitation-options",
+    ...options,
+  })
 
 /**
  * Revoke an auth invitation
@@ -794,7 +834,10 @@ export const revokeAuthInvitation = <ThrowOnError extends boolean = false>(
     RevokeAuthInvitationErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/invitations/{invitationId}/revoke",
     ...options,
   })
@@ -809,7 +852,11 @@ export const getAuthMembershipOptions = <ThrowOnError extends boolean = false>(
     GetAuthMembershipOptionsResponses,
     GetAuthMembershipOptionsErrors,
     ThrowOnError
-  >({ url: "/api/auth/membership-options", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/membership-options",
+    ...options,
+  })
 
 /**
  * List auth members
@@ -818,6 +865,7 @@ export const listAuthMembers = <ThrowOnError extends boolean = false>(
   options?: Options<ListAuthMembersData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListAuthMembersResponses, ListAuthMembersErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/auth/members",
     ...options,
   })
@@ -833,7 +881,10 @@ export const updateAuthMemberGroups = <ThrowOnError extends boolean = false>(
     UpdateAuthMemberGroupsErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/members/{userId}/groups",
     ...options,
     headers: {
@@ -853,7 +904,10 @@ export const suspendAuthMember = <ThrowOnError extends boolean = false>(
     SuspendAuthMemberErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/members/{userId}/suspend",
     ...options,
   })
@@ -869,7 +923,10 @@ export const reactivateAuthMember = <ThrowOnError extends boolean = false>(
     ReactivateAuthMemberErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/auth/members/{userId}/reactivate",
     ...options,
   })
@@ -885,7 +942,10 @@ export const getAiAccountingOverview = <ThrowOnError extends boolean = false>(
     GetAiAccountingOverviewErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/ai/accounting/overview",
     ...options,
   })
@@ -897,7 +957,10 @@ export const listAiModelCalls = <ThrowOnError extends boolean = false>(
   options: Options<ListAiModelCallsData, ThrowOnError>
 ) =>
   (options.client ?? client).get<ListAiModelCallsResponses, ListAiModelCallsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/ai/model-calls",
     ...options,
   })
@@ -913,7 +976,10 @@ export const listAiLimitPolicies = <ThrowOnError extends boolean = false>(
     ListAiLimitPoliciesErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/ai/limits",
     ...options,
   })
@@ -932,6 +998,7 @@ export const createAiLimitPolicy = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/ai/limits",
     ...options,
@@ -948,7 +1015,10 @@ export const getAiLimitStatus = <ThrowOnError extends boolean = false>(
   options?: Options<GetAiLimitStatusData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<GetAiLimitStatusResponses, GetAiLimitStatusErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/ai/limits/status",
     ...options,
   })
@@ -966,7 +1036,10 @@ export const getAiLimitSubjectOptions = <ThrowOnError extends boolean = false>(
     GetAiLimitSubjectOptionsErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/ai/limits/subjects",
     ...options,
   })
@@ -984,6 +1057,7 @@ export const deleteAiLimitPolicy = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/ai/limits/{limitId}",
@@ -1003,6 +1077,7 @@ export const updateAiLimitPolicy = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/ai/limits/{limitId}",
@@ -1024,7 +1099,10 @@ export const listAiModelCallGroups = <ThrowOnError extends boolean = false>(
     ListAiModelCallGroupsErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/ai/model-call-groups",
     ...options,
   })
@@ -1036,7 +1114,10 @@ export const getProjectInfo = <ThrowOnError extends boolean = false>(
   options?: Options<GetProjectInfoData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<GetProjectInfoResponses, unknown, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/project",
     ...options,
   })
@@ -1048,6 +1129,7 @@ export const getStatus = <ThrowOnError extends boolean = false>(
   options?: Options<GetStatusData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<GetStatusResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/status",
     ...options,
   })
@@ -1059,6 +1141,7 @@ export const listConnectors = <ThrowOnError extends boolean = false>(
   options?: Options<ListConnectorsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListConnectorsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/connectors",
     ...options,
   })
@@ -1070,6 +1153,7 @@ export const getConnector = <ThrowOnError extends boolean = false>(
   options: Options<GetConnectorData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetConnectorResponses, GetConnectorErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/connectors/{connectorId}",
     ...options,
   })
@@ -1084,7 +1168,11 @@ export const listConnectorConnections = <ThrowOnError extends boolean = false>(
     ListConnectorConnectionsResponses,
     ListConnectorConnectionsErrors,
     ThrowOnError
-  >({ url: "/api/connectors/{connectorId}/connections", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/connectors/{connectorId}/connections",
+    ...options,
+  })
 
 /**
  * Disconnect a connector account
@@ -1097,7 +1185,10 @@ export const disconnectConnectorConnection = <ThrowOnError extends boolean = fal
     DisconnectConnectorConnectionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/connectors/{connectorId}/connections/{connectionId}",
     ...options,
   })
@@ -1113,7 +1204,10 @@ export const revokeConnectorConnection = <ThrowOnError extends boolean = false>(
     RevokeConnectorConnectionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/connectors/{connectorId}/connections/{connectionId}/revoke",
     ...options,
   })
@@ -1128,7 +1222,11 @@ export const listPendingConnectorConnectionRuns = <ThrowOnError extends boolean 
     ListPendingConnectorConnectionRunsResponses,
     ListPendingConnectorConnectionRunsErrors,
     ThrowOnError
-  >({ url: "/api/connectors/{connectorId}/connection-runs", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/connectors/{connectorId}/connection-runs",
+    ...options,
+  })
 
 /**
  * Start a connector connection run
@@ -1141,7 +1239,10 @@ export const startConnectorConnectionRun = <ThrowOnError extends boolean = false
     StartConnectorConnectionRunErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/connectors/{connectorId}/connection-runs",
     ...options,
     headers: {
@@ -1160,7 +1261,11 @@ export const getConnectorConnectionRun = <ThrowOnError extends boolean = false>(
     GetConnectorConnectionRunResponses,
     GetConnectorConnectionRunErrors,
     ThrowOnError
-  >({ url: "/api/connectors/{connectorId}/connection-runs/{runId}", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/connectors/{connectorId}/connection-runs/{runId}",
+    ...options,
+  })
 
 /**
  * Add a connector connection from an existing authorization
@@ -1173,7 +1278,10 @@ export const addConnectorConnection = <ThrowOnError extends boolean = false>(
     AddConnectorConnectionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/connectors/{connectorId}/connections/{connectionId}/connection-runs",
     ...options,
     headers: {
@@ -1193,7 +1301,10 @@ export const selectConnectorConnectionRunAccount = <ThrowOnError extends boolean
     SelectConnectorConnectionRunAccountErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/connectors/{connectorId}/connection-runs/{runId}/selection",
     ...options,
     headers: {
@@ -1213,7 +1324,10 @@ export const reauthorizeConnectorConnection = <ThrowOnError extends boolean = fa
     ReauthorizeConnectorConnectionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/connectors/{connectorId}/connections/{connectionId}/reauthorize",
     ...options,
     headers: {
@@ -1229,6 +1343,7 @@ export const listDatasets = <ThrowOnError extends boolean = false>(
   options?: Options<ListDatasetsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListDatasetsResponses, ListDatasetsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/datasets",
     ...options,
   })
@@ -1240,6 +1355,7 @@ export const getDataset = <ThrowOnError extends boolean = false>(
   options: Options<GetDatasetData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetDatasetResponses, GetDatasetErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/datasets/{datasetId}",
     ...options,
   })
@@ -1254,7 +1370,11 @@ export const listDatasetVersions = <ThrowOnError extends boolean = false>(
     ListDatasetVersionsResponses,
     ListDatasetVersionsErrors,
     ThrowOnError
-  >({ url: "/api/datasets/{datasetId}/versions", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/datasets/{datasetId}/versions",
+    ...options,
+  })
 
 /**
  * Get dataset version
@@ -1263,7 +1383,11 @@ export const getDatasetVersion = <ThrowOnError extends boolean = false>(
   options: Options<GetDatasetVersionData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetDatasetVersionResponses, GetDatasetVersionErrors, ThrowOnError>(
-    { url: "/api/datasets/{datasetId}/versions/{versionId}", ...options }
+    {
+      security: [{ scheme: "bearer", type: "http" }],
+      url: "/api/datasets/{datasetId}/versions/{versionId}",
+      ...options,
+    }
   )
 
 /**
@@ -1273,6 +1397,7 @@ export const listDatasetRows = <ThrowOnError extends boolean = false>(
   options: Options<ListDatasetRowsData, ThrowOnError>
 ) =>
   (options.client ?? client).get<ListDatasetRowsResponses, ListDatasetRowsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/datasets/{datasetId}/rows",
     ...options,
   })
@@ -1284,6 +1409,7 @@ export const listSyncs = <ThrowOnError extends boolean = false>(
   options?: Options<ListSyncsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListSyncsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/syncs",
     ...options,
   })
@@ -1295,6 +1421,7 @@ export const getSync = <ThrowOnError extends boolean = false>(
   options: Options<GetSyncData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetSyncResponses, GetSyncErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/syncs/{syncId}",
     ...options,
   })
@@ -1306,6 +1433,7 @@ export const listSyncRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListSyncRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListSyncRunsResponses, ListSyncRunsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/sync-runs",
     ...options,
   })
@@ -1317,7 +1445,10 @@ export const requestSyncRun = <ThrowOnError extends boolean = false>(
   options: Options<RequestSyncRunData, ThrowOnError>
 ) =>
   (options.client ?? client).post<RequestSyncRunResponses, RequestSyncRunErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/syncs/{syncId}/runs",
     ...options,
     headers: {
@@ -1333,6 +1464,7 @@ export const listPipelines = <ThrowOnError extends boolean = false>(
   options?: Options<ListPipelinesData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListPipelinesResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/pipelines",
     ...options,
   })
@@ -1344,6 +1476,7 @@ export const getPipeline = <ThrowOnError extends boolean = false>(
   options: Options<GetPipelineData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetPipelineResponses, GetPipelineErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/pipelines/{pipelineId}",
     ...options,
   })
@@ -1355,6 +1488,7 @@ export const listPipelineRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListPipelineRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListPipelineRunsResponses, ListPipelineRunsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/pipeline-runs",
     ...options,
   })
@@ -1366,6 +1500,7 @@ export const getPipelineRun = <ThrowOnError extends boolean = false>(
   options: Options<GetPipelineRunData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetPipelineRunResponses, GetPipelineRunErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/pipeline-runs/{runId}",
     ...options,
   })
@@ -1381,7 +1516,10 @@ export const requestPipelineRun = <ThrowOnError extends boolean = false>(
     RequestPipelineRunErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/pipelines/{pipelineId}/runs",
     ...options,
   })
@@ -1393,7 +1531,10 @@ export const listWorkflows = <ThrowOnError extends boolean = false>(
   options?: Options<ListWorkflowsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListWorkflowsResponses, unknown, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflows",
     ...options,
   })
@@ -1405,7 +1546,10 @@ export const getWorkflow = <ThrowOnError extends boolean = false>(
   options: Options<GetWorkflowData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetWorkflowResponses, GetWorkflowErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflows/{workflowId}",
     ...options,
   })
@@ -1420,7 +1564,11 @@ export const listWorkflowInterventions = <ThrowOnError extends boolean = false>(
     ListWorkflowInterventionsResponses,
     ListWorkflowInterventionsErrors,
     ThrowOnError
-  >({ url: "/api/workflow-interventions", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/workflow-interventions",
+    ...options,
+  })
 
 /**
  * Get workflow intervention detail
@@ -1432,7 +1580,11 @@ export const getWorkflowIntervention = <ThrowOnError extends boolean = false>(
     GetWorkflowInterventionResponses,
     GetWorkflowInterventionErrors,
     ThrowOnError
-  >({ url: "/api/workflow-interventions/{interventionId}", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/workflow-interventions/{interventionId}",
+    ...options,
+  })
 
 /**
  * Submit a workflow intervention response
@@ -1445,7 +1597,10 @@ export const submitWorkflowIntervention = <ThrowOnError extends boolean = false>
     SubmitWorkflowInterventionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-interventions/{interventionId}/submit",
     ...options,
     headers: {
@@ -1465,7 +1620,10 @@ export const cancelWorkflowIntervention = <ThrowOnError extends boolean = false>
     CancelWorkflowInterventionErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-interventions/{interventionId}/cancel",
     ...options,
     headers: {
@@ -1481,7 +1639,10 @@ export const listWorkflowRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListWorkflowRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListWorkflowRunsResponses, ListWorkflowRunsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-runs",
     ...options,
   })
@@ -1493,7 +1654,10 @@ export const getWorkflowRun = <ThrowOnError extends boolean = false>(
   options: Options<GetWorkflowRunData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetWorkflowRunResponses, GetWorkflowRunErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-runs/{runId}",
     ...options,
   })
@@ -1509,7 +1673,10 @@ export const getWorkflowAgentNodeExecution = <ThrowOnError extends boolean = fal
     GetWorkflowAgentNodeExecutionErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/agent-execution",
     ...options,
   })
@@ -1527,6 +1694,7 @@ export const cancelWorkflowRun = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/workflow-runs/{runId}/cancel",
@@ -1548,7 +1716,10 @@ export const getWorkflowRunFileContent = <ThrowOnError extends boolean = false>(
     GetWorkflowRunFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-runs/{runId}/files/content",
     ...options,
   })
@@ -1564,7 +1735,10 @@ export const headWorkflowRunFileContent = <ThrowOnError extends boolean = false>
     HeadWorkflowRunFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-runs/{runId}/files/content",
     ...options,
   })
@@ -1580,7 +1754,10 @@ export const getWorkflowNodeRunFileContent = <ThrowOnError extends boolean = fal
     GetWorkflowNodeRunFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content",
     ...options,
   })
@@ -1596,7 +1773,10 @@ export const headWorkflowNodeRunFileContent = <ThrowOnError extends boolean = fa
     HeadWorkflowNodeRunFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/workflow-runs/{runId}/nodes/{nodeKey}/files/content",
     ...options,
   })
@@ -1615,6 +1795,7 @@ export const requestWorkflowRun = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/workflows/{workflowId}/runs",
     ...options,
@@ -1631,6 +1812,7 @@ export const listRules = <ThrowOnError extends boolean = false>(
   options?: Options<ListRulesData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListRulesResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/rules",
     ...options,
   })
@@ -1642,6 +1824,7 @@ export const getRule = <ThrowOnError extends boolean = false>(
   options: Options<GetRuleData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetRuleResponses, GetRuleErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/rules/{ruleId}",
     ...options,
   })
@@ -1653,6 +1836,7 @@ export const listRuleStates = <ThrowOnError extends boolean = false>(
   options?: Options<ListRuleStatesData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListRuleStatesResponses, ListRuleStatesErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/rule-states",
     ...options,
   })
@@ -1668,7 +1852,10 @@ export const listSharedAccessGrants = <ThrowOnError extends boolean = false>(
     ListSharedAccessGrantsErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/share-grants",
     ...options,
   })
@@ -1686,6 +1873,7 @@ export const issueSharedAccessGrant = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/share-grants",
@@ -1709,6 +1897,7 @@ export const revokeSharedAccessGrant = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/share-grants/{grantId}",
@@ -1771,6 +1960,7 @@ export const listObjectTypes = <ThrowOnError extends boolean = false>(
   (options?.client ?? client).get<ListObjectTypesResponses, unknown, ThrowOnError>({
     security: [
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/object-types",
@@ -1785,6 +1975,7 @@ export const getObjectType = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetObjectTypeResponses, GetObjectTypeErrors, ThrowOnError>({
     security: [
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -1801,6 +1992,7 @@ export const searchObjects = <ThrowOnError extends boolean = false>(
   (options.client ?? client).get<SearchObjectsResponses, SearchObjectsErrors, ThrowOnError>({
     security: [
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/search",
@@ -1815,6 +2007,7 @@ export const listObjects = <ThrowOnError extends boolean = false>(
 ) =>
   (options?.client ?? client).get<ListObjectsResponses, ListObjectsErrors, ThrowOnError>({
     security: [
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -1831,6 +2024,7 @@ export const queryObjects = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<QueryObjectsResponses, QueryObjectsErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -1852,6 +2046,7 @@ export const queryObjectLinks = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/query/links",
@@ -1871,6 +2066,7 @@ export const countObjects = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<CountObjectsResponses, CountObjectsErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -1892,6 +2088,7 @@ export const existsObjects = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/query/exists",
@@ -1911,6 +2108,7 @@ export const facetObjects = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<FacetObjectsResponses, FacetObjectsErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -1935,6 +2133,7 @@ export const getObjectFileContent = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}/files/content",
@@ -1954,6 +2153,7 @@ export const headObjectFileContent = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}/files/content",
@@ -1968,6 +2168,7 @@ export const getObject = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetObjectResponses, GetObjectErrors, ThrowOnError>({
     security: [
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -1984,6 +2185,7 @@ export const upsertObject = <ThrowOnError extends boolean = false>(
   (options.client ?? client).put<UpsertObjectResponses, UpsertObjectErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}",
@@ -2003,6 +2205,7 @@ export const listActions = <ThrowOnError extends boolean = false>(
   (options?.client ?? client).get<ListActionsResponses, unknown, ThrowOnError>({
     security: [
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/actions",
@@ -2017,6 +2220,7 @@ export const getAction = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetActionResponses, GetActionErrors, ThrowOnError>({
     security: [
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -2033,6 +2237,7 @@ export const requestAction = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<RequestActionResponses, RequestActionErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -2055,6 +2260,7 @@ export const uploadFileRaw = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/files",
     ...options,
@@ -2071,7 +2277,10 @@ export const createFileUpload = <ThrowOnError extends boolean = false>(
   options: Options<CreateFileUploadData, ThrowOnError>
 ) =>
   (options.client ?? client).post<CreateFileUploadResponses, CreateFileUploadErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/files/uploads",
     ...options,
     headers: {
@@ -2089,7 +2298,10 @@ export const uploadFileContent = <ThrowOnError extends boolean = false>(
   (options.client ?? client).put<UploadFileContentResponses, UploadFileContentErrors, ThrowOnError>(
     {
       bodySerializer: null,
-      security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+      security: [
+        { name: "x-sixb-csrf", type: "apiKey" },
+        { scheme: "bearer", type: "http" },
+      ],
       url: "/api/files/uploads/{uploadId}/content",
       ...options,
       headers: {
@@ -2110,7 +2322,10 @@ export const signFileUploadPart = <ThrowOnError extends boolean = false>(
     SignFileUploadPartErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/files/uploads/{uploadId}/parts/{partNumber}",
     ...options,
   })
@@ -2126,7 +2341,10 @@ export const completeFileUpload = <ThrowOnError extends boolean = false>(
     CompleteFileUploadErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/files/uploads/{uploadId}/complete",
     ...options,
     headers: {
@@ -2142,7 +2360,10 @@ export const abortFileUpload = <ThrowOnError extends boolean = false>(
   options: Options<AbortFileUploadData, ThrowOnError>
 ) =>
   (options.client ?? client).post<AbortFileUploadResponses, AbortFileUploadErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/files/uploads/{uploadId}/abort",
     ...options,
   })
@@ -2154,7 +2375,10 @@ export const listActionRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListActionRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListActionRunsResponses, ListActionRunsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/action-runs",
     ...options,
   })
@@ -2167,6 +2391,7 @@ export const getActionRun = <ThrowOnError extends boolean = false>(
 ) =>
   (options.client ?? client).get<GetActionRunResponses, GetActionRunErrors, ThrowOnError>({
     security: [
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
@@ -2185,7 +2410,10 @@ export const getActionRunFileContent = <ThrowOnError extends boolean = false>(
     GetActionRunFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/action-runs/{runId}/files/content",
     ...options,
   })
@@ -2201,7 +2429,10 @@ export const headActionRunFileContent = <ThrowOnError extends boolean = false>(
     HeadActionRunFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/action-runs/{runId}/files/content",
     ...options,
   })
@@ -2213,6 +2444,7 @@ export const getAgent = <ThrowOnError extends boolean = false>(
   options?: Options<GetAgentData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<GetAgentResponses, GetAgentErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent",
     ...options,
   })
@@ -2224,6 +2456,7 @@ export const listAgentThreads = <ThrowOnError extends boolean = false>(
   options?: Options<ListAgentThreadsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListAgentThreadsResponses, ListAgentThreadsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent-threads",
     ...options,
   })
@@ -2239,7 +2472,10 @@ export const createAgentThread = <ThrowOnError extends boolean = false>(
     CreateAgentThreadErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/agent-threads",
     ...options,
     headers: {
@@ -2255,6 +2491,7 @@ export const getAgentThread = <ThrowOnError extends boolean = false>(
   options: Options<GetAgentThreadData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetAgentThreadResponses, GetAgentThreadErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent-threads/{threadId}",
     ...options,
   })
@@ -2270,7 +2507,10 @@ export const recreateAgentThreadSandbox = <ThrowOnError extends boolean = false>
     RecreateAgentThreadSandboxErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/agent-threads/{threadId}/sandbox/recreate",
     ...options,
     headers: {
@@ -2289,7 +2529,11 @@ export const listAgentThreadMessages = <ThrowOnError extends boolean = false>(
     ListAgentThreadMessagesResponses,
     ListAgentThreadMessagesErrors,
     ThrowOnError
-  >({ url: "/api/agent-threads/{threadId}/messages", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-threads/{threadId}/messages",
+    ...options,
+  })
 
 /**
  * Post an agent thread message
@@ -2302,7 +2546,10 @@ export const postAgentThreadMessage = <ThrowOnError extends boolean = false>(
     PostAgentThreadMessageErrors,
     ThrowOnError
   >({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/agent-threads/{threadId}/messages",
     ...options,
     headers: {
@@ -2322,7 +2569,10 @@ export const getAgentMessageFileContent = <ThrowOnError extends boolean = false>
     GetAgentMessageFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content",
     ...options,
   })
@@ -2338,7 +2588,10 @@ export const headAgentMessageFileContent = <ThrowOnError extends boolean = false
     HeadAgentMessageFileContentErrors,
     ThrowOnError
   >({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/agent-threads/{threadId}/messages/{messageId}/files/content",
     ...options,
   })
@@ -2350,7 +2603,10 @@ export const cancelAgentRun = <ThrowOnError extends boolean = false>(
   options: Options<CancelAgentRunData, ThrowOnError>
 ) =>
   (options.client ?? client).post<CancelAgentRunResponses, CancelAgentRunErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/agent-threads/{threadId}/cancel",
     ...options,
     headers: {
@@ -2366,7 +2622,10 @@ export const retryAgentRun = <ThrowOnError extends boolean = false>(
   options: Options<RetryAgentRunData, ThrowOnError>
 ) =>
   (options.client ?? client).post<RetryAgentRunResponses, RetryAgentRunErrors, ThrowOnError>({
-    security: [{ name: "x-sixb-csrf", type: "apiKey" }],
+    security: [
+      { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/agent-threads/{threadId}/runs/{runId}/retry",
     ...options,
   })
@@ -2381,7 +2640,11 @@ export const listAgentThreadRuns = <ThrowOnError extends boolean = false>(
     ListAgentThreadRunsResponses,
     ListAgentThreadRunsErrors,
     ThrowOnError
-  >({ url: "/api/agent-threads/{threadId}/runs", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/agent-threads/{threadId}/runs",
+    ...options,
+  })
 
 /**
  * Get agent run
@@ -2390,6 +2653,7 @@ export const getAgentRun = <ThrowOnError extends boolean = false>(
   options: Options<GetAgentRunData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetAgentRunResponses, GetAgentRunErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/agent-runs/{runId}",
     ...options,
   })
@@ -2401,6 +2665,7 @@ export const listModels = <ThrowOnError extends boolean = false>(
   options?: Options<ListModelsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListModelsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/models",
     ...options,
   })
@@ -2419,6 +2684,7 @@ export const removeObjectLink = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}",
     ...options,
@@ -2433,6 +2699,7 @@ export const upsertObjectLink = <ThrowOnError extends boolean = false>(
   (options.client ?? client).put<UpsertObjectLinkResponses, UpsertObjectLinkErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}/links/{linkId}",
@@ -2452,6 +2719,7 @@ export const appendTelemetry = <ThrowOnError extends boolean = false>(
   (options.client ?? client).post<AppendTelemetryResponses, AppendTelemetryErrors, ThrowOnError>({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
+      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}",
@@ -2476,6 +2744,7 @@ export const getBulkTelemetryHistory = <ThrowOnError extends boolean = false>(
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/telemetry/history",
@@ -2499,6 +2768,7 @@ export const getTelemetryHistory = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/history",
@@ -2518,6 +2788,7 @@ export const getLatestTelemetry = <ThrowOnError extends boolean = false>(
   >({
     security: [
       { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
       { name: "x-sixb-share-grant", type: "apiKey" },
     ],
     url: "/api/objects/{objectTypeId}/{objectId}/telemetry/{propertyId}/latest",
@@ -2531,7 +2802,10 @@ export const listEvents = <ThrowOnError extends boolean = false>(
   options?: Options<ListEventsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListEventsResponses, ListEventsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/events",
     ...options,
   })
@@ -2543,7 +2817,10 @@ export const listLogs = <ThrowOnError extends boolean = false>(
   options?: Options<ListLogsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListLogsResponses, ListLogsErrors, ThrowOnError>({
-    security: [{ scheme: "bearer", type: "http" }],
+    security: [
+      { scheme: "bearer", type: "http" },
+      { scheme: "bearer", type: "http" },
+    ],
     url: "/api/logs",
     ...options,
   })
@@ -2555,6 +2832,7 @@ export const listProjections = <ThrowOnError extends boolean = false>(
   options?: Options<ListProjectionsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListProjectionsResponses, unknown, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/projections",
     ...options,
   })
@@ -2566,6 +2844,7 @@ export const getProjection = <ThrowOnError extends boolean = false>(
   options: Options<GetProjectionData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetProjectionResponses, GetProjectionErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/projections/{projectionId}",
     ...options,
   })
@@ -2580,7 +2859,11 @@ export const listProjectionRuns = <ThrowOnError extends boolean = false>(
     ListProjectionRunsResponses,
     ListProjectionRunsErrors,
     ThrowOnError
-  >({ url: "/api/projection-runs", ...options })
+  >({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/projection-runs",
+    ...options,
+  })
 
 /**
  * Get a projection run by id
@@ -2589,6 +2872,7 @@ export const getProjectionRun = <ThrowOnError extends boolean = false>(
   options: Options<GetProjectionRunData, ThrowOnError>
 ) =>
   (options.client ?? client).get<GetProjectionRunResponses, GetProjectionRunErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/projection-runs/{runId}",
     ...options,
   })
@@ -2600,6 +2884,7 @@ export const listWebhookRuns = <ThrowOnError extends boolean = false>(
   options?: Options<ListWebhookRunsData, ThrowOnError>
 ) =>
   (options?.client ?? client).get<ListWebhookRunsResponses, ListWebhookRunsErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
     url: "/api/webhook-runs",
     ...options,
   })

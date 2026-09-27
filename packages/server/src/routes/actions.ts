@@ -1,7 +1,7 @@
 import type { ActionDescriptor, SixbHostView } from "@sixb/core"
 import { schemaFieldsToJsonSchema } from "@sixb/core/internal/ontology"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
@@ -62,7 +62,7 @@ export function registerActionRoutes(app: Elysia, host: SixbHostView) {
           summary: "List registered actions",
           tags: [OPENAPI_TAGS.actions.name],
           operationId: "listActions",
-          security: bearerSecurityRequirement("listActions"),
+          security: accessTokenSecurityRequirement("listActions"),
         },
       }
     )
@@ -85,7 +85,7 @@ export function registerActionRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get action metadata",
           tags: [OPENAPI_TAGS.actions.name],
           operationId: "getAction",
-          security: bearerSecurityRequirement("getAction"),
+          security: accessTokenSecurityRequirement("getAction"),
         },
       }
     )
@@ -123,7 +123,7 @@ export function registerActionRoutes(app: Elysia, host: SixbHostView) {
           summary: "Request an action",
           tags: [OPENAPI_TAGS.actions.name],
           operationId: "requestAction",
-          security: bearerSecurityRequirement("requestAction"),
+          security: accessTokenSecurityRequirement("requestAction"),
         },
       }
     )
