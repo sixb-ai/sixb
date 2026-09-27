@@ -13,6 +13,18 @@ export * from "./file"
 export * from "./generated"
 export { client } from "./generated/client.gen"
 export * from "./logs"
-
 // Framework UI models and adapters
 export * from "./models"
+export type {
+  SixbDeviceLogin,
+  SixbSessionOptions,
+  SixbSessionRequestOptions,
+  SixbSessionStore,
+  SixbSessionTokens,
+} from "./session"
+export {
+  getSixbSessionAccessToken,
+  SixbSessionEndedError,
+  signOutSixbSession,
+  startSixbDeviceLogin,
+} from "./session"

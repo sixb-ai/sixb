@@ -1,7 +1,11 @@
 import type { SixbErrorCode } from "@sixb/core"
+import { normalizeSixbApiBaseUrl } from "./base-url"
 import { assertSharedAccessGrantId, markClientSharedAuthority } from "./client-authority"
 import { type Auth, type Client, type Config, createClient, createConfig } from "./generated/client"
 import { client as sharedClient } from "./generated/client.gen"
+import { createSixbSessionFetch, type SixbSessionStore } from "./session"
+
+export { normalizeSixbApiBaseUrl } from "./base-url"
 
 export const SIXB_CSRF_HEADER_NAME = "x-sixb-csrf"
 export const SIXB_CSRF_TOKEN_RESPONSE_HEADER_NAME = "x-sixb-csrf-token"
@@ -22,6 +26,13 @@ export type SixbClientAuth =
       readonly kind: "shared"
       readonly grantId: string
       readonly csrfToken?: () => string | null | undefined
+    }
+  | {
+      /** A native client's session: its access token is sent, and refreshed, on every request. */
+      readonly kind: "session"
+      readonly store: SixbSessionStore
+      /** Called once when the session ends; the store has been cleared. Sign the user in again. */
+      readonly onSessionEnded?: () => void
     }
   | {
       readonly kind: "none"
@@ -119,6 +130,8 @@ export function createSixbClientConfig(options: SixbClientOptions = {}): Config 
 
   const baseUrl =
     options.baseUrl === undefined ? undefined : normalizeSixbApiBaseUrl(options.baseUrl)
+  // Shares and sessions stamp their credential at the transport, on every request to the API. The
+  // generated per-operation auth only covers operations whose OpenAPI entry declares that scheme.
   const configuredFetch =
     auth.kind === "shared"
       ? createSharedAuthorityFetch({
@@ -126,36 +139,28 @@ export function createSixbClientConfig(options: SixbClientOptions = {}): Config 
           grantId: auth.grantId,
           fetch: options.fetch ?? globalThis.fetch,
         })
-      : options.fetch
+      : auth.kind === "session"
+        ? createSixbSessionFetch({
+            baseUrl: baseUrl ?? "",
+            store: auth.store,
+            onSessionEnded: auth.onSessionEnded,
+            fetch: options.fetch,
+          })
+        : options.fetch
 
   return createConfig({
     ...(baseUrl === undefined ? {} : { baseUrl }),
     ...(configuredFetch === undefined ? {} : { fetch: configuredFetch }),
     ...(options.headers === undefined ? {} : { headers: options.headers }),
     credentials: auth.kind === "cookie" || auth.kind === "shared" ? "include" : options.credentials,
-    auth: auth.kind === "none" ? undefined : createSixbAuthResolver(auth),
+    auth:
+      auth.kind === "none" || auth.kind === "session" ? undefined : createSixbAuthResolver(auth),
   })
 }
 
-export function normalizeSixbApiBaseUrl(value: string): string {
-  const absolute = /^[a-z][a-z\d+.-]*:\/\//i.test(value)
-  let url: URL
-
-  try {
-    url = new URL(value, absolute ? undefined : "http://sixb.local")
-  } catch {
-    throw new Error(`[SixbClient] Invalid API base URL '${value}'.`)
-  }
-
-  const pathname = stripTrailingApiPath(url.pathname)
-  if (!absolute) {
-    return pathname
-  }
-
-  return `${url.origin}${pathname === "/" ? "" : pathname}`
-}
-
-function createSixbAuthResolver(auth: SixbClientAuth): Config["auth"] {
+function createSixbAuthResolver(
+  auth: Exclude<SixbClientAuth, { readonly kind: "none" | "session" }>
+): Config["auth"] {
   return (scheme: Auth) => {
     if (auth.kind === "bearer") {
       return isBearerAuth(scheme) ? auth.token : undefined
@@ -241,19 +246,6 @@ function resolveSharedApiOrigin(baseUrl: string | undefined): string {
   } catch {
     throw new Error("[SixbClient] Shared access API base URL is invalid.")
   }
-}
-
-function stripTrailingApiPath(pathname: string): string {
-  const trimmed = pathname.replace(/\/+$/, "")
-  if (!trimmed || trimmed === "/api") {
-    return ""
-  }
-
-  if (trimmed.endsWith("/api")) {
-    return trimmed.slice(0, -4) || ""
-  }
-
-  return trimmed
 }
 
 /**

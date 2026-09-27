@@ -1,12 +1,8 @@
 import { hostname } from "node:os"
 import { CliError, createInstanceApiClient, writeJson } from "@sixb/cli-core"
+import { type SixbSessionTokens, startSixbDeviceLogin } from "@sixb/client"
 import { normalizeApiUrl } from "../lib/api-client"
-import {
-  assertProfileName,
-  parseSessionTokens,
-  type SixbProfileSession,
-  updateConfig,
-} from "../lib/profiles"
+import { assertProfileName, updateConfig } from "../lib/profiles"
 import { KeyValueResultView, renderStatic } from "../ui"
 
 export interface LoginCommandOptions {
@@ -23,7 +19,7 @@ export async function runLogin(options: LoginCommandOptions = {}): Promise<void>
 
   const apiUrl = normalizeApiUrl(options.apiUrl)
   let token: string | undefined
-  let session: SixbProfileSession | undefined
+  let session: SixbSessionTokens | undefined
   let projectId: string
 
   try {
@@ -75,82 +71,16 @@ export async function runLogin(options: LoginCommandOptions = {}): Promise<void>
   )
 }
 
-interface DeviceAuthorizationStart {
-  readonly deviceCode: string
-  readonly userCode: string
-  readonly verificationUriComplete: string
-  readonly expiresAt: string
-  readonly interval: number
-}
-
-async function authorizeDevice(apiUrl: string): Promise<SixbProfileSession> {
-  const api = createInstanceApiClient({ kind: "local", baseUrl: apiUrl })
-  const start = parseDeviceAuthorizationStart(
-    await api.post("/api/auth/device-authorizations", { clientName: `sixb CLI on ${hostname()}` }),
-    apiUrl
-  )
-  process.stderr.write(`Opening ${start.verificationUriComplete}\n`)
-  process.stderr.write(`Confirm code: ${start.userCode}\n`)
-  await openBrowser(start.verificationUriComplete)
+async function authorizeDevice(apiUrl: string): Promise<SixbSessionTokens> {
+  const login = await startSixbDeviceLogin({
+    baseUrl: apiUrl,
+    clientName: `sixb CLI on ${hostname()}`,
+  })
+  process.stderr.write(`Opening ${login.verificationUriComplete}\n`)
+  process.stderr.write(`Confirm code: ${login.userCode}\n`)
+  await openBrowser(login.verificationUriComplete)
   process.stderr.write("Waiting for browser authorization...\n")
-
-  const serverDeadline = new Date(start.expiresAt).getTime()
-  const deadline = Math.min(serverDeadline, Date.now() + 15 * 60 * 1000)
-  const intervalMs = Math.max(1, Math.min(10, start.interval)) * 1000
-  while (Date.now() < deadline) {
-    const result = await api.post("/api/auth/device-authorizations/token", {
-      deviceCode: start.deviceCode,
-    })
-    if (!isRecord(result) || typeof result.status !== "string") {
-      throw new Error("[SixbCLI] The Sixb API returned an invalid device authorization response.")
-    }
-    if (result.status === "approved") {
-      return parseSessionTokens(result)
-    }
-    if (result.status === "denied") {
-      throw new Error("[SixbCLI] Browser authorization was denied.")
-    }
-    if (result.status === "expired") {
-      throw new Error("[SixbCLI] Browser authorization expired. Run `sixb login` again.")
-    }
-    if (result.status !== "pending") {
-      throw new Error("[SixbCLI] The Sixb API returned an unknown authorization status.")
-    }
-    await Bun.sleep(intervalMs)
-  }
-  throw new Error("[SixbCLI] Browser authorization expired. Run `sixb login` again.")
-}
-
-function parseDeviceAuthorizationStart(value: unknown, apiUrl: string): DeviceAuthorizationStart {
-  if (
-    !isRecord(value) ||
-    typeof value.deviceCode !== "string" ||
-    !value.deviceCode ||
-    value.deviceCode.length > 1_024 ||
-    typeof value.userCode !== "string" ||
-    !value.userCode ||
-    typeof value.verificationUriComplete !== "string" ||
-    typeof value.expiresAt !== "string" ||
-    typeof value.interval !== "number" ||
-    !Number.isFinite(value.interval) ||
-    !Number.isFinite(new Date(value.expiresAt).getTime())
-  ) {
-    throw new Error("[SixbCLI] The Sixb API returned an invalid device authorization.")
-  }
-  const verificationUrl = new URL(value.verificationUriComplete)
-  if (
-    verificationUrl.origin !== new URL(apiUrl).origin ||
-    (verificationUrl.protocol !== "http:" && verificationUrl.protocol !== "https:")
-  ) {
-    throw new Error("[SixbCLI] The device verification URL does not match the Sixb API origin.")
-  }
-  return {
-    deviceCode: value.deviceCode,
-    userCode: value.userCode,
-    verificationUriComplete: value.verificationUriComplete,
-    expiresAt: value.expiresAt,
-    interval: value.interval,
-  }
+  return login.complete()
 }
 
 async function openBrowser(url: string): Promise<void> {
