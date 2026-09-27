@@ -76,7 +76,7 @@ const login = await startSixbDeviceLogin({ baseUrl, clientName: "Acme CLI" })
 openInBrowser(login.verificationUriComplete) // shows login.userCode
 await store.save(await login.complete())
 
-// Every API function, query, and hook now uses the session.
+// Every API function, query, hook, and live subscription now uses the session.
 configureSixbClient(client, {
   baseUrl,
   auth: { kind: "session", store, onSessionEnded: () => showSignIn() },

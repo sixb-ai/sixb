@@ -44,7 +44,7 @@ export interface SixbLogsPage {
 }
 
 export interface SixbLogsClientOptions {
-  /** HTTP client override for reads. Its base URL is also used by the cookie-authenticated WS. */
+  /** HTTP client override for reads. The WebSocket uses its base URL and credential too. */
   readonly client?: Client
 }
 
@@ -100,7 +100,7 @@ class LogsBuilderImpl implements RunScopedLogsBuilder {
       afterCursor: options?.afterCursor,
       reconnect: options?.reconnect,
       reconnectDelayMs: options?.reconnectDelayMs,
-      baseUrl: transportClient.getConfig().baseUrl,
+      client: transportClient,
       onLog: handler,
       onError: options?.onError,
       onReset: options?.onReset,

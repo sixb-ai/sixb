@@ -5,6 +5,7 @@ import {
   type SixbRunKind,
   type StoredLogLine,
 } from "@sixb/core/logging"
+import type { Client } from "./generated/client"
 import {
   createReconnectingSocket,
   createSixbWebSocketUrl,
@@ -20,8 +21,10 @@ export interface LogSocketOptions {
   readonly afterCursor?: string
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  /** API origin override. Authentication uses the browser session cookie. */
+  /** Override the API base url. Defaults to `client`'s, then the global client config. */
   readonly baseUrl?: string
+  /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
+  readonly client?: Client
   readonly onLog: (line: StoredLogLine) => void
   readonly onError?: (error: string) => void
   readonly onReset?: (cursor?: string) => void
@@ -42,7 +45,8 @@ export function createLogSocket(options: LogSocketOptions): LogSocket {
   let latestCursor = options.afterCursor
 
   return createReconnectingSocket({
-    url: createSixbLogsWebSocketUrl(options.baseUrl),
+    url: createSixbLogsWebSocketUrl(options.baseUrl ?? options.client?.getConfig().baseUrl),
+    client: options.client,
     reconnect: options.reconnect,
     reconnectDelayMs: options.reconnectDelayMs,
     connectionErrorMessage: "Log websocket connection failed.",

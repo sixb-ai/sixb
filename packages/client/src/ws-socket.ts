@@ -7,8 +7,14 @@
  * protocol while sharing one reconnection loop. React is an optional peer of `@sixb/client`;
  * nothing here may import it.
  */
-import { hasClientSharedAuthority, SHARED_ACCESS_REALTIME_UNAVAILABLE } from "./client-authority"
-import { client } from "./generated/client.gen"
+import {
+  getClientSessionAuthority,
+  hasClientSharedAuthority,
+  SHARED_ACCESS_REALTIME_UNAVAILABLE,
+} from "./client-authority"
+import type { Client } from "./generated/client"
+import { client as generatedClient } from "./generated/client.gen"
+import { getSixbSessionAccessToken, SixbSessionEndedError } from "./session"
 
 const DEFAULT_SIXB_API_BASE_URL = "http://localhost:3002"
 const DEFAULT_RECONNECT_DELAY_MS = 1000
@@ -27,6 +33,8 @@ export interface ReconnectingSocketErrorSink {
 
 export interface ReconnectingSocketOptions {
   readonly url: string
+  /** The client whose credential the socket presents. Defaults to the package's shared client. */
+  readonly client?: Client
   /** Built before every connection; useful for one-shot WebSocket tickets. */
   readonly protocols?: () => readonly string[] | Promise<readonly string[]>
   /** Decide whether a failed async connection setup should be retried. */
@@ -66,6 +74,7 @@ const INITIAL_STATE: ReconnectingSocketState = {
 }
 
 export function createReconnectingSocket(options: ReconnectingSocketOptions): ReconnectingSocket {
+  const client = options.client ?? generatedClient
   if (hasClientSharedAuthority(client)) {
     options.onError?.(SHARED_ACCESS_REALTIME_UNAVAILABLE)
     options.onStateChange?.({
@@ -77,6 +86,9 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   }
 
   const { reconnect = true, reconnectDelayMs = DEFAULT_RECONNECT_DELAY_MS } = options
+  // Like the session fetch, present the token only to the API the session belongs to.
+  const session = getClientSessionAuthority(client)
+  const socketSession = session && servesSocket(session.baseUrl, options.url) ? session : null
 
   let state = INITIAL_STATE
   let stopped = false
@@ -111,19 +123,31 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
     setState({ connected: false, reconnecting: openedOnce || state.reconnecting, error: null })
 
     let protocols: readonly string[] | undefined
+    let accessToken: string | null = null
     try {
       if (options.protocols) protocols = await options.protocols()
+      // Read on every connection: the token refreshes shortly before it expires, and the server
+      // checks it only at the upgrade.
+      if (socketSession) {
+        accessToken = await getSixbSessionAccessToken(socketSession)
+        if (!accessToken) {
+          throw new SixbSessionEndedError("[SixbClient] No session is stored. Sign in first.")
+        }
+      }
     } catch (error) {
       if (stopped || generation !== connectionGeneration) return
       sink.reportError(error instanceof Error ? error.message : String(error))
-      const retry = reconnect && (options.shouldReconnectAfterSetupError?.(error) ?? true)
+      const retry =
+        reconnect &&
+        !(error instanceof SixbSessionEndedError) &&
+        (options.shouldReconnectAfterSetupError?.(error) ?? true)
       setState({ connected: false, reconnecting: retry, error: state.error })
       if (retry) scheduleReconnect()
       return
     }
     if (stopped || generation !== connectionGeneration) return
 
-    const ws = protocols ? new WebSocket(options.url, [...protocols]) : new WebSocket(options.url)
+    const ws = openWebSocket(options.url, protocols, accessToken)
     socket = ws
     let subscribed = false
     let readyTimer: ReturnType<typeof setTimeout> | null = null
@@ -202,9 +226,42 @@ export function createReconnectingSocket(options: ReconnectingSocketOptions): Re
   }
 }
 
+function servesSocket(apiBaseUrl: string, socketUrl: string): boolean {
+  try {
+    const api = new URL(apiBaseUrl)
+    const socket = new URL(socketUrl)
+    return (
+      socket.protocol === (api.protocol === "https:" ? "wss:" : "ws:") && socket.host === api.host
+    )
+  } catch {
+    return false
+  }
+}
+
+// Browsers cannot set WebSocket headers, and never hold a native session. Bun and Node take headers
+// in an options object in place of the protocols argument.
+type HeaderWebSocketConstructor = new (
+  url: string,
+  options: { readonly protocols?: string[]; readonly headers: Record<string, string> }
+) => WebSocket
+
+function openWebSocket(
+  url: string,
+  protocols: readonly string[] | undefined,
+  accessToken: string | null
+): WebSocket {
+  if (accessToken) {
+    return new (WebSocket as unknown as HeaderWebSocketConstructor)(url, {
+      ...(protocols ? { protocols: [...protocols] } : {}),
+      headers: { authorization: `Bearer ${accessToken}` },
+    })
+  }
+  return protocols ? new WebSocket(url, [...protocols]) : new WebSocket(url)
+}
+
 /** Build the `ws(s)://.../<path>` URL for a Sixb WebSocket stream from the client's API base URL. */
 export function createSixbWebSocketUrl(path: string, baseUrl?: string): string {
-  const url = new URL(baseUrl ?? client.getConfig().baseUrl ?? DEFAULT_SIXB_API_BASE_URL)
+  const url = new URL(baseUrl ?? generatedClient.getConfig().baseUrl ?? DEFAULT_SIXB_API_BASE_URL)
   url.protocol = url.protocol === "https:" ? "wss:" : "ws:"
   url.pathname = path
   url.search = ""

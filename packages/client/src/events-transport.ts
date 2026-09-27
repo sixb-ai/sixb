@@ -14,6 +14,7 @@ import {
   type SixbEventTopic,
   type SixbEventType,
 } from "./events-model"
+import type { Client } from "./generated/client"
 import {
   createReconnectingSocket,
   createSixbWebSocketUrl,
@@ -40,8 +41,10 @@ export interface EventSocketOptions {
   readonly reconnectDelayMs?: number
   /** Maximum time to complete the event protocol handshake. */
   readonly handshakeTimeoutMs?: number
-  /** Override the API base url. Defaults to the global client config. */
+  /** Override the API base url. Defaults to `client`'s, then the global client config. */
   readonly baseUrl?: string
+  /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
+  readonly client?: Client
   readonly onEvent: (event: SixbEvent) => void
   readonly onError?: (error: string) => void
   readonly onStateChange?: (state: EventSocketState) => void
@@ -81,7 +84,8 @@ export function createEventSocket(options: EventSocketOptions): EventSocket {
   }
 
   return createReconnectingSocket({
-    url: createSixbEventsWebSocketUrl(options.baseUrl),
+    url: createSixbEventsWebSocketUrl(options.baseUrl ?? options.client?.getConfig().baseUrl),
+    client: options.client,
     reconnect: options.reconnect,
     reconnectDelayMs: options.reconnectDelayMs,
     readyTimeoutMs: options.handshakeTimeoutMs,
