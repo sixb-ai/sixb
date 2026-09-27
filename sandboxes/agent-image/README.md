@@ -130,6 +130,7 @@ sixb-render report.pdf --output-dir previews-2 --first-page 31 --last-page 40
 --last-page    Last page to preview (default: last page)
 --max-pages    Fail if the range is longer, 1–200 (default 30)
 --size         Longest PNG side in pixels, 320–3000 (default 1600)
+--timeout      Seconds allowed per conversion step, 1–900 (default 60)
 ```
 
 It prints the manifest it also writes to `manifest.json`:
@@ -171,13 +172,8 @@ bun sandboxes/agent-image/verify.ts
 `verify.ts` mounts `tests/` into the image and runs them as an arbitrary non-root user with
 networking disabled. It writes, renders, and checks every document format, and exercises OCR, PDF
 tables, Parquet, Chromium, and offline package installs. Its output stays in
-`.local/agent-image/verification` for inspection.
-
-The same checks run as a gated test:
-
-```bash
-SIXB_AGENT_IMAGE_INTEGRATION=1 bun test ./sandboxes/agent-image/tests/image.e2e.ts
-```
+`.local/agent-image/verification` for inspection. The `Agent image` workflow runs it on both
+architectures.
 
 ## Update dependencies
 

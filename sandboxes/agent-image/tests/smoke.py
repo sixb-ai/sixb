@@ -139,6 +139,8 @@ command("sixb-render", str(root / "report.pdf"), "--output-dir", str(root / "lim
 assert not (root / "limited").exists()
 partial = json.loads(command("sixb-render", str(root / "report.pdf"), "--output-dir", str(root / "partial"), "--first-page", "2").stdout)
 assert not partial["complete"] and len(partial["pages"]) == 1
+command("sixb-render", str(root / "report.pdf"), "--output-dir", str(root / "no-time"), "--timeout", "0", ok=False)
+assert not (root / "no-time").exists()
 broken = root / "broken.pptx"
 broken.write_text("not a presentation")
 command("sixb-render", str(broken), "--output-dir", str(root / "broken-preview"), ok=False)

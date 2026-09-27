@@ -37,7 +37,7 @@ COPY --chmod=0644 profile.sh /etc/profile.d/sixb.sh
 # Fail the build rather than publish an image missing a tool the skills rely on.
 RUN for tool in bash node bun python python3 pip pip3 uv pytest ruff git rg jq curl zip unzip \
       7z xz bzip2 patch rsync sqlite3 pandoc tesseract qpdf libreoffice pdftoppm pdfinfo \
-      pdftotext fc-match realpath head tail base64 sixb-render; do \
+      pdftotext fc-match realpath head tail base64 unshare setpriv sixb-render; do \
       command -v "$tool" >/dev/null || { echo "[SixbImage] missing $tool" >&2; exit 1; }; \
     done \
     && mkdir -p /workspace \

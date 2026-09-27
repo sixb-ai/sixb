@@ -23,13 +23,14 @@ Podman on the machine that saves it):
 
 ```bash
 mkdir -p ~/.cache/sixb
-docker pull ghcr.io/sixb-ai/sixb-agent:1.2.0
-docker save ghcr.io/sixb-ai/sixb-agent:1.2.0 -o ~/.cache/sixb/sixb-agent.tar
+docker pull ghcr.io/sixb-ai/sixb-agent:<version>
+docker save ghcr.io/sixb-ai/sixb-agent:<version> -o ~/.cache/sixb/sixb-agent.tar
 ```
 
-A local archive boots offline, with no registry access. Save it on a machine with the same
-architecture as the smolvm host, or add `--platform linux/amd64` / `linux/arm64` to `docker pull`.
-The host that runs sandboxes needs only smolvm and the `.tar`.
+Replace `<version>` with the current [`VERSION`](../agent-image/VERSION). A local archive boots
+offline, with no registry access. Save it on a machine with the same architecture as the smolvm
+host, or add `--platform linux/amd64` / `linux/arm64` to `docker pull`. The host that runs
+sandboxes needs only smolvm and the `.tar`.
 
 ## Use
 
@@ -44,14 +45,14 @@ createSixb({
 ```
 
 Each run boots a microVM from the image, runs the agent's sandbox tools, and destroys it.
-Networking is locked to the sixb gateway — no open internet. Boot time scales with image size: the
-agent image takes about 20 seconds per run on Apple silicon. If the archive is missing, `create()`
-throws a message telling you what to run.
+Networking is locked to the sixb gateway — no open internet. Boot time scales with image size:
+on Apple silicon the agent image takes about 10–20 seconds per run, a slim Node image under 2. If
+the archive is missing, `create()` throws a message telling you what to run.
 
 ## Custom images
 
 Any image works if it has Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+.
-Extend the agent image with `FROM ghcr.io/sixb-ai/sixb-agent:1.2.0`, or use a smaller image for
+Extend the agent image with `FROM ghcr.io/sixb-ai/sixb-agent:<version>`, or use a smaller image for
 faster boots. Run-time installs will not work because egress is locked down. Commands run as the
 image's user, and smolvm mounts `/workspace` owned by root: an image with a non-root `USER` cannot
 write its working directory.
