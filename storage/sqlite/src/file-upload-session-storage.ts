@@ -18,9 +18,6 @@ export class SqliteFileUploadSessionStorage extends DurableFileUploadSessions {
 
 class SqliteFileUploadSessionBackend implements FileUploadSessionPersistenceBackend {
   private readonly persistence: FileUploadSessionPersistence
-  // A concurrent runImmediateTransactionAsync joins the open transaction instead of waiting,
-  // so an awaited read-modify-write would interleave. Chaining keeps each one atomic.
-  private tail: Promise<unknown> = Promise.resolve()
 
   constructor(private readonly db: Database) {
     this.persistence = new SqliteFileUploadSessionPersistence(db)
@@ -31,11 +28,7 @@ class SqliteFileUploadSessionBackend implements FileUploadSessionPersistenceBack
   }
 
   transaction<T>(run: (persistence: FileUploadSessionPersistence) => Promise<T>): Promise<T> {
-    const result = this.tail.then(() =>
-      runImmediateTransactionAsync(this.db, () => run(this.persistence))
-    )
-    this.tail = result.catch(() => undefined)
-    return result
+    return runImmediateTransactionAsync(this.db, () => run(this.persistence))
   }
 }
 
