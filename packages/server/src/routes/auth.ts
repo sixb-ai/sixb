@@ -423,29 +423,25 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
       "/api/auth/session",
       async ({ request }) => {
         const authOptions = resolveAuthOptions(options, request)
-        let session = await host.auth.getSession(request, authOptions)
-        if (!session.authenticated) {
+        const caller = await host.auth.getSession(request, {
+          ...authOptions,
+          credentialSource: "any",
+        })
+        // Access tokens are not sessions; a native client's session has no cookies to renew.
+        if (!caller.authenticated || caller.credentialSource !== "session") {
           return jsonResponse({ authenticated: false as const }, 200)
         }
+        if (caller.session.bearer) {
+          return jsonResponse(authSessionBody(host, caller, caller.session.audience), 200)
+        }
 
-        let applicationAccessAllowed = sessionCanAccessApplication(
-          host,
-          session,
-          authOptions.audience
-        )
-        if (applicationAccessAllowed && hasForegroundSessionActivity(request)) {
-          session = await host.auth.getSession(request, {
-            ...authOptions,
-            sessionActivity: "foreground",
-          })
-          if (!session.authenticated) {
-            return jsonResponse({ authenticated: false as const }, 200)
-          }
-          applicationAccessAllowed = sessionCanAccessApplication(
-            host,
-            session,
-            authOptions.audience
-          )
+        const session =
+          hasForegroundSessionActivity(request) &&
+          sessionCanAccessApplication(host, caller, authOptions.audience)
+            ? await host.auth.getSession(request, { ...authOptions, sessionActivity: "foreground" })
+            : caller
+        if (!session.authenticated) {
+          return jsonResponse({ authenticated: false as const }, 200)
         }
 
         const cookieOptions = host.auth.getCookieOptions(authOptions)
@@ -464,25 +460,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               })
             : null
         return authSessionJsonResponse(
-          {
-            authenticated: true as const,
-            csrfToken: csrf.token,
-            applicationAccess: {
-              allowed: applicationAccessAllowed,
-              audience: authOptions.audience,
-            },
-            user: {
-              id: session.user.id,
-              email: session.user.email,
-              displayName: session.user.displayName,
-              avatarUrl: session.user.avatarUrl,
-              groupIds: [...session.groupIds],
-            },
-            session: {
-              id: session.session.id,
-              expiresAt: toIsoString(session.session.expiresAt),
-            },
-          },
+          { ...authSessionBody(host, session, authOptions.audience), csrfToken: csrf.token },
           renewal?.headers ?? (csrf.setCookie ? [csrf.setCookie] : [])
         )
       },
@@ -1932,6 +1910,25 @@ function resolveSessionCsrfToken(input: {
       expiresAt: input.expiresAt,
       options: input.cookieOptions,
     }),
+  }
+}
+
+function authSessionBody(
+  host: SixbHostView,
+  session: AuthenticatedAuthSession,
+  audience: AuthSessionAudience
+): Omit<AuthenticatedAuthSessionResponse, "csrfToken"> {
+  return {
+    authenticated: true,
+    applicationAccess: { allowed: sessionCanAccessApplication(host, session, audience), audience },
+    user: {
+      id: session.user.id,
+      email: session.user.email,
+      displayName: session.user.displayName,
+      avatarUrl: session.user.avatarUrl,
+      groupIds: [...session.groupIds],
+    },
+    session: { id: session.session.id, expiresAt: toIsoString(session.session.expiresAt) },
   }
 }
 

@@ -4,7 +4,7 @@ The Sixb API streams domain changes, run logs, and agent output over WebSockets.
 
 ## Connect
 
-Connect to the API origin using `wss://` in production. Connections use an authenticated browser session and an allowed browser origin. Bearer tokens and shared-access sessions cannot authenticate WebSockets.
+Connect to the API origin using `wss://` in production. Connections use an authenticated browser session from an allowed browser origin, or a signed-in native client's access token in an `Authorization: Bearer` header. Personal access tokens, service-account tokens, and shared-access sessions cannot authenticate WebSockets.
 
 | Endpoint | Streams | Access |
 | --- | --- | --- |

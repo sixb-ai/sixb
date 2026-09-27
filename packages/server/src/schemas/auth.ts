@@ -275,7 +275,8 @@ export const AuthSessionResponseSchema = z.union([
   }),
   z.object({
     authenticated: z.literal(true),
-    csrfToken: z.string(),
+    /** Browser sessions only: send it back in `x-sixb-csrf` on mutations. */
+    csrfToken: z.string().optional(),
     applicationAccess: z.object({
       allowed: z.boolean(),
       audience: z.enum(["atlas", "app"]),

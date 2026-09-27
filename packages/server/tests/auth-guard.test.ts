@@ -453,6 +453,15 @@ describe("server auth guard", () => {
     }
     const cliSession = listed.sessions.find((entry) => entry.clientName === "sixb CLI on alex-mbp")
     expect(cliSession).toMatchObject({ current: true })
+    const whoami = await bearer(token.accessToken, "/api/auth/session")
+    const identity = (await whoami.json()) as Record<string, unknown>
+    expect(identity).toMatchObject({
+      authenticated: true,
+      user: { id: "usr_1", email: "ava@acme.com" },
+      session: { id: cliSession?.id },
+    })
+    expect(identity.csrfToken).toBeUndefined()
+
     const created = await app.fetch(
       new Request("http://localhost/api/auth/access-tokens", {
         method: "POST",

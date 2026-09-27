@@ -457,7 +457,7 @@ export async function requireSixbBrowserAuthSession(
   const { data } = await getAuthSession({ throwOnError: true })
 
   if (data.authenticated) {
-    controller.setCsrfToken(data.csrfToken)
+    controller.setCsrfToken(data.csrfToken ?? null)
     return data
   }
 

@@ -1480,13 +1480,7 @@
                           "additionalProperties": false
                         }
                       },
-                      "required": [
-                        "authenticated",
-                        "csrfToken",
-                        "applicationAccess",
-                        "user",
-                        "session"
-                      ],
+                      "required": ["authenticated", "applicationAccess", "user", "session"],
                       "additionalProperties": false
                     }
                   ]
