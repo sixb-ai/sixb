@@ -6,7 +6,7 @@ import {
 } from "@sixb/core"
 import { ObjectNotFoundError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -65,7 +65,7 @@ export function registerShareGrantRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Issue a shared-access grant",
           tags: [OPENAPI_TAGS.sharedAccess.name],
           operationId: "issueSharedAccessGrant",
-          security: bearerSecurityRequirement("issueSharedAccessGrant"),
+          security: accessTokenSecurityRequirement("issueSharedAccessGrant"),
         },
       }
     )
@@ -109,7 +109,7 @@ export function registerShareGrantRoutes(app: Elysia, _host: SixbHostView) {
           summary: "List shared-access grants",
           tags: [OPENAPI_TAGS.sharedAccess.name],
           operationId: "listSharedAccessGrants",
-          security: bearerSecurityRequirement("listSharedAccessGrants"),
+          security: accessTokenSecurityRequirement("listSharedAccessGrants"),
         },
       }
     )
@@ -148,7 +148,7 @@ export function registerShareGrantRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Revoke a shared-access grant",
           tags: [OPENAPI_TAGS.sharedAccess.name],
           operationId: "revokeSharedAccessGrant",
-          security: bearerSecurityRequirement("revokeSharedAccessGrant"),
+          security: accessTokenSecurityRequirement("revokeSharedAccessGrant"),
         },
       }
     )

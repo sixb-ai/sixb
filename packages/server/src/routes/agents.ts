@@ -13,7 +13,7 @@ import {
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { type RequestAuthState, requestAuthState, requireRequestSixb } from "../auth/scope"
 import {
   createFileContentResponse,
@@ -21,7 +21,7 @@ import {
   fileContentHeadResponses,
   resolveFileRefAtPath,
 } from "../files/content"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import {
   AgentDescriptorSchema,
@@ -388,7 +388,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Create an agent thread",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "createAgentThread",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -461,7 +461,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
             "Explicitly recreate an unavailable or uncertain workspace without deleting its previous state",
           operationId: "recreateAgentThreadSandbox",
           tags: [OPENAPI_TAGS.agentThreads.name],
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -553,7 +553,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get agent message file content",
           tags: ["Agents"],
           operationId: "getAgentMessageFileContent",
-          security: bearerSecurityRequirement("getAgentMessageFileContent"),
+          security: accessTokenSecurityRequirement("getAgentMessageFileContent"),
           responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
@@ -568,7 +568,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Head agent message file content",
           tags: ["Agents"],
           operationId: "headAgentMessageFileContent",
-          security: bearerSecurityRequirement("headAgentMessageFileContent"),
+          security: accessTokenSecurityRequirement("headAgentMessageFileContent"),
           responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }
@@ -626,7 +626,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Post an agent thread message",
           tags: [OPENAPI_TAGS.agentThreads.name],
           operationId: "postAgentThreadMessage",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -721,7 +721,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Cancel an agent thread's active run",
           tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "cancelAgentRun",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -776,7 +776,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           summary: "Retry a failed agent run",
           tags: [OPENAPI_TAGS.agentRuns.name],
           operationId: "retryAgentRun",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

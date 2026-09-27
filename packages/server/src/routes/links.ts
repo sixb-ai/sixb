@@ -1,6 +1,6 @@
 import type { SixbHostView } from "@sixb/core"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
@@ -44,7 +44,7 @@ export function registerLinkRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Create or update object link",
           tags: [OPENAPI_TAGS.links.name],
           operationId: "upsertObjectLink",
-          security: bearerSecurityRequirement("upsertObjectLink"),
+          security: accessTokenSecurityRequirement("upsertObjectLink"),
         },
       }
     )
@@ -82,7 +82,7 @@ export function registerLinkRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Remove object link",
           tags: [OPENAPI_TAGS.links.name],
           operationId: "removeObjectLink",
-          security: bearerSecurityRequirement("removeObjectLink"),
+          security: accessTokenSecurityRequirement("removeObjectLink"),
         },
       }
     )

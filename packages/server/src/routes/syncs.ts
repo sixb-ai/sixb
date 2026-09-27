@@ -2,7 +2,7 @@ import type { SixbHostView, SyncDefinition } from "@sixb/core"
 import type { SyncRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -210,7 +210,7 @@ export function registerSyncRoutes(app: Elysia, host: SixbHostView) {
           summary: "Request a sync run",
           tags: [OPENAPI_TAGS.syncRuns.name],
           operationId: "requestSyncRun",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

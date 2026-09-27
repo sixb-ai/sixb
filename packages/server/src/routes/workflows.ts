@@ -21,7 +21,7 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requestAuthState, requireRequestSixb } from "../auth/scope"
 import {
   createContextualFileContentResponse,
@@ -29,7 +29,7 @@ import {
   fileContentHeadResponses,
   handleFileContentQueryValidationError,
 } from "../files/content"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import { FileContentQuerySchema } from "../schemas/files"
@@ -580,7 +580,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "List registered workflows",
           tags: [OPENAPI_TAGS.workflows.name],
           operationId: "listWorkflows",
-          security: bearerSecurityRequirement("listWorkflows"),
+          security: accessTokenSecurityRequirement("listWorkflows"),
         },
       }
     )
@@ -606,7 +606,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get workflow metadata",
           tags: [OPENAPI_TAGS.workflows.name],
           operationId: "getWorkflow",
-          security: bearerSecurityRequirement("getWorkflow"),
+          security: accessTokenSecurityRequirement("getWorkflow"),
         },
       }
     )
@@ -776,7 +776,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Submit a workflow intervention response",
           tags: [OPENAPI_TAGS.workflowInterventions.name],
           operationId: "submitWorkflowIntervention",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -904,7 +904,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Cancel a workflow intervention",
           tags: [OPENAPI_TAGS.workflowInterventions.name],
           operationId: "cancelWorkflowIntervention",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -952,7 +952,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "List workflow run history",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "listWorkflowRuns",
-          security: bearerSecurityRequirement("listWorkflowRuns"),
+          security: accessTokenSecurityRequirement("listWorkflowRuns"),
         },
       }
     )
@@ -1007,7 +1007,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get workflow run detail",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "getWorkflowRun",
-          security: bearerSecurityRequirement("getWorkflowRun"),
+          security: accessTokenSecurityRequirement("getWorkflowRun"),
         },
       }
     )
@@ -1054,7 +1054,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get workflow agent node execution detail",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "getWorkflowAgentNodeExecution",
-          security: bearerSecurityRequirement("getWorkflowAgentNodeExecution"),
+          security: accessTokenSecurityRequirement("getWorkflowAgentNodeExecution"),
         },
       }
     )
@@ -1229,7 +1229,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Cancel a workflow run",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "cancelWorkflowRun",
-          security: bearerSecurityRequirement("cancelWorkflowRun"),
+          security: accessTokenSecurityRequirement("cancelWorkflowRun"),
         },
       }
     )
@@ -1244,7 +1244,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get workflow run file content",
           tags: ["Workflows"],
           operationId: "getWorkflowRunFileContent",
-          security: bearerSecurityRequirement("getWorkflowRunFileContent"),
+          security: accessTokenSecurityRequirement("getWorkflowRunFileContent"),
           responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
@@ -1260,7 +1260,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Head workflow run file content",
           tags: ["Workflows"],
           operationId: "headWorkflowRunFileContent",
-          security: bearerSecurityRequirement("headWorkflowRunFileContent"),
+          security: accessTokenSecurityRequirement("headWorkflowRunFileContent"),
           responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }
@@ -1276,7 +1276,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get workflow node run file content",
           tags: ["Workflows"],
           operationId: "getWorkflowNodeRunFileContent",
-          security: bearerSecurityRequirement("getWorkflowNodeRunFileContent"),
+          security: accessTokenSecurityRequirement("getWorkflowNodeRunFileContent"),
           responses: fileContentGetResponses({ optionalStorage: true }),
         },
       }
@@ -1292,7 +1292,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Head workflow node run file content",
           tags: ["Workflows"],
           operationId: "headWorkflowNodeRunFileContent",
-          security: bearerSecurityRequirement("headWorkflowNodeRunFileContent"),
+          security: accessTokenSecurityRequirement("headWorkflowNodeRunFileContent"),
           responses: fileContentHeadResponses({ optionalStorage: true }),
         },
       }
@@ -1340,7 +1340,7 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
           summary: "Request a workflow run",
           tags: [OPENAPI_TAGS.workflowRuns.name],
           operationId: "requestWorkflowRun",
-          security: bearerSecurityRequirement("requestWorkflowRun"),
+          security: accessTokenSecurityRequirement("requestWorkflowRun"),
         },
       }
     )

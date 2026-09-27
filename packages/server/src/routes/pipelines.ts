@@ -2,7 +2,7 @@ import type { PipelineDefinition, PipelineStepExecutor, SixbHostView } from "@si
 import type { PipelineRunRecord, PipelineStepRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { requireRequestSixb } from "../auth/scope"
-import { SIXB_CSRF_SECURITY_REQUIREMENT } from "../openapi/security"
+import { SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT } from "../openapi/security"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
 import {
@@ -291,7 +291,7 @@ export function registerPipelineRoutes(app: Elysia, host: SixbHostView) {
           summary: "Request a pipeline run",
           tags: [OPENAPI_TAGS.pipelineRuns.name],
           operationId: "requestPipelineRun",
-          security: SIXB_CSRF_SECURITY_REQUIREMENT,
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

@@ -1,7 +1,7 @@
 import type { SixbHostView } from "@sixb/core"
 import type { TimeseriesPoint } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema, SuccessResponseSchema } from "../schemas/common"
@@ -65,7 +65,7 @@ export function registerTelemetryRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Append telemetry point",
           tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "appendTelemetry",
-          security: bearerSecurityRequirement("appendTelemetry"),
+          security: accessTokenSecurityRequirement("appendTelemetry"),
         },
       }
     )
@@ -106,7 +106,7 @@ export function registerTelemetryRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Get bulk telemetry history",
           tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "getBulkTelemetryHistory",
-          security: bearerSecurityRequirement("getBulkTelemetryHistory"),
+          security: accessTokenSecurityRequirement("getBulkTelemetryHistory"),
         },
       }
     )
@@ -148,7 +148,7 @@ export function registerTelemetryRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Get telemetry history",
           tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "getTelemetryHistory",
-          security: bearerSecurityRequirement("getTelemetryHistory"),
+          security: accessTokenSecurityRequirement("getTelemetryHistory"),
         },
       }
     )
@@ -189,7 +189,7 @@ export function registerTelemetryRoutes(app: Elysia, _host: SixbHostView) {
           summary: "Get latest telemetry point",
           tags: [OPENAPI_TAGS.telemetry.name],
           operationId: "getLatestTelemetry",
-          security: bearerSecurityRequirement("getLatestTelemetry"),
+          security: accessTokenSecurityRequirement("getLatestTelemetry"),
         },
       }
     )

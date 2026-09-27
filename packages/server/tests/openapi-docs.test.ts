@@ -11,6 +11,7 @@ import {
 } from "@sixb/core"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
 import { ACCESS_TOKEN_ROUTES } from "../src/auth/access-token-boundary"
+import { classifyRoute } from "../src/auth/public-routes"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
 
@@ -40,6 +41,7 @@ interface OpenApiDocument {
     readonly securitySchemes?: Record<string, unknown>
   }
   readonly paths?: Record<string, Record<string, OpenApiOperation>>
+  readonly security?: unknown
   readonly tags?: readonly { readonly name?: string; readonly description?: string }[]
 }
 
@@ -94,12 +96,15 @@ describe("OpenAPI docs", () => {
       description:
         "Required for cookie-authenticated mutating requests. Use the csrfToken returned by the corresponding session endpoint.",
     })
-    expect(spec.components?.securitySchemes?.sixbBearer).toEqual({
+    expect(spec.components?.securitySchemes?.sixbSession).toMatchObject({
+      type: "http",
+      scheme: "bearer",
+      bearerFormat: "Sixb session access token",
+    })
+    expect(spec.components?.securitySchemes?.sixbAccessToken).toMatchObject({
       type: "http",
       scheme: "bearer",
       bearerFormat: "Sixb access token",
-      description:
-        "Use a Sixb personal access token or service-account token. Bearer tokens are accepted only on routes that explicitly document this scheme.",
     })
     expect(spec.components?.securitySchemes?.sixbSharedGrant).toEqual({
       type: "apiKey",
@@ -135,8 +140,7 @@ describe("OpenAPI docs", () => {
       "Connector Connection Runs",
     ])
 
-    const csrfOnlyRoutes = [
-      ["post", "/api/auth/sign-out"],
+    const sessionMutationRoutes = [
       ["post", "/api/auth/invitations"],
       ["post", "/api/auth/invitations/{invitationId}/revoke"],
       ["patch", "/api/auth/members/{userId}/groups"],
@@ -162,8 +166,11 @@ describe("OpenAPI docs", () => {
       // The derived ACCESS_TOKEN_ROUTES loop below covers them.
     ] as const
 
-    for (const [method, path] of csrfOnlyRoutes) {
-      expect(spec.paths?.[path]?.[method]?.security).toEqual([{ sixbCsrf: [] }])
+    for (const [method, path] of sessionMutationRoutes) {
+      expect(spec.paths?.[path]?.[method]?.security).toEqual([
+        { sixbCsrf: [] },
+        { sixbSession: [] },
+      ])
     }
 
     // The bearer boundary is the single source of truth. Every route in
@@ -178,8 +185,8 @@ describe("OpenAPI docs", () => {
       const path = toOpenApiPath(route.path)
       expectedBearer.add(`${method} ${path}`)
       const expected: Record<string, readonly unknown[]>[] = isCsrfExemptMethod(route.method)
-        ? [{ sixbBearer: [] }]
-        : [{ sixbCsrf: [] }, { sixbBearer: [] }]
+        ? [{ sixbAccessToken: [] }, { sixbSession: [] }]
+        : [{ sixbCsrf: [] }, { sixbAccessToken: [] }, { sixbSession: [] }]
       if (route.sharedSession) {
         expected.push(
           isCsrfExemptMethod(route.method)
@@ -194,14 +201,35 @@ describe("OpenAPI docs", () => {
     for (const [path, operations] of Object.entries(spec.paths ?? {})) {
       for (const [method, operation] of Object.entries(operations)) {
         const requirements = (operation.security ?? []) as { readonly [scheme: string]: unknown }[]
-        if (requirements.some((requirement) => "sixbBearer" in requirement)) {
+        if (requirements.some((requirement) => "sixbAccessToken" in requirement)) {
           documentedBearer.add(`${method} ${path}`)
         }
       }
     }
     expect([...documentedBearer].sort()).toEqual([...expectedBearer].sort())
+  })
 
-    expect(spec.paths?.["/api/auth/invitations"]?.get?.security).toBeUndefined()
+  // Reproduce: drop the global `security` default in createSixbApi, or a public route's
+  // `security: []`; the protected or public operation then documents the wrong credentials.
+  test("documents a session on every protected operation and nothing on public ones", async () => {
+    const spec = await fetchDocsJsonWithoutWarnings(createDocsApi())
+    for (const [path, operations] of Object.entries(spec.paths ?? {})) {
+      for (const [method, operation] of Object.entries(operations)) {
+        if (!["get", "post", "put", "patch", "delete", "head"].includes(method)) continue
+        const url = `http://localhost${path.replace(/\{[^}]+\}/g, "x")}`
+        const route = classifyRoute(new Request(url, { method: method.toUpperCase() }))
+        const security = operation.security ?? spec.security
+        // A public operation must allow no credentials: `[]`, or `{}` beside optional ones.
+        const anonymous =
+          Array.isArray(security) &&
+          (security.length === 0 ||
+            security.some((requirement) => Object.keys(requirement as object).length === 0))
+        expect(anonymous, `${method} ${path}`).toBe(route.kind === "public")
+        if (route.kind !== "public") {
+          expect(security, `${method} ${path}`).toContainEqual({ sixbSession: [] })
+        }
+      }
+    }
   })
 
   test("documents contextual file content responses", async () => {

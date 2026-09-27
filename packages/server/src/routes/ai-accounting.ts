@@ -10,7 +10,7 @@ import type {
 } from "@sixb/core/storage"
 import { AiLimitStorageError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import type { RequestAuthState } from "../auth/scope"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -240,7 +240,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "Get project AI usage and cost analytics",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "getAiAccountingOverview",
-        security: bearerSecurityRequirement("getAiAccountingOverview"),
+        security: accessTokenSecurityRequirement("getAiAccountingOverview"),
       },
     }
   )
@@ -288,7 +288,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "List project AI model-call accounting records",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "listAiModelCalls",
-        security: bearerSecurityRequirement("listAiModelCalls"),
+        security: accessTokenSecurityRequirement("listAiModelCalls"),
       },
     }
   )
@@ -326,7 +326,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "List project AI usage-limit policies",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "listAiLimitPolicies",
-        security: bearerSecurityRequirement("listAiLimitPolicies"),
+        security: accessTokenSecurityRequirement("listAiLimitPolicies"),
       },
     }
   )
@@ -365,7 +365,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "Get current project AI usage-limit status",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "getAiLimitStatus",
-        security: bearerSecurityRequirement("getAiLimitStatus"),
+        security: accessTokenSecurityRequirement("getAiLimitStatus"),
       },
     }
   )
@@ -395,7 +395,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
           "Lists registered groups and auth principals available for AI usage-limit policies.",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "getAiLimitSubjectOptions",
-        security: bearerSecurityRequirement("getAiLimitSubjectOptions"),
+        security: accessTokenSecurityRequirement("getAiLimitSubjectOptions"),
       },
     }
   )
@@ -429,7 +429,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "Create an AI usage-limit policy",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "createAiLimitPolicy",
-        security: bearerSecurityRequirement("createAiLimitPolicy"),
+        security: accessTokenSecurityRequirement("createAiLimitPolicy"),
       },
     }
   )
@@ -467,7 +467,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "Update an AI usage-limit policy",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "updateAiLimitPolicy",
-        security: bearerSecurityRequirement("updateAiLimitPolicy"),
+        security: accessTokenSecurityRequirement("updateAiLimitPolicy"),
       },
     }
   )
@@ -505,7 +505,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "Delete an AI usage-limit policy",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "deleteAiLimitPolicy",
-        security: bearerSecurityRequirement("deleteAiLimitPolicy"),
+        security: accessTokenSecurityRequirement("deleteAiLimitPolicy"),
       },
     }
   )
@@ -549,7 +549,7 @@ export function registerAiAccountingRoutes(app: Elysia, host: SixbHostView) {
         summary: "List AI model calls grouped by initiating execution",
         tags: [OPENAPI_TAGS.aiAccounting.name],
         operationId: "listAiModelCallGroups",
-        security: bearerSecurityRequirement("listAiModelCallGroups"),
+        security: accessTokenSecurityRequirement("listAiModelCallGroups"),
       },
     }
   )

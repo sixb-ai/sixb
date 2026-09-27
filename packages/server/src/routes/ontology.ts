@@ -2,7 +2,7 @@ import type { Property, SixbHostView, ValueType } from "@sixb/core"
 import { resolvePropertyQueryCapabilities } from "@sixb/core/internal/ontology"
 import type { Sixb } from "@sixb/core/internal/request-execution"
 import type { Elysia } from "elysia"
-import { bearerSecurityRequirement } from "../auth/access-token-boundary"
+import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -124,7 +124,7 @@ export function registerOntologyRoutes(app: Elysia, host: SixbHostView) {
           summary: "List registered object types",
           tags: [OPENAPI_TAGS.ontology.name],
           operationId: "listObjectTypes",
-          security: bearerSecurityRequirement("listObjectTypes"),
+          security: accessTokenSecurityRequirement("listObjectTypes"),
         },
       }
     )
@@ -148,7 +148,7 @@ export function registerOntologyRoutes(app: Elysia, host: SixbHostView) {
           summary: "Get object type definition",
           tags: [OPENAPI_TAGS.ontology.name],
           operationId: "getObjectType",
-          security: bearerSecurityRequirement("getObjectType"),
+          security: accessTokenSecurityRequirement("getObjectType"),
         },
       }
     )

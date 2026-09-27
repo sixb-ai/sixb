@@ -42,10 +42,13 @@ import {
   type SixbSharedAccessOptions,
 } from "./auth/shared-access"
 import {
-  SIXB_BEARER_SECURITY_SCHEME,
-  SIXB_BEARER_SECURITY_SCHEME_ID,
+  SIXB_ACCESS_TOKEN_SECURITY_SCHEME,
+  SIXB_ACCESS_TOKEN_SECURITY_SCHEME_ID,
   SIXB_CSRF_SECURITY_SCHEME,
   SIXB_CSRF_SECURITY_SCHEME_ID,
+  SIXB_SESSION_SECURITY_REQUIREMENT,
+  SIXB_SESSION_SECURITY_SCHEME,
+  SIXB_SESSION_SECURITY_SCHEME_ID,
   SIXB_SHARED_GRANT_SECURITY_SCHEME,
   SIXB_SHARED_GRANT_SECURITY_SCHEME_ID,
 } from "./openapi/security"
@@ -393,11 +396,14 @@ export function createSixbApi(server: SixbServer) {
         components: {
           securitySchemes: {
             [SIXB_CSRF_SECURITY_SCHEME_ID]: SIXB_CSRF_SECURITY_SCHEME,
-            [SIXB_BEARER_SECURITY_SCHEME_ID]: SIXB_BEARER_SECURITY_SCHEME,
+            [SIXB_SESSION_SECURITY_SCHEME_ID]: SIXB_SESSION_SECURITY_SCHEME,
+            [SIXB_ACCESS_TOKEN_SECURITY_SCHEME_ID]: SIXB_ACCESS_TOKEN_SECURITY_SCHEME,
             [SIXB_SHARED_GRANT_SECURITY_SCHEME_ID]: SIXB_SHARED_GRANT_SECURITY_SCHEME,
           },
           schemas: ObjectQueryOpenApiSchemas,
         },
+        // Every operation needs a session unless it says otherwise; public ones declare `[]`.
+        security: SIXB_SESSION_SECURITY_REQUIREMENT,
         tags: OPENAPI_TAG_METADATA,
       },
       swagger: {
