@@ -212,4 +212,5 @@ ghcr.io/sixb-ai/sixb-agent:<version>-amd64
 ghcr.io/sixb-ai/sixb-agent:<version>-arm64
 ```
 
-A published version is never overwritten. A merge without a `VERSION` bump only verifies.
+A published version is never overwritten. A merge without a `VERSION` bump only verifies. Each
+architecture is first pushed as `staging-<commit>-<arch>`; those tags are not a supported reference.
