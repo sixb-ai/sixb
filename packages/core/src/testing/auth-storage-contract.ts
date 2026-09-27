@@ -37,6 +37,24 @@ function sessionInput(
   }
 }
 
+function bearerSessionInput(id: string) {
+  return {
+    id,
+    projectId,
+    userId: "usr_1",
+    strategyId: "magic-link",
+    audience: "atlas" as const,
+    tokenHash: "access-1",
+    createdAt: at("2026-05-14T10:00:00.000Z"),
+    expiresAt: at("2026-06-14T10:00:00.000Z"),
+    bearer: {
+      clientName: "sixb CLI",
+      accessExpiresAt: at("2026-05-14T10:15:00.000Z"),
+      refreshTokenHash: "refresh-1",
+    },
+  }
+}
+
 async function expectAuthError(
   promise: Promise<unknown>,
   code: AuthStorageErrorCode
@@ -1308,11 +1326,11 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("authorizes a device and atomically creates its one-time access token", async () => {
+    test("authorizes a device and atomically starts its bearer session", async () => {
       await withStorage(async (storage) => {
         await createUser(storage)
         await storage.sessions.create({
-          id: "ses_device",
+          id: "ses_browser",
           projectId,
           userId: "usr_1",
           strategyId: "magic-link",
@@ -1327,70 +1345,146 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           deviceCodeHash: "device-code-hash",
           userCode: "BCDF-HJKM",
           clientName: "sixb CLI",
-          tokenName: "codex",
-          tokenExpiresAt: at("2026-08-12T10:00:00.000Z"),
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-14T10:10:00.000Z"),
         })
 
         await expect(
           storage.deviceAuthorizations.getByUserCode({ projectId, userCode: "BCDF-HJKM" })
-        ).resolves.toMatchObject({ id: "dva_1", status: "pending" })
+        ).resolves.toMatchObject({ id: "dva_1", status: "pending", clientName: "sixb CLI" })
         await storage.deviceAuthorizations.approve({
           projectId,
           id: "dva_1",
           userId: "usr_1",
-          sessionId: "ses_device",
+          sessionId: "ses_browser",
           approvedAt: at("2026-05-14T10:01:00.000Z"),
         })
 
-        const completed = await storage.completeDeviceAuthorization({
-          projectId,
-          id: "dva_1",
-          deviceCodeHash: "device-code-hash",
-          completedAt: at("2026-05-14T10:02:00.000Z"),
-          accessToken: {
-            id: "tok_device",
-            projectId,
-            name: "codex",
-            kind: "personal",
-            subject: { type: "user", id: "usr_1" },
-            tokenHash: "access-token-hash",
-            createdByPrincipal: { type: "user", id: "usr_1" },
-            createdBySessionId: "ses_device",
-            createdAt: at("2026-05-14T10:02:00.000Z"),
-            expiresAt: at("2026-08-12T10:00:00.000Z"),
-          },
-        })
-
-        expect(completed.authorization).toMatchObject({ status: "consumed" })
-        expect(completed.accessToken).toMatchObject({
-          id: "tok_device",
-          subject: { type: "user", id: "usr_1" },
-        })
-        await expectAuthError(
+        const complete = (id: string) =>
           storage.completeDeviceAuthorization({
             projectId,
             id: "dva_1",
             deviceCodeHash: "device-code-hash",
-            completedAt: at("2026-05-14T10:03:00.000Z"),
-            accessToken: {
-              id: "tok_device_2",
-              projectId,
-              name: "codex",
-              kind: "personal",
-              subject: { type: "user", id: "usr_1" },
-              tokenHash: "access-token-hash-2",
-              createdBySessionId: "ses_device",
-              createdAt: at("2026-05-14T10:03:00.000Z"),
-              expiresAt: at("2026-08-12T10:00:00.000Z"),
-            },
-          }),
-          "invalid_device_authorization"
-        )
+            completedAt: at("2026-05-14T10:02:00.000Z"),
+            session: bearerSessionInput(id),
+          })
+        const completed = await complete("ses_cli")
+
+        expect(completed.authorization).toMatchObject({ status: "consumed" })
+        expect(completed.session).toMatchObject({
+          id: "ses_cli",
+          userId: "usr_1",
+          bearer: { clientName: "sixb CLI", refreshTokenHash: "refresh-1" },
+        })
+        await expectAuthError(complete("ses_cli_2"), "invalid_device_authorization")
+        await expect(storage.sessions.getById({ projectId, id: "ses_cli_2" })).resolves.toBeNull()
+      })
+    })
+
+    test("keeps bearer and cookie session credentials apart", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.sessions.create(bearerSessionInput("ses_cli"))
+        await storage.sessions.create({
+          ...bearerSessionInput("ses_cookie"),
+          tokenHash: "cookie-hash",
+          bearer: undefined,
+        })
+        const now = at("2026-05-14T10:05:00.000Z")
+
         await expect(
-          storage.accessTokens.getById({ projectId, id: "tok_device_2" })
+          storage.sessions.findValidByAccessTokenHash({
+            projectId,
+            id: "ses_cli",
+            tokenHash: "access-1",
+            now,
+          })
+        ).resolves.toMatchObject({ id: "ses_cli" })
+        // A bearer access token never works as a cookie secret, and a cookie never as a token.
+        await expect(
+          storage.sessions.findValidByTokenHash({
+            projectId,
+            id: "ses_cli",
+            audience: "atlas",
+            tokenHash: "access-1",
+            now,
+          })
         ).resolves.toBeNull()
+        await expect(
+          storage.sessions.findValidByAccessTokenHash({
+            projectId,
+            id: "ses_cookie",
+            tokenHash: "cookie-hash",
+            now,
+          })
+        ).resolves.toBeNull()
+        // The access token expires before its session.
+        await expect(
+          storage.sessions.findValidByAccessTokenHash({
+            projectId,
+            id: "ses_cli",
+            tokenHash: "access-1",
+            now: at("2026-05-14T10:15:00.000Z"),
+          })
+        ).resolves.toBeNull()
+      })
+    })
+
+    test("rotates refresh tokens, tolerates a lost response, and revokes on reuse", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.sessions.create({
+          ...bearerSessionInput("ses_cli"),
+          absoluteExpiresAt: at("2026-06-20T00:00:00.000Z"),
+        })
+        const rotate = (refreshTokenHash: string, now: string, generation: number) =>
+          storage.sessions.rotateRefreshToken({
+            projectId,
+            id: "ses_cli",
+            refreshTokenHash,
+            now: at(now),
+            reuseGraceMs: 60_000,
+            next: {
+              tokenHash: `access-${generation}`,
+              accessExpiresAt: new Date(at(now).getTime() + 15 * 60_000),
+              refreshTokenHash: `refresh-${generation}`,
+              expiresAt: at("2026-07-01T00:00:00.000Z"),
+            },
+          })
+
+        const rotated = await rotate("refresh-1", "2026-05-15T10:00:00.000Z", 2)
+        expect(rotated).toMatchObject({
+          status: "rotated",
+          session: {
+            tokenHash: "access-2",
+            bearer: { refreshTokenHash: "refresh-2", previousRefreshTokenHash: "refresh-1" },
+          },
+        })
+        // The idle deadline moves, but never past the absolute one.
+        expect(rotated.status === "rotated" && rotated.session.expiresAt.toISOString()).toBe(
+          "2026-06-20T00:00:00.000Z"
+        )
+        // The response was lost; the client retries with the token it still has.
+        await expect(rotate("refresh-1", "2026-05-15T10:00:30.000Z", 3)).resolves.toMatchObject({
+          status: "rotated",
+          session: { bearer: { refreshTokenHash: "refresh-3" } },
+        })
+        // An unknown token fails without touching the session.
+        await expect(rotate("guess", "2026-05-15T10:01:00.000Z", 4)).resolves.toEqual({
+          status: "invalid",
+        })
+        expect((await storage.sessions.getById({ projectId, id: "ses_cli" }))?.revokedAt).toBe(
+          undefined
+        )
+        // A replaced token after the grace window means a copy is in use: end the session.
+        await expect(rotate("refresh-2", "2026-05-15T10:05:00.000Z", 4)).resolves.toEqual({
+          status: "reused",
+        })
+        await expect(rotate("refresh-3", "2026-05-15T10:05:01.000Z", 5)).resolves.toEqual({
+          status: "invalid",
+        })
+        const session = await storage.sessions.getById({ projectId, id: "ses_cli" })
+        expect(session?.revokedAt).toBeInstanceOf(Date)
       })
     })
 

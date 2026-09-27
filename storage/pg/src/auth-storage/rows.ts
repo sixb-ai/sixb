@@ -76,6 +76,11 @@ export interface PgAuthSessionRow {
   readonly last_seen_at: PgDate | null
   readonly user_agent: string | null
   readonly ip_address: string | null
+  readonly client_name: string | null
+  readonly access_expires_at: PgDate | null
+  readonly refresh_token_hash: string | null
+  readonly previous_refresh_token_hash: string | null
+  readonly refreshed_at: PgDate | null
 }
 
 export interface PgAuthAccessTokenRow {
@@ -157,8 +162,6 @@ export interface PgAuthDeviceAuthorizationRow {
   readonly device_code_hash: string
   readonly user_code: string
   readonly client_name: string
-  readonly token_name: string
-  readonly token_expires_at: PgDate
   readonly status: DeviceAuthorizationRecord["status"]
   readonly approved_user_id: string | null
   readonly approved_session_id: string | null
@@ -235,6 +238,16 @@ export function rowToSessionRecord(row: PgAuthSessionRow): SessionRecord {
     lastSeenAt: row.last_seen_at ? toDate(row.last_seen_at) : undefined,
     userAgent: row.user_agent ?? undefined,
     ipAddress: row.ip_address ?? undefined,
+    bearer:
+      row.refresh_token_hash !== null && row.client_name !== null && row.access_expires_at !== null
+        ? {
+            clientName: row.client_name,
+            accessExpiresAt: toDate(row.access_expires_at),
+            refreshTokenHash: row.refresh_token_hash,
+            previousRefreshTokenHash: row.previous_refresh_token_hash ?? undefined,
+            refreshedAt: row.refreshed_at ? toDate(row.refreshed_at) : undefined,
+          }
+        : undefined,
   }
 }
 
@@ -331,8 +344,6 @@ export function rowToDeviceAuthorizationRecord(
     deviceCodeHash: row.device_code_hash,
     userCode: row.user_code,
     clientName: row.client_name,
-    tokenName: row.token_name,
-    tokenExpiresAt: toDate(row.token_expires_at),
     status: row.status,
     approvedUserId: row.approved_user_id ?? undefined,
     approvedSessionId: row.approved_session_id ?? undefined,

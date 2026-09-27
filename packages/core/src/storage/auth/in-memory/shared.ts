@@ -320,6 +320,13 @@ export function createSessionRecord(
     absoluteExpiresAt: input.absoluteExpiresAt ? cloneDate(input.absoluteExpiresAt) : undefined,
     userAgent: input.userAgent,
     ipAddress: input.ipAddress,
+    bearer: input.bearer
+      ? {
+          clientName: assertNonEmpty(input.bearer.clientName, "Session client name"),
+          accessExpiresAt: cloneDate(input.bearer.accessExpiresAt),
+          refreshTokenHash: assertNonEmpty(input.bearer.refreshTokenHash, "Refresh token hash"),
+        }
+      : undefined,
   }
 
   state.sessions.set(sessionKey(projectId, id), cloneRecord(session))

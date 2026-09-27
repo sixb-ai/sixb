@@ -33,9 +33,9 @@ export class SqliteAuthDeviceAuthorizationStore implements AuthDeviceAuthorizati
         this.db
           .query(`
           INSERT INTO auth_device_authorizations (
-            project_id, id, device_code_hash, user_code, client_name, token_name,
-            token_expires_at, status, created_at, expires_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+            project_id, id, device_code_hash, user_code, client_name, status, created_at,
+            expires_at
+          ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
         `)
           .run(
             assertNonEmpty(input.projectId, "Project id"),
@@ -43,8 +43,6 @@ export class SqliteAuthDeviceAuthorizationStore implements AuthDeviceAuthorizati
             assertNonEmpty(input.deviceCodeHash, "Device code hash"),
             assertNonEmpty(input.userCode, "User code"),
             assertNonEmpty(input.clientName, "Client name"),
-            assertNonEmpty(input.tokenName, "Token name"),
-            toIso(input.tokenExpiresAt),
             toIso(input.createdAt),
             toIso(input.expiresAt)
           )

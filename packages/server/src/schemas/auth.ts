@@ -299,8 +299,20 @@ export const AuthSignOutResponseSchema = z.object({
 })
 
 export const CreateDeviceAuthorizationBodySchema = z.object({
+  /** Shown to the approving user and on their sessions list, such as "sixb CLI on alex-mbp". */
   clientName: z.string().trim().min(1).max(100),
-  tokenName: z.string().trim().min(1).max(100),
+})
+
+/** A native client's session tokens. Send `accessToken` as a Bearer token until `expiresIn` runs out. */
+export const BearerSessionTokensSchema = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  /** Seconds until the access token expires. */
+  expiresIn: z.number(),
+})
+
+export const RefreshAuthSessionBodySchema = z.object({
+  refreshToken: z.string().min(1),
 })
 
 export const CreateDeviceAuthorizationResponseSchema = z.object({
@@ -320,7 +332,7 @@ export const ExchangeDeviceAuthorizationResponseSchema = z.union([
   z.object({ status: z.literal("pending") }),
   z.object({ status: z.literal("denied") }),
   z.object({ status: z.literal("expired") }),
-  z.object({ status: z.literal("approved"), accessToken: z.string() }),
+  BearerSessionTokensSchema.extend({ status: z.literal("approved") }),
 ])
 
 export const DeviceAuthorizationDecisionBodySchema = z.object({
@@ -338,6 +350,8 @@ export const AuthSessionSummarySchema = z.object({
   lastSeenAt: z.string().optional(),
   userAgent: z.string().optional(),
   ipAddress: z.string().optional(),
+  /** Set for native clients, such as the CLI. */
+  clientName: z.string().optional(),
 })
 
 export const ListAuthSessionsResponseSchema = z.object({

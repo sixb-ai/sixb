@@ -81,9 +81,11 @@ export function isPublicRoute(pathname: string, method: string): boolean {
     return true
   }
 
+  // The refresh token in the body is the credential; the access token it replaces has expired.
   if (
     (pathname === "/api/auth/device-authorizations" ||
-      pathname === "/api/auth/device-authorizations/token") &&
+      pathname === "/api/auth/device-authorizations/token" ||
+      pathname === "/api/auth/refresh") &&
     normalizedMethod === "POST"
   ) {
     return true

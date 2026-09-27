@@ -1,5 +1,11 @@
 import { writeJson } from "@sixb/cli-core"
-import { readConfig, requireProfile, updateConfig } from "../lib/profiles"
+import {
+  readConfig,
+  requireProfile,
+  resolveProfile,
+  SessionEndedError,
+  updateConfig,
+} from "../lib/profiles"
 import { KeyValueResultView, renderStatic } from "../ui"
 
 export interface LogoutCommandOptions {
@@ -11,7 +17,7 @@ export async function runLogout(options: LogoutCommandOptions = {}): Promise<voi
   const current = await readConfig()
   const name = options.profile?.trim() || current.currentProfile
   if (!name) throw new Error("[SixbCLI] No current profile to remove.")
-  requireProfile(current, name)
+  if (requireProfile(current, name).session) await signOut(name)
 
   await updateConfig((config) => {
     const profiles = { ...config.profiles }
@@ -33,4 +39,25 @@ export async function runLogout(options: LogoutCommandOptions = {}): Promise<voi
       items={[{ label: "Profile", value: name }]}
     />
   )
+}
+
+// End the session on the server too, so a copy of its tokens stops working. A session that has
+// already ended leaves nothing to revoke.
+async function signOut(profile: string): Promise<void> {
+  let resolved: Awaited<ReturnType<typeof resolveProfile>>
+  try {
+    resolved = await resolveProfile({ profile })
+  } catch (error) {
+    if (error instanceof SessionEndedError) return
+    throw error
+  }
+  const response = await fetch(`${resolved.apiUrl}/api/auth/sign-out`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${resolved.token}` },
+  })
+  if (!response.ok) {
+    throw new Error(
+      `[SixbCLI] Signing out of profile '${profile}' failed with HTTP ${response.status}.`
+    )
+  }
 }

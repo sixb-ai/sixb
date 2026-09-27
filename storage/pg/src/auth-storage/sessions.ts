@@ -1,5 +1,10 @@
 import type { AuthSessionAudience } from "@sixb/core"
-import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core/storage"
+import type {
+  AuthSessionStore,
+  CreateAuthSessionInput,
+  RotateSessionRefreshTokenResult,
+  SessionRecord,
+} from "@sixb/core/storage"
 import { AuthStorageError } from "@sixb/core/storage"
 import {
   authLockKey,
@@ -85,16 +90,80 @@ export class PgAuthSessionStore implements AuthSessionStore {
 
     if (
       !row ||
+      row.refresh_token_hash !== null ||
       row.audience !== params.audience ||
       row.token_hash !== params.tokenHash ||
-      row.revoked_at ||
-      new Date(row.expires_at) <= params.now ||
-      (row.absolute_expires_at !== null && new Date(row.absolute_expires_at) <= params.now)
+      !isLiveSessionRow(row, params.now)
     ) {
       return null
     }
 
     return rowToSessionRecord(row)
+  }
+
+  async findValidByAccessTokenHash(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly tokenHash: string
+    readonly now: Date
+  }): Promise<SessionRecord | null> {
+    const row = await getSessionRowById(this.sql, params)
+    if (
+      !row ||
+      row.access_expires_at === null ||
+      row.token_hash !== params.tokenHash ||
+      new Date(row.access_expires_at) <= params.now ||
+      !isLiveSessionRow(row, params.now)
+    ) {
+      return null
+    }
+
+    return rowToSessionRecord(row)
+  }
+
+  async rotateRefreshToken(
+    params: Parameters<AuthSessionStore["rotateRefreshToken"]>[0]
+  ): Promise<RotateSessionRefreshTokenResult> {
+    return runPgTransaction(this.sql, async (tx): Promise<RotateSessionRefreshTokenResult> => {
+      const row = await getSessionRowById(tx, params, { forUpdate: true })
+      if (!row?.refresh_token_hash || !isLiveSessionRow(row, params.now)) {
+        return { status: "invalid" }
+      }
+
+      const replacedRecently =
+        row.previous_refresh_token_hash === params.refreshTokenHash &&
+        row.refreshed_at !== null &&
+        params.now.getTime() - new Date(row.refreshed_at).getTime() <= params.reuseGraceMs
+      if (row.refresh_token_hash !== params.refreshTokenHash && !replacedRecently) {
+        if (row.previous_refresh_token_hash !== params.refreshTokenHash) {
+          return { status: "invalid" }
+        }
+        await tx`
+          UPDATE auth_sessions SET revoked_at = ${params.now}
+          WHERE project_id = ${params.projectId} AND id = ${params.id}
+        `
+        return { status: "reused" }
+      }
+
+      const [rotated] = await tx<PgAuthSessionRow[]>`
+        UPDATE auth_sessions
+        SET token_hash = ${params.next.tokenHash},
+            access_expires_at = ${params.next.accessExpiresAt},
+            previous_refresh_token_hash = refresh_token_hash,
+            refresh_token_hash = ${params.next.refreshTokenHash},
+            refreshed_at = ${params.now},
+            last_seen_at = ${params.now},
+            expires_at = GREATEST(
+              expires_at,
+              LEAST(${params.next.expiresAt}, COALESCE(absolute_expires_at, ${params.next.expiresAt}))
+            )
+        WHERE project_id = ${params.projectId} AND id = ${params.id}
+        RETURNING *
+      `
+      return rotated
+        ? { status: "rotated", session: rowToSessionRecord(rotated) }
+        : { status: "invalid" }
+    })
   }
 
   async renewIfValid(params: {
@@ -119,6 +188,7 @@ export class PgAuthSessionStore implements AuthSessionStore {
         AND id = ${params.id}
         AND audience = ${params.audience}
         AND token_hash = ${params.tokenHash}
+        AND refresh_token_hash IS NULL
         AND revoked_at IS NULL
         AND expires_at > ${params.now}
         AND (absolute_expires_at IS NULL OR absolute_expires_at > ${params.now})
@@ -190,4 +260,12 @@ export class PgAuthSessionStore implements AuthSessionStore {
       return rowToSessionRecord(row)
     })
   }
+}
+
+function isLiveSessionRow(row: PgAuthSessionRow, now: Date): boolean {
+  return (
+    row.revoked_at === null &&
+    new Date(row.expires_at) > now &&
+    (row.absolute_expires_at === null || new Date(row.absolute_expires_at) > now)
+  )
 }

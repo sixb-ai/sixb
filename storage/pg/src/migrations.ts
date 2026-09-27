@@ -105,6 +105,7 @@ import workflowInterventionPrincipalsSql from "./migrations/046-workflow-interve
 import ontologyCommitAttributionSql from "./migrations/047-ontology-commit-attribution.sql" with {
   type: "text",
 }
+import nativeSessionsSql from "./migrations/049-native-sessions.sql" with { type: "text" }
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -406,6 +407,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("046-workflow-intervention-principals", workflowInterventionPrincipalsSql),
     pgSql("047-ontology-commit-attribution", ontologyCommitAttributionSql),
     pgSql("048-file-upload-sessions", fileUploadSessionsSql),
+    pgSql("049-native-sessions", nativeSessionsSql),
   ],
 })
 

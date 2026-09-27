@@ -1,6 +1,11 @@
 import type { Database } from "bun:sqlite"
 import type { AuthSessionAudience } from "@sixb/core"
-import type { AuthSessionStore, CreateAuthSessionInput, SessionRecord } from "@sixb/core/storage"
+import type {
+  AuthSessionStore,
+  CreateAuthSessionInput,
+  RotateSessionRefreshTokenResult,
+  SessionRecord,
+} from "@sixb/core/storage"
 import { AuthStorageError } from "@sixb/core/storage"
 import { runImmediateTransaction } from "../transactions"
 import type { SqliteAuthSessionRow } from "./rows"
@@ -99,16 +104,87 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
 
     if (
       !row ||
+      row.refresh_token_hash !== null ||
       row.audience !== params.audience ||
       row.token_hash !== params.tokenHash ||
-      row.revoked_at ||
-      new Date(row.expires_at) <= params.now ||
-      (row.absolute_expires_at !== null && new Date(row.absolute_expires_at) <= params.now)
+      !isLiveSessionRow(row, params.now)
     ) {
       return null
     }
 
     return rowToSessionRecord(row)
+  }
+
+  async findValidByAccessTokenHash(params: {
+    readonly projectId: string
+    readonly id: string
+    readonly tokenHash: string
+    readonly now: Date
+  }): Promise<SessionRecord | null> {
+    const row = getSessionRowById(this.db, params)
+    if (
+      !row ||
+      row.access_expires_at === null ||
+      row.token_hash !== params.tokenHash ||
+      new Date(row.access_expires_at) <= params.now ||
+      !isLiveSessionRow(row, params.now)
+    ) {
+      return null
+    }
+
+    return rowToSessionRecord(row)
+  }
+
+  async rotateRefreshToken(
+    params: Parameters<AuthSessionStore["rotateRefreshToken"]>[0]
+  ): Promise<RotateSessionRefreshTokenResult> {
+    return runImmediateTransaction(this.db, (): RotateSessionRefreshTokenResult => {
+      const row = getSessionRowById(this.db, params)
+      if (!row?.refresh_token_hash || !isLiveSessionRow(row, params.now)) {
+        return { status: "invalid" }
+      }
+
+      const replacedRecently =
+        row.previous_refresh_token_hash === params.refreshTokenHash &&
+        row.refreshed_at !== null &&
+        params.now.getTime() - new Date(row.refreshed_at).getTime() <= params.reuseGraceMs
+      if (row.refresh_token_hash !== params.refreshTokenHash && !replacedRecently) {
+        if (row.previous_refresh_token_hash !== params.refreshTokenHash) {
+          return { status: "invalid" }
+        }
+        this.db
+          .query("UPDATE auth_sessions SET revoked_at = ? WHERE project_id = ? AND id = ?")
+          .run(toIso(params.now), params.projectId, params.id)
+        return { status: "reused" }
+      }
+
+      const expiresAt = toIso(params.next.expiresAt)
+      this.db
+        .query(`
+          UPDATE auth_sessions
+          SET token_hash = ?,
+              access_expires_at = ?,
+              previous_refresh_token_hash = refresh_token_hash,
+              refresh_token_hash = ?,
+              refreshed_at = ?,
+              last_seen_at = ?,
+              expires_at = MAX(expires_at, MIN(?, COALESCE(absolute_expires_at, ?)))
+          WHERE project_id = ? AND id = ?
+        `)
+        .run(
+          params.next.tokenHash,
+          toIso(params.next.accessExpiresAt),
+          params.next.refreshTokenHash,
+          toIso(params.now),
+          toIso(params.now),
+          expiresAt,
+          expiresAt,
+          params.projectId,
+          params.id
+        )
+      const session = getSessionById(this.db, params)
+      return session ? { status: "rotated", session } : { status: "invalid" }
+    })
   }
 
   async renewIfValid(params: {
@@ -135,6 +211,7 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
             AND id = ?
             AND audience = ?
             AND token_hash = ?
+            AND refresh_token_hash IS NULL
             AND revoked_at IS NULL
             AND expires_at > ?
             AND (absolute_expires_at IS NULL OR absolute_expires_at > ?)
@@ -227,4 +304,12 @@ export class SqliteAuthSessionStore implements AuthSessionStore {
       return updated
     })
   }
+}
+
+function isLiveSessionRow(row: SqliteAuthSessionRow, now: Date): boolean {
+  return (
+    row.revoked_at === null &&
+    new Date(row.expires_at) > now &&
+    (row.absolute_expires_at === null || new Date(row.absolute_expires_at) > now)
+  )
 }

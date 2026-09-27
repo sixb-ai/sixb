@@ -1,6 +1,12 @@
+import { hostname } from "node:os"
 import { CliError, createInstanceApiClient, writeJson } from "@sixb/cli-core"
 import { normalizeApiUrl } from "../lib/api-client"
-import { assertProfileName, updateConfig } from "../lib/profiles"
+import {
+  assertProfileName,
+  parseSessionTokens,
+  type SixbProfileSession,
+  updateConfig,
+} from "../lib/profiles"
 import { KeyValueResultView, renderStatic } from "../ui"
 
 export interface LoginCommandOptions {
@@ -17,16 +23,19 @@ export async function runLogin(options: LoginCommandOptions = {}): Promise<void>
 
   const apiUrl = normalizeApiUrl(options.apiUrl)
   let token: string | undefined
+  let session: SixbProfileSession | undefined
   let projectId: string
 
   try {
     projectId = await fetchProject(apiUrl)
   } catch (error) {
     if (!isAuthorizationError(error)) throw error
-    token = options.tokenStdin
-      ? await readTokenFromStdin()
-      : await authorizeDevice(apiUrl, options.profile?.trim() || "sixb CLI")
-    projectId = await fetchProject(apiUrl, token)
+    if (options.tokenStdin) {
+      token = await readTokenFromStdin()
+    } else {
+      session = await authorizeDevice(apiUrl)
+    }
+    projectId = await fetchProject(apiUrl, token ?? session?.accessToken)
   }
 
   const profile = options.profile?.trim() || projectId
@@ -36,11 +45,16 @@ export async function runLogin(options: LoginCommandOptions = {}): Promise<void>
     currentProfile: profile,
     profiles: {
       ...config.profiles,
-      [profile]: { apiUrl, projectId, ...(token ? { token } : {}) },
+      [profile]: {
+        apiUrl,
+        projectId,
+        ...(token ? { token } : {}),
+        ...(session ? { session } : {}),
+      },
     },
   }))
 
-  const result = { profile, projectId, apiUrl, authenticated: Boolean(token) }
+  const result = { profile, projectId, apiUrl, authenticated: Boolean(token ?? session) }
   if (options.json) {
     writeJson(result)
     return
@@ -52,7 +66,10 @@ export async function runLogin(options: LoginCommandOptions = {}): Promise<void>
       items={[
         { label: "Project", value: projectId },
         { label: "API", value: apiUrl },
-        { label: "Authentication", value: token ? "stored token" : "not required" },
+        {
+          label: "Authentication",
+          value: session ? "signed in" : token ? "stored token" : "not required",
+        },
       ]}
     />
   )
@@ -66,13 +83,10 @@ interface DeviceAuthorizationStart {
   readonly interval: number
 }
 
-async function authorizeDevice(apiUrl: string, tokenName: string): Promise<string> {
+async function authorizeDevice(apiUrl: string): Promise<SixbProfileSession> {
   const api = createInstanceApiClient({ kind: "local", baseUrl: apiUrl })
   const start = parseDeviceAuthorizationStart(
-    await api.post("/api/auth/device-authorizations", {
-      clientName: "sixb CLI",
-      tokenName,
-    }),
+    await api.post("/api/auth/device-authorizations", { clientName: `sixb CLI on ${hostname()}` }),
     apiUrl
   )
   process.stderr.write(`Opening ${start.verificationUriComplete}\n`)
@@ -90,8 +104,8 @@ async function authorizeDevice(apiUrl: string, tokenName: string): Promise<strin
     if (!isRecord(result) || typeof result.status !== "string") {
       throw new Error("[SixbCLI] The Sixb API returned an invalid device authorization response.")
     }
-    if (result.status === "approved" && typeof result.accessToken === "string") {
-      return requireToken(result.accessToken)
+    if (result.status === "approved") {
+      return parseSessionTokens(result)
     }
     if (result.status === "denied") {
       throw new Error("[SixbCLI] Browser authorization was denied.")

@@ -1088,14 +1088,9 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100
-                  },
-                  "tokenName": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
                   }
                 },
-                "required": ["clientName", "tokenName"],
+                "required": ["clientName"],
                 "additionalProperties": false
               }
             },
@@ -1107,14 +1102,9 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100
-                  },
-                  "tokenName": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
                   }
                 },
-                "required": ["clientName", "tokenName"],
+                "required": ["clientName"],
                 "additionalProperties": false
               }
             },
@@ -1126,14 +1116,9 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 100
-                  },
-                  "tokenName": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100
                   }
                 },
-                "required": ["clientName", "tokenName"],
+                "required": ["clientName"],
                 "additionalProperties": false
               }
             }
@@ -1291,18 +1276,117 @@
                     {
                       "type": "object",
                       "properties": {
+                        "accessToken": {
+                          "type": "string"
+                        },
+                        "refreshToken": {
+                          "type": "string"
+                        },
+                        "expiresIn": {
+                          "type": "number"
+                        },
                         "status": {
                           "type": "string",
                           "enum": ["approved"]
-                        },
-                        "accessToken": {
-                          "type": "string"
                         }
                       },
-                      "required": ["status", "accessToken"],
+                      "required": ["accessToken", "refreshToken", "expiresIn", "status"],
                       "additionalProperties": false
                     }
                   ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/auth/refresh": {
+      "post": {
+        "summary": "Refresh a native client's session tokens",
+        "tags": ["Auth Sessions"],
+        "operationId": "refreshAuthSession",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["refreshToken"],
+                "additionalProperties": false
+              }
+            },
+            "application/x-www-form-urlencoded": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["refreshToken"],
+                "additionalProperties": false
+              }
+            },
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                },
+                "required": ["refreshToken"],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Response for status 200",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "accessToken": {
+                      "type": "string"
+                    },
+                    "refreshToken": {
+                      "type": "string"
+                    },
+                    "expiresIn": {
+                      "type": "number"
+                    }
+                  },
+                  "required": ["accessToken", "refreshToken", "expiresIn"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Response for status 401",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": ["error"],
+                  "additionalProperties": false
                 }
               }
             }
@@ -1502,6 +1586,9 @@
                             "type": "string"
                           },
                           "ipAddress": {
+                            "type": "string"
+                          },
+                          "clientName": {
                             "type": "string"
                           }
                         },

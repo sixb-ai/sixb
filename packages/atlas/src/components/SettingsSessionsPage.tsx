@@ -201,7 +201,7 @@ export function SettingsSessionsPage() {
                     <td className="py-3 pl-4 pr-3">
                       <div className="flex min-w-0 items-center gap-2">
                         <span className="truncate font-medium text-foreground">
-                          {describeDevice(session.userAgent)}
+                          {session.clientName ?? describeDevice(session.userAgent)}
                         </span>
                         <Badge variant="secondary" className="rounded-md bg-accent/70 text-xs">
                           {humanizeIdentifier(session.audience)}

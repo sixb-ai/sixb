@@ -18,6 +18,7 @@ import {
   type AccessTokenRecord,
   type AuthStorage,
   AuthStorageError,
+  type CompleteDeviceAuthorizationInput,
   type InvitationRecord,
   type ServiceAccountGroupMembershipRecord,
   type ServiceAccountRecord,
@@ -31,7 +32,7 @@ import {
   hashAccessTokenSecret,
   parseAccessTokenValue,
 } from "./access-tokens"
-import type { AuthSessionAudience } from "./audience"
+import { type AuthSessionAudience, DEFAULT_AUTH_SESSION_AUDIENCE } from "./audience"
 import { getRequestClientAddress } from "./client-address"
 import {
   getCookie,
@@ -40,7 +41,15 @@ import {
 } from "./cookies"
 import { AuthRuntimeError } from "./errors"
 import { SessionCache } from "./session-cache"
-import { hashSessionSecret, parseSessionCookieValue } from "./sessions"
+import {
+  type BearerSessionTokens,
+  createBearerSessionTokens,
+  hashSessionSecret,
+  parseBearerSessionToken,
+  parseSessionCookieValue,
+  SESSION_ACCESS_TOKEN_PREFIX,
+  SESSION_REFRESH_TOKEN_PREFIX,
+} from "./sessions"
 import type {
   AuthenticatedAuthSession,
   AuthenticatedRequestAuthSession,
@@ -115,6 +124,12 @@ export {
 // than this, so an active session does not incur a write on every request.
 const SESSION_TOUCH_INTERVAL_MS = 60_000
 const ACCESS_TOKEN_TOUCH_INTERVAL_MS = 60_000
+
+// A native client's access token is sent on every request, so a leaked one must stop working soon.
+const BEARER_ACCESS_TOKEN_TTL_MS = 15 * 60_000
+// A replaced refresh token still rotates this long after its replacement, so a client whose refresh
+// response was lost can retry. Later, it means a copy is in use and the session is revoked.
+const REFRESH_REUSE_GRACE_MS = 60_000
 
 export interface AuthRuntimeOptions {
   readonly projectId: string
@@ -228,6 +243,9 @@ export class AuthRuntime {
 
     if (options.credentialSource === "any") {
       const tokenValue = getBearerAccessTokenValue(request)
+      if (tokenValue?.startsWith(SESSION_ACCESS_TOKEN_PREFIX)) {
+        return this.resolveBearerSession(tokenValue)
+      }
       if (tokenValue) {
         return this.resolveAccessTokenSession(request, tokenValue)
       }
@@ -263,6 +281,7 @@ export class AuthRuntime {
     const cached = this.sessionCache?.get({
       sessionId: parts.sessionId,
       tokenHash,
+      transport: "cookie",
       audience,
       nowMs,
     })
@@ -305,13 +324,56 @@ export class AuthRuntime {
       sessionRenewed = true
     }
 
+    if (!sessionRenewed) {
+      await this.touchSessionLastSeen(storage, session, now)
+    }
+    const result = await this.authenticateSession(storage, session, tokenHash, now)
+    return result.authenticated && sessionRenewed ? { ...result, sessionRenewed: true } : result
+  }
+
+  private async resolveBearerSession(tokenValue: string): Promise<AuthSessionResult> {
+    const parts = parseBearerSessionToken(SESSION_ACCESS_TOKEN_PREFIX, tokenValue)
+    if (!parts) {
+      return { authenticated: false, reason: "invalid_access_token" }
+    }
+
+    const tokenHash = hashSessionSecret(parts.sessionSecret)
+    const now = new Date()
+    const cached = this.sessionCache?.get({
+      sessionId: parts.sessionId,
+      tokenHash,
+      transport: "bearer",
+      nowMs: now.getTime(),
+    })
+    if (cached) {
+      return cached
+    }
+
+    const storage = this.requireAuthStorage()
+    const session = await storage.sessions.findValidByAccessTokenHash({
+      projectId: this.projectId,
+      id: parts.sessionId,
+      tokenHash,
+      now,
+    })
+    if (!session) {
+      return { authenticated: false, reason: "invalid_access_token" }
+    }
+
+    await this.touchSessionLastSeen(storage, session, now)
+    return this.authenticateSession(storage, session, tokenHash, now)
+  }
+
+  /** Resolve a live session's user and groups, the same way for cookies and bearer tokens. */
+  private async authenticateSession(
+    storage: AuthStorage,
+    session: SessionRecord,
+    tokenHash: string,
+    now: Date
+  ): Promise<AuthSessionResult> {
     const member = await this.loadActiveUser(storage, session.userId)
     if (!member.authenticated) {
       return member
-    }
-
-    if (!sessionRenewed) {
-      await this.touchSessionLastSeen(storage, session, now)
     }
 
     const result: AuthenticatedAuthSession = {
@@ -322,18 +384,81 @@ export class AuthRuntime {
       session,
       groupIds: member.groupIds,
     }
-
     this.sessionCache?.set({
-      sessionId: parts.sessionId,
+      sessionId: session.id,
       tokenHash,
-      audience,
+      audience: session.audience,
       session: result,
-      nowMs,
+      nowMs: now.getTime(),
       sessionExpiresAtMs: session.expiresAt.getTime(),
       sessionAbsoluteExpiresAtMs: session.absoluteExpiresAt?.getTime(),
     })
+    return result
+  }
 
-    return sessionRenewed ? { ...result, sessionRenewed: true } : result
+  /**
+   * The session a native client starts when the user approves it, and its first tokens. The caller
+   * stores the session in the same transaction that consumes the approval.
+   */
+  prepareBearerSession(input: {
+    readonly userId: string
+    readonly clientName: string
+    readonly now: Date
+  }): {
+    readonly session: CompleteDeviceAuthorizationInput["session"]
+    readonly tokens: BearerSessionTokens
+  } {
+    const sessionId = `ses_${randomUUID()}`
+    const tokens = createBearerSessionTokens(sessionId)
+    return {
+      tokens,
+      session: {
+        id: sessionId,
+        projectId: this.projectId,
+        userId: input.userId,
+        strategyId: "device",
+        audience: DEFAULT_AUTH_SESSION_AUDIENCE,
+        tokenHash: tokens.tokenHash,
+        createdAt: input.now,
+        ...this.createSessionDeadlines(input.now),
+        bearer: {
+          clientName: input.clientName,
+          accessExpiresAt: new Date(input.now.getTime() + BEARER_ACCESS_TOKEN_TTL_MS),
+          refreshTokenHash: tokens.refreshTokenHash,
+        },
+      },
+    }
+  }
+
+  /**
+   * Trade a native client's refresh token for new tokens. Returns null when the token is not
+   * accepted; a replaced token presented after the grace window also revokes its session.
+   */
+  async refreshSession(
+    refreshToken: string
+  ): Promise<{ readonly tokens: BearerSessionTokens; readonly session: SessionRecord } | null> {
+    const parts = parseBearerSessionToken(SESSION_REFRESH_TOKEN_PREFIX, refreshToken)
+    if (!parts || !this.isEnabled()) {
+      return null
+    }
+
+    const now = new Date()
+    const tokens = createBearerSessionTokens(parts.sessionId)
+    const result = await this.requireAuthStorage().sessions.rotateRefreshToken({
+      projectId: this.projectId,
+      id: parts.sessionId,
+      refreshTokenHash: hashSessionSecret(parts.sessionSecret),
+      now,
+      reuseGraceMs: REFRESH_REUSE_GRACE_MS,
+      next: {
+        tokenHash: tokens.tokenHash,
+        accessExpiresAt: new Date(now.getTime() + BEARER_ACCESS_TOKEN_TTL_MS),
+        refreshTokenHash: tokens.refreshTokenHash,
+        expiresAt: new Date(now.getTime() + this.config.session.idleTimeoutMs),
+      },
+    })
+    this.sessionCache?.invalidate(parts.sessionId)
+    return result.status === "rotated" ? { tokens, session: result.session } : null
   }
 
   private canRenewSession(session: SessionRecord, nowMs: number): boolean {
