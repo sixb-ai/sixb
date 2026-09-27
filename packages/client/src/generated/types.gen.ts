@@ -9198,6 +9198,12 @@ export type CreateFileUploadErrors = {
   400: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type CreateFileUploadError = CreateFileUploadErrors[keyof CreateFileUploadErrors]
@@ -9269,6 +9275,12 @@ export type UploadFileContentErrors = {
   410: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type UploadFileContentError = UploadFileContentErrors[keyof UploadFileContentErrors]
@@ -9317,6 +9329,12 @@ export type SignFileUploadPartErrors = {
    * Response for status 410
    */
   410: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }
@@ -9382,6 +9400,12 @@ export type CompleteFileUploadErrors = {
   410: {
     error: string
   }
+  /**
+   * Response for status 501
+   */
+  501: {
+    error: string
+  }
 }
 
 export type CompleteFileUploadError = CompleteFileUploadErrors[keyof CompleteFileUploadErrors]
@@ -9435,6 +9459,12 @@ export type AbortFileUploadErrors = {
    * Response for status 410
    */
   410: {
+    error: string
+  }
+  /**
+   * Response for status 501
+   */
+  501: {
     error: string
   }
 }

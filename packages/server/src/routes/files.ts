@@ -2,7 +2,6 @@ import {
   type BlobDigest,
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   type FileRef,
-  InMemoryFileUploadSessions,
   type SixbHostView,
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
@@ -24,7 +23,7 @@ import {
   FileUploadPartParamsSchema,
   SignedFileUploadPartSchema,
 } from "../schemas/files"
-import { handleRouteError } from "../utils/http"
+import { handleRouteError, unconfiguredStorageResponse } from "../utils/http"
 import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 // The simple-upload ceiling lives in @sixb/core so the client staged-switch
 // threshold and this server limit stay a single source of truth. The body limit
@@ -33,9 +32,7 @@ import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/req
 export const DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES = DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1024 * 1024
 
 export function registerFileRoutes(app: Elysia, host: SixbHostView) {
-  // Every published storage provider supplies a durable store. A custom Storage without one
-  // still works on a single instance, but staged uploads then die with the process.
-  const uploadSessions = host.storage.fileUploadSessions ?? inMemoryUploadSessionsWithWarning()
+  const uploadSessions = host.storage.fileUploadSessions
 
   return app
     .post(
@@ -123,6 +120,9 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         const { body, set } = context
         try {
+          if (!uploadSessions) {
+            return unconfiguredStorageResponse(set, "File upload session storage")
+          }
           const parsed = CreateFileUploadBodySchema.parse(body)
           const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const uploadId = createFileUploadId()
@@ -168,6 +168,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
         response: {
           201: CreateFileUploadResponseSchema,
           400: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Create a staged file upload",
@@ -182,6 +183,9 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         const { params, request, set } = context
         try {
+          if (!uploadSessions) {
+            return unconfiguredStorageResponse(set, "File upload session storage")
+          }
           const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
           if (session.status !== "pending") {
@@ -245,6 +249,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
           410: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Upload staged file content through Sixb",
@@ -270,6 +275,9 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         const { params, set } = context
         try {
+          if (!uploadSessions) {
+            return unconfiguredStorageResponse(set, "File upload session storage")
+          }
           const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
           if (session.status !== "pending") {
@@ -314,6 +322,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
           410: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Sign a staged multipart upload part",
@@ -328,6 +337,9 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         const { body, params, set } = context
         try {
+          if (!uploadSessions) {
+            return unconfiguredStorageResponse(set, "File upload session storage")
+          }
           const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const parsed = CompleteFileUploadBodySchema.parse(body ?? {})
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
@@ -383,6 +395,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
           410: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Complete a staged file upload",
@@ -397,6 +410,9 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
       async (context) => {
         const { params, set } = context
         try {
+          if (!uploadSessions) {
+            return unconfiguredStorageResponse(set, "File upload session storage")
+          }
           const principal = requireRequestSixb(context).execution.requestedBy ?? SYSTEM_PRINCIPAL
           const session = await uploadSessions.getForPrincipal(params.uploadId, principal)
 
@@ -437,6 +453,7 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
           410: ErrorResponseSchema,
+          501: ErrorResponseSchema,
         },
         detail: {
           summary: "Abort a staged file upload",
@@ -660,14 +677,4 @@ function expectedContentLengthError(session: FileUploadSession, request: Request
   }
 
   return expectedSizeBytesError(session, sizeBytes)
-}
-
-function inMemoryUploadSessionsWithWarning(): InMemoryFileUploadSessions {
-  console.warn(
-    "[SixbServer] Storage provides no fileUploadSessions; staged uploads are kept in memory, " +
-      "so they do not survive a restart, cannot span multiple API instances, and abandoned " +
-      "multipart uploads are left to the bucket's lifecycle rule."
-  )
-  // Maintenance sweeps host.storage only, so this store must drop abandoned sessions itself.
-  return new InMemoryFileUploadSessions({ unswept: true })
 }
