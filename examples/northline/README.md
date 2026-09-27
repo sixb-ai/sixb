@@ -68,9 +68,11 @@ service user, and the `smolvm` binary must be on that user's `PATH`.
 Save the [Sixb agent image](../../sandboxes/agent-image/README.md) once with Docker or Podman:
 
 ```bash
-docker pull ghcr.io/sixb-ai/sixb-agent:1.2.0
-docker save ghcr.io/sixb-ai/sixb-agent:1.2.0 -o /opt/sixb/agent.tar
+docker pull ghcr.io/sixb-ai/sixb-agent:<version>
+docker save ghcr.io/sixb-ai/sixb-agent:<version> -o /opt/sixb/agent.tar
 ```
+
+Use the current [`VERSION`](../../sandboxes/agent-image/VERSION) for `<version>`.
 
 Then start the hosted example with smolvm selected and an API origin reachable from inside the VM:
 

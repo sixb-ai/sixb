@@ -12,14 +12,18 @@ import zipfile
 from pathlib import Path
 
 
-def run(command):
-    result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+def run(command, timeout):
+    try:
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        message = f"{command[0]} timed out after {timeout} s; raise --timeout for large documents"
+        raise RuntimeError(message) from None
     if result.returncode:
         raise RuntimeError(f"{command[0]} failed: {(result.stderr or result.stdout)[-4000:]}")
     return result
 
 
-def render(source, output, first=1, last=None, max_pages=30, size=1600):
+def render(source, output, first=1, last=None, max_pages=30, size=1600, timeout=60):
     source = source.resolve(strict=True)
     output = output.resolve()
     if source.suffix.lower() not in {".pdf", ".pptx", ".docx", ".xlsx"}:
@@ -33,19 +37,19 @@ def render(source, output, first=1, last=None, max_pages=30, size=1600):
         with zipfile.ZipFile(source) as package:
             if not {"[Content_Types].xml", required[source.suffix.lower()]}.issubset(package.namelist()):
                 raise ValueError("Office package does not match its file extension")
-    if not 1 <= max_pages <= 200 or not 320 <= size <= 3000:
-        raise ValueError("max-pages must be 1–200 and size must be 320–3000")
+    if not 1 <= max_pages <= 200 or not 320 <= size <= 3000 or not 1 <= timeout <= 900:
+        raise ValueError("max-pages must be 1–200, size 320–3000, and timeout 1–900")
     # A fresh directory prevents a failed converter from being mistaken for an old successful run.
     # It is removed on failure, so the same directory can be used for a retry.
     output.mkdir(parents=True, exist_ok=False)
     try:
-        return render_into(source, output, first, last, max_pages, size)
+        return render_into(source, output, first, last, max_pages, size, timeout)
     except BaseException:
         shutil.rmtree(output, ignore_errors=True)
         raise
 
 
-def render_into(source, output, first, last, max_pages, size):
+def render_into(source, output, first, last, max_pages, size, timeout):
     pdf = output / "document.pdf"
     if source.suffix.lower() == ".pdf":
         shutil.copyfile(source, pdf)
@@ -56,7 +60,7 @@ def render_into(source, output, first, last, max_pages, size):
             run([
                 "libreoffice", f"-env:UserInstallation={profile}", "--headless",
                 "--convert-to", "pdf", "--outdir", str(scratch), str(source),
-            ])
+            ], timeout)
             converted = scratch / f"{source.stem}.pdf"
             if not converted.is_file() or converted.stat().st_size == 0:
                 raise RuntimeError("LibreOffice did not produce a PDF")
@@ -64,7 +68,10 @@ def render_into(source, output, first, last, max_pages, size):
 
     # Count pages with Poppler, the engine that renders them, so both agree on what the PDF contains.
     # Corrupt and password-protected PDFs surface as ordinary command failures.
-    count = int(re.search(r"^Pages:\s+(\d+)$", run(["pdfinfo", str(pdf)]).stdout, re.M)[1])
+    pages_line = re.search(r"^Pages:\s+(\d+)$", run(["pdfinfo", str(pdf)], timeout).stdout, re.M)
+    if not pages_line:
+        raise RuntimeError("pdfinfo did not report a page count")
+    count = int(pages_line[1])
     last = count if last is None else last
     if not 1 <= first <= last <= count:
         raise ValueError(f"Page range must be within 1–{count}")
@@ -73,7 +80,7 @@ def render_into(source, output, first, last, max_pages, size):
     run([
         "pdftoppm", "-png", "-scale-to", str(size), "-f", str(first), "-l", str(last),
         str(pdf), str(output / "page"),
-    ])
+    ], timeout)
     pages = sorted(output.glob("page-*.png"), key=lambda p: int(p.stem.rsplit("-", 1)[1]))
     if len(pages) != last - first + 1 or any(p.stat().st_size == 0 for p in pages):
         raise RuntimeError("Renderer did not produce every requested page")
@@ -94,11 +101,14 @@ def main():
     parser.add_argument("--last-page", type=int)
     parser.add_argument("--max-pages", type=int, default=30)
     parser.add_argument("--size", type=int, default=1600, help="Maximum PNG width/height")
+    parser.add_argument("--timeout", type=int, default=60, help="Seconds allowed per conversion step")
     args = parser.parse_args()
     try:
-        result = render(args.input, args.output_dir, args.first_page, args.last_page, args.max_pages, args.size)
+        result = render(
+            args.input, args.output_dir, args.first_page, args.last_page, args.max_pages, args.size, args.timeout
+        )
         print(json.dumps(result, indent=2))
-    except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as error:
+    except (OSError, ValueError, RuntimeError) as error:
         print(f"[SixbRender] {error}", file=sys.stderr)
         return 1
     return 0

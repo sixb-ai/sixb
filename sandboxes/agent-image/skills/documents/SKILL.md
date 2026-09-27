@@ -30,7 +30,8 @@ sixb-render draft.pptx --output-dir previews-1
 The helper accepts PDF, PPTX, DOCX, and XLSX. It creates a PDF, page PNGs, and a JSON manifest.
 Always use a new output directory after revisions. Rendering has a 30-page default limit; use
 `--first-page` and `--last-page` for larger documents and inspect every required page across batches.
-The manifest's `complete` field says whether previews cover the entire document.
+The manifest's `complete` field says whether previews cover the entire document. Pass `--timeout`
+(seconds per conversion step, default 60) when a large document times out.
 
 Inspect the PNG paths with `view_file` when image input is supported. Check clipping, overlap,
 contrast, fonts, chart labels, and units. Repair and render again when needed. Text extraction alone
@@ -40,6 +41,7 @@ visual inspection. LibreOffice is a compatibility check; it does not prove exact
 For spreadsheets, inspect formulas and values separately from printed-page previews. openpyxl does
 not calculate formulas. Use LibreOffice on a copy when recalculation is needed and verify the result.
 
-Create previews inside the workspace so `view_file` can read them. Keep source scripts when another
+Create previews inside the workspace so `view_file` can read them, and delete a preview directory
+once you have inspected it: the workspace can outlive the turn. Keep source scripts when another
 turn may need to edit the document. Publish only the requested formats using the worker's output
 instructions; preview PNGs and validation logs are working files unless the user requests them.
