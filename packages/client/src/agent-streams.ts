@@ -3,6 +3,7 @@ import type { AgentRunActivityEvent, AgentRunStreamEvent } from "@sixb/core/agen
 // node-only runtime (e.g. `node:crypto`), which breaks the Atlas browser bundle.
 import { isAgentRunActivityEvent, isAgentRunStreamEvent } from "@sixb/core/agents/streams"
 import type { BrokerRecord } from "@sixb/core/broker"
+import type { Client } from "./generated/client"
 import type { GetAgentRunResponses } from "./generated/types.gen"
 import {
   createReconnectingSocket,
@@ -78,8 +79,10 @@ export interface AgentRunSocketOptions {
   readonly afterCursor?: string
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  /** Override the API base url. Defaults to the global client config. */
+  /** Override the API base url. Defaults to `client`'s, then the global client config. */
   readonly baseUrl?: string
+  /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
+  readonly client?: Client
   readonly onEvent: (event: AgentRunStreamEvent, cursor: string) => void
   readonly onRunSnapshot?: (run: AgentRunSnapshot) => void
   readonly onError?: (message: string) => void
@@ -89,8 +92,10 @@ export interface AgentRunSocketOptions {
 export interface AgentActivitySocketOptions {
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
-  /** Override the API base url. Defaults to the global client config. */
+  /** Override the API base url. Defaults to `client`'s, then the global client config. */
   readonly baseUrl?: string
+  /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
+  readonly client?: Client
   readonly onActivity: (event: AgentRunActivityEvent) => void
   /** Called after each initial or reconnect subscription, so durable state can be reconciled. */
   readonly onSubscribed?: () => void
@@ -107,7 +112,8 @@ export function createAgentRunSocket(options: AgentRunSocketOptions): Reconnecti
   let latestCursor = options.afterCursor
 
   return createReconnectingSocket({
-    url: createSixbAgentsWebSocketUrl(options.baseUrl),
+    url: createSixbAgentsWebSocketUrl(options.baseUrl ?? options.client?.getConfig().baseUrl),
+    client: options.client,
     reconnect: options.reconnect,
     reconnectDelayMs: options.reconnectDelayMs,
     connectionErrorMessage: "Agent stream websocket connection failed.",
@@ -144,7 +150,8 @@ export function createAgentRunSocket(options: AgentRunSocketOptions): Reconnecti
 /** Open one project-level lifecycle feed, independent of how many Agent threads are running. */
 export function createAgentActivitySocket(options: AgentActivitySocketOptions): ReconnectingSocket {
   return createReconnectingSocket({
-    url: createSixbAgentsWebSocketUrl(options.baseUrl),
+    url: createSixbAgentsWebSocketUrl(options.baseUrl ?? options.client?.getConfig().baseUrl),
+    client: options.client,
     reconnect: options.reconnect,
     reconnectDelayMs: options.reconnectDelayMs,
     connectionErrorMessage: "Agent activity websocket connection failed.",

@@ -4,6 +4,7 @@ import {
   type AgentRunStreamEvent,
   createAgentRunSocket,
 } from "./agent-streams"
+import type { Client } from "./generated/client"
 import type { ReconnectingSocketState } from "./ws-socket"
 
 export interface UseAgentRunStreamOptions {
@@ -12,6 +13,8 @@ export interface UseAgentRunStreamOptions {
   readonly enabled?: boolean
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
+  /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
+  readonly client?: Client
   readonly onEvent?: (event: AgentRunStreamEvent, cursor: string) => void
   readonly onRunSnapshot?: (run: AgentRunSnapshot) => void
   readonly onError?: (message: string) => void
@@ -25,10 +28,10 @@ const DISCONNECTED: ReconnectingSocketState = { connected: false, reconnecting: 
  * React binding over {@link createAgentRunSocket}: opens the run's stream while enabled and mirrors
  * the transport's connection state into React state. Callbacks are read through refs so re-renders
  * with new callback identities never tear the socket down; the socket is re-created only when a
- * subscription-defining option (runId/afterCursor/enabled/reconnect) changes.
+ * subscription-defining option (runId/afterCursor/enabled/reconnect/client) changes.
  */
 export function useAgentRunStream(options: UseAgentRunStreamOptions): UseAgentRunStreamResult {
-  const { runId, afterCursor, enabled = true, reconnect, reconnectDelayMs } = options
+  const { runId, afterCursor, enabled = true, reconnect, reconnectDelayMs, client } = options
   const onEventRef = useRef(options.onEvent)
   onEventRef.current = options.onEvent
   const onSnapshotRef = useRef(options.onRunSnapshot)
@@ -49,6 +52,7 @@ export function useAgentRunStream(options: UseAgentRunStreamOptions): UseAgentRu
       ...(afterCursor ? { afterCursor } : {}),
       reconnect,
       reconnectDelayMs,
+      client,
       onEvent: (event, cursor) => onEventRef.current?.(event, cursor),
       onRunSnapshot: (run) => onSnapshotRef.current?.(run),
       onError: (message) => onErrorRef.current?.(message),
@@ -56,7 +60,7 @@ export function useAgentRunStream(options: UseAgentRunStreamOptions): UseAgentRu
     })
 
     return () => socket.close()
-  }, [enabled, runId, afterCursor, reconnect, reconnectDelayMs])
+  }, [enabled, runId, afterCursor, reconnect, reconnectDelayMs, client])
 
   return state
 }

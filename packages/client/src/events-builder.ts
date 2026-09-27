@@ -340,7 +340,6 @@ export interface EventSubscribeExecutor {
  */
 export function createWsSubscribeExecutor(options?: { client?: Client }): EventSubscribeExecutor {
   const transportClient = options?.client ?? generatedClient
-  const baseUrl = transportClient.getConfig().baseUrl
   if (hasClientSharedAuthority(transportClient)) {
     return {
       subscribe(_filter, _handler, subscribeOptions) {
@@ -372,7 +371,7 @@ export function createWsSubscribeExecutor(options?: { client?: Client }): EventS
         reconnect: subscribeOptions?.reconnect,
         reconnectDelayMs: subscribeOptions?.reconnectDelayMs,
         handshakeTimeoutMs: subscribeOptions?.handshakeTimeoutMs,
-        baseUrl: typeof baseUrl === "string" ? baseUrl : undefined,
+        client: transportClient,
         onEvent: (event) => {
           if (matches(event)) handler(event)
         },

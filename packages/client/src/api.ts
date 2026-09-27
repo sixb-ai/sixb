@@ -1,9 +1,13 @@
 import type { SixbErrorCode } from "@sixb/core"
 import { normalizeSixbApiBaseUrl } from "./base-url"
-import { assertSharedAccessGrantId, markClientSharedAuthority } from "./client-authority"
+import {
+  assertSharedAccessGrantId,
+  markClientSessionAuthority,
+  markClientSharedAuthority,
+} from "./client-authority"
 import { type Auth, type Client, type Config, createClient, createConfig } from "./generated/client"
 import { client as sharedClient } from "./generated/client.gen"
-import { createSixbSessionFetch, type SixbSessionStore } from "./session"
+import { createSixbSessionFetch, type SixbSessionOptions, type SixbSessionStore } from "./session"
 
 export { normalizeSixbApiBaseUrl } from "./base-url"
 
@@ -105,6 +109,7 @@ export function isSixbApiError(value: unknown): value is SixbApiError {
 export function createSixbClient(options: SixbClientOptions = {}): SixbClient {
   const client = createClient(createSixbClientConfig(options))
   markClientSharedAuthority(client, options.auth?.kind === "shared")
+  markClientSessionAuthority(client, sixbSessionOptions(options))
   installSixbErrorInterceptor(client)
   return client
 }
@@ -115,6 +120,7 @@ export function configureSixbClient(
 ): SixbClient {
   client.setConfig(createSixbClientConfig(options))
   markClientSharedAuthority(client, options.auth?.kind === "shared")
+  markClientSessionAuthority(client, sixbSessionOptions(options))
   installSixbErrorInterceptor(client)
   return client
 }
@@ -130,6 +136,7 @@ export function createSixbClientConfig(options: SixbClientOptions = {}): Config 
 
   const baseUrl =
     options.baseUrl === undefined ? undefined : normalizeSixbApiBaseUrl(options.baseUrl)
+  const session = sixbSessionOptions(options)
   // Shares and sessions stamp their credential at the transport, on every request to the API. The
   // generated per-operation auth only covers operations whose OpenAPI entry declares that scheme.
   const configuredFetch =
@@ -139,13 +146,8 @@ export function createSixbClientConfig(options: SixbClientOptions = {}): Config 
           grantId: auth.grantId,
           fetch: options.fetch ?? globalThis.fetch,
         })
-      : auth.kind === "session"
-        ? createSixbSessionFetch({
-            baseUrl: baseUrl ?? "",
-            store: auth.store,
-            onSessionEnded: auth.onSessionEnded,
-            fetch: options.fetch,
-          })
+      : session
+        ? createSixbSessionFetch(session)
         : options.fetch
 
   return createConfig({
@@ -156,6 +158,17 @@ export function createSixbClientConfig(options: SixbClientOptions = {}): Config 
     auth:
       auth.kind === "none" || auth.kind === "session" ? undefined : createSixbAuthResolver(auth),
   })
+}
+
+function sixbSessionOptions(options: SixbClientOptions): SixbSessionOptions | null {
+  const auth = options.auth
+  if (auth?.kind !== "session") return null
+  return {
+    baseUrl: options.baseUrl === undefined ? "" : normalizeSixbApiBaseUrl(options.baseUrl),
+    store: auth.store,
+    onSessionEnded: auth.onSessionEnded,
+    fetch: options.fetch,
+  }
 }
 
 function createSixbAuthResolver(

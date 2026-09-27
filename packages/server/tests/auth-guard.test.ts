@@ -1248,6 +1248,44 @@ describe("server auth guard", () => {
     }
   })
 
+  test("accepts a native session's bearer token on WebSockets, but not an access token", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const accessToken = await signInDevice(
+      createSixbApi(
+        new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+      ),
+      seeded
+    )
+    const personalToken = await seedAccessToken(storage)
+    const port = await getFreePort()
+    const server = new SixbServer({
+      host: sixb,
+      hostname: "127.0.0.1",
+      port,
+      quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin: `http://127.0.0.1:${port}` }),
+    })
+
+    await server.start()
+
+    try {
+      await expect(
+        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
+          authorization: `Bearer ${accessToken}`,
+        })
+      ).resolves.toBeUndefined()
+
+      await expect(
+        connectWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
+          authorization: `Bearer ${personalToken.tokenValue}`,
+        })
+      ).rejects.toThrow()
+    } finally {
+      await server.stop()
+    }
+  })
+
   test("rejects WebSocket connections from unknown browser origins", async () => {
     const { sixb, storage } = createRuntime({ auth: true })
     const seeded = await seedSession(storage, { audience: "app" })
@@ -1356,6 +1394,38 @@ describe("server auth guard", () => {
     expect(response.headers.get("access-control-allow-origin")).toBe("http://api.localhost")
   })
 })
+
+/** Sign a native client in through the device flow, approved by `seeded`'s browser session. */
+async function signInDevice(
+  app: ReturnType<typeof createSixbApi>,
+  seeded: Awaited<ReturnType<typeof seedSession>>
+): Promise<string> {
+  const post = (path: string, init: RequestInit) =>
+    app.fetch(new Request(`http://localhost${path}`, { method: "POST", ...init }))
+  const json = { "content-type": "application/json" }
+  const started = await post("/api/auth/device-authorizations", {
+    headers: json,
+    body: JSON.stringify({ clientName: "sixb CLI" }),
+  })
+  const authorization = (await started.json()) as { deviceCode: string; userCode: string }
+  const approved = await post("/auth/device", {
+    headers: {
+      "content-type": "application/x-www-form-urlencoded",
+      cookie: `${seeded.cookie}; ${seeded.csrfCookie}`,
+    },
+    body: new URLSearchParams({
+      userCode: authorization.userCode,
+      decision: "approve",
+      csrfToken: "csrf_1",
+    }),
+  })
+  expect(approved.status).toBe(200)
+  const exchanged = await post("/api/auth/device-authorizations/token", {
+    headers: json,
+    body: JSON.stringify({ deviceCode: authorization.deviceCode }),
+  })
+  return ((await exchanged.json()) as { accessToken: string }).accessToken
+}
 
 async function connectWebSocket(url: string, headers?: Record<string, string>): Promise<void> {
   await new Promise<void>((resolvePromise, reject) => {

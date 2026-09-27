@@ -1,6 +1,6 @@
 # Events & subscriptions
 
-Subscribe to live data with `@sixb/client/hooks`. Subscriptions use your browser session and receive only events permitted by your grants.
+Subscribe to live data with `@sixb/client/hooks`. Subscriptions use your browser session, or a [native client's session](overview.md#tools-outside-the-browser), and receive only events permitted by your grants.
 
 For a normal action button, use [`useActionRunMutation`](../apps/actions.md). It already waits for the action and refreshes changed data.
 

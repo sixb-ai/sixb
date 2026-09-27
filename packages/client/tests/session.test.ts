@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   createSixbClient,
   getAuthSession,
@@ -8,6 +8,8 @@ import {
   signOutSixbSession,
   startSixbDeviceLogin,
 } from "../src"
+import { createAgentActivitySocket, createAgentRunSocket } from "../src/agent-streams"
+import { createEventSocket } from "../src/events-transport"
 
 const baseUrl = "https://api.example.com"
 
@@ -236,3 +238,153 @@ describe("native sessions", () => {
     expect(current()).toBeNull()
   })
 })
+
+class HeaderRecordingWebSocket {
+  static instances: HeaderRecordingWebSocket[] = []
+  onopen: (() => void) | null = null
+  onmessage: ((event: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+  onclose: (() => void) | null = null
+
+  constructor(
+    readonly url: string,
+    readonly init?: { readonly headers?: Record<string, string> }
+  ) {
+    HeaderRecordingWebSocket.instances.push(this)
+  }
+
+  send(): void {}
+  close(): void {}
+}
+
+// Each test names the line in src/ that it guards; removing that line fails it.
+describe("native sessions over WebSockets", () => {
+  let originalWebSocket: typeof WebSocket
+
+  beforeEach(() => {
+    originalWebSocket = globalThis.WebSocket
+    HeaderRecordingWebSocket.instances = []
+    globalThis.WebSocket = HeaderRecordingWebSocket as unknown as typeof WebSocket
+  })
+
+  afterEach(() => {
+    globalThis.WebSocket = originalWebSocket
+  })
+
+  // Guards passing `accessToken` to `openWebSocket` in ws-socket.ts.
+  test("opens the socket with the session's refreshed access token", async () => {
+    const { store, current } = memoryStore(tokens(1, 30_000))
+    const api = fakeApi({ acceptedAccessToken: () => current()?.accessToken ?? "" })
+    const client = createSixbClient({ baseUrl, fetch: api.fetch, auth: { kind: "session", store } })
+
+    const socket = createEventSocket({ client, baseUrl, reconnect: false, onEvent: () => {} })
+    await waitFor(() => HeaderRecordingWebSocket.instances.length === 1)
+    socket.close()
+
+    const [ws] = HeaderRecordingWebSocket.instances
+    expect(ws?.url).toBe("wss://api.example.com/ws/events")
+    expect(ws?.init?.headers).toEqual({ authorization: "Bearer access-2" })
+  })
+
+  // Guards `client: options.client` and the `options.client?.getConfig().baseUrl` default in
+  // agent-streams.ts.
+  test("connects agent sockets to a separate client's API with its session", async () => {
+    const { store, current } = memoryStore(tokens(1, 10 * 60_000))
+    const api = fakeApi({ acceptedAccessToken: () => current()?.accessToken ?? "" })
+    const client = createSixbClient({ baseUrl, fetch: api.fetch, auth: { kind: "session", store } })
+
+    const run = createAgentRunSocket({ runId: "run_1", client, onEvent: () => {} })
+    const activity = createAgentActivitySocket({ client, onActivity: () => {} })
+    await waitFor(() => HeaderRecordingWebSocket.instances.length === 2)
+    run.close()
+    activity.close()
+
+    for (const ws of HeaderRecordingWebSocket.instances) {
+      expect(ws.url).toBe("wss://api.example.com/ws/agents")
+      expect(ws.init?.headers).toEqual({ authorization: "Bearer access-1" })
+    }
+  })
+
+  // Guards the `servesSocket` check in ws-socket.ts.
+  test("never sends the token to another origin", async () => {
+    const { store } = memoryStore(tokens(1, 10 * 60_000))
+    const client = createSixbClient({ baseUrl, auth: { kind: "session", store } })
+
+    const socket = createEventSocket({
+      client,
+      baseUrl: "https://other.example.net",
+      reconnect: false,
+      onEvent: () => {},
+    })
+    await waitFor(() => HeaderRecordingWebSocket.instances.length === 1)
+    socket.close()
+
+    const [ws] = HeaderRecordingWebSocket.instances
+    expect(ws?.url).toBe("wss://other.example.net/ws/events")
+    expect(ws?.init).toBeUndefined()
+  })
+
+  // Guards the empty-store check in ws-socket.ts.
+  test("does not connect without a stored session", async () => {
+    const { store } = memoryStore(null)
+    const client = createSixbClient({ baseUrl, auth: { kind: "session", store } })
+    const states: Array<{ reconnecting: boolean; error: string | null }> = []
+
+    const socket = createEventSocket({
+      client,
+      reconnectDelayMs: 1,
+      onEvent: () => {},
+      onStateChange: (state) => states.push(state),
+    })
+    await waitFor(() => states.some((state) => state.error !== null))
+    await Bun.sleep(10)
+    socket.close()
+
+    expect(HeaderRecordingWebSocket.instances).toHaveLength(0)
+    expect(states.at(-1)).toMatchObject({
+      reconnecting: false,
+      error: expect.stringContaining("No session is stored"),
+    })
+  })
+
+  // Guards the `SixbSessionEndedError` exclusion from retries in ws-socket.ts.
+  test("stops connecting once the session has ended", async () => {
+    const { store, current } = memoryStore(tokens(1, 30_000))
+    const api = fakeApi({ acceptedAccessToken: () => "", ended: true })
+    let ended = 0
+    const client = createSixbClient({
+      baseUrl,
+      fetch: api.fetch,
+      auth: { kind: "session", store, onSessionEnded: () => ended++ },
+    })
+    const states: Array<{ reconnecting: boolean; error: string | null }> = []
+
+    const socket = createEventSocket({
+      client,
+      baseUrl,
+      reconnectDelayMs: 1,
+      onEvent: () => {},
+      onStateChange: (state) => states.push(state),
+    })
+    await waitFor(() => states.some((state) => state.error !== null))
+    await Bun.sleep(10)
+    socket.close()
+
+    expect(HeaderRecordingWebSocket.instances).toHaveLength(0)
+    expect(states.at(-1)).toMatchObject({
+      reconnecting: false,
+      error: expect.stringContaining("ended"),
+    })
+    expect(api.calls.filter((call) => call.startsWith("POST /api/auth/refresh"))).toHaveLength(1)
+    expect(current()).toBeNull()
+    expect(ended).toBe(1)
+  })
+})
+
+async function waitFor(condition: () => boolean, timeoutMs = 1_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!condition()) {
+    if (Date.now() >= deadline) throw new Error("Timed out waiting for the socket.")
+    await Bun.sleep(1)
+  }
+}

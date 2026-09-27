@@ -1,11 +1,14 @@
 import { useEffect, useRef, useState } from "react"
 import { type AgentRunActivityEvent, createAgentActivitySocket } from "./agent-streams"
+import type { Client } from "./generated/client"
 import type { ReconnectingSocketState } from "./ws-socket"
 
 export interface UseAgentActivityStreamOptions {
   readonly enabled?: boolean
   readonly reconnect?: boolean
   readonly reconnectDelayMs?: number
+  /** The client whose API and credential the socket uses. Defaults to the package's shared client. */
+  readonly client?: Client
   readonly onActivity?: (event: AgentRunActivityEvent) => void
   readonly onSubscribed?: () => void
   readonly onError?: (message: string) => void
@@ -19,7 +22,7 @@ const DISCONNECTED: ReconnectingSocketState = { connected: false, reconnecting: 
 export function useAgentActivityStream(
   options: UseAgentActivityStreamOptions
 ): UseAgentActivityStreamResult {
-  const { enabled = true, reconnect, reconnectDelayMs } = options
+  const { enabled = true, reconnect, reconnectDelayMs, client } = options
   const onActivityRef = useRef(options.onActivity)
   onActivityRef.current = options.onActivity
   const onSubscribedRef = useRef(options.onSubscribed)
@@ -36,13 +39,14 @@ export function useAgentActivityStream(
     const socket = createAgentActivitySocket({
       reconnect,
       reconnectDelayMs,
+      client,
       onActivity: (event) => onActivityRef.current?.(event),
       onSubscribed: () => onSubscribedRef.current?.(),
       onError: (message) => onErrorRef.current?.(message),
       onStateChange: setState,
     })
     return () => socket.close()
-  }, [enabled, reconnect, reconnectDelayMs])
+  }, [enabled, reconnect, reconnectDelayMs, client])
 
   return state
 }
