@@ -21,26 +21,15 @@ export type InMemoryFileUploadSessionsSnapshot = Map<string, FileUploadSession>
  */
 export class InMemoryFileUploadSessions extends DurableFileUploadSessions {
   private readonly sessionsById: Map<string, FileUploadSession>
-  private readonly unswept: boolean
 
-  /**
-   * `unswept`: no maintenance pass retires this store's abandoned sessions, so `create` drops
-   * them too, bounding memory and leaving their provider parts to the bucket lifecycle rule.
-   */
-  constructor(options: { readonly unswept?: boolean } = {}) {
+  constructor() {
     const sessionsById = new Map<string, FileUploadSession>()
     super(new InMemoryFileUploadSessionBackend(sessionsById))
     this.sessionsById = sessionsById
-    this.unswept = options.unswept ?? false
   }
 
   override async create(input: CreateFileUploadSessionInput): Promise<FileUploadSession> {
     await this.cleanupExpired()
-    if (this.unswept) {
-      for (const [id, session] of this.sessionsById) {
-        if (isAbandonedFileUploadSession(session)) this.sessionsById.delete(id)
-      }
-    }
     return super.create(input)
   }
 

@@ -87,9 +87,10 @@ See [OAuth connection flows](../../docs/connectors/authentication.md#connect-an-
 | `POST` | `/api/files/uploads/:uploadId/abort` | Discard the session |
 | `GET` | `/api/objects/:objectTypeId/:objectKey/files/content` | Download a `fileRef` property (`?path=/properties/scan`) |
 
-Upload sessions default to an in-memory store: neither `@sixb/pg` nor `@sixb/sqlite` implements
-`fileUploadSessions` in the pre-0.1 line, so a session does not survive a restart and is not shared
-across replicas. Single-request `POST /api/files` is unaffected.
+Upload sessions live in `storage.fileUploadSessions`, so they survive restarts and span replicas
+with `@sixb/pg` and `@sixb/sqlite`. The session routes answer `501` when the storage has no such
+store; single-request `POST /api/files` does not use it. A session that expires unfinished while
+holding a provider upload is aborted by the API's maintenance pass, then deleted.
 
 ### WebSocket
 

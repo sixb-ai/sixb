@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   DEFAULT_SIMPLE_FILE_UPLOAD_BYTES,
   defineObjectType,
@@ -22,6 +22,7 @@ import {
   type SignBlobUploadPartInput,
   type SignedBlobUploadPart,
 } from "@sixb/core/blob-storage/server"
+import type { Storage } from "@sixb/core/storage"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "../src/routes/files"
 import { FileUploadPartSchema } from "../src/schemas/files"
 import { createSixbApi, SixbServer } from "../src/server"
@@ -117,12 +118,15 @@ class TestDirectBlobStorage extends InMemoryBlobStorage implements DirectUploadB
   }
 }
 
-function createFilesApi(blobStorage = new InMemoryBlobStorage()) {
+function createFilesApi(
+  blobStorage = new InMemoryBlobStorage(),
+  storage: Storage = new InMemoryStorage()
+) {
   const sixb = new SixbHost({
     id: "test-project",
     ontology: [Document],
     broker: new InMemoryBroker(),
-    storage: new InMemoryStorage(),
+    storage,
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage,
     queues: new InMemoryQueues(),
@@ -259,6 +263,30 @@ describe("file routes", () => {
     expect(upload.method).toBe("PUT")
     expect(upload.url).toBe(`/api/files/uploads/${upload.uploadId}/content`)
     expect(new Date(upload.expiresAt).getTime()).toBeGreaterThan(Date.now())
+  })
+
+  test("answers 501 on every staged upload route when storage keeps no upload sessions", async () => {
+    const storage = new InMemoryStorage()
+    const withoutSessions = new Proxy(storage, {
+      get: (target, property) =>
+        property === "fileUploadSessions" ? undefined : Reflect.get(target, property, target),
+    })
+    const { app, blobStorage } = createFilesApi(new InMemoryBlobStorage(), withoutSessions)
+    const put = spyOn(blobStorage, "put")
+
+    const responses = await Promise.all([
+      app.fetch(jsonRequest("/api/files/uploads", { fileName: "a.txt", sizeBytes: 1 })),
+      app.fetch(stagedContentRequest("upload_missing", "a")),
+      app.fetch(jsonRequest("/api/files/uploads/upload_missing/parts/1")),
+      app.fetch(jsonRequest("/api/files/uploads/upload_missing/complete", {})),
+      app.fetch(jsonRequest("/api/files/uploads/upload_missing/abort")),
+    ])
+
+    expect(responses.map((response) => response.status)).toEqual([501, 501, 501, 501, 501])
+    expect(await responses[0]?.json()).toEqual({
+      error: "[SixbServer] File upload session storage is not configured on this runtime.",
+    })
+    expect(put).not.toHaveBeenCalled()
   })
 
   test("uploads staged server content and completes to a FileRef", async () => {
