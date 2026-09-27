@@ -412,7 +412,7 @@ export type GetAuthSessionResponses = {
       }
     | {
         authenticated: true
-        csrfToken: string
+        csrfToken?: string
         applicationAccess: {
           allowed: boolean
           audience: "atlas" | "app"
