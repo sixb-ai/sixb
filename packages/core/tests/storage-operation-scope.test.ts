@@ -5,8 +5,10 @@ import {
   type ObjectStorage,
   StorageTransactionError,
 } from "../src/storage"
+import { InMemoryAuthStorage } from "../src/storage/auth"
 import { InMemoryStorage } from "../src/storage/in-memory"
 import {
+  createAuthOperationScope,
   createObjectOperationScope,
   createOperationScopedFacade,
   createStorageOperationScope,
@@ -28,6 +30,28 @@ describe("storage operation scope", () => {
         createStorageOperationScope(async (run) => run())
       )
     ).toThrow("must implement ObjectReadScopeFactory")
+  })
+
+  // An unwrapped store skips the provider's lock: on SQLite its writes can land inside another
+  // request's open transaction. Reproduce: drop `deviceAuthorizations` from createAuthOperationScope.
+  test("scopes every auth store", () => {
+    const target = new InMemoryAuthStorage()
+    const scoped = createAuthOperationScope(
+      target,
+      createStorageOperationScope(async (run) => run())
+    )
+    // Stores are class instances; the shared state behind them is a plain object.
+    const stores = Object.entries(target).filter(
+      ([, value]) =>
+        typeof value === "object" &&
+        value !== null &&
+        Object.getPrototypeOf(value) !== Object.prototype
+    )
+
+    expect(stores.map(([name]) => name)).toContain("deviceAuthorizations")
+    for (const [name, store] of stores) {
+      expect(Reflect.get(scoped, name), name).not.toBe(store)
+    }
   })
 
   test("keeps decorated provider methods inside their operation scope", async () => {
