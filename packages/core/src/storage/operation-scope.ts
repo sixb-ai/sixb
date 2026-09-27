@@ -206,6 +206,7 @@ export function createAuthOperationScope<T extends AuthStorage>(
     groupMemberships: createOperationScopedFacade(target.groupMemberships, scope),
     magicLinks: createOperationScopedFacade(target.magicLinks, scope),
     oidcAuthorizationAttempts: createOperationScopedFacade(target.oidcAuthorizationAttempts, scope),
+    deviceAuthorizations: createOperationScopedFacade(target.deviceAuthorizations, scope),
   }) as T
 }
 
