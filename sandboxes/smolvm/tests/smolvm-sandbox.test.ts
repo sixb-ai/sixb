@@ -159,17 +159,37 @@ describe("SmolvmSandbox lifecycle", () => {
     expect(sandbox.status).toBe("stopped")
   })
 
-  test("destroy stops, removes the machine, and cleans up the temp workdir", async () => {
+  test("destroy stops and removes the machine", async () => {
     const bin = await makeFakeSmolvm()
     const sandbox = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
-    const wd = sandbox.workingDirectory
 
     await sandbox.destroy()
 
     const calls = await readCalls()
     expect(calls.some((c) => c.includes("machine stop --name run-1"))).toBe(true)
     expect(calls.some((c) => c.includes("machine delete --name run-1"))).toBe(true)
-    expect(stat(wd)).rejects.toThrow()
+  })
+
+  // Regression check: derive the working directory from a host mkdtemp() path again; the default is
+  // then a host path such as /private/var/folders/..., which a non-root image user cannot create.
+  test("uses a guest working directory and never creates it on the host", async () => {
+    const bin = await makeFakeSmolvm()
+    const byDefault = await SmolvmSandbox.create({ cli: { bin, image: "x" }, id: "run-1" })
+    expect(byDefault.workingDirectory).toBe("/workspace")
+    await byDefault.destroy()
+
+    const configured = join(dir, "guest-only")
+    const sandbox = await SmolvmSandbox.create({
+      cli: { bin, image: "x" },
+      id: "run-2",
+      workingDirectory: configured,
+    })
+    expect(sandbox.workingDirectory).toBe(configured)
+    expect((await readCalls()).at(-1)).toBe(
+      `machine exec --name run-2 --workdir / -- mkdir -p ${configured}`
+    )
+    expect(stat(configured)).rejects.toThrow()
+    await sandbox.destroy()
   })
 
   test("create failure throws SandboxError and best-effort removes the machine", async () => {
