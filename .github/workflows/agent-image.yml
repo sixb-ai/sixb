@@ -19,7 +19,8 @@ on:
 
 concurrency:
   group: agent-image-${{ github.ref }}
-  cancel-in-progress: true
+  # A release must finish once started: cancelling it between pushes strands a partial publish.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   IMAGE: ghcr.io/sixb-ai/sixb-agent
@@ -28,6 +29,9 @@ jobs:
   version:
     name: Resolve version
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     outputs:
       version: ${{ steps.version.outputs.version }}
       publish: ${{ steps.version.outputs.publish }}
@@ -35,18 +39,35 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Log in to GHCR
+        if: github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
       - id: version
         name: Check whether this version is published
         run: |
           version=$(cat sandboxes/agent-image/VERSION)
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+          # Only main publishes. A pull request, or a dispatch from any other branch, only verifies.
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
-          elif docker manifest inspect "$IMAGE:$version" > /dev/null 2>&1; then
+            exit 0
+          fi
+          # Check with the credentials that push, and treat only "not found" as unpublished. Any
+          # other failure (authorization, rate limit, outage) stops the release instead of letting
+          # it overwrite a published version.
+          if error=$(docker buildx imagetools inspect "$IMAGE:$version" 2>&1 >/dev/null); then
             echo "::notice::$IMAGE:$version is already published; bump VERSION to release changes."
             echo "publish=false" >> "$GITHUB_OUTPUT"
-          else
+          elif grep -q "$IMAGE:$version: not found" <<< "$error"; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Could not check whether $IMAGE:$version is published: $error"
+            exit 1
           fi
 
   build:
@@ -99,11 +120,13 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push
+      # Stage under the commit, not the version: release tags are written only after both
+      # architectures pass, so a failure on one never publishes the other.
+      - name: Push staging tag
         if: needs.version.outputs.publish == 'true'
         run: |
-          docker tag sixb-agent:ci "$IMAGE:${{ needs.version.outputs.version }}-${{ matrix.arch }}"
-          docker push "$IMAGE:${{ needs.version.outputs.version }}-${{ matrix.arch }}"
+          docker tag sixb-agent:ci "$IMAGE:staging-${{ github.sha }}-${{ matrix.arch }}"
+          docker push "$IMAGE:staging-${{ github.sha }}-${{ matrix.arch }}"
 
   publish:
     name: Publish multi-platform image
@@ -121,9 +144,16 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Create manifest
+      - name: Tag release
         run: |
           version=${{ needs.version.outputs.version }}
-          docker buildx imagetools create -t "$IMAGE:$version" "$IMAGE:$version-amd64" "$IMAGE:$version-arm64"
+          staged="$IMAGE:staging-${{ github.sha }}"
+          # Copy each verified architecture unchanged, then write the multi-platform tag last. The
+          # version check reads that tag, so a release interrupted before it is redone in full.
+          for arch in amd64 arm64; do
+            docker buildx imagetools create --prefer-index=false \
+              -t "$IMAGE:$version-$arch" "$staged-$arch"
+          done
+          docker buildx imagetools create -t "$IMAGE:$version" "$staged-amd64" "$staged-arm64"
           digest=$(docker buildx imagetools inspect "$IMAGE:$version" --format '{{json .Manifest}}' | jq -r .digest)
           echo "Published \`$IMAGE:$version\` (\`$IMAGE@$digest\`)" >> "$GITHUB_STEP_SUMMARY"
