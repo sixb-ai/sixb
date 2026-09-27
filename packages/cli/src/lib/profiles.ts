@@ -2,6 +2,12 @@ import { randomUUID } from "node:crypto"
 import { chmod, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises"
 import { homedir } from "node:os"
 import { dirname, isAbsolute, join } from "node:path"
+import {
+  getSixbSessionAccessToken,
+  SixbSessionEndedError,
+  type SixbSessionStore,
+  type SixbSessionTokens,
+} from "@sixb/client"
 import { normalizeApiUrl } from "./api-client"
 
 const CONFIG_DIRECTORY_MODE = 0o700
@@ -14,22 +20,8 @@ export interface SixbProfile {
   /** A personal access token, for scripts and CI (`sixb login --token-stdin`). */
   readonly token?: string
   /** The session `sixb login` signs in through the browser. */
-  readonly session?: SixbProfileSession
+  readonly session?: SixbSessionTokens
 }
-
-/** A signed-in session: the access token lasts minutes, and the refresh token renews it. */
-export interface SixbProfileSession {
-  readonly accessToken: string
-  readonly refreshToken: string
-  /** ISO time the access token expires. */
-  readonly accessExpiresAt: string
-}
-
-/** The profile's session has been signed out, revoked, or left unused past its idle timeout. */
-export class SessionEndedError extends Error {}
-
-// Refresh a little early, so a command never starts with an access token about to expire.
-const SESSION_REFRESH_MARGIN_MS = 60_000
 
 export interface SixbConfigFile {
   readonly version: 1
@@ -206,65 +198,40 @@ async function resolvedStoredProfile(
   const base = { ...rest, profile, source }
   if (explicitToken) return { ...base, token: explicitToken, tokenSource: "--token" }
   if (session) {
-    const token = await sessionAccessToken(profile, stored.apiUrl, session, options)
+    const token = await getSixbSessionAccessToken({
+      baseUrl: stored.apiUrl,
+      store: profileSessionStore(profile, options),
+    }).catch((error: unknown) => {
+      if (!(error instanceof SixbSessionEndedError)) throw error
+      return null
+    })
+    if (!token) {
+      throw new Error(
+        `[SixbCLI] The sign-in for profile '${profile}' has ended. Run \`sixb login ${stored.apiUrl} --profile ${profile}\` again.`
+      )
+    }
     return { ...base, token, tokenSource: "profile" }
   }
   return stored.token ? { ...base, tokenSource: "profile" } : base
 }
 
-async function sessionAccessToken(
+/** A profile's session, as the store the client SDK refreshes and signs out through. */
+export function profileSessionStore(
   profile: string,
-  apiUrl: string,
-  session: SixbProfileSession,
-  options: ProfileStoreOptions
-): Promise<string> {
-  if (Date.parse(session.accessExpiresAt) - Date.now() > SESSION_REFRESH_MARGIN_MS) {
-    return session.accessToken
-  }
-
-  const response = await fetch(`${apiUrl}/api/auth/refresh`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ refreshToken: session.refreshToken }),
-  })
-  if (response.status === 401) {
-    throw new SessionEndedError(
-      `[SixbCLI] The sign-in for profile '${profile}' has ended. Run \`sixb login ${apiUrl} --profile ${profile}\` again.`
+  options: ProfileStoreOptions = {}
+): SixbSessionStore {
+  const update = (change: (stored: SixbProfile) => SixbProfile) =>
+    updateConfig(
+      (config) => ({
+        ...config,
+        profiles: { ...config.profiles, [profile]: change(requireProfile(config, profile)) },
+      }),
+      options
     )
-  }
-  if (!response.ok) {
-    throw new Error(
-      `[SixbCLI] Renewing the sign-in for profile '${profile}' failed with HTTP ${response.status}.`
-    )
-  }
-
-  const next = parseSessionTokens(await response.json())
-  await updateConfig(
-    (config) => ({
-      ...config,
-      profiles: {
-        ...config.profiles,
-        [profile]: { ...requireProfile(config, profile), session: next },
-      },
-    }),
-    options
-  )
-  return next.accessToken
-}
-
-/** Read the tokens the API returns when it signs a client in or refreshes its session. */
-export function parseSessionTokens(value: unknown): SixbProfileSession {
-  const record = asRecord(value)
-  const accessToken = nonblankString(record.accessToken)
-  const refreshToken = nonblankString(record.refreshToken)
-  const expiresIn = record.expiresIn
-  if (!accessToken || !refreshToken || typeof expiresIn !== "number" || !(expiresIn > 0)) {
-    throw new Error("[SixbCLI] The Sixb API returned invalid session tokens.")
-  }
   return {
-    accessToken,
-    refreshToken,
-    accessExpiresAt: new Date(Date.now() + expiresIn * 1000).toISOString(),
+    load: async () => requireProfile(await readConfig(options), profile).session ?? null,
+    save: async (session) => void (await update((stored) => ({ ...stored, session }))),
+    clear: async () => void (await update(({ session: _ended, ...stored }) => stored)),
   }
 }
 
@@ -328,7 +295,7 @@ function parseConfig(value: unknown, path: string): SixbConfigFile {
   }
 }
 
-function parseStoredSession(value: unknown): SixbProfileSession | undefined {
+function parseStoredSession(value: unknown): SixbSessionTokens | undefined {
   const record = asRecord(value)
   const accessToken = nonblankString(record.accessToken)
   const refreshToken = nonblankString(record.refreshToken)

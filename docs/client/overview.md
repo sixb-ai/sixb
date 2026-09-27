@@ -51,6 +51,43 @@ This handles cookies, CSRF, session activity, and sign-in redirects. Call `contr
 
 React hooks also need a TanStack `QueryClientProvider`. A Sixb-served app supplies it for you; a standalone React app supplies its own.
 
+## Tools outside the browser
+
+A command-line tool or other program that runs outside the browser signs its user in through the browser and holds a session instead of a token. Store the session where your platform keeps secrets:
+
+```ts
+import {
+  client,
+  configureSixbClient,
+  type SixbSessionStore,
+  signOutSixbSession,
+  startSixbDeviceLogin,
+} from "@sixb/client"
+
+const baseUrl = "https://api.example.com"
+const store: SixbSessionStore = {
+  load: () => secureStorage.get("sixb-session"),
+  save: (tokens) => secureStorage.set("sixb-session", tokens),
+  clear: () => secureStorage.delete("sixb-session"),
+}
+
+// Sign in once: the user approves in the browser.
+const login = await startSixbDeviceLogin({ baseUrl, clientName: "Acme CLI" })
+openInBrowser(login.verificationUriComplete) // shows login.userCode
+await store.save(await login.complete())
+
+// Every API function, query, and hook now uses the session.
+configureSixbClient(client, {
+  baseUrl,
+  auth: { kind: "session", store, onSessionEnded: () => showSignIn() },
+})
+
+// Sign out on the server and clear the store.
+await signOutSixbSession({ baseUrl, store })
+```
+
+The access token lasts 15 minutes. The client refreshes it before it expires, and once more if the API rejects it, so the user stays signed in while the tool is used. The session ends after the API's idle timeout without use, or when it is signed out or revoked; the client then clears the store and calls `onSessionEnded`. The session appears under the tool's name in the user's sessions in Atlas.
+
 ## Call the API
 
 API functions accept `path`, `query`, and `body` options matching the endpoint. Set `throwOnError` to reject failed requests:
