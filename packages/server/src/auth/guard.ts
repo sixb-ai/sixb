@@ -86,10 +86,14 @@ export class ServerAuthGuard {
       return { kind: "deny", response: jsonAuthRequiredResponse() }
     }
 
-    // A native client's session names its own application; it sends no browser origin.
-    const audience =
-      session.credentialSource === "session" ? session.session.audience : authContext.audience
-    if (!sessionCanAccessApplication(this.host, session, audience)) {
+    // Application access gates the web app a browser session belongs to. A native client's session
+    // and an access token belong to no web app: grants alone decide what they may do. Account pages
+    // serve every signed-in user.
+    const deniedApplication = (caller: AuthenticatedRequestAuthSession) =>
+      !route.account &&
+      credentialTransport(caller) === "cookie" &&
+      !sessionCanAccessApplication(this.host, caller, authContext.audience)
+    if (deniedApplication(session)) {
       return {
         kind: "deny",
         response: jsonForbiddenResponse("Application access is not allowed"),
@@ -135,7 +139,7 @@ export class ServerAuthGuard {
         }
         return { kind: "deny", response: jsonAuthRequiredResponse() }
       }
-      if (!sessionCanAccessApplication(this.host, activeSession, authContext.audience)) {
+      if (deniedApplication(activeSession)) {
         return {
           kind: "deny",
           response: jsonForbiddenResponse("Application access is not allowed"),

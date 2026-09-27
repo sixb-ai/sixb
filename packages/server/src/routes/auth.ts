@@ -1,5 +1,10 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from "node:crypto"
-import type { AuthSessionAudience, GroupDefinition, SixbHostView } from "@sixb/core"
+import {
+  type AuthSessionAudience,
+  DEFAULT_AUTH_SESSION_AUDIENCE,
+  type GroupDefinition,
+  type SixbHostView,
+} from "@sixb/core"
 import {
   type AuthenticatedAuthSession,
   type AuthenticatedUserRequestSession,
@@ -372,10 +377,8 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         const parsed = DeviceAuthorizationDecisionBodySchema.parse(body)
         const authOptions = resolveAuthOptions(options, request)
         const session = await host.auth.getSession(request, authOptions)
+        // Every signed-in user may approve their own CLI login, whichever web app they may open.
         if (!session.authenticated) return authPageResponse("<h1>Authentication required</h1>", 401)
-        if (!sessionCanAccessApplication(host, session, authOptions.audience)) {
-          return authPageResponse("<h1>Access denied</h1>", 403)
-        }
         const csrfCookieName = host.auth.getCookieOptions(authOptions).csrfCookieName
         if (!verifyCsrfToken(request, { cookieName: csrfCookieName, token: parsed.csrfToken })) {
           return authPageResponse("<h1>Invalid authorization request</h1>", 403)
@@ -438,8 +441,9 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         if (!caller.authenticated || caller.credentialSource !== "session") {
           return jsonResponse({ authenticated: false as const }, 200)
         }
+        // A native client belongs to no web app; tell it whether its user may open Atlas.
         if (caller.session.bearer) {
-          return jsonResponse(authSessionBody(host, caller, caller.session.audience), 200)
+          return jsonResponse(authSessionBody(host, caller, DEFAULT_AUTH_SESSION_AUDIENCE), 200)
         }
 
         const session =
@@ -535,7 +539,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           {
             sessions: sessions.map((entry) => ({
               id: entry.id,
-              audience: entry.audience,
+              audience: entry.bearer ? undefined : entry.audience,
               current: entry.id === session.session.id,
               createdAt: toIsoString(entry.createdAt),
               expiresAt: toIsoString(entry.expiresAt),

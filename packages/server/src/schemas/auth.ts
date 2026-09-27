@@ -277,6 +277,7 @@ export const AuthSessionResponseSchema = z.union([
     authenticated: z.literal(true),
     /** Browser sessions only: send it back in `x-sixb-csrf` on mutations. */
     csrfToken: z.string().optional(),
+    /** Whether the user may open a web app: the browser session's own, or Atlas for a native client. */
     applicationAccess: z.object({
       allowed: z.boolean(),
       audience: z.enum(["atlas", "app"]),
@@ -344,7 +345,8 @@ export const DeviceAuthorizationDecisionBodySchema = z.object({
 
 export const AuthSessionSummarySchema = z.object({
   id: z.string(),
-  audience: z.enum(["atlas", "app"]),
+  /** The web app a browser session belongs to. Native clients' sessions have none. */
+  audience: z.enum(["atlas", "app"]).optional(),
   current: z.boolean(),
   createdAt: z.string(),
   expiresAt: z.string(),

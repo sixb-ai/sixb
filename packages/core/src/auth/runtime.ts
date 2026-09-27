@@ -417,6 +417,7 @@ export class AuthRuntime {
         projectId: this.projectId,
         userId: input.userId,
         strategyId: "device",
+        // A native session belongs to no web app. The column needs a value; nothing reads it.
         audience: DEFAULT_AUTH_SESSION_AUDIENCE,
         tokenHash: tokens.tokenHash,
         createdAt: input.now,
