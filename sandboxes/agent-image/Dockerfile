@@ -46,7 +46,8 @@ RUN for tool in bash node bun python python3 pip pip3 uv pytest ruff git rg jq c
 # shells when a provider does not apply image ENV.
 ENV LANG=C.UTF-8 MPLBACKEND=Agg PIP_DISABLE_PIP_VERSION_CHECK=1 PYTHONUNBUFFERED=1
 WORKDIR /workspace
-# No USER: SmolVM creates its working directory (a host-style path) as the image user, which a
-# non-root default cannot do. Providers that run as another UID rely on the writable paths above.
+# No USER: providers own privileges. Azure's supervisor must start as root and drops to an
+# unprivileged UID itself, and SmolVM mounts a root-owned /workspace over the image's. Providers
+# that run commands as another UID rely on the writable paths above.
 # Providers run commands explicitly; Vercel does not execute ENTRYPOINT/CMD.
 CMD ["bash"]

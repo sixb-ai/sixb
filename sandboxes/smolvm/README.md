@@ -4,7 +4,8 @@ Runs each agent's sandbox tools inside a hardware-isolated
 [smolvm](https://github.com/smol-machines/smolvm) microVM. Drop-in `Sandbox` provider — wire it once
 into `createSixb({ sandboxes })`; nothing else changes.
 
-Commands default to the sandbox's working directory. Relative `cwd` values such as `"."` or
+Commands default to the sandbox's working directory, `/workspace` in the guest unless
+`workingDirectory` says otherwise. Relative `cwd` values such as `"."` or
 `"src"` resolve against that directory; absolute paths select a guest directory for that call only.
 
 ## Setup
@@ -51,7 +52,9 @@ throws a message telling you what to run.
 
 Any image works if it has Bash, standard file utilities, CA certificates, and Bun 1.3+ or Node 22+.
 Extend the agent image with `FROM ghcr.io/sixb-ai/sixb-agent:1.2.0`, or use a smaller image for
-faster boots. Run-time installs will not work because egress is locked down.
+faster boots. Run-time installs will not work because egress is locked down. Commands run as the
+image's user, and smolvm mounts `/workspace` owned by root: an image with a non-root `USER` cannot
+write its working directory.
 
 ## Options
 

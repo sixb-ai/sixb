@@ -58,8 +58,10 @@ guard("SmolvmSandbox (real bare VM)", () => {
   test("runs in workingDirectory and injects env vars", async () => {
     const sandbox = await createBare({ env: { SIXB_RUN_ID: "run-xyz" } })
     try {
-      const pwd = await sandbox.runCommand("sh", ["-lc", "pwd"])
-      expect(pwd.stdout.trim()).toBe(sandbox.workingDirectory)
+      // The bare rootfs links /workspace to /storage/workspace, so compare physical paths.
+      const pwd = await sandbox.runCommand("sh", ["-lc", "pwd -P"])
+      const resolved = await sandbox.runCommand("realpath", [sandbox.workingDirectory])
+      expect(pwd.stdout.trim()).toBe(resolved.stdout.trim())
 
       const env = await sandbox.runCommand("sh", ["-lc", 'echo "$SIXB_RUN_ID"'])
       expect(env.stdout.trim()).toBe("run-xyz")
