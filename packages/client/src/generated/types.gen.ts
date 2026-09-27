@@ -487,7 +487,7 @@ export type ListAuthSessionsResponses = {
   200: {
     sessions: Array<{
       id: string
-      audience: "atlas" | "app"
+      audience?: "atlas" | "app"
       current: boolean
       createdAt: string
       expiresAt: string

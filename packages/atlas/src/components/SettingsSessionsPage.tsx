@@ -203,9 +203,11 @@ export function SettingsSessionsPage() {
                         <span className="truncate font-medium text-foreground">
                           {session.clientName ?? describeDevice(session.userAgent)}
                         </span>
-                        <Badge variant="secondary" className="rounded-md bg-accent/70 text-xs">
-                          {humanizeIdentifier(session.audience)}
-                        </Badge>
+                        {session.audience && (
+                          <Badge variant="secondary" className="rounded-md bg-accent/70 text-xs">
+                            {humanizeIdentifier(session.audience)}
+                          </Badge>
+                        )}
                         {session.current && (
                           <Badge
                             variant="outline"

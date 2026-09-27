@@ -9,6 +9,11 @@ export type RouteAccessKind = "public" | "api" | "html" | "websocket"
 export interface RouteAccess {
   readonly kind: RouteAccessKind
   readonly csrfProtected: boolean
+  /**
+   * An instance account page every signed-in user needs, whichever web app they may open: approving
+   * a CLI login. Application access does not gate it.
+   */
+  readonly account?: true
 }
 
 export function classifyRoute(request: Request): RouteAccess {
@@ -28,7 +33,7 @@ export function classifyRoute(request: Request): RouteAccess {
   }
 
   if (pathname === "/auth/device") {
-    return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method) }
+    return { kind: "html", csrfProtected: !isCsrfExemptMethod(request.method), account: true }
   }
 
   if (pathname === "/docs" || pathname.startsWith("/docs/")) {

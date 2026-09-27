@@ -54,6 +54,7 @@ export interface SessionRecord {
   readonly projectId: string
   readonly userId: string
   readonly strategyId: string
+  /** The web app a browser session belongs to. A bearer session belongs to none and ignores it. */
   readonly audience: AuthSessionAudience
   readonly tokenHash: string
   readonly createdAt: Date

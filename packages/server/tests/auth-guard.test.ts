@@ -453,6 +453,8 @@ describe("server auth guard", () => {
     }
     const cliSession = listed.sessions.find((entry) => entry.clientName === "sixb CLI on alex-mbp")
     expect(cliSession).toMatchObject({ current: true })
+    // A native session belongs to no web app.
+    expect(cliSession && "audience" in cliSession).toBe(false)
     const whoami = await bearer(token.accessToken, "/api/auth/session")
     const identity = (await whoami.json()) as Record<string, unknown>
     expect(identity).toMatchObject({
@@ -504,6 +506,105 @@ describe("server auth guard", () => {
 
   // Reproduce: skip the limiter in POST /api/auth/device-authorizations, or resolve the leftmost
   // x-forwarded-for entry (the old behavior); either way the 11th request returns 201.
+  // Reproduce: check application access for every caller in ServerAuthGuard again; the native
+  // session and the access token are then refused an Atlas they never asked to open.
+  test("gates only browser sessions by application; native sessions and tokens use grants", async () => {
+    const atlasForAtlasUsers = defineRole("atlas.users", {
+      grantedTo: [atlasUsers],
+      grants: [can.access(applications.atlas)],
+    })
+    const { sixb, storage } = createRuntime({ auth: true, roles: [atlasForAtlasUsers] })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const get = (path: string, headers: Record<string, string>) =>
+      app.fetch(new Request(`http://localhost${path}`, { headers }))
+
+    expect((await get("/api/project", { cookie: seeded.cookie })).status).toBe(403)
+
+    const { session, tokens } = sixb.auth.prepareBearerSession({
+      userId: "usr_1",
+      clientName: "Acme CLI",
+      now: new Date(),
+    })
+    await storage.auth.sessions.create(session)
+    const native = { authorization: `Bearer ${tokens.accessToken}` }
+    expect((await get("/api/project", native)).status).toBe(200)
+
+    const token = createAccessTokenCredential("personal")
+    await storage.auth.accessTokens.create({
+      id: token.tokenId,
+      projectId: "test-project",
+      name: "ci",
+      kind: "personal",
+      subject: { type: "user", id: "usr_1" },
+      tokenHash: token.tokenHash,
+      createdAt: new Date(),
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    })
+    expect(
+      (await get("/api/project", { authorization: `Bearer ${token.tokenValue}` })).status
+    ).toBe(200)
+
+    // Who-am-I tells the native client that its user may not open Atlas.
+    expect(await (await get("/api/auth/session", native)).json()).toMatchObject({
+      authenticated: true,
+      applicationAccess: { allowed: false, audience: "atlas" },
+    })
+  })
+
+  // Reproduce: drop `account: true` from /auth/device in classifyRoute, or restore the approval
+  // handler's application check; the user is then refused on the page or when approving.
+  test("lets a user who may not open Atlas approve their own CLI login", async () => {
+    const atlasForAtlasUsers = defineRole("atlas.users", {
+      grantedTo: [atlasUsers],
+      grants: [can.access(applications.atlas)],
+    })
+    const { sixb, storage } = createRuntime({ auth: true, roles: [atlasForAtlasUsers] })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const browser = { cookie: `${seeded.cookie}; ${seeded.csrfCookie}` }
+    expect(
+      (await app.fetch(new Request("http://localhost/api/project", { headers: browser }))).status
+    ).toBe(403)
+
+    const started = await app.fetch(
+      new Request("http://localhost/api/auth/device-authorizations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ clientName: "Acme CLI" }),
+      })
+    )
+    const { deviceCode, userCode, verificationUriComplete } = (await started.json()) as {
+      readonly deviceCode: string
+      readonly userCode: string
+      readonly verificationUriComplete: string
+    }
+
+    const page = await app.fetch(new Request(verificationUriComplete, { headers: browser }))
+    expect(page.status).toBe(200)
+    const approved = await app.fetch(
+      new Request("http://localhost/auth/device", {
+        method: "POST",
+        headers: { ...browser, "content-type": "application/x-www-form-urlencoded" },
+        body: new URLSearchParams({ userCode, decision: "approve", csrfToken: "csrf_1" }),
+      })
+    )
+    expect(approved.status).toBe(200)
+
+    const exchanged = await app.fetch(
+      new Request("http://localhost/api/auth/device-authorizations/token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deviceCode }),
+      })
+    )
+    expect(await exchanged.json()).toMatchObject({ status: "approved" })
+  })
+
   test("limits device authorizations per client address behind a trusted proxy", async () => {
     const { sixb } = createRuntime({ auth: true })
     const port = await getFreePort()

@@ -1610,7 +1610,7 @@
                             "type": "string"
                           }
                         },
-                        "required": ["id", "audience", "current", "createdAt", "expiresAt"],
+                        "required": ["id", "current", "createdAt", "expiresAt"],
                         "additionalProperties": false
                       }
                     }
