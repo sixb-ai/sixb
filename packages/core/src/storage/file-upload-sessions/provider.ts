@@ -41,6 +41,9 @@ export interface FileUploadSessionPersistenceBackend {
  * Shared durable implementation of the upload session lifecycle. Concrete providers own SQL,
  * transactions and database time; every transition and retention rule lives here so SQLite,
  * PostgreSQL and the in-memory reference cannot drift semantically.
+ *
+ * Every method is `async`: a storage's operation-scoped facade serializes only async methods, and
+ * a plain Promise-returning method would bypass it and join whatever SQLite transaction is open.
  */
 export class DurableFileUploadSessions implements FileUploadSessionStore {
   constructor(private readonly backend: FileUploadSessionPersistenceBackend) {}
@@ -91,11 +94,11 @@ export class DurableFileUploadSessions implements FileUploadSessionStore {
     })
   }
 
-  markUploaded(uploadId: string, fileRef: FileRef): Promise<FileUploadSession> {
+  async markUploaded(uploadId: string, fileRef: FileRef): Promise<FileUploadSession> {
     return this.transition(uploadId, (session) => ({ ...session, fileRef }))
   }
 
-  addSignedPart(uploadId: string, part: SignedBlobUploadPart): Promise<FileUploadSession> {
+  async addSignedPart(uploadId: string, part: SignedBlobUploadPart): Promise<FileUploadSession> {
     return this.transition(uploadId, (session) => ({
       ...session,
       signedParts: [
@@ -105,7 +108,7 @@ export class DurableFileUploadSessions implements FileUploadSessionStore {
     }))
   }
 
-  complete(uploadId: string, fileRef: FileRef): Promise<FileUploadSession> {
+  async complete(uploadId: string, fileRef: FileRef): Promise<FileUploadSession> {
     return this.transition(uploadId, (session, now) => ({
       ...session,
       status: "completed",
@@ -114,7 +117,7 @@ export class DurableFileUploadSessions implements FileUploadSessionStore {
     }))
   }
 
-  abort(uploadId: string): Promise<FileUploadSession> {
+  async abort(uploadId: string): Promise<FileUploadSession> {
     return this.transition(uploadId, (session, now) => ({
       ...session,
       status: "aborted",
