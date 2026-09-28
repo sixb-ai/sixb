@@ -462,6 +462,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 49,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "050-directory-group-memberships",
+    status: "applied",
+    version: 50,
+  },
 ]
 
 afterEach(async () => {
@@ -508,6 +515,48 @@ describe("SQLite storage migrations", () => {
         { project_id: "p", id: "task", requester_group_ids: '["finance"]' },
         { project_id: "p", id: "workflow", requester_group_ids: '["finance"]' },
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("keeps group memberships when it widens their source check to 'directory'", async () => {
+    // Removal proof: drop 050's INSERT … SELECT; the manual membership below disappears.
+    const db = new Database(":memory:")
+    try {
+      db.exec(`
+        CREATE TABLE auth_group_memberships (
+          project_id TEXT NOT NULL,
+          user_id TEXT NOT NULL,
+          group_id TEXT NOT NULL,
+          source TEXT NOT NULL CHECK (source IN ('invitation', 'manual', 'agent')),
+          created_at TEXT NOT NULL,
+          PRIMARY KEY (project_id, user_id, group_id)
+        );
+        CREATE INDEX idx_auth_group_memberships_group
+          ON auth_group_memberships(project_id, group_id);
+        INSERT INTO auth_group_memberships
+          VALUES ('p', 'usr_1', 'security-admins', 'manual', '2026-05-14T10:00:00.000Z');
+      `)
+      const migration = sqliteStorageMigrations.steps.find(
+        (step) => step.id === "050-directory-group-memberships"
+      )!
+      await migration.up(db)
+      db.run(
+        "INSERT INTO auth_group_memberships VALUES ('p', 'usr_1', 'field-ops', 'directory', '2026-05-14T10:01:00.000Z')"
+      )
+
+      expect(
+        db.query("SELECT group_id, source FROM auth_group_memberships ORDER BY group_id").all()
+      ).toEqual([
+        { group_id: "field-ops", source: "directory" },
+        { group_id: "security-admins", source: "manual" },
+      ])
+      expect(() =>
+        db.run(
+          "INSERT INTO auth_group_memberships VALUES ('p', 'usr_1', 'x', 'unknown', '2026-05-14T10:02:00.000Z')"
+        )
+      ).toThrow()
     } finally {
       db.close()
     }
