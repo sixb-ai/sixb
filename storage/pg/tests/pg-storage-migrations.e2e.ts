@@ -340,6 +340,7 @@ describe("Postgres storage migrations", () => {
             "047-ontology-commit-attribution",
             "048-file-upload-sessions",
             "049-native-sessions",
+            "050-directory-group-memberships",
           ],
         },
       ])
@@ -686,6 +687,13 @@ describe("Postgres storage migrations", () => {
           id: "049-native-sessions",
           status: "applied",
           version: 49,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "050-directory-group-memberships",
+          status: "applied",
+          version: 50,
         },
       ])
     })
@@ -2570,6 +2578,13 @@ describe("Postgres storage migrations", () => {
           id: "049-native-sessions",
           status: "applied",
           version: 49,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "050-directory-group-memberships",
+          status: "applied",
+          version: 50,
         },
       ])
     } finally {

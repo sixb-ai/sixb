@@ -7,6 +7,7 @@ import type {
   CompleteSignInResult,
   DeviceAuthorizationRecord,
   GroupMembershipRecord,
+  GroupMembershipSource,
   InvitationRecord,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
@@ -273,8 +274,9 @@ export class PgAuthStorage implements AuthStorage {
           projectId,
           user,
         })
-        const groupMemberships = await this.applyManualGroups(tx, {
+        const groupMemberships = await this.applyGroups(tx, {
           completedAt,
+          source: "manual",
           existing: invitation.groupMemberships,
           groupIds: manualGroupIds,
           projectId,
@@ -440,10 +442,17 @@ export class PgAuthStorage implements AuthStorage {
           projectId,
           user,
         })
-        const groupMemberships = await this.applyManualGroups(tx, {
+        const groupMemberships = await this.syncDirectoryGroups(tx, {
           completedAt,
-          existing: invitation.groupMemberships,
-          groupIds: manualGroupIds,
+          existing: await this.applyGroups(tx, {
+            completedAt,
+            source: "manual",
+            existing: invitation.groupMemberships,
+            groupIds: manualGroupIds,
+            projectId,
+            userId: user.id,
+          }),
+          groupIds: input.directoryGroupIds,
           projectId,
           userId: user.id,
         })
@@ -646,13 +655,14 @@ export class PgAuthStorage implements AuthStorage {
     return { invitation, groupMemberships }
   }
 
-  private async applyManualGroups(
+  private async applyGroups(
     sql: SQLClient,
     input: {
       readonly completedAt: Date
       readonly existing: readonly GroupMembershipRecord[]
       readonly groupIds: readonly string[]
       readonly projectId: string
+      readonly source: GroupMembershipSource
       readonly userId: string
     }
   ): Promise<readonly GroupMembershipRecord[]> {
@@ -664,13 +674,40 @@ export class PgAuthStorage implements AuthStorage {
           projectId: input.projectId,
           userId: input.userId,
           groupId,
-          source: "manual",
+          source: input.source,
           createdAt: input.completedAt,
         })
       )
     }
 
     return groupMemberships
+  }
+  // Directory memberships become exactly `groupIds`. A group the user already holds from another
+  // source keeps that source, and memberships from other sources are never removed.
+  private async syncDirectoryGroups(
+    sql: SQLClient,
+    input: {
+      readonly completedAt: Date
+      readonly existing: readonly GroupMembershipRecord[]
+      readonly groupIds?: readonly string[]
+      readonly projectId: string
+      readonly userId: string
+    }
+  ): Promise<readonly GroupMembershipRecord[]> {
+    if (!input.groupIds) {
+      return input.existing
+    }
+
+    const groupIds = normalizeGroupIds(input.groupIds)
+    await sql`
+      DELETE FROM auth_group_memberships
+      WHERE project_id = ${input.projectId}
+        AND user_id = ${input.userId}
+        AND source = 'directory'
+        ${groupIds.length > 0 ? sql`AND group_id NOT IN ${sql(groupIds)}` : sql``}
+    `
+
+    return this.applyGroups(sql, { ...input, groupIds, source: "directory" })
   }
 
   private async createSignInSession(

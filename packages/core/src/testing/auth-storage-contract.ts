@@ -81,6 +81,34 @@ async function createUser(
   })
 }
 
+async function completeOidcSignInForAva(
+  storage: AuthStorage,
+  directoryGroupIds: readonly string[] | undefined
+): Promise<void> {
+  await storage.oidcAuthorizationAttempts.create({
+    id: "oidc_directory",
+    projectId,
+    strategyId: "entra",
+    audience: "atlas",
+    stateHash: "directory-state",
+    nonceHash: "nonce-hash",
+    codeVerifier: "verifier",
+    createdAt: at("2026-05-14T10:00:00.000Z"),
+    expiresAt: at("2026-05-14T10:10:00.000Z"),
+  })
+  await storage.completeOidcSignIn({
+    projectId,
+    oidcAuthorizationAttemptId: "oidc_directory",
+    stateHash: "directory-state",
+    completedAt: at("2026-05-14T10:01:00.000Z"),
+    subject: "entra-ava",
+    email: "ava@acme.com",
+    directoryGroupIds,
+    newUserId: "usr_unused",
+    session: sessionInput("ses_directory"),
+  })
+}
+
 /**
  * Runs the shared `AuthStorage` contract against any storage implementation.
  *
@@ -1952,6 +1980,72 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         await expect(
           storage.groupMemberships.listForUser({ projectId, userId: "usr_founder" })
         ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])
+      })
+    })
+
+    test("syncs directory memberships to exactly the groups the provider grants", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        for (const [groupId, source] of [
+          ["security-admins", "manual"],
+          ["commercial", "invitation"],
+          ["legacy-team", "directory"],
+        ] as const) {
+          await storage.groupMemberships.upsert({ projectId, userId: "usr_1", groupId, source })
+        }
+
+        await completeOidcSignInForAva(storage, ["security-admins", "field-ops"])
+
+        // legacy-team is no longer granted; security-admins keeps its manual source.
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_1" })
+        ).resolves.toMatchObject([
+          { groupId: "commercial", source: "invitation" },
+          { groupId: "field-ops", source: "directory" },
+          { groupId: "security-admins", source: "manual" },
+        ])
+      })
+    })
+
+    test("removes every directory membership when the provider grants no groups", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.groupMemberships.upsert({
+          projectId,
+          userId: "usr_1",
+          groupId: "security-admins",
+          source: "manual",
+        })
+        await storage.groupMemberships.upsert({
+          projectId,
+          userId: "usr_1",
+          groupId: "field-ops",
+          source: "directory",
+        })
+
+        await completeOidcSignInForAva(storage, [])
+
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_1" })
+        ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])
+      })
+    })
+
+    test("leaves directory memberships alone when sign-in syncs no groups", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.groupMemberships.upsert({
+          projectId,
+          userId: "usr_1",
+          groupId: "field-ops",
+          source: "directory",
+        })
+
+        await completeOidcSignInForAva(storage, undefined)
+
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_1" })
+        ).resolves.toMatchObject([{ groupId: "field-ops", source: "directory" }])
       })
     })
 

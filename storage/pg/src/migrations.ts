@@ -106,6 +106,9 @@ import ontologyCommitAttributionSql from "./migrations/047-ontology-commit-attri
   type: "text",
 }
 import nativeSessionsSql from "./migrations/049-native-sessions.sql" with { type: "text" }
+import directoryGroupMembershipsSql from "./migrations/050-directory-group-memberships.sql" with {
+  type: "text",
+}
 import type { SQL, SQLClient } from "./pg-client"
 
 export interface PostgresMigrationContext {
@@ -408,6 +411,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("047-ontology-commit-attribution", ontologyCommitAttributionSql),
     pgSql("048-file-upload-sessions", fileUploadSessionsSql),
     pgSql("049-native-sessions", nativeSessionsSql),
+    pgSql("050-directory-group-memberships", directoryGroupMembershipsSql),
   ],
 })
 

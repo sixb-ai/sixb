@@ -55,7 +55,7 @@ export interface SqliteAuthServiceAccountGroupMembershipRow {
   readonly project_id: string
   readonly service_account_id: string
   readonly group_id: string
-  readonly source: GroupMembershipSource
+  readonly source: ServiceAccountGroupMembershipRecord["source"]
   readonly created_at: string
 }
 
