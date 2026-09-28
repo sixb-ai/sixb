@@ -200,27 +200,6 @@ export class SqliteAuthStorage implements AuthStorage {
           }
         }
 
-        if (
-          shouldCreateUser &&
-          !activeInvitation &&
-          input.allowUserCreationWithoutInvitation &&
-          input.requireNoActiveUsersForUserCreation &&
-          hasActiveUsers(this.db, projectId)
-        ) {
-          consumeMagicLink(this.db, {
-            projectId,
-            id: input.magicLinkId,
-            tokenHash: input.tokenHash,
-            consumedAt: completedAt,
-          })
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
         validateCompleteSessionInput(this.db, projectId, input.session)
         assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
@@ -369,22 +348,6 @@ export class SqliteAuthStorage implements AuthStorage {
         }
 
         if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
-          this.consumeOidcAttempt(input, completedAt, projectId)
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
-        if (
-          shouldCreateUser &&
-          !activeInvitation &&
-          input.allowUserCreationWithoutInvitation &&
-          input.requireNoActiveUsersForUserCreation &&
-          hasActiveUsers(this.db, projectId)
-        ) {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
             error: new AuthStorageError(
@@ -790,22 +753,6 @@ export class SqliteAuthStorage implements AuthStorage {
       updated_at: toIso(input.updatedAt),
     })
   }
-}
-
-function hasActiveUsers(db: Database, projectId: string): boolean {
-  const row = db
-    .query(
-      `
-      SELECT 1 AS active
-      FROM auth_users
-      WHERE project_id = ?
-        AND status = 'active'
-      LIMIT 1
-    `
-    )
-    .get(projectId) as { readonly active: number } | null
-
-  return row !== null
 }
 
 function assertSignInSessionAudience(

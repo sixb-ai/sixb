@@ -431,7 +431,6 @@ export interface CompleteMagicLinkSignInInput {
   readonly newUserDisplayName?: string
   readonly newUserAvatarUrl?: string
   readonly allowUserCreationWithoutInvitation?: boolean
-  readonly requireNoActiveUsersForUserCreation?: boolean
   readonly manualGroupIds?: readonly string[]
   readonly session: CompleteAuthSessionInput
 }
@@ -449,7 +448,6 @@ export interface CompleteOidcSignInInput {
   readonly claims?: Readonly<Record<string, unknown>>
   readonly autoLinkByVerifiedEmail?: boolean
   readonly allowUserCreationWithoutInvitation?: boolean
-  readonly requireNoActiveUsersForUserCreation?: boolean
   readonly manualGroupIds?: readonly string[]
   readonly newUserId: string
   readonly session: CompleteAuthSessionInput

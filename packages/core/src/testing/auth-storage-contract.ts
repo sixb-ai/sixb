@@ -1721,91 +1721,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("closes bootstrap user creation when an active user already exists", async () => {
-      await withStorage(async (storage) => {
-        await createUser(storage, {
-          id: "usr_existing",
-          email: "existing@acme.com",
-        })
-        await storage.magicLinks.create({
-          id: "ml_1",
-          projectId,
-          strategyId: "magic-link",
-          audience: "atlas",
-          email: "founder@acme.com",
-          tokenHash: "link-hash",
-          createdAt: at("2026-05-14T10:01:00.000Z"),
-          expiresAt: at("2026-05-14T10:16:00.000Z"),
-        })
-
-        await expectAuthError(
-          storage.completeMagicLinkSignIn({
-            projectId,
-            magicLinkId: "ml_1",
-            tokenHash: "link-hash",
-            completedAt: at("2026-05-14T10:03:00.000Z"),
-            newUserId: "usr_founder",
-            allowUserCreationWithoutInvitation: true,
-            requireNoActiveUsersForUserCreation: true,
-            session: sessionInput("ses_founder"),
-          }),
-          "user_creation_not_allowed"
-        )
-        await expect(
-          storage.users.getByEmail({ projectId, email: "founder@acme.com" })
-        ).resolves.toBeNull()
-        await expect(storage.magicLinks.getById({ projectId, id: "ml_1" })).resolves.toMatchObject({
-          consumedAt: at("2026-05-14T10:03:00.000Z"),
-        })
-      })
-    })
-
-    test("does not apply the bootstrap closure guard to invited user creation", async () => {
-      await withStorage(async (storage) => {
-        await createUser(storage, {
-          id: "usr_existing",
-          email: "existing@acme.com",
-        })
-        await storage.invitations.createOrUpdateActive({
-          id: "inv_1",
-          projectId,
-          email: "invited@acme.com",
-          groupIds: ["commercial"],
-          createdAt: at("2026-05-14T10:00:00.000Z"),
-          expiresAt: at("2026-05-21T10:00:00.000Z"),
-        })
-        await storage.magicLinks.create({
-          id: "ml_1",
-          projectId,
-          strategyId: "magic-link",
-          audience: "atlas",
-          email: "invited@acme.com",
-          tokenHash: "link-hash",
-          createdAt: at("2026-05-14T10:01:00.000Z"),
-          expiresAt: at("2026-05-14T10:16:00.000Z"),
-        })
-
-        const result = await storage.completeMagicLinkSignIn({
-          projectId,
-          magicLinkId: "ml_1",
-          tokenHash: "link-hash",
-          completedAt: at("2026-05-14T10:03:00.000Z"),
-          newUserId: "usr_invited",
-          requireNoActiveUsersForUserCreation: true,
-          session: sessionInput("ses_invited"),
-        })
-
-        expect(result.user).toMatchObject({
-          id: "usr_invited",
-          email: "invited@acme.com",
-        })
-        expect(result.invitation).toMatchObject({
-          id: "inv_1",
-          status: "accepted",
-        })
-      })
-    })
-
     test("consumes valid magic links when an existing user is suspended", async () => {
       await withStorage(async (storage) => {
         await createUser(storage, { status: "suspended" })
@@ -2036,7 +1951,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("allows first OIDC bootstrap user creation with manual groups", async () => {
+    test("allows OIDC bootstrap user creation with manual groups", async () => {
       await withStorage(async (storage) => {
         await storage.oidcAuthorizationAttempts.create({
           id: "oidc_bootstrap",
@@ -2059,7 +1974,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           email: "founder@acme.com",
           emailVerified: true,
           allowUserCreationWithoutInvitation: true,
-          requireNoActiveUsersForUserCreation: true,
           manualGroupIds: ["security-admins"],
           newUserId: "usr_founder",
           session: sessionInput("ses_oidc_bootstrap"),
