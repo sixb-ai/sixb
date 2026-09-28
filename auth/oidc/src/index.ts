@@ -1,3 +1,4 @@
+export type { OidcClaims } from "./claims"
 export type { OidcClientAdapter, OidcTokenResponse } from "./client"
 export type { SendOidcInvitationInput } from "./email"
 export { OidcAuthError } from "./errors"

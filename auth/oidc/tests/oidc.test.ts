@@ -1,7 +1,13 @@
 import { describe, expect, test } from "bun:test"
 import type { CompleteAuthSessionInput } from "@sixb/core/storage"
 import { InMemoryAuthStorage } from "@sixb/core/storage"
-import { OidcAuthError, type OidcClientAdapter, type OidcTokenResponse, oidc } from "../src"
+import {
+  OidcAuthError,
+  type OidcClientAdapter,
+  type OidcOptions,
+  type OidcTokenResponse,
+  oidc,
+} from "../src"
 
 const projectId = "project-a"
 
@@ -22,6 +28,7 @@ class FakeOidcClient implements OidcClientAdapter {
     picture: "https://idp.example/avatar.png",
   }
   authorizationCodeGrantCalls: URL[] = []
+  userInfoCalls = 0
 
   randomPKCECodeVerifier(): string {
     return this.codeVerifier
@@ -62,6 +69,7 @@ class FakeOidcClient implements OidcClientAdapter {
   }
 
   async fetchUserInfo(): Promise<Readonly<Record<string, unknown>>> {
+    this.userInfoCalls += 1
     return this.userInfo ?? {}
   }
 }
@@ -82,6 +90,7 @@ async function startSignIn(input: {
   readonly bootstrapUsers?: readonly string[]
   readonly bootstrapGroups?: readonly string[]
   readonly returnTo?: string
+  readonly trustedEmail?: OidcOptions["trustedEmail"]
 }) {
   const strategy = oidc({
     id: "okta",
@@ -91,6 +100,7 @@ async function startSignIn(input: {
     allowedDomains: ["acme.com"],
     bootstrapUsers: input.bootstrapUsers,
     bootstrapGroups: input.bootstrapGroups ?? ["security-admins"],
+    trustedEmail: input.trustedEmail,
     clientAdapter: input.client,
   })
   const start = await strategy.startOidcSignIn({
@@ -102,6 +112,33 @@ async function startSignIn(input: {
     now: new Date("2026-05-17T09:58:00.000Z"),
   })
   return { strategy, redirectTo: new URL(start.redirectTo) }
+}
+
+async function signIn(input: Parameters<typeof startSignIn>[0] & { readonly sessionId?: string }) {
+  const { strategy, redirectTo } = await startSignIn(input)
+  return strategy.completeOidcSignIn({
+    projectId,
+    authStorage: input.authStorage,
+    requestUrl: `http://localhost/auth/callback?code=code&state=${redirectTo.searchParams.get("state")}`,
+    requestOrigin: "http://localhost",
+    session: sessionInput(input.sessionId),
+    now: new Date("2026-05-17T10:00:00.000Z"),
+  })
+}
+
+// What Microsoft Entra sends for a user without a mailbox: no `email`, no `email_verified`, and the
+// sign-in name in `preferred_username`. Its UserInfo adds only a Graph photo URL.
+const entraClaims = {
+  sub: "AAAAAAAAAAAAAAAAAAAAAEntraPairwiseSub",
+  oid: "00000000-0000-0000-0000-000000000001",
+  tid: "00000000-0000-0000-0000-00000000000a",
+  preferred_username: "Alice@acme.com",
+  name: "Alice Park",
+}
+const entraUserInfo = {
+  sub: entraClaims.sub,
+  name: "Alice Park",
+  picture: "https://graph.microsoft.com/v1.0/me/photo/$value",
 }
 
 describe("oidc auth strategy", () => {
@@ -409,7 +446,7 @@ describe("oidc auth strategy", () => {
         session: sessionInput(),
         now: new Date("2026-05-17T10:00:00.000Z"),
       })
-    ).rejects.toThrow("OIDC provider did not verify the email address.")
+    ).rejects.toThrow("OIDC provider sent no trusted email address.")
 
     await expect(
       authStorage.identities.listForUser({ projectId, userId: "usr_ava" })
@@ -421,27 +458,76 @@ describe("oidc auth strategy", () => {
     expect(attempt?.consumedAt).toEqual(new Date("2026-05-17T10:00:00.000Z"))
   })
 
-  test("rejects mismatched userinfo subjects", async () => {
+  test("signs in an invited Entra user by the address trustedEmail returns", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    await authStorage.invitations.createOrUpdateActive({
+      id: "inv_alice",
+      projectId,
+      email: "alice@acme.com",
+      groupIds: ["commercial"],
+      createdAt: new Date("2026-05-17T09:57:00.000Z"),
+      expiresAt: new Date("2026-05-24T09:57:00.000Z"),
+    })
+    const client = new FakeOidcClient()
+    client.tokenClaims = entraClaims
+    client.userInfo = entraUserInfo
+
+    const result = await signIn({
+      authStorage,
+      client,
+      trustedEmail: (claims) => claims.preferred_username,
+    })
+
+    expect(result.user).toMatchObject({ email: "alice@acme.com", displayName: "Alice Park" })
+    expect(result.user.avatarUrl).toBeUndefined()
+    expect(result.identity).toMatchObject({ subject: entraClaims.sub })
+    expect(result.invitation).toMatchObject({ id: "inv_alice", status: "accepted" })
+    expect(client.userInfoCalls).toBe(0)
+  })
+
+  test("refuses an Entra user by default, after asking UserInfo for an address", async () => {
     const authStorage = new InMemoryAuthStorage()
     const client = new FakeOidcClient()
-    client.userInfo = {
-      sub: "different",
-      email: "ava@acme.com",
-      email_verified: true,
-    }
-    const { strategy, redirectTo } = await startSignIn({ authStorage, client })
+    client.tokenClaims = entraClaims
+    client.userInfo = entraUserInfo
 
     await expect(
-      strategy.completeOidcSignIn({
-        projectId,
-        authStorage,
-        requestUrl: `http://localhost/auth/callback?code=code&state=${redirectTo.searchParams.get(
-          "state"
-        )}`,
-        requestOrigin: "http://localhost",
-        session: sessionInput(),
-        now: new Date("2026-05-17T10:00:00.000Z"),
-      })
-    ).rejects.toBeInstanceOf(OidcAuthError)
+      signIn({ authStorage, client, bootstrapUsers: ["alice@acme.com"] })
+    ).rejects.toThrow("return the address from the `trustedEmail` option")
+    expect(client.userInfoCalls).toBe(1)
+  })
+
+  test('accepts email_verified sent as the string "true"', async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    client.tokenClaims = { sub: "001", email: "ava@acme.com", email_verified: "true" }
+
+    const result = await signIn({ authStorage, client, bootstrapUsers: ["ava@acme.com"] })
+
+    expect(result.user.email).toBe("ava@acme.com")
+  })
+
+  test("reads the address from UserInfo when the ID token leaves it out", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    client.tokenClaims = { sub: "00u1" }
+    client.userInfo = { sub: "00u1", email: "ava@acme.com", email_verified: true, name: "Ava" }
+
+    const result = await signIn({ authStorage, client, bootstrapUsers: ["ava@acme.com"] })
+
+    expect(result.user).toMatchObject({ email: "ava@acme.com", displayName: "Ava" })
+    expect(client.userInfoCalls).toBe(1)
+  })
+
+  test("signs a returning user in by subject after their address changes", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    const first = await signIn({ authStorage, client, bootstrapUsers: ["ava@acme.com"] })
+
+    client.tokenClaims = { sub: "00u1", email: "ava.chen@acme.com", email_verified: true }
+    const second = await signIn({ authStorage, client, sessionId: "ses_2" })
+
+    expect(second.user.id).toBe(first.user.id)
+    expect(second.user.email).toBe("ava@acme.com")
   })
 })
