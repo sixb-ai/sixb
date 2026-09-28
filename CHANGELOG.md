@@ -2,6 +2,131 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-28 — Framework 0.1.13
+
+### Highlights
+
+- Sign native clients and the CLI in with refreshable bearer sessions, including authenticated
+  WebSockets. Authorize native clients and access tokens through grants independently of web-app
+  access.
+- Persist upload sessions across restarts and replicas with PostgreSQL and SQLite. Enforce
+  expiration and clean up abandoned provider uploads.
+- Type SDK surfaces from a shared ontology registry, add user references with `ref.user()`, and
+  render Atlas values from their declared schemas.
+- Fence objects returned by Action query and list reads, reporting changed reads as
+  `action.read_conflict`.
+- Attribute ontology commits and events to their requester and executor.
+- Add Instagram and Facebook media publishing and semantic search through vector profiles in the
+  CLI.
+- Resolve relative sandbox command directories against the workspace and run SmolVM commands in the
+  guest workspace. Introduce a separately published Agent image with document, rendering, and
+  browser tools.
+
+### Upgrade notes
+
+- Upgrade core, exact worker/storage consumers, server, client, and CLI together to 0.1.13. Upgrade
+  the changed sandbox providers and rebuild custom-app and Atlas assets with the matching
+  dependencies.
+- Apply PostgreSQL and SQLite migrations 046–049. Migration 046 normalizes intervention actors to
+  `{ type, id }`. Migration 047 replaces commit `actor` with requester/executor attribution,
+  backfills existing commits, and rewrites unpublished outbox events. Migration 048 adds persistent
+  upload sessions. Migration 049 adds native-session state and removes the device authorization
+  token-name and token-expiration columns.
+- Stop old runtime roles before migration and rehearse on a backup of a 0.1.12 database. Measure
+  migration 047 against representative commit and outbox volumes. Do not assume old and new
+  binaries can safely overlap. Plan rollback through database restoration and matching old
+  binaries; with SQLite, migrate once before starting multiple roles with `--no-migrate`.
+- Update consumers of event/commit `actor` to `requestedBy` and `executor`. Review replay consumers
+  of historical events as well as live delivery; the migration rewrites the database outbox, not
+  external event archives.
+- Update explicit SDK type annotations to the shared ontology registry. Removed exports include
+  `EventActor`, `SecurityContext`, `RegisteredObjectType`, `RegisteredValueTypes`, and the former
+  `ActionReadObjectByIdHandle`, `ActionReadObjectSet`, and `ActionReadObjectSetSource` types. Use
+  the current `ObjectReader`, `ObjectReadByIdHandle`, and `ObjectReadSet` contracts where
+  applicable.
+- Handle `action.read_conflict` explicitly in custom Action interfaces and integrations; do not
+  treat an obsolete read as a successful write.
+- Interactive CLI login now establishes a renewable native session. Personal access-token profiles
+  remain supported. Verify login, refresh, revocation/logout, and native WebSockets after
+  upgrading; coordinate new CLI/client deployment with the new server.
+- Check `trustedProxies` against deployment topology. The server defaults to trusting private,
+  loopback, and link-local proxy networks when resolving forwarded client addresses.
+- Upload-session routes return 501 if storage does not implement `fileUploadSessions`; there is no
+  in-memory fallback for these routes. Single-request file uploads remain separate.
+- Configure SmolVM with an explicit `image`. A local archive supports offline boot and must match
+  the host architecture. Its normal working directory is `/workspace` in the guest.
+- The Agent image is versioned independently of npm as `ghcr.io/sixb-ai/sixb-agent:1.2.0`. Pin a
+  verified digest in production; the npm framework version is not an image tag.
+
+### Package versions
+
+- `0.1.13`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.10`: `@sixb/agent-ui`.
+- `0.1.11`: `@sixb/atlas`.
+- `0.1.6`: `@sixb/cli-core`, `@sixb/sandboxes-apple-container`, `@sixb/sandboxes-local`,
+  `@sixb/sandboxes-smolvm`, `@sixb/sandboxes-vercel`.
+- `0.1.3`: `@sixb/connector-companycam`, `@sixb/connector-pandadoc`, `@sixb/connector-pipedrive`,
+  `@sixb/connector-stripe`, `@sixb/connector-unipile`.
+- `0.1.4`: `@sixb/connector-github`, `@sixb/connector-mercury`, `@sixb/connector-meta`.
+
+## 2026-09-24 — Framework 0.1.12
+
+### Highlights
+
+- Introduce named vector profiles, automatic batched indexing, server-side text embedding for
+  search, PostgreSQL and SQLite search, and Atlas profile visibility. Add Foundry embeddings with
+  pinned representation identity and usage accounting.
+- Add typed decision evaluation, the TypeSafe provider, and Vercel AI Gateway decision models.
+- Persist conversation sandbox files across runs, recover confirmed lost state, and configure
+  source/setup environments. Add execution-scoped GitHub App access to private repositories.
+- Unify Agent surfaces and preserve conversation state across navigation.
+- Add the Monday connector, LinkedIn and TikTok media publishing, Google Drive streaming downloads,
+  and QuickBooks documents, attachments, and aging reports.
+- Preserve safe error explanations across runtime boundaries.
+
+### Upgrade notes
+
+- Upgrade core, exact worker/storage consumers, and CLI together to 0.1.12. Upgrade sandbox
+  providers and rebuild custom-app and Atlas assets.
+- Apply PostgreSQL and SQLite migrations 041–045. SQLite 043 rebuilds executions; PostgreSQL 043
+  changes execution constraints. Stop old runtime roles and rehearse against a backup of a 0.1.11
+  database. Plan rollback through database restoration and matching old binaries. With SQLite,
+  migrate once before starting multiple roles with --no-migrate.
+- Replace removed query.vector and search.vector metadata with named search.vectors profiles. Adapt
+  queries and reindex; do not assume legacy embedding properties migrate automatically.
+- Vector persistence needs no extension. PostgreSQL search requires pgvector in the public schema.
+  SQLite search loads sqlite-vec; macOS requires an extension-capable SQLite library configured
+  before connections open. Search is exact and bounded to 10,000 eligible vectors and 16 million
+  coordinates.
+- Review third-party sandbox implementations against the new creation, resume, and
+  execution-prepared authentication contracts. Bound conversations require a persistence-capable
+  provider; workflows and subagents remain ephemeral.
+- Confirmed lost sandbox state may be recreated without restoring local edits. Uncertain state
+  blocks further runs until explicit recovery. Provider retention still applies. Normal cleanup
+  revokes managed GitHub access; a worker crash cannot guarantee immediate revocation. Never put
+  credentials in guest-readable environment variables or thread parameters.
+- Replace the removed ThreadSidebar export. AgentWorkspaceProvider no longer accepts sidebarHeader,
+  sidebarFooter, or sidebarWidth; adapt custom Agent layouts.
+
+### Package versions
+
+- `0.1.12`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.9`: `@sixb/agent-ui`, `@sixb/app`.
+- `0.1.10`: `@sixb/atlas`.
+- `0.1.2`: `@sixb/azure-ai-foundry`.
+- `0.1.4`: `@sixb/vercel-ai-gateway`, `@sixb/connector-tiktok`.
+- `0.1.5`: `@sixb/queues-bullmq`, `@sixb/sandboxes-apple-container`, `@sixb/sandboxes-local`,
+  `@sixb/sandboxes-smolvm`, `@sixb/sandboxes-vercel`.
+- `0.1.1`: `@sixb/sandboxes-azure`, `@sixb/connector-quickbooks`.
+- `0.1.3`: `@sixb/connector-github`.
+- `0.1.6`: `@sixb/connector-google`.
+- `0.1.7`: `@sixb/connector-linkedin`.
+- `0.1.0`, first publications: `@sixb/typesafe`, `@sixb/connector-monday`.
+
 ## 2026-09-20 — Framework 0.1.11
 
 ### Highlights

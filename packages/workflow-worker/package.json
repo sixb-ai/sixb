@@ -1,6 +1,6 @@
 {
   "name": "@sixb/workflow-worker",
-  "version": "0.1.12",
+  "version": "0.1.13",
   "description": "Worker that runs Sixb workflows",
   "keywords": [
     "sixb",
