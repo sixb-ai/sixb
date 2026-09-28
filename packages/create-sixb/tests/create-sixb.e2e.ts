@@ -60,10 +60,16 @@ describe("create-sixb packed artifacts", () => {
       join(layoutRoot, "node_modules", "create-sixb")
     )
     const cliManifest = await readPackageManifest(join(layoutRoot, "node_modules", "@sixb", "cli"))
+    const [createSourceManifest, cliCoreSourceManifest] = await Promise.all([
+      readPackageManifest(createPackageDir),
+      readPackageManifest(cliCorePackageDir),
+    ])
 
     expect(createManifest.dependencies).toBeUndefined()
-    expect(cliManifest.dependencies?.["create-sixb"]).toBe("^0.1.3")
-    expect(cliManifest.dependencies?.["@sixb/cli-core"]).toBe("^0.1.5")
+    // Keep checking workspace:^ packing across releases. To reproduce the old failure,
+    // restore the hard-coded ^0.1.5 cli-core expectation and run this E2E with cli-core 0.1.6.
+    expect(cliManifest.dependencies?.["create-sixb"]).toBe(`^${createSourceManifest.version}`)
+    expect(cliManifest.dependencies?.["@sixb/cli-core"]).toBe(`^${cliCoreSourceManifest.version}`)
   })
 
   test("shows the bun create usage", () => {
@@ -146,6 +152,7 @@ describe("create-sixb packed artifacts", () => {
 })
 
 async function readPackageManifest(packageDir: string): Promise<{
+  version: string
   dependencies?: Record<string, string>
 }> {
   return JSON.parse(await readFile(join(packageDir, "package.json"), "utf8"))
