@@ -41,6 +41,11 @@ export interface OidcOptions {
    * `email_verified` is true.
    */
   readonly trustedEmail?: (claims: OidcClaims) => string | undefined
+  /**
+   * Returns the groups the provider grants this user. They are synced on every sign-in, and a
+   * user granted at least one may sign in without an invitation.
+   */
+  readonly groups?: (claims: OidcClaims) => readonly GroupDefinition[]
   readonly sendInvitation?: (message: SendOidcInvitationInput) => Promise<void>
   readonly from?: string
   readonly subject?: string
@@ -66,6 +71,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   private readonly scope: string
   private readonly authorizationParams: Readonly<Record<string, string>>
   private readonly trustedEmail: (claims: OidcClaims) => string | undefined
+  private readonly groups?: (claims: OidcClaims) => readonly GroupDefinition[]
   private readonly sendInvitation?: (message: SendOidcInvitationInput) => Promise<void>
   private readonly from?: string
   private readonly subject: string
@@ -87,6 +93,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
     this.scope = normalizeScope(options.scope)
     this.authorizationParams = options.authorizationParams ?? {}
     this.trustedEmail = options.trustedEmail ?? verifiedEmail
+    this.groups = options.groups
     this.sendInvitation = options.sendInvitation
     this.from = options.from
     this.subject = options.subject ?? "You are invited to Sixb"
@@ -213,6 +220,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       // self-provision without an invitation — at any time, not only as the
       // first user. The allowlist itself is the trust boundary.
       const canBootstrap = this.bootstrapUsers.has(email)
+      const directoryGroupIds = this.groups ? normalizeGroupRefs(this.groups(claims)) : undefined
       const signIn = await input.authStorage
         .completeOidcSignIn({
           projectId: input.projectId,
@@ -224,8 +232,9 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
           displayName: claims.name,
           avatarUrl: claims.picture,
           claims: rawClaims,
-          allowUserCreationWithoutInvitation: canBootstrap,
+          allowUserCreationWithoutInvitation: canBootstrap || Boolean(directoryGroupIds?.length),
           manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
+          directoryGroupIds,
           newUserId: `usr_${randomUUID()}`,
           session: {
             ...input.session,

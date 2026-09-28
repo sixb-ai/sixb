@@ -12,16 +12,25 @@ export interface OidcClaims {
   readonly preferred_username?: string
   readonly name?: string
   readonly picture?: string
+  /** Role and group names, as Entra app roles, Okta, and RFC 9068 send them. */
+  readonly roles?: readonly string[]
+  readonly groups?: readonly string[]
   readonly [claim: string]: unknown
 }
 
 const STRING_CLAIMS = ["email", "preferred_username", "name", "picture"] as const
+const STRING_LIST_CLAIMS = ["roles", "groups"] as const
 
 export function toOidcClaims(raw: Readonly<Record<string, unknown>>): OidcClaims {
   const claims: Record<string, unknown> = { ...raw }
   for (const key of ["sub", ...STRING_CLAIMS]) {
     const value = typeof raw[key] === "string" ? raw[key].trim() : ""
     claims[key] = value || undefined
+  }
+  for (const key of STRING_LIST_CLAIMS) {
+    const value = raw[key]
+    claims[key] =
+      Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined
   }
   const verified = raw.email_verified
   claims.email_verified = verified === true || verified === "true"

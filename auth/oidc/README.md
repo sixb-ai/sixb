@@ -35,6 +35,7 @@ export const auth = oidc({
 | `bootstrapUsers` | Addresses that get an account on first sign-in, so a fresh deployment has someone who can log in. |
 | `bootstrapGroups` | Groups those first users join. |
 | `trustedEmail` | Returns the address the provider vouches for. Defaults to `email` when `email_verified` is true. See [Microsoft Entra](#microsoft-entra). |
+| `groups` | Returns the groups the provider grants the user. See [Groups from your identity provider](#groups-from-your-identity-provider). |
 | `scope` | Requested scopes. Defaults to what is needed to identify the user. |
 | `authorizationParams` | Extra query parameters on the authorization request, e.g. `hd` or `prompt`. |
 | `sendInvitation` | Optional. Called with a rendered invitation message so you can email users who are not yet in the provider. |
@@ -95,3 +96,44 @@ export const auth = oidc({
   organization's users sign in and are not supported.
 - A user without a mailbox cannot receive an invitation email. Copy the invitation link from Atlas
   instead.
+
+## Groups from your identity provider
+
+Instead of inviting each person, let the provider decide who belongs to which group. `groups`
+receives the sign-in's claims and returns group definitions:
+
+```ts
+import type { GroupDefinition } from "@sixb/core"
+import { securityAdmins } from "./groups/security-admins"
+import { teamMembers } from "./groups/team-members"
+
+const appRoles: Record<string, GroupDefinition> = {
+  "Sixb.Admin": securityAdmins,
+  "Sixb.Member": teamMembers,
+}
+
+export const auth = oidc({
+  // …issuer, client, and trustedEmail as above
+  groups: (claims) => claims.roles?.flatMap((role) => appRoles[role] ?? []) ?? [],
+})
+```
+
+- A user the provider grants at least one group signs in without an invitation. Anyone else
+  still needs an invitation or a bootstrap entry.
+- Groups are synced on every sign-in: new ones are added, and ones the provider no longer grants
+  are removed. Groups an admin or an invitation gave the user are never touched.
+- A change at the provider applies at the user's next sign-in. To cut someone off immediately,
+  suspend them in Sixb.
+
+In Microsoft Entra, use app roles:
+
+1. In the app registration, open **App roles** and create one per group, e.g. `Sixb.Admin` and
+   `Sixb.Member`, allowed for **Users/Groups**.
+2. In **Enterprise applications**, open the app, set **Assignment required** to **Yes**, and
+   assign users or Entra groups to the roles.
+
+Assigned roles arrive in the `roles` claim. Prefer them to Entra's `groups` claim, which holds
+group IDs rather than names and is left out for users in more than 200 groups.
+
+Okta sends a `groups` claim once you configure one for the app. Keycloak needs a role mapper that
+adds roles to the ID token under a claim named `roles`.

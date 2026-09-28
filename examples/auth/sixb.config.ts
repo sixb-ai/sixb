@@ -2,6 +2,7 @@ import { magicLink, type SendMagicLinkInput } from "@sixb/auth-magic-link"
 import { oidc, type SendOidcInvitationInput } from "@sixb/auth-oidc"
 import {
   createSixb,
+  type GroupDefinition,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -10,6 +11,7 @@ import {
 import { migrateSqliteStorage, SqliteStorage } from "@sixb/sqlite"
 import { renderAcmeMagicLinkEmail } from "./lib/magic-link-email"
 import { securityAdmins } from "./security/groups/security-admins"
+import { teamMembers } from "./security/groups/team-members"
 
 // Switch the auth strategy with SIXB_AUTH_MODE:
 //   magic-link (default) — zero setup; the sign-in link is printed to this terminal.
@@ -39,6 +41,11 @@ async function createAuthExampleSixb() {
   })
 }
 
+const entraAppRoles: Record<string, GroupDefinition> = {
+  "Sixb.Admin": securityAdmins,
+  "Sixb.Member": teamMembers,
+}
+
 function createAuthStrategy() {
   if (authMode === "oidc") {
     return oidc({
@@ -62,6 +69,8 @@ function createAuthStrategy() {
       clientSecret: requiredEnv("SIXB_ENTRA_CLIENT_SECRET"),
       // Entra never sends email_verified; this single-tenant app trusts the directory's sign-in names.
       trustedEmail: (claims) => claims.preferred_username,
+      // Users assigned an app role in Entra sign in without an invitation.
+      groups: (claims) => claims.roles?.flatMap((role) => entraAppRoles[role] ?? []) ?? [],
       allowedDomains,
       bootstrapUsers,
       bootstrapGroups: [securityAdmins],

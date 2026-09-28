@@ -74,7 +74,7 @@ const auth = oidc({
 })
 ```
 
-See the [strategy's README](https://github.com/sixb-ai/sixb/tree/main/auth/oidc#readme) for provider setup.
+To let the identity provider decide group membership instead of inviting each person, return the groups it grants from `groups`. A user granted at least one group signs in without an invitation, and the groups are synced on every sign-in. See the [strategy's README](https://github.com/sixb-ai/sixb/tree/main/auth/oidc#readme) for provider setup and group mapping.
 
 ## Set up the first administrator
 
