@@ -181,15 +181,21 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         throw new OidcAuthError("OIDC id token nonce is invalid.")
       }
 
+      // Storage links accounts and claims invitations by this address, so it only ever receives an
+      // address the provider verified.
+      if (!profile.emailVerified) {
+        throw new OidcAuthError("OIDC provider did not verify the email address.")
+      }
+
       const email = normalizeEmail(profile.email)
       if (!this.isAllowedEmail(email)) {
         throw new OidcAuthError("OIDC email domain is not allowed.")
       }
 
-      // Every verified email in the configured bootstrap allowlist may
+      // Every email in the configured bootstrap allowlist may
       // self-provision without an invitation — at any time, not only as the
       // first user. The allowlist itself is the trust boundary.
-      const canBootstrap = profile.emailVerified && this.bootstrapUsers.has(email)
+      const canBootstrap = this.bootstrapUsers.has(email)
       const signIn = await input.authStorage.completeOidcSignIn({
         projectId: input.projectId,
         oidcAuthorizationAttemptId: attempt.id,
@@ -197,11 +203,9 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         completedAt: now,
         subject: profile.subject,
         email,
-        emailVerified: profile.emailVerified,
         displayName: profile.displayName,
         avatarUrl: profile.avatarUrl,
         claims: profile.claims,
-        autoLinkByVerifiedEmail: profile.emailVerified,
         allowUserCreationWithoutInvitation: canBootstrap,
         manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
         newUserId: `usr_${randomUUID()}`,

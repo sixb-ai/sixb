@@ -371,32 +371,12 @@ export class PgAuthStorage implements AuthStorage {
           }
         }
 
-        if (!identity && userRow && (!input.autoLinkByVerifiedEmail || !input.emailVerified)) {
-          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
-          return {
-            error: new AuthStorageError(
-              "email_link_not_allowed",
-              `[Sixb] OIDC identity cannot auto-link to user '${userRow.id}' for project '${projectId}'.`
-            ),
-          }
-        }
-
         if (userRow?.status === "suspended") {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
             error: new AuthStorageError(
               "suspended_user",
               `[Sixb] User '${userRow.id}' is suspended for project '${projectId}'.`
-            ),
-          }
-        }
-
-        if (shouldCreateUser && !input.emailVerified) {
-          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
           }
         }

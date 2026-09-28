@@ -333,27 +333,11 @@ export class InMemoryAuthStorage implements AuthStorage {
       )
     }
 
-    if (!identity && user && (!input.autoLinkByVerifiedEmail || !input.emailVerified)) {
-      this.consumeOidcAttempt(input, completedAt, projectId)
-      throw new AuthStorageError(
-        "email_link_not_allowed",
-        `[Sixb] OIDC identity cannot auto-link to user '${user.id}' for project '${projectId}'.`
-      )
-    }
-
     if (user?.status === "suspended") {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "suspended_user",
         `[Sixb] User '${user.id}' is suspended for project '${projectId}'.`
-      )
-    }
-
-    if (shouldCreateUser && !input.emailVerified) {
-      this.consumeOidcAttempt(input, completedAt, projectId)
-      throw new AuthStorageError(
-        "user_creation_not_allowed",
-        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
       )
     }
 

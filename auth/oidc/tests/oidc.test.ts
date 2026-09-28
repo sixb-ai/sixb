@@ -388,6 +388,39 @@ describe("oidc auth strategy", () => {
     expect(attempt?.consumedAt).toEqual(new Date("2026-05-17T10:00:00.000Z"))
   })
 
+  // Storage links accounts by whatever address it receives, so this check is the only thing that
+  // keeps an unverified address from taking over an account. Deleting the `emailVerified` check in
+  // `completeOidcSignIn` makes this test link the identity to usr_ava.
+  test("refuses an unverified address before it can link an existing account", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    await authStorage.users.create({ id: "usr_ava", projectId, email: "ava@acme.com" })
+    const client = new FakeOidcClient()
+    client.tokenClaims = { sub: "attacker", email: "ava@acme.com", email_verified: false }
+    client.userInfo = { sub: "attacker", email: "ava@acme.com", email_verified: false }
+    const { strategy, redirectTo } = await startSignIn({ authStorage, client })
+    const state = redirectTo.searchParams.get("state") ?? ""
+
+    await expect(
+      strategy.completeOidcSignIn({
+        projectId,
+        authStorage,
+        requestUrl: `http://localhost/auth/callback?code=code&state=${state}`,
+        requestOrigin: "http://localhost",
+        session: sessionInput(),
+        now: new Date("2026-05-17T10:00:00.000Z"),
+      })
+    ).rejects.toThrow("OIDC provider did not verify the email address.")
+
+    await expect(
+      authStorage.identities.listForUser({ projectId, userId: "usr_ava" })
+    ).resolves.toEqual([])
+    const attempt = await authStorage.oidcAuthorizationAttempts.getById({
+      projectId,
+      id: state.split(".")[0] ?? "",
+    })
+    expect(attempt?.consumedAt).toEqual(new Date("2026-05-17T10:00:00.000Z"))
+  })
+
   test("rejects mismatched userinfo subjects", async () => {
     const authStorage = new InMemoryAuthStorage()
     const client = new FakeOidcClient()
