@@ -14,6 +14,7 @@ import { securityAdmins } from "./security/groups/security-admins"
 // Switch the auth strategy with SIXB_AUTH_MODE:
 //   magic-link (default) — zero setup; the sign-in link is printed to this terminal.
 //   oidc                 — set SIXB_GOOGLE_CLIENT_ID and SIXB_GOOGLE_CLIENT_SECRET.
+//   entra                — set SIXB_ENTRA_TENANT_ID, SIXB_ENTRA_CLIENT_ID, SIXB_ENTRA_CLIENT_SECRET.
 // Set RESEND_API_KEY (+ SIXB_AUTH_EMAIL_FROM) to actually deliver the emails via Resend.
 const authMode = (process.env.SIXB_AUTH_MODE ?? "magic-link").trim()
 const fromEmail = process.env.SIXB_AUTH_EMAIL_FROM?.trim()
@@ -34,27 +35,48 @@ async function createAuthExampleSixb() {
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),
-    auth:
-      authMode === "oidc"
-        ? oidc({
-            id: "google-workspace",
-            issuer: "https://accounts.google.com",
-            clientId: requiredEnv("SIXB_GOOGLE_CLIENT_ID"),
-            clientSecret: requiredEnv("SIXB_GOOGLE_CLIENT_SECRET"),
-            allowedDomains,
-            bootstrapUsers,
-            bootstrapGroups: [securityAdmins],
-            from: fromEmail,
-            sendInvitation: sendAuthInvitation,
-          })
-        : magicLink({
-            allowedDomains,
-            bootstrapUsers,
-            bootstrapGroups: [securityAdmins],
-            from: fromEmail,
-            subject: "Sign in to Acme Operations",
-            sendMagicLink: sendMagicLinkEmail,
-          }),
+    auth: createAuthStrategy(),
+  })
+}
+
+function createAuthStrategy() {
+  if (authMode === "oidc") {
+    return oidc({
+      id: "google-workspace",
+      issuer: "https://accounts.google.com",
+      clientId: requiredEnv("SIXB_GOOGLE_CLIENT_ID"),
+      clientSecret: requiredEnv("SIXB_GOOGLE_CLIENT_SECRET"),
+      allowedDomains,
+      bootstrapUsers,
+      bootstrapGroups: [securityAdmins],
+      from: fromEmail,
+      sendInvitation: sendAuthInvitation,
+    })
+  }
+
+  if (authMode === "entra") {
+    return oidc({
+      id: "entra",
+      issuer: `https://login.microsoftonline.com/${requiredEnv("SIXB_ENTRA_TENANT_ID")}/v2.0`,
+      clientId: requiredEnv("SIXB_ENTRA_CLIENT_ID"),
+      clientSecret: requiredEnv("SIXB_ENTRA_CLIENT_SECRET"),
+      // Entra never sends email_verified; this single-tenant app trusts the directory's sign-in names.
+      trustedEmail: (claims) => claims.preferred_username,
+      allowedDomains,
+      bootstrapUsers,
+      bootstrapGroups: [securityAdmins],
+      from: fromEmail,
+      sendInvitation: sendAuthInvitation,
+    })
+  }
+
+  return magicLink({
+    allowedDomains,
+    bootstrapUsers,
+    bootstrapGroups: [securityAdmins],
+    from: fromEmail,
+    subject: "Sign in to Acme Operations",
+    sendMagicLink: sendMagicLinkEmail,
   })
 }
 
