@@ -232,27 +232,6 @@ export class PgAuthStorage implements AuthStorage {
           }
         }
 
-        if (
-          shouldCreateUser &&
-          !activeInvitation &&
-          input.allowUserCreationWithoutInvitation &&
-          input.requireNoActiveUsersForUserCreation &&
-          (await hasActiveUsers(tx, projectId))
-        ) {
-          await consumeMagicLink(tx, {
-            projectId,
-            id: input.magicLinkId,
-            tokenHash: input.tokenHash,
-            consumedAt: completedAt,
-          })
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
         await validateCompleteSessionInput(tx, projectId, input.session)
         assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
@@ -423,22 +402,6 @@ export class PgAuthStorage implements AuthStorage {
         }
 
         if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
-          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
-        if (
-          shouldCreateUser &&
-          !activeInvitation &&
-          input.allowUserCreationWithoutInvitation &&
-          input.requireNoActiveUsersForUserCreation &&
-          (await hasActiveUsers(tx, projectId))
-        ) {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
             error: new AuthStorageError(
@@ -813,18 +776,6 @@ export class PgAuthStorage implements AuthStorage {
 
     return rowToIdentityRecord(row)
   }
-}
-
-async function hasActiveUsers(sql: SQLClient, projectId: string): Promise<boolean> {
-  const rows = (await sql`
-    SELECT 1 AS active
-    FROM auth_users
-    WHERE project_id = ${projectId}
-      AND status = 'active'
-    LIMIT 1
-  `) as Array<{ readonly active: number }>
-
-  return rows.length > 0
 }
 
 function assertSignInSessionAudience(

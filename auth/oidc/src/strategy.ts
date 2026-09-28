@@ -203,7 +203,6 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         claims: profile.claims,
         autoLinkByVerifiedEmail: profile.emailVerified,
         allowUserCreationWithoutInvitation: canBootstrap,
-        requireNoActiveUsersForUserCreation: false,
         manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
         newUserId: `usr_${randomUUID()}`,
         session: {

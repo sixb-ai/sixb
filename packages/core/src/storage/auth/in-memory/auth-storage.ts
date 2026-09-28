@@ -219,25 +219,6 @@ export class InMemoryAuthStorage implements AuthStorage {
       )
     }
 
-    if (
-      shouldCreateUser &&
-      !activeInvitation &&
-      input.allowUserCreationWithoutInvitation &&
-      input.requireNoActiveUsersForUserCreation &&
-      hasActiveUsers(this.state, projectId)
-    ) {
-      consumeMagicLinkRecord(this.state, {
-        projectId,
-        id: input.magicLinkId,
-        tokenHash: input.tokenHash,
-        consumedAt: completedAt,
-      })
-      throw new AuthStorageError(
-        "user_creation_not_allowed",
-        `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
-      )
-    }
-
     validateCompleteSessionInput(this.state, projectId, input.session)
     assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
@@ -377,20 +358,6 @@ export class InMemoryAuthStorage implements AuthStorage {
     }
 
     if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
-      this.consumeOidcAttempt(input, completedAt, projectId)
-      throw new AuthStorageError(
-        "user_creation_not_allowed",
-        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-      )
-    }
-
-    if (
-      shouldCreateUser &&
-      !activeInvitation &&
-      input.allowUserCreationWithoutInvitation &&
-      input.requireNoActiveUsersForUserCreation &&
-      hasActiveUsers(this.state, projectId)
-    ) {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "user_creation_not_allowed",
@@ -597,16 +564,6 @@ function restoreMap<TKey, TValue>(target: Map<TKey, TValue>, snapshot: Map<TKey,
   for (const [key, value] of structuredClone(snapshot)) {
     target.set(key, value)
   }
-}
-
-function hasActiveUsers(state: AuthStorageState, projectId: string): boolean {
-  for (const user of state.users.values()) {
-    if (user.projectId === projectId && user.status === "active") {
-      return true
-    }
-  }
-
-  return false
 }
 
 function assertSignInSessionAudience(
