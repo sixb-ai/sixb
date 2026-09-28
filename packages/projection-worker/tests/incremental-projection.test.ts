@@ -465,3 +465,50 @@ test("a timestamp-only delta re-evaluates mostRecent against a runtime edit", as
     await f.host.closeBroker()
   }
 })
+
+// Red proof: restore the "dataset-mismatch" conflict in comparePinnedDatasetWatermarks; the
+// rebound run fails with "does not match the active source dataset" and the old source stays.
+test("rebinding a projection to a new dataset replaces its source and keeps edits", async () => {
+  const original = fixture()
+  await original.run(
+    (
+      await original.write([
+        { id: "a", name: "A" },
+        { id: "b", name: "B" },
+      ])
+    ).versionId
+  )
+  const { createTestSixb } = await import("@sixb/core/testing")
+  await createTestSixb(original.host)
+    .objects(Device)
+    .upsert({ properties: { id: "a", name: "Edited" } })
+
+  const reboundDataset = defineDataset(`${dataset.id}.v2`, {
+    schema: [col("id", "string"), col("name", "string"), col("updated_at", "timestamp")],
+  })
+  const rebound = fixture(
+    defineProjection(projection.id, Device)
+      .fromDataset(reboundDataset)
+      .properties({ id: "id", name: "name" }),
+    original,
+    reboundDataset
+  )
+  try {
+    const version = await rebound.write([
+      { id: "a", name: "A2", updated_at: "2026-01-01T00:00:00.000Z" },
+      { id: "c", name: "C", updated_at: "2026-01-01T00:00:00.000Z" },
+    ])
+    await rebound.run(version.versionId)
+    expect(await rebound.active()).toMatchObject({
+      datasetVersion: { datasetId: reboundDataset.id, versionId: version.versionId },
+      rootCount: 2,
+    })
+    expect(await rebound.object("a")).toMatchObject({ properties: { name: "Edited" } })
+    expect(await rebound.object("b")).toBeNull()
+    expect(await rebound.object("c")).toMatchObject({ properties: { name: "C" } })
+    expect(rebound.lake.deltaReads).toBe(0)
+  } finally {
+    await original.host.closeBroker()
+    await rebound.host.closeBroker()
+  }
+})

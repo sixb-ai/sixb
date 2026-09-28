@@ -83,6 +83,12 @@ export const projectMembersProjection = defineProjection(
   .targetField("employee_id")
 ```
 
+## Change the source dataset
+
+To read a projection from a different dataset, point `.fromDataset(...)` at it and keep the
+projection ID. The next run rebuilds the projection from the new dataset: values from rows it no
+longer contains are withdrawn, and app edits are kept.
+
 ## Source updates and app edits
 
 By default, an app edit to a projected property takes precedence over later source updates until

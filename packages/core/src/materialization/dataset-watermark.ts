@@ -2,16 +2,20 @@ import { MaterializationConflictError } from "./errors"
 import type { PinnedDatasetVersion } from "./model"
 
 export type PinnedDatasetWatermarkConflict =
-  | "dataset-mismatch"
   | "version-metadata-mismatch"
   | "older-version"
   | "ambiguous-version"
 
+/**
+ * Orders versions of one dataset. A projection rebound to a different dataset starts a new
+ * watermark: versions of two datasets have no order, and whether a run may read that dataset is
+ * decided by the registered definition, which rejects runs pinned to any other dataset.
+ */
 export function comparePinnedDatasetWatermarks(
   active: PinnedDatasetVersion,
   next: PinnedDatasetVersion
 ): PinnedDatasetWatermarkConflict | null {
-  if (active.datasetId !== next.datasetId) return "dataset-mismatch"
+  if (active.datasetId !== next.datasetId) return null
   if (active.versionId === next.versionId && active.createdAt !== next.createdAt) {
     return "version-metadata-mismatch"
   }
@@ -40,8 +44,6 @@ function pinnedDatasetWatermarkConflictMessage(
   subject: string
 ): string {
   switch (conflict) {
-    case "dataset-mismatch":
-      return `${subject} dataset does not match the active source dataset.`
     case "version-metadata-mismatch":
       return `${subject} reused an immutable dataset version id with different metadata.`
     case "older-version":
