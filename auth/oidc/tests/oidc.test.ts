@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { defineGroup, type GroupDefinition } from "@sixb/core"
 import type { CompleteAuthSessionInput } from "@sixb/core/storage"
 import { InMemoryAuthStorage } from "@sixb/core/storage"
 import { type OidcClientAdapter, type OidcOptions, type OidcTokenResponse, oidc } from "../src"
@@ -85,6 +86,7 @@ async function startSignIn(input: {
   readonly bootstrapGroups?: readonly string[]
   readonly returnTo?: string
   readonly trustedEmail?: OidcOptions["trustedEmail"]
+  readonly groups?: OidcOptions["groups"]
 }) {
   const strategy = oidc({
     id: "okta",
@@ -95,6 +97,7 @@ async function startSignIn(input: {
     bootstrapUsers: input.bootstrapUsers,
     bootstrapGroups: input.bootstrapGroups ?? ["security-admins"],
     trustedEmail: input.trustedEmail,
+    groups: input.groups,
     clientAdapter: input.client,
   })
   const start = await strategy.startOidcSignIn({
@@ -129,6 +132,16 @@ const entraClaims = {
   preferred_username: "Alice@acme.com",
   name: "Alice Park",
 }
+// Entra app roles mapped to groups, as the README's directory setup does it.
+const securityAdmins = defineGroup("security-admins")
+const teamMembers = defineGroup("team-members")
+const appRoles: Record<string, GroupDefinition> = {
+  "Sixb.Admin": securityAdmins,
+  "Sixb.Member": teamMembers,
+}
+const mapAppRoles: OidcOptions["groups"] = (claims) =>
+  claims.roles?.flatMap((role) => appRoles[role] ?? []) ?? []
+
 const entraUserInfo = {
   sub: entraClaims.sub,
   name: "Alice Park",
@@ -523,5 +536,79 @@ describe("oidc auth strategy", () => {
 
     expect(second.user.id).toBe(first.user.id)
     expect(second.user.email).toBe("ava@acme.com")
+  })
+
+  test("admits an uninvited user the provider maps to a group", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    client.tokenClaims = { ...entraClaims, roles: ["Sixb.Member", "Other.App.Role"] }
+
+    const result = await signIn({
+      authStorage,
+      client,
+      trustedEmail: (claims) => claims.preferred_username,
+      groups: mapAppRoles,
+    })
+
+    expect(result.user.email).toBe("alice@acme.com")
+    expect(result.invitation).toBeUndefined()
+    expect(result.groupMemberships).toMatchObject([
+      { groupId: "team-members", source: "directory" },
+    ])
+  })
+
+  test("refuses a new user the provider maps to no group", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    client.tokenClaims = { ...entraClaims, roles: ["Other.App.Role"] }
+
+    await expect(
+      signIn({
+        authStorage,
+        client,
+        trustedEmail: (claims) => claims.preferred_username,
+        groups: mapAppRoles,
+      })
+    ).rejects.toMatchObject({ reason: "not_invited", email: "alice@acme.com" })
+  })
+
+  test("syncs mapped groups again on every sign-in", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    const options = {
+      authStorage,
+      client,
+      trustedEmail: (claims: { preferred_username?: string }) => claims.preferred_username,
+      groups: mapAppRoles,
+    }
+    client.tokenClaims = { ...entraClaims, roles: ["Sixb.Admin", "Sixb.Member"] }
+    const first = await signIn(options)
+
+    client.tokenClaims = { ...entraClaims, roles: ["Sixb.Member"] }
+    await signIn({ ...options, sessionId: "ses_2" })
+
+    await expect(
+      authStorage.groupMemberships.listForUser({ projectId, userId: first.user.id })
+    ).resolves.toMatchObject([{ groupId: "team-members", source: "directory" }])
+  })
+
+  test("hands the mapping only role and group claims that are lists of names", async () => {
+    const authStorage = new InMemoryAuthStorage()
+    const client = new FakeOidcClient()
+    client.tokenClaims = { ...entraClaims, roles: "Sixb.Admin", groups: ["g-1", 7] }
+    const seen: unknown[] = []
+
+    await expect(
+      signIn({
+        authStorage,
+        client,
+        trustedEmail: (claims) => claims.preferred_username,
+        groups: (claims) => {
+          seen.push(claims.roles, claims.groups)
+          return []
+        },
+      })
+    ).rejects.toMatchObject({ reason: "not_invited" })
+    expect(seen).toEqual([undefined, undefined])
   })
 })
