@@ -24,6 +24,7 @@ import {
   Check,
   Copy,
   KeyRound,
+  Link2,
   Loader2,
   ShieldCheck,
   TriangleAlert,
@@ -325,20 +326,27 @@ function formatDateLabel(date: Date): string {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })
 }
 
+const MANAGED_GROUP_HINT =
+  "Managed by your identity provider. Change it there; it syncs at the member's next sign-in."
+
 export function GroupPicker({
   disabled,
   groups,
   selectedGroupIds,
+  lockedGroupIds = [],
   onChange,
   emptyMessage = "Your account has no assignable groups, so this credential carries no extra scopes.",
 }: {
   readonly disabled?: boolean
   readonly groups: readonly AuthGroupOption[]
   readonly selectedGroupIds: readonly string[]
+  /** Selected groups the identity provider manages, which cannot be unselected here. */
+  readonly lockedGroupIds?: readonly string[]
   readonly onChange: (groupIds: string[]) => void
   readonly emptyMessage?: string
 }) {
   const selected = useMemo(() => new Set(selectedGroupIds), [selectedGroupIds])
+  const locked = useMemo(() => new Set(lockedGroupIds), [lockedGroupIds])
 
   const toggle = (groupId: string) => {
     if (selected.has(groupId)) {
@@ -356,29 +364,41 @@ export function GroupPicker({
     <div className="flex flex-wrap gap-2">
       {groups.map((group) => {
         const active = selected.has(group.id)
+        const managed = locked.has(group.id)
         return (
           <button
             type="button"
             key={group.id}
             onClick={() => toggle(group.id)}
-            disabled={disabled}
+            disabled={disabled || managed}
             aria-pressed={active}
+            title={managed ? MANAGED_GROUP_HINT : undefined}
             className={cn(
               "inline-flex max-w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50",
               active
                 ? "border-ring/40 bg-primary/6 text-foreground"
-                : "border-border/60 bg-background text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+                : "border-border/60 bg-background text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+              // A managed group is still one the member has: only its checkbox shows it is fixed.
+              managed && !disabled && "disabled:cursor-default disabled:opacity-100"
             )}
           >
             <span
               className={cn(
                 "flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors",
-                active ? "border-foreground bg-foreground text-background" : "border-border"
+                active && managed && "border-border bg-muted text-muted-foreground",
+                active && !managed && "border-foreground bg-foreground text-background",
+                !active && "border-border"
               )}
             >
               {active ? <Check className="h-3 w-3" /> : null}
             </span>
             <span className="truncate">{groupLabel(group)}</span>
+            {managed ? (
+              <span className="inline-flex shrink-0 items-center gap-1 text-xs font-normal text-muted-foreground">
+                <Link2 className="h-3 w-3" />
+                Identity provider
+              </span>
+            ) : null}
           </button>
         )
       })}
@@ -388,10 +408,13 @@ export function GroupPicker({
 
 export function ScopeChips({
   groupIds,
+  managedGroupIds = [],
   groupOptionsById,
   emptyLabel = "No scopes",
 }: {
   readonly groupIds: readonly string[]
+  /** Groups the identity provider manages, marked with a directory icon. */
+  readonly managedGroupIds?: readonly string[]
   readonly groupOptionsById: ReadonlyMap<string, AuthGroupOption>
   readonly emptyLabel?: string
 }) {
@@ -401,15 +424,20 @@ export function ScopeChips({
 
   return (
     <span className="inline-flex flex-wrap items-center gap-1.5">
-      {groupIds.map((groupId) => (
-        <span
-          key={groupId}
-          className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground/80"
-        >
-          <ShieldCheck className="h-3 w-3 text-muted-foreground" />
-          {groupLabel(groupOptionsById.get(groupId) ?? { id: groupId })}
-        </span>
-      ))}
+      {groupIds.map((groupId) => {
+        const managed = managedGroupIds.includes(groupId)
+        const Icon = managed ? Link2 : ShieldCheck
+        return (
+          <span
+            key={groupId}
+            title={managed ? MANAGED_GROUP_HINT : undefined}
+            className="inline-flex items-center gap-1 rounded-md bg-muted px-1.5 py-0.5 text-[11px] font-medium text-foreground/80"
+          >
+            <Icon className="h-3 w-3 text-muted-foreground" />
+            {groupLabel(groupOptionsById.get(groupId) ?? { id: groupId })}
+          </span>
+        )
+      })}
     </span>
   )
 }

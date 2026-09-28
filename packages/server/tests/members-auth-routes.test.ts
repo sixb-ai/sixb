@@ -314,6 +314,54 @@ describe("auth member routes", () => {
     expect(missingTarget.status).toBe(404)
   })
 
+  test("reports and keeps the groups the identity provider manages", async () => {
+    const { app, storage } = createRuntime()
+    const admin = await seedAdminSession(storage)
+    await seedUser(storage, { id: "usr_target" })
+    await storage.auth.groupMemberships.upsert({
+      projectId,
+      userId: "usr_target",
+      groupId: "commercial",
+      source: "directory",
+    })
+
+    const list = await app.fetch(jsonRequest("/api/auth/members", { cookie: admin.cookie }))
+    const removeManaged = await app.fetch(
+      jsonRequest("/api/auth/members/usr_target/groups", {
+        method: "PATCH",
+        cookie: admin.cookie,
+        csrfHeader: admin.csrfHeader,
+        body: { groupIds: [] },
+      })
+    )
+    const keepManaged = await app.fetch(
+      jsonRequest("/api/auth/members/usr_target/groups", {
+        method: "PATCH",
+        cookie: admin.cookie,
+        csrfHeader: admin.csrfHeader,
+        body: { groupIds: ["commercial"] },
+      })
+    )
+
+    expect(await list.json()).toMatchObject({
+      members: [
+        { user: { id: "usr_target" }, groupIds: ["commercial"], managedGroupIds: ["commercial"] },
+      ],
+    })
+    // Removing it here would only last until the member's next sign-in restored it.
+    expect(removeManaged.status).toBe(400)
+    expect(await removeManaged.json()).toMatchObject({
+      error: expect.stringContaining("managed by the identity provider"),
+    })
+    expect(keepManaged.status).toBe(200)
+    expect(await keepManaged.json()).toMatchObject({
+      member: { groupIds: ["commercial"], managedGroupIds: ["commercial"] },
+    })
+    await expect(
+      storage.auth.groupMemberships.listForUser({ projectId, userId: "usr_target" })
+    ).resolves.toMatchObject([{ groupId: "commercial", source: "directory" }])
+  })
+
   test("suspends and reactivates members without restoring revoked sessions", async () => {
     const { app, storage } = createRuntime()
     const admin = await seedAdminSession(storage)

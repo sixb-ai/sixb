@@ -1261,7 +1261,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             groupIds: parsed.groupIds,
           })
 
-          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+          return jsonResponse({ member: serializeManagedMember(result) }, 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1293,7 +1293,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const parsed = AuthMemberParamsSchema.parse(params)
           const result = await host.auth.suspendMember(caller, { userId: parsed.userId })
 
-          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+          return jsonResponse({ member: serializeManagedMember(result) }, 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1323,7 +1323,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const parsed = AuthMemberParamsSchema.parse(params)
           const result = await host.auth.reactivateMember(caller, { userId: parsed.userId })
 
-          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+          return jsonResponse({ member: serializeManagedMember(result) }, 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -2474,15 +2474,16 @@ function serializeInvitationDelivery(delivery: InviteDeliveryResult) {
 
 function serializeMemberSummary(member: MemberSummary) {
   return {
-    ...serializeManagedMember(member.user, member.groupIds),
+    ...serializeManagedMember(member),
     capabilities: member.capabilities,
   }
 }
 
-function serializeManagedMember(user: UserRecord, groupIds: readonly string[]) {
+function serializeManagedMember(member: Omit<MemberSummary, "capabilities">) {
   return {
-    user: serializeMemberUser(user),
-    groupIds: [...groupIds],
+    user: serializeMemberUser(member.user),
+    groupIds: [...member.groupIds],
+    managedGroupIds: [...member.managedGroupIds],
   }
 }
 

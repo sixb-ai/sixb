@@ -81,6 +81,8 @@ export const AuthMemberUserSchema = z.object({
 export const AuthManagedMemberSchema = z.object({
   user: AuthMemberUserSchema,
   groupIds: z.array(z.string()),
+  /** The groups among `groupIds` the identity provider manages; they sync at sign-in. */
+  managedGroupIds: z.array(z.string()),
 })
 
 export const AuthMemberCapabilitiesSchema = z.object({

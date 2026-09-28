@@ -322,6 +322,11 @@ export interface MemberCapabilities {
 export interface MemberSummary {
   readonly user: UserRecord
   readonly groupIds: readonly string[]
+  /**
+   * The groups among `groupIds` that the identity provider manages. They sync at the user's next
+   * sign-in, so they cannot be removed here.
+   */
+  readonly managedGroupIds: readonly string[]
   readonly capabilities: MemberCapabilities
 }
 
@@ -340,6 +345,7 @@ export interface UpdateMemberGroupsInput {
 export interface UpdateMemberGroupsResult {
   readonly user: UserRecord
   readonly groupIds: readonly string[]
+  readonly managedGroupIds: readonly string[]
 }
 
 export interface SuspendMemberInput {
@@ -349,6 +355,7 @@ export interface SuspendMemberInput {
 export interface SuspendMemberResult {
   readonly user: UserRecord
   readonly groupIds: readonly string[]
+  readonly managedGroupIds: readonly string[]
 }
 
 export interface ReactivateMemberInput {
@@ -358,6 +365,7 @@ export interface ReactivateMemberInput {
 export interface ReactivateMemberResult {
   readonly user: UserRecord
   readonly groupIds: readonly string[]
+  readonly managedGroupIds: readonly string[]
 }
 
 /** `"session"` reads only the cookie; `"any"` reads a bearer access token, else the cookie. */
