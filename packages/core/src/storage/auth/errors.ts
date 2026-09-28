@@ -10,7 +10,6 @@ export type AuthStorageErrorCode =
   | "duplicate_service_account"
   | "duplicate_session"
   | "duplicate_user"
-  | "email_link_not_allowed"
   | "expired_magic_link"
   | "expired_oidc_attempt"
   | "invalid_input"

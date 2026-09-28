@@ -441,12 +441,14 @@ export interface CompleteOidcSignInInput {
   readonly stateHash: string
   readonly completedAt: Date
   readonly subject: string
+  /**
+   * An address the strategy has already decided to trust. Without an identity for `subject`, it
+   * links the user who has this email, or claims this email's invitation for a new user.
+   */
   readonly email: string
-  readonly emailVerified?: boolean
   readonly displayName?: string
   readonly avatarUrl?: string
   readonly claims?: Readonly<Record<string, unknown>>
-  readonly autoLinkByVerifiedEmail?: boolean
   readonly allowUserCreationWithoutInvitation?: boolean
   readonly manualGroupIds?: readonly string[]
   readonly newUserId: string

@@ -317,32 +317,12 @@ export class SqliteAuthStorage implements AuthStorage {
           }
         }
 
-        if (!identity && userRow && (!input.autoLinkByVerifiedEmail || !input.emailVerified)) {
-          this.consumeOidcAttempt(input, completedAt, projectId)
-          return {
-            error: new AuthStorageError(
-              "email_link_not_allowed",
-              `[Sixb] OIDC identity cannot auto-link to user '${userRow.id}' for project '${projectId}'.`
-            ),
-          }
-        }
-
         if (userRow?.status === "suspended") {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
             error: new AuthStorageError(
               "suspended_user",
               `[Sixb] User '${userRow.id}' is suspended for project '${projectId}'.`
-            ),
-          }
-        }
-
-        if (shouldCreateUser && !input.emailVerified) {
-          this.consumeOidcAttempt(input, completedAt, projectId)
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
             ),
           }
         }

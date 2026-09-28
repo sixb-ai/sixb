@@ -1782,7 +1782,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           completedAt: at("2026-05-14T10:02:00.000Z"),
           subject: "00u1",
           email: "renamed@acme.com",
-          emailVerified: true,
           claims: { email: "renamed@acme.com" },
           newUserId: "usr_unused",
           session: sessionInput("ses_oidc"),
@@ -1800,65 +1799,35 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("auto-links OIDC by verified email only when explicitly allowed", async () => {
+    test("links a new OIDC identity to the existing user with its email", async () => {
       await withStorage(async (storage) => {
         await createUser(storage, { id: "usr_existing", email: "ava@acme.com" })
         await storage.oidcAuthorizationAttempts.create({
-          id: "oidc_blocked",
+          id: "oidc_1",
           projectId,
           strategyId: "okta",
           audience: "atlas",
-          stateHash: "blocked-state",
+          stateHash: "state-hash",
           nonceHash: "nonce-hash",
           codeVerifier: "verifier",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-14T10:10:00.000Z"),
         })
 
-        await expectAuthError(
-          storage.completeOidcSignIn({
-            projectId,
-            oidcAuthorizationAttemptId: "oidc_blocked",
-            stateHash: "blocked-state",
-            completedAt: at("2026-05-14T10:01:00.000Z"),
-            subject: "00u1",
-            email: "ava@acme.com",
-            emailVerified: false,
-            autoLinkByVerifiedEmail: true,
-            newUserId: "usr_unused",
-            session: sessionInput("ses_blocked"),
-          }),
-          "email_link_not_allowed"
-        )
-
-        await storage.oidcAuthorizationAttempts.create({
-          id: "oidc_allowed",
-          projectId,
-          strategyId: "okta",
-          audience: "atlas",
-          stateHash: "allowed-state",
-          nonceHash: "nonce-hash",
-          codeVerifier: "verifier",
-          createdAt: at("2026-05-14T10:02:00.000Z"),
-          expiresAt: at("2026-05-14T10:12:00.000Z"),
-        })
         const result = await storage.completeOidcSignIn({
           projectId,
-          oidcAuthorizationAttemptId: "oidc_allowed",
-          stateHash: "allowed-state",
-          completedAt: at("2026-05-14T10:03:00.000Z"),
+          oidcAuthorizationAttemptId: "oidc_1",
+          stateHash: "state-hash",
+          completedAt: at("2026-05-14T10:01:00.000Z"),
           subject: "00u1",
           email: "ava@acme.com",
-          emailVerified: true,
-          autoLinkByVerifiedEmail: true,
           newUserId: "usr_unused",
-          session: sessionInput("ses_allowed"),
+          session: sessionInput("ses_oidc"),
         })
 
         expect(result.user.id).toBe("usr_existing")
-        expect(result.identity).toMatchObject({
-          userId: "usr_existing",
-        })
+        expect(result.identity).toMatchObject({ subject: "00u1", userId: "usr_existing" })
+        await expect(storage.users.getById({ projectId, id: "usr_unused" })).resolves.toBeNull()
       })
     })
 
@@ -1892,7 +1861,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           subject: "00u1",
           email: "ava@acme.com",
           displayName: "Ava Chen",
-          emailVerified: true,
           newUserId: "usr_oidc",
           session: sessionInput("ses_oidc"),
         })
@@ -1939,7 +1907,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             completedAt: at("2026-05-14T10:01:00.000Z"),
             subject: "00u1",
             email: "ava@acme.com",
-            emailVerified: true,
             newUserId: "usr_oidc",
             session: sessionInput("ses_oidc"),
           }),
@@ -1972,7 +1939,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           completedAt: at("2026-05-14T10:01:00.000Z"),
           subject: "00u1",
           email: "founder@acme.com",
-          emailVerified: true,
           allowUserCreationWithoutInvitation: true,
           manualGroupIds: ["security-admins"],
           newUserId: "usr_founder",
