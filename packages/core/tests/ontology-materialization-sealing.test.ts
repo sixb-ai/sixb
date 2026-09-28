@@ -920,7 +920,7 @@ describe("in-memory ontology materialization finalization", () => {
     ).rejects.toThrow("cannot precede the active materialization update")
   })
 
-  test("fences source dataset watermarks at provider activation", async () => {
+  test("fences source dataset watermarks at provider activation and starts one per dataset", async () => {
     const storage = new InMemoryStorage()
     const active = await prepareEmptyCandidate(storage, {
       projectionId: "devices",
@@ -948,13 +948,6 @@ describe("in-memory ontology materialization finalization", () => {
     })
 
     const cases = [
-      {
-        name: "dataset mismatch",
-        datasetId: "other-dataset",
-        versionId: "v3",
-        datasetCreatedAt: "2026-01-03T00:00:00.000Z",
-        message: "does not match the active source dataset",
-      },
       {
         name: "regression",
         datasetId: "devices",
@@ -1002,5 +995,40 @@ describe("in-memory ontology materialization finalization", () => {
         testCase.name
       ).rejects.toThrow(testCase.message)
     }
+
+    // Red proof: restore the "dataset-mismatch" conflict in comparePinnedDatasetWatermarks; this
+    // rebind, with a version older than the active one, is rejected as a mismatch.
+    const rebound = await prepareEmptyCandidate(storage, {
+      projectionId: "devices",
+      datasetId: "devices.v2",
+      projectionKind: "object",
+      runId: "watermark-rebound-run",
+      materializationId: "watermark-rebound-candidate",
+      versionId: "v1",
+      datasetCreatedAt: "2026-01-01T00:00:00.000Z",
+      candidateCreatedAt: "2026-01-05T00:00:00.000Z",
+      readyAt: "2026-01-05T01:00:00.000Z",
+    })
+    const reboundHeader = replacementHeader(
+      rebound,
+      "watermark-rebound-commit",
+      "2026-01-06T00:00:00.000Z",
+      { materializationId: active.materializationId, commitId: activeHeader.commit.id }
+    )
+    await storage.transaction(async (tx) => {
+      if (!tx.ontology) throw new Error("missing ontology")
+      const session = await beginMaterialization(tx, reboundHeader)
+      await drainReplacementState(tx.ontology.materializations, session, rebound)
+      await tx.ontology.materializations.finalize({
+        session,
+        finalization: replacementFinalization(rebound, reboundHeader),
+      })
+    })
+    expect(
+      await storage.ontology.sources.getActive({ projectId, source: rebound.source })
+    ).toMatchObject({
+      materializationId: rebound.materializationId,
+      datasetVersion: { datasetId: "devices.v2", versionId: "v1" },
+    })
   })
 })
