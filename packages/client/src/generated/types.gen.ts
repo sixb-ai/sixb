@@ -1576,6 +1576,7 @@ export type ListAuthMembersResponses = {
         updatedAt: string
       }
       groupIds: Array<string>
+      managedGroupIds: Array<string>
       capabilities: {
         assignGroups: boolean
         suspend: boolean
@@ -1652,6 +1653,7 @@ export type UpdateAuthMemberGroupsResponses = {
         updatedAt: string
       }
       groupIds: Array<string>
+      managedGroupIds: Array<string>
     }
   }
 }
@@ -1713,6 +1715,7 @@ export type SuspendAuthMemberResponses = {
         updatedAt: string
       }
       groupIds: Array<string>
+      managedGroupIds: Array<string>
     }
   }
 }
@@ -1773,6 +1776,7 @@ export type ReactivateAuthMemberResponses = {
         updatedAt: string
       }
       groupIds: Array<string>
+      managedGroupIds: Array<string>
     }
   }
 }

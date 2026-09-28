@@ -4594,6 +4594,12 @@
                               "type": "string"
                             }
                           },
+                          "managedGroupIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "capabilities": {
                             "type": "object",
                             "properties": {
@@ -4611,7 +4617,7 @@
                             "additionalProperties": false
                           }
                         },
-                        "required": ["user", "groupIds", "capabilities"],
+                        "required": ["user", "groupIds", "managedGroupIds", "capabilities"],
                         "additionalProperties": false
                       }
                     },
@@ -4804,9 +4810,15 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "managedGroupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
-                      "required": ["user", "groupIds"],
+                      "required": ["user", "groupIds", "managedGroupIds"],
                       "additionalProperties": false
                     }
                   },
@@ -4973,9 +4985,15 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "managedGroupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
-                      "required": ["user", "groupIds"],
+                      "required": ["user", "groupIds", "managedGroupIds"],
                       "additionalProperties": false
                     }
                   },
@@ -5125,9 +5143,15 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "managedGroupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
-                      "required": ["user", "groupIds"],
+                      "required": ["user", "groupIds", "managedGroupIds"],
                       "additionalProperties": false
                     }
                   },

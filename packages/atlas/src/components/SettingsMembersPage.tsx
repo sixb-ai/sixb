@@ -1025,6 +1025,7 @@ export function SettingsMembersPage() {
                           <span className="md:hidden">
                             <ScopeChips
                               groupIds={member.groupIds}
+                              managedGroupIds={member.managedGroupIds}
                               groupOptionsById={groupOptionsById}
                               emptyLabel="No groups"
                             />
@@ -1035,6 +1036,7 @@ export function SettingsMembersPage() {
                     <span className="hidden max-w-[40%] shrink-0 justify-end md:flex">
                       <ScopeChips
                         groupIds={member.groupIds}
+                        managedGroupIds={member.managedGroupIds}
                         groupOptionsById={groupOptionsById}
                         emptyLabel="No groups"
                       />
@@ -1202,6 +1204,7 @@ export function SettingsMembersPage() {
                   <div className="mt-3">
                     <ScopeChips
                       groupIds={selectedMember.groupIds}
+                      managedGroupIds={selectedMember.managedGroupIds}
                       groupOptionsById={groupOptionsById}
                       emptyLabel="No groups"
                     />
@@ -1348,6 +1351,7 @@ export function SettingsMembersPage() {
               <GroupPicker
                 groups={groupOptions}
                 selectedGroupIds={draftGroupIds}
+                lockedGroupIds={editingMember.managedGroupIds}
                 disabled={updateGroups.isPending}
                 onChange={setDraftGroupIds}
                 emptyMessage="You do not have any assignable groups. Saving with no selections keeps the member group-less."
