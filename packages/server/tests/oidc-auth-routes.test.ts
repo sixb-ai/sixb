@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import {
   type OidcClientAdapter,
   type OidcTokenResponse,
@@ -174,6 +174,21 @@ function cookieValue(setCookie: string | null, name: string): string {
     throw new Error(`Cookie ${name} was not set`)
   }
   return match[1]
+}
+
+async function completeSignIn(app: ReturnType<typeof createRuntime>["app"]): Promise<Response> {
+  const signIn = await app.fetch(
+    new Request(
+      "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2F",
+      { redirect: "manual" }
+    )
+  )
+  const state = new URL(signIn.headers.get("location") ?? "").searchParams.get("state")
+  return app.fetch(
+    new Request(`http://api.localhost/auth/callback?code=code&state=${state}`, {
+      redirect: "manual",
+    })
+  )
 }
 
 describe("oidc auth routes", () => {
@@ -391,5 +406,54 @@ describe("oidc auth routes", () => {
       total: 1,
       invitations: [{ email: "ava@acme.com", status: "revoked" }],
     })
+  })
+
+  test("callback names the address that hasn't been invited", async () => {
+    const { app, client } = createRuntime()
+    client.tokenClaims = { sub: "00u-stranger", email: "stranger@acme.com", email_verified: true }
+
+    const callback = await completeSignIn(app)
+
+    expect(callback.status).toBe(403)
+    expect(callback.headers.get("set-cookie")).toBeNull()
+    expect(await callback.text()).toContain("stranger@acme.com hasn't been invited.")
+  })
+
+  test("callback tells a suspended user their account is suspended", async () => {
+    const { app, client, storage } = createRuntime()
+    await storage.auth.users.create({ id: "usr_ava", projectId, email: "ava@acme.com" })
+    await storage.auth.suspendUserAndRevokeSessions({
+      projectId,
+      userId: "usr_ava",
+      suspendedAt: new Date("2026-05-17T09:00:00.000Z"),
+    })
+    client.tokenClaims = { sub: "00u-ava", email: "ava@acme.com", email_verified: true }
+
+    const callback = await completeSignIn(app)
+
+    expect(callback.status).toBe(403)
+    expect(await callback.text()).toContain("ava@acme.com has been suspended.")
+  })
+
+  // Nobody signing in can fix a provider that vouches for no address, so the server log says what
+  // to change even without SIXB_AUTH_DEBUG. The claim names are logged; their values are not.
+  test("logs a provider that vouches for no address without SIXB_AUTH_DEBUG", async () => {
+    const { app, client } = createRuntime()
+    client.tokenClaims = { sub: "00u-entra", preferred_username: "alice@acme.com" }
+    const logged = spyOn(console, "error").mockImplementation(() => {})
+
+    try {
+      const callback = await completeSignIn(app)
+
+      expect(callback.status).toBe(403)
+      expect(await callback.text()).toContain("didn't share an email address this app trusts")
+      const line = String(logged.mock.calls[0]?.[0])
+      expect(line).toContain("SignInRefusedError(no_trusted_address)")
+      expect(line).toContain("preferred_username")
+      expect(line).toContain("`trustedEmail`")
+      expect(line).not.toContain("alice@acme.com")
+    } finally {
+      logged.mockRestore()
+    }
   })
 })

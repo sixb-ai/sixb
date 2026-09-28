@@ -1,13 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import type { CompleteAuthSessionInput } from "@sixb/core/storage"
 import { InMemoryAuthStorage } from "@sixb/core/storage"
-import {
-  OidcAuthError,
-  type OidcClientAdapter,
-  type OidcOptions,
-  type OidcTokenResponse,
-  oidc,
-} from "../src"
+import { type OidcClientAdapter, type OidcOptions, type OidcTokenResponse, oidc } from "../src"
 
 const projectId = "project-a"
 
@@ -335,7 +329,7 @@ describe("oidc auth strategy", () => {
         session: sessionInput("ses_stranger"),
         now: new Date("2026-05-17T10:02:00.000Z"),
       })
-    ).rejects.toBeInstanceOf(Error)
+    ).rejects.toMatchObject({ reason: "not_invited", email: "stranger@acme.com" })
   })
 
   test("reconciles bootstrap groups for an existing user on later sign-in", async () => {
@@ -416,7 +410,7 @@ describe("oidc auth strategy", () => {
         session: sessionInput(),
         now: new Date("2026-05-17T10:00:00.000Z"),
       })
-    ).rejects.toBeInstanceOf(OidcAuthError)
+    ).rejects.toMatchObject({ reason: "domain_not_allowed", email: "ava@evil.com" })
 
     const attempt = await authStorage.oidcAuthorizationAttempts.getById({
       projectId,
@@ -446,7 +440,7 @@ describe("oidc auth strategy", () => {
         session: sessionInput(),
         now: new Date("2026-05-17T10:00:00.000Z"),
       })
-    ).rejects.toThrow("OIDC provider sent no trusted email address.")
+    ).rejects.toMatchObject({ reason: "no_trusted_address" })
 
     await expect(
       authStorage.identities.listForUser({ projectId, userId: "usr_ava" })

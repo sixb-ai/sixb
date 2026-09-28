@@ -11,7 +11,8 @@ import type {
   OidcStartSignInInput,
   OidcStartSignInResult,
 } from "@sixb/core/auth/strategy"
-import type { AuthStorage } from "@sixb/core/storage"
+import { SignInRefusedError } from "@sixb/core/auth/strategy"
+import { type AuthStorage, AuthStorageError } from "@sixb/core/storage"
 import { type OidcClaims, toOidcClaims, verifiedEmail } from "./claims"
 import { defaultOidcClientAdapter, type OidcClientAdapter } from "./client"
 import { createOidcInvitationEmail, type SendOidcInvitationInput } from "./email"
@@ -191,39 +192,49 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       // Storage links accounts and claims invitations by this address, so it only ever receives an
       // address the provider vouches for.
       if (!trustedEmail) {
-        throw new OidcAuthError(
-          "OIDC provider sent no trusted email address. If it vouches for addresses without " +
-            "email_verified, return the address from the `trustedEmail` option."
+        throw new SignInRefusedError(
+          "no_trusted_address",
+          `[Sixb] OIDC provider sent no trusted email address (claims: ${Object.keys(rawClaims).join(", ")}). ` +
+            "If it vouches for addresses without email_verified, return the address from the " +
+            "`trustedEmail` option."
         )
       }
 
       const email = normalizeEmail(trustedEmail)
       if (!this.isAllowedEmail(email)) {
-        throw new OidcAuthError("OIDC email domain is not allowed.")
+        throw new SignInRefusedError(
+          "domain_not_allowed",
+          `[Sixb] OIDC email domain is not allowed for '${email}'.`,
+          email
+        )
       }
 
       // Every email in the configured bootstrap allowlist may
       // self-provision without an invitation — at any time, not only as the
       // first user. The allowlist itself is the trust boundary.
       const canBootstrap = this.bootstrapUsers.has(email)
-      const signIn = await input.authStorage.completeOidcSignIn({
-        projectId: input.projectId,
-        oidcAuthorizationAttemptId: attempt.id,
-        stateHash,
-        completedAt: now,
-        subject: claims.sub,
-        email,
-        displayName: claims.name,
-        avatarUrl: claims.picture,
-        claims: rawClaims,
-        allowUserCreationWithoutInvitation: canBootstrap,
-        manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
-        newUserId: `usr_${randomUUID()}`,
-        session: {
-          ...input.session,
-          audience: attempt.audience,
-        },
-      })
+      const signIn = await input.authStorage
+        .completeOidcSignIn({
+          projectId: input.projectId,
+          oidcAuthorizationAttemptId: attempt.id,
+          stateHash,
+          completedAt: now,
+          subject: claims.sub,
+          email,
+          displayName: claims.name,
+          avatarUrl: claims.picture,
+          claims: rawClaims,
+          allowUserCreationWithoutInvitation: canBootstrap,
+          manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
+          newUserId: `usr_${randomUUID()}`,
+          session: {
+            ...input.session,
+            audience: attempt.audience,
+          },
+        })
+        .catch((error: unknown) => {
+          throw refusalFromStorage(error, email)
+        })
 
       return {
         ...signIn,
@@ -349,6 +360,18 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   }): Promise<void> {
     await input.authStorage.oidcAuthorizationAttempts.consume(input).catch(() => undefined)
   }
+}
+
+// Storage refuses with its own codes; these two are reasons the person signing in can act on.
+function refusalFromStorage(error: unknown, email: string): unknown {
+  if (!(error instanceof AuthStorageError)) return error
+  if (error.code === "user_creation_not_allowed") {
+    return new SignInRefusedError("not_invited", `[Sixb] '${email}' has not been invited.`, email)
+  }
+  if (error.code === "suspended_user") {
+    return new SignInRefusedError("suspended", `[Sixb] '${email}' is suspended.`, email)
+  }
+  return error
 }
 
 function normalizeStrategyId(value: string | undefined): string {

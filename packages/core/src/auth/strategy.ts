@@ -7,6 +7,8 @@
  * entry plus the storage contracts from `@sixb/core/storage`.
  */
 
+export type { SignInRefusalReason } from "./errors"
+export { SignInRefusedError } from "./errors"
 export type {
   AuthEmailDeliveryStatus,
   AuthInvitationRecipientInput,
