@@ -2,6 +2,55 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-09-29 — Framework 0.1.14
+
+### Highlights
+
+- Configure OIDC sign-in for a single Microsoft Entra tenant with `trustedEmail`. Standard claims
+  are typed, and providers sending `email_verified` as the string `"true"` are supported.
+- Map provider claims to Sixb groups with the OIDC `groups` option. Reconcile directory-owned
+  memberships at each sign-in without removing memberships granted manually or by invitation.
+- Show identity-provider-managed groups in Atlas and prevent their removal through member editing.
+  Member API responses now include `managedGroupIds`.
+- Explain refused OIDC sign-ins with actionable messages for uninvited or suspended users,
+  disallowed domains, and providers that supply no trusted address.
+
+### Upgrade notes
+
+- Upgrade core, its exact worker/storage consumers, server, client, and CLI together to `0.1.14`.
+  Upgrade OIDC to `0.1.4`, magic-link to `0.1.5`, and Atlas to `0.1.12`; rebuild application assets.
+- Apply PostgreSQL and SQLite migration 050 before enabling directory-managed groups. PostgreSQL
+  replaces a source constraint; SQLite rebuilds `auth_group_memberships` and its group index,
+  preserving existing memberships. Rehearse against a backup of a `0.1.13` database, stop old
+  runtime roles before migrating, and plan rollback with a database backup and matching binaries.
+  With SQLite, migrate once before starting multiple roles with `--no-migrate`.
+- OIDC strategies must supply a trusted address on every sign-in. The default requires a verified
+  `email`; Entra deployments must explicitly configure `trustedEmail`, normally from
+  `preferred_username`, and use a tenant-specific issuer, not `common` or `organizations`.
+  Review account linking and invitation addresses before enabling a custom trust callback.
+- UserInfo is fetched only when the ID token lacks a trusted address. When fetched, ID-token claims
+  take precedence. Ensure claims needed by your `groups` mapping are available in that flow.
+- A nonempty provider group mapping permits account creation without an invitation. Validate the
+  mapping and provider assignments carefully. Membership changes apply at the next sign-in; suspend
+  a user in Sixb when access must stop immediately. Omitting `groups` leaves existing directory
+  memberships untouched; returning an empty array removes only directory-owned memberships.
+- A group already granted manually or by invitation retains its original source. Removing that
+  group at the provider does not revoke the independently granted membership. Directory-owned
+  groups cannot be removed through the member API or Atlas; edit them at the provider.
+- Custom auth strategies calling `completeOidcSignIn` must validate address trust before storage:
+  `emailVerified` and `autoLinkByVerifiedEmail` were removed. The unused
+  `requireNoActiveUsersForUserCreation` input was removed from OIDC and magic-link completion.
+  Update explicit member response types and fixtures for the required `managedGroupIds` field.
+
+### Package versions
+
+- `0.1.14`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.12`: `@sixb/atlas`.
+- `0.1.4`: `@sixb/auth-oidc`.
+- `0.1.5`: `@sixb/auth-magic-link`.
+
 ## 2026-09-28 — Framework 0.1.13
 
 ### Highlights
