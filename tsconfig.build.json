@@ -89,6 +89,9 @@
       "path": "connectors/unipile/tsconfig.build.json"
     },
     {
+      "path": "deploy/ssh/tsconfig.build.json"
+    },
+    {
       "path": "loggers/pino/tsconfig.build.json"
     },
     {
