@@ -190,20 +190,22 @@ async function readLines(
 }
 
 /** OpenSSH's own failures, which exit 255, reworded as what to do about them. */
-function sshError(destination: string, error: unknown): Error {
+export function sshError(destination: string, error: unknown): Error {
   if (!(error instanceof RemoteScriptError) || error.exitCode !== 255) {
     return error instanceof Error ? error : new Error(String(error))
   }
   const output = error.message
   const host = destination.split("@").at(-1) ?? destination
-  const reason = /Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED/.test(output)
-    ? `The host key for ${host} is not trusted yet. Connect once with \`ssh ${destination}\`, check the fingerprint, and accept it.`
-    : /Permission denied/.test(output)
-      ? `The server refused your SSH key for ${destination}. Load it into your SSH agent, or ask someone with access to authorize it.`
-      : /Could not resolve hostname/.test(output)
-        ? `${host} does not resolve. Check the target's host.`
-        : /Connection refused|timed out|No route to host/.test(output)
-          ? `Could not reach ${host} over SSH.`
-          : `SSH to ${destination} failed.`
+  const reason = /REMOTE HOST IDENTIFICATION HAS CHANGED/.test(output)
+    ? `${host} answered with a host key other than the one on record. If the server was rebuilt, remove the old key with \`ssh-keygen -R ${host}\` and connect once to accept the new one; for CI, run \`sixb deploy ci\` again. Otherwise, something else is answering at that address: do not deploy to it.`
+    : /Host key verification failed/.test(output)
+      ? `The host key for ${host} is not trusted yet. Connect once with \`ssh ${destination}\`, check the fingerprint, and accept it.`
+      : /Permission denied/.test(output)
+        ? `The server refused your SSH key for ${destination}. Load it into your SSH agent, or ask someone with access to authorize it.`
+        : /Could not resolve hostname/.test(output)
+          ? `${host} does not resolve. Check the target's host.`
+          : /Connection refused|timed out|No route to host/.test(output)
+            ? `Could not reach ${host} over SSH.`
+            : `SSH to ${destination} failed.`
   return new RemoteScriptError(`[SshTarget] ${reason}\n${output}`, error.exitCode)
 }

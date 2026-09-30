@@ -1106,8 +1106,15 @@ export function DeployCiView({
   credential: string
   secrets: readonly string[]
   retired: readonly DeployAccessKey[]
-  workflow: { readonly path: string; readonly changed: boolean }
-  token: { readonly name: string; readonly submodules: readonly string[] } | null
+  workflow: { readonly path: string; readonly state: "written" | "unchanged" | "kept" }
+  token: {
+    readonly name: string
+    readonly submodules: readonly {
+      readonly path: string
+      readonly url: string
+      readonly repo: string | null
+    }[]
+  } | null
 }) {
   const rows: { label: string; ok: boolean; detail: string; remedy?: string }[] = [
     { label: "Key", ok: true, detail: credential },
@@ -1123,23 +1130,28 @@ export function DeployCiView({
     {
       label: "Workflow",
       ok: true,
-      detail: `${workflow.path}${workflow.changed ? "" : " (unchanged)"}`,
+      detail: {
+        written: workflow.path,
+        unchanged: `${workflow.path} (unchanged)`,
+        kept: `${workflow.path} (yours, kept: it differs from what this command writes; delete it and run again to start over)`,
+      }[workflow.state],
     },
     ...(token
       ? [
           {
             label: "Token",
             ok: false,
-            detail: `${token.submodules.join(", ")} ${token.submodules.length === 1 ? "is" : "are"} private, and CI cannot read ${token.submodules.length === 1 ? "it" : "them"} with its own token.`,
-            remedy: `Create a fine-grained token with Contents: read on ${token.submodules.length === 1 ? "that repository" : "those repositories"}, then run \`gh secret set ${token.name} --env ${environment} --repo ${repo}\`.`,
+            detail: `${token.submodules.map((submodule) => submodule.path).join(", ")} ${token.submodules.length === 1 ? "is" : "are"} private, and CI cannot read ${token.submodules.length === 1 ? "it" : "them"} with its own token.`,
+            remedy: `Create a fine-grained token with Contents: read on ${token.submodules.map((submodule) => submodule.repo ?? submodule.url).join(", ")}, then run \`gh secret set ${token.name} --env ${environment} --repo ${repo}\`.`,
           },
         ]
       : []),
   ]
   const labelWidth = Math.max(...rows.map((row) => row.label.length)) + 2
-  const next = workflow.changed
-    ? `Next: commit ${workflow.path} and push to ${branch}.`
-    : `Next: push to ${branch} to deploy.`
+  const next =
+    workflow.state === "written"
+      ? `Next: commit ${workflow.path} and push to ${branch}.`
+      : `Next: push to ${branch} to deploy.`
 
   return (
     <Box flexDirection="column">

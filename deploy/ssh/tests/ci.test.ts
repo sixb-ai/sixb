@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { addKey, listKeys, removeKeysWhere } from "../src/access"
 import { generateCiKey, knownHostsLines, renderCiInstall } from "../src/ci"
 import { parsePublicKey } from "../src/keys"
-import { LocalShell } from "../src/transport"
+import { LocalShell, RemoteScriptError, sshError } from "../src/transport"
 
 const tempDirs: string[] = []
 
@@ -103,5 +103,21 @@ describe("the runner's SSH setup", () => {
     expect(options.get("port")).toBe("2222")
     expect(options.get("identityfile")).toBe("~/.ssh/sixb_deploy")
     expect(options.get("stricthostkeychecking")).toBe("true")
+  })
+})
+
+describe("a host key that does not match", () => {
+  test("is told apart from one not trusted yet", () => {
+    const fail = (output: string) =>
+      sshError("sixb@myvm", new RemoteScriptError(output, 255)).message
+
+    expect(
+      fail(
+        "@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @\nHost key verification failed."
+      )
+    ).toContain("answered with a host key other than the one on record")
+    expect(fail("No ED25519 host key is known for myvm.\nHost key verification failed.")).toContain(
+      "is not trusted yet"
+    )
   })
 })
