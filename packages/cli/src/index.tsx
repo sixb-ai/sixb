@@ -323,7 +323,34 @@ async function main(): Promise<void> {
 
     case "deploy": {
       const { runDeploy } = await import("./commands/deploy")
-      await runDeploy({ dryRun: hasFlag("dry-run"), json: hasFlag("json") })
+      await runDeploy({ dryRun: hasFlag("dry-run"), json: hasFlag("json"), ref: getFlag("ref") })
+      break
+    }
+
+    case "deploy:status": {
+      const { runDeployStatus } = await import("./commands/deploy")
+      await runDeployStatus({ json: hasFlag("json") })
+      break
+    }
+
+    case "deploy:logs": {
+      const { runDeployLogs } = await import("./commands/deploy")
+      await runDeployLogs({
+        service: positionals[0],
+        follow: hasFlag("follow"),
+        tail: getFlag("tail"),
+      })
+      break
+    }
+
+    case "deploy:restart":
+    case "deploy:start":
+    case "deploy:stop": {
+      const { runDeployControl } = await import("./commands/deploy")
+      await runDeployControl({
+        action: parsed.id.slice("deploy:".length) as "restart" | "start" | "stop",
+        service: positionals[0],
+      })
       break
     }
 

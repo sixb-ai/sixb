@@ -20,6 +20,7 @@
     "rules/**/*.ts",
     "schedules/**/*.ts",
     "scripts/**/*.ts",
+    "security/**/*.ts",
     "syncs/**/*.ts",
     "tests/**/*.ts",
     "workflows/**/*.ts",

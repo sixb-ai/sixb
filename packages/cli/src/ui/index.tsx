@@ -1,8 +1,8 @@
+import type { DeployCommand, DeployRelease, DeployStatus } from "@sixb/core/deploy"
 import { Box, render, Text } from "ink"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { CLI_EXAMPLES, type CliHelp, ROOT_HELP } from "../lib/command-line"
-import type { DeployCommand, DeployRelease } from "../lib/deploy-release"
 import { errorMessage, errorRemediation } from "../lib/errors"
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
@@ -871,12 +871,187 @@ export function DeployReleaseView({
   )
 }
 
+export interface DeployProgressState {
+  readonly name: string
+  readonly location: string
+  readonly commit: string
+  readonly ref: string
+  readonly dirty: boolean
+  readonly labels: readonly string[]
+  /** How many steps have finished, in order. */
+  readonly done: number
+  readonly current: number | null
+  /** The latest output lines, shown while a step runs and kept when one fails. */
+  readonly output: readonly string[]
+  readonly outcome: "running" | "done" | "failed"
+}
+
+export function DeployProgressView({ state }: { state: DeployProgressState }) {
+  return (
+    <Box flexDirection="column">
+      <Text bold>
+        {state.name} → {state.location}
+      </Text>
+      <Text dimColor>
+        {state.commit.slice(0, 12)} · {state.ref}
+      </Text>
+      {state.dirty ? <Text color="yellow">Uncommitted changes are not deployed.</Text> : null}
+      <Spacer />
+      {state.labels.length === 0 ? (
+        <Spinner label="Connecting…" />
+      ) : (
+        state.labels.map((label, index) => {
+          if (index < state.done) {
+            return (
+              <Text key={`${index}:${label}`}>
+                <Text color="green">✓</Text> {label}
+              </Text>
+            )
+          }
+          if (index === state.current && state.outcome === "failed") {
+            return (
+              <Text key={`${index}:${label}`} color="red">
+                ✕ {label}
+              </Text>
+            )
+          }
+          if (index === state.current && state.outcome === "running") {
+            return <Spinner key={`${index}:${label}`} label={label} />
+          }
+          return (
+            <Text key={`${index}:${label}`} dimColor>
+              · {label}
+            </Text>
+          )
+        })
+      )}
+      {state.outcome === "running" && state.output.length > 0 ? (
+        <Box flexDirection="column" marginTop={1} paddingLeft={2}>
+          {state.output.slice(-6).map((line, index) => (
+            <Text key={`${index}:${line}`} dimColor wrap="truncate-end">
+              {line}
+            </Text>
+          ))}
+        </Box>
+      ) : null}
+    </Box>
+  )
+}
+
+export function DeployCompleteView({
+  release,
+  commit,
+  ref,
+}: {
+  release: DeployRelease
+  commit: string
+  ref: string
+}) {
+  const urls = release.services.flatMap((service) =>
+    service.http ? [{ label: service.name, value: service.http.publicOrigin }] : []
+  )
+  return (
+    <Box flexDirection="column">
+      <Spacer />
+      <Text color="green" bold>
+        {release.name} deployed
+      </Text>
+      <Text dimColor>
+        {commit.slice(0, 12)} · {ref} · {release.target.kind} {release.target.location}
+      </Text>
+      {urls.length > 0 ? (
+        <>
+          <Spacer />
+          <KeyValueList items={urls} />
+        </>
+      ) : null}
+    </Box>
+  )
+}
+
+export function DeployStatusView({
+  name,
+  location,
+  status,
+}: {
+  name: string
+  location: string
+  status: DeployStatus
+}) {
+  if (!status.release) {
+    return (
+      <Box flexDirection="column">
+        <Text bold>{name}</Text>
+        <Text dimColor>Nothing is deployed on {location} yet. Run `sixb deploy`.</Text>
+      </Box>
+    )
+  }
+  const healthy =
+    status.running && status.processes.every((process) => process.status === "running")
+  return (
+    <Box flexDirection="column">
+      <Text color={healthy ? "green" : "yellow"} bold>
+        {name} {healthy ? "is running" : status.running ? "needs attention" : "is stopped"}
+      </Text>
+      <Text dimColor>
+        {status.release.commit.slice(0, 12)} · {status.release.ref} · deployed{" "}
+        {formatAge(status.release.deployedAt)} by {status.release.deployedBy} · {location}
+      </Text>
+      <Spacer />
+      {status.processes.length > 0 ? (
+        <Table
+          headers={["Service", "Status", "PID", "CPU", "Memory", "Restarts", "Up"]}
+          rows={status.processes.map((process) => [
+            process.instance === 0 ? process.service : `${process.service}#${process.instance}`,
+            process.status,
+            process.pid === undefined ? "-" : String(process.pid),
+            process.cpuPercent === undefined ? "-" : `${process.cpuPercent.toFixed(1)}%`,
+            process.memoryBytes === undefined ? "-" : formatBytes(process.memoryBytes),
+            String(process.restarts),
+            process.status === "running" && process.startedAt
+              ? formatAge(process.startedAt, "")
+              : "-",
+          ])}
+        />
+      ) : (
+        <Text dimColor>The supervisor is not running.</Text>
+      )}
+      {status.processes
+        .filter((process) => process.lastError)
+        .map((process) => (
+          <Text key={`${process.service}#${process.instance}`} color="yellow">
+            {process.service}: {process.lastError}
+          </Text>
+        ))}
+    </Box>
+  )
+}
+
+function formatAge(iso: string, suffix = " ago"): string {
+  const seconds = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 1000))
+  const age =
+    seconds < 60
+      ? `${seconds}s`
+      : seconds < 3600
+        ? `${Math.floor(seconds / 60)}m`
+        : seconds < 86_400
+          ? `${Math.floor(seconds / 3600)}h`
+          : `${Math.floor(seconds / 86_400)}d`
+  return `${age}${suffix}`
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes >= 1024 ** 3) return `${(bytes / 1024 ** 3).toFixed(1)}G`
+  if (bytes >= 1024 ** 2) return `${(bytes / 1024 ** 2).toFixed(1)}M`
+  return `${Math.round(bytes / 1024)}K`
+}
+
 function describeDeployProcess(service: DeployRelease["services"][number]): string {
   const count = `${service.instances} ${service.instances === 1 ? "process" : "processes"}`
-  if (service.role === "custom") return `project script · ${count}`
+  if (service.kind === "script") return `project script · ${count}`
   // `worker-group` without worker types runs every type the project registers work for.
   const namesWorkerTypes = service.command.args[1] && !service.command.args[1].startsWith("-")
-  if (service.role === "worker-group" && !namesWorkerTypes) {
+  if (service.kind === "workers" && !namesWorkerTypes) {
     return `${count} · every worker type the project registers`
   }
   return count

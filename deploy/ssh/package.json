@@ -19,6 +19,9 @@
   },
   "author": "Sixb contributors",
   "type": "module",
+  "bin": {
+    "sixb-deploy-ssh": "./src/server/cli.ts"
+  },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
