@@ -342,6 +342,7 @@ describe("Postgres storage migrations", () => {
             "049-native-sessions",
             "050-directory-group-memberships",
             "051-projection-run-supersession",
+            "052-compact-source-storage",
           ],
         },
       ])
@@ -702,6 +703,13 @@ describe("Postgres storage migrations", () => {
           id: "051-projection-run-supersession",
           status: "applied",
           version: 51,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "052-compact-source-storage",
+          status: "applied",
+          version: 52,
         },
       ])
     })
@@ -2701,6 +2709,13 @@ describe("Postgres storage migrations", () => {
           id: "051-projection-run-supersession",
           status: "applied",
           version: 51,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "052-compact-source-storage",
+          status: "applied",
+          version: 52,
         },
       ])
     } finally {

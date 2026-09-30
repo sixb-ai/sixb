@@ -11,6 +11,8 @@ import type {
   ExpectedObjectRevision,
   OntologyLinkRef,
   OntologyObjectRef,
+  ProjectionEntityRef,
+  ProjectionSourceAssertion,
 } from "../../materialization/model"
 import { linkRefKey, objectRefKey, projectionEntityKey } from "../../materialization/refs"
 import type { OntologyCommitOriginSelector, OntologyCommitWrite } from "./commits"
@@ -963,6 +965,71 @@ export function sourceEntityColumns(entity: StageSourceAssertion["root"]): {
     targetTypeId: entity.ref.target.objectTypeId,
     targetPrimaryId: entity.ref.target.primaryId,
   }
+}
+
+/** The inverse of `projectionEntityKey`, for providers that store only the canonical key. */
+export function sourceEntityFromKey(key: string): ProjectionEntityRef {
+  const parts: unknown = JSON.parse(key)
+  if (Array.isArray(parts) && parts.every((part) => typeof part === "string")) {
+    if (parts[0] === "object" && parts.length === 3) {
+      return { kind: "object", ref: { objectTypeId: parts[1]!, primaryId: parts[2]! } }
+    }
+    if (parts[0] === "link" && parts.length === 6) {
+      return {
+        kind: "link",
+        ref: {
+          source: { objectTypeId: parts[1]!, primaryId: parts[2]! },
+          linkId: parts[3]!,
+          target: { objectTypeId: parts[4]!, primaryId: parts[5]! },
+        },
+      }
+    }
+  }
+  throw new MaterializationConflictError(
+    "source-materialization",
+    `Stored source key ${key} is not a canonical entity key.`
+  )
+}
+
+/** What an assertion carries beyond its identity, or null when that is nothing. */
+export function sourceAssertionPayload(
+  assertion: ProjectionSourceAssertion
+): Readonly<Record<string, unknown>> | null {
+  const { kind: _kind, ref: _ref, ...payload } = assertion
+  return Object.keys(payload).length === 0 ? null : payload
+}
+
+/** Rebuilds an assertion from its typed identity columns and its payload. */
+export function sourceAssertionFromColumns(
+  columns: {
+    readonly entity_kind: "object" | "link"
+    readonly object_type_id: string | null
+    readonly primary_id: string | null
+    readonly source_type_id: string | null
+    readonly source_primary_id: string | null
+    readonly link_id: string | null
+    readonly target_type_id: string | null
+    readonly target_primary_id: string | null
+  },
+  payload: unknown
+): ProjectionSourceAssertion {
+  const rest = (payload ?? {}) as Record<string, unknown>
+  if (columns.entity_kind === "object") {
+    return {
+      kind: "object",
+      ref: { objectTypeId: columns.object_type_id!, primaryId: columns.primary_id! },
+      ...rest,
+    } as ProjectionSourceAssertion
+  }
+  return {
+    kind: "link",
+    ref: {
+      source: { objectTypeId: columns.source_type_id!, primaryId: columns.source_primary_id! },
+      linkId: columns.link_id!,
+      target: { objectTypeId: columns.target_type_id!, primaryId: columns.target_primary_id! },
+    },
+    ...rest,
+  } as ProjectionSourceAssertion
 }
 
 export function utf8SortKey(canonicalKey: string): string {
