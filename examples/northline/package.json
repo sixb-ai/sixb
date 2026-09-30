@@ -17,7 +17,6 @@
   "dependencies": {
     "ai": "^7.0.4",
     "@sixb/app": "workspace:*",
-    "@sixb/auth-magic-link": "workspace:*",
     "@sixb/blob-local": "workspace:*",
     "@sixb/broker-redis": "workspace:*",
     "@sixb/client": "workspace:*",

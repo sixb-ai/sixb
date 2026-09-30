@@ -29,7 +29,13 @@ export const sixb = createSixb({
     }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
   queues: production?.queues ?? new InMemoryQueues(),
-  ...(production ? { auth: production.auth } : {}),
+  // A public demo: anyone with the link can use it, deployed or not.
+  auth: {
+    id: "northline",
+    kind: "disabled",
+    disabled: true,
+    allowDisabledInProduction: true,
+  },
   sandboxes:
     process.env.SIXB_SANDBOX_PROVIDER === "smolvm"
       ? new SmolvmSandboxFactory({
