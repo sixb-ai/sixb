@@ -115,6 +115,9 @@ import nativeSessionsSql from "./migrations/049-native-sessions.sql" with { type
 import directoryGroupMembershipsSql from "./migrations/050-directory-group-memberships.sql" with {
   type: "text",
 }
+import projectionRunSupersessionSql from "./migrations/051-projection-run-supersession.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -220,6 +223,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("048-file-upload-sessions", fileUploadSessionsSql),
     sqliteSql("049-native-sessions", nativeSessionsSql),
     sqliteSql("050-directory-group-memberships", directoryGroupMembershipsSql),
+    sqliteSql("051-projection-run-supersession", projectionRunSupersessionSql),
   ],
 })
 

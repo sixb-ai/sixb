@@ -26,8 +26,10 @@ import {
   finishProjectionRunRecord,
   immutableDatasetVersionConflict,
   mergeProjectionRunProgress,
+  parseProjectionAttemptFailure,
   planProjectionRunReclaim,
   projectionRunNotFound,
+  projectionRunSupersedes,
   publicProjectionRunRecord,
   requireTelemetryProjectionRun,
   type StoredProjectionRunRecord,
@@ -36,6 +38,7 @@ import {
 import {
   type AdvanceProjectionTelemetryCheckpointInput,
   type FailProjectionRunEnqueueInput,
+  type FindSupersedingProjectionRunInput,
   type FinishProjectionRunInput,
   type ListLatestProjectionRunsInput,
   type ListLatestProjectionRunsResult,
@@ -47,6 +50,7 @@ import {
   type ProjectionRunStorage,
   projectionRunObjectTypesVisible,
   type QueueProjectionRunInput,
+  type RecordProjectionAttemptFailureInput,
   type RecordProjectionMissingTargetInput,
   type StartOrReclaimProjectionRunInput,
   type TelemetryProjectionRunRecord,
@@ -58,6 +62,10 @@ const runDirectly: RunRootOperation = async <T>(run: () => Promise<T> | T): Prom
 
 function projectionRunKey(projectId: string, id: string): string {
   return JSON.stringify([projectId, id])
+}
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
 }
 
 function compareRuns(a: ProjectionRunRecord, b: ProjectionRunRecord, order: "asc" | "desc") {
@@ -152,7 +160,6 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
         executionToken,
         startedAt: existing.startedAt ?? new Date(input.startedAt ?? new Date()),
         finishedAt: undefined,
-        error: undefined,
       }
 
       this.rows.set(key, structuredClone(record))
@@ -246,6 +253,17 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     })
   }
 
+  async recordAttemptFailure(
+    input: RecordProjectionAttemptFailureInput
+  ): Promise<ProjectionRunRecord> {
+    return this.runRootOperation(() => {
+      const existing = this.requireExecution(input)
+      const next = { ...existing, error: parseProjectionAttemptFailure(existing, input.error) }
+      this.rows.set(projectionRunKey(input.projectId, input.id), structuredClone(next))
+      return publicProjectionRunRecord(next)
+    })
+  }
+
   async finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord> {
     return this.runRootOperation(() => {
       const existing = this.requireExecution(input)
@@ -311,12 +329,33 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
     })
   }
 
+  async findSupersedingRun(
+    input: FindSupersedingProjectionRunInput
+  ): Promise<ProjectionRunRecord | null> {
+    return this.runRootOperation(() => {
+      const run = this.rows.get(projectionRunKey(input.projectId, input.id))
+      if (!run) throw projectionRunNotFound(input.projectId, input.id)
+      const newest = [...this.rows.values()]
+        .filter((candidate) => projectionRunSupersedes(candidate, run))
+        .sort(
+          (left, right) =>
+            compareText(
+              right.identity.datasetVersion.createdAt,
+              left.identity.datasetVersion.createdAt
+            ) || compareText(right.id, left.id)
+        )[0]
+      return newest ? publicProjectionRunRecord(newest) : null
+    })
+  }
+
   async listLatestByProjectionIds(
     input: ListLatestProjectionRunsInput
   ): Promise<ListLatestProjectionRunsResult> {
     return this.runRootOperation(() => {
       const runs = latestStartedAtByOwnerId(
-        [...this.rows.values()].filter((record) => record.projectId === input.projectId),
+        [...this.rows.values()].filter(
+          (record) => record.projectId === input.projectId && record.status !== "superseded"
+        ),
         input.projectionIds,
         (record) => record.identity.projectionId
       )

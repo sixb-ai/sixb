@@ -102,3 +102,16 @@ not its ingestion time. For each property, a source value replaces an app edit w
 is equal to or newer than the edit's timestamp.
 
 For timestamped readings, see [Telemetry projections](telemetry.md).
+
+## Runs
+
+Each committed dataset version starts one run per projection that reads it. A run that fails for a
+transient reason, such as a lost database connection, is retried. While it retries, the run is
+`running` and its `error` says why the last attempt failed. The error is cleared if the run
+succeeds.
+
+If a newer dataset version is committed before an older run starts or retries, the older run ends
+`superseded` without writing anything, because its output would be stale. This applies to object
+and link projections only: telemetry runs append readings, so every version is projected. The
+latest run shown for a projection is never a superseded run.
+

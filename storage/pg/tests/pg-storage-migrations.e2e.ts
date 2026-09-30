@@ -341,6 +341,7 @@ describe("Postgres storage migrations", () => {
             "048-file-upload-sessions",
             "049-native-sessions",
             "050-directory-group-memberships",
+            "051-projection-run-supersession",
           ],
         },
       ])
@@ -695,6 +696,13 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 50,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "051-projection-run-supersession",
+          status: "applied",
+          version: 51,
+        },
       ])
     })
   })
@@ -1016,6 +1024,107 @@ describe("Postgres storage migrations", () => {
             },
           },
         ])
+      } finally {
+        await sql.end()
+      }
+    })
+  })
+
+  test("keeps projection runs and admits superseded runs and retrying failures", async () => {
+    // Removal proof: drop 051's DO block; the old status checks, still in place, reject both the
+    // superseded run and the running run's error below.
+    await withStorage(false, async (_storage, schemaName) => {
+      const connectionString = process.env.DATABASE_URL
+      if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+      const index = postgresStorageMigrations.steps.findIndex(
+        (step) => step.id === "051-projection-run-supersession"
+      )
+      const sql = createPgClient({ connectionString, schemaName, max: 1 })
+      const migrateThrough = (count: number) =>
+        createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: defineMigrations({
+            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+            steps: postgresStorageMigrations.steps.slice(0, count),
+          }),
+        }).migrate()
+      try {
+        await migrateThrough(index)
+        const schema = quoteIdent(schemaName)
+        const failure = JSON.stringify({
+          code: "projection.execution_failed",
+          message: "Projection execution failed.",
+          retryable: false,
+          at: "2026-09-01T12:00:00.000Z",
+        })
+        const insertRun = async (
+          id: string,
+          status: string,
+          versionId: string,
+          error: string | null
+        ) => {
+          await sql.unsafe(
+            `
+              INSERT INTO ${schema}.executions (
+                project_id, id, executor_kind, executor_id, source_kind, source_id,
+                correlation_id, authority_kind, authority_primitive_kind, authority_primitive_id,
+                created_at
+              ) VALUES (
+                'project-a', $1, 'projection', 'rooms', 'datasetVersion', $2, $1,
+                'trustedPrimitive', 'projection', 'rooms', '2026-09-01T12:00:00.000Z'
+              )
+            `,
+            [`execution-${id}`, versionId]
+          )
+          await sql.unsafe(
+            `
+              INSERT INTO ${schema}.projection_runs (
+                project_id, id, execution_id, projection_id, projection_kind,
+                materialization_protocol, dataset_id, dataset_version_id,
+                dataset_version_created_at, ontology_revision, projection_revision,
+                ownership_hash, object_type_id, status, queued_at, started_at, finished_at,
+                attempt, execution_token, error
+              ) VALUES (
+                'project-a', $2, $1, 'rooms', 'object', 'replacement', 'rooms', $3,
+                '2026-09-01T12:00:00.000Z', 'ontology', 'projection', 'ownership', 'Room', $4,
+                '2026-09-01T12:00:00.000Z', '2026-09-01T12:00:00.000Z', $5, 1, $6,
+                $7::text::jsonb
+              )
+            `,
+            [
+              `execution-${id}`,
+              id,
+              versionId,
+              status,
+              status === "running" ? null : "2026-09-01T12:01:00.000Z",
+              status === "running" ? "token" : null,
+              error,
+            ]
+          )
+        }
+        await insertRun("failed-run", "failed", "version-1", failure)
+        await insertRun("running-run", "running", "version-2", null)
+
+        await migrateThrough(index + 1)
+        await insertRun("superseded-run", "superseded", "version-3", null)
+        await sql.unsafe(
+          `UPDATE ${schema}.projection_runs SET error = $1::text::jsonb WHERE id = 'running-run'`,
+          [failure]
+        )
+
+        const rows = await sql.unsafe<{ id: string; status: string; error_code: string | null }[]>(
+          `SELECT id, status, error->>'code' AS error_code
+          FROM ${schema}.projection_runs ORDER BY id`
+        )
+        expect([...rows]).toEqual([
+          { id: "failed-run", status: "failed", error_code: "projection.execution_failed" },
+          { id: "running-run", status: "running", error_code: "projection.execution_failed" },
+          { id: "superseded-run", status: "superseded", error_code: null },
+        ])
+        await expect(
+          insertRun("superseded-with-error", "superseded", "version-4", failure)
+        ).rejects.toThrow("projection_runs_superseded_check")
       } finally {
         await sql.end()
       }
@@ -2585,6 +2694,13 @@ describe("Postgres storage migrations", () => {
           id: "050-directory-group-memberships",
           status: "applied",
           version: 50,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "051-projection-run-supersession",
+          status: "applied",
+          version: 51,
         },
       ])
     } finally {

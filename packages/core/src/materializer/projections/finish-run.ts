@@ -123,6 +123,9 @@ async function finishProjectionRunTransaction(
 
   if (command.input.protocol === "replacement") {
     await assertReplacementTerminalDecision(storage, command)
+    if (command.input.status === "superseded") {
+      await assertRunSuperseded(projectionRuns, command)
+    }
     if (command.input.status !== "succeeded") {
       // The candidate belongs to the run: once the run ends, nothing may adopt or activate it.
       await storage.ontology.sources.abandon({
@@ -143,6 +146,26 @@ async function finishProjectionRunTransaction(
     ...terminalDecision(command.input),
     finishedAt: command.finishedAt,
   })
+}
+
+/**
+ * Checked again here, under the finish transaction, rather than trusted from the caller's earlier
+ * read: the newer run may have failed since, and a run superseded by a failure would leave the
+ * projection with neither version.
+ */
+async function assertRunSuperseded(
+  projectionRuns: LockedProjectionExecution["projectionRuns"],
+  command: PreparedProjectionRunFinish
+): Promise<void> {
+  const newer = await projectionRuns.findSupersedingRun({
+    projectId: command.projectId,
+    id: command.input.execution.projectionRunId,
+  })
+  if (newer) return
+  throw new MaterializationConflictError(
+    "run-correlation",
+    `Projection run '${command.input.execution.projectionRunId}' cannot be superseded: no run of a later dataset version stands to replace it.`
+  )
 }
 
 /** Locks a run by the identity it was pinned with, for a decision that needs no definition. */
@@ -185,8 +208,16 @@ function assertValidTerminalDecision(input: ProjectionRunFinishInput): void {
   if (input.protocol !== "replacement" && input.protocol !== "telemetry") {
     throw new MaterializationValidationError("Projection finish protocol is invalid.")
   }
-  if (input.status !== "succeeded" && input.status !== "failed" && input.status !== "cancelled") {
+  if (
+    input.status !== "succeeded" &&
+    input.status !== "failed" &&
+    input.status !== "cancelled" &&
+    input.status !== "superseded"
+  ) {
     throw new MaterializationValidationError("Projection finish status must be terminal.")
+  }
+  if (input.status === "superseded" && input.protocol !== "replacement") {
+    throw new MaterializationValidationError("Only a replacement projection run can be superseded.")
   }
   const inputExhausted = "inputExhausted" in input ? input.inputExhausted : undefined
   if (input.status === "succeeded" && input.protocol === "telemetry") {
@@ -203,6 +234,9 @@ function assertValidTerminalDecision(input: ProjectionRunFinishInput): void {
 }
 
 function terminalDecision(input: ProjectionRunFinishInput): ProjectionRunTerminalDecision {
+  if (input.status === "superseded") {
+    return { protocol: "replacement", status: "superseded" }
+  }
   if (input.status !== "succeeded") {
     return {
       protocol: input.protocol,

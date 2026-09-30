@@ -1,3 +1,5 @@
+import { createSixbError } from "@sixb/core/internal/errors"
+
 // Map thrown errors to their PostgreSQL/porsager meaning by code rather than by matching
 // message text. Database errors arrive in the native Postgres format with a SQLSTATE on
 // `.code` and the server's `severity`; connection-layer failures arrive with porsager's own
@@ -29,6 +31,20 @@ const CONNECTION_LOST_CODES = new Set([
   "ECONNRESET",
   "EPIPE",
   "ETIMEDOUT",
+])
+
+/**
+ * Codes of a connection that could not be opened: refused, unresolvable, unreachable, or not
+ * answered in time. A server that accepts the socket and then refuses the session (too many
+ * connections, starting up) answers with a `FATAL` error, which `isConnectionLost` covers.
+ */
+const CONNECT_FAILED_CODES = new Set([
+  "CONNECT_TIMEOUT",
+  "ECONNREFUSED",
+  "ENOTFOUND",
+  "EAI_AGAIN",
+  "EHOSTUNREACH",
+  "ENETUNREACH",
 ])
 
 /**
@@ -99,10 +115,14 @@ export function isConnectionLost(error: unknown): boolean {
 }
 
 /**
- * Replace a full-lock-table error with one that names the table and the setting that sizes it;
- * return every other error unchanged.
+ * Replace an error that says something about the database rather than the statement: a lost or
+ * unopenable connection becomes the retryable `storage.unavailable`, a full lock table an error
+ * naming the table and the setting that sizes it. Every other error is returned unchanged.
  */
 export function explainPgError(error: unknown): unknown {
+  if (isStorageUnavailable(error)) {
+    return storageUnavailable(error)
+  }
   if (!(error instanceof Error) || pgErrorCode(error) !== OUT_OF_MEMORY) {
     return error
   }
@@ -120,5 +140,25 @@ export function explainPgError(error: unknown): unknown {
       `max_prepared_transactions) entries shared by all sessions.${note} Raise ${setting} ` +
       "(applied at server restart) or shorten the transactions that overlap.",
     { cause: error }
+  )
+}
+
+function isStorageUnavailable(error: unknown): boolean {
+  const code = pgErrorCode(error)
+  return isConnectionLost(error) || (code !== undefined && CONNECT_FAILED_CODES.has(code))
+}
+
+/**
+ * Whether a lost connection's transaction committed is unknown when the loss interrupted its
+ * COMMIT, so the message does not say it rolled back. Retrying is still safe for Sixb's own
+ * writes: each is fenced or idempotent.
+ */
+function storageUnavailable(error: unknown): Error {
+  const code = pgErrorCode(error)
+  const reason = error instanceof Error ? error.message : String(error)
+  return createSixbError(
+    "storage.unavailable",
+    `[SixbPg] PostgreSQL is unavailable: the connection was lost or could not be opened (${code ?? "no code"}: ${reason}).`,
+    { cause: error, ...(code === undefined ? {} : { details: { code } }) }
   )
 }

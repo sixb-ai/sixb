@@ -63,6 +63,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | `projection.run_identity_mismatch` | No | Delivery does not match the run's pinned identity. | Discard it and dispatch from the current definition. |
 | `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry the unchanged request while the durable run remains in its enqueue phase. |
 | `runtime.cancelled` | No | Work was cancelled before completion. | Confirm the cancellation before requesting another run. |
+| `storage.unavailable` | Yes | The storage connection was lost or could not be opened. | Let the run retry; check the database's availability and connection limits if it persists. |
 | `sync.execution_failed` | No | A Sync failed while reading, validating, or writing its dataset. | Inspect the `onError` report, fix the source or data, then request a new run. |
 | `vector.model_unavailable` | No | The profile's embedding model is unavailable or incompatible. | Check model registration and dimensions, then index the profile again. |
 | `vector.response_invalid` | No | The model returned unusable vectors. | Check the provider response and profile dimensions before indexing again. |

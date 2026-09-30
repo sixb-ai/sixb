@@ -109,6 +109,9 @@ import nativeSessionsSql from "./migrations/049-native-sessions.sql" with { type
 import directoryGroupMembershipsSql from "./migrations/050-directory-group-memberships.sql" with {
   type: "text",
 }
+import projectionRunSupersessionSql from "./migrations/051-projection-run-supersession.sql" with {
+  type: "text",
+}
 import type { ReservedSQL, SQL, SQLClient } from "./pg-client"
 import { runPgTransactionOn, undoOnFailure, withReservedPgConnection } from "./transactions"
 
@@ -407,6 +410,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("048-file-upload-sessions", fileUploadSessionsSql),
     pgSql("049-native-sessions", nativeSessionsSql),
     pgSql("050-directory-group-memberships", directoryGroupMembershipsSql),
+    pgSql("051-projection-run-supersession", projectionRunSupersessionSql),
   ],
 })
 

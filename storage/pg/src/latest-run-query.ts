@@ -15,6 +15,8 @@ export async function queryLatestRunsByOwnerId<TRow>(
     readonly projectId: string
     readonly ownerIdFor: (row: TRow) => string
     readonly selectList?: PgLatestRunSelectList
+    /** A status that never counts as the latest run, such as a run made stale by a newer one. */
+    readonly excludedStatus?: string
   } & PgLatestRunTarget
 ): Promise<readonly TRow[]> {
   const ownerIds = [...new Set(input.ownerIds)]
@@ -23,6 +25,12 @@ export async function queryLatestRunsByOwnerId<TRow>(
   }
 
   const placeholders = ownerIds.map((_, index) => `$${index + 2}`).join(", ")
+  const parameters: SqlParameter[] = [input.projectId, ...ownerIds]
+  let statusFilter = ""
+  if (input.excludedStatus !== undefined) {
+    parameters.push(input.excludedStatus)
+    statusFilter = ` AND status <> $${parameters.length}`
+  }
   const orderColumn =
     input.tableName === "sync_runs" ||
     input.tableName === "pipeline_runs" ||
@@ -33,10 +41,10 @@ export async function queryLatestRunsByOwnerId<TRow>(
     `
       SELECT DISTINCT ON (${input.ownerColumn}) ${input.selectList ?? "*"}
       FROM ${input.tableName}
-      WHERE project_id = $1 AND ${input.ownerColumn} IN (${placeholders})
+      WHERE project_id = $1 AND ${input.ownerColumn} IN (${placeholders})${statusFilter}
       ORDER BY ${input.ownerColumn}, ${orderColumn} DESC, id DESC
     `,
-    [input.projectId, ...ownerIds] as SqlParameter[]
+    parameters
   )
 
   const latestByOwnerId = new Map(rows.map((row) => [input.ownerIdFor(row), row]))

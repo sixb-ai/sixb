@@ -6,6 +6,7 @@ export const PROJECTION_RUN_FAILURE_CODES = [
   "runtime.cancelled",
   "queue.enqueue_failed",
   "projection.execution_failed",
+  "storage.unavailable",
 ] as const satisfies readonly [SixbErrorCode, ...SixbErrorCode[]]
 
 export type ProjectionRunFailureCode = (typeof PROJECTION_RUN_FAILURE_CODES)[number]

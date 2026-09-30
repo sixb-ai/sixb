@@ -50,9 +50,11 @@ const ping = () =>
 const firstQuery = await ping()
 const secondQuery = await ping()
 
+const failure = rejection as { readonly code?: unknown; readonly cause?: unknown } | undefined
 console.log(
   JSON.stringify({
-    rejection: (rejection as { readonly code?: unknown } | undefined)?.code ?? null,
+    rejection: failure?.code ?? null,
+    cause: (failure?.cause as { readonly code?: unknown } | undefined)?.code ?? null,
     firstQuery,
     secondQuery,
   })
