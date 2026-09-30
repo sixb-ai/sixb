@@ -73,13 +73,23 @@ export async function followLogFiles(
   }
 }
 
+/**
+ * Terminal control sequences: services draw their startup view with cursor movement, which reads
+ * as noise once it is in a log.
+ */
+const TERMINAL_CONTROL = /\x1B(?:\[[0-?]*[ -/]*[@-~]|\][^\x07\x1B]*(?:\x07|\x1B\\)|[@-Z\\-_])/g
+
+export function stripTerminalControl(line: string): string {
+  return line.replace(TERMINAL_CONTROL, "")
+}
+
 /** `hh:mm:ss service stderr message`, or `null` for an empty line. */
 export function renderProcessLogLine(
   item: LogLine,
   options: { readonly label: string; readonly labelWidth?: number }
 ): string | null {
   const parsed = parseStoredLogLine(item.line)
-  const message = formatLogMessage(parsed.message)
+  const message = formatLogMessage(stripTerminalControl(parsed.message))
   if (!message.trim()) return null
 
   const time = parsed.timestamp ? formatLogTime(parsed.timestamp) : " ".repeat(8)
