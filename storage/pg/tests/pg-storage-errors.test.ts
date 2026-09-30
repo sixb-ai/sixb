@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  isConnectionLost,
   isRetryableTransactionConflict,
   isUniqueViolation,
   pgErrorCode,
@@ -34,5 +35,20 @@ describe("PostgreSQL storage error classification", () => {
     const unique = pgError("23505")
     expect(isRetryableTransactionConflict(unique)).toBe(false)
     expect(isUniqueViolation(unique)).toBe(true)
+  })
+
+  test("treats a closed connection or an ended session as a lost connection", () => {
+    expect(isConnectionLost(pgError("CONNECTION_CLOSED"))).toBe(true)
+    expect(isConnectionLost(pgError("ECONNRESET"))).toBe(true)
+    expect(isConnectionLost(Object.assign(pgError("57P01"), { severity: "FATAL" }))).toBe(true)
+    expect(isConnectionLost(Object.assign(pgError("XX000"), { severity: "PANIC" }))).toBe(true)
+  })
+
+  test("does not treat a failed statement or a refused connect as a lost connection", () => {
+    // A statement error leaves the session alive (it only aborts the transaction), and a refused
+    // connect never had a session: neither may skip ROLLBACK nor keep a connection out of the pool.
+    expect(isConnectionLost(Object.assign(pgError("57014"), { severity: "ERROR" }))).toBe(false)
+    expect(isConnectionLost(Object.assign(pgError("23505"), { severity: "ERROR" }))).toBe(false)
+    expect(isConnectionLost(pgError("ECONNREFUSED"))).toBe(false)
   })
 })

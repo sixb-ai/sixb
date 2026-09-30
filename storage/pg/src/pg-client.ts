@@ -30,6 +30,9 @@ export type SQL = postgres.Sql<Record<string, never>>
  */
 export type SQLClient = postgres.ISql<Record<string, never>>
 
+/** One pool connection held outside the pool until `release()` — see `withReservedPgConnection`. */
+export type ReservedSQL = postgres.ReservedSql<Record<string, never>>
+
 /**
  * A value accepted as a positional parameter by {@link SQLClient.unsafe}. Dynamically built
  * parameter arrays (from the query-IR compiler / run-list helpers) are cast to this since
