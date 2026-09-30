@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readdir, readFile, rm, stat, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { deploymentLayout } from "../src/layout"
@@ -116,5 +116,30 @@ describe("uploading the source", () => {
     }
 
     expect(await tree(incoming ?? "")).toEqual(["root.ts", "vendor/lib/index.ts"])
+  })
+
+  test("leaves the code readable by the admin, who reads it through the deploy user's group", async () => {
+    const home = await tempDir()
+    const shell = new LocalShell({ HOME: home })
+    const lines: string[] = []
+    await shell.run(renderPrepareScript("northline", "abcdef1234567890"), {
+      onLine: (line) => lines.push(line),
+    })
+    const incoming = lines[1] ?? ""
+    await writeTree(incoming, { "app.ts": "app" })
+
+    const layout = deploymentLayout({
+      home,
+      user: "sixb",
+      name: "northline",
+      projectPath: ".",
+      bunVersion: "1.4.2",
+    })
+    await shell.run(renderApplyFiles(layout, incoming))
+
+    // Found on a real server: `code/` took the upload directory's 0700 from `mktemp -d`. Only GNU
+    // tar, which Linux (and CI) runs, passes that on; macOS's bsdtar leaves `code/` alone, so
+    // removing the `chmod` in renderPrepareScript fails this test on Linux only.
+    expect((await stat(layout.code)).mode & 0o050).toBe(0o050)
   })
 })

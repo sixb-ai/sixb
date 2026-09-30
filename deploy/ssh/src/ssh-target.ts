@@ -283,7 +283,9 @@ function withoutLine({ type, fingerprint, comment, restricted }: DeployAccessKey
  */
 async function runAsAdmin(destination: string, root: boolean, script: string): Promise<void> {
   const command = `${root ? "" : "sudo "}bash -c ${shellQuote(script)}`
-  const child = Bun.spawn(["ssh", "-tt", "-o", "ConnectTimeout=15", destination, command], {
+  // LogLevel=ERROR drops the "Connection closed" line a terminal session ends with, not errors.
+  const ssh = ["ssh", "-tt", "-o", "ConnectTimeout=15", "-o", "LogLevel=ERROR"]
+  const child = Bun.spawn([...ssh, destination, command], {
     stdio: ["inherit", "inherit", "inherit"],
   })
   const exitCode = await child.exited
