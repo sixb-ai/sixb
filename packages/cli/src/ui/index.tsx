@@ -1095,18 +1095,27 @@ export function DeployAccessView({
   title: string
   keys: readonly DeployAccessKey[]
 }) {
+  // Two lines a key: a fingerprint and a long comment do not fit side by side in 80 columns.
   return (
-    <TableResultView
-      title={title}
-      headers={["Comment", "Type", "Fingerprint", "Limits"]}
-      rows={keys.map((key) => [
-        key.comment || "-",
-        key.type,
-        key.fingerprint,
-        key.restricted ? "restricted" : "-",
-      ])}
-      emptyMessage="No keys."
-    />
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        {title}
+      </Text>
+      <Spacer />
+      {keys.length === 0 ? <Text dimColor>No keys.</Text> : null}
+      {keys.map((key) => (
+        <Box key={key.fingerprint} flexDirection="column">
+          <Text>
+            {key.comment || "(no comment)"}
+            {key.restricted ? <Text color="yellow"> restricted</Text> : null}
+          </Text>
+          <Text dimColor>
+            {"  "}
+            {key.type} {key.fingerprint}
+          </Text>
+        </Box>
+      ))}
+    </Box>
   )
 }
 
