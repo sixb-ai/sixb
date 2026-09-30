@@ -47,29 +47,22 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
 
   const execution = await claimOrReplaySucceededRun(input)
   if ("replayedTerminal" in execution) return execution
-  let finishBoundary: "run" | "materialization" = "run"
   try {
     const validated = await validateProjectionJob(input.runtime, input.job)
-    finishBoundary = "materialization"
     const completion = await materializeProjection(input, validated, execution, signal)
-    await finishProjection(input, execution, { ...completion, status: "succeeded" }, finishBoundary)
+    await finishProjection(input, execution, { ...completion, status: "succeeded" })
     return { run: await requireRun(input), replayedTerminal: false }
   } catch (error) {
     const succeeded = await findSucceededRun(input)
     if (succeeded) return terminalResult(succeeded)
 
     if (isExplicitCancellation(error)) {
-      await finishProjection(
-        input,
-        execution,
-        projectionFailure(input, error, "cancelled"),
-        finishBoundary
-      )
+      await finishProjection(input, execution, projectionFailure(input, error, "cancelled"))
       throw error
     }
     if ((await isPermanentFailure(input, execution, error)) && !signal.aborted) {
       const decision = projectionFailure(input, error, "failed")
-      await finishProjection(input, execution, decision, finishBoundary)
+      await finishProjection(input, execution, decision)
       const run = await requireRun(input)
       input.onRunFailed?.(error, run, decision.error)
     }
@@ -248,29 +241,20 @@ function replacementEntries(
   })
 }
 
+/**
+ * Every terminal transition goes through the materializer, including a failure found before
+ * materialization began: an earlier delivery of the same run may have left a candidate, and only
+ * the materializer's finish releases it in the same transaction.
+ */
 async function finishProjection(
   input: RunProjectionJobInput,
   execution: ClaimedProjectionExecution,
-  decision: ProjectionRunTerminalDecision & { readonly finishedAt?: Date },
-  boundary: "run" | "materialization"
+  decision: ProjectionRunTerminalDecision & { readonly finishedAt?: Date }
 ): Promise<void> {
-  if (boundary === "run") {
-    await input.runtime.projectionRunsStorage.finish({
-      id: input.job.id,
-      projectId: input.runtime.projectId,
-      identity: input.job,
-      executionToken: execution.execution.executionToken,
-      ...decision,
-    })
-    return
-  }
-  const common = {
+  await getOntologyMutationRuntime(input.runtime).finishProjection({
     source: { projectionId: input.job.projectionId },
     datasetVersion: input.job.datasetVersion,
     execution: execution.execution,
-  }
-  await getOntologyMutationRuntime(input.runtime).finishProjection({
-    ...common,
     ...decision,
   })
 }

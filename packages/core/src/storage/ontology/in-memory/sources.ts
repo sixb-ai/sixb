@@ -16,8 +16,11 @@ import {
   sourceStageRoots,
 } from "../provider"
 import type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  AdoptedSourceMaterialization,
+  AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecution,
   BeginSourceMaterializationInput,
   CleanupTerminalSourceMaterializationsInput,
@@ -26,7 +29,7 @@ import type {
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
-  ReclaimSourceMaterializationInput,
+  PurgeAbandonedSourceMaterializationsInput,
   StageSourceAssertion,
   StageSourceRowsInput,
   StageSourceRowsResult,
@@ -38,6 +41,7 @@ import {
   assertNonblank,
   type InMemoryOntologyState,
   type InMemorySourceMaterialization,
+  type InMemorySourceRoot,
   insertBounded,
   sourceMaterializationKey,
   sourceMaterializationRecord,
@@ -78,7 +82,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
       )
       if (nonterminal.length > 0) {
         throw sourceConflict(
-          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; reclaim it before beginning another.`
+          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; adopt it before beginning another.`
         )
       }
 
@@ -191,8 +195,42 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
     })
   }
 
+  async adopt(
+    input: AdoptSourceMaterializationInput
+  ): Promise<AdoptedSourceMaterialization | null> {
+    return this.runRootOperation(async () => {
+      assertProjectAndSource(input)
+      assertSourceExecutionIdentity(input.execution.projectionRunId, input.execution.executionToken)
+      assertCanonicalTimestamp(input.adoptedAt, "Source adoptedAt")
+      await this.assertCurrentExecution(input)
+      const [candidate, ...others] = this.findRunCandidates(
+        input.projectId,
+        input.source.projectionId,
+        input.execution.projectionRunId
+      )
+      if (!candidate) return null
+      if (others.length > 0) throw multipleRunCandidates(input.execution.projectionRunId)
+      const [key, materialization] = candidate
+      const adopted: InMemorySourceMaterialization = {
+        ...materialization,
+        executionToken: input.execution.executionToken,
+        // Workers' clocks differ; adoption never moves the record back in time.
+        updatedAt:
+          input.adoptedAt > materialization.updatedAt ? input.adoptedAt : materialization.updatedAt,
+      }
+      this.state.sourceMaterializations.set(key, adopted)
+      return {
+        record: sourceMaterializationRecord(adopted),
+        resumeStagingOrdinal:
+          adopted.status === "ready"
+            ? (adopted.rootCount ?? 0)
+            : Math.max(0, ...adopted.ordinalRoots.keys()),
+      }
+    })
+  }
+
   async abandon(input: AbandonSourceMaterializationCandidateInput): Promise<OntologySourceRecord>
-  async abandon(input: ReclaimSourceMaterializationInput): Promise<OntologySourceRecord | null>
+  async abandon(input: AbandonRunSourceMaterializationInput): Promise<OntologySourceRecord | null>
   async abandon(input: AbandonSourceMaterializationInput): Promise<OntologySourceRecord | null> {
     return this.runRootOperation(async () => {
       assertProjectAndSource(input)
@@ -201,7 +239,7 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
       await this.assertCurrentExecution(input)
       return input.kind === "candidate"
         ? this.abandonCandidate(input)
-        : this.abandonForReclaim(input)
+        : this.abandonRunCandidate(input)
     })
   }
 
@@ -211,18 +249,14 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
     return this.runRootOperation(() => {
       assertNonblank(input.projectId, "Terminal source cleanup project id")
       assertCanonicalTimestamp(input.terminalBefore, "Terminal source cleanup cutoff")
-      if (!Number.isSafeInteger(input.limit) || input.limit <= 0) {
-        throw new MaterializationValidationError(
-          "Terminal source cleanup limit must be a positive safe integer."
-        )
-      }
+      assertCleanupLimit(input.limit)
 
       const candidates: [string, InMemorySourceMaterialization][] = []
       for (const entry of this.state.sourceMaterializations.entries()) {
         const materialization = entry[1]
         if (
           materialization.projectId !== input.projectId ||
-          (materialization.status !== "superseded" && materialization.status !== "abandoned") ||
+          materialization.status !== "superseded" ||
           materialization.terminalAt === null ||
           materialization.terminalAt >= input.terminalBefore
         ) {
@@ -239,42 +273,69 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
         insertBounded(candidates, entry, input.limit, compareTerminalMaterializations)
       }
 
-      let remaining = input.limit
-      let rowsDeleted = 0
-      let materializationsDeleted = 0
-      for (const [key, candidate] of candidates) {
+      return this.deleteRetiredRoots(
+        candidates,
+        input.limit,
+        (root) => !root.active && root.retiredAt !== null && root.retiredAt < input.terminalBefore
+      )
+    })
+  }
+
+  async purgeAbandoned(
+    input: PurgeAbandonedSourceMaterializationsInput
+  ): Promise<CleanupTerminalSourceMaterializationsResult> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Abandoned source purge project id")
+      assertCleanupLimit(input.limit)
+      const abandoned = [...this.state.sourceMaterializations.entries()]
+        .filter(
+          ([, materialization]) =>
+            materialization.projectId === input.projectId && materialization.status === "abandoned"
+        )
+        .sort(compareTerminalMaterializations)
+      return this.deleteRetiredRoots(abandoned, input.limit, () => true)
+    })
+  }
+
+  private deleteRetiredRoots(
+    candidates: readonly [string, InMemorySourceMaterialization][],
+    limit: number,
+    retired: (root: InMemorySourceRoot) => boolean
+  ): CleanupTerminalSourceMaterializationsResult {
+    let remaining = limit
+    let rowsDeleted = 0
+    let materializationsDeleted = 0
+    for (const [key, candidate] of candidates) {
+      if (remaining === 0) break
+      const current = this.state.sourceMaterializations.get(key)
+      if (current !== candidate) continue
+      current.rootOrdinals.clear()
+      current.ordinalRoots.clear()
+      for (const [rootKey, root] of current.roots) {
         if (remaining === 0) break
-        const current = this.state.sourceMaterializations.get(key)
-        if (current !== candidate) continue
-        current.rootOrdinals.clear()
-        current.ordinalRoots.clear()
-        for (const [rootKey, root] of current.roots) {
+        if (!retired(root)) continue
+        for (const entityKey of root.entityKeys) {
           if (remaining === 0) break
-          if (root.active || root.retiredAt === null || root.retiredAt >= input.terminalBefore)
-            continue
-          for (const entityKey of root.entityKeys) {
-            if (remaining === 0) break
-            current.rowsByEntity.delete(entityKey)
-            root.entityKeys.delete(entityKey)
-            rowsDeleted += 1
-            remaining -= 1
-          }
-          if (root.entityKeys.size === 0 && remaining > 0) {
-            current.roots.delete(rootKey)
-            current.rootOrdinals.delete(rootKey)
-            current.ordinalRoots.delete(root.stagingOrdinal)
-            rowsDeleted += 1
-            remaining -= 1
-          }
+          current.rowsByEntity.delete(entityKey)
+          root.entityKeys.delete(entityKey)
+          rowsDeleted += 1
+          remaining -= 1
         }
-        if (current.roots.size === 0 && current.rowsByEntity.size === 0 && remaining > 0) {
-          this.state.sourceMaterializations.delete(key)
-          materializationsDeleted += 1
+        if (root.entityKeys.size === 0 && remaining > 0) {
+          current.roots.delete(rootKey)
+          current.rootOrdinals.delete(rootKey)
+          current.ordinalRoots.delete(root.stagingOrdinal)
+          rowsDeleted += 1
           remaining -= 1
         }
       }
-      return { rowsDeleted, materializationsDeleted }
-    })
+      if (current.roots.size === 0 && current.rowsByEntity.size === 0 && remaining > 0) {
+        this.state.sourceMaterializations.delete(key)
+        materializationsDeleted += 1
+        remaining -= 1
+      }
+    }
+    return { rowsDeleted, materializationsDeleted }
   }
 
   async summarizeTerminal(
@@ -356,26 +417,15 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
     return this.transitionToAbandoned(materialization, input.abandonedAt)
   }
 
-  private abandonForReclaim(input: ReclaimSourceMaterializationInput): OntologySourceRecord | null {
+  private abandonRunCandidate(
+    input: AbandonRunSourceMaterializationInput
+  ): OntologySourceRecord | null {
     const candidates = this.findRunCandidates(
       input.projectId,
       input.source.projectionId,
       input.execution.projectionRunId
     )
-    if (
-      candidates.some(
-        ([, materialization]) => materialization.executionToken === input.execution.executionToken
-      )
-    ) {
-      throw sourceConflict(
-        `Projection run '${input.execution.projectionRunId}' already has a source materialization owned by the current execution.`
-      )
-    }
-    if (candidates.length > 1) {
-      throw sourceConflict(
-        `Projection run '${input.execution.projectionRunId}' has multiple nonterminal source materializations.`
-      )
-    }
+    if (candidates.length > 1) throw multipleRunCandidates(input.execution.projectionRunId)
     const candidate = candidates[0]?.[1]
     return candidate ? this.transitionToAbandoned(candidate, input.abandonedAt) : null
   }
@@ -607,6 +657,20 @@ function assertNotBefore(
   if (value < minimum) {
     throw new MaterializationValidationError(`${label} cannot precede source ${minimumLabel}.`)
   }
+}
+
+function assertCleanupLimit(limit: number): void {
+  if (!Number.isSafeInteger(limit) || limit <= 0) {
+    throw new MaterializationValidationError(
+      "Terminal source cleanup limit must be a positive safe integer."
+    )
+  }
+}
+
+function multipleRunCandidates(projectionRunId: string) {
+  return sourceConflict(
+    `Projection run '${projectionRunId}' has multiple nonterminal source materializations.`
+  )
 }
 
 function compareTerminalMaterializations(

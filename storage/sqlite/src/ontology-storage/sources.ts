@@ -17,8 +17,11 @@ import {
   utf8SortKey,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  AdoptedSourceMaterialization,
+  AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecutionInput,
   BeginSourceMaterializationInput,
   CleanupTerminalSourceMaterializationsInput,
@@ -27,7 +30,7 @@ import type {
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
-  ReclaimSourceMaterializationInput,
+  PurgeAbandonedSourceMaterializationsInput,
   StageSourceRowsInput,
   StageSourceRowsResult,
   SummarizeTerminalSourceMaterializationsInput,
@@ -47,7 +50,7 @@ import {
   sourceAssertion,
   sourceRecord,
 } from "./shared"
-import { cleanupSourceVersions } from "./source-cleanup"
+import { cleanupSourceVersions, purgeAbandonedSourceVersions } from "./source-cleanup"
 import { assertSourceRootCoverage, stageSourceRoots } from "./source-roots"
 
 export class SqliteOntologySourceStorage implements OntologySourceStorage {
@@ -87,7 +90,7 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
         .get(input.projectId, input.execution.projectionRunId)
       if (candidate) {
         throw sourceConflict(
-          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; reclaim it before beginning another.`
+          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; adopt it before beginning another.`
         )
       }
 
@@ -233,17 +236,59 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
     })
   }
 
+  async adopt(
+    input: AdoptSourceMaterializationInput
+  ): Promise<AdoptedSourceMaterialization | null> {
+    return this.runRootOperation(() => {
+      assertProjectAndSource(input)
+      assertExecutionIdentity(input.execution.projectionRunId, input.execution.executionToken)
+      assertTimestamp(input.adoptedAt, "Source adoptedAt", true)
+      this.assertExecution(input)
+      const candidate = this.findRunCandidate(input)
+      if (!candidate) return null
+      // Workers' clocks differ; adoption never moves the record back in time.
+      const changed = this.db
+        .query(
+          `
+            UPDATE ontology_sources SET execution_token = ?, updated_at = MAX(updated_at, ?)
+            WHERE project_id = ? AND source_id = ? AND materialization_id = ?
+              AND status IN ('staging', 'ready')
+          `
+        )
+        .run(
+          input.execution.executionToken,
+          input.adoptedAt,
+          candidate.project_id,
+          candidate.source_id,
+          candidate.materialization_id
+        ).changes
+      if (changed !== 1) {
+        throw sourceConflict(`Source materialization '${candidate.materialization_id}' changed.`)
+      }
+      const adopted = this.requireManifest(
+        candidate.project_id,
+        candidate.source_id,
+        candidate.materialization_id
+      )
+      return {
+        record: sourceRecord(adopted),
+        resumeStagingOrdinal:
+          adopted.status === "ready" ? Number(adopted.root_count) : this.lastStagedOrdinal(adopted),
+      }
+    })
+  }
+
   async abandon(input: AbandonSourceMaterializationCandidateInput): Promise<OntologySourceRecord>
-  async abandon(input: ReclaimSourceMaterializationInput): Promise<OntologySourceRecord | null>
+  async abandon(input: AbandonRunSourceMaterializationInput): Promise<OntologySourceRecord | null>
   async abandon(input: AbandonSourceMaterializationInput): Promise<OntologySourceRecord | null> {
     return this.runRootOperation(() => {
       assertProjectAndSource(input)
       assertExecutionIdentity(input.execution.projectionRunId, input.execution.executionToken)
       assertTimestamp(input.abandonedAt, "Source abandonedAt", true)
       this.assertExecution(input)
-      return input.kind === "candidate"
-        ? this.abandonCandidate(input)
-        : this.abandonForReclaim(input)
+      if (input.kind === "candidate") return this.abandonCandidate(input)
+      const candidate = this.findRunCandidate(input)
+      return candidate ? this.transitionToAbandoned(candidate, input.abandonedAt) : null
     })
   }
 
@@ -255,6 +300,16 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
       assertTimestamp(input.terminalBefore, "Terminal source cleanup cutoff", true)
       assertPositiveInteger(input.limit, "Terminal source cleanup limit")
       return cleanupSourceVersions(this.db, input)
+    })
+  }
+
+  async purgeAbandoned(
+    input: PurgeAbandonedSourceMaterializationsInput
+  ): Promise<CleanupTerminalSourceMaterializationsResult> {
+    return this.runRootOperation(() => {
+      assertNonblank(input.projectId, "Abandoned source purge project id")
+      assertPositiveInteger(input.limit, "Abandoned source purge limit")
+      return purgeAbandonedSourceVersions(this.db, input)
     })
   }
 
@@ -305,7 +360,12 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
     return this.transitionToAbandoned(manifest, input.abandonedAt)
   }
 
-  private abandonForReclaim(input: ReclaimSourceMaterializationInput): OntologySourceRecord | null {
+  /** The run's one staging or ready candidate, whichever execution staged it. */
+  private findRunCandidate(input: {
+    readonly projectId: string
+    readonly source: { readonly projectionId: string }
+    readonly execution: { readonly projectionRunId: string }
+  }): SqliteOntologySourceRow | null {
     const candidates = this.db
       .query(
         `
@@ -319,19 +379,26 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
         input.source.projectionId,
         input.execution.projectionRunId
       ) as SqliteOntologySourceRow[]
-    if (
-      candidates.some((candidate) => candidate.execution_token === input.execution.executionToken)
-    ) {
-      throw sourceConflict(
-        `Projection run '${input.execution.projectionRunId}' already has a source materialization owned by the current execution.`
-      )
-    }
     if (candidates.length > 1) {
       throw sourceConflict(
         `Projection run '${input.execution.projectionRunId}' has multiple nonterminal source materializations.`
       )
     }
-    return candidates[0] ? this.transitionToAbandoned(candidates[0], input.abandonedAt) : null
+    return candidates[0] ?? null
+  }
+
+  private lastStagedOrdinal(manifest: SqliteOntologySourceRow): number {
+    const last = this.db
+      .query(
+        `
+          SELECT MAX(staging_ordinal) AS ordinal FROM ontology_source_roots
+          WHERE project_id = ? AND source_id = ? AND materialization_id = ?
+        `
+      )
+      .get(manifest.project_id, manifest.source_id, manifest.materialization_id) as {
+      readonly ordinal: number | null
+    } | null
+    return last?.ordinal ?? 0
   }
 
   private transitionToAbandoned(

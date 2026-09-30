@@ -410,8 +410,33 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             abandonedAt: "2026-01-01T00:03:00.000Z",
           })
         ).rejects.toMatchObject({ kind: "execution-lost" })
+        const adopted = await storage.ontology.sources.adopt({
+          projectId: "contract-project",
+          source,
+          execution: reclaimed.execution,
+          adoptedAt: "2026-01-01T00:01:30.000Z",
+        })
+        expect(adopted).toMatchObject({
+          record: {
+            materializationId: "staging-candidate",
+            status: "ready",
+            executionToken: reclaimed.execution.executionToken,
+            updatedAt: "2026-01-01T00:01:30.000Z",
+          },
+          resumeStagingOrdinal: 1,
+        })
+        // Adopting twice from the same execution is a no-op, not a second owner change.
+        expect(
+          await storage.ontology.sources.adopt({
+            projectId: "contract-project",
+            source,
+            execution: reclaimed.execution,
+            adoptedAt: "2026-01-01T00:01:40.000Z",
+          })
+        ).toMatchObject({ record: { executionToken: reclaimed.execution.executionToken } })
+
         const abandoned = await storage.ontology.sources.abandon({
-          kind: "reclaim",
+          kind: "run",
           projectId: "contract-project",
           source,
           execution: reclaimed.execution,
@@ -419,33 +444,135 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         })
         expect(abandoned).toMatchObject({ status: "abandoned", executionToken: null })
         expect(
+          await storage.ontology.sources.abandon({
+            kind: "run",
+            projectId: "contract-project",
+            source,
+            execution: reclaimed.execution,
+            abandonedAt: "2026-01-01T00:02:00.000Z",
+          })
+        ).toBeNull()
+        expect(
+          await storage.ontology.sources.adopt({
+            projectId: "contract-project",
+            source,
+            execution: reclaimed.execution,
+            adoptedAt: "2026-01-01T00:02:10.000Z",
+          })
+        ).toBeNull()
+        expect(
           await storage.ontology.sources.summarizeTerminal({ projectId: "contract-project" })
         ).toEqual({ count: 1, oldestTerminalAt: "2026-01-01T00:02:00.000Z" })
 
+        // Superseded retention does not hold an abandoned candidate back.
         expect(
           await storage.ontology.sources.cleanupTerminal({
             projectId: "contract-project",
             terminalBefore: "2026-02-01T00:00:00.000Z",
-            limit: 1,
+            limit: 10,
           })
+        ).toEqual({ rowsDeleted: 0, materializationsDeleted: 0 })
+        expect(
+          await storage.ontology.sources.purgeAbandoned({ projectId: "contract-project", limit: 1 })
         ).toEqual({ rowsDeleted: 1, materializationsDeleted: 0 })
         expect(
-          await storage.ontology.sources.cleanupTerminal({
-            projectId: "contract-project",
-            terminalBefore: "2026-02-01T00:00:00.000Z",
-            limit: 1,
-          })
+          await storage.ontology.sources.purgeAbandoned({ projectId: "contract-project", limit: 1 })
         ).toEqual({ rowsDeleted: 1, materializationsDeleted: 0 })
         expect(
-          await storage.ontology.sources.cleanupTerminal({
-            projectId: "contract-project",
-            terminalBefore: "2026-02-01T00:00:00.000Z",
-            limit: 1,
-          })
+          await storage.ontology.sources.purgeAbandoned({ projectId: "contract-project", limit: 1 })
         ).toEqual({ rowsDeleted: 0, materializationsDeleted: 1 })
         expect(
           await storage.ontology.sources.summarizeTerminal({ projectId: "contract-project" })
         ).toEqual({ count: 0, oldestTerminalAt: null })
+      })
+    })
+
+    test("adopts a staging candidate at its last staged root", async () => {
+      await withStorage(async (storage) => {
+        const identity = replacementIdentity("01")
+        const claimed = await startTestProjectionRun(storage, {
+          id: "resumed-run",
+          projectId: "contract-project",
+          identity,
+          target: { objectTypeId: "ContractDevice" },
+        })
+        const source = { projectionId: identity.projectionId }
+        await storage.ontology.sources.beginMaterialization({
+          projectId: "contract-project",
+          source,
+          materializationId: "resumed-candidate",
+          execution: claimed.execution,
+          projectionKind: "object",
+          protocol: "replacement",
+          datasetVersion: identity.datasetVersion,
+          projectionRevision: identity.projectionRevision,
+          ownershipHash: identity.ownershipHash,
+          ontologyRevision: identity.ontologyRevision,
+          createdAt: "2026-01-01T00:00:00.000Z",
+        })
+        const row = (primaryId: string, stagingOrdinal: number) => ({
+          root: { kind: "object" as const, ref: { objectTypeId: "ContractDevice", primaryId } },
+          assertion: {
+            kind: "object" as const,
+            ref: { objectTypeId: "ContractDevice", primaryId },
+            properties: { name: primaryId },
+          },
+          stagingOrdinal,
+        })
+        await storage.ontology.sources.stageRows({
+          projectId: "contract-project",
+          source,
+          materializationId: "resumed-candidate",
+          execution: claimed.execution,
+          rows: [row("zero", 0), row("one", 1)],
+        })
+
+        const reclaimed = await storage.projectionRuns.startOrReclaim({
+          id: claimed.run.id,
+          projectId: claimed.run.projectId,
+          identity,
+          target: { objectTypeId: "ContractDevice" },
+        })
+        const adopted = await storage.ontology.sources.adopt({
+          projectId: "contract-project",
+          source,
+          execution: reclaimed.execution,
+          adoptedAt: "2026-01-01T00:01:00.000Z",
+        })
+        expect(adopted).toMatchObject({
+          record: { status: "staging", executionToken: reclaimed.execution.executionToken },
+          resumeStagingOrdinal: 1,
+        })
+        // The previous execution lost the candidate with the run.
+        await expect(
+          storage.ontology.sources.stageRows({
+            projectId: "contract-project",
+            source,
+            materializationId: "resumed-candidate",
+            execution: claimed.execution,
+            rows: [row("two", 2)],
+          })
+        ).rejects.toMatchObject({ kind: "execution-lost" })
+        expect(
+          await storage.ontology.sources.stageRows({
+            projectId: "contract-project",
+            source,
+            materializationId: "resumed-candidate",
+            execution: reclaimed.execution,
+            rows: [row("one", 1), row("two", 2)],
+          })
+        ).toEqual({ inserted: 1, unchanged: 1 })
+        expect(
+          await storage.ontology.sources.markReady({
+            projectId: "contract-project",
+            source,
+            materializationId: "resumed-candidate",
+            execution: reclaimed.execution,
+            rootCount: 3,
+            assertionCount: 3,
+            readyAt: "2026-01-01T00:02:00.000Z",
+          })
+        ).toMatchObject({ status: "ready", rootCount: 3 })
       })
     })
 
@@ -532,16 +659,15 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           )
         ).rejects.toThrow("execution token is stale")
         await storage.ontology.sources.abandon({
-          kind: "reclaim",
+          kind: "run",
           projectId: "contract-project",
           source: stale.source,
           execution: reclaimed.execution,
           abandonedAt: "2026-01-06T00:01:00.000Z",
         })
 
-        const cleanup = await storage.ontology.sources.cleanupTerminal({
+        const cleanup = await storage.ontology.sources.purgeAbandoned({
           projectId: "contract-project",
-          terminalBefore: "2026-02-01T00:00:00.000Z",
           limit: 10,
         })
         expect(cleanup.materializationsDeleted).toBeGreaterThanOrEqual(1)

@@ -321,7 +321,7 @@ describe("in-memory ontology source lifecycle", () => {
     ).rejects.toThrow("matching link assertion")
   })
 
-  test("fences every write and lets only a new token reclaim the prior candidate", async () => {
+  test("fences every write and hands the prior candidate only to a new token", async () => {
     const { storage, claim } = fixture()
     const oldExecution = claim("stable-run", "old-token")
     await storage.beginMaterialization(beginInput("old-materialization", oldExecution))
@@ -338,16 +338,26 @@ describe("in-memory ontology source lifecycle", () => {
     ).rejects.toThrow("execution lost")
     await expect(
       storage.beginMaterialization(beginInput("new-materialization", newExecution))
-    ).rejects.toThrow("reclaim it before beginning another")
+    ).rejects.toThrow("adopt it before beginning another")
 
-    const reclaimed = await storage.abandon({
-      kind: "reclaim",
+    const adopted = await storage.adopt({
+      projectId,
+      source,
+      execution: newExecution,
+      adoptedAt: "2026-02-01T00:01:00.000Z",
+    })
+    expect(adopted).toMatchObject({
+      record: { materializationId: "old-materialization", executionToken: "new-token" },
+      resumeStagingOrdinal: 0,
+    })
+    const released = await storage.abandon({
+      kind: "run",
       projectId,
       source,
       execution: newExecution,
       abandonedAt: "2026-02-01T00:02:00.000Z",
     })
-    expect(reclaimed).toMatchObject({
+    expect(released).toMatchObject({
       materializationId: "old-materialization",
       status: "abandoned",
       executionToken: null,
@@ -356,15 +366,6 @@ describe("in-memory ontology source lifecycle", () => {
       beginInput("new-materialization", newExecution, "2026-02-01T00:03:00.000Z")
     )
     expect(current.executionToken).toBe("new-token")
-    await expect(
-      storage.abandon({
-        kind: "reclaim",
-        projectId,
-        source,
-        execution: newExecution,
-        abandonedAt: "2026-02-01T00:04:00.000Z",
-      })
-    ).rejects.toThrow("current execution")
 
     const abandoned = await storage.abandon({
       kind: "candidate",
@@ -387,7 +388,7 @@ describe("in-memory ontology source lifecycle", () => {
     ).toEqual(abandoned)
   })
 
-  test("cleans only terminal records, deleting bounded rows before their manifest", async () => {
+  test("purges abandoned candidates whole, oldest first, rows before their manifest", async () => {
     const { state, storage, claim } = fixture()
     const execution = claim("cleanup-run", "cleanup-token")
     const materializationId = "cleanup-with-rows"
@@ -449,13 +450,18 @@ describe("in-memory ontology source lifecycle", () => {
       updatedAt: "2025-01-01T00:02:00.000Z",
     })
 
+    // Retention applies to superseded versions only: nothing reads an abandoned candidate.
     expect(
       await storage.cleanupTerminal({
         projectId,
         terminalBefore: "2026-02-01T00:00:00.000Z",
-        limit: 2,
+        limit: 10,
       })
-    ).toEqual({ rowsDeleted: 2, materializationsDeleted: 0 })
+    ).toEqual({ rowsDeleted: 0, materializationsDeleted: 0 })
+    expect(await storage.purgeAbandoned({ projectId, limit: 2 })).toEqual({
+      rowsDeleted: 2,
+      materializationsDeleted: 0,
+    })
     expect(
       state.sourceMaterializations.has(
         sourceMaterializationKey(projectId, source.projectionId, materializationId)
@@ -466,35 +472,22 @@ describe("in-memory ontology source lifecycle", () => {
     )
     expect(partiallyCleaned?.rootOrdinals.size).toBe(0)
     expect(partiallyCleaned?.ordinalRoots.size).toBe(0)
-    expect(
-      await storage.cleanupTerminal({
-        projectId,
-        terminalBefore: "2026-02-01T00:00:00.000Z",
-        limit: 2,
-      })
-    ).toEqual({ rowsDeleted: 2, materializationsDeleted: 0 })
-
-    expect(
-      await storage.cleanupTerminal({
-        projectId,
-        terminalBefore: "2026-02-01T00:00:00.000Z",
-        limit: 1,
-      })
-    ).toEqual({ rowsDeleted: 0, materializationsDeleted: 1 })
-    expect(
-      await storage.cleanupTerminal({
-        projectId,
-        terminalBefore: "2026-01-03T00:00:00.000Z",
-        limit: 1,
-      })
-    ).toEqual({ rowsDeleted: 0, materializationsDeleted: 0 })
-    expect(
-      await storage.cleanupTerminal({
-        projectId,
-        terminalBefore: "2026-02-01T00:00:00.000Z",
-        limit: 1,
-      })
-    ).toEqual({ rowsDeleted: 0, materializationsDeleted: 1 })
+    expect(await storage.purgeAbandoned({ projectId, limit: 2 })).toEqual({
+      rowsDeleted: 2,
+      materializationsDeleted: 0,
+    })
+    expect(await storage.purgeAbandoned({ projectId, limit: 1 })).toEqual({
+      rowsDeleted: 0,
+      materializationsDeleted: 1,
+    })
+    expect(await storage.purgeAbandoned({ projectId, limit: 10 })).toEqual({
+      rowsDeleted: 0,
+      materializationsDeleted: 1,
+    })
+    expect(await storage.purgeAbandoned({ projectId, limit: 10 })).toEqual({
+      rowsDeleted: 0,
+      materializationsDeleted: 0,
+    })
     expect(state.sourceMaterializations.has(liveKey)).toBe(true)
     expect(await storage.getActive({ projectId, source })).toMatchObject({
       materializationId: "cleanup-live",

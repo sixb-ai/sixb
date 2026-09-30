@@ -151,9 +151,20 @@ describe("ontology materializer telemetry", () => {
         source: { projectionId: "temperatures" },
         datasetVersion,
         execution,
-        status: "failed",
+        status: "succeeded",
+        inputExhausted: true,
       })
     ).rejects.toMatchObject({ kind: "run-correlation" })
+    // Failing needs no definition to match: a run that can never succeed must still be able to end.
+    await expect(
+      materializer.projections.finishRun({
+        protocol: "telemetry",
+        source: { projectionId: "temperatures" },
+        datasetVersion,
+        execution,
+        status: "failed",
+      })
+    ).resolves.toBeUndefined()
   })
 
   test("persists telemetry EOF atomically with terminal success", async () => {

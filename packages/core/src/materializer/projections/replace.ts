@@ -1,6 +1,5 @@
 import { assertPinnedDatasetWatermark } from "../../materialization/dataset-watermark"
 import {
-  MaterializationCancellationError,
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../materialization/errors"
@@ -18,6 +17,7 @@ import type {
 } from "../../materialization/model"
 import type { ProjectionRegistry } from "../../projections/registry"
 import type {
+  AdoptedSourceMaterialization,
   OntologyCommitRecord,
   OntologyCommitWrite,
   OntologyMaterializationStorage,
@@ -76,6 +76,8 @@ interface PreparedProjectionReplacement {
 interface ProjectionCandidate {
   readonly materializationId: string
   readonly createdAt: string
+  /** Set when a redelivery adopted the candidate a previous execution of this run staged. */
+  readonly adopted?: AdoptedSourceMaterialization
   readonly expectedSource: {
     readonly source: ProjectionSourceRef
     readonly activeMaterializationId: string | null
@@ -96,14 +98,11 @@ export async function replaceProjection(
   const replay = await admitProjectionExecution(context, command)
   if (replay) return replay
 
+  // A failed attempt leaves its candidate to the run: a redelivery adopts it, and the run's
+  // terminal transition (`finishRun`) abandons it.
   const candidate = await prepareProjectionCandidate(context, command)
-  try {
-    const ready = await stageProjectionCandidate(context, command, candidate)
-    return await commitProjectionCandidate(context, command, ready)
-  } catch (error) {
-    await abandonFailedCandidate(context, command, candidate, error)
-    throw error
-  }
+  const ready = await stageProjectionCandidate(context, command, candidate)
+  return commitProjectionCandidate(context, command, ready)
 }
 
 function prepareProjectionReplacement(
@@ -230,12 +229,11 @@ async function prepareProjectionCandidate(
   context: MaterializerContext,
   command: PreparedProjectionReplacement
 ): Promise<ProjectionCandidate> {
-  await context.storage.ontology.sources.abandon({
-    kind: "reclaim",
+  const adopted = await context.storage.ontology.sources.adopt({
     projectId: context.projectId,
     source: command.source,
     execution: command.execution,
-    abandonedAt: context.clock().toISOString(),
+    adoptedAt: context.clock().toISOString(),
   })
   const active = await context.storage.ontology.sources.getActive({
     projectId: context.projectId,
@@ -243,14 +241,35 @@ async function prepareProjectionCandidate(
   })
   validateProjectionWatermark(active, command.datasetVersion)
   assertDeltaBase(active, command)
+  const expectedSource = {
+    source: command.source,
+    activeMaterializationId: active?.materializationId ?? null,
+    lastCommitId: active?.lastCommitId ?? null,
+  }
+  if (adopted && sameSourceBase(adopted.record.base, command.base)) {
+    return {
+      materializationId: adopted.record.materializationId,
+      createdAt: adopted.record.createdAt,
+      adopted,
+      expectedSource,
+    }
+  }
+  if (adopted) {
+    // Staged against another delta base (the active source moved, or this attempt reads the
+    // whole version): its roots answer a different question, so it cannot be completed.
+    await context.storage.ontology.sources.abandon({
+      kind: "candidate",
+      projectId: context.projectId,
+      source: command.source,
+      materializationId: adopted.record.materializationId,
+      execution: command.execution,
+      abandonedAt: context.clock().toISOString(),
+    })
+  }
   return {
     materializationId: context.materializationId(),
     createdAt: context.clock().toISOString(),
-    expectedSource: {
-      source: command.source,
-      activeMaterializationId: active?.materializationId ?? null,
-      lastCommitId: active?.lastCommitId ?? null,
-    },
+    expectedSource,
   }
 }
 
@@ -259,6 +278,26 @@ async function stageProjectionCandidate(
   command: PreparedProjectionReplacement,
   candidate: ProjectionCandidate
 ): Promise<ReadyProjectionReplacement> {
+  const staged = await stageOrReuseCandidate(context, command, candidate)
+  return {
+    ...candidate,
+    staged,
+    // Commit time starts only after the source candidate is sealed ready.
+    identity: timestampCommitIdentity(command.identity, context.clock()),
+  }
+}
+
+async function stageOrReuseCandidate(
+  context: MaterializerContext,
+  command: PreparedProjectionReplacement,
+  candidate: ProjectionCandidate
+): Promise<StagedProjectionMaterialization> {
+  const adopted = candidate.adopted?.record
+  if (adopted?.status === "ready" && adopted.rootCount !== null) {
+    // The entries are left unread: the pinned version and definition that produced this candidate
+    // are the ones this run is bound to.
+    return { rootCount: adopted.rootCount, assertionCount: adopted.assertionCount ?? 0 }
+  }
   const input = {
     source: command.source,
     materializationId: candidate.materializationId,
@@ -270,15 +309,10 @@ async function stageProjectionCandidate(
     createdAt: candidate.createdAt,
     entries: command.entries,
     ...(command.base ? { base: command.base } : {}),
+    resumeStagingOrdinal: candidate.adopted?.resumeStagingOrdinal ?? 0,
     validateEntry: createProjectionEntryValidator(context.ontology, command.resolved),
   }
-  const staged = await stageCandidateEntries(context, input, command.signal)
-  return {
-    ...candidate,
-    staged,
-    // Commit time starts only after the source candidate is sealed ready.
-    identity: timestampCommitIdentity(command.identity, context.clock()),
-  }
+  return stageCandidateEntries(context, input, command.signal)
 }
 
 async function stageCandidateEntries(
@@ -462,38 +496,22 @@ function projectionActivation(
   }
 }
 
-async function abandonFailedCandidate(
-  context: MaterializerContext,
-  command: PreparedProjectionReplacement,
-  candidate: ProjectionCandidate,
-  error: unknown
-): Promise<void> {
-  if (!shouldAbandonCandidate(error)) return
-  await context.storage.ontology.sources.abandon({
-    kind: "candidate",
-    projectId: context.projectId,
-    source: command.source,
-    materializationId: candidate.materializationId,
-    execution: command.execution,
-    abandonedAt: context.clock().toISOString(),
-  })
-}
-
-function shouldAbandonCandidate(error: unknown): boolean {
-  if (error instanceof MaterializationValidationError) return true
-  if (error instanceof MaterializationCancellationError) return true
-  return (
-    error instanceof MaterializationConflictError &&
-    (error.kind === "run-correlation" || error.kind === "idempotency")
-  )
-}
-
 function validateProjectionWatermark(
   active: Awaited<ReturnType<OntologyStorage["sources"]["getActive"]>>,
   next: PinnedDatasetVersion
 ): void {
   if (!active) return
   assertPinnedDatasetWatermark(active.datasetVersion, next, "Projection replacement")
+}
+
+function sameSourceBase(
+  left: ProjectionSourceBase | undefined,
+  right: ProjectionSourceBase | undefined
+): boolean {
+  return (
+    left?.materializationId === right?.materializationId &&
+    left?.lastCommitId === right?.lastCommitId
+  )
 }
 
 function assertDeltaBase(

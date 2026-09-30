@@ -128,7 +128,7 @@ interface BaseAbandonSourceMaterializationInput {
   readonly abandonedAt: string
 }
 
-/** Abandon the current execution's exact candidate after ingress or semantic failure. */
+/** Abandon the current execution's exact candidate, e.g. an adopted one whose delta base moved. */
 export interface AbandonSourceMaterializationCandidateInput
   extends BaseAbandonSourceMaterializationInput {
   readonly kind: "candidate"
@@ -136,20 +136,38 @@ export interface AbandonSourceMaterializationCandidateInput
 }
 
 /**
- * Reclaim a logical run after redelivery. The current execution may abandon the prior execution's
- * staging/ready candidate, but never one already owned by its own token.
+ * Release whatever candidate a run still holds, whichever execution staged it. Called in the same
+ * transaction as the run's terminal transition, so no candidate outlives its run.
  */
-export interface ReclaimSourceMaterializationInput extends BaseAbandonSourceMaterializationInput {
-  readonly kind: "reclaim"
+export interface AbandonRunSourceMaterializationInput
+  extends BaseAbandonSourceMaterializationInput {
+  readonly kind: "run"
 }
 
 export type AbandonSourceMaterializationInput =
   | AbandonSourceMaterializationCandidateInput
-  | ReclaimSourceMaterializationInput
+  | AbandonRunSourceMaterializationInput
+
+export interface AdoptSourceMaterializationInput {
+  readonly projectId: string
+  readonly source: ProjectionSourceRef
+  readonly execution: ProjectionExecution
+  readonly adoptedAt: string
+}
+
+export interface AdoptedSourceMaterialization {
+  readonly record: OntologySourceRecord
+  /**
+   * Where staging resumes. Every root before this ordinal is complete; the root at it may be
+   * partial and is staged again, which staging accepts for identical rows. Equals the root count
+   * once the candidate is ready.
+   */
+  readonly resumeStagingOrdinal: number
+}
 
 export interface CleanupTerminalSourceMaterializationsInput {
   readonly projectId: string
-  /** Exclusive cutoff for retired roots in terminal manifests, and for empty terminal manifests. */
+  /** Exclusive cutoff for retired roots in superseded manifests, and for empty ones. */
   readonly terminalBefore: string
   /** Maximum total assertion, root-reference, and manifest deletions performed by one call. */
   readonly limit: number
@@ -159,6 +177,12 @@ export interface CleanupTerminalSourceMaterializationsResult {
   /** Assertion rows and root references deleted. */
   readonly rowsDeleted: number
   readonly materializationsDeleted: number
+}
+
+export interface PurgeAbandonedSourceMaterializationsInput {
+  readonly projectId: string
+  /** Maximum total assertion, root-reference, and manifest deletions performed by one call. */
+  readonly limit: number
 }
 
 export interface SummarizeTerminalSourceMaterializationsInput {
@@ -195,10 +219,20 @@ export interface OntologySourceStorage {
   stageRows(input: StageSourceRowsInput): Promise<StageSourceRowsResult>
   markReady(input: MarkSourceMaterializationReadyInput): Promise<OntologySourceRecord>
   getActive(input: GetActiveOntologySourceInput): Promise<OntologySourceRecord | null>
+  /** Hands a redelivered run's candidate to its current execution; null when it has none. */
+  adopt(input: AdoptSourceMaterializationInput): Promise<AdoptedSourceMaterialization | null>
   abandon(input: AbandonSourceMaterializationCandidateInput): Promise<OntologySourceRecord>
-  abandon(input: ReclaimSourceMaterializationInput): Promise<OntologySourceRecord | null>
+  abandon(input: AbandonRunSourceMaterializationInput): Promise<OntologySourceRecord | null>
+  /** Retired roots of superseded manifests, after their retention. */
   cleanupTerminal(
     input: CleanupTerminalSourceMaterializationsInput
+  ): Promise<CleanupTerminalSourceMaterializationsResult>
+  /**
+   * Abandoned candidates, whole and oldest first. Nothing reads an abandoned candidate, so it has
+   * no retention; deleting one manifest at a time keeps each delete on the source-version index.
+   */
+  purgeAbandoned(
+    input: PurgeAbandonedSourceMaterializationsInput
   ): Promise<CleanupTerminalSourceMaterializationsResult>
   summarizeTerminal(
     input: SummarizeTerminalSourceMaterializationsInput

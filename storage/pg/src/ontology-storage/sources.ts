@@ -16,8 +16,11 @@ import {
   utf8SortKey,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  AdoptedSourceMaterialization,
+  AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecutionInput,
   BeginSourceMaterializationInput,
   CleanupTerminalSourceMaterializationsInput,
@@ -26,7 +29,7 @@ import type {
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
-  ReclaimSourceMaterializationInput,
+  PurgeAbandonedSourceMaterializationsInput,
   StageSourceRowsInput,
   StageSourceRowsResult,
   SummarizeTerminalSourceMaterializationsInput,
@@ -49,7 +52,7 @@ import {
   sourceRecord,
   toIsoString,
 } from "./shared"
-import { cleanupSourceVersions } from "./source-cleanup"
+import { cleanupSourceVersions, purgeAbandonedSourceVersions } from "./source-cleanup"
 import { assertSourceRootCoverage, stageSourceRoots } from "./source-roots"
 
 export class PgOntologySourceStorage implements OntologySourceStorage {
@@ -88,7 +91,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       const candidate = await this.getRunCandidate(sql, input)
       if (candidate) {
         throw sourceConflict(
-          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; reclaim it before beginning another.`
+          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; adopt it before beginning another.`
         )
       }
 
@@ -126,7 +129,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       }
       if (await this.getRunCandidate(sql, input)) {
         throw sourceConflict(
-          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; reclaim it before beginning another.`
+          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; adopt it before beginning another.`
         )
       }
       throw sourceConflict(
@@ -236,17 +239,50 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
     })
   }
 
+  async adopt(
+    input: AdoptSourceMaterializationInput
+  ): Promise<AdoptedSourceMaterialization | null> {
+    return this.runRootOperation(async (sql) => {
+      assertProjectAndSource(input)
+      assertExecutionIdentity(input.execution.projectionRunId, input.execution.executionToken)
+      assertTimestamp(input.adoptedAt, "Source adoptedAt", true)
+      await this.assertExecution(sql, input)
+      const candidate = await this.lockRunCandidate(sql, input)
+      if (!candidate) return null
+      // Workers' clocks differ; adoption never moves the record back in time.
+      const [adopted] = await sql<PgOntologySourceRow[]>`
+        UPDATE ontology_sources
+        SET execution_token = ${input.execution.executionToken},
+          updated_at = GREATEST(updated_at, ${input.adoptedAt}::timestamptz)
+        WHERE project_id = ${candidate.project_id} AND source_id = ${candidate.source_id}
+          AND materialization_id = ${candidate.materialization_id}
+          AND status IN ('staging', 'ready')
+        RETURNING *
+      `
+      if (!adopted) {
+        throw sourceConflict(`Source materialization '${candidate.materialization_id}' changed.`)
+      }
+      return {
+        record: sourceRecord(adopted),
+        resumeStagingOrdinal:
+          adopted.status === "ready"
+            ? Number(adopted.root_count)
+            : await this.lastStagedOrdinal(sql, adopted),
+      }
+    })
+  }
+
   async abandon(input: AbandonSourceMaterializationCandidateInput): Promise<OntologySourceRecord>
-  async abandon(input: ReclaimSourceMaterializationInput): Promise<OntologySourceRecord | null>
+  async abandon(input: AbandonRunSourceMaterializationInput): Promise<OntologySourceRecord | null>
   async abandon(input: AbandonSourceMaterializationInput): Promise<OntologySourceRecord | null> {
     return this.runRootOperation(async (sql) => {
       assertProjectAndSource(input)
       assertExecutionIdentity(input.execution.projectionRunId, input.execution.executionToken)
       assertTimestamp(input.abandonedAt, "Source abandonedAt", true)
       await this.assertExecution(sql, input)
-      return input.kind === "candidate"
-        ? this.abandonCandidate(sql, input)
-        : this.abandonForReclaim(sql, input)
+      if (input.kind === "candidate") return this.abandonCandidate(sql, input)
+      const candidate = await this.lockRunCandidate(sql, input)
+      return candidate ? this.transitionToAbandoned(sql, candidate, input.abandonedAt) : null
     })
   }
 
@@ -258,6 +294,16 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       assertTimestamp(input.terminalBefore, "Terminal source cleanup cutoff", true)
       assertPositiveInteger(input.limit, "Terminal source cleanup limit")
       return cleanupSourceVersions(sql, input)
+    })
+  }
+
+  async purgeAbandoned(
+    input: PurgeAbandonedSourceMaterializationsInput
+  ): Promise<CleanupTerminalSourceMaterializationsResult> {
+    return this.runRootOperation(async (sql) => {
+      assertNonblank(input.projectId, "Abandoned source purge project id")
+      assertPositiveInteger(input.limit, "Abandoned source purge limit")
+      return purgeAbandonedSourceVersions(sql, input)
     })
   }
 
@@ -311,10 +357,15 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
     return this.transitionToAbandoned(sql, manifest, input.abandonedAt)
   }
 
-  private async abandonForReclaim(
+  /** The run's one staging or ready candidate, locked, whichever execution staged it. */
+  private async lockRunCandidate(
     sql: SQLClient,
-    input: ReclaimSourceMaterializationInput
-  ): Promise<OntologySourceRecord | null> {
+    input: {
+      readonly projectId: string
+      readonly source: { readonly projectionId: string }
+      readonly execution: { readonly projectionRunId: string }
+    }
+  ): Promise<PgOntologySourceRow | null> {
     const candidates = await sql<PgOntologySourceRow[]>`
       SELECT * FROM ontology_sources
       WHERE project_id = ${input.projectId}
@@ -323,19 +374,21 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         AND status IN ('staging', 'ready')
       FOR UPDATE
     `
-    if (
-      candidates.some((candidate) => candidate.execution_token === input.execution.executionToken)
-    ) {
-      throw sourceConflict(
-        `Projection run '${input.execution.projectionRunId}' already has a source materialization owned by the current execution.`
-      )
-    }
     if (candidates.length > 1) {
       throw sourceConflict(
         `Projection run '${input.execution.projectionRunId}' has multiple nonterminal source materializations.`
       )
     }
-    return candidates[0] ? this.transitionToAbandoned(sql, candidates[0], input.abandonedAt) : null
+    return candidates[0] ?? null
+  }
+
+  private async lastStagedOrdinal(sql: SQLClient, manifest: PgOntologySourceRow): Promise<number> {
+    const [last] = await sql<{ readonly ordinal: number | string | null }[]>`
+      SELECT MAX(staging_ordinal) AS ordinal FROM ontology_source_roots
+      WHERE project_id = ${manifest.project_id} AND source_id = ${manifest.source_id}
+        AND materialization_id = ${manifest.materialization_id}
+    `
+    return last?.ordinal == null ? 0 : Number(last.ordinal)
   }
 
   private async transitionToAbandoned(

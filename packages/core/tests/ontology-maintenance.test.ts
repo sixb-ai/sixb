@@ -3,7 +3,12 @@ import { InMemoryBroker, InMemoryStorage } from "../src"
 import { DomainEventService, OntologyOutboxDispatcher } from "../src/events"
 import { OntologyMaintenance } from "../src/maintenance"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
-import { createMaterializerFixture } from "./materializer-fixture"
+import {
+  claimProjectionExecution,
+  createMaterializerFixture,
+  entries,
+  sourceEntry,
+} from "./materializer-fixture"
 
 describe("OntologyMaintenance", () => {
   // Regression proof: return after settlesWithin times out; cleanup can then access closed storage.
@@ -202,6 +207,56 @@ describe("OntologyMaintenance", () => {
     expect(maintenance.getSnapshot().cleanup?.publishedOutboxRowsDeleted).toBe(1)
     await handle.stop()
   })
+
+  test("deletes an abandoned candidate on the next pass, whatever the retention", async () => {
+    const storage = new InMemoryStorage()
+    // One row per stage call: the first root is durable before the duplicate fails.
+    const { materializer, projections } = createMaterializerFixture({
+      storage,
+      dependencies: { batching: { sourceStageRows: 1 } },
+    })
+    const datasetVersion = {
+      datasetId: "devices",
+      versionId: "abandoned-in-maintenance",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const execution = await claimProjectionExecution(storage, projections, {
+      runId: "abandoned-in-maintenance",
+      projectionId: "devices",
+      protocol: "replacement",
+      datasetVersion,
+    })
+    await expect(
+      materializer.projections.replace({
+        source: { projectionId: "devices" },
+        datasetVersion,
+        execution,
+        entries: entries([sourceEntry("one", "one"), sourceEntry("one", "one")]),
+      })
+    ).rejects.toThrow("repeats root")
+    await materializer.projections.finishRun({
+      protocol: "replacement",
+      source: { projectionId: "devices" },
+      datasetVersion,
+      execution,
+      status: "failed",
+    })
+    expect(sourceVersions(storage)).toHaveLength(1)
+
+    const maintenance = new OntologyMaintenance({
+      projectId: "project",
+      storage,
+      dispatcher: new CountingDispatcher(storage),
+      options: { terminalSourceRetentionMs: 24 * 60 * 60_000 },
+    })
+    await maintenance.runNow()
+
+    expect(sourceVersions(storage)).toHaveLength(0)
+    expect(maintenance.getSnapshot().cleanup).toMatchObject({
+      terminalSourceRowsDeleted: 2,
+      terminalSourceMaterializationsDeleted: 1,
+    })
+  })
 })
 
 class DelayedDispatcher extends OntologyOutboxDispatcher {
@@ -279,6 +334,14 @@ async function seedObject(
     expectedLinks: [],
     expectedLinkScopes: [],
   })
+}
+
+function sourceVersions(storage: InMemoryStorage) {
+  return [
+    ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+      .snapshot()
+      .sourceMaterializations.values(),
+  ]
 }
 
 function outboxRows(storage: InMemoryStorage) {
