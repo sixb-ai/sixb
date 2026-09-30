@@ -49,6 +49,7 @@ const extensionRoots = new Set([
   "auth",
   "broker",
   "connectors",
+  "deploy",
   "loggers",
   "queues",
   "sandboxes",

@@ -93,11 +93,11 @@ export const CLI_OPTION_DEFINITIONS = {
     kind: "string",
   },
   group: { syntax: "--group <id>", summary: "Assignable token group; may repeat", kind: "string" },
-  json: { syntax: "--json", summary: "Print JSON for management commands", kind: "boolean" },
+  json: { syntax: "--json", summary: "Print JSON instead of formatted output", kind: "boolean" },
   outdir: { syntax: "--outdir <path>", summary: "Build output directory", kind: "string" },
   "dry-run": {
     syntax: "--dry-run",
-    summary: "Preview lake cleanup without changing storage",
+    summary: "Show what would change without changing it",
     kind: "boolean",
   },
   "expire-older-than": {
@@ -144,6 +144,7 @@ export type LocalCommandId =
   | "db:migrate"
   | "lake:check"
   | "lake:cleanup"
+  | "deploy"
   | "init"
 
 interface CommandNode {
@@ -425,6 +426,10 @@ const commandTree: readonly CommandNode[] = [
       }),
     ],
   },
+  command("deploy", "Deploy the project described in sixb.deploy.ts", {
+    usage: "sixb deploy --dry-run [--json]",
+    options: ["dry-run", "json"],
+  }),
   command("init", "Initialize sixb project in a directory", {
     usage: "sixb init [dir]",
     maximumPositionals: 1,
@@ -512,6 +517,7 @@ export const CLI_EXAMPLES = [
   "sixb db migrate",
   "sixb lake check",
   "sixb lake cleanup --dry-run",
+  "sixb deploy --dry-run",
 ] as const
 
 export function parseCliArgs(args: readonly string[]): ParsedCli {
@@ -550,8 +556,9 @@ export function repeatedOption(options: ParsedCliOptions, name: CliOptionName): 
 
 export function wantsManagementJson(args: readonly string[]): boolean {
   return (
-    ["login", "logout", "status", "profile", "token", "service-account"].includes(args[0] ?? "") &&
-    args.some((argument) => argument === "--json" || argument.startsWith("--json="))
+    ["login", "logout", "status", "profile", "token", "service-account", "deploy"].includes(
+      args[0] ?? ""
+    ) && args.some((argument) => argument === "--json" || argument.startsWith("--json="))
   )
 }
 

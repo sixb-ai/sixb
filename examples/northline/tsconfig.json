@@ -24,6 +24,7 @@
     "tests/**/*.ts",
     "workflows/**/*.ts",
     "sixb.config.ts",
+    "sixb.deploy.ts",
     ".sixb/types/**/*.d.ts"
   ]
 }

@@ -461,6 +461,18 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "deploy/ssh": {
+      "name": "@sixb/deploy-ssh",
+      "version": "0.1.0",
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "examples/auth": {
       "name": "@sixb/example-auth",
       "dependencies": {
@@ -506,6 +518,7 @@
         "zod": "^3.24.0",
       },
       "devDependencies": {
+        "@sixb/deploy-ssh": "workspace:*",
         "@sixb/server": "workspace:*",
         "@types/bun": "latest",
         "@types/node": "^22.15.30",
@@ -770,6 +783,7 @@
         "react-devtools-core": "^4.19.1",
       },
       "devDependencies": {
+        "@sixb/deploy-ssh": "workspace:*",
         "@types/bun": "latest",
         "@types/react": "^19.0.0",
         "typescript": "^5.7.0",
@@ -1715,6 +1729,8 @@
     "@sixb/connector-unipile": ["@sixb/connector-unipile@workspace:connectors/unipile"],
 
     "@sixb/core": ["@sixb/core@workspace:packages/core"],
+
+    "@sixb/deploy-ssh": ["@sixb/deploy-ssh@workspace:deploy/ssh"],
 
     "@sixb/docs": ["@sixb/docs@workspace:apps/docs"],
 
