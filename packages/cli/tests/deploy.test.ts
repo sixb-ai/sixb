@@ -526,6 +526,7 @@ export default {
     expect(result.stdout).toContain("northline deploys from GitHub Actions on every push to main")
     expect(result.stdout).toContain("revoked SHA256:old")
     expect(result.stdout).toContain("vendor/lib is private")
+    expect(result.stdout).toContain("Contents: read on acme/lib")
     expect(await gh.calls()).toEqual([
       "repo view --json nameWithOwner,defaultBranchRef <>",
       "api repos/acme/lib --jq .private <>",
@@ -546,6 +547,26 @@ export default {
     expect(workflow).toContain(`SIXB_DEPLOY_SSH_KEY: \${{ secrets.SIXB_DEPLOY_SSH_KEY_NORTHLINE }}`)
     expect(workflow).toContain("          echo installing the key")
     expect(workflow).toContain(`token: \${{ secrets.SIXB_GITHUB_TOKEN }}`)
+  })
+
+  test("rotates the key without undoing edits to the workflow", async () => {
+    const { root, recordPath } = await project()
+    const gh = await fakeGh()
+    const run = () =>
+      runCliToCompletion({
+        cmd: ["bun", cliEntry, "deploy", "ci"],
+        cwd: root,
+        env: { DEPLOY_RECORD: recordPath, PATH: gh.path },
+      })
+    await run()
+    const path = join(root, ".github/workflows/deploy-northline.yml")
+    const edited = `${await readFile(path, "utf8")}# edited\n`
+    await writeFile(path, edited)
+
+    const again = await run()
+    expect(again.exitCode).toBe(0)
+    expect(again.stdout).toContain("(yours, kept")
+    expect(await readFile(path, "utf8")).toBe(edited)
   })
 
   test("revokes the new CI key when GitHub does not take it", async () => {
