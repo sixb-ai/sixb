@@ -194,9 +194,9 @@ export async function runDeployCi(options: { readonly branch?: string; readonly 
   const projectPath = await projectPathOf(cwd)
   const repoRoot = await repoRootOf(cwd)
   const submodules = await readSubmodules(repoRoot, repo)
-  const privateSubmodules: string[] = []
+  const privateSubmodules = []
   for (const submodule of submodules) {
-    if (!submodule.repo || (await isPrivate(submodule.repo))) privateSubmodules.push(submodule.path)
+    if (!submodule.repo || (await isPrivate(submodule.repo))) privateSubmodules.push(submodule)
   }
 
   const credential = await ci.create(`github:${repo.name}`, { name: config.name })
@@ -228,8 +228,9 @@ export async function runDeployCi(options: { readonly branch?: string; readonly 
   })
   const path = workflowPath(config.name)
   const file = Bun.file(join(repoRoot, path))
-  const changed = !(await file.exists()) || (await file.text()) !== workflow
-  if (changed) {
+  // A workflow already there may have been edited, and rotating the key must not undo that.
+  const existing = (await file.exists()) ? await file.text() : null
+  if (existing === null) {
     await mkdir(dirname(join(repoRoot, path)), { recursive: true })
     await Bun.write(file, workflow)
   }
@@ -243,7 +244,10 @@ export async function runDeployCi(options: { readonly branch?: string; readonly 
       credential={credential.description}
       secrets={Object.values(secrets)}
       retired={retired}
-      workflow={{ path, changed }}
+      workflow={{
+        path,
+        state: existing === null ? "written" : existing === workflow ? "unchanged" : "kept",
+      }}
       token={
         privateSubmodules.length > 0 && !(await hasSecret(repo, SUBMODULE_TOKEN_SECRET))
           ? { name: SUBMODULE_TOKEN_SECRET, submodules: privateSubmodules }
