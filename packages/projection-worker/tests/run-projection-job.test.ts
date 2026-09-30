@@ -46,11 +46,11 @@ import type {
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
 import type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   OntologySourceRecord,
   ProjectionRunRecord,
   ProjectionRunStorage,
-  ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
 import { createTestSixb, queueTestProjectionRun } from "@sixb/core/testing"
 import { MISSING_TARGET_GRACE_MS } from "../src/retry-backoff"
@@ -1199,14 +1199,14 @@ describe("runProjectionJob", () => {
       ownershipHash: descriptor.ownershipHash,
     }
     const runId = createProjectionRunId(sixb.id, identity)
-    await queueTestProjectionRun(deps.storage, {
+    const run = await queueTestProjectionRun(deps.storage, {
       id: runId,
       projectId: sixb.id,
       identity,
       target: { objectTypeId: Room.id },
     })
     const error = await runCanonicalProjectionJob({
-      runtime: createRuntime(sixb),
+      runtime: await bindRuntimeToRun(createRuntime(sixb), run),
       job: { id: runId, ...identity },
     }).catch((caught: unknown) => caught)
 
@@ -1225,6 +1225,73 @@ describe("runProjectionJob", () => {
         ],
       },
     })
+  })
+
+  // Reverting the worker to finish such a run through projection run storage directly (as it did
+  // before materialization began) leaves this candidate staging forever.
+  test("releases a candidate an earlier delivery left when validation ends the run", async () => {
+    const deps = createDeps()
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const descriptor = getProjectionRegistry(sixb).resolveDispatch(roomProjection.id)
+    if (descriptor.projectionKind !== "object") throw new Error("Expected object projection.")
+    const identity = {
+      projectionId: descriptor.projectionId,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: version.datasetId,
+        versionId: version.versionId,
+        createdAt: version.createdAt.toISOString(),
+      },
+      ontologyRevision: descriptor.ontologyRevision,
+      // Pinned before a deploy changed the projection.
+      projectionRevision: "revision-before-deploy",
+      ownershipHash: descriptor.ownershipHash,
+    }
+    const runId = createProjectionRunId(sixb.id, identity)
+    const run = await queueTestProjectionRun(deps.storage, {
+      id: runId,
+      projectId: sixb.id,
+      identity,
+      target: { objectTypeId: Room.id },
+    })
+    const earlier = await deps.storage.projectionRuns.startOrReclaim({
+      id: runId,
+      projectId: sixb.id,
+      identity,
+      target: { objectTypeId: Room.id },
+    })
+    await deps.storage.ontology.sources.beginMaterialization({
+      projectId: sixb.id,
+      source: { projectionId: roomProjection.id },
+      materializationId: "left-by-earlier-delivery",
+      execution: earlier.execution,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion: identity.datasetVersion,
+      projectionRevision: identity.projectionRevision,
+      ownershipHash: identity.ownershipHash,
+      ontologyRevision: identity.ontologyRevision,
+      createdAt: new Date().toISOString(),
+    })
+
+    await expect(
+      runCanonicalProjectionJob({
+        runtime: await bindRuntimeToRun(createRuntime(sixb), run),
+        job: { id: runId, ...identity },
+      })
+    ).rejects.toMatchObject({ code: "projection.run_identity_mismatch" })
+
+    expect(
+      await deps.storage.projectionRuns.getById({ projectId: sixb.id, id: runId })
+    ).toMatchObject({ status: "failed", attempt: 2 })
+    // The only terminal source version is the abandoned candidate.
+    expect(
+      await deps.storage.ontology.sources.summarizeTerminal({ projectId: sixb.id })
+    ).toMatchObject({ count: 1 })
   })
 
   test("resumes telemetry from the durable offset without an exact-multiple empty commit", async () => {
@@ -2164,7 +2231,7 @@ describe("runProjectionJob", () => {
     ).toBeNull()
   })
 
-  test("keeps the run running when candidate abandonment cannot be confirmed", async () => {
+  test("keeps the run running when its candidate cannot be released with it", async () => {
     const deps = createDeps()
     const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
@@ -2176,19 +2243,20 @@ describe("runProjectionJob", () => {
       deps.storage.ontology.sources,
       "abandon",
       (abandon) => {
-        function failCandidateAbandonment(
+        function failRunRelease(
           input: AbandonSourceMaterializationCandidateInput
         ): Promise<OntologySourceRecord>
-        function failCandidateAbandonment(
-          input: ReclaimSourceMaterializationInput
+        function failRunRelease(
+          input: AbandonRunSourceMaterializationInput
         ): Promise<OntologySourceRecord | null>
-        async function failCandidateAbandonment(
-          input: AbandonSourceMaterializationCandidateInput | ReclaimSourceMaterializationInput
+        async function failRunRelease(
+          input: AbandonSourceMaterializationCandidateInput | AbandonRunSourceMaterializationInput
         ): Promise<OntologySourceRecord | null> {
-          if (input.kind === "candidate") throw abandonmentFailure
+          // The run ends in the same transaction as the release, so it cannot end without it.
+          if (input.kind === "run") throw abandonmentFailure
           return abandon(input)
         }
-        return failCandidateAbandonment
+        return failRunRelease
       }
     )
 

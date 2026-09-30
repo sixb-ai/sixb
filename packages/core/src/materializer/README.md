@@ -70,13 +70,28 @@ dataset entries
   -> atomically activate candidate and finalize commit
 ```
 
-Source ingress is sealed before commit time is assigned. A retry reuses the ready candidate and
-the same semantic commit identity. Activation and ontology commit finalization are atomic; the
-projection run stores no separate commit pointer.
+Source ingress is sealed before commit time is assigned. Activation and ontology commit
+finalization are atomic; the projection run stores no separate commit pointer.
 
-Projection runs finish only through `projections.finishRun(...)`. Its serializable transaction reads
-the authoritative ontology commit before replacement success, rejects failure after commit, and
-then applies the fenced run transition.
+A candidate belongs to its run, not to the delivery that staged it:
+
+```text
+delivery fails transiently -> candidate stays with the run
+next delivery              -> adopts it: ready is published as is, staging resumes at its last root
+run ends without success   -> finishRun abandons it in the same transaction
+maintenance                -> deletes abandoned candidates whole, without retention
+```
+
+An adopted candidate staged against another delta base is abandoned and replaced, since its roots
+describe a different change. Staging resumes by reading the entries again from the start, which is
+sound because they are deterministic for the pinned dataset version and definition.
+
+Projection runs finish only through `projections.finishRun(...)`, including a failure found before
+materialization began. Its serializable transaction reads the authoritative ontology commit before
+replacement success, rejects failure after commit, releases the run's candidate, and then applies
+the fenced run transition. Success must match the deployed definition; failure only has to hold
+the run's execution token, so a run pinned to a definition a deploy has since replaced can still
+end.
 
 ## Managed edits and Actions
 

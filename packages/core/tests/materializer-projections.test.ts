@@ -397,7 +397,7 @@ describe("ontology materializer projection replacement", () => {
     ).rejects.toThrow("immutable dataset version id with different metadata")
   })
 
-  test("reclaim abandons an old ready candidate before a newer watermark fences it", async () => {
+  test("keeps a fenced run's candidate until the run ends, then releases it", async () => {
     const { materializer, storage, projections } = createMaterializerFixture()
     const resolved = projections.resolveSource("devices")
     const datasetVersion = {
@@ -451,13 +451,202 @@ describe("ontology materializer projection replacement", () => {
         entries: entries([]),
       })
     ).rejects.toMatchObject({ kind: "projection-fence" })
+    expect(candidateStatus(storage, "lost-race-candidate")).toBe("ready")
+
+    await materializer.projections.finishRun({
+      protocol: "replacement",
+      source: { projectionId: "devices" },
+      datasetVersion,
+      execution: reclaimedExecution,
+      status: "failed",
+    })
+    expect(candidateStatus(storage, "lost-race-candidate")).toBe("abandoned")
+  })
+
+  test("publishes an adopted ready candidate without reading its entries again", async () => {
+    const { materializer, storage, projections } = createMaterializerFixture()
+    const resolved = projections.resolveSource("devices")
+    const datasetVersion = {
+      datasetId: "devices",
+      versionId: "adopted-ready",
+      createdAt: "2026-01-01T00:00:00.000Z",
+    }
+    const claim = () =>
+      claimProjectionExecution(storage, projections, {
+        runId: "adopted-ready-run",
+        projectionId: "devices",
+        protocol: "replacement",
+        datasetVersion,
+      })
+    const firstExecution = await claim()
+    const candidate = {
+      projectId: "project",
+      source: { projectionId: "devices" },
+      materializationId: "adopted-ready-candidate",
+      execution: firstExecution,
+    }
+    await storage.ontology.sources.beginMaterialization({
+      ...candidate,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion,
+      ontologyRevision: projections.ontologyRevision,
+      projectionRevision: resolved.projectionRevision,
+      ownershipHash: resolved.ownershipHash,
+      createdAt: "2026-01-02T00:00:00.000Z",
+    })
+    await storage.ontology.sources.stageRows({
+      ...candidate,
+      rows: [
+        {
+          root: { kind: "object", ref: ref("one") },
+          assertion: { kind: "object", ref: ref("one"), properties: { name: "one" } },
+          stagingOrdinal: 0,
+        },
+      ],
+    })
+    await storage.ontology.sources.markReady({
+      ...candidate,
+      rootCount: 1,
+      assertionCount: 1,
+      readyAt: "2026-01-02T00:00:01.000Z",
+    })
+
+    let consumed = false
+    async function* shouldNotBeConsumed() {
+      consumed = true
+      yield sourceEntry("two", "two")
+    }
+    const result = await materializer.projections.replace({
+      source: { projectionId: "devices" },
+      datasetVersion,
+      execution: await claim(),
+      entries: shouldNotBeConsumed(),
+    })
+
+    expect(consumed).toBe(false)
+    expect(result.counts).toMatchObject({ objectsCreated: 1 })
+    expect(candidateStatus(storage, "adopted-ready-candidate")).toBe("active")
+  })
+
+  test("replaces an adopted candidate staged against another delta base", async () => {
+    const { materializer, storage, projections } = createMaterializerFixture()
+    const resolved = projections.resolveSource("devices")
+    const active = await materializer.projections.replace(
+      replacement("base-v1", "2026-01-01T00:00:00Z", [sourceEntry("one", "one")])
+    )
+    const datasetVersion = {
+      datasetId: "devices",
+      versionId: "base-v2",
+      createdAt: "2026-01-02T00:00:00.000Z",
+    }
+    const claim = () =>
+      claimProjectionExecution(storage, projections, {
+        runId: "moved-base-run",
+        projectionId: "devices",
+        protocol: "replacement",
+        datasetVersion,
+      })
+    const firstExecution = await claim()
+    await storage.ontology.sources.beginMaterialization({
+      projectId: "project",
+      source: { projectionId: "devices" },
+      materializationId: "moved-base-candidate",
+      execution: firstExecution,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion,
+      ontologyRevision: projections.ontologyRevision,
+      projectionRevision: resolved.projectionRevision,
+      ownershipHash: resolved.ownershipHash,
+      base: { materializationId: "an-older-head", lastCommitId: active.commitId },
+      createdAt: "2026-01-02T03:00:00.000Z",
+    })
+
+    // This delivery reads the whole version, so the delta rows cannot complete it.
+    await materializer.projections.replace({
+      source: { projectionId: "devices" },
+      datasetVersion,
+      execution: await claim(),
+      entries: entries([sourceEntry("one", "one"), sourceEntry("two", "two")]),
+    })
+
+    expect(candidateStatus(storage, "moved-base-candidate")).toBe("abandoned")
     expect(
-      [
-        ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
-          .snapshot()
-          .sourceMaterializations.values(),
-      ].find(({ materializationId }) => materializationId === "lost-race-candidate")?.status
-    ).toBe("abandoned")
+      await storage.ontology.sources.getActive({
+        projectId: "project",
+        source: { projectionId: "devices" },
+      })
+    ).toMatchObject({ projectionRunId: "moved-base-run", rootCount: 2 })
+  })
+
+  test("ends a run pinned to a definition that is no longer deployed, releasing its candidate", async () => {
+    const { materializer, storage, projections } = createMaterializerFixture()
+    const resolved = projections.resolveSource("devices")
+    const identity = {
+      projectionId: resolved.projectionId,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: "devices",
+        versionId: "before-deploy",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+      ontologyRevision: projections.ontologyRevision,
+      projectionRevision: "revision-before-deploy",
+      ownershipHash: resolved.ownershipHash,
+    }
+    const run = await startTestProjectionRun(storage, {
+      id: "before-deploy-run",
+      projectId: "project",
+      identity,
+      target: { objectTypeId: "Device" },
+    })
+    await storage.ontology.sources.beginMaterialization({
+      projectId: "project",
+      source: { projectionId: "devices" },
+      materializationId: "before-deploy-candidate",
+      execution: run.execution,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion: identity.datasetVersion,
+      ontologyRevision: identity.ontologyRevision,
+      projectionRevision: identity.projectionRevision,
+      ownershipHash: identity.ownershipHash,
+      createdAt: "2026-01-02T00:00:00.000Z",
+    })
+
+    await materializer.projections.finishRun({
+      protocol: "replacement",
+      source: { projectionId: "devices" },
+      datasetVersion: identity.datasetVersion,
+      execution: run.execution,
+      status: "failed",
+    })
+
+    expect(candidateStatus(storage, "before-deploy-candidate")).toBe("abandoned")
+    await expect(
+      storage.projectionRuns.getById({ projectId: "project", id: run.run.id })
+    ).resolves.toMatchObject({ status: "failed" })
+    // Success still has to match the deployed definition.
+    const other = await startTestProjectionRun(storage, {
+      id: "before-deploy-success",
+      projectId: "project",
+      identity: {
+        ...identity,
+        datasetVersion: { ...identity.datasetVersion, versionId: "before-deploy-success" },
+      },
+      target: { objectTypeId: "Device" },
+    })
+    await expect(
+      materializer.projections.finishRun({
+        protocol: "replacement",
+        source: { projectionId: "devices" },
+        datasetVersion: { ...identity.datasetVersion, versionId: "before-deploy-success" },
+        execution: other.execution,
+        status: "succeeded",
+      })
+    ).rejects.toThrow("materialization identity does not match")
   })
 
   test("rechecks a same-run fast replay in one fenced transaction", async () => {
@@ -529,7 +718,7 @@ describe("ontology materializer projection replacement", () => {
     ).rejects.toThrow("execution token is stale")
   })
 
-  test("abandons a staged candidate when another run wins the same semantic commit", async () => {
+  test("releases the losing candidate when its run ends after another run wins the commit", async () => {
     const { materializer, storage, projections } = createMaterializerFixture({
       dependencies: { batching: { sourceStageRows: 1 } },
     })
@@ -582,94 +771,89 @@ describe("ontology materializer projection replacement", () => {
     resume()
 
     await expect(losing).rejects.toMatchObject({ kind: "idempotency" })
-    const loser = [
-      ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
-        .snapshot()
-        .sourceMaterializations.values(),
-    ].find((candidate) => candidate.projectionRunId === losingExecution.projectionRunId)
-    expect(loser?.status).toBe("abandoned")
+    expect(runCandidateStatus(storage, losingExecution.projectionRunId)).toBe("ready")
+    await materializer.projections.finishRun({
+      protocol: "replacement",
+      source: { projectionId: "devices" },
+      datasetVersion,
+      execution: losingExecution,
+      status: "failed",
+    })
+    expect(runCandidateStatus(storage, losingExecution.projectionRunId)).toBe("abandoned")
   })
 
-  test("abandons semantic failures and explicit cancellation but retains infrastructure aborts", async () => {
-    const { materializer, storage } = createMaterializerFixture({
+  test("leaves every failed candidate to its run, which releases it when it ends", async () => {
+    const { materializer, storage, projections } = createMaterializerFixture({
       dependencies: { batching: { sourceStageRows: 1 } },
     })
+    const claim = (versionId: string, createdAt: string) => {
+      const datasetVersion = { datasetId: "devices", versionId, createdAt }
+      return claimProjectionExecution(storage, projections, {
+        runId: versionId,
+        projectionId: "devices",
+        protocol: "replacement",
+        datasetVersion,
+      }).then((execution) => ({ datasetVersion, execution }))
+    }
+    const finish = (run: Awaited<ReturnType<typeof claim>>, status: "failed" | "cancelled") =>
+      materializer.projections.finishRun({
+        protocol: "replacement",
+        source: { projectionId: "devices" },
+        ...run,
+        status,
+      })
+
+    const duplicates = await claim("duplicates", "2026-01-01T00:00:00.000Z")
     await expect(
       materializer.projections.replace({
         source: { projectionId: "devices" },
-        datasetVersion: {
-          datasetId: "devices",
-          versionId: "duplicates",
-          createdAt: "2026-01-01T00:00:00Z",
-        },
-        execution: pendingProjectionExecution("duplicates"),
+        ...duplicates,
         entries: entries([sourceEntry("one", "one"), sourceEntry("one", "one")]),
       })
     ).rejects.toThrow("repeats root")
-    expect(
-      [
-        ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
-          .snapshot()
-          .sourceMaterializations.values(),
-      ].find((candidate) => candidate.projectionRunId === "duplicates")?.status
-    ).toBe("abandoned")
+    expect(runCandidateStatus(storage, "duplicates")).toBe("staging")
+    await finish(duplicates, "failed")
+    expect(runCandidateStatus(storage, "duplicates")).toBe("abandoned")
 
+    const cancelled = await claim("explicitly-cancelled", "2026-01-03T00:00:00.000Z")
     const controller = new AbortController()
-    async function* cancelling() {
-      yield sourceEntry("one", "one")
-      controller.abort()
-      yield sourceEntry("two", "two")
-    }
-    await expect(
-      materializer.projections.replace({
-        source: { projectionId: "devices" },
-        datasetVersion: {
-          datasetId: "devices",
-          versionId: "cancelled",
-          createdAt: "2026-01-02T00:00:00Z",
-        },
-        execution: pendingProjectionExecution("cancelled"),
-        entries: cancelling(),
-        signal: controller.signal,
-      })
-    ).rejects.toMatchObject({ name: "AbortError" })
-    expect(
-      [
-        ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
-          .snapshot()
-          .sourceMaterializations.values(),
-      ].find((candidate) => candidate.projectionRunId === "cancelled")?.status
-    ).toBe("staging")
-
-    const explicitController = new AbortController()
     async function* explicitlyCancelling() {
       yield sourceEntry("one", "one")
-      explicitController.abort(new MaterializationCancellationError("Projection run cancelled."))
+      controller.abort(new MaterializationCancellationError("Projection run cancelled."))
       yield sourceEntry("two", "two")
     }
     await expect(
       materializer.projections.replace({
         source: { projectionId: "devices" },
-        datasetVersion: {
-          datasetId: "devices",
-          versionId: "explicitly-cancelled",
-          createdAt: "2026-01-03T00:00:00Z",
-        },
-        execution: pendingProjectionExecution("explicitly-cancelled"),
+        ...cancelled,
         entries: explicitlyCancelling(),
-        signal: explicitController.signal,
+        signal: controller.signal,
       })
     ).rejects.toBeInstanceOf(MaterializationCancellationError)
-    expect(
-      [
-        ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
-          .snapshot()
-          .sourceMaterializations.values(),
-      ].find((candidate) => candidate.projectionRunId === "explicitly-cancelled")?.status
-    ).toBe("abandoned")
+    expect(runCandidateStatus(storage, "explicitly-cancelled")).toBe("staging")
+    await finish(cancelled, "cancelled")
+    expect(runCandidateStatus(storage, "explicitly-cancelled")).toBe("abandoned")
+
+    // An infrastructure abort ends the delivery, not the run: the next delivery adopts the rows.
+    const interrupted = await claim("interrupted", "2026-01-04T00:00:00.000Z")
+    const shutdown = new AbortController()
+    async function* interrupting() {
+      yield sourceEntry("one", "one")
+      shutdown.abort()
+      yield sourceEntry("two", "two")
+    }
+    await expect(
+      materializer.projections.replace({
+        source: { projectionId: "devices" },
+        ...interrupted,
+        entries: interrupting(),
+        signal: shutdown.signal,
+      })
+    ).rejects.toMatchObject({ name: "AbortError" })
+    expect(runCandidateStatus(storage, "interrupted")).toBe("staging")
   })
 
-  test("reclaims an in-flight candidate and fences its prior execution", async () => {
+  test("adopts an in-flight candidate, resumes at its last staged root, and fences its prior execution", async () => {
     const { materializer, storage } = createMaterializerFixture({
       dependencies: {
         batching: { sourceStageRows: 1 },
@@ -689,28 +873,34 @@ describe("ontology materializer projection replacement", () => {
       firstReached()
       await firstBlocked
     }
+    const version = { datasetId: "devices", versionId: "slow", createdAt: "2026-01-01T00:00:00Z" }
     const first = materializer.projections.replace({
       source: { projectionId: "devices" },
-      datasetVersion: {
-        datasetId: "devices",
-        versionId: "slow",
-        createdAt: "2026-01-01T00:00:00Z",
-      },
+      datasetVersion: version,
       execution: pendingProjectionExecution("slow-run"),
       entries: slowFirst(),
     })
     await firstReachedPause
 
-    await materializer.projections.replace({
+    const resumedOrdinals: number[] = []
+    decorateOperationScopedMethodForTesting(
+      storage.ontology.sources,
+      "stageRows",
+      (stageRows) => (input) => {
+        resumedOrdinals.push(...input.rows.map((row) => row.stagingOrdinal))
+        return stageRows(input)
+      }
+    )
+    const second = await materializer.projections.replace({
       source: { projectionId: "devices" },
-      datasetVersion: {
-        datasetId: "devices",
-        versionId: "slow",
-        createdAt: "2026-01-01T00:00:00Z",
-      },
+      datasetVersion: version,
       execution: pendingProjectionExecution("slow-run"),
-      entries: entries([]),
+      entries: entries([sourceEntry("one", "one"), sourceEntry("two", "two")]),
     })
+    expect(second.counts).toMatchObject({ objectsCreated: 2 })
+    // Root 0 was complete; root 1 may have been cut mid-root, so it is the only one written again.
+    expect(resumedOrdinals).toEqual([1])
+
     const firstRejected = first.then(
       () => new Error("first replacement unexpectedly completed"),
       (error: unknown) => error
@@ -725,8 +915,7 @@ describe("ontology materializer projection replacement", () => {
       ]
         .filter((candidate) => candidate.projectionRunId === "slow-run")
         .map((candidate) => candidate.status)
-        .sort()
-    ).toEqual(["abandoned", "active"])
+    ).toEqual(["active"])
   })
 
   test("preserves the active materialization after late malformed and cancelled ingress", async () => {
@@ -1466,3 +1655,19 @@ describe("ontology materializer projection replacement", () => {
     ).rejects.toThrow("does not map link assertion properties")
   })
 })
+
+function candidateStatus(storage: InMemoryStorage, materializationId: string) {
+  return [
+    ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+      .snapshot()
+      .sourceMaterializations.values(),
+  ].find((candidate) => candidate.materializationId === materializationId)?.status
+}
+
+function runCandidateStatus(storage: InMemoryStorage, projectionRunId: string) {
+  return [
+    ...getInMemoryOntologyStorageTestingAdapter(storage.ontology)
+      .snapshot()
+      .sourceMaterializations.values(),
+  ].find((candidate) => candidate.projectionRunId === projectionRunId)?.status
+}

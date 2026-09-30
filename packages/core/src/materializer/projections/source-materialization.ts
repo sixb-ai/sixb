@@ -23,8 +23,10 @@ export interface StagedProjectionMaterialization {
 /**
  * Persist and seal one explicit source-materialization candidate.
  *
- * A candidate is deliberately left staging/ready when execution is interrupted. The next claim
- * reclaims it with a fresh execution token; age is never used to infer abandonment.
+ * A candidate is deliberately left staging/ready when execution is interrupted. The next delivery
+ * of the same run adopts it and resumes at `resumeStagingOrdinal`: the entries are read again from
+ * the start, since they are deterministic for the pinned version, but only the roots from that
+ * ordinal on are written. Age is never used to infer abandonment; the run's end is.
  */
 export async function stageProjectionMaterialization(
   context: Pick<
@@ -42,6 +44,8 @@ export async function stageProjectionMaterialization(
     readonly createdAt: string
     readonly entries: AsyncIterable<ProjectionSourceEntry | ProjectionSourceDeletion>
     readonly base?: ProjectionSourceBase
+    /** First root ordinal to write; earlier ones are already staged. */
+    readonly resumeStagingOrdinal: number
     readonly validateEntry: ProjectionEntryValidator
     readonly signal?: AbortSignal
   }
@@ -77,16 +81,17 @@ export async function stageProjectionMaterialization(
           context.projectionRegistry.resolveSource(input.source.projectionId),
           root
         )
-        yield { root, stagingOrdinal: rootCount++ }
+        const stagingOrdinal = rootCount++
+        if (stagingOrdinal >= input.resumeStagingOrdinal) yield { root, stagingOrdinal }
         continue
       }
       const entry = input.validateEntry(normalizeProjectionSourceEntry(rawEntry))
-      const stagingOrdinal = rootCount
+      const stagingOrdinal = rootCount++
+      assertionCount += entry.assertions.length
+      if (stagingOrdinal < input.resumeStagingOrdinal) continue
       for (const assertion of entry.assertions) {
-        assertionCount += 1
         yield { root: entry.root, assertion, stagingOrdinal }
       }
-      rootCount += 1
     }
     throwIfAborted(input.signal)
   }

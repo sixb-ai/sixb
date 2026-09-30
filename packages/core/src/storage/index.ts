@@ -449,8 +449,11 @@ export {
   snapshotObjectReadExecutionLimits,
 } from "./objects"
 export type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  AdoptedSourceMaterialization,
+  AdoptSourceMaterializationInput,
   ApplyMaterializationChunkInput,
   ApplyMaterializationResult,
   AssertSourceMaterializationExecution,
@@ -530,9 +533,9 @@ export type {
   OntologyStorage,
   OntologyVectorStorage,
   ProjectionOntologyCommitIntent,
+  PurgeAbandonedSourceMaterializationsInput,
   PurgePublishedOntologyOutboxInput,
   ReadMaterializationObjectExistenceInput,
-  ReclaimSourceMaterializationInput,
   RescheduleOntologyOutboxLeaseInput,
   SourceActivationWrite,
   SourceReplacementLinkState,
