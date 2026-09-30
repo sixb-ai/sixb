@@ -99,6 +99,35 @@ describe("runPgTransaction", () => {
     expect(pool.released()).toBe(true)
   })
 
+  test("names the full lock table behind SQLSTATE 53200", async () => {
+    const exhausted = pgError("53200", {
+      message: "out of shared memory",
+      hint: 'You might need to increase "max_pred_locks_per_transaction".',
+    })
+
+    const error = await runPgTransaction(fakePool().sql, async () => {
+      throw exhausted
+    }).catch((caught: unknown) => caught)
+
+    expect(error).toBeInstanceOf(Error)
+    expect((error as Error).message).toContain("[SixbPg]")
+    expect((error as Error).message).toContain("predicate lock table is full")
+    expect((error as Error).message).toContain(
+      "max_pred_locks_per_transaction × (max_connections + max_prepared_transactions)"
+    )
+    expect((error as Error).cause).toBe(exhausted)
+  })
+
+  test("leaves a 53200 that is not about a lock table unchanged", async () => {
+    const outOfMemory = pgError("53200", { message: "out of memory" })
+
+    await expect(
+      runPgTransaction(fakePool().sql, async () => {
+        throw outOfMemory
+      })
+    ).rejects.toBe(outOfMemory)
+  })
+
   test("runs a nested call inside the open transaction", async () => {
     const pool = fakePool()
 
