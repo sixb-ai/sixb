@@ -98,7 +98,7 @@ function Table({
       <Text>
         {headers.map((header, index) => (
           <Text key={`${index}:${header}`} bold>
-            {padLabel(header, widths[index] ?? header.length)}
+            {header.padEnd(widths[index] ?? header.length)}
             {index === headers.length - 1 ? "" : "  "}
           </Text>
         ))}
@@ -108,7 +108,7 @@ function Table({
         <Text key={`${rowIndex}:${row.join(":")}`}>
           {row.map((value, index) => (
             <Text key={`${index}:${value}`}>
-              {padLabel(value, widths[index] ?? value.length)}
+              {value.padEnd(widths[index] ?? value.length)}
               {index === row.length - 1 ? "" : "  "}
             </Text>
           ))}

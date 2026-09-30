@@ -43,10 +43,11 @@ Add `@sixb/cli` and `@sixb/deploy-ssh` to the project's dependencies, and pin Bu
 3. Updates the project the way `git reset --hard` would: files removed from the commit are removed,
    while `.env`, `.sixb/`, and `node_modules/` stay.
 4. Installs the pinned Bun, then the dependencies, then runs `sixb build`.
-5. Stops the services, runs `sixb db migrate` and `sixb lake check`, and starts them again. Pages
+5. Updates the Caddy routes when they changed. Caddy has to accept the whole configuration first;
+   otherwise the previous routes stay and the deploy stops, with the previous release still
+   serving.
+6. Stops the services, runs `sixb db migrate` and `sixb lake check`, and starts them again. Pages
    requested while the app or Atlas is down get an "Updates in progress" page.
-6. Updates the Caddy routes when they changed. Caddy has to accept the whole configuration first;
-   otherwise the previous routes stay and the deploy stops.
 7. Waits for the API's `/ready`, and fails if any process exits in the seconds after.
 
 ## The server
@@ -56,8 +57,10 @@ The server needs Ubuntu or Debian with systemd, Caddy, `curl`, and `unzip`, and 
 - linger enabled (`loginctl enable-linger <user>`), so its services start at boot;
 - your SSH key in its `authorized_keys`;
 - in the `sixb-deploy` group, which may run `sudo systemctl reload caddy` and nothing else;
-- owning `/etc/caddy/sixb.d/<user>/`, which the root Caddyfile imports with
-  `import /etc/caddy/sixb.d/*/*.caddy`.
+- owning `/etc/caddy/sixb.d/<user>/`, which Caddy loads through a root-owned
+  `/etc/caddy/sixb.d/<user>.caddy` holding `import /etc/caddy/sixb.d/<user>/*.caddy`. The root
+  Caddyfile imports those with `import /etc/caddy/sixb.d/*.caddy`; Caddy allows only one `*` per
+  import pattern.
 
 Keep Caddy's admin API off `localhost:2019`, where any local process could change every route: set
 `admin unix//var/lib/caddy/admin.sock` in the root Caddyfile's global options.

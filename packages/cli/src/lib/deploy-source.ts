@@ -50,20 +50,46 @@ export async function packSource(projectDir: string, ref = "HEAD"): Promise<Pack
 
 /**
  * The Bun version the project pins with `packageManager` (`"bun@1.4.2"`) in its `package.json` or
- * the nearest one above it, up to the repository root; else the Bun running this CLI.
+ * the nearest one above it, up to the repository root; else the Bun running this CLI. Read from the
+ * deployed commit when there is one, and from the files on disk for a dry run.
  */
-export async function resolveBunVersion(projectDir: string): Promise<string> {
-  for (let dir = resolve(projectDir); ; dir = dirname(dir)) {
-    const manifest = await Bun.file(join(dir, "package.json"))
-      .json()
-      .then((value: { readonly packageManager?: unknown }) => value)
-      .catch(() => null)
+export async function resolveBunVersion(
+  projectDir: string,
+  source?: Pick<DeploySource, "commit" | "projectPath">
+): Promise<string> {
+  const root = source ? await git(projectDir, ["rev-parse", "--show-toplevel"]) : null
+  let dir = source ? source.projectPath : resolve(projectDir)
+  for (;;) {
+    const manifest = await readPackageJson(dir, root && source ? source.commit : null)
     const pinned =
       typeof manifest?.packageManager === "string"
         ? manifest.packageManager.match(/^bun@(\d+\.\d+\.\d+)/)?.[1]
         : undefined
     if (pinned) return pinned
-    if ((await Bun.file(join(dir, ".git")).exists()) || dirname(dir) === dir) return Bun.version
+
+    const atTop = source
+      ? dir === "."
+      : (await Bun.file(join(dir, ".git")).exists()) || dirname(dir) === dir
+    if (atTop) return Bun.version
+    dir = source ? posix.dirname(dir) : dirname(dir)
+  }
+
+  async function readPackageJson(
+    at: string,
+    commit: string | null
+  ): Promise<{ readonly packageManager?: unknown } | null> {
+    const text =
+      commit && root
+        ? await git(root, ["show", `${commit}:${posix.join(at, "package.json")}`]).catch(() => null)
+        : await Bun.file(join(at, "package.json"))
+            .text()
+            .catch(() => null)
+    if (text === null) return null
+    try {
+      return JSON.parse(text) as { readonly packageManager?: unknown }
+    } catch {
+      return null
+    }
   }
 }
 
