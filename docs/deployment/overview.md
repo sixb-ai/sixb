@@ -1,8 +1,13 @@
 # Deployment
 
-Deploy a Sixb project as services that share the same configuration and persistent providers. The CLI builds your project and starts each service.
+A deployed Sixb project runs as several services, such as the API, Atlas, your app, and background workers, that share one configuration and the same persistent providers.
 
-To deploy to a Linux server you reach over SSH, describe the deployment in `sixb.deploy.ts` and run `sixb deploy`: it sends the commit, builds it on the server, and runs every service described below for you. See <a href="https://github.com/sixb-ai/sixb/tree/main/deploy/ssh#readme" target="_blank" rel="noopener noreferrer">@sixb/deploy-ssh</a>. The rest of this page covers running the services yourself.
+There are two ways to run them:
+
+- **[Deploy to a server](servers.md)** with `sixb deploy`. Describe the deployment in `sixb.deploy.ts`, and the CLI sets up a Linux server you reach over SSH, sends each commit, and runs and routes every service for you. It can also [deploy from GitHub Actions](github-actions.md) on every push.
+- **Run the services yourself** on the platform of your choice, as the rest of this page describes.
+
+Either way, start by preparing your configuration.
 
 ## Prepare your configuration
 

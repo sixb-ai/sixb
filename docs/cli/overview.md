@@ -85,6 +85,21 @@ Set `SIXB_<TYPE>_WORKER_CONCURRENCY` to configure concurrency through the enviro
 
 Agent turns default to a 10-minute timeout. Override it with `--agent-turn-timeout 20m` or `SIXB_AGENT_TURN_TIMEOUT=20m` on `dev`, agent workers, or worker groups containing an agent worker.
 
+## Deploy commands
+
+Run these from a project with a `sixb.deploy.ts`. See [Deploy to a server](../deployment/servers.md).
+
+| Command | Purpose |
+| --- | --- |
+| `sixb deploy` | Deploy the committed `HEAD`, or `--ref <ref>`. `--dry-run` shows what would run. |
+| `sixb deploy setup` | Prepare the server and the deploy account. `--admin <login>` names an account with `sudo`. |
+| `sixb deploy check` | Check what stands between the server and a working deploy. |
+| `sixb deploy status` | Show the running processes and the deployed commit. |
+| `sixb deploy logs [service]` | Print recent log lines; `--follow` keeps printing. |
+| `sixb deploy restart [service]` | Restart services. Also `stop` and `start`. |
+| `sixb deploy access <list\|add\|remove>` | Manage the SSH keys that can deploy. |
+| `sixb deploy ci` | [Deploy from GitHub Actions](../deployment/github-actions.md) on every push. |
+
 ## Connect to an instance
 
 Sign in to an API and save it as a profile:
