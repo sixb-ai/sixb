@@ -1,6 +1,9 @@
 import { parseSixbFailure } from "@sixb/core/internal/errors"
-import type { ProjectionEntityRef } from "@sixb/core/internal/materialization"
 import { MaterializationConflictError } from "@sixb/core/internal/materialization"
+import {
+  sourceAssertionFromColumns,
+  sourceEntityFromKey,
+} from "@sixb/core/internal/ontology-storage-provider"
 import type {
   AssertSourceMaterializationExecutionInput,
   OntologyCommitRecord,
@@ -50,6 +53,7 @@ export interface PgOntologyCommitRow {
 }
 
 export interface PgOntologySourceRow {
+  readonly version_id: string
   readonly project_id: string
   readonly source_id: string
   readonly materialization_id: string
@@ -76,19 +80,21 @@ export interface PgOntologySourceRow {
   readonly updated_at: Date | string
 }
 
+/** An assertion with its root and version, as `sourceAssertionColumns` selects it. */
 export interface PgOntologySourceAssertionRow {
-  readonly project_id: string
   readonly source_id: string
   readonly materialization_id: string
-  readonly entity_kind: "object" | "link"
-  readonly entity_key: unknown
-  readonly entity_sort_key: string
-  readonly root_kind: "object" | "link"
-  readonly root_key: unknown
-  readonly root_sort_key: string
+  readonly root_key: string
   readonly staging_ordinal: number | string
-  readonly root: unknown
-  readonly assertion: unknown
+  readonly entity_kind: "object" | "link"
+  readonly object_type_id: string | null
+  readonly primary_id: string | null
+  readonly source_type_id: string | null
+  readonly source_primary_id: string | null
+  readonly link_id: string | null
+  readonly target_type_id: string | null
+  readonly target_primary_id: string | null
+  readonly payload: unknown
 }
 
 export interface PgStoredOverrideRow {
@@ -174,8 +180,8 @@ export function sourceRecord(row: PgOntologySourceRow): OntologySourceRecord {
 
 export function sourceAssertion(row: PgOntologySourceAssertionRow): StageSourceAssertion {
   return {
-    root: structuredClone(row.root) as ProjectionEntityRef,
-    assertion: structuredClone(row.assertion) as StageSourceAssertion["assertion"],
+    root: sourceEntityFromKey(row.root_key),
+    assertion: sourceAssertionFromColumns(row, row.payload),
     stagingOrdinal: databaseSafeInteger(row.staging_ordinal, "Source staging ordinal"),
   }
 }
