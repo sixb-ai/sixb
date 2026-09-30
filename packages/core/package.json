@@ -65,6 +65,12 @@
       "import": "./dist/broker/index.js",
       "default": "./dist/broker/index.js"
     },
+    "./deploy": {
+      "types": "./dist/deploy/index.d.ts",
+      "bun": "./src/deploy/index.ts",
+      "import": "./dist/deploy/index.js",
+      "default": "./dist/deploy/index.js"
+    },
     "./events/selectors": {
       "types": "./dist/events/selectors/index.d.ts",
       "bun": "./src/events/selectors/index.ts",
@@ -184,6 +190,12 @@
       "bun": "./src/datasets/write.ts",
       "import": "./dist/datasets/write.js",
       "default": "./dist/datasets/write.js"
+    },
+    "./internal/deploy": {
+      "types": "./dist/deploy/internal.d.ts",
+      "bun": "./src/deploy/internal.ts",
+      "import": "./dist/deploy/internal.js",
+      "default": "./dist/deploy/internal.js"
     },
     "./internal/edits": {
       "types": "./dist/edits/index.d.ts",

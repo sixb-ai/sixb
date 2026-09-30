@@ -50,6 +50,7 @@ jobs:
             .tsbuild
             packages/*/.tsbuild
             connectors/*/.tsbuild
+            deploy/*/.tsbuild
             storage/*/.tsbuild
             broker/*/.tsbuild
             queues/*/.tsbuild
@@ -58,6 +59,7 @@ jobs:
             loggers/*/.tsbuild
             packages/*/dist
             connectors/*/dist
+            deploy/*/dist
             storage/*/dist
             broker/*/dist
             queues/*/dist

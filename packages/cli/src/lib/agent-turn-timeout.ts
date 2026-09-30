@@ -8,8 +8,15 @@ export function resolveAgentTurnTimeoutMs(value: string | undefined): number | u
   const configured = nonblank(value) ?? nonblank(process.env.SIXB_AGENT_TURN_TIMEOUT)
   if (configured === undefined) return undefined
 
-  const match = configured.match(/^(\d+)(ms|s|m|h)$/)
-  if (!match) throw invalidAgentTurnTimeout(configured)
+  const timeoutMs = parseAgentTurnTimeoutMs(configured)
+  if (timeoutMs === null) throw invalidAgentTurnTimeout(configured)
+  return timeoutMs
+}
+
+/** A duration such as `30s`, `10m`, or `1h` in milliseconds, or `null` when it is not one. */
+export function parseAgentTurnTimeoutMs(value: string): number | null {
+  const match = value.match(/^(\d+)(ms|s|m|h)$/)
+  if (!match) return null
 
   const amount = Number(match[1])
   const unit = match[2] as "ms" | "s" | "m" | "h"
@@ -22,9 +29,8 @@ export function resolveAgentTurnTimeoutMs(value: string | undefined): number | u
   const timeoutMs = amount * multipliers[unit]
 
   if (!Number.isSafeInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > MAX_TIMER_DURATION_MS) {
-    throw invalidAgentTurnTimeout(configured)
+    return null
   }
-
   return timeoutMs
 }
 
