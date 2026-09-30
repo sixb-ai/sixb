@@ -79,6 +79,29 @@ describe("setup", () => {
     expect(script).toContain("import /etc/caddy/sixb.d/*.caddy")
   })
 
+  test("keeps apt quiet, except when it fails", async () => {
+    const script = renderAdminScript({ user: "sixb", publicKey: "ssh-ed25519 AAAA", admin: "root" })
+    const quiet = script.split("\n").find((line) => line.startsWith("quiet()")) ?? ""
+    const run = async (command: string) => {
+      const child = Bun.spawn(["bash", "-c", `${quiet}\n${command}`], {
+        stdout: "pipe",
+        stderr: "pipe",
+      })
+      const [exitCode, stdout, stderr] = await Promise.all([
+        child.exited,
+        new Response(child.stdout).text(),
+        new Response(child.stderr).text(),
+      ])
+      return { exitCode, output: stdout + stderr }
+    }
+
+    expect(await run("quiet echo pages of apt")).toEqual({ exitCode: 0, output: "" })
+    expect(await run("quiet sh -c 'echo E: Unable to locate package; exit 100'")).toEqual({
+      exitCode: 100,
+      output: "E: Unable to locate package\n",
+    })
+  })
+
   test("authorizes the key given, else the first one SSH would offer", async () => {
     const dir = await mkdtemp(join(tmpdir(), "sixb-setup-"))
     tempDirs.push(dir)
