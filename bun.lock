@@ -471,7 +471,6 @@
       "name": "@sixb/example-northline",
       "dependencies": {
         "@sixb/app": "workspace:*",
-        "@sixb/auth-magic-link": "workspace:*",
         "@sixb/blob-local": "workspace:*",
         "@sixb/broker-redis": "workspace:*",
         "@sixb/client": "workspace:*",
