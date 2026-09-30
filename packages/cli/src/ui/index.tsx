@@ -1088,6 +1088,88 @@ export function DeployChecksView({
   )
 }
 
+export function DeployCiView({
+  name,
+  repo,
+  environment,
+  branch,
+  credential,
+  secrets,
+  retired,
+  workflow,
+  token,
+}: {
+  name: string
+  repo: string
+  environment: string
+  branch: string
+  credential: string
+  secrets: readonly string[]
+  retired: readonly DeployAccessKey[]
+  workflow: { readonly path: string; readonly changed: boolean }
+  token: { readonly name: string; readonly submodules: readonly string[] } | null
+}) {
+  const rows: { label: string; ok: boolean; detail: string; remedy?: string }[] = [
+    { label: "Key", ok: true, detail: credential },
+    { label: "Secrets", ok: true, detail: secrets.join(", ") },
+    {
+      label: "Older keys",
+      ok: true,
+      detail:
+        retired.length === 0
+          ? "none to revoke"
+          : `revoked ${retired.map((key) => key.fingerprint).join(", ")}`,
+    },
+    {
+      label: "Workflow",
+      ok: true,
+      detail: `${workflow.path}${workflow.changed ? "" : " (unchanged)"}`,
+    },
+    ...(token
+      ? [
+          {
+            label: "Token",
+            ok: false,
+            detail: `${token.submodules.join(", ")} ${token.submodules.length === 1 ? "is" : "are"} private, and CI cannot read ${token.submodules.length === 1 ? "it" : "them"} with its own token.`,
+            remedy: `Create a fine-grained token with Contents: read on ${token.submodules.length === 1 ? "that repository" : "those repositories"}, then run \`gh secret set ${token.name} --env ${environment} --repo ${repo}\`.`,
+          },
+        ]
+      : []),
+  ]
+  const labelWidth = Math.max(...rows.map((row) => row.label.length)) + 2
+  const next = workflow.changed
+    ? `Next: commit ${workflow.path} and push to ${branch}.`
+    : `Next: push to ${branch} to deploy.`
+
+  return (
+    <Box flexDirection="column">
+      <Text color={token ? "yellow" : "green"} bold>
+        {name} deploys from GitHub Actions on every push to {branch}
+      </Text>
+      <Text dimColor>
+        {repo} · environment {environment}
+      </Text>
+      <Spacer />
+      {rows.map((row) => (
+        <Box key={row.label}>
+          <Box width={2} flexShrink={0}>
+            <Text color={row.ok ? "green" : "yellow"}>{row.ok ? "✓" : "○"}</Text>
+          </Box>
+          <Box width={labelWidth} flexShrink={0}>
+            <Text>{row.label}</Text>
+          </Box>
+          <Box flexDirection="column">
+            <Text dimColor>{row.detail}</Text>
+            {row.remedy ? <Text color="cyan">{row.remedy}</Text> : null}
+          </Box>
+        </Box>
+      ))}
+      <Spacer />
+      <Text dimColor>{next}</Text>
+    </Box>
+  )
+}
+
 export function DeployAccessView({
   title,
   keys,

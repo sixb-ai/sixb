@@ -49,9 +49,37 @@ Point each domain at the server before the first deploy, so Caddy can get certif
 | `sixb deploy status` | Shows each process and the deployed commit. |
 | `sixb deploy logs [service]` | Prints recent log lines; `--follow` keeps printing, `--tail <lines>` sets how many. |
 | `sixb deploy restart [service]` | Restarts one service, or all of them. Also `start` and `stop`. |
+| `sixb deploy ci` | Deploys from GitHub Actions on every push to the default branch, or to `--branch <name>`. See below. |
 | `sixb deploy access list` | Lists the keys that can deploy, with their fingerprints. |
 | `sixb deploy access add <key>` | Authorizes a key: a `.pub` file, the key's text, or `github:<user>` for that account's keys. |
 | `sixb deploy access remove <match>` | Revokes the keys with that fingerprint or comment. Never removes the last key. |
+
+## Deploying from GitHub Actions
+
+Run `sixb deploy ci` from the project, with the [GitHub CLI](https://cli.github.com) logged in as
+someone who can change the repository's settings. It:
+
+1. Makes a new SSH key for the repository's deploys and authorizes it on the server, restricted to
+   running commands: no port forwarding, no terminal. The private key goes straight to GitHub and
+   is never written anywhere else.
+2. Stores it, with the server's host keys, as secrets of the repository's `production` environment.
+   The host keys are read over your own connection, which SSH has already checked, so CI never
+   trusts whatever answers at the address.
+3. Revokes the keys it made for this repository before, once GitHub holds the new one. Run the
+   command again to rotate the key.
+4. Writes `.github/workflows/deploy-<name>.yml`. Commit it and push.
+
+The workflow reads only the repository (`contents: read`), runs one deploy at a time, and uses
+actions pinned by commit. Add protection rules to the `production` environment in the repository's
+settings to require an approval before each deploy.
+
+Submodules are checked out at their recorded commits. When one is private, CI's own token cannot
+read it: create a fine-grained token with read access to its contents, and store it with
+`gh secret set SIXB_GITHUB_TOKEN --env production`. The workflow stops with that name when it is
+missing.
+
+CI connects to the server directly, so `host` must be an address GitHub can reach. When
+`sixb.deploy.ts` reads environment variables, add them to the workflow's `env`.
 
 ## What a deploy does
 

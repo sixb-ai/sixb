@@ -14,8 +14,14 @@ export async function listKeys(shell: RemoteShell): Promise<AuthorizedKey[]> {
   return [...(await readKeysFile(shell)).keys]
 }
 
-export async function addKey(shell: RemoteShell, text: string): Promise<DeployAccessKey> {
-  const key = parsePublicKey(text)
+/** Authorizes a public key once, with `options` (such as `restrict`) in front of it. */
+export async function addKey(
+  shell: RemoteShell,
+  text: string,
+  options?: string
+): Promise<AuthorizedKey> {
+  const parsed = parsePublicKey(text)
+  const key = options ? (parseAuthorizedKey(`${options} ${parsed.line}`) ?? parsed) : parsed
   const file = await readKeysFile(shell)
   if (file.keys.some((candidate) => candidate.fingerprint === key.fingerprint)) return key
   await rewrite(shell, [...file.lines, key.line], file.hash)
@@ -24,11 +30,24 @@ export async function addKey(shell: RemoteShell, text: string): Promise<DeployAc
 
 /** Removes the keys whose fingerprint or comment is `match`. Never removes the last one. */
 export async function removeKeys(shell: RemoteShell, match: string): Promise<DeployAccessKey[]> {
-  const file = await readKeysFile(shell)
-  const removed = file.keys.filter((key) => key.fingerprint === match || key.comment === match)
+  const removed = await removeKeysWhere(
+    shell,
+    (key) => key.fingerprint === match || key.comment === match
+  )
   if (removed.length === 0) {
     throw new Error(`[SshTarget] No authorized key has the fingerprint or comment '${match}'.`)
   }
+  return removed
+}
+
+/** Removes the keys `matches` picks, if any. Never removes the last one. */
+export async function removeKeysWhere(
+  shell: RemoteShell,
+  matches: (key: AuthorizedKey) => boolean
+): Promise<AuthorizedKey[]> {
+  const file = await readKeysFile(shell)
+  const removed = file.keys.filter(matches)
+  if (removed.length === 0) return []
   if (removed.length === file.keys.length) {
     throw new Error(
       "[SshTarget] That would remove every key, and nobody could reach the deployment. " +
