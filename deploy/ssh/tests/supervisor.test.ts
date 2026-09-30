@@ -166,5 +166,9 @@ describe("log lines", () => {
     )
     expect(render(`[${at}] exit code=1 signal=null`)).toBe("18:13:55 workers  exited code=1")
     expect(render(`[${at}] [stdout] `)).toBeNull()
+    expect(render(`[${at}] [stdout] \x1B[2K\x1B[1A\x1B[2K\x1B[GSixb API started`)).toBe(
+      "18:13:55 workers  Sixb API started"
+    )
+    expect(render(`[${at}] [stdout] \x1B[2K\x1B[1A`)).toBeNull()
   })
 })
