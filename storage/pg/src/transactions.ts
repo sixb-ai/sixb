@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto"
 import type { ReservedSQL, SQL, SQLClient } from "./pg-client"
-import { isConnectionLost } from "./storage-errors"
+import { explainPgError, isConnectionLost } from "./storage-errors"
 
 // Why transactions are driven here instead of through porsager's `sql.begin`:
 //
@@ -49,21 +49,25 @@ export async function runPgTransaction<T>(
   }
 
   const isolation = options.isolation ?? "unverifiedDefault"
-  return withReservedPgConnection(sql, (tx) => {
-    pgTransactionClients.add(tx)
-    return runPgTransactionOn(
-      tx,
-      async () => {
-        activePgTransactions.set(tx, isolation)
-        try {
-          return await run(tx)
-        } finally {
-          activePgTransactions.delete(tx)
-        }
-      },
-      isolation
-    )
-  })
+  try {
+    return await withReservedPgConnection(sql, (tx) => {
+      pgTransactionClients.add(tx)
+      return runPgTransactionOn(
+        tx,
+        async () => {
+          activePgTransactions.set(tx, isolation)
+          try {
+            return await run(tx)
+          } finally {
+            activePgTransactions.delete(tx)
+          }
+        },
+        isolation
+      )
+    })
+  } catch (error) {
+    throw explainPgError(error)
+  }
 }
 
 /**

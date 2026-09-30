@@ -31,6 +31,24 @@ const CONNECTION_LOST_CODES = new Set([
   "ETIMEDOUT",
 ])
 
+/**
+ * The shared lock tables PostgreSQL can fill, keyed by the setting its hint names. Both raise
+ * SQLSTATE 53200 (`out_of_memory`) with the message "out of shared memory", which reads like the
+ * server ran out of RAM; the hint is the only part that says which table filled up.
+ */
+const LOCK_TABLES = [
+  {
+    setting: "max_pred_locks_per_transaction",
+    table: "predicate lock table",
+    note:
+      " A long serializable transaction also keeps the predicate locks of every serializable" +
+      " transaction that commits while it is open.",
+  },
+  { setting: "max_locks_per_transaction", table: "lock table", note: "" },
+] as const
+
+const OUT_OF_MEMORY = "53200"
+
 /** The SQLSTATE / system error code carried by a thrown database or connection error. */
 export function pgErrorCode(error: unknown): string | undefined {
   if (error instanceof Error) {
@@ -78,4 +96,29 @@ export function isConnectionLost(error: unknown): boolean {
   const severity =
     error instanceof Error ? (error as { readonly severity?: unknown }).severity : null
   return severity === "FATAL" || severity === "PANIC"
+}
+
+/**
+ * Replace a full-lock-table error with one that names the table and the setting that sizes it;
+ * return every other error unchanged.
+ */
+export function explainPgError(error: unknown): unknown {
+  if (!(error instanceof Error) || pgErrorCode(error) !== OUT_OF_MEMORY) {
+    return error
+  }
+  const hint = (error as { readonly hint?: unknown }).hint
+  const lockTable =
+    typeof hint === "string" ? LOCK_TABLES.find(({ setting }) => hint.includes(setting)) : undefined
+  if (!lockTable) {
+    return error
+  }
+
+  const { setting, table, note } = lockTable
+  return new Error(
+    `[SixbPg] PostgreSQL aborted the transaction because its shared ${table} is full ` +
+      `(SQLSTATE 53200 "${error.message}"). The table holds ${setting} × (max_connections + ` +
+      `max_prepared_transactions) entries shared by all sessions.${note} Raise ${setting} ` +
+      "(applied at server restart) or shorten the transactions that overlap.",
+    { cause: error }
+  )
 }
