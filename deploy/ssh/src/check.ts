@@ -38,7 +38,7 @@ export function renderCheckScript(input: {
     'missing=""',
     `for tool in ${TOOLS.join(" ")}; do command -v "$tool" > /dev/null || missing="$missing $tool"; done`,
     'if [ -n "$missing" ]; then emit server.tools fixable "missing:$missing"',
-    'else emit server.tools ok "$(caddy version 2>/dev/null | cut -d" " -f1), git, curl, unzip"; fi',
+    'else emit server.tools ok "Caddy $(caddy version 2>/dev/null | cut -d" " -f1), git, curl, unzip"; fi',
     "",
     'if [ -e "/var/lib/systemd/linger/$USER" ]; then emit server.linger ok "on for $USER"',
     'else emit server.linger fixable "off for $USER: services would stop when you log out"; fi',
