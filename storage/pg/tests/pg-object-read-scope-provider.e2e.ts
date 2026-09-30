@@ -225,23 +225,23 @@ describe("PgObjectStorage selected reader invariants", () => {
       await insertObject(sql, RootType, "root-1", { id: "root-1" })
       await insertObject(sql, TargetType, "target-1", { id: "target-1" })
       let writerCommitted = false
-      const beginModes: string[] = []
+      const beginStatements: string[] = []
       const intercepted = {
-        begin: (mode: string, run: (client: SQLClient) => Promise<unknown>): Promise<unknown> =>
-          sql.begin(mode, async (tx) => {
-            beginModes.push(mode)
-            const client = {
-              unsafe: async (query: string, args: SqlParameter[]) => {
-                const result = await tx.unsafe(query, args)
-                if (!writerCommitted && query.includes("bounded_traversal_facts")) {
-                  writerCommitted = true
-                  await insertLink(sql, "root-1", "items", "target-1")
-                }
-                return result
-              },
-            } as unknown as SQLClient
-            return run(client)
-          }) as Promise<unknown>,
+        reserve: async () => {
+          const connection = await sql.reserve()
+          return {
+            unsafe: async (query: string, args?: SqlParameter[]) => {
+              if (query.startsWith("BEGIN")) beginStatements.push(query)
+              const result = await connection.unsafe(query, args)
+              if (!writerCommitted && query.includes("bounded_traversal_facts")) {
+                writerCommitted = true
+                await insertLink(sql, "root-1", "items", "target-1")
+              }
+              return result
+            },
+            release: () => connection.release(),
+          }
+        },
       } as unknown as PgStoreClient
       const reader = createReader(new PgObjectStorage(intercepted), singlePathScope(), {
         ...generousLimits,
@@ -253,7 +253,7 @@ describe("PgObjectStorage selected reader invariants", () => {
         hasMore: false,
         total: 1,
       })
-      expect(beginModes).toEqual(["isolation level repeatable read"])
+      expect(beginStatements).toEqual(["BEGIN ISOLATION LEVEL REPEATABLE READ"])
       expect(writerCommitted).toBe(true)
 
       const freshReader = createReader(storage, singlePathScope(), {

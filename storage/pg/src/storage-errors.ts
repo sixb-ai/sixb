@@ -1,7 +1,7 @@
 // Map thrown errors to their PostgreSQL/porsager meaning by code rather than by matching
 // message text. Database errors arrive in the native Postgres format with a SQLSTATE on
-// `.code`; connection-layer failures arrive with porsager's own codes or, for Node socket
-// errors, as an `AggregateError` of `ECONNREFUSED`/`ETIMEDOUT`/… entries.
+// `.code` and the server's `severity`; connection-layer failures arrive with porsager's own
+// codes or the socket's system error code.
 
 /** PostgreSQL SQLSTATE for a unique-constraint violation. */
 const UNIQUE_VIOLATION = "23505"
@@ -17,18 +17,18 @@ const FOREIGN_KEY_VIOLATION = "23503"
  */
 const RETRYABLE_TRANSACTION_CONFLICT_CODES = new Set(["40001", "40P01"])
 
-const CONNECTION_ERROR_CODES = new Set([
-  // porsager-specific
-  "CONNECT_TIMEOUT",
+/**
+ * Codes that mean the connection itself is gone, not that a statement failed: porsager's own codes
+ * for a connection that closed under a query or that the pool destroyed, and the socket errors a
+ * live connection can die with. Connect-time failures (`ECONNREFUSED`, `CONNECT_TIMEOUT`, ...) are
+ * left out on purpose: they reject before any session exists, so there is nothing to give up.
+ */
+const CONNECTION_LOST_CODES = new Set([
   "CONNECTION_CLOSED",
   "CONNECTION_DESTROYED",
-  "CONNECTION_ENDED",
-  // Node socket errors
-  "ECONNREFUSED",
   "ECONNRESET",
+  "EPIPE",
   "ETIMEDOUT",
-  "ENOTFOUND",
-  "EAI_AGAIN",
 ])
 
 /** The SQLSTATE / system error code carried by a thrown database or connection error. */
@@ -63,16 +63,19 @@ export function isRetryableTransactionConflict(error: unknown): boolean {
 }
 
 /**
- * True when the error originates from the connection layer (porsager connection codes, or a
- * Node socket failure surfaced as an `AggregateError`) rather than from a SQL statement.
+ * True when the error means the session is gone: PostgreSQL has already rolled back its open
+ * transaction and released its locks, and nothing more may be sent on that connection.
+ *
+ * PostgreSQL ends the session after every `FATAL` or `PANIC` error — `pg_terminate_backend` (57P01),
+ * a server shutdown (57P02), `idle_in_transaction_session_timeout` (25P03) — so the severity decides
+ * rather than a list of SQLSTATEs.
  */
-export function isConnectionError(error: unknown): boolean {
+export function isConnectionLost(error: unknown): boolean {
   const code = pgErrorCode(error)
-  if (code !== undefined && CONNECTION_ERROR_CODES.has(code)) {
+  if (code !== undefined && CONNECTION_LOST_CODES.has(code)) {
     return true
   }
-  if (error instanceof AggregateError) {
-    return error.errors.some(isConnectionError)
-  }
-  return false
+  const severity =
+    error instanceof Error ? (error as { readonly severity?: unknown }).severity : null
+  return severity === "FATAL" || severity === "PANIC"
 }

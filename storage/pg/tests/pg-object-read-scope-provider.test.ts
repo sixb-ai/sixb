@@ -13,7 +13,7 @@ import {
   compilePgObjectStatement,
 } from "../src/objects/query-compiler"
 import { compilePgSelectedObjectReadSource } from "../src/objects/read-scope"
-import type { SQLClient, SqlParameter } from "../src/pg-client"
+import type { SqlParameter } from "../src/pg-client"
 import type { PgStoreClient } from "../src/transactions"
 
 const projectId = "pg-selected-reader"
@@ -121,7 +121,7 @@ describe("PgObjectStorage selected reader compilation", () => {
       })
     ).toEqual({ links: [], hasMore: false })
 
-    expect(beginCalls).toEqual(["isolation level repeatable read"])
+    expect(beginCalls).toEqual(["BEGIN ISOLATION LEVEL REPEATABLE READ"])
     expect(calls).toHaveLength(2)
     const terminal = calls[1]
     if (!terminal) throw new Error("expected a terminal query")
@@ -240,21 +240,24 @@ function recordingPool(): {
 } {
   const calls: { sql: string; args: readonly SqlParameter[] }[] = []
   const beginCalls: string[] = []
-  const tx = {
+  const connection = {
     unsafe: async <T extends readonly unknown[]>(sql: string, args: SqlParameter[]): Promise<T> => {
+      if (sql.startsWith("BEGIN")) {
+        beginCalls.push(sql)
+        return [] as unknown as T
+      }
+      if (sql === "COMMIT") {
+        return Object.assign([], { command: "COMMIT" }) as unknown as T
+      }
       calls.push({ sql, args })
       if (sql.includes("bounded_traversal_facts")) {
         return [{ total: "0" }] as unknown as T
       }
       return [] as unknown as T
     },
-  } as unknown as SQLClient
-  const sql = {
-    begin: async (mode: string, run: (client: SQLClient) => Promise<unknown>) => {
-      beginCalls.push(mode)
-      return run(tx)
-    },
-  } as unknown as PgStoreClient
+    release: () => {},
+  }
+  const sql = { reserve: async () => connection } as unknown as PgStoreClient
   return { sql, calls, beginCalls }
 }
 
