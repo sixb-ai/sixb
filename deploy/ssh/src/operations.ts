@@ -13,6 +13,7 @@ import {
   renderReceiveScript,
   STEP_MARKER,
 } from "./scripts"
+import { stripTerminalControl } from "./server/logs"
 import { shellQuote } from "./shell"
 import { RemoteScriptError, type RemoteShell } from "./transport"
 
@@ -77,8 +78,9 @@ async function runReportingSteps(
           index: step,
           status: status === "start" ? "running" : "done",
         })
-      } else if (line.trim()) {
-        context.report({ type: "output", line })
+      } else {
+        const output = stripTerminalControl(line)
+        if (output.trim()) context.report({ type: "output", line: output })
       }
     },
   })
