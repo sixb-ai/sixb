@@ -52,10 +52,12 @@ export function renderDeployScript(input: DeployScriptInput): DeployScript {
     { label: `Install Bun ${release.bunVersion}`, body: renderInstallBun(release.bunVersion) },
     { label: "Install dependencies", body: renderInstallDependencies() },
     ...release.steps.build.map((command) => runStep(command)),
-    { label: "Stop services", body: renderStopServices() },
-    ...release.steps.beforeStart.map((command) => runStep(command)),
+    // Everything that can be rejected happens while the previous release still serves: services
+    // are down only from here to "Start services".
     { label: "Write services", body: renderWriteServices(release, layout) },
     { label: "Update routes", body: renderUpdateRoutes(release, layout) },
+    { label: "Stop services", body: renderStopServices() },
+    ...release.steps.beforeStart.map((command) => runStep(command)),
     { label: "Start services", body: renderStartServices() },
     {
       label: "Check services",
@@ -115,6 +117,9 @@ function renderEnvironment(release: DeployRelease, layout: DeploymentLayout): st
 function renderTakeLock(layout: DeploymentLayout): string {
   return [
     `exec 9>${shellQuote(layout.lock)}`,
+    "if ! flock -n 9; then",
+    '  echo "Waiting for another deploy of this project to finish…"',
+    "fi",
     "if ! flock -w 600 9; then",
     '  echo "Another deploy of this project has held its lock for 10 minutes." >&2',
     "  exit 1",

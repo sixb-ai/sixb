@@ -26,9 +26,9 @@ export interface DeployOptions {
 export async function runDeploy(options: DeployOptions = {}): Promise<void> {
   const cwd = options.cwd ?? process.cwd()
   const { path, config } = await loadDeployConfig(cwd)
-  const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd) })
 
   if (options.dryRun) {
+    const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd) })
     if (options.json) return writeJson(release)
     await renderStatic(
       <DeployReleaseView release={release} configPath={relative(cwd, path) || path} />
@@ -37,6 +37,7 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
   }
 
   const source = await packSource(cwd, options.ref)
+  const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd, source) })
   const progress = createProgress(release, {
     commit: source.commit,
     ref: source.ref,
@@ -145,6 +146,8 @@ function createProgress(
     report(event: DeployEvent) {
       if (event.type === "steps") state.labels = [...event.labels]
       if (event.type === "step" && event.status === "running") {
+        // A step's output is what explains its failure; earlier steps' would bury it.
+        state.output = []
         state.current = event.index
         started.set(event.index, Date.now())
         if (!live) console.log(`▸ ${state.labels[event.index]}`)
