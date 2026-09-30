@@ -99,6 +99,11 @@ export async function projectPathOf(projectDir: string): Promise<string> {
   return prefix.replace(/\/$/, "") || "."
 }
 
+/** The root of the git repository the project is in. */
+export function repoRootOf(projectDir: string): Promise<string> {
+  return git(projectDir, ["rev-parse", "--show-toplevel"])
+}
+
 /** Who deploys, recorded with the release. */
 export async function deployer(projectDir: string): Promise<string> {
   if (process.env.GITHUB_ACTIONS && process.env.GITHUB_ACTOR) {

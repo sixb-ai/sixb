@@ -4,6 +4,8 @@ export type {
   DeployAccessKey,
   DeployCheck,
   DeployCheckContext,
+  DeployCi,
+  DeployCiCredential,
   DeployCommand,
   DeployConfig,
   DeployConfigurableWorkerType,

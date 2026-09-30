@@ -135,6 +135,8 @@ export interface DeployTarget {
   setup?(release: DeployRelease, context: DeploySetupContext): Promise<void>
   /** Who may deploy and operate the deployment, for a target reached with keys. */
   readonly access?: DeployAccess
+  /** Credentials for a CI job that deploys, for a target reached with keys. */
+  readonly ci?: DeployCi
 }
 
 export interface DeployCheck {
@@ -179,6 +181,31 @@ export interface DeployAccessKey {
   readonly comment: string
   /** Whether the key is limited to running commands: no forwarding, no terminal. */
   readonly restricted: boolean
+}
+
+/**
+ * Lets a CI job deploy. `sixb deploy ci` stores what `create` returns as the CI system's secrets and
+ * writes the workflow around it.
+ */
+export interface DeployCi {
+  /**
+   * Creates a credential for one CI job, such as `"github:acme/shop"`, and authorizes it on the
+   * target next to the job's earlier ones. Running it again for the same job rotates the credential.
+   */
+  create(job: string, context: DeployOperationContext): Promise<DeployCiCredential>
+}
+
+export interface DeployCiCredential {
+  /** Describes the credential, such as its key's fingerprint. */
+  readonly description: string
+  /** What the CI job needs, by environment variable name. CI stores them as secrets. */
+  readonly secrets: Readonly<Record<string, string>>
+  /** Shell lines that install the credential on the CI runner, with `secrets` in the environment. */
+  readonly install: readonly string[]
+  /** Revokes the job's earlier credentials once CI holds this one, and returns them. */
+  retireOthers(): Promise<readonly DeployAccessKey[]>
+  /** Revokes this credential, when CI could not store it. */
+  revoke(): Promise<void>
 }
 
 export interface DeployListenAddress {

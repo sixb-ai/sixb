@@ -4,6 +4,8 @@ import type {
   DeployAccessKey,
   DeployCheck,
   DeployCheckContext,
+  DeployCi,
+  DeployCiCredential,
   DeployContext,
   DeployControlAction,
   DeployHttpServiceName,
@@ -16,8 +18,9 @@ import type {
   DeployStatus,
   DeployTarget,
 } from "@sixb/core/deploy"
-import { addKey, listKeys, removeKeys } from "./access"
+import { addKey, listKeys, removeKeys, removeKeysWhere } from "./access"
 import { checkDns, runChecks } from "./check"
+import { generateCiKey, knownHostsLines, readHostKeys, renderCiInstall } from "./ci"
 import { controlServices, deployRelease, readStatus, streamLogs } from "./operations"
 import { pickPublicKey, renderAdminScript } from "./setup"
 import { shellQuote } from "./shell"
@@ -177,6 +180,53 @@ export class SshTarget implements DeployTarget {
     add: (key) => this.#connected((shell) => addKey(shell, key)).then(withoutLine),
     remove: (match) =>
       this.#connected(async (shell) => (await removeKeys(shell, match)).map(withoutLine)),
+  }
+
+  readonly ci: DeployCi = {
+    create: (job, context) => this.#createCiKey(job, context.name),
+  }
+
+  /**
+   * A key for one CI job, allowed to run commands and nothing else (no forwarding, no terminal),
+   * with the server's host keys pinned so CI never trusts an address on first sight.
+   */
+  async #createCiKey(job: string, name: string): Promise<DeployCiCredential> {
+    const ssh = await resolveSshConfig(this.location)
+    if (ssh.proxyJump) {
+      throw new Error(
+        `[SshTarget] Your SSH config reaches ${this.host} through ${ssh.proxyJump}, and CI connects ` +
+          "directly. Set `host` to an address CI can reach."
+      )
+    }
+    // One comment per job and deployment: it is how a later run finds the keys it replaces.
+    const comment = `sixb-ci:${name}@${job}`
+    const pair = await generateCiKey(comment)
+    const { key, hostKeys } = await this.#connected(async (shell) => ({
+      hostKeys: await readHostKeys(shell),
+      key: await addKey(shell, pair.publicKey, "restrict"),
+    }))
+
+    return {
+      description: `${key.fingerprint} for ${this.location}, restricted to running commands`,
+      secrets: {
+        SIXB_DEPLOY_SSH_KEY: pair.privateKey,
+        SIXB_DEPLOY_KNOWN_HOSTS: knownHostsLines(hostKeys, ssh.hostname, ssh.port).join("\n"),
+      },
+      install: renderCiInstall({ host: this.host, hostname: ssh.hostname, port: ssh.port }),
+      retireOthers: () =>
+        this.#connected(async (shell) =>
+          (
+            await removeKeysWhere(
+              shell,
+              (other) => other.comment === comment && other.fingerprint !== key.fingerprint
+            )
+          ).map(withoutLine)
+        ),
+      revoke: () =>
+        this.#connected(async (shell) => {
+          await removeKeysWhere(shell, (other) => other.fingerprint === key.fingerprint)
+        }),
+    }
   }
 
   async #connected<T>(work: (shell: RemoteShell) => Promise<T>): Promise<T> {
