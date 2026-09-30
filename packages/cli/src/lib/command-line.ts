@@ -111,6 +111,11 @@ export const CLI_OPTION_DEFINITIONS = {
     summary: "Public key to authorize for deploys (default: the one SSH uses)",
     kind: "string",
   },
+  branch: {
+    syntax: "--branch <name>",
+    summary: "Branch whose pushes deploy (default: the repository's default branch)",
+    kind: "string",
+  },
   tail: {
     syntax: "--tail <lines>",
     summary: "Recent log lines to print (default: 100)",
@@ -173,6 +178,7 @@ export type LocalCommandId =
   | "deploy:stop"
   | "deploy:setup"
   | "deploy:check"
+  | "deploy:ci"
   | "deploy:access:list"
   | "deploy:access:add"
   | "deploy:access:remove"
@@ -471,6 +477,10 @@ const commandTree: readonly CommandNode[] = [
       command("deploy:check", "Check what stands between you and a working deploy", {
         path: ["deploy", "check"],
         options: ["json"],
+      }),
+      command("deploy:ci", "Deploy from GitHub Actions on every push", {
+        path: ["deploy", "ci"],
+        options: ["branch"],
       }),
       command("deploy:status", "Show what the deployment runs, and which commit", {
         path: ["deploy", "status"],

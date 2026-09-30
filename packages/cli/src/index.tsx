@@ -355,6 +355,12 @@ async function main(): Promise<void> {
       break
     }
 
+    case "deploy:ci": {
+      const { runDeployCi } = await import("./commands/deploy")
+      await runDeployCi({ branch: getFlag("branch") })
+      break
+    }
+
     case "deploy:access:list":
     case "deploy:access:add":
     case "deploy:access:remove": {
