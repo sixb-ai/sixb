@@ -116,6 +116,7 @@ describe("deploy release", () => {
       build: [{ program: "sixb", args: ["build"] }],
       beforeStart: [
         { program: "sixb", args: ["db", "migrate"] },
+        { program: "sixb", args: ["check"] },
         { program: "sixb", args: ["lake", "check"] },
       ],
     })
@@ -259,6 +260,16 @@ describe("deploy source", () => {
 
     expect((await packSource(project)).projectPath).toBe("apps/web")
     expect(await resolveBunVersion(project)).toBe("1.4.7")
+  })
+
+  test("runs the Bun the deployed commit pins, not an uncommitted edit", async () => {
+    const root = await repository({
+      "package.json": JSON.stringify({ packageManager: "bun@1.4.7" }),
+    })
+    await writeFile(join(root, "package.json"), JSON.stringify({ packageManager: "bun@1.4.9" }))
+
+    expect(await resolveBunVersion(root, await packSource(root))).toBe("1.4.7")
+    expect(await resolveBunVersion(root)).toBe("1.4.9")
   })
 
   test("refuses a ref that is not a commit, or a project that was never committed", async () => {
