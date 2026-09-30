@@ -6,8 +6,11 @@ import { shellQuote } from "./shell"
 export interface RunOptions {
   /** Streamed to the script's standard input. The script itself then travels as an argument. */
   readonly stdin?: ReadableStream<Uint8Array>
-  /** Every line the script prints, from either stream. */
-  readonly onLine?: (line: string) => void
+  /**
+   * Every line the script prints, and which stream it came from. Read results from `stdout`
+   * only: a login script or a failed redirection can write to `stderr` first.
+   */
+  readonly onLine?: (line: string, stream: "stdout" | "stderr") => void
   /** Attach the terminal, so the remote command stops when you press Ctrl-C. */
   readonly terminal?: boolean
 }
@@ -137,17 +140,17 @@ async function runProcess(
     env: { ...process.env, ...options.env },
   })
   const tail: string[] = []
-  const onLine = (line: string) => {
+  const onLine = (stream: "stdout" | "stderr") => (line: string) => {
     tail.push(line)
     if (tail.length > OUTPUT_TAIL) tail.shift()
-    options.onLine?.(line)
+    options.onLine?.(line, stream)
   }
 
   const [exitCode] = await Promise.all([
     child.exited,
     options.stdin && child.stdin ? pump(options.stdin, child.stdin) : undefined,
-    readLines(child.stdout, onLine),
-    readLines(child.stderr, onLine),
+    readLines(child.stdout, onLine("stdout")),
+    readLines(child.stderr, onLine("stderr")),
   ])
   if (exitCode !== 0) {
     throw new RemoteScriptError(

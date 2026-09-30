@@ -25,15 +25,33 @@ export default defineDeploy({
 Add `@sixb/cli` and `@sixb/deploy-ssh` to the project's dependencies, and pin Bun with
 `"packageManager": "bun@1.4.2"` in its `package.json`; the server runs that version.
 
+## First deploy
+
+Start from a fresh Ubuntu or Debian server you can reach over SSH as root, or as a user with sudo:
+
+```sh
+sixb deploy setup --admin ademattos   # once per server; asks for sudo if needed
+ssh sixb@203.0.113.10 'install -m 600 /dev/null ~/northline/code/.env'
+ssh -t sixb@203.0.113.10 'nano ~/northline/code/.env'   # the project's secrets
+sixb deploy
+```
+
+Point each domain at the server before the first deploy, so Caddy can get certificates for it.
+
 ## Commands
 
 | Command | Does |
 | --- | --- |
-| `sixb deploy` | Deploys the committed `HEAD`. `--ref <ref>` deploys another branch, tag, or commit. |
+| `sixb deploy setup` | Prepares the server and the deploy user. `--admin <login>` is who logs in to do it (default `root`); `--key <file>` is the key to authorize (default: the one SSH would use). Safe to run again. |
+| `sixb deploy check` | Checks the server, the project, its ports, and its DNS, changing nothing. Exits 1 when a deploy would fail. |
+| `sixb deploy` | Runs the checks, then deploys the committed `HEAD`. `--ref <ref>` deploys another branch, tag, or commit. |
 | `sixb deploy --dry-run` | Prints every process with its command, address, and environment, without deploying. |
 | `sixb deploy status` | Shows each process and the deployed commit. |
 | `sixb deploy logs [service]` | Prints recent log lines; `--follow` keeps printing, `--tail <lines>` sets how many. |
 | `sixb deploy restart [service]` | Restarts one service, or all of them. Also `start` and `stop`. |
+| `sixb deploy access list` | Lists the keys that can deploy, with their fingerprints. |
+| `sixb deploy access add <key>` | Authorizes a key: a `.pub` file, the key's text, or `github:<user>` for that account's keys. |
+| `sixb deploy access remove <match>` | Revokes the keys with that fingerprint or comment. Never removes the last key. |
 
 ## What a deploy does
 
@@ -52,7 +70,9 @@ Add `@sixb/cli` and `@sixb/deploy-ssh` to the project's dependencies, and pin Bu
 
 ## The server
 
-The server needs Ubuntu or Debian with systemd, Caddy, `curl`, and `unzip`, and a deploy user:
+`sixb deploy setup` logs in as the admin once and leaves the server like this; `sixb deploy check`
+reports anything that is missing. The server runs Ubuntu or Debian with systemd, Caddy, `git`,
+`curl`, and `unzip`, and has a deploy user:
 
 - linger enabled (`loginctl enable-linger <user>`), so its services start at boot;
 - your SSH key in its `authorized_keys`;
@@ -63,7 +83,14 @@ The server needs Ubuntu or Debian with systemd, Caddy, `curl`, and `unzip`, and 
   import pattern.
 
 Keep Caddy's admin API off `localhost:2019`, where any local process could change every route: set
-`admin unix//var/lib/caddy/admin.sock` in the root Caddyfile's global options.
+`admin unix//var/lib/caddy/admin.sock` in the root Caddyfile's global options. Setup does this when
+the Caddyfile is still the one Caddy's package installed. A server that already serves other sites
+keeps its Caddyfile, gains the one import line, and keeps a copy of the previous file in
+`/etc/caddy/Caddyfile.before-sixb-deploy`.
+
+Setup adds the admin to the deploy user's group, so the admin can read every project under that
+user without sudo; `.env` files stay readable only by the deploy user. It reports, but never
+changes, an SSH server that accepts passwords or a firewall that blocks ports 80 and 443.
 
 Put the project's secrets in `.env` in its directory on the server, readable only by the deploy
 user: `~/<name>/code/.env`, or `~/<name>/code/<path>/.env` for a project inside a monorepo.

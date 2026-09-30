@@ -343,6 +343,30 @@ async function main(): Promise<void> {
       break
     }
 
+    case "deploy:setup": {
+      const { runDeploySetup } = await import("./commands/deploy")
+      await runDeploySetup({ admin: getFlag("admin"), key: getFlag("key") })
+      break
+    }
+
+    case "deploy:check": {
+      const { runDeployCheck } = await import("./commands/deploy")
+      await runDeployCheck({ json: hasFlag("json") })
+      break
+    }
+
+    case "deploy:access:list":
+    case "deploy:access:add":
+    case "deploy:access:remove": {
+      const { runDeployAccess } = await import("./commands/deploy")
+      await runDeployAccess({
+        action: parsed.id.slice("deploy:access:".length) as "list" | "add" | "remove",
+        value: positionals[0],
+        json: hasFlag("json"),
+      })
+      break
+    }
+
     case "deploy:restart":
     case "deploy:start":
     case "deploy:stop": {

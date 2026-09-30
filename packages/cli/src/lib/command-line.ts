@@ -101,6 +101,16 @@ export const CLI_OPTION_DEFINITIONS = {
     kind: "string",
   },
   follow: { syntax: "--follow", summary: "Keep printing new log lines", kind: "boolean" },
+  admin: {
+    syntax: "--admin <login>",
+    summary: "Login with sudo that prepares the server (default: root)",
+    kind: "string",
+  },
+  key: {
+    syntax: "--key <path>",
+    summary: "Public key to authorize for deploys (default: the one SSH uses)",
+    kind: "string",
+  },
   tail: {
     syntax: "--tail <lines>",
     summary: "Recent log lines to print (default: 100)",
@@ -161,6 +171,11 @@ export type LocalCommandId =
   | "deploy:restart"
   | "deploy:start"
   | "deploy:stop"
+  | "deploy:setup"
+  | "deploy:check"
+  | "deploy:access:list"
+  | "deploy:access:add"
+  | "deploy:access:remove"
   | "init"
 
 interface CommandNode {
@@ -449,6 +464,14 @@ const commandTree: readonly CommandNode[] = [
       rootHelpLabel: "deploy ...",
     }),
     children: [
+      command("deploy:setup", "Prepare the server and project for deploys", {
+        path: ["deploy", "setup"],
+        options: ["admin", "key"],
+      }),
+      command("deploy:check", "Check what stands between you and a working deploy", {
+        path: ["deploy", "check"],
+        options: ["json"],
+      }),
       command("deploy:status", "Show what the deployment runs, and which commit", {
         path: ["deploy", "status"],
         options: ["json"],
@@ -466,6 +489,29 @@ const commandTree: readonly CommandNode[] = [
           maximumPositionals: 1,
         })
       ),
+      {
+        name: "access",
+        summary: "Manage the keys that may deploy and operate the deployment",
+        usage: "sixb deploy access <list|add|remove>",
+        children: [
+          command("deploy:access:list", "List the authorized keys", {
+            path: ["deploy", "access", "list"],
+            options: ["json"],
+          }),
+          command("deploy:access:add", "Authorize a key: a .pub file, its text, or github:<user>", {
+            path: ["deploy", "access", "add"],
+            usage: "sixb deploy access add <key>",
+            minimumPositionals: 1,
+            maximumPositionals: 1,
+          }),
+          command("deploy:access:remove", "Revoke the keys with this fingerprint or comment", {
+            path: ["deploy", "access", "remove"],
+            usage: "sixb deploy access remove <fingerprint|comment>",
+            minimumPositionals: 1,
+            maximumPositionals: 1,
+          }),
+        ],
+      },
     ],
   },
   command("init", "Initialize sixb project in a directory", {

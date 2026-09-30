@@ -11,6 +11,7 @@ const target: DeployTarget = {
   status: async () => ({ release: null, running: false, processes: [] }),
   logs: async () => {},
   control: async () => {},
+  check: async () => [],
 }
 
 function config(overrides: Record<string, unknown> = {}): unknown {

@@ -1,4 +1,10 @@
-import type { DeployCommand, DeployRelease, DeployStatus } from "@sixb/core/deploy"
+import type {
+  DeployAccessKey,
+  DeployCheck,
+  DeployCommand,
+  DeployRelease,
+  DeployStatus,
+} from "@sixb/core/deploy"
 import { Box, render, Text } from "ink"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
@@ -1024,6 +1030,83 @@ export function DeployStatusView({
           </Text>
         ))}
     </Box>
+  )
+}
+
+const CHECK_MARKS = {
+  ok: { glyph: "✓", color: "green" },
+  fixable: { glyph: "●", color: "yellow" },
+  manual: { glyph: "○", color: "yellow" },
+  warning: { glyph: "!", color: "yellow" },
+} as const satisfies Record<DeployCheck["status"], { glyph: string; color: string }>
+
+export function DeployChecksView({
+  name,
+  location,
+  checks,
+}: {
+  name: string
+  location: string
+  checks: readonly DeployCheck[]
+}) {
+  const blocking = checks.filter((check) => check.status === "fixable" || check.status === "manual")
+  const warnings = checks.filter((check) => check.status === "warning")
+  const labelWidth = Math.max(...checks.map((check) => check.label.length)) + 2
+  const next = blocking.some((check) => check.status === "fixable")
+    ? "Next: sixb deploy setup"
+    : blocking.length > 0
+      ? "Next: the steps above, then sixb deploy check"
+      : "Next: sixb deploy"
+
+  return (
+    <Box flexDirection="column">
+      <Text color={blocking.length > 0 ? "yellow" : "green"} bold>
+        {name}{" "}
+        {blocking.length > 0
+          ? `· ${blocking.length} to fix before deploying`
+          : `is ready to deploy${warnings.length > 0 ? ` · ${warnings.length} to look at` : ""}`}
+      </Text>
+      <Text dimColor>{location}</Text>
+      <Spacer />
+      {checks.map((check) => (
+        <Box key={check.id}>
+          <Box width={2} flexShrink={0}>
+            <Text color={CHECK_MARKS[check.status].color}>{CHECK_MARKS[check.status].glyph}</Text>
+          </Box>
+          <Box width={labelWidth} flexShrink={0}>
+            <Text>{check.label}</Text>
+          </Box>
+          <Box flexDirection="column">
+            <Text dimColor>{check.detail}</Text>
+            {check.remedy ? <Text color="cyan">{check.remedy}</Text> : null}
+          </Box>
+        </Box>
+      ))}
+      <Spacer />
+      <Text dimColor>{next}</Text>
+    </Box>
+  )
+}
+
+export function DeployAccessView({
+  title,
+  keys,
+}: {
+  title: string
+  keys: readonly DeployAccessKey[]
+}) {
+  return (
+    <TableResultView
+      title={title}
+      headers={["Comment", "Type", "Fingerprint", "Limits"]}
+      rows={keys.map((key) => [
+        key.comment || "-",
+        key.type,
+        key.fingerprint,
+        key.restricted ? "restricted" : "-",
+      ])}
+      emptyMessage="No keys."
+    />
   )
 }
 

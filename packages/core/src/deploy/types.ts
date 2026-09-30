@@ -129,6 +129,56 @@ export interface DeployTarget {
     service: string | undefined,
     context: DeployOperationContext
   ): Promise<void>
+  /** What stands between the target and a working deploy of the release, changing nothing. */
+  check(release: DeployRelease, context: DeployCheckContext): Promise<readonly DeployCheck[]>
+  /** Prepares the target for the release, fixing what `check` reports as fixable. */
+  setup?(release: DeployRelease, context: DeploySetupContext): Promise<void>
+  /** Who may deploy and operate the deployment, for a target reached with keys. */
+  readonly access?: DeployAccess
+}
+
+export interface DeployCheck {
+  readonly id: string
+  /** What was checked, such as `"SSH"` or `"api DNS"`. */
+  readonly label: string
+  /**
+   * `fixable`: `sixb deploy setup` fixes it. `manual`: only you can, as `remedy` says. Both stop
+   * a deploy; a `warning` does not.
+   */
+  readonly status: "ok" | "fixable" | "manual" | "warning"
+  readonly detail: string
+  /** What to do about it, when the status is not `ok`. */
+  readonly remedy?: string
+}
+
+export interface DeployCheckContext extends DeployOperationContext {
+  /** The project's directory inside its repository: `.` at the root. */
+  readonly projectPath: string
+}
+
+export interface DeploySetupContext extends DeployCheckContext {
+  /** The account with sudo that prepares a server, for a target that needs one. */
+  readonly admin?: string
+  /** A public key file to authorize for deploys, instead of the one the target would pick. */
+  readonly key?: string
+  /** A line of progress for the person running setup. */
+  write(line: string): void
+}
+
+export interface DeployAccess {
+  list(context: DeployOperationContext): Promise<readonly DeployAccessKey[]>
+  /** Authorizes a public key, given as its text (`ssh-ed25519 AAAA… comment`). */
+  add(key: string, context: DeployOperationContext): Promise<DeployAccessKey>
+  /** Revokes the keys whose fingerprint or comment matches, and returns them. */
+  remove(match: string, context: DeployOperationContext): Promise<readonly DeployAccessKey[]>
+}
+
+export interface DeployAccessKey {
+  readonly type: string
+  readonly fingerprint: string
+  readonly comment: string
+  /** Whether the key is limited to running commands: no forwarding, no terminal. */
+  readonly restricted: boolean
 }
 
 export interface DeployListenAddress {

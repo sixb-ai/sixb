@@ -1,5 +1,9 @@
 export { defineDeploy } from "./define"
 export type {
+  DeployAccess,
+  DeployAccessKey,
+  DeployCheck,
+  DeployCheckContext,
   DeployCommand,
   DeployConfig,
   DeployConfigurableWorkerType,
@@ -23,6 +27,7 @@ export type {
   DeployScalableProcessOptions,
   DeployServiceName,
   DeployServicesConfig,
+  DeploySetupContext,
   DeploySingletonServiceConfig,
   DeploySingletonServiceName,
   DeploySource,

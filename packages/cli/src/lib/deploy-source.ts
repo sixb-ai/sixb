@@ -93,6 +93,12 @@ export async function resolveBunVersion(
   }
 }
 
+/** The project's directory inside its repository, `.` at its root or outside git. */
+export async function projectPathOf(projectDir: string): Promise<string> {
+  const prefix = await git(projectDir, ["rev-parse", "--show-prefix"]).catch(() => "")
+  return prefix.replace(/\/$/, "") || "."
+}
+
 /** Who deploys, recorded with the release. */
 export async function deployer(projectDir: string): Promise<string> {
   if (process.env.GITHUB_ACTIONS && process.env.GITHUB_ACTOR) {
