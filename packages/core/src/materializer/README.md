@@ -93,6 +93,11 @@ the fenced run transition. Success must match the deployed definition; failure o
 the run's execution token, so a run pinned to a definition a deploy has since replaced can still
 end.
 
+A replacement run ends `superseded`, without materializing, when a run of the same projection
+pinned to a later dataset version is queued, running, or succeeded. The worker checks this on every
+delivery after its claim; `finishRun` checks it again under its transaction, since a newer run that
+failed in between replaces nothing, and releases the candidate like any other end without success.
+
 ## Managed edits and Actions
 
 ```text

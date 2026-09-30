@@ -161,7 +161,10 @@ export class ProjectionWorker extends QueueWorker<
 function terminalFailureDecision(
   run: ProjectionRunRecord | null
 ): QueueWorkerFailureDecision<ProjectionRunFailureCode> {
-  return run?.error ? { kind: "fail", failure: run.error } : { kind: "fail" }
+  // A running run's error is its last attempt's failure, not an outcome to report.
+  return run?.error && run.status !== "running"
+    ? { kind: "fail", failure: run.error }
+    : { kind: "fail" }
 }
 
 function retryWithBackoff(

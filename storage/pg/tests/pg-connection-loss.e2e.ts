@@ -33,7 +33,8 @@ describe("PostgreSQL connection loss", () => {
 
     expect({ exitCode, stdout, stderr }).toMatchObject({ exitCode: 0 })
     expect(JSON.parse(stdout)).toEqual({
-      rejection: expect.stringMatching(/^(CONNECTION_CLOSED|57P01)$/),
+      rejection: "storage.unavailable",
+      cause: expect.stringMatching(/^(CONNECTION_CLOSED|57P01)$/),
       firstQuery: expect.stringMatching(/^(ok|57P01)$/),
       secondQuery: "ok",
     })

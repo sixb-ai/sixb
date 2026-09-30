@@ -469,6 +469,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 50,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "051-projection-run-supersession",
+    status: "applied",
+    version: 51,
+  },
 ]
 
 afterEach(async () => {
@@ -515,6 +522,76 @@ describe("SQLite storage migrations", () => {
         { project_id: "p", id: "task", requester_group_ids: '["finance"]' },
         { project_id: "p", id: "workflow", requester_group_ids: '["finance"]' },
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("keeps projection runs and admits superseded runs and retrying failures", async () => {
+    // Removal proof: keep `AND error IS NULL` on 051's running branch; the running run's error
+    // below is then rejected.
+    const db = new Database(":memory:")
+    try {
+      const steps = sqliteStorageMigrations.steps
+      const index = steps.findIndex((step) => step.id === "051-projection-run-supersession")
+      for (const step of steps.slice(0, index)) await step.up(db)
+      const failure = JSON.stringify({
+        code: "projection.execution_failed",
+        message: "Projection execution failed.",
+        retryable: false,
+        at: "2026-09-01T12:00:00.000Z",
+      })
+      const insertRun = (id: string, status: string, versionId: string, error: string | null) => {
+        db.run(
+          `INSERT INTO executions (
+            project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+            authority_kind, authority_primitive_kind, authority_primitive_id, created_at
+          ) VALUES ('p', ?, 'projection', 'rooms', 'datasetVersion', ?, ?, 'trustedPrimitive',
+            'projection', 'rooms', '2026-09-01T12:00:00.000Z')`,
+          [`execution-${id}`, versionId, `execution-${id}`]
+        )
+        db.run(
+          `INSERT INTO projection_runs (
+            project_id, id, execution_id, projection_id, projection_kind,
+            materialization_protocol, dataset_id, dataset_version_id, dataset_version_created_at,
+            ontology_revision, projection_revision, ownership_hash, object_type_id, status,
+            queued_at, started_at, finished_at, attempt, execution_token, error
+          ) VALUES ('p', ?, ?, 'rooms', 'object', 'replacement', 'rooms', ?,
+            '2026-09-01T12:00:00.000Z', 'ontology', 'projection', 'ownership', 'Room', ?,
+            '2026-09-01T12:00:00.000Z', '2026-09-01T12:00:00.000Z', ?, 1, ?, ?)`,
+          [
+            id,
+            `execution-${id}`,
+            versionId,
+            status,
+            status === "running" ? null : "2026-09-01T12:01:00.000Z",
+            status === "running" ? "token" : null,
+            error,
+          ]
+        )
+      }
+      insertRun("failed-run", "failed", "version-1", failure)
+      insertRun("running-run", "running", "version-2", null)
+
+      await steps[index]!.up(db)
+      insertRun("superseded-run", "superseded", "version-3", null)
+      db.run("UPDATE projection_runs SET error = ? WHERE id = 'running-run'", [failure])
+
+      expect(db.query("SELECT id, status, error FROM projection_runs ORDER BY id").all()).toEqual([
+        { id: "failed-run", status: "failed", error: failure },
+        { id: "running-run", status: "running", error: failure },
+        { id: "superseded-run", status: "superseded", error: null },
+      ])
+      expect(() => insertRun("superseded-with-error", "superseded", "version-4", failure)).toThrow(
+        "CHECK constraint failed"
+      )
+      expect(
+        db
+          .query(
+            "SELECT count(*) AS count FROM sqlite_master WHERE type = 'index' AND tbl_name = 'projection_runs' AND name LIKE 'idx_%'"
+          )
+          .get()
+      ).toEqual({ count: 6 })
     } finally {
       db.close()
     }

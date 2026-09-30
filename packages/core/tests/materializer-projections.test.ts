@@ -23,7 +23,7 @@ import {
 } from "../src/storage"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
-import { startTestProjectionRun } from "../src/testing"
+import { queueTestProjectionRun, startTestProjectionRun } from "../src/testing"
 import {
   atomic,
   claimProjectionExecution,
@@ -647,6 +647,79 @@ describe("ontology materializer projection replacement", () => {
         status: "succeeded",
       })
     ).rejects.toThrow("materialization identity does not match")
+  })
+
+  test("supersedes a run only while a later version still stands to replace it", async () => {
+    // Removal proof: skip `assertRunSuperseded`; the run below is superseded by a failed run.
+    const { materializer, storage, projections } = createMaterializerFixture()
+    const resolved = projections.resolveSource("devices")
+    const identity = (versionId: string, createdAt: string) => ({
+      projectionId: resolved.projectionId,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: { datasetId: "devices", versionId, createdAt },
+      ontologyRevision: projections.ontologyRevision,
+      projectionRevision: resolved.projectionRevision,
+      ownershipHash: resolved.ownershipHash,
+    })
+    const stale = identity("stale", "2026-01-01T00:00:00.000Z")
+    const run = await startTestProjectionRun(storage, {
+      id: "stale-run",
+      projectId: "project",
+      identity: stale,
+      target: { objectTypeId: "Device" },
+    })
+    await storage.ontology.sources.beginMaterialization({
+      projectId: "project",
+      source: { projectionId: "devices" },
+      materializationId: "stale-candidate",
+      execution: run.execution,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion: stale.datasetVersion,
+      ontologyRevision: stale.ontologyRevision,
+      projectionRevision: stale.projectionRevision,
+      ownershipHash: stale.ownershipHash,
+      createdAt: "2026-01-02T00:00:00.000Z",
+    })
+    const supersede = () =>
+      materializer.projections.finishRun({
+        protocol: "replacement",
+        source: { projectionId: "devices" },
+        datasetVersion: stale.datasetVersion,
+        execution: run.execution,
+        status: "superseded",
+      })
+    const newer = await startTestProjectionRun(storage, {
+      id: "newer-run",
+      projectId: "project",
+      identity: identity("newer", "2026-01-03T00:00:00.000Z"),
+      target: { objectTypeId: "Device" },
+    })
+    await storage.projectionRuns.finish({
+      id: newer.run.id,
+      projectId: "project",
+      executionToken: newer.execution.executionToken,
+      identity: newer.run.identity,
+      protocol: "replacement",
+      status: "failed",
+    })
+
+    await expect(supersede()).rejects.toThrow("cannot be superseded")
+    expect(candidateStatus(storage, "stale-candidate")).toBe("staging")
+
+    await queueTestProjectionRun(storage, {
+      id: "newest-run",
+      projectId: "project",
+      identity: identity("newest", "2026-01-04T00:00:00.000Z"),
+      target: { objectTypeId: "Device" },
+    })
+    await supersede()
+
+    await expect(
+      storage.projectionRuns.getById({ projectId: "project", id: run.run.id })
+    ).resolves.toMatchObject({ status: "superseded", error: undefined })
+    expect(candidateStatus(storage, "stale-candidate")).toBe("abandoned")
   })
 
   test("rechecks a same-run fast replay in one fenced transaction", async () => {

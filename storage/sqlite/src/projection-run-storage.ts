@@ -19,6 +19,7 @@ import {
   immutableDatasetVersionConflict,
   mergeProjectionRunProgress,
   type PersistedProjectionRunRecord,
+  parseProjectionAttemptFailure,
   planProjectionRunFinish,
   planProjectionRunReclaim,
   projectionRunNotFound,
@@ -26,12 +27,14 @@ import {
   requireTelemetryProjectionRun,
   restoreProjectionRun,
   type StoredProjectionRunRecord,
+  SUPERSEDING_PROJECTION_RUN_STATUSES,
   staleProjectionRunExecution,
 } from "@sixb/core/internal/projection-run-storage-provider"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
   ExecutionStorage,
   FailProjectionRunEnqueueInput,
+  FindSupersedingProjectionRunInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
@@ -45,6 +48,7 @@ import type {
   ProjectionRunStatus,
   ProjectionRunStorage,
   QueueProjectionRunInput,
+  RecordProjectionAttemptFailureInput,
   RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
@@ -177,7 +181,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
           `
             UPDATE projection_runs
             SET status = 'running', started_at = COALESCE(started_at, ?), finished_at = NULL,
-              attempt = ?, execution_token = ?, error = NULL
+              attempt = ?, execution_token = ?
             WHERE project_id = ? AND id = ?
               AND (
                 (status = 'queued' AND execution_token IS NULL)
@@ -239,6 +243,31 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
       const progress = mergeProjectionRunProgress(existing.progress, input.progress)
       const result = this.updateProgress(existingRow, progress, input.executionToken)
       if (result !== 1) throw staleProjectionRunExecution(input.id)
+      return rowToProjectionRunRecord(this.requireRow(input.projectId, input.id))
+    })
+  }
+
+  async recordAttemptFailure(
+    input: RecordProjectionAttemptFailureInput
+  ): Promise<ProjectionRunRecord> {
+    return runImmediateTransaction(this.db, () => {
+      const existingRow = this.requireMaterializationExecution(input)
+      const error = parseProjectionAttemptFailure(restoreProjectionRunRow(existingRow), input.error)
+      const result = this.db
+        .query(
+          `
+          UPDATE projection_runs
+          SET error = ?
+          WHERE project_id = ? AND id = ? AND status = 'running' AND execution_token = ?
+        `
+        )
+        .run(
+          serializeSixbFailure(error, PROJECTION_RUN_FAILURE_CODES),
+          input.projectId,
+          input.id,
+          input.executionToken
+        )
+      if (result.changes !== 1) throw staleProjectionRunExecution(input.id)
       return rowToProjectionRunRecord(this.requireRow(input.projectId, input.id))
     })
   }
@@ -447,6 +476,34 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     return { runs, hasMore: offset + runs.length < totalRow.count, total: totalRow.count }
   }
 
+  async findSupersedingRun(
+    input: FindSupersedingProjectionRunInput
+  ): Promise<ProjectionRunRecord | null> {
+    const run = this.requireRow(input.projectId, input.id)
+    if (run.materialization_protocol !== "replacement") return null
+    // SQLite compares TEXT with the binary collation, under which canonical UTC ISO timestamps
+    // order chronologically.
+    const statuses = SUPERSEDING_PROJECTION_RUN_STATUSES
+    const newer = this.db
+      .query(
+        `
+          SELECT * FROM projection_runs
+          WHERE project_id = ? AND projection_id = ? AND materialization_protocol = 'replacement'
+            AND status IN (${statuses.map(() => "?").join(", ")})
+            AND dataset_version_created_at > ?
+          ORDER BY dataset_version_created_at DESC, id DESC
+          LIMIT 1
+        `
+      )
+      .get(
+        input.projectId,
+        run.projection_id,
+        ...statuses,
+        run.dataset_version_created_at
+      ) as DatabaseRow | null
+    return newer ? rowToProjectionRunRecord(newer) : null
+  }
+
   async listLatestByProjectionIds(
     input: ListLatestProjectionRunsInput
   ): Promise<ListLatestProjectionRunsResult> {
@@ -457,6 +514,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
       ownerIds: input.projectionIds,
       projectId: input.projectId,
       ownerIdFor: (row) => row.projection_id,
+      excludedStatus: "superseded",
     })
     return { runs: rows.map(rowToProjectionRunRecord) }
   }

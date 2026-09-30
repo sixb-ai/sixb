@@ -146,6 +146,10 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "The embedding call was interrupted; its outcome and charges may be unknown.",
     retryable: false,
   },
+  "storage.unavailable": {
+    publicMessage: "Storage is temporarily unavailable.",
+    retryable: true,
+  },
   "sync.execution_failed": {
     publicMessage: "Sync execution failed.",
     retryable: false,

@@ -19,6 +19,7 @@ import {
   immutableDatasetVersionConflict,
   mergeProjectionRunProgress,
   type PersistedProjectionRunRecord,
+  parseProjectionAttemptFailure,
   planProjectionRunFinish,
   planProjectionRunReclaim,
   projectionRunNotFound,
@@ -26,12 +27,14 @@ import {
   requireTelemetryProjectionRun,
   restoreProjectionRun,
   type StoredProjectionRunRecord,
+  SUPERSEDING_PROJECTION_RUN_STATUSES,
   staleProjectionRunExecution,
 } from "@sixb/core/internal/projection-run-storage-provider"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
   ExecutionStorage,
   FailProjectionRunEnqueueInput,
+  FindSupersedingProjectionRunInput,
   FinishProjectionRunInput,
   ListLatestProjectionRunsInput,
   ListLatestProjectionRunsResult,
@@ -44,6 +47,7 @@ import type {
   ProjectionRunStatus,
   ProjectionRunStorage,
   QueueProjectionRunInput,
+  RecordProjectionAttemptFailureInput,
   RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,
@@ -159,8 +163,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE projection_runs
         SET status = ${"running"}, started_at = COALESCE(started_at, ${input.startedAt ?? new Date()}),
-          finished_at = ${null}, attempt = ${attempt}, execution_token = ${executionToken},
-          error = ${null}
+          finished_at = ${null}, attempt = ${attempt}, execution_token = ${executionToken}
         WHERE project_id = ${input.projectId} AND id = ${input.id}
           AND (
             (status = ${"queued"} AND execution_token IS NULL)
@@ -218,6 +221,26 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
           source_rows_read = ${progress.sourceRowsRead},
           source_rows_skipped = ${progress.sourceRowsSkipped},
           source_changes_read = ${progress.sourceChangesRead ?? null}
+        WHERE project_id = ${input.projectId}
+          AND id = ${input.id}
+          AND status = ${"running"}
+          AND execution_token = ${input.executionToken}
+        RETURNING *
+      `
+      if (!updated) throw staleProjectionRunExecution(input.id)
+      return rowToProjectionRunRecord(updated)
+    })
+  }
+
+  async recordAttemptFailure(
+    input: RecordProjectionAttemptFailureInput
+  ): Promise<ProjectionRunRecord> {
+    return runPgTransaction(this.sql, async (tx) => {
+      const existingRow = await requireMaterializationExecution(tx, input)
+      const error = parseProjectionAttemptFailure(restoreProjectionRunRow(existingRow), input.error)
+      const [updated] = await tx<DatabaseRow[]>`
+        UPDATE projection_runs
+        SET error = ${serializeSixbFailure(error, PROJECTION_RUN_FAILURE_CODES)}::text::jsonb
         WHERE project_id = ${input.projectId}
           AND id = ${input.id}
           AND status = ${"running"}
@@ -411,6 +434,36 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
     return { runs, hasMore: offset + runs.length < total, total }
   }
 
+  async findSupersedingRun(
+    input: FindSupersedingProjectionRunInput
+  ): Promise<ProjectionRunRecord | null> {
+    const [run] = await this.sql<
+      Pick<
+        DatabaseRow,
+        "projection_id" | "materialization_protocol" | "dataset_version_created_at"
+      >[]
+    >`
+      SELECT projection_id, materialization_protocol, dataset_version_created_at
+      FROM projection_runs
+      WHERE project_id = ${input.projectId} AND id = ${input.id}
+    `
+    if (!run) throw projectionRunNotFound(input.projectId, input.id)
+    if (run.materialization_protocol !== "replacement") return null
+    // Canonical UTC ISO timestamps order as text, but only under a binary collation: a
+    // linguistic one may weigh their punctuation differently.
+    const [newer] = await this.sql<DatabaseRow[]>`
+      SELECT * FROM projection_runs
+      WHERE project_id = ${input.projectId}
+        AND projection_id = ${run.projection_id}
+        AND materialization_protocol = ${"replacement"}
+        AND status = ANY(${this.sql.array([...SUPERSEDING_PROJECTION_RUN_STATUSES])}::text[])
+        AND dataset_version_created_at COLLATE "C" > ${run.dataset_version_created_at} COLLATE "C"
+      ORDER BY dataset_version_created_at COLLATE "C" DESC, id DESC
+      LIMIT 1
+    `
+    return newer ? rowToProjectionRunRecord(newer) : null
+  }
+
   async listLatestByProjectionIds(
     input: ListLatestProjectionRunsInput
   ): Promise<ListLatestProjectionRunsResult> {
@@ -421,6 +474,7 @@ export class PgProjectionRunStorage implements ProjectionRunStorage {
       ownerIds: input.projectionIds,
       projectId: input.projectId,
       ownerIdFor: (row) => row.projection_id,
+      excludedStatus: "superseded",
     })
 
     return { runs: rows.map(rowToProjectionRunRecord) }

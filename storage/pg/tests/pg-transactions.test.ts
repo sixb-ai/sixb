@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test"
+import { isSixbError } from "@sixb/core/internal/errors"
 import type { PgStoreClient } from "../src/transactions"
 import { runPgRepeatableReadTransaction, runPgTransaction } from "../src/transactions"
 
@@ -14,7 +15,9 @@ interface FakePool {
  * statements `runPgTransaction` sends itself. This is the CI-runnable check of the emitted
  * transaction statements; the Docker-gated e2e runs them against PostgreSQL.
  */
-function fakePool(options: { readonly commitTag?: string } = {}): FakePool {
+function fakePool(
+  options: { readonly commitTag?: string; readonly connectError?: Error } = {}
+): FakePool {
   const statements: string[] = []
   let released = false
   const connection = {
@@ -30,7 +33,12 @@ function fakePool(options: { readonly commitTag?: string } = {}): FakePool {
     // for a pool that can start a transaction.
     reserve: async () => connection,
   }
-  const sql = { reserve: async () => connection }
+  const sql = {
+    reserve: async () => {
+      if (options.connectError) throw options.connectError
+      return connection
+    },
+  }
   return { sql: sql as unknown as PgStoreClient, statements, released: () => released }
 }
 
@@ -80,14 +88,28 @@ describe("runPgTransaction", () => {
   ])("sends nothing more and keeps a lost connection out of the pool: %s", async (_, lost) => {
     const pool = fakePool()
 
-    await expect(
-      runPgTransaction(pool.sql, async () => {
-        throw lost
-      })
-    ).rejects.toBe(lost)
+    const error = await runPgTransaction(pool.sql, async () => {
+      throw lost
+    }).catch((caught: unknown) => caught)
 
+    expectStorageUnavailable(error, lost)
     expect(pool.statements).toEqual(["BEGIN"])
     expect(pool.released()).toBe(false)
+  })
+
+  test.each([
+    ["refused", pgError("ECONNREFUSED")],
+    ["timed out", pgError("CONNECT_TIMEOUT")],
+    ["unresolved", pgError("ENOTFOUND")],
+  ])("reports a connection that could not be opened as unavailable storage: %s", async (_, cause) => {
+    const pool = fakePool({ connectError: cause })
+
+    const error = await runPgTransaction(pool.sql, async () => "ok").catch(
+      (caught: unknown) => caught
+    )
+
+    expectStorageUnavailable(error, cause)
+    expect(pool.statements).toEqual([])
   })
 
   test("fails when PostgreSQL answers COMMIT with a rollback", async () => {
@@ -188,3 +210,9 @@ describe("runPgRepeatableReadTransaction", () => {
     ).rejects.toThrow("cannot join an unverified PostgreSQL transaction")
   })
 })
+
+function expectStorageUnavailable(error: unknown, cause: Error): void {
+  expect(isSixbError(error) && error.code === "storage.unavailable" && error.retryable).toBe(true)
+  expect((error as Error).message).toStartWith("[SixbPg] PostgreSQL is unavailable")
+  expect((error as Error).cause).toBe(cause)
+}
