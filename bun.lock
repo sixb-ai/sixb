@@ -135,6 +135,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/fullenrich": {
+      "name": "@sixb/connector-fullenrich",
+      "version": "0.1.0",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/github": {
       "name": "@sixb/connector-github",
       "version": "0.1.4",
@@ -1639,6 +1654,8 @@
     "@sixb/connector-companycam": ["@sixb/connector-companycam@workspace:connectors/companycam"],
 
     "@sixb/connector-exa": ["@sixb/connector-exa@workspace:connectors/exa"],
+
+    "@sixb/connector-fullenrich": ["@sixb/connector-fullenrich@workspace:connectors/fullenrich"],
 
     "@sixb/connector-github": ["@sixb/connector-github@workspace:connectors/github"],
 

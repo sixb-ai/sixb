@@ -23,6 +23,9 @@
       "path": "connectors/exa/tsconfig.build.json"
     },
     {
+      "path": "connectors/fullenrich/tsconfig.build.json"
+    },
+    {
       "path": "connectors/github/tsconfig.build.json"
     },
     {
