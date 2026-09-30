@@ -117,7 +117,7 @@ export async function streamLogs(
     ...(options.follow ? ["--follow"] : []),
   ]
   await shell.run(ctlScript(name, args), {
-    ...(options.terminal ? { terminal: true } : { onLine: options.write }),
+    ...(options.terminal ? { terminal: true } : { onLine: (line: string) => options.write(line) }),
   })
 }
 
@@ -149,6 +149,10 @@ function ctlScript(
 
 async function capture(shell: RemoteShell, script: string): Promise<string[]> {
   const lines: string[] = []
-  await shell.run(script, { onLine: (line) => lines.push(line) })
+  await shell.run(script, {
+    onLine: (line, stream) => {
+      if (stream === "stdout") lines.push(line)
+    },
+  })
   return lines
 }

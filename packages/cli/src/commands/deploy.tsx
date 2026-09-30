@@ -1,11 +1,20 @@
 import { relative } from "node:path"
 import { writeJson } from "@sixb/cli-core"
-import type { DeployControlAction, DeployEvent, DeployRelease } from "@sixb/core/deploy"
+import type {
+  DeployAccessKey,
+  DeployCheck,
+  DeployConfig,
+  DeployControlAction,
+  DeployEvent,
+  DeployRelease,
+} from "@sixb/core/deploy"
 import { loadDeployConfig } from "../lib/deploy-config"
 import { buildDeployRelease } from "../lib/deploy-release"
-import { deployer, packSource, resolveBunVersion } from "../lib/deploy-source"
+import { deployer, packSource, projectPathOf, resolveBunVersion } from "../lib/deploy-source"
 import { SixbCliError } from "../lib/errors"
 import {
+  DeployAccessView,
+  DeployChecksView,
   DeployCompleteView,
   type DeployProgressState,
   DeployProgressView,
@@ -38,6 +47,18 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
 
   const source = await packSource(cwd, options.ref)
   const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd, source) })
+
+  // Stop before uploading anything when the target already says the deploy cannot work.
+  const checks = await config.target.check(release, {
+    name: config.name,
+    projectPath: source.projectPath,
+  })
+  if (checks.some(blocksDeploy)) {
+    await renderStatic(
+      <DeployChecksView name={config.name} location={location(config)} checks={checks} />
+    )
+    process.exit(1)
+  }
   const progress = createProgress(release, {
     commit: source.commit,
     ref: source.ref,
@@ -62,6 +83,104 @@ export async function runDeploy(options: DeployOptions = {}): Promise<void> {
   await renderStatic(
     <DeployCompleteView release={release} commit={source.commit} ref={source.ref} />
   )
+}
+
+export async function runDeployCheck(options: { readonly json?: boolean; readonly cwd?: string }) {
+  const cwd = options.cwd ?? process.cwd()
+  const { config } = await loadDeployConfig(cwd)
+  const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd) })
+  const checks = await config.target.check(release, {
+    name: config.name,
+    projectPath: await projectPathOf(cwd),
+  })
+  if (options.json) writeJson(checks)
+  else
+    await renderStatic(
+      <DeployChecksView name={config.name} location={location(config)} checks={checks} />
+    )
+  if (checks.some(blocksDeploy)) process.exitCode = 1
+}
+
+export async function runDeploySetup(options: {
+  readonly admin?: string
+  readonly key?: string
+  readonly cwd?: string
+}) {
+  const cwd = options.cwd ?? process.cwd()
+  const { config } = await loadDeployConfig(cwd)
+  const release = buildDeployRelease(config, { bunVersion: await resolveBunVersion(cwd) })
+  const context = { name: config.name, projectPath: await projectPathOf(cwd) }
+
+  if (!config.target.setup) {
+    console.log(`A ${config.target.kind} target needs no setup.`)
+  } else {
+    await config.target.setup(release, {
+      ...context,
+      ...(options.admin ? { admin: options.admin } : {}),
+      ...(options.key ? { key: options.key } : {}),
+      write: (line) => console.log(line),
+    })
+  }
+  const checks = await config.target.check(release, context)
+  await renderStatic(
+    <DeployChecksView name={config.name} location={location(config)} checks={checks} />
+  )
+}
+
+export async function runDeployAccess(options: {
+  readonly action: "list" | "add" | "remove"
+  readonly value?: string
+  readonly json?: boolean
+  readonly cwd?: string
+}) {
+  const { config } = await loadDeployConfig(options.cwd)
+  const access = config.target.access
+  if (!access) {
+    throw new SixbCliError(`[SixbDeploy] A ${config.target.kind} target has no keys to manage.`)
+  }
+  const context = { name: config.name }
+
+  if (options.action === "list") {
+    const keys = await access.list(context)
+    if (options.json) return writeJson(keys)
+    return renderStatic(<DeployAccessView title={`Keys for ${location(config)}`} keys={keys} />)
+  }
+  if (options.action === "add") {
+    const added: DeployAccessKey[] = []
+    for (const key of await publicKeys(options.value ?? ""))
+      added.push(await access.add(key, context))
+    return renderStatic(<DeployAccessView title="Authorized" keys={added} />)
+  }
+  const removed = await access.remove(options.value ?? "", context)
+  return renderStatic(<DeployAccessView title="Revoked" keys={removed} />)
+}
+
+/**
+ * The public keys a value names: `github:<user>` for the keys on that GitHub account, a path to a
+ * `.pub` file, or the key's own text.
+ */
+async function publicKeys(value: string): Promise<string[]> {
+  if (value.startsWith("github:")) {
+    const user = value.slice("github:".length)
+    const response = await fetch(`https://github.com/${encodeURIComponent(user)}.keys`)
+    if (!response.ok) {
+      throw new SixbCliError(`[SixbDeploy] GitHub has no public keys for '${user}'.`)
+    }
+    const keys = (await response.text()).split("\n").filter((line) => line.trim())
+    if (keys.length === 0) throw new SixbCliError(`[SixbDeploy] '${user}' has no keys on GitHub.`)
+    return keys.map((key) => `${key.trim()} ${user}@github`)
+  }
+  const file = Bun.file(value)
+  if (await file.exists()) return [(await file.text()).trim()]
+  return [value]
+}
+
+function blocksDeploy(check: DeployCheck): boolean {
+  return check.status === "fixable" || check.status === "manual"
+}
+
+function location(config: DeployConfig): string {
+  return `${config.target.kind} ${config.target.location}`
 }
 
 export async function runDeployStatus(options: { readonly json?: boolean; readonly cwd?: string }) {

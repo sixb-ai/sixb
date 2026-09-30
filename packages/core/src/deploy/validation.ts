@@ -44,7 +44,7 @@ function target(value: unknown): void {
     throw new Error(`[SixbDeploy] target is required. ${hint}`)
   }
   const candidate = value as UnknownRecord
-  const methods = ["listenAddress", "deploy", "status", "logs", "control"]
+  const methods = ["listenAddress", "deploy", "status", "logs", "control", "check"]
   if (
     typeof candidate.kind !== "string" ||
     typeof candidate.location !== "string" ||
