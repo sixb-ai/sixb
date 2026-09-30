@@ -144,6 +144,13 @@ export const connectorCatalog: readonly ConnectorEntry[] = [
     icon: "unipile.png",
   },
   {
+    id: "fullenrich",
+    name: "FullEnrich",
+    description: "Contact enrichment, reverse email lookup, and B2B search",
+    category: "Business",
+    package: "fullenrich",
+  },
+  {
     id: "companycam",
     name: "CompanyCam",
     description: "Projects and jobsite photos",
