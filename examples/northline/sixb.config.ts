@@ -7,22 +7,29 @@ import { SmolvmSandboxFactory } from "@sixb/sandboxes-smolvm"
 import { SqliteStorage } from "@sixb/sqlite"
 import { languageModels } from "./ai/models"
 import { generateImageTool, lookupResponsePolicy } from "./ai/tools"
+import { productionRuntime } from "./lib/runtime/production"
 
 const localLakePath = ".sixb/lake"
 mkdirSync(localLakePath, { recursive: true })
+
+// Production roles and `sixb deploy` set NODE_ENV=production; `sixb dev` does not.
+const production = process.env.NODE_ENV === "production" ? productionRuntime() : null
 
 export const sixb = createSixb({
   id: "northline",
   models: { language: languageModels },
   tools: [lookupResponsePolicy, generateImageTool],
-  broker: new InMemoryBroker(),
-  storage: new SqliteStorage({ path: ".sixb" }),
-  lakeStorage: new DuckLakeStorage({
-    catalog: { type: "duckdb", path: `${localLakePath}/catalog.ducklake` },
-    dataPath: `${localLakePath}/data`,
-  }),
+  broker: production?.broker ?? new InMemoryBroker(),
+  storage: production?.storage ?? new SqliteStorage({ path: ".sixb" }),
+  lakeStorage:
+    production?.lakeStorage ??
+    new DuckLakeStorage({
+      catalog: { type: "duckdb", path: `${localLakePath}/catalog.ducklake` },
+      dataPath: `${localLakePath}/data`,
+    }),
   blobStorage: new LocalBlobStorage({ basePath: ".sixb" }),
-  queues: new InMemoryQueues(),
+  queues: production?.queues ?? new InMemoryQueues(),
+  ...(production ? { auth: production.auth } : {}),
   sandboxes:
     process.env.SIXB_SANDBOX_PROVIDER === "smolvm"
       ? new SmolvmSandboxFactory({
