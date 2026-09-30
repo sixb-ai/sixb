@@ -60,6 +60,9 @@ export async function runCheck(options: CheckOptions = {}) {
       process.exit(process.exitCode ?? 1)
     }
   }
+  // A client can report itself closed and still hold the process open — one retrying a server it
+  // never reached does. The report is out and teardown ran, so finish.
+  process.exit(process.exitCode ?? 0)
 }
 
 const CLOSE_TIMEOUT_MS = 10_000

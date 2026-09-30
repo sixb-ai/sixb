@@ -82,4 +82,12 @@ describe("sixb check", () => {
     expect(result.timedOut).toBe(false)
     expect(result.exitCode).toBe(0)
   }, 30_000)
+
+  // Reproduce: remove the final `process.exit` from commands/check.tsx and this times out.
+  test("exits when a provider keeps the process open after closing", async () => {
+    const result = await spawnCheckWithTimeout("retrying-handle-project", 15_000)
+
+    expect(result.timedOut).toBe(false)
+    expect(result.exitCode).toBe(0)
+  }, 30_000)
 })
