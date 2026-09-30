@@ -464,6 +464,9 @@
     "deploy/ssh": {
       "name": "@sixb/deploy-ssh",
       "version": "0.1.0",
+      "bin": {
+        "sixb-deploy-ssh": "./src/server/cli.ts",
+      },
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -498,10 +501,14 @@
       "name": "@sixb/example-northline",
       "dependencies": {
         "@sixb/app": "workspace:*",
+        "@sixb/auth-magic-link": "workspace:*",
         "@sixb/blob-local": "workspace:*",
+        "@sixb/broker-redis": "workspace:*",
         "@sixb/client": "workspace:*",
         "@sixb/core": "workspace:*",
         "@sixb/ducklake": "workspace:*",
+        "@sixb/pg": "workspace:*",
+        "@sixb/queues-bullmq": "workspace:*",
         "@sixb/sandboxes-local": "workspace:*",
         "@sixb/sandboxes-smolvm": "workspace:*",
         "@sixb/sqlite": "workspace:*",
@@ -518,6 +525,7 @@
         "zod": "^3.24.0",
       },
       "devDependencies": {
+        "@sixb/cli": "workspace:*",
         "@sixb/deploy-ssh": "workspace:*",
         "@sixb/server": "workspace:*",
         "@types/bun": "latest",

@@ -44,10 +44,11 @@ function target(value: unknown): void {
     throw new Error(`[SixbDeploy] target is required. ${hint}`)
   }
   const candidate = value as UnknownRecord
+  const methods = ["listenAddress", "deploy", "status", "logs", "control"]
   if (
     typeof candidate.kind !== "string" ||
     typeof candidate.location !== "string" ||
-    typeof candidate.listenAddress !== "function"
+    methods.some((method) => typeof candidate[method] !== "function")
   ) {
     throw new Error(`[SixbDeploy] target is not a deploy target. ${hint}`)
   }

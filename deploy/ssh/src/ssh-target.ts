@@ -1,5 +1,18 @@
 import { isIPv6 } from "node:net"
-import type { DeployHttpServiceName, DeployListenAddress, DeployTarget } from "@sixb/core/deploy"
+import type {
+  DeployContext,
+  DeployControlAction,
+  DeployHttpServiceName,
+  DeployListenAddress,
+  DeployLogsOptions,
+  DeployOperationContext,
+  DeployRelease,
+  DeploySource,
+  DeployStatus,
+  DeployTarget,
+} from "@sixb/core/deploy"
+import { controlServices, deployRelease, readStatus, streamLogs } from "./operations"
+import { type RemoteShell, SshShell } from "./transport"
 
 export interface SshTargetOptions {
   /** The server: a hostname, an IP address, or a `Host` alias from your SSH config. */
@@ -61,6 +74,37 @@ export class SshTarget implements DeployTarget {
 
   listenAddress(service: DeployHttpServiceName): DeployListenAddress {
     return { host: LISTEN_HOST, port: this.#ports[service] }
+  }
+
+  deploy(release: DeployRelease, source: DeploySource, context: DeployContext): Promise<void> {
+    return this.#connected((shell) => deployRelease(shell, this.user, release, source, context))
+  }
+
+  status(context: DeployOperationContext): Promise<DeployStatus> {
+    return this.#connected((shell) => readStatus(shell, context.name))
+  }
+
+  logs(options: DeployLogsOptions, context: DeployOperationContext): Promise<void> {
+    // Following in a terminal attaches it, so Ctrl-C stops the remote reader too.
+    const terminal = options.follow && Boolean(process.stdin.isTTY && process.stdout.isTTY)
+    return this.#connected((shell) => streamLogs(shell, context.name, { ...options, terminal }))
+  }
+
+  control(
+    action: DeployControlAction,
+    service: string | undefined,
+    context: DeployOperationContext
+  ): Promise<void> {
+    return this.#connected((shell) => controlServices(shell, context.name, action, service))
+  }
+
+  async #connected<T>(work: (shell: RemoteShell) => Promise<T>): Promise<T> {
+    const shell = await SshShell.open(this.location)
+    try {
+      return await work(shell)
+    } finally {
+      await shell.close()
+    }
   }
 }
 

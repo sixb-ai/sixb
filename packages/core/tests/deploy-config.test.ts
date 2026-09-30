@@ -7,6 +7,10 @@ const target: DeployTarget = {
   kind: "test",
   location: "test-server",
   listenAddress: () => ({ host: "127.0.0.1", port: 3000 }),
+  deploy: async () => {},
+  status: async () => ({ release: null, running: false, processes: [] }),
+  logs: async () => {},
+  control: async () => {},
 }
 
 function config(overrides: Record<string, unknown> = {}): unknown {

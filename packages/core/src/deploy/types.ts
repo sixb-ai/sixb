@@ -114,9 +114,148 @@ export interface DeployTarget {
   readonly location: string
   /** The address an HTTP service listens on, where the target's proxy reaches it. */
   listenAddress(service: DeployHttpServiceName): DeployListenAddress
+  /**
+   * Ships the source, runs the release, and resolves once its services answer. Rejects with the
+   * reason when a step fails; the steps it reported say how far it got.
+   */
+  deploy(release: DeployRelease, source: DeploySource, context: DeployContext): Promise<void>
+  /** What the deployment runs right now, and which release it runs. */
+  status(context: DeployOperationContext): Promise<DeployStatus>
+  /** Writes recent log lines, then new ones as they arrive when `follow` is set. */
+  logs(options: DeployLogsOptions, context: DeployOperationContext): Promise<void>
+  /** Restarts, stops, or starts one service, or every service. */
+  control(
+    action: DeployControlAction,
+    service: string | undefined,
+    context: DeployOperationContext
+  ): Promise<void>
 }
 
 export interface DeployListenAddress {
   readonly host: string
   readonly port: number
 }
+
+/**
+ * Everything a deployment runs, resolved by `sixb deploy` from `sixb.deploy.ts`. A target decides
+ * where and how it runs; which processes exist, and the command each one starts with, come from
+ * Sixb.
+ */
+export interface DeployRelease {
+  readonly name: string
+  readonly target: { readonly kind: string; readonly location: string }
+  /** The Bun version the project runs on. */
+  readonly bunVersion: string
+  /** The environment every step and service starts from. */
+  readonly env: DeployEnv
+  readonly steps: {
+    /** Runs while the previous release still serves. */
+    readonly build: readonly DeployCommand[]
+    /** Runs after the services stop and before they start again. */
+    readonly beforeStart: readonly DeployCommand[]
+  }
+  readonly services: readonly DeployReleaseService[]
+}
+
+export interface DeployCommand {
+  /** `sixb` is the CLI the project installs; `bun` runs a project script. */
+  readonly program: "sixb" | "bun"
+  readonly args: readonly string[]
+}
+
+export interface DeployReleaseService {
+  readonly name: string
+  readonly kind: "http" | "singleton" | "workers" | "script"
+  readonly command: DeployCommand
+  /** The complete environment: the release's, then the service's own additions. */
+  readonly env: DeployEnv
+  readonly instances: number
+  readonly http?: DeployReleaseHttp
+  readonly process: DeployReleaseProcess
+}
+
+export interface DeployReleaseHttp extends DeployListenAddress {
+  readonly domain: string
+  readonly publicOrigin: string
+  /** Answers once the service can take traffic, when the service has such a route. */
+  readonly readinessPath?: string
+}
+
+export interface DeployReleaseProcess {
+  readonly killTimeoutMs: number
+  readonly restartDelayMs: number
+  readonly maxMemory?: string
+}
+
+/** The committed files a deployment runs, read from git by `sixb deploy`. */
+export interface DeploySource {
+  /** The commit being deployed. */
+  readonly commit: string
+  /** What the deployer asked for, such as `HEAD` or `main`. */
+  readonly ref: string
+  /** The project's directory inside the repository: `.` at its root. */
+  readonly projectPath: string
+  /** Tar archives of the committed files: the repository first, then each submodule. */
+  readonly archives: readonly DeploySourceArchive[]
+}
+
+export interface DeploySourceArchive {
+  /** Where the archive's files belong, relative to the repository root: `.` for the root. */
+  readonly path: string
+  open(): ReadableStream<Uint8Array>
+}
+
+export interface DeployOperationContext {
+  /** The deployment's `name`, which a target may run several of. */
+  readonly name: string
+}
+
+export interface DeployContext extends DeployOperationContext {
+  /** Who deployed, recorded with the release. */
+  readonly deployedBy: string
+  report(event: DeployEvent): void
+}
+
+export type DeployEvent =
+  /** The steps the deployment will run, reported before the first one starts. */
+  | { readonly type: "steps"; readonly labels: readonly string[] }
+  | { readonly type: "step"; readonly index: number; readonly status: "running" | "done" }
+  | { readonly type: "output"; readonly line: string }
+
+export interface DeployStatus {
+  /** The release the target last deployed, if any. */
+  readonly release: DeployRecord | null
+  /** Whether the target's process supervisor is running. */
+  readonly running: boolean
+  readonly processes: readonly DeployProcessStatus[]
+}
+
+export interface DeployRecord {
+  readonly commit: string
+  readonly ref: string
+  readonly deployedAt: string
+  readonly deployedBy: string
+}
+
+export interface DeployProcessStatus {
+  readonly service: string
+  readonly instance: number
+  readonly status: "starting" | "running" | "stopping" | "stopped" | "exited"
+  readonly pid?: number
+  readonly restarts: number
+  readonly startedAt?: string
+  readonly cpuPercent?: number
+  readonly memoryBytes?: number
+  readonly lastError?: string
+}
+
+export interface DeployLogsOptions {
+  /** One service's logs, or every service's. */
+  readonly service?: string
+  /** How many recent lines to write first. */
+  readonly tail: number
+  readonly follow: boolean
+  write(line: string): void
+}
+
+export type DeployControlAction = "restart" | "start" | "stop"

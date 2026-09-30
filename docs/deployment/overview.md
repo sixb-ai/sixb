@@ -2,6 +2,8 @@
 
 Deploy a Sixb project as services that share the same configuration and persistent providers. The CLI builds your project and starts each service.
 
+To deploy to a Linux server you reach over SSH, describe the deployment in `sixb.deploy.ts` and run `sixb deploy`: it sends the commit, builds it on the server, and runs every service described below for you. See <a href="https://github.com/sixb-ai/sixb/tree/main/deploy/ssh#readme" target="_blank" rel="noopener noreferrer">@sixb/deploy-ssh</a>. The rest of this page covers running the services yourself.
+
 ## Prepare your configuration
 
 Use shared [infrastructure providers](../infrastructure/overview.md) for storage, datasets, files, events, and queues. In-memory providers cannot share state between production processes.
