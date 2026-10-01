@@ -4,7 +4,8 @@ import type { AuthorizablePrincipal } from "../../execution/types"
 export type UserStatus = "active" | "suspended"
 export type ServiceAccountStatus = "active" | "suspended"
 export type InvitationStatus = "pending" | "accepted" | "revoked"
-export type GroupMembershipSource = "invitation" | "manual" | "agent"
+/** `directory`: owned by the identity provider, and synced to its groups on every sign-in. */
+export type GroupMembershipSource = "invitation" | "manual" | "agent" | "directory"
 export type DeviceAuthorizationStatus = "pending" | "approved" | "denied" | "consumed"
 export const MAX_PENDING_DEVICE_AUTHORIZATIONS = 100
 
@@ -45,7 +46,8 @@ export interface ServiceAccountGroupMembershipRecord {
   readonly projectId: string
   readonly serviceAccountId: string
   readonly groupId: string
-  readonly source: GroupMembershipSource
+  /** Service accounts never sign in, so no identity provider owns their memberships. */
+  readonly source: Exclude<GroupMembershipSource, "directory">
   readonly createdAt: Date
 }
 
@@ -269,7 +271,7 @@ export interface UpsertAuthServiceAccountGroupMembershipInput {
   readonly projectId: string
   readonly serviceAccountId: string
   readonly groupId: string
-  readonly source: GroupMembershipSource
+  readonly source: ServiceAccountGroupMembershipRecord["source"]
   readonly createdAt?: Date
 }
 
@@ -431,7 +433,6 @@ export interface CompleteMagicLinkSignInInput {
   readonly newUserDisplayName?: string
   readonly newUserAvatarUrl?: string
   readonly allowUserCreationWithoutInvitation?: boolean
-  readonly requireNoActiveUsersForUserCreation?: boolean
   readonly manualGroupIds?: readonly string[]
   readonly session: CompleteAuthSessionInput
 }
@@ -442,15 +443,22 @@ export interface CompleteOidcSignInInput {
   readonly stateHash: string
   readonly completedAt: Date
   readonly subject: string
+  /**
+   * An address the strategy has already decided to trust. Without an identity for `subject`, it
+   * links the user who has this email, or claims this email's invitation for a new user.
+   */
   readonly email: string
-  readonly emailVerified?: boolean
   readonly displayName?: string
   readonly avatarUrl?: string
   readonly claims?: Readonly<Record<string, unknown>>
-  readonly autoLinkByVerifiedEmail?: boolean
   readonly allowUserCreationWithoutInvitation?: boolean
-  readonly requireNoActiveUsersForUserCreation?: boolean
   readonly manualGroupIds?: readonly string[]
+  /**
+   * The groups the identity provider grants this user. When present, the user's `directory`
+   * memberships become exactly these; memberships from any other source are never touched, and a
+   * group the user already has from another source keeps it. Omitted, nothing is synced.
+   */
+  readonly directoryGroupIds?: readonly string[]
   readonly newUserId: string
   readonly session: CompleteAuthSessionInput
 }

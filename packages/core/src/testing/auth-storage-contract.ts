@@ -81,6 +81,34 @@ async function createUser(
   })
 }
 
+async function completeOidcSignInForAva(
+  storage: AuthStorage,
+  directoryGroupIds: readonly string[] | undefined
+): Promise<void> {
+  await storage.oidcAuthorizationAttempts.create({
+    id: "oidc_directory",
+    projectId,
+    strategyId: "entra",
+    audience: "atlas",
+    stateHash: "directory-state",
+    nonceHash: "nonce-hash",
+    codeVerifier: "verifier",
+    createdAt: at("2026-05-14T10:00:00.000Z"),
+    expiresAt: at("2026-05-14T10:10:00.000Z"),
+  })
+  await storage.completeOidcSignIn({
+    projectId,
+    oidcAuthorizationAttemptId: "oidc_directory",
+    stateHash: "directory-state",
+    completedAt: at("2026-05-14T10:01:00.000Z"),
+    subject: "entra-ava",
+    email: "ava@acme.com",
+    directoryGroupIds,
+    newUserId: "usr_unused",
+    session: sessionInput("ses_directory"),
+  })
+}
+
 /**
  * Runs the shared `AuthStorage` contract against any storage implementation.
  *
@@ -1721,91 +1749,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("closes bootstrap user creation when an active user already exists", async () => {
-      await withStorage(async (storage) => {
-        await createUser(storage, {
-          id: "usr_existing",
-          email: "existing@acme.com",
-        })
-        await storage.magicLinks.create({
-          id: "ml_1",
-          projectId,
-          strategyId: "magic-link",
-          audience: "atlas",
-          email: "founder@acme.com",
-          tokenHash: "link-hash",
-          createdAt: at("2026-05-14T10:01:00.000Z"),
-          expiresAt: at("2026-05-14T10:16:00.000Z"),
-        })
-
-        await expectAuthError(
-          storage.completeMagicLinkSignIn({
-            projectId,
-            magicLinkId: "ml_1",
-            tokenHash: "link-hash",
-            completedAt: at("2026-05-14T10:03:00.000Z"),
-            newUserId: "usr_founder",
-            allowUserCreationWithoutInvitation: true,
-            requireNoActiveUsersForUserCreation: true,
-            session: sessionInput("ses_founder"),
-          }),
-          "user_creation_not_allowed"
-        )
-        await expect(
-          storage.users.getByEmail({ projectId, email: "founder@acme.com" })
-        ).resolves.toBeNull()
-        await expect(storage.magicLinks.getById({ projectId, id: "ml_1" })).resolves.toMatchObject({
-          consumedAt: at("2026-05-14T10:03:00.000Z"),
-        })
-      })
-    })
-
-    test("does not apply the bootstrap closure guard to invited user creation", async () => {
-      await withStorage(async (storage) => {
-        await createUser(storage, {
-          id: "usr_existing",
-          email: "existing@acme.com",
-        })
-        await storage.invitations.createOrUpdateActive({
-          id: "inv_1",
-          projectId,
-          email: "invited@acme.com",
-          groupIds: ["commercial"],
-          createdAt: at("2026-05-14T10:00:00.000Z"),
-          expiresAt: at("2026-05-21T10:00:00.000Z"),
-        })
-        await storage.magicLinks.create({
-          id: "ml_1",
-          projectId,
-          strategyId: "magic-link",
-          audience: "atlas",
-          email: "invited@acme.com",
-          tokenHash: "link-hash",
-          createdAt: at("2026-05-14T10:01:00.000Z"),
-          expiresAt: at("2026-05-14T10:16:00.000Z"),
-        })
-
-        const result = await storage.completeMagicLinkSignIn({
-          projectId,
-          magicLinkId: "ml_1",
-          tokenHash: "link-hash",
-          completedAt: at("2026-05-14T10:03:00.000Z"),
-          newUserId: "usr_invited",
-          requireNoActiveUsersForUserCreation: true,
-          session: sessionInput("ses_invited"),
-        })
-
-        expect(result.user).toMatchObject({
-          id: "usr_invited",
-          email: "invited@acme.com",
-        })
-        expect(result.invitation).toMatchObject({
-          id: "inv_1",
-          status: "accepted",
-        })
-      })
-    })
-
     test("consumes valid magic links when an existing user is suspended", async () => {
       await withStorage(async (storage) => {
         await createUser(storage, { status: "suspended" })
@@ -1867,7 +1810,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           completedAt: at("2026-05-14T10:02:00.000Z"),
           subject: "00u1",
           email: "renamed@acme.com",
-          emailVerified: true,
           claims: { email: "renamed@acme.com" },
           newUserId: "usr_unused",
           session: sessionInput("ses_oidc"),
@@ -1885,65 +1827,35 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("auto-links OIDC by verified email only when explicitly allowed", async () => {
+    test("links a new OIDC identity to the existing user with its email", async () => {
       await withStorage(async (storage) => {
         await createUser(storage, { id: "usr_existing", email: "ava@acme.com" })
         await storage.oidcAuthorizationAttempts.create({
-          id: "oidc_blocked",
+          id: "oidc_1",
           projectId,
           strategyId: "okta",
           audience: "atlas",
-          stateHash: "blocked-state",
+          stateHash: "state-hash",
           nonceHash: "nonce-hash",
           codeVerifier: "verifier",
           createdAt: at("2026-05-14T10:00:00.000Z"),
           expiresAt: at("2026-05-14T10:10:00.000Z"),
         })
 
-        await expectAuthError(
-          storage.completeOidcSignIn({
-            projectId,
-            oidcAuthorizationAttemptId: "oidc_blocked",
-            stateHash: "blocked-state",
-            completedAt: at("2026-05-14T10:01:00.000Z"),
-            subject: "00u1",
-            email: "ava@acme.com",
-            emailVerified: false,
-            autoLinkByVerifiedEmail: true,
-            newUserId: "usr_unused",
-            session: sessionInput("ses_blocked"),
-          }),
-          "email_link_not_allowed"
-        )
-
-        await storage.oidcAuthorizationAttempts.create({
-          id: "oidc_allowed",
-          projectId,
-          strategyId: "okta",
-          audience: "atlas",
-          stateHash: "allowed-state",
-          nonceHash: "nonce-hash",
-          codeVerifier: "verifier",
-          createdAt: at("2026-05-14T10:02:00.000Z"),
-          expiresAt: at("2026-05-14T10:12:00.000Z"),
-        })
         const result = await storage.completeOidcSignIn({
           projectId,
-          oidcAuthorizationAttemptId: "oidc_allowed",
-          stateHash: "allowed-state",
-          completedAt: at("2026-05-14T10:03:00.000Z"),
+          oidcAuthorizationAttemptId: "oidc_1",
+          stateHash: "state-hash",
+          completedAt: at("2026-05-14T10:01:00.000Z"),
           subject: "00u1",
           email: "ava@acme.com",
-          emailVerified: true,
-          autoLinkByVerifiedEmail: true,
           newUserId: "usr_unused",
-          session: sessionInput("ses_allowed"),
+          session: sessionInput("ses_oidc"),
         })
 
         expect(result.user.id).toBe("usr_existing")
-        expect(result.identity).toMatchObject({
-          userId: "usr_existing",
-        })
+        expect(result.identity).toMatchObject({ subject: "00u1", userId: "usr_existing" })
+        await expect(storage.users.getById({ projectId, id: "usr_unused" })).resolves.toBeNull()
       })
     })
 
@@ -1977,7 +1889,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           subject: "00u1",
           email: "ava@acme.com",
           displayName: "Ava Chen",
-          emailVerified: true,
           newUserId: "usr_oidc",
           session: sessionInput("ses_oidc"),
         })
@@ -2024,7 +1935,6 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
             completedAt: at("2026-05-14T10:01:00.000Z"),
             subject: "00u1",
             email: "ava@acme.com",
-            emailVerified: true,
             newUserId: "usr_oidc",
             session: sessionInput("ses_oidc"),
           }),
@@ -2036,7 +1946,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
       })
     })
 
-    test("allows first OIDC bootstrap user creation with manual groups", async () => {
+    test("allows OIDC bootstrap user creation with manual groups", async () => {
       await withStorage(async (storage) => {
         await storage.oidcAuthorizationAttempts.create({
           id: "oidc_bootstrap",
@@ -2057,9 +1967,7 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
           completedAt: at("2026-05-14T10:01:00.000Z"),
           subject: "00u1",
           email: "founder@acme.com",
-          emailVerified: true,
           allowUserCreationWithoutInvitation: true,
-          requireNoActiveUsersForUserCreation: true,
           manualGroupIds: ["security-admins"],
           newUserId: "usr_founder",
           session: sessionInput("ses_oidc_bootstrap"),
@@ -2072,6 +1980,72 @@ export function runAuthStorageContractSuite<TStorage extends AuthStorage>(
         await expect(
           storage.groupMemberships.listForUser({ projectId, userId: "usr_founder" })
         ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])
+      })
+    })
+
+    test("syncs directory memberships to exactly the groups the provider grants", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        for (const [groupId, source] of [
+          ["security-admins", "manual"],
+          ["commercial", "invitation"],
+          ["legacy-team", "directory"],
+        ] as const) {
+          await storage.groupMemberships.upsert({ projectId, userId: "usr_1", groupId, source })
+        }
+
+        await completeOidcSignInForAva(storage, ["security-admins", "field-ops"])
+
+        // legacy-team is no longer granted; security-admins keeps its manual source.
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_1" })
+        ).resolves.toMatchObject([
+          { groupId: "commercial", source: "invitation" },
+          { groupId: "field-ops", source: "directory" },
+          { groupId: "security-admins", source: "manual" },
+        ])
+      })
+    })
+
+    test("removes every directory membership when the provider grants no groups", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.groupMemberships.upsert({
+          projectId,
+          userId: "usr_1",
+          groupId: "security-admins",
+          source: "manual",
+        })
+        await storage.groupMemberships.upsert({
+          projectId,
+          userId: "usr_1",
+          groupId: "field-ops",
+          source: "directory",
+        })
+
+        await completeOidcSignInForAva(storage, [])
+
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_1" })
+        ).resolves.toMatchObject([{ groupId: "security-admins", source: "manual" }])
+      })
+    })
+
+    test("leaves directory memberships alone when sign-in syncs no groups", async () => {
+      await withStorage(async (storage) => {
+        await createUser(storage)
+        await storage.groupMemberships.upsert({
+          projectId,
+          userId: "usr_1",
+          groupId: "field-ops",
+          source: "directory",
+        })
+
+        await completeOidcSignInForAva(storage, undefined)
+
+        await expect(
+          storage.groupMemberships.listForUser({ projectId, userId: "usr_1" })
+        ).resolves.toMatchObject([{ groupId: "field-ops", source: "directory" }])
       })
     })
 

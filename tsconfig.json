@@ -32,6 +32,8 @@
       "@sixb/connector-companycam": ["./connectors/companycam/src/index.ts"],
       "@sixb/connector-exa": ["./connectors/exa/src/index.ts"],
       "@sixb/connector-exa/agent-tools": ["./connectors/exa/src/agent-tools.ts"],
+      "@sixb/connector-fullenrich": ["./connectors/fullenrich/src/index.ts"],
+      "@sixb/connector-fullenrich/agent-tools": ["./connectors/fullenrich/src/agent-tools.ts"],
       "@sixb/connector-github": ["./connectors/github/src/index.ts"],
       "@sixb/connector-github/auth": ["./connectors/github/src/auth.ts"],
       "@sixb/connector-google": ["./connectors/google/src/index.ts"],

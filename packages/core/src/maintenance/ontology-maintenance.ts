@@ -24,6 +24,9 @@ const DEGRADED_FAILURE_THRESHOLD = 2
 // run ahead of the database's; the sweep leaves sessions alone until this long past expiry.
 const ABANDONED_UPLOAD_SWEEP_DELAY_MS = 5 * 60_000
 const ABANDONED_UPLOAD_ABORT_GRACE_MS = 15 * 60_000
+// One abandoned candidate of a large projection holds hundreds of thousands of rows. Batches this
+// size keep each delete short while clearing such a candidate within a pass.
+const ABANDONED_SOURCE_PURGE_BATCH = 50_000
 
 interface OntologyMaintenanceDependencies {
   readonly projectId: string
@@ -188,6 +191,11 @@ export class OntologyMaintenance {
       failures,
       { rowsDeleted: 0, materializationsDeleted: 0 }
     )
+    const abandonedSources = await captureFailure(
+      () => this.purgeAbandonedSources(started),
+      failures,
+      { rowsDeleted: 0, materializationsDeleted: 0 }
+    )
     const uploads = this.storage.fileUploadSessions
     if (uploads) {
       // Retire abandoned uploads first: the store never reaps one that is still pending.
@@ -197,8 +205,30 @@ export class OntologyMaintenance {
 
     return {
       publishedOutboxRowsDeleted,
-      terminalSourceRowsDeleted: terminalSources.rowsDeleted,
-      terminalSourceMaterializationsDeleted: terminalSources.materializationsDeleted,
+      terminalSourceRowsDeleted: terminalSources.rowsDeleted + abandonedSources.rowsDeleted,
+      terminalSourceMaterializationsDeleted:
+        terminalSources.materializationsDeleted + abandonedSources.materializationsDeleted,
+    }
+  }
+
+  /** Deletes abandoned candidates batch after batch, until none is left or the pass runs long. */
+  private async purgeAbandonedSources(
+    started: Date
+  ): Promise<{ readonly rowsDeleted: number; readonly materializationsDeleted: number }> {
+    let rowsDeleted = 0
+    let materializationsDeleted = 0
+    while (true) {
+      const purged = await this.storage.ontology.sources.purgeAbandoned({
+        projectId: this.projectId,
+        limit: ABANDONED_SOURCE_PURGE_BATCH,
+      })
+      rowsDeleted += purged.rowsDeleted
+      materializationsDeleted += purged.materializationsDeleted
+      const exhausted =
+        purged.rowsDeleted + purged.materializationsDeleted < ABANDONED_SOURCE_PURGE_BATCH
+      if (exhausted || this.now().getTime() - started.getTime() >= this.intervalMs) {
+        return { rowsDeleted, materializationsDeleted }
+      }
     }
   }
 

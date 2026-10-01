@@ -41,6 +41,13 @@ const failure = {
   details: { projectionId: "contract.devices", runId: "failed-run" },
 } as const satisfies SixbFailure<ProjectionRunFailureCode>
 
+const attemptFailure = {
+  code: "storage.unavailable",
+  message: "Storage is temporarily unavailable.",
+  retryable: true,
+  at: "2026-06-01T11:00:00.000Z",
+} as const satisfies SixbFailure<ProjectionRunFailureCode>
+
 const replacementIdentity = {
   projectionId: "contract.devices",
   projectionKind: "object",
@@ -149,11 +156,149 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
           error: { code: "queue.enqueue_failed", message: "queue unavailable" },
         })
 
-        await expect(context.projectionRuns.queue(admission)).resolves.toMatchObject({
+        const requeued = await context.projectionRuns.queue(admission)
+        expect(requeued).toMatchObject({
           executionId: admission.executionId,
           status: "queued",
           attempt: 0,
         })
+        expect(requeued.error).toBeUndefined()
+      })
+    })
+
+    test("keeps the failure of a retried attempt until the run ends", async () => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const input = replacementInput("retried-run")
+        await admitProjectionRun(context, input)
+        const first = await storage.startOrReclaim(input)
+
+        const failed = await storage.recordAttemptFailure({
+          ...executionInput(first),
+          error: attemptFailure,
+        })
+        expect(failed).toMatchObject({ status: "running", error: attemptFailure })
+
+        const second = await storage.startOrReclaim(input)
+        expect(second.run).toMatchObject({ attempt: 2, error: attemptFailure })
+        await expect(
+          storage.recordAttemptFailure({ ...executionInput(first), error: failure })
+        ).rejects.toThrow("execution token is stale")
+        await expect(
+          storage.recordAttemptFailure({
+            ...executionInput(second),
+            error: { ...failure, code: "dataset.not_found" } as never,
+          })
+        ).rejects.toThrow("code is not allowed by this failure contract")
+
+        const succeeded = await storage.finish({
+          ...executionInput(second),
+          protocol: "replacement",
+          status: "succeeded",
+        })
+        expect(succeeded).toMatchObject({ status: "succeeded" })
+        expect(succeeded.error).toBeUndefined()
+        await expect(
+          storage.recordAttemptFailure({ ...executionInput(second), error: failure })
+        ).rejects.toThrow("already terminal")
+      })
+    })
+
+    test("finds the newest later run that still stands to replace a source", async () => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const current = replacementInput("current-run")
+        const earlier = versionedReplacementInput("earlier-run", "version-0", "2025-12-31")
+        const later = versionedReplacementInput("later-run", "version-2", "2026-01-02")
+        const latest = versionedReplacementInput("latest-run", "version-3", "2026-01-03")
+        const otherProjection = {
+          ...versionedReplacementInput("other-projection-run", "version-4", "2026-01-04"),
+          identity: {
+            ...versionedReplacementInput("other", "version-4", "2026-01-04").identity,
+            projectionId: "contract.rooms",
+          },
+        }
+        for (const input of [current, earlier, later, latest, otherProjection]) {
+          await admitProjectionRun(context, input)
+        }
+        const superseding = () => storage.findSupersedingRun({ projectId, id: current.id })
+
+        await expect(superseding()).resolves.toMatchObject({ id: latest.id, status: "queued" })
+        await expect(storage.findSupersedingRun({ projectId, id: latest.id })).resolves.toBeNull()
+
+        // A run that failed or was cancelled replaces nothing, so it supersedes nothing either.
+        await finishClaimed(context, latest, "failed")
+        await expect(superseding()).resolves.toMatchObject({ id: later.id })
+        await finishClaimed(context, later, "cancelled")
+        await expect(superseding()).resolves.toBeNull()
+
+        const telemetry = {
+          id: "telemetry-run",
+          projectId,
+          identity: telemetryIdentity,
+          target: objectTarget,
+          fixedBatchSize: 2,
+        } as const
+        await admitProjectionRun(context, telemetry)
+        await expect(
+          storage.findSupersedingRun({ projectId, id: telemetry.id })
+        ).resolves.toBeNull()
+        await expect(storage.findSupersedingRun({ projectId, id: "missing-run" })).rejects.toThrow(
+          "not found"
+        )
+      })
+    })
+
+    test("ends a superseded run without a failure and never reports it as the latest", async () => {
+      await withStorage(async (context) => {
+        const storage = context.projectionRuns
+        const stale = replacementInput("stale-run")
+        const newer = versionedReplacementInput("newer-run", "version-2", "2026-01-02")
+        await admitProjectionRun(context, stale)
+        await admitProjectionRun(context, newer)
+        // Started after the newer run was queued, so it is the most recent by activity.
+        // Removal proof: drop the superseded filter from listLatestByProjectionIds.
+        const claim = await storage.startOrReclaim({
+          ...stale,
+          startedAt: new Date("2026-01-01T00:00:05.000Z"),
+        })
+
+        const superseded = await storage.finish({
+          ...executionInput(claim),
+          protocol: "replacement",
+          status: "superseded",
+        })
+
+        expect(superseded).toMatchObject({ status: "superseded", attempt: 1 })
+        expect(superseded.error).toBeUndefined()
+        expect(superseded.finishedAt).toBeInstanceOf(Date)
+        await expect(
+          storage.listLatestByProjectionIds({
+            projectId,
+            projectionIds: [replacementIdentity.projectionId],
+          })
+        ).resolves.toMatchObject({ runs: [{ id: newer.id, status: "queued" }] })
+        await expect(storage.list({ projectId, statuses: ["superseded"] })).resolves.toMatchObject({
+          runs: [{ id: stale.id }],
+          total: 1,
+        })
+
+        const telemetry = {
+          id: "telemetry-run",
+          projectId,
+          identity: telemetryIdentity,
+          target: objectTarget,
+          fixedBatchSize: 2,
+        } as const
+        await admitProjectionRun(context, telemetry)
+        const telemetryClaim = await storage.startOrReclaim(telemetry)
+        await expect(
+          storage.finish({
+            ...executionInput(telemetryClaim),
+            protocol: "telemetry",
+            status: "superseded",
+          } as never)
+        ).rejects.toThrow("cannot be superseded")
       })
     })
 
@@ -580,6 +725,34 @@ async function admitProjectionRun<TStorage extends ProjectionRunStorage>(
 
 function replacementInput(id: string) {
   return { id, projectId, identity: replacementIdentity, target: objectTarget } as const
+}
+
+/** A replacement run of the same projection, pinned to another version created on `day`. */
+function versionedReplacementInput(id: string, versionId: string, day: string) {
+  return {
+    ...replacementInput(id),
+    identity: {
+      ...replacementIdentity,
+      datasetVersion: {
+        ...replacementIdentity.datasetVersion,
+        versionId,
+        createdAt: `${day}T00:00:00.000Z`,
+      },
+    },
+  } as const
+}
+
+async function finishClaimed<TStorage extends ProjectionRunStorage>(
+  context: ProjectionRunStorageContractContext<TStorage>,
+  input: StartOrReclaimProjectionRunInput,
+  status: "failed" | "cancelled"
+): Promise<void> {
+  const claim = await context.projectionRuns.startOrReclaim(input)
+  await context.projectionRuns.finish({
+    ...executionInput(claim),
+    protocol: "replacement",
+    status,
+  })
 }
 
 function executionInput(claim: ProjectionRunClaim) {

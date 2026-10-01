@@ -449,8 +449,11 @@ export {
   snapshotObjectReadExecutionLimits,
 } from "./objects"
 export type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  AdoptedSourceMaterialization,
+  AdoptSourceMaterializationInput,
   ApplyMaterializationChunkInput,
   ApplyMaterializationResult,
   AssertSourceMaterializationExecution,
@@ -530,9 +533,9 @@ export type {
   OntologyStorage,
   OntologyVectorStorage,
   ProjectionOntologyCommitIntent,
+  PurgeAbandonedSourceMaterializationsInput,
   PurgePublishedOntologyOutboxInput,
   ReadMaterializationObjectExistenceInput,
-  ReclaimSourceMaterializationInput,
   RescheduleOntologyOutboxLeaseInput,
   SourceActivationWrite,
   SourceReplacementLinkState,
@@ -595,6 +598,7 @@ export {
 export type {
   AdvanceProjectionTelemetryCheckpointInput,
   FailProjectionRunEnqueueInput,
+  FindSupersedingProjectionRunInput,
   FinishProjectionRunInput,
   LinkProjectionRunRecord,
   LinkProjectionTarget,
@@ -616,6 +620,7 @@ export type {
   ProjectionTarget,
   ProjectionTelemetryCheckpoint,
   QueueProjectionRunInput,
+  RecordProjectionAttemptFailureInput,
   RecordProjectionMissingTargetInput,
   StartOrReclaimProjectionRunInput,
   TelemetryProjectionRunRecord,

@@ -8,6 +8,7 @@ import type {
   CompleteSignInResult,
   DeviceAuthorizationRecord,
   GroupMembershipRecord,
+  GroupMembershipSource,
   InvitationRecord,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
@@ -200,27 +201,6 @@ export class SqliteAuthStorage implements AuthStorage {
           }
         }
 
-        if (
-          shouldCreateUser &&
-          !activeInvitation &&
-          input.allowUserCreationWithoutInvitation &&
-          input.requireNoActiveUsersForUserCreation &&
-          hasActiveUsers(this.db, projectId)
-        ) {
-          consumeMagicLink(this.db, {
-            projectId,
-            id: input.magicLinkId,
-            tokenHash: input.tokenHash,
-            consumedAt: completedAt,
-          })
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
         validateCompleteSessionInput(this.db, projectId, input.session)
         assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
@@ -259,8 +239,9 @@ export class SqliteAuthStorage implements AuthStorage {
           projectId,
           user,
         })
-        const groupMemberships = this.applyManualGroups({
+        const groupMemberships = this.applyGroups({
           completedAt,
+          source: "manual",
           existing: invitation.groupMemberships,
           groupIds: manualGroupIds,
           projectId,
@@ -338,16 +319,6 @@ export class SqliteAuthStorage implements AuthStorage {
           }
         }
 
-        if (!identity && userRow && (!input.autoLinkByVerifiedEmail || !input.emailVerified)) {
-          this.consumeOidcAttempt(input, completedAt, projectId)
-          return {
-            error: new AuthStorageError(
-              "email_link_not_allowed",
-              `[Sixb] OIDC identity cannot auto-link to user '${userRow.id}' for project '${projectId}'.`
-            ),
-          }
-        }
-
         if (userRow?.status === "suspended") {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
@@ -358,33 +329,7 @@ export class SqliteAuthStorage implements AuthStorage {
           }
         }
 
-        if (shouldCreateUser && !input.emailVerified) {
-          this.consumeOidcAttempt(input, completedAt, projectId)
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
         if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
-          this.consumeOidcAttempt(input, completedAt, projectId)
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
-        if (
-          shouldCreateUser &&
-          !activeInvitation &&
-          input.allowUserCreationWithoutInvitation &&
-          input.requireNoActiveUsersForUserCreation &&
-          hasActiveUsers(this.db, projectId)
-        ) {
           this.consumeOidcAttempt(input, completedAt, projectId)
           return {
             error: new AuthStorageError(
@@ -438,10 +383,17 @@ export class SqliteAuthStorage implements AuthStorage {
           projectId,
           user,
         })
-        const groupMemberships = this.applyManualGroups({
+        const groupMemberships = this.syncDirectoryGroups({
           completedAt,
-          existing: invitation.groupMemberships,
-          groupIds: manualGroupIds,
+          existing: this.applyGroups({
+            completedAt,
+            source: "manual",
+            existing: invitation.groupMemberships,
+            groupIds: manualGroupIds,
+            projectId,
+            userId: user.id,
+          }),
+          groupIds: input.directoryGroupIds,
           projectId,
           userId: user.id,
         })
@@ -684,11 +636,12 @@ export class SqliteAuthStorage implements AuthStorage {
     return { invitation, groupMemberships }
   }
 
-  private applyManualGroups(input: {
+  private applyGroups(input: {
     readonly completedAt: Date
     readonly existing: readonly GroupMembershipRecord[]
     readonly groupIds: readonly string[]
     readonly projectId: string
+    readonly source: GroupMembershipSource
     readonly userId: string
   }): readonly GroupMembershipRecord[] {
     const groupMemberships = [...input.existing]
@@ -699,13 +652,41 @@ export class SqliteAuthStorage implements AuthStorage {
           projectId: input.projectId,
           userId: input.userId,
           groupId,
-          source: "manual",
+          source: input.source,
           createdAt: input.completedAt,
         })
       )
     }
 
     return groupMemberships
+  }
+  // Directory memberships become exactly `groupIds`. A group the user already holds from another
+  // source keeps that source, and memberships from other sources are never removed.
+  private syncDirectoryGroups(input: {
+    readonly completedAt: Date
+    readonly existing: readonly GroupMembershipRecord[]
+    readonly groupIds?: readonly string[]
+    readonly projectId: string
+    readonly userId: string
+  }): readonly GroupMembershipRecord[] {
+    if (!input.groupIds) {
+      return input.existing
+    }
+
+    const groupIds = normalizeGroupIds(input.groupIds)
+    this.db
+      .query(
+        `
+        DELETE FROM auth_group_memberships
+        WHERE project_id = ?
+          AND user_id = ?
+          AND source = 'directory'
+          AND group_id NOT IN (${groupIds.map(() => "?").join(", ")})
+      `
+      )
+      .run(input.projectId, input.userId, ...groupIds)
+
+    return this.applyGroups({ ...input, groupIds, source: "directory" })
   }
 
   private createSignInSession(input: {
@@ -790,22 +771,6 @@ export class SqliteAuthStorage implements AuthStorage {
       updated_at: toIso(input.updatedAt),
     })
   }
-}
-
-function hasActiveUsers(db: Database, projectId: string): boolean {
-  const row = db
-    .query(
-      `
-      SELECT 1 AS active
-      FROM auth_users
-      WHERE project_id = ?
-        AND status = 'active'
-      LIMIT 1
-    `
-    )
-    .get(projectId) as { readonly active: number } | null
-
-  return row !== null
 }
 
 function assertSignInSessionAudience(

@@ -32,13 +32,20 @@ test("replacement pages seek past the cursor in generic prepared plans", async (
       await tx.unsafe("SET LOCAL plan_cache_mode=force_generic_plan")
       // These temporary fixtures contain only the columns consumed by identity preparation.
       await tx.unsafe(
-        "CREATE TEMP TABLE ontology_source_roots(project_id text,source_id text,materialization_id text,root_sort_key text,active boolean) ON COMMIT DROP"
+        "CREATE TEMP TABLE ontology_sources(version_id bigint,project_id text,source_id text,materialization_id text,status text) ON COMMIT DROP"
+      )
+      await tx.unsafe("INSERT INTO ontology_sources VALUES (1,'test','source','candidate','ready')")
+      await tx.unsafe(
+        "CREATE TEMP TABLE ontology_source_roots(id bigint,version_id bigint,project_id text,root_key text,deleted boolean,retired_at timestamptz) ON COMMIT DROP"
       )
       await tx.unsafe(
-        "CREATE TEMP TABLE ontology_source_rows(project_id text,source_id text,materialization_id text,entity_kind text,object_type_id text,primary_id text,root_sort_key text) ON COMMIT DROP"
+        "CREATE TEMP TABLE ontology_source_rows(root_id bigint,entity_kind text,object_type_id text,primary_id text) ON COMMIT DROP"
       )
       await tx.unsafe(
-        "INSERT INTO ontology_source_rows SELECT 'test','source','candidate','object','Synthetic',lpad(i::text,5,'0'),i::text FROM generate_series(1,20000) i"
+        "INSERT INTO ontology_source_roots SELECT i,1,'test',i::text,false,NULL FROM generate_series(1,20000) i"
+      )
+      await tx.unsafe(
+        "INSERT INTO ontology_source_rows SELECT i,'object','Synthetic',lpad(i::text,5,'0') FROM generate_series(1,20000) i"
       )
       await tx.unsafe(
         'CREATE TEMP TABLE ontology_replacement_work(session_id text,entity_kind text,identity_key text COLLATE "C",sort_key text COLLATE "C",diff_required boolean,PRIMARY KEY(session_id,entity_kind,identity_key)) ON COMMIT DROP'

@@ -7,6 +7,7 @@ import type {
   CompleteSignInResult,
   DeviceAuthorizationRecord,
   GroupMembershipRecord,
+  GroupMembershipSource,
   InvitationRecord,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
@@ -232,27 +233,6 @@ export class PgAuthStorage implements AuthStorage {
           }
         }
 
-        if (
-          shouldCreateUser &&
-          !activeInvitation &&
-          input.allowUserCreationWithoutInvitation &&
-          input.requireNoActiveUsersForUserCreation &&
-          (await hasActiveUsers(tx, projectId))
-        ) {
-          await consumeMagicLink(tx, {
-            projectId,
-            id: input.magicLinkId,
-            tokenHash: input.tokenHash,
-            consumedAt: completedAt,
-          })
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
         await validateCompleteSessionInput(tx, projectId, input.session)
         assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
@@ -294,8 +274,9 @@ export class PgAuthStorage implements AuthStorage {
           projectId,
           user,
         })
-        const groupMemberships = await this.applyManualGroups(tx, {
+        const groupMemberships = await this.applyGroups(tx, {
           completedAt,
+          source: "manual",
           existing: invitation.groupMemberships,
           groupIds: manualGroupIds,
           projectId,
@@ -392,16 +373,6 @@ export class PgAuthStorage implements AuthStorage {
           }
         }
 
-        if (!identity && userRow && (!input.autoLinkByVerifiedEmail || !input.emailVerified)) {
-          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
-          return {
-            error: new AuthStorageError(
-              "email_link_not_allowed",
-              `[Sixb] OIDC identity cannot auto-link to user '${userRow.id}' for project '${projectId}'.`
-            ),
-          }
-        }
-
         if (userRow?.status === "suspended") {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
@@ -412,33 +383,7 @@ export class PgAuthStorage implements AuthStorage {
           }
         }
 
-        if (shouldCreateUser && !input.emailVerified) {
-          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
         if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
-          await this.consumeOidcAttempt(input, completedAt, projectId, tx)
-          return {
-            error: new AuthStorageError(
-              "user_creation_not_allowed",
-              `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-            ),
-          }
-        }
-
-        if (
-          shouldCreateUser &&
-          !activeInvitation &&
-          input.allowUserCreationWithoutInvitation &&
-          input.requireNoActiveUsersForUserCreation &&
-          (await hasActiveUsers(tx, projectId))
-        ) {
           await this.consumeOidcAttempt(input, completedAt, projectId, tx)
           return {
             error: new AuthStorageError(
@@ -497,10 +442,17 @@ export class PgAuthStorage implements AuthStorage {
           projectId,
           user,
         })
-        const groupMemberships = await this.applyManualGroups(tx, {
+        const groupMemberships = await this.syncDirectoryGroups(tx, {
           completedAt,
-          existing: invitation.groupMemberships,
-          groupIds: manualGroupIds,
+          existing: await this.applyGroups(tx, {
+            completedAt,
+            source: "manual",
+            existing: invitation.groupMemberships,
+            groupIds: manualGroupIds,
+            projectId,
+            userId: user.id,
+          }),
+          groupIds: input.directoryGroupIds,
           projectId,
           userId: user.id,
         })
@@ -703,13 +655,14 @@ export class PgAuthStorage implements AuthStorage {
     return { invitation, groupMemberships }
   }
 
-  private async applyManualGroups(
+  private async applyGroups(
     sql: SQLClient,
     input: {
       readonly completedAt: Date
       readonly existing: readonly GroupMembershipRecord[]
       readonly groupIds: readonly string[]
       readonly projectId: string
+      readonly source: GroupMembershipSource
       readonly userId: string
     }
   ): Promise<readonly GroupMembershipRecord[]> {
@@ -721,13 +674,40 @@ export class PgAuthStorage implements AuthStorage {
           projectId: input.projectId,
           userId: input.userId,
           groupId,
-          source: "manual",
+          source: input.source,
           createdAt: input.completedAt,
         })
       )
     }
 
     return groupMemberships
+  }
+  // Directory memberships become exactly `groupIds`. A group the user already holds from another
+  // source keeps that source, and memberships from other sources are never removed.
+  private async syncDirectoryGroups(
+    sql: SQLClient,
+    input: {
+      readonly completedAt: Date
+      readonly existing: readonly GroupMembershipRecord[]
+      readonly groupIds?: readonly string[]
+      readonly projectId: string
+      readonly userId: string
+    }
+  ): Promise<readonly GroupMembershipRecord[]> {
+    if (!input.groupIds) {
+      return input.existing
+    }
+
+    const groupIds = normalizeGroupIds(input.groupIds)
+    await sql`
+      DELETE FROM auth_group_memberships
+      WHERE project_id = ${input.projectId}
+        AND user_id = ${input.userId}
+        AND source = 'directory'
+        ${groupIds.length > 0 ? sql`AND group_id NOT IN ${sql(groupIds)}` : sql``}
+    `
+
+    return this.applyGroups(sql, { ...input, groupIds, source: "directory" })
   }
 
   private async createSignInSession(
@@ -813,18 +793,6 @@ export class PgAuthStorage implements AuthStorage {
 
     return rowToIdentityRecord(row)
   }
-}
-
-async function hasActiveUsers(sql: SQLClient, projectId: string): Promise<boolean> {
-  const rows = (await sql`
-    SELECT 1 AS active
-    FROM auth_users
-    WHERE project_id = ${projectId}
-      AND status = 'active'
-    LIMIT 1
-  `) as Array<{ readonly active: number }>
-
-  return rows.length > 0
 }
 
 function assertSignInSessionAudience(

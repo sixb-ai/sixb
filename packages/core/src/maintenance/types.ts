@@ -3,9 +3,15 @@ export interface OntologyMaintenanceOptions {
   readonly intervalMs?: number
   /** Published outbox retention. Defaults to 24 hours. */
   readonly publishedOutboxRetentionMs?: number
-  /** Superseded/abandoned source retention. Defaults to 24 hours. */
+  /**
+   * Retention of superseded source versions. Defaults to 24 hours. Abandoned candidates have none:
+   * nothing reads them, so the next pass deletes them whole.
+   */
   readonly terminalSourceRetentionMs?: number
-  /** Maximum deletions attempted per cleanup domain and pass. Defaults to 1,000. */
+  /**
+   * Maximum deletions attempted per cleanup domain and pass. Defaults to 1,000. Abandoned
+   * candidates are deleted in larger batches until none is left or the pass reaches `intervalMs`.
+   */
   readonly cleanupLimit?: number
   /** Warn after this shutdown grace period, then wait for active operations. Defaults to 30 seconds. */
   readonly shutdownTimeoutMs?: number

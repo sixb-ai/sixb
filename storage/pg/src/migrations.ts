@@ -106,7 +106,17 @@ import ontologyCommitAttributionSql from "./migrations/047-ontology-commit-attri
   type: "text",
 }
 import nativeSessionsSql from "./migrations/049-native-sessions.sql" with { type: "text" }
-import type { SQL, SQLClient } from "./pg-client"
+import directoryGroupMembershipsSql from "./migrations/050-directory-group-memberships.sql" with {
+  type: "text",
+}
+import projectionRunSupersessionSql from "./migrations/051-projection-run-supersession.sql" with {
+  type: "text",
+}
+import compactSourceStorageSql from "./migrations/052-compact-source-storage.sql" with {
+  type: "text",
+}
+import type { ReservedSQL, SQL, SQLClient } from "./pg-client"
+import { runPgTransactionOn, undoOnFailure, withReservedPgConnection } from "./transactions"
 
 export interface PostgresMigrationContext {
   exec(sqlText: string): Promise<void>
@@ -186,7 +196,7 @@ export function quoteIdent(identifier: string): string {
 }
 
 function postgresMigrationSession(
-  sql: SQL,
+  sql: ReservedSQL,
   schemaName: string
 ): { context: PostgresMigrationContext; state: MigrationHistoryStore } {
   const schema = quoteIdent(schemaName)
@@ -253,19 +263,15 @@ function postgresMigrationSession(
       },
       async transaction(run) {
         // `sql` is the reserved connection holding the migration advisory lock. porsager's
-        // reserved connection has no `.begin`, so drive the transaction manually on it and
-        // route exec()/markStarted()/markApplied() through the same connection via `active`.
+        // `.begin` would open the transaction on another pool connection, so drive it on this one
+        // and route exec()/markStarted()/markApplied() through it via `active`.
         const previous = active
         active = sql
-        await sql.unsafe("BEGIN")
         try {
-          await sql.unsafe(`SET LOCAL search_path TO ${schema}`)
-          const result = await run()
-          await sql.unsafe("COMMIT")
-          return result
-        } catch (error) {
-          await sql.unsafe("ROLLBACK")
-          throw error
+          return await runPgTransactionOn(sql, async () => {
+            await sql.unsafe(`SET LOCAL search_path TO ${schema}`)
+            return run()
+          })
         } finally {
           active = previous
         }
@@ -312,23 +318,21 @@ async function withPostgresMigrationLock<T>(
     readonly schemaName: string
     readonly migrations: MigrationSet<PostgresMigrationContext>
   },
-  run: (sql: SQL) => Promise<T>
+  run: (sql: ReservedSQL) => Promise<T>
 ): Promise<T> {
-  const sql = await params.sql.reserve()
   const [first, second] = advisoryLockParts(
     `storage:migration:${params.schemaName}:${params.migrations.adapterId}`
   )
 
-  try {
+  // A session-level lock outlives any transaction, so it is released before the connection goes
+  // back to the pool — except when the connection was lost, which already released it.
+  return withReservedPgConnection(params.sql, async (sql) => {
+    const unlock = () => sql`SELECT pg_advisory_unlock(${first}, ${second})`
     await sql`SELECT pg_advisory_lock(${first}, ${second})`
-    try {
-      return await run(sql)
-    } finally {
-      await sql`SELECT pg_advisory_unlock(${first}, ${second})`
-    }
-  } finally {
-    sql.release()
-  }
+    const result = await undoOnFailure(() => run(sql), unlock)
+    await unlock()
+    return result
+  })
 }
 
 function advisoryLockParts(key: string): readonly [number, number] {
@@ -408,6 +412,9 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("047-ontology-commit-attribution", ontologyCommitAttributionSql),
     pgSql("048-file-upload-sessions", fileUploadSessionsSql),
     pgSql("049-native-sessions", nativeSessionsSql),
+    pgSql("050-directory-group-memberships", directoryGroupMembershipsSql),
+    pgSql("051-projection-run-supersession", projectionRunSupersessionSql),
+    pgSql("052-compact-source-storage", compactSourceStorageSql),
   ],
 })
 

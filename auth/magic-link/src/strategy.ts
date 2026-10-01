@@ -264,7 +264,6 @@ class MagicLinkAuthStrategyImpl implements MagicLinkAuthStrategy {
       completedAt: now,
       newUserId: `usr_${randomUUID()}`,
       allowUserCreationWithoutInvitation: canBootstrap,
-      requireNoActiveUsersForUserCreation: false,
       manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
       session: {
         ...input.session,

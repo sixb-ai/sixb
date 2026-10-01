@@ -97,8 +97,11 @@ export type {
 } from "./outbox"
 export { ONTOLOGY_OUTBOX_FAILURE_CODES } from "./outbox"
 export type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  AdoptedSourceMaterialization,
+  AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecution,
   AssertSourceMaterializationExecutionInput,
   BeginSourceMaterializationInput,
@@ -109,7 +112,7 @@ export type {
   OntologySourceMaterializationStatus,
   OntologySourceRecord,
   OntologySourceStorage,
-  ReclaimSourceMaterializationInput,
+  PurgeAbandonedSourceMaterializationsInput,
   StageSourceAssertion,
   StageSourceRoot,
   StageSourceRowsInput,

@@ -13,6 +13,7 @@ export const ProjectionRunStatusSchema = z.enum([
   "succeeded",
   "failed",
   "cancelled",
+  "superseded",
 ])
 
 const ProjectionRunIdentityBaseSchema = z.object({

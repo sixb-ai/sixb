@@ -217,6 +217,13 @@ export type ProjectionRunTerminalDecision =
       readonly error?: SixbFailure<ProjectionRunFailureCode>
       readonly inputExhausted?: never
     }
+  | {
+      readonly protocol: "replacement"
+      /** A run of the same projection pinned to a later dataset version makes this one stale. */
+      readonly status: "superseded"
+      readonly error?: never
+      readonly inputExhausted?: never
+    }
 
 /**
  * Queue-agnostic terminal decision for one fenced projection execution.

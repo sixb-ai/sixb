@@ -58,7 +58,14 @@ import { registerPostgresStorageTestingAdapter } from "./testing"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export interface PostgresStorageOptions {
-  /** Full connection string (e.g. DATABASE_URL). Takes precedence over individual fields. */
+  /**
+   * Full connection string (e.g. DATABASE_URL). Takes precedence over individual fields.
+   *
+   * Add `sslnegotiation=direct` (with `sslmode=require`, `verify-ca` or `verify-full`) to open TLS
+   * directly, as libpq does against PostgreSQL 17 or later. It saves a round trip per connection
+   * and avoids a Bun 1.4.0–1.4.2 bug that keeps in memory every byte read over a TLS connection
+   * negotiated the classic way.
+   */
   connectionString?: string
 
   /** PostgreSQL host. Defaults to 'localhost'. */

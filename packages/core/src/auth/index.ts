@@ -37,7 +37,7 @@ export {
   verifyDoubleSubmitCsrf,
 } from "./csrf"
 export type { AuthRuntimeErrorCode } from "./errors"
-export { AuthRuntimeError } from "./errors"
+export { AuthRuntimeError, SignInRefusedError } from "./errors"
 export type { AuthRuntimeOptions } from "./runtime"
 export {
   AuthRuntime,

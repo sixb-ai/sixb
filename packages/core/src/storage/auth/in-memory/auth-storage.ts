@@ -7,6 +7,7 @@ import type {
   CompleteOidcSignInInput,
   CompleteSignInResult,
   GroupMembershipRecord,
+  GroupMembershipSource,
   InvitationRecord,
   SessionRecord,
   SuspendUserAndRevokeSessionsInput,
@@ -42,6 +43,7 @@ import {
   normalizeEmail,
   normalizeGroupIds,
   oidcAttemptKey,
+  removeGroupMembershipRecord,
   revokeActiveSessionsForUser,
   upsertGroupMembershipRecord,
   userKey,
@@ -219,25 +221,6 @@ export class InMemoryAuthStorage implements AuthStorage {
       )
     }
 
-    if (
-      shouldCreateUser &&
-      !activeInvitation &&
-      input.allowUserCreationWithoutInvitation &&
-      input.requireNoActiveUsersForUserCreation &&
-      hasActiveUsers(this.state, projectId)
-    ) {
-      consumeMagicLinkRecord(this.state, {
-        projectId,
-        id: input.magicLinkId,
-        tokenHash: input.tokenHash,
-        consumedAt: completedAt,
-      })
-      throw new AuthStorageError(
-        "user_creation_not_allowed",
-        `[Sixb] Magic link '${input.magicLinkId}' cannot create a user for project '${projectId}'.`
-      )
-    }
-
     validateCompleteSessionInput(this.state, projectId, input.session)
     assertSignInSessionAudience(projectId, input.session.audience, magicLink.audience)
 
@@ -280,8 +263,9 @@ export class InMemoryAuthStorage implements AuthStorage {
       projectId,
       user,
     })
-    const memberships = this.applyManualGroups({
+    const memberships = this.applyGroups({
       completedAt,
+      source: "manual",
       groupIds: manualGroupIds,
       projectId,
       userId: user.id,
@@ -352,14 +336,6 @@ export class InMemoryAuthStorage implements AuthStorage {
       )
     }
 
-    if (!identity && user && (!input.autoLinkByVerifiedEmail || !input.emailVerified)) {
-      this.consumeOidcAttempt(input, completedAt, projectId)
-      throw new AuthStorageError(
-        "email_link_not_allowed",
-        `[Sixb] OIDC identity cannot auto-link to user '${user.id}' for project '${projectId}'.`
-      )
-    }
-
     if (user?.status === "suspended") {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
@@ -368,29 +344,7 @@ export class InMemoryAuthStorage implements AuthStorage {
       )
     }
 
-    if (shouldCreateUser && !input.emailVerified) {
-      this.consumeOidcAttempt(input, completedAt, projectId)
-      throw new AuthStorageError(
-        "user_creation_not_allowed",
-        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-      )
-    }
-
     if (shouldCreateUser && !activeInvitation && !input.allowUserCreationWithoutInvitation) {
-      this.consumeOidcAttempt(input, completedAt, projectId)
-      throw new AuthStorageError(
-        "user_creation_not_allowed",
-        `[Sixb] OIDC authorization attempt '${input.oidcAuthorizationAttemptId}' cannot create a user for project '${projectId}'.`
-      )
-    }
-
-    if (
-      shouldCreateUser &&
-      !activeInvitation &&
-      input.allowUserCreationWithoutInvitation &&
-      input.requireNoActiveUsersForUserCreation &&
-      hasActiveUsers(this.state, projectId)
-    ) {
       this.consumeOidcAttempt(input, completedAt, projectId)
       throw new AuthStorageError(
         "user_creation_not_allowed",
@@ -434,12 +388,19 @@ export class InMemoryAuthStorage implements AuthStorage {
       projectId,
       user,
     })
-    const memberships = this.applyManualGroups({
+    const memberships = this.syncDirectoryGroups({
       completedAt,
-      groupIds: manualGroupIds,
+      groupIds: input.directoryGroupIds,
       projectId,
       userId: user.id,
-      existing: invitation.memberships,
+      existing: this.applyGroups({
+        completedAt,
+        source: "manual",
+        groupIds: manualGroupIds,
+        projectId,
+        userId: user.id,
+        existing: invitation.memberships,
+      }),
     })
 
     const nextIdentity: UserIdentityRecord = {
@@ -533,10 +494,11 @@ export class InMemoryAuthStorage implements AuthStorage {
     return { invitation, memberships }
   }
 
-  private applyManualGroups(input: {
+  private applyGroups(input: {
     readonly completedAt: Date
     readonly groupIds: readonly string[]
     readonly projectId: string
+    readonly source: GroupMembershipSource
     readonly userId: string
     readonly existing: readonly GroupMembershipRecord[]
   }): readonly GroupMembershipRecord[] {
@@ -547,12 +509,39 @@ export class InMemoryAuthStorage implements AuthStorage {
           projectId: input.projectId,
           userId: input.userId,
           groupId,
-          source: "manual",
+          source: input.source,
           createdAt: input.completedAt,
         })
       )
     }
     return memberships
+  }
+  // Directory memberships become exactly `groupIds`. A group the user already holds from another
+  // source keeps that source, and memberships from other sources are never removed.
+  private syncDirectoryGroups(input: {
+    readonly completedAt: Date
+    readonly groupIds?: readonly string[]
+    readonly projectId: string
+    readonly userId: string
+    readonly existing: readonly GroupMembershipRecord[]
+  }): readonly GroupMembershipRecord[] {
+    if (!input.groupIds) {
+      return input.existing
+    }
+
+    const groupIds = normalizeGroupIds(input.groupIds)
+    const stale = [...this.state.groupMemberships.values()].filter(
+      (membership) =>
+        membership.projectId === input.projectId &&
+        membership.userId === input.userId &&
+        membership.source === "directory" &&
+        !groupIds.includes(membership.groupId)
+    )
+    for (const membership of stale) {
+      removeGroupMembershipRecord(this.state, membership)
+    }
+
+    return this.applyGroups({ ...input, groupIds, source: "directory" })
   }
 
   private createSignInSession(input: {
@@ -597,16 +586,6 @@ function restoreMap<TKey, TValue>(target: Map<TKey, TValue>, snapshot: Map<TKey,
   for (const [key, value] of structuredClone(snapshot)) {
     target.set(key, value)
   }
-}
-
-function hasActiveUsers(state: AuthStorageState, projectId: string): boolean {
-  for (const user of state.users.values()) {
-    if (user.projectId === projectId && user.status === "active") {
-      return true
-    }
-  }
-
-  return false
 }
 
 function assertSignInSessionAudience(

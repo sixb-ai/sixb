@@ -11,8 +11,9 @@ import type {
   OidcStartSignInInput,
   OidcStartSignInResult,
 } from "@sixb/core/auth/strategy"
-import type { AuthStorage } from "@sixb/core/storage"
-import { resolveOidcProfile } from "./claims"
+import { SignInRefusedError } from "@sixb/core/auth/strategy"
+import { type AuthStorage, AuthStorageError } from "@sixb/core/storage"
+import { type OidcClaims, toOidcClaims, verifiedEmail } from "./claims"
 import { defaultOidcClientAdapter, type OidcClientAdapter } from "./client"
 import { createOidcInvitationEmail, type SendOidcInvitationInput } from "./email"
 import { OidcAuthError } from "./errors"
@@ -34,6 +35,17 @@ export interface OidcOptions {
   readonly publicUrl?: string
   readonly scope?: string
   readonly authorizationParams?: Readonly<Record<string, string>>
+  /**
+   * Returns the address this provider vouches for, or undefined. Sign-in uses it to link an
+   * existing user and claim invitations and bootstrap entries. Defaults to `email` when
+   * `email_verified` is true.
+   */
+  readonly trustedEmail?: (claims: OidcClaims) => string | undefined
+  /**
+   * Returns the groups the provider grants this user. They are synced on every sign-in, and a
+   * user granted at least one may sign in without an invitation.
+   */
+  readonly groups?: (claims: OidcClaims) => readonly GroupDefinition[]
   readonly sendInvitation?: (message: SendOidcInvitationInput) => Promise<void>
   readonly from?: string
   readonly subject?: string
@@ -58,6 +70,8 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   private readonly publicOrigin?: string
   private readonly scope: string
   private readonly authorizationParams: Readonly<Record<string, string>>
+  private readonly trustedEmail: (claims: OidcClaims) => string | undefined
+  private readonly groups?: (claims: OidcClaims) => readonly GroupDefinition[]
   private readonly sendInvitation?: (message: SendOidcInvitationInput) => Promise<void>
   private readonly from?: string
   private readonly subject: string
@@ -78,6 +92,8 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       : undefined
     this.scope = normalizeScope(options.scope)
     this.authorizationParams = options.authorizationParams ?? {}
+    this.trustedEmail = options.trustedEmail ?? verifiedEmail
+    this.groups = options.groups
     this.sendInvitation = options.sendInvitation
     this.from = options.from
     this.subject = options.subject ?? "You are invited to Sixb"
@@ -164,53 +180,70 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
         throw new OidcAuthError("OIDC token response is missing id token claims.")
       }
 
-      const idTokenSubject = claimString(idTokenClaims, "sub")
-      if (!idTokenSubject) {
-        throw new OidcAuthError("OIDC id token is missing a subject.")
+      // The ID token usually carries the address. A provider may send it only from UserInfo
+      // (OIDC Core 5.4), so fetch that just when the ID token leaves the address out.
+      let rawClaims = idTokenClaims
+      let claims = toOidcClaims(rawClaims)
+      let trustedEmail = this.trustedEmail(claims)
+      if (!trustedEmail && tokens.access_token) {
+        const userInfo = await this.client.fetchUserInfo(
+          await this.getConfiguration(),
+          tokens.access_token,
+          claims.sub
+        )
+        rawClaims = { ...userInfo, ...idTokenClaims }
+        claims = toOidcClaims(rawClaims)
+        trustedEmail = this.trustedEmail(claims)
       }
 
-      const userInfo = tokens.access_token
-        ? await this.client.fetchUserInfo(
-            await this.getConfiguration(),
-            tokens.access_token,
-            idTokenSubject
-          )
-        : undefined
-      const profile = resolveOidcProfile({ idTokenClaims, userInfo })
-      if (!profile.nonce || sha256(profile.nonce) !== attempt.nonceHash) {
-        throw new OidcAuthError("OIDC id token nonce is invalid.")
+      // Storage links accounts and claims invitations by this address, so it only ever receives an
+      // address the provider vouches for.
+      if (!trustedEmail) {
+        throw new SignInRefusedError(
+          "no_trusted_address",
+          `[Sixb] OIDC provider sent no trusted email address (claims: ${Object.keys(rawClaims).join(", ")}). ` +
+            "If it vouches for addresses without email_verified, return the address from the " +
+            "`trustedEmail` option."
+        )
       }
 
-      const email = normalizeEmail(profile.email)
+      const email = normalizeEmail(trustedEmail)
       if (!this.isAllowedEmail(email)) {
-        throw new OidcAuthError("OIDC email domain is not allowed.")
+        throw new SignInRefusedError(
+          "domain_not_allowed",
+          `[Sixb] OIDC email domain is not allowed for '${email}'.`,
+          email
+        )
       }
 
-      // Every verified email in the configured bootstrap allowlist may
+      // Every email in the configured bootstrap allowlist may
       // self-provision without an invitation — at any time, not only as the
       // first user. The allowlist itself is the trust boundary.
-      const canBootstrap = profile.emailVerified && this.bootstrapUsers.has(email)
-      const signIn = await input.authStorage.completeOidcSignIn({
-        projectId: input.projectId,
-        oidcAuthorizationAttemptId: attempt.id,
-        stateHash,
-        completedAt: now,
-        subject: profile.subject,
-        email,
-        emailVerified: profile.emailVerified,
-        displayName: profile.displayName,
-        avatarUrl: profile.avatarUrl,
-        claims: profile.claims,
-        autoLinkByVerifiedEmail: profile.emailVerified,
-        allowUserCreationWithoutInvitation: canBootstrap,
-        requireNoActiveUsersForUserCreation: false,
-        manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
-        newUserId: `usr_${randomUUID()}`,
-        session: {
-          ...input.session,
-          audience: attempt.audience,
-        },
-      })
+      const canBootstrap = this.bootstrapUsers.has(email)
+      const directoryGroupIds = this.groups ? normalizeGroupRefs(this.groups(claims)) : undefined
+      const signIn = await input.authStorage
+        .completeOidcSignIn({
+          projectId: input.projectId,
+          oidcAuthorizationAttemptId: attempt.id,
+          stateHash,
+          completedAt: now,
+          subject: claims.sub,
+          email,
+          displayName: claims.name,
+          avatarUrl: claims.picture,
+          claims: rawClaims,
+          allowUserCreationWithoutInvitation: canBootstrap || Boolean(directoryGroupIds?.length),
+          manualGroupIds: canBootstrap ? this.bootstrapGroupIds : [],
+          directoryGroupIds,
+          newUserId: `usr_${randomUUID()}`,
+          session: {
+            ...input.session,
+            audience: attempt.audience,
+          },
+        })
+        .catch((error: unknown) => {
+          throw refusalFromStorage(error, email)
+        })
 
       return {
         ...signIn,
@@ -338,6 +371,18 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
   }
 }
 
+// Storage refuses with its own codes; these two are reasons the person signing in can act on.
+function refusalFromStorage(error: unknown, email: string): unknown {
+  if (!(error instanceof AuthStorageError)) return error
+  if (error.code === "user_creation_not_allowed") {
+    return new SignInRefusedError("not_invited", `[Sixb] '${email}' has not been invited.`, email)
+  }
+  if (error.code === "suspended_user") {
+    return new SignInRefusedError("suspended", `[Sixb] '${email}' is suspended.`, email)
+  }
+  return error
+}
+
 function normalizeStrategyId(value: string | undefined): string {
   return assertNonEmpty(value?.trim() || "oidc", "OIDC auth id")
 }
@@ -401,15 +446,6 @@ function normalizeInvitationEmail(value: string): string | null {
 function emailDomain(email: string): string | null {
   const index = email.lastIndexOf("@")
   return index === -1 ? null : email.slice(index + 1).toLowerCase()
-}
-
-function claimString(claims: Readonly<Record<string, unknown>>, key: string): string | undefined {
-  const value = claims[key]
-  if (typeof value !== "string") {
-    return undefined
-  }
-  const trimmed = value.trim()
-  return trimmed || undefined
 }
 
 function assertNonEmpty(value: string | undefined, label: string): string {

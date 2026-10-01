@@ -9,15 +9,18 @@ import {
   isExactStagingManifest,
   reconcileSourceStageRows,
   type SourceStageRow,
+  sourceAssertionPayload,
   sourceConflict,
   sourceMaterializationIdentity,
   sourceStageRow,
   sourceStageRows,
-  utf8SortKey,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   AbandonSourceMaterializationInput,
+  AdoptedSourceMaterialization,
+  AdoptSourceMaterializationInput,
   AssertSourceMaterializationExecutionInput,
   BeginSourceMaterializationInput,
   CleanupTerminalSourceMaterializationsInput,
@@ -26,7 +29,7 @@ import type {
   MarkSourceMaterializationReadyInput,
   OntologySourceRecord,
   OntologySourceStorage,
-  ReclaimSourceMaterializationInput,
+  PurgeAbandonedSourceMaterializationsInput,
   StageSourceRowsInput,
   StageSourceRowsResult,
   SummarizeTerminalSourceMaterializationsInput,
@@ -49,8 +52,8 @@ import {
   sourceRecord,
   toIsoString,
 } from "./shared"
-import { cleanupSourceVersions } from "./source-cleanup"
-import { assertSourceRootCoverage, stageSourceRoots } from "./source-roots"
+import { cleanupSourceVersions, purgeAbandonedSourceVersions } from "./source-cleanup"
+import { assertSourceRootCoverage, sourceAssertionColumns, stageSourceRoots } from "./source-roots"
 
 export class PgOntologySourceStorage implements OntologySourceStorage {
   constructor(private readonly runRootOperation: PgRootOperation) {}
@@ -88,7 +91,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       const candidate = await this.getRunCandidate(sql, input)
       if (candidate) {
         throw sourceConflict(
-          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; reclaim it before beginning another.`
+          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; adopt it before beginning another.`
         )
       }
 
@@ -126,7 +129,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       }
       if (await this.getRunCandidate(sql, input)) {
         throw sourceConflict(
-          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; reclaim it before beginning another.`
+          `Projection run '${input.execution.projectionRunId}' already has a nonterminal source materialization; adopt it before beginning another.`
         )
       }
       throw sourceConflict(
@@ -154,10 +157,10 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       }
 
       const rows = sourceStageRows(manifest.projection_kind, input.rows)
-      const existing = await this.findStageRows(sql, input, rows)
+      const existing = await this.findStageRows(sql, manifest, rows)
       const { pending, unchanged } = reconcileSourceStageRows(rows, existing)
       await stageSourceRoots(sql, manifest, input)
-      await this.insertStageRows(sql, input, pending)
+      await this.insertStageRows(sql, manifest, pending)
       return { inserted: pending.length, unchanged }
     })
   }
@@ -236,17 +239,50 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
     })
   }
 
+  async adopt(
+    input: AdoptSourceMaterializationInput
+  ): Promise<AdoptedSourceMaterialization | null> {
+    return this.runRootOperation(async (sql) => {
+      assertProjectAndSource(input)
+      assertExecutionIdentity(input.execution.projectionRunId, input.execution.executionToken)
+      assertTimestamp(input.adoptedAt, "Source adoptedAt", true)
+      await this.assertExecution(sql, input)
+      const candidate = await this.lockRunCandidate(sql, input)
+      if (!candidate) return null
+      // Workers' clocks differ; adoption never moves the record back in time.
+      const [adopted] = await sql<PgOntologySourceRow[]>`
+        UPDATE ontology_sources
+        SET execution_token = ${input.execution.executionToken},
+          updated_at = GREATEST(updated_at, ${input.adoptedAt}::timestamptz)
+        WHERE project_id = ${candidate.project_id} AND source_id = ${candidate.source_id}
+          AND materialization_id = ${candidate.materialization_id}
+          AND status IN ('staging', 'ready')
+        RETURNING *
+      `
+      if (!adopted) {
+        throw sourceConflict(`Source materialization '${candidate.materialization_id}' changed.`)
+      }
+      return {
+        record: sourceRecord(adopted),
+        resumeStagingOrdinal:
+          adopted.status === "ready"
+            ? Number(adopted.root_count)
+            : await this.lastStagedOrdinal(sql, adopted),
+      }
+    })
+  }
+
   async abandon(input: AbandonSourceMaterializationCandidateInput): Promise<OntologySourceRecord>
-  async abandon(input: ReclaimSourceMaterializationInput): Promise<OntologySourceRecord | null>
+  async abandon(input: AbandonRunSourceMaterializationInput): Promise<OntologySourceRecord | null>
   async abandon(input: AbandonSourceMaterializationInput): Promise<OntologySourceRecord | null> {
     return this.runRootOperation(async (sql) => {
       assertProjectAndSource(input)
       assertExecutionIdentity(input.execution.projectionRunId, input.execution.executionToken)
       assertTimestamp(input.abandonedAt, "Source abandonedAt", true)
       await this.assertExecution(sql, input)
-      return input.kind === "candidate"
-        ? this.abandonCandidate(sql, input)
-        : this.abandonForReclaim(sql, input)
+      if (input.kind === "candidate") return this.abandonCandidate(sql, input)
+      const candidate = await this.lockRunCandidate(sql, input)
+      return candidate ? this.transitionToAbandoned(sql, candidate, input.abandonedAt) : null
     })
   }
 
@@ -258,6 +294,16 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
       assertTimestamp(input.terminalBefore, "Terminal source cleanup cutoff", true)
       assertPositiveInteger(input.limit, "Terminal source cleanup limit")
       return cleanupSourceVersions(sql, input)
+    })
+  }
+
+  async purgeAbandoned(
+    input: PurgeAbandonedSourceMaterializationsInput
+  ): Promise<CleanupTerminalSourceMaterializationsResult> {
+    return this.runRootOperation(async (sql) => {
+      assertNonblank(input.projectId, "Abandoned source purge project id")
+      assertPositiveInteger(input.limit, "Abandoned source purge limit")
+      return purgeAbandonedSourceVersions(sql, input)
     })
   }
 
@@ -311,10 +357,15 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
     return this.transitionToAbandoned(sql, manifest, input.abandonedAt)
   }
 
-  private async abandonForReclaim(
+  /** The run's one staging or ready candidate, locked, whichever execution staged it. */
+  private async lockRunCandidate(
     sql: SQLClient,
-    input: ReclaimSourceMaterializationInput
-  ): Promise<OntologySourceRecord | null> {
+    input: {
+      readonly projectId: string
+      readonly source: { readonly projectionId: string }
+      readonly execution: { readonly projectionRunId: string }
+    }
+  ): Promise<PgOntologySourceRow | null> {
     const candidates = await sql<PgOntologySourceRow[]>`
       SELECT * FROM ontology_sources
       WHERE project_id = ${input.projectId}
@@ -323,19 +374,20 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         AND status IN ('staging', 'ready')
       FOR UPDATE
     `
-    if (
-      candidates.some((candidate) => candidate.execution_token === input.execution.executionToken)
-    ) {
-      throw sourceConflict(
-        `Projection run '${input.execution.projectionRunId}' already has a source materialization owned by the current execution.`
-      )
-    }
     if (candidates.length > 1) {
       throw sourceConflict(
         `Projection run '${input.execution.projectionRunId}' has multiple nonterminal source materializations.`
       )
     }
-    return candidates[0] ? this.transitionToAbandoned(sql, candidates[0], input.abandonedAt) : null
+    return candidates[0] ?? null
+  }
+
+  private async lastStagedOrdinal(sql: SQLClient, manifest: PgOntologySourceRow): Promise<number> {
+    const [last] = await sql<{ readonly ordinal: number | string | null }[]>`
+      SELECT MAX(staging_ordinal) AS ordinal FROM ontology_source_roots
+      WHERE version_id = ${manifest.version_id}
+    `
+    return last?.ordinal == null ? 0 : Number(last.ordinal)
   }
 
   private async transitionToAbandoned(
@@ -366,9 +418,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         `Source materialization '${manifest.materialization_id}' cannot transition to 'abandoned'.`
       )
     }
-    await sql`UPDATE ontology_source_roots SET retired_at = ${abandonedAt}
-      WHERE project_id = ${manifest.project_id} AND source_id = ${manifest.source_id}
-        AND materialization_id = ${manifest.materialization_id} AND NOT active`
+    // Its roots were never live and stay unpublished; purging removes them with the version.
     return sourceRecord(rows[0])
   }
 
@@ -378,6 +428,7 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
     rootCount: number,
     assertionCount: number
   ): Promise<void> {
+    const version = manifest.version_id
     const [counts] = await sql<
       {
         readonly assertions: number | string
@@ -387,15 +438,13 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
         readonly max_ordinal: number | string | null
       }[]
     >`
-      SELECT (SELECT COUNT(*) FROM ontology_source_rows
-        WHERE project_id = ${manifest.project_id} AND source_id = ${manifest.source_id}
-          AND materialization_id = ${manifest.materialization_id}) AS assertions, COUNT(*) AS roots,
-        COUNT(DISTINCT staging_ordinal) AS ordinals,
+      SELECT (SELECT COUNT(*) FROM ontology_source_roots AS roots
+          JOIN ontology_source_rows AS rows ON rows.root_id = roots.id
+          WHERE roots.version_id = ${version}) AS assertions,
+        COUNT(*) AS roots, COUNT(DISTINCT staging_ordinal) AS ordinals,
         MIN(staging_ordinal) AS min_ordinal, MAX(staging_ordinal) AS max_ordinal
       FROM ontology_source_roots
-      WHERE project_id = ${manifest.project_id}
-        AND source_id = ${manifest.source_id}
-        AND materialization_id = ${manifest.materialization_id}
+      WHERE version_id = ${version}
     `
     const assertions = Number(counts?.assertions ?? 0)
     const roots = Number(counts?.roots ?? 0)
@@ -414,39 +463,45 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
     }
     await assertSourceRootCoverage(sql, manifest)
 
+    // Roots store only their canonical key; compare its parts with each row's typed identity.
     const [invalid] =
       manifest.projection_kind === "link"
-        ? await sql<{ readonly root_key: unknown }[]>`
-            SELECT root_key
-            FROM ontology_source_rows
-            WHERE project_id = ${manifest.project_id}
-              AND source_id = ${manifest.source_id}
-              AND materialization_id = ${manifest.materialization_id}
-            GROUP BY root_key
+        ? await sql<{ readonly root_key: string }[]>`
+            SELECT roots.root_key
+            FROM ontology_source_roots AS roots
+            CROSS JOIN LATERAL (SELECT roots.root_key::jsonb AS parts) AS root
+            JOIN ontology_source_rows AS rows ON rows.root_id = roots.id
+            WHERE roots.version_id = ${version}
+            GROUP BY roots.id, roots.root_key
             HAVING COUNT(*) <> 1
-              OR BOOL_OR(root_kind <> 'link')
-              OR BOOL_OR(entity_kind <> 'link')
-              OR BOOL_OR(root_key <> entity_key)
+              OR BOOL_OR(root.parts->>0 <> 'link')
+              OR BOOL_OR(rows.entity_kind <> 'link')
+              OR BOOL_OR(rows.source_type_id <> root.parts->>1
+                OR rows.source_primary_id <> root.parts->>2 OR rows.link_id <> root.parts->>3
+                OR rows.target_type_id <> root.parts->>4 OR rows.target_primary_id <> root.parts->>5)
             LIMIT 1
           `
-        : await sql<{ readonly root_key: unknown }[]>`
-            SELECT root_key
-            FROM ontology_source_rows
-            WHERE project_id = ${manifest.project_id}
-              AND source_id = ${manifest.source_id}
-              AND materialization_id = ${manifest.materialization_id}
-            GROUP BY root_key
-            HAVING BOOL_OR(root_kind <> 'object')
+        : await sql<{ readonly root_key: string }[]>`
+            SELECT roots.root_key
+            FROM ontology_source_roots AS roots
+            CROSS JOIN LATERAL (SELECT roots.root_key::jsonb AS parts) AS root
+            JOIN ontology_source_rows AS rows ON rows.root_id = roots.id
+            WHERE roots.version_id = ${version}
+            GROUP BY roots.id, roots.root_key
+            HAVING BOOL_OR(root.parts->>0 <> 'object')
               OR COUNT(*) FILTER (
-                WHERE entity_kind = 'object' AND entity_key = root_key
+                WHERE rows.entity_kind = 'object' AND rows.object_type_id = root.parts->>1
+                  AND rows.primary_id = root.parts->>2
               ) <> 1
               OR COUNT(*) FILTER (
-                WHERE (entity_kind = 'object' AND entity_key <> root_key)
-                   OR (entity_kind = 'link' AND (
-                     source_type_id <> root_object_type_id
-                     OR source_primary_id <> root_primary_id
-                   ))
+                WHERE (rows.entity_kind = 'object' AND (rows.object_type_id <> root.parts->>1
+                    OR rows.primary_id <> root.parts->>2))
+                  OR (rows.entity_kind = 'link' AND (rows.source_type_id <> root.parts->>1
+                    OR rows.source_primary_id <> root.parts->>2))
               ) <> 0
+              OR COUNT(*) FILTER (WHERE rows.entity_kind = 'link') <> COUNT(DISTINCT (
+                rows.link_id, rows.target_type_id, rows.target_primary_id
+              )) FILTER (WHERE rows.entity_kind = 'link')
             LIMIT 1
           `
     if (invalid) {
@@ -458,24 +513,24 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
     }
   }
 
+  /** Already staged assertions sharing a root or an ordinal with `rows`. */
   private async findStageRows(
     sql: SQLClient,
-    input: StageSourceRowsInput,
+    manifest: PgOntologySourceRow,
     rows: readonly SourceStageRow[]
   ): Promise<readonly SourceStageRow[]> {
     if (rows.length === 0) return []
-    const rootSortKeys = [...new Set(rows.map((row) => utf8SortKey(row.rootKey)))]
+    const rootKeys = [...new Set(rows.map((row) => row.rootKey))]
     const ordinals = [...new Set(rows.map((row) => row.row.stagingOrdinal))]
-    const entitySortKeys = [...new Set(rows.map((row) => utf8SortKey(row.entityKey)))]
     const existing = await sql<PgOntologySourceAssertionRow[]>`
-      SELECT * FROM ontology_source_rows
-      WHERE project_id = ${input.projectId}
-        AND source_id = ${input.source.projectionId}
-        AND materialization_id = ${input.materializationId}
+      SELECT ${sourceAssertionColumns(sql)}
+      FROM ontology_source_roots AS roots
+      JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
+      JOIN ontology_source_rows AS rows ON rows.root_id = roots.id
+      WHERE roots.version_id = ${manifest.version_id}
         AND (
-          root_sort_key = ANY(${sql.array(rootSortKeys)}::text[])
-          OR staging_ordinal = ANY(${sql.array(ordinals)}::bigint[])
-          OR entity_sort_key = ANY(${sql.array(entitySortKeys)}::text[])
+          roots.root_key = ANY(${sql.array(rootKeys)}::text[])
+          OR roots.staging_ordinal = ANY(${sql.array(ordinals)}::bigint[])
         )
     `
     return existing.map((row) => sourceStageRow(sourceAssertion(row)))
@@ -483,69 +538,44 @@ export class PgOntologySourceStorage implements OntologySourceStorage {
 
   private async insertStageRows(
     sql: SQLClient,
-    input: StageSourceRowsInput,
+    manifest: PgOntologySourceRow,
     rows: readonly SourceStageRow[]
   ): Promise<void> {
     if (rows.length === 0) return
-    const payload = rows.map(({ entityKey, rootKey, row }) => {
+    const payload = rows.map(({ rootKey, row }) => {
       const entity = entityColumns(row.assertion)
-      const root = entityColumns(row.root)
       return {
-        entityKind: row.assertion.kind,
-        entityKey: JSON.parse(entityKey) as unknown,
-        entitySortKey: utf8SortKey(entityKey),
-        rootKind: row.root.kind,
-        rootKey: JSON.parse(rootKey) as unknown,
-        rootSortKey: utf8SortKey(rootKey),
-        stagingOrdinal: row.stagingOrdinal,
-        root: row.root,
-        assertion: row.assertion,
-        objectTypeId: entity.objectTypeId,
-        primaryId: entity.primaryId,
-        sourceTypeId: entity.sourceTypeId,
-        sourcePrimaryId: entity.sourcePrimaryId,
-        linkId: entity.linkId,
-        targetTypeId: entity.targetTypeId,
-        targetPrimaryId: entity.targetPrimaryId,
-        rootObjectTypeId: root.objectTypeId,
-        rootPrimaryId: root.primaryId,
-        rootSourceTypeId: root.sourceTypeId,
-        rootSourcePrimaryId: root.sourcePrimaryId,
-        rootLinkId: root.linkId,
-        rootTargetTypeId: root.targetTypeId,
-        rootTargetPrimaryId: root.targetPrimaryId,
+        root_key: rootKey,
+        entity_kind: row.assertion.kind,
+        object_type_id: entity.objectTypeId,
+        primary_id: entity.primaryId,
+        source_type_id: entity.sourceTypeId,
+        source_primary_id: entity.sourcePrimaryId,
+        link_id: entity.linkId,
+        target_type_id: entity.targetTypeId,
+        target_primary_id: entity.targetPrimaryId,
+        payload: sourceAssertionPayload(row.assertion),
       }
     })
-    await sql`
-      WITH staged AS (
-        SELECT value
-        FROM jsonb_array_elements(${jsonParameter(sql, payload)}::jsonb)
-      )
+    const inserted = await sql`
       INSERT INTO ontology_source_rows (
-        project_id, source_id, materialization_id,
-        entity_kind, entity_key, entity_sort_key,
-        root_kind, root_key, root_sort_key, staging_ordinal,
-        root, assertion,
-        object_type_id, primary_id,
-        source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
-        root_object_type_id, root_primary_id,
-        root_source_type_id, root_source_primary_id, root_link_id,
-        root_target_type_id, root_target_primary_id
+        root_id, entity_kind, object_type_id, primary_id,
+        source_type_id, source_primary_id, link_id, target_type_id, target_primary_id, payload
       )
-      SELECT
-        ${input.projectId}, ${input.source.projectionId}, ${input.materializationId},
-        value->>'entityKind', value->'entityKey', value->>'entitySortKey',
-        value->>'rootKind', value->'rootKey', value->>'rootSortKey',
-        (value->>'stagingOrdinal')::bigint,
-        value->'root', value->'assertion',
-        value->>'objectTypeId', value->>'primaryId',
-        value->>'sourceTypeId', value->>'sourcePrimaryId', value->>'linkId',
-        value->>'targetTypeId', value->>'targetPrimaryId',
-        value->>'rootObjectTypeId', value->>'rootPrimaryId',
-        value->>'rootSourceTypeId', value->>'rootSourcePrimaryId', value->>'rootLinkId',
-        value->>'rootTargetTypeId', value->>'rootTargetPrimaryId'
-      FROM staged
+      SELECT roots.id, staged.entity_kind, staged.object_type_id, staged.primary_id,
+        staged.source_type_id, staged.source_primary_id, staged.link_id,
+        staged.target_type_id, staged.target_primary_id, staged.payload
+      FROM jsonb_to_recordset(${jsonParameter(sql, payload)}) AS staged(
+        root_key TEXT, entity_kind TEXT, object_type_id TEXT, primary_id TEXT,
+        source_type_id TEXT, source_primary_id TEXT, link_id TEXT,
+        target_type_id TEXT, target_primary_id TEXT, payload JSONB
+      )
+      JOIN ontology_source_roots AS roots
+        ON roots.version_id = ${manifest.version_id} AND roots.root_key = staged.root_key
     `
+    if (inserted.count !== rows.length) {
+      throw sourceConflict("Staged source rows do not all belong to a staged root.")
+    }
   }
 
   private assertExecution(

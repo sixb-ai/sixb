@@ -46,11 +46,11 @@ import type {
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
 import type {
+  AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
   OntologySourceRecord,
   ProjectionRunRecord,
   ProjectionRunStorage,
-  ReclaimSourceMaterializationInput,
 } from "@sixb/core/storage"
 import { createTestSixb, queueTestProjectionRun } from "@sixb/core/testing"
 import { MISSING_TARGET_GRACE_MS } from "../src/retry-backoff"
@@ -266,6 +266,7 @@ class RecordingLakeStorage implements LakeStorage {
 
 class InterruptibleLakeStorage extends RecordingLakeStorage {
   failAfterRows: number | undefined
+  failure: unknown = new Error("lake read interrupted")
   stopAfterRows: number | undefined
   omitVersionRowCount = false
 
@@ -281,7 +282,7 @@ class InterruptibleLakeStorage extends RecordingLakeStorage {
     for await (const row of super.readRows(input)) {
       if (this.stopAfterRows !== undefined && rowsRead >= this.stopAfterRows) return
       if (this.failAfterRows !== undefined && rowsRead >= this.failAfterRows) {
-        throw new Error("lake read interrupted")
+        throw this.failure
       }
       rowsRead += 1
       yield row
@@ -381,7 +382,25 @@ async function runProjectionJob(
     readonly batchSize?: number
   }
 ): Promise<ProjectionJobResult> {
-  const runtime = input.runtime
+  const { id, identity } = await queueProjectionJob(input)
+  const { batchSize, runtime, ...canonicalInput } = input
+  const run = await runtime.projectionRunsStorage.getById({ projectId: runtime.projectId, id })
+  if (!run) throw new Error(`Projection run '${id}' was not queued.`)
+  return runCanonicalProjectionJob({
+    ...canonicalInput,
+    runtime: await bindRuntimeToRun(runtime, run),
+    job: { id, ...identity },
+    ...(batchSize === undefined ? {} : { telemetryBatchSize: batchSize }),
+  })
+}
+
+/** Queues the job's durable run as dispatch would, unless it exists, without running it. */
+async function queueProjectionJob(input: {
+  readonly runtime: TestProjectionWorkerContext
+  readonly job: LegacyTestProjectionJob
+  readonly batchSize?: number
+}): Promise<{ readonly id: string; readonly identity: ProjectionRunRecord["identity"] }> {
+  const { runtime, batchSize } = input
   const registry = getProjectionRegistry(runtime)
   const version = await runtime.lakeStorage.getVersion(input.job.datasetId, input.job.versionId)
   let descriptor: ProjectionDispatchDescriptor
@@ -401,7 +420,6 @@ async function runProjectionJob(
   }
   const id = createProjectionRunId(runtime.projectId, identity)
   canonicalRunIds.set(input.job.id, id)
-  const { batchSize, runtime: _inputRuntime, ...canonicalInput } = input
   const existing = await runtime.projectionRunsStorage.getById({
     projectId: runtime.projectId,
     id,
@@ -435,14 +453,7 @@ async function runProjectionJob(
       await queueTestProjectionRun(runtime.host.storage, { ...common, identity, target })
     }
   }
-  const run = await runtime.projectionRunsStorage.getById({ projectId: runtime.projectId, id })
-  if (!run) throw new Error(`Projection run '${id}' was not queued.`)
-  return runCanonicalProjectionJob({
-    ...canonicalInput,
-    runtime: await bindRuntimeToRun(runtime, run),
-    job: { id, ...identity },
-    ...(batchSize === undefined ? {} : { telemetryBatchSize: batchSize }),
-  })
+  return { id, identity: identity as ProjectionRunRecord["identity"] }
 }
 
 function unknownProjectionDescriptor(
@@ -1199,14 +1210,14 @@ describe("runProjectionJob", () => {
       ownershipHash: descriptor.ownershipHash,
     }
     const runId = createProjectionRunId(sixb.id, identity)
-    await queueTestProjectionRun(deps.storage, {
+    const run = await queueTestProjectionRun(deps.storage, {
       id: runId,
       projectId: sixb.id,
       identity,
       target: { objectTypeId: Room.id },
     })
     const error = await runCanonicalProjectionJob({
-      runtime: createRuntime(sixb),
+      runtime: await bindRuntimeToRun(createRuntime(sixb), run),
       job: { id: runId, ...identity },
     }).catch((caught: unknown) => caught)
 
@@ -1225,6 +1236,73 @@ describe("runProjectionJob", () => {
         ],
       },
     })
+  })
+
+  // Reverting the worker to finish such a run through projection run storage directly (as it did
+  // before materialization began) leaves this candidate staging forever.
+  test("releases a candidate an earlier delivery left when validation ends the run", async () => {
+    const deps = createDeps()
+    const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
+    const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+    ])
+    const descriptor = getProjectionRegistry(sixb).resolveDispatch(roomProjection.id)
+    if (descriptor.projectionKind !== "object") throw new Error("Expected object projection.")
+    const identity = {
+      projectionId: descriptor.projectionId,
+      projectionKind: "object" as const,
+      protocol: "replacement" as const,
+      datasetVersion: {
+        datasetId: version.datasetId,
+        versionId: version.versionId,
+        createdAt: version.createdAt.toISOString(),
+      },
+      ontologyRevision: descriptor.ontologyRevision,
+      // Pinned before a deploy changed the projection.
+      projectionRevision: "revision-before-deploy",
+      ownershipHash: descriptor.ownershipHash,
+    }
+    const runId = createProjectionRunId(sixb.id, identity)
+    const run = await queueTestProjectionRun(deps.storage, {
+      id: runId,
+      projectId: sixb.id,
+      identity,
+      target: { objectTypeId: Room.id },
+    })
+    const earlier = await deps.storage.projectionRuns.startOrReclaim({
+      id: runId,
+      projectId: sixb.id,
+      identity,
+      target: { objectTypeId: Room.id },
+    })
+    await deps.storage.ontology.sources.beginMaterialization({
+      projectId: sixb.id,
+      source: { projectionId: roomProjection.id },
+      materializationId: "left-by-earlier-delivery",
+      execution: earlier.execution,
+      projectionKind: "object",
+      protocol: "replacement",
+      datasetVersion: identity.datasetVersion,
+      projectionRevision: identity.projectionRevision,
+      ownershipHash: identity.ownershipHash,
+      ontologyRevision: identity.ontologyRevision,
+      createdAt: new Date().toISOString(),
+    })
+
+    await expect(
+      runCanonicalProjectionJob({
+        runtime: await bindRuntimeToRun(createRuntime(sixb), run),
+        job: { id: runId, ...identity },
+      })
+    ).rejects.toMatchObject({ code: "projection.run_identity_mismatch" })
+
+    expect(
+      await deps.storage.projectionRuns.getById({ projectId: sixb.id, id: runId })
+    ).toMatchObject({ status: "failed", attempt: 2 })
+    // The only terminal source version is the abandoned candidate.
+    expect(
+      await deps.storage.ontology.sources.summarizeTerminal({ projectId: sixb.id })
+    ).toMatchObject({ count: 1 })
   })
 
   test("resumes telemetry from the durable offset without an exact-multiple empty commit", async () => {
@@ -2164,7 +2242,109 @@ describe("runProjectionJob", () => {
     ).toBeNull()
   })
 
-  test("keeps the run running when candidate abandonment cannot be confirmed", async () => {
+  test("supersedes a run of an older version without reading it once a later one is queued", async () => {
+    // Removal proof: make `supersedeStaleRun` return false; the stale rows are materialized.
+    const deps = createDeps()
+    const lakeStorage = new RecordingLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      { datasets: [roomsDataset], projections: [roomProjection] },
+      { ...deps, lakeStorage }
+    )
+    const stale = await commitDatasetVersion(lakeStorage, roomsDataset, [
+      { room_id: "stale", room_name: "Stale room", building_ref: null },
+    ])
+    const latest = await commitDatasetVersion(lakeStorage, roomsDataset, [
+      { room_id: "latest", room_name: "Latest room", building_ref: null },
+    ])
+    const runtime = createRuntime(sixb)
+    const job = (id: string, versionId: string) => ({
+      id,
+      projectionId: roomProjection.id,
+      projectionKind: "object" as const,
+      datasetId: roomsDataset.id,
+      versionId,
+    })
+    await queueProjectionJob({ runtime, job: job("projrun-latest", latest.versionId) })
+
+    const superseded = await runProjectionJob({
+      runtime,
+      job: job("projrun-stale", stale.versionId),
+    })
+
+    expect(superseded).toMatchObject({
+      replayedTerminal: false,
+      run: { status: "superseded", attempt: 1 },
+    })
+    expect(superseded.run.error).toBeUndefined()
+    expect(lakeStorage.readInputs).toEqual([])
+    await expect(
+      runProjectionJob({ runtime, job: job("projrun-stale", stale.versionId) })
+    ).resolves.toMatchObject({ replayedTerminal: true, run: { status: "superseded" } })
+
+    await runProjectionJob({ runtime, job: job("projrun-latest", latest.versionId) })
+    const room = (primaryId: string) =>
+      deps.storage.objects.getByPrimaryId({ projectId: sixb.id, objectTypeId: Room.id, primaryId })
+    expect(await room("stale")).toBeNull()
+    expect(await room("latest")).toMatchObject({ properties: { name: "Latest room" } })
+  })
+
+  test("keeps the failure of each retried attempt until the run recovers", async () => {
+    // Removal proof: drop `recordAttemptFailure` from the transient branch; the error stays unset.
+    const deps = createDeps()
+    const lakeStorage = new InterruptibleLakeStorage(deps.lakeStorage)
+    const sixb = createSixb(
+      { datasets: [roomsDataset], projections: [roomProjection] },
+      { ...deps, lakeStorage }
+    )
+    const version = await commitDatasetVersion(lakeStorage, roomsDataset, [
+      { room_id: "r1", room_name: "Kitchen", building_ref: null },
+      { room_id: "r2", room_name: "Office", building_ref: null },
+    ])
+    const input = {
+      runtime: createRuntime(sixb),
+      job: {
+        id: "projrun-retried",
+        projectionId: roomProjection.id,
+        projectionKind: "object" as const,
+        datasetId: roomsDataset.id,
+        versionId: version.versionId,
+      },
+    }
+    const run = () =>
+      deps.storage.projectionRuns.getById({
+        projectId: sixb.id,
+        id: canonicalRunId(input.job.id),
+      })
+
+    lakeStorage.failAfterRows = 1
+    await expect(runProjectionJob(input)).rejects.toThrow("lake read interrupted")
+    expect(await run()).toMatchObject({
+      status: "running",
+      attempt: 1,
+      error: { code: "projection.execution_failed", message: "Projection execution failed." },
+    })
+
+    const unavailable = createSixbError("storage.unavailable", "PostgreSQL is unavailable.")
+    lakeStorage.failure = unavailable
+    await expect(runProjectionJob(input)).rejects.toBe(unavailable)
+    expect(await run()).toMatchObject({
+      status: "running",
+      attempt: 2,
+      error: {
+        code: "storage.unavailable",
+        message: "Storage is temporarily unavailable.",
+        retryable: true,
+      },
+    })
+
+    lakeStorage.failAfterRows = undefined
+    await runProjectionJob(input)
+    const recovered = await run()
+    expect(recovered).toMatchObject({ status: "succeeded", attempt: 3 })
+    expect(recovered?.error).toBeUndefined()
+  })
+
+  test("keeps the run running when its candidate cannot be released with it", async () => {
     const deps = createDeps()
     const sixb = createSixb({ datasets: [roomsDataset], projections: [roomProjection] }, deps)
     const version = await commitDatasetVersion(deps.lakeStorage, roomsDataset, [
@@ -2176,19 +2356,20 @@ describe("runProjectionJob", () => {
       deps.storage.ontology.sources,
       "abandon",
       (abandon) => {
-        function failCandidateAbandonment(
+        function failRunRelease(
           input: AbandonSourceMaterializationCandidateInput
         ): Promise<OntologySourceRecord>
-        function failCandidateAbandonment(
-          input: ReclaimSourceMaterializationInput
+        function failRunRelease(
+          input: AbandonRunSourceMaterializationInput
         ): Promise<OntologySourceRecord | null>
-        async function failCandidateAbandonment(
-          input: AbandonSourceMaterializationCandidateInput | ReclaimSourceMaterializationInput
+        async function failRunRelease(
+          input: AbandonSourceMaterializationCandidateInput | AbandonRunSourceMaterializationInput
         ): Promise<OntologySourceRecord | null> {
-          if (input.kind === "candidate") throw abandonmentFailure
+          // The run ends in the same transaction as the release, so it cannot end without it.
+          if (input.kind === "run") throw abandonmentFailure
           return abandon(input)
         }
-        return failCandidateAbandonment
+        return failRunRelease
       }
     )
 

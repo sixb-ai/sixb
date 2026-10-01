@@ -38,15 +38,21 @@ import type {
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import {
-  databaseSafeInteger,
   jsonParameter,
   linkRefFromColumns,
   objectRefFromColumns,
   type PgOntologySourceAssertionRow,
   type PgStoredOverrideRow,
+  sourceAssertion,
   toIsoString,
 } from "./shared"
-import { activeSourceRows, replacementAssertionRows, replacementSourceRows } from "./source-roots"
+import {
+  activeSourceRows,
+  liveSourceRowsJoin,
+  replacementAssertionRows,
+  replacementSourceRows,
+  sourceAssertionColumns,
+} from "./source-roots"
 
 export const PG_MATERIALIZATION_WORK_TABLE = "ontology_materialization_work"
 export const PG_REPLACEMENT_WORK_TABLE = "ontology_replacement_work"
@@ -410,20 +416,14 @@ export class PgMaterializationStateReader {
               scope_sort_key TEXT, source_type_id TEXT, source_id TEXT, link_id TEXT
             )
         )
-        SELECT rows.*
+        SELECT ${sourceAssertionColumns(this.sql)}
         FROM ontology_source_rows AS rows
         JOIN requested
           ON requested.source_type_id = rows.source_type_id
          AND requested.source_id = rows.source_primary_id
          AND requested.link_id = rows.link_id
-        JOIN ontology_source_roots AS sources
-          ON sources.project_id = rows.project_id
-         AND sources.source_id = rows.source_id
-         AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
-        WHERE rows.project_id = ${this.projectId}
-          AND rows.entity_kind = 'link'
-          AND sources.active
+        ${liveSourceRowsJoin(this.sql, this.projectId)}
+        WHERE rows.entity_kind = 'link'
       `,
       this.sql<LinkSlotOverrideRow[]>`
         WITH requested AS (
@@ -582,32 +582,20 @@ export class PgMaterializationStateReader {
           SELECT rows.source_type_id, rows.source_primary_id AS source_id,
             rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
           FROM ontology_source_rows AS rows
-          JOIN ontology_source_roots AS sources
-            ON sources.project_id = rows.project_id
-           AND sources.source_id = rows.source_id
-           AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
+          ${liveSourceRowsJoin(this.sql, this.projectId)}
           JOIN requested
             ON requested.object_type_id = rows.source_type_id
            AND requested.primary_id = rows.source_primary_id
-          WHERE rows.project_id = ${this.projectId}
-            AND rows.entity_kind = 'link'
-            AND sources.active
+          WHERE rows.entity_kind = 'link'
           UNION
           SELECT rows.source_type_id, rows.source_primary_id AS source_id,
             rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
           FROM ontology_source_rows AS rows
-          JOIN ontology_source_roots AS sources
-            ON sources.project_id = rows.project_id
-           AND sources.source_id = rows.source_id
-           AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
+          ${liveSourceRowsJoin(this.sql, this.projectId)}
           JOIN requested
             ON requested.object_type_id = rows.target_type_id
            AND requested.primary_id = rows.target_primary_id
-          WHERE rows.project_id = ${this.projectId}
-            AND rows.entity_kind = 'link'
-            AND sources.active
+          WHERE rows.entity_kind = 'link'
         ), selected AS (
           SELECT DISTINCT links.*,
             ${this.sql.unsafe(linkSortExpression("links"))} AS sort_key
@@ -912,32 +900,20 @@ export class PgMaterializationStateReader {
         SELECT rows.source_type_id, rows.source_primary_id AS source_id,
           rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
         FROM ontology_source_rows AS rows
-        JOIN ontology_source_roots AS sources
-          ON sources.project_id = rows.project_id
-         AND sources.source_id = rows.source_id
-         AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
+        ${liveSourceRowsJoin(this.sql, this.projectId)}
         JOIN incident_objects
           ON incident_objects.object_type_id = rows.source_type_id
          AND incident_objects.primary_id = rows.source_primary_id
-        WHERE rows.project_id = ${this.projectId}
-          AND rows.entity_kind = 'link'
-          AND sources.active
+        WHERE rows.entity_kind = 'link'
         UNION
         SELECT rows.source_type_id, rows.source_primary_id AS source_id,
           rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
         FROM ontology_source_rows AS rows
-        JOIN ontology_source_roots AS sources
-          ON sources.project_id = rows.project_id
-         AND sources.source_id = rows.source_id
-         AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
+        ${liveSourceRowsJoin(this.sql, this.projectId)}
         JOIN incident_objects
           ON incident_objects.object_type_id = rows.target_type_id
          AND incident_objects.primary_id = rows.target_primary_id
-        WHERE rows.project_id = ${this.projectId}
-          AND rows.entity_kind = 'link'
-          AND sources.active
+        WHERE rows.entity_kind = 'link'
       ), diff_links AS (
         SELECT * FROM replacement_links
         UNION SELECT * FROM incident_links
@@ -1104,9 +1080,7 @@ function storedSource(row: PgOntologySourceAssertionRow): StoredSourceAssertion 
   return {
     source: { projectionId: row.source_id },
     materializationId: row.materialization_id,
-    root: structuredClone(row.root) as StoredSourceAssertion["root"],
-    assertion: structuredClone(row.assertion) as StoredSourceAssertion["assertion"],
-    stagingOrdinal: databaseSafeInteger(row.staging_ordinal, "Source staging ordinal"),
+    ...sourceAssertion(row),
   } as StoredSourceAssertion
 }
 

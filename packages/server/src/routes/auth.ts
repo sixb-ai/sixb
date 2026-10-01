@@ -22,6 +22,7 @@ import {
   isOidcAuthStrategy,
   type MagicLinkAuthStrategy,
   type MemberSummary,
+  SignInRefusedError,
   shouldUseSecureCookies,
   verifyCsrfToken,
   verifyDoubleSubmitCsrf,
@@ -1260,7 +1261,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             groupIds: parsed.groupIds,
           })
 
-          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+          return jsonResponse({ member: serializeManagedMember(result) }, 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1292,7 +1293,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const parsed = AuthMemberParamsSchema.parse(params)
           const result = await host.auth.suspendMember(caller, { userId: parsed.userId })
 
-          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+          return jsonResponse({ member: serializeManagedMember(result) }, 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1322,7 +1323,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const parsed = AuthMemberParamsSchema.parse(params)
           const result = await host.auth.reactivateMember(caller, { userId: parsed.userId })
 
-          return jsonResponse({ member: serializeManagedMember(result.user, result.groupIds) }, 200)
+          return jsonResponse({ member: serializeManagedMember(result) }, 200)
         } catch (error) {
           return authRouteErrorResponse(error)
         }
@@ -1556,6 +1557,9 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             })
           } catch (error) {
             logAuthCallbackError("OIDC", error)
+            if (error instanceof SignInRefusedError) {
+              return htmlMessageResponse(signInRefusalMessage(error), 403, "You can't sign in")
+            }
             return htmlMessageResponse("This sign-in attempt could not be completed.", 400)
           }
         }
@@ -2470,15 +2474,16 @@ function serializeInvitationDelivery(delivery: InviteDeliveryResult) {
 
 function serializeMemberSummary(member: MemberSummary) {
   return {
-    ...serializeManagedMember(member.user, member.groupIds),
+    ...serializeManagedMember(member),
     capabilities: member.capabilities,
   }
 }
 
-function serializeManagedMember(user: UserRecord, groupIds: readonly string[]) {
+function serializeManagedMember(member: Omit<MemberSummary, "capabilities">) {
   return {
-    user: serializeMemberUser(user),
-    groupIds: [...groupIds],
+    user: serializeMemberUser(member.user),
+    groupIds: [...member.groupIds],
+    managedGroupIds: [...member.managedGroupIds],
   }
 }
 
@@ -2552,17 +2557,40 @@ function authRouteErrorResponse(error: unknown): Response {
   return jsonResponse({ error: String(error) }, 500)
 }
 
+function signInRefusalMessage(error: SignInRefusedError): string {
+  const who = error.email ?? "This account"
+  switch (error.reason) {
+    case "not_invited":
+      return `${who} hasn't been invited. Ask an administrator to invite this address.`
+    case "suspended":
+      return `${who} has been suspended. Ask an administrator to reactivate it.`
+    case "domain_not_allowed":
+      return `${who} isn't on a domain that can sign in here.`
+    case "no_trusted_address":
+      return "Your identity provider didn't share an email address this app trusts. Ask an administrator to check the sign-in setup."
+  }
+}
+
 function logAuthCallbackError(kind: string, error: unknown): void {
-  if (process.env.NODE_ENV !== "development" && process.env.SIXB_AUTH_DEBUG !== "1") {
+  // A provider that vouches for no address is a setup mistake nobody signing in can fix, so it is
+  // logged even without SIXB_AUTH_DEBUG.
+  const setupMistake = error instanceof SignInRefusedError && error.reason === "no_trusted_address"
+  if (
+    !setupMistake &&
+    process.env.NODE_ENV !== "development" &&
+    process.env.SIXB_AUTH_DEBUG !== "1"
+  ) {
     return
   }
 
   const detail =
     error instanceof AuthStorageError
       ? `${error.name}(${error.code}): ${error.message}`
-      : error instanceof Error
-        ? `${error.name}: ${error.message}`
-        : String(error)
+      : error instanceof SignInRefusedError
+        ? `${error.name}(${error.reason}): ${error.message}`
+        : error instanceof Error
+          ? `${error.name}: ${error.message}`
+          : String(error)
 
   console.error(`[SixbServer] ${kind} auth callback failed: ${detail}`)
 }

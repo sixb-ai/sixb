@@ -45,33 +45,34 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
   const terminal = await findMatchingTerminalRun(input)
   if (terminal) return terminalResult(terminal)
 
-  const execution = await claimOrReplaySucceededRun(input)
+  const execution = await claimOrReplaySettledRun(input)
   if ("replayedTerminal" in execution) return execution
-  let finishBoundary: "run" | "materialization" = "run"
+  // Outside the try below: a supersession that fails is retried by the next delivery, never
+  // turned into a failed run.
+  if (await supersedeStaleRun(input, execution)) {
+    return { run: await requireRun(input), replayedTerminal: false }
+  }
   try {
     const validated = await validateProjectionJob(input.runtime, input.job)
-    finishBoundary = "materialization"
     const completion = await materializeProjection(input, validated, execution, signal)
-    await finishProjection(input, execution, { ...completion, status: "succeeded" }, finishBoundary)
+    await finishProjection(input, execution, { ...completion, status: "succeeded" })
     return { run: await requireRun(input), replayedTerminal: false }
   } catch (error) {
-    const succeeded = await findSucceededRun(input)
-    if (succeeded) return terminalResult(succeeded)
+    const settled = await findSettledRun(input)
+    if (settled) return terminalResult(settled)
 
     if (isExplicitCancellation(error)) {
-      await finishProjection(
-        input,
-        execution,
-        projectionFailure(input, error, "cancelled"),
-        finishBoundary
-      )
+      await finishProjection(input, execution, projectionFailure(input, error, "cancelled"))
       throw error
     }
-    if ((await isPermanentFailure(input, execution, error)) && !signal.aborted) {
+    const permanent = await isPermanentFailure(input, execution, error)
+    if (permanent && !signal.aborted) {
       const decision = projectionFailure(input, error, "failed")
-      await finishProjection(input, execution, decision, finishBoundary)
+      await finishProjection(input, execution, decision)
       const run = await requireRun(input)
       input.onRunFailed?.(error, run, decision.error)
+    } else if (!signal.aborted) {
+      await recordAttemptFailure(input, execution, error)
     }
     // Transient errors, delivery loss, shutdown, and stale executions deliberately leave the run
     // running so the next QueueDelivery can reclaim it with a fresh token.
@@ -79,17 +80,42 @@ export async function runProjectionJob(input: RunProjectionJobInput): Promise<Pr
   }
 }
 
-async function claimOrReplaySucceededRun(
+async function claimOrReplaySettledRun(
   input: RunProjectionJobInput
 ): Promise<ClaimedProjectionExecution | ProjectionJobResult> {
   try {
     return await claimExecution(input)
   } catch (error) {
-    // Another delivery may have finished after our initial terminal read but before the claim.
-    const succeeded = await findSucceededRun(input)
-    if (succeeded) return terminalResult(succeeded)
+    // Another delivery may have settled the run after our initial terminal read but before the
+    // claim.
+    const settled = await findSettledRun(input)
+    if (settled) return terminalResult(settled)
     throw error
   }
+}
+
+/**
+ * Ends a replacement run without materializing it when a run of a later dataset version stands
+ * to replace the source anyway: its output would be stale on arrival, and on a large projection
+ * producing it can take hours. Checked on every delivery, so a run that is retrying also stops
+ * once a newer version arrives. The materializer checks again under the finish transaction.
+ */
+async function supersedeStaleRun(
+  input: RunProjectionJobInput,
+  execution: ClaimedProjectionExecution
+): Promise<boolean> {
+  if (input.job.protocol !== "replacement") return false
+  const newer = await input.runtime.projectionRunsStorage.findSupersedingRun({
+    projectId: input.runtime.projectId,
+    id: input.job.id,
+  })
+  if (!newer) return false
+  await finishProjection(input, execution, {
+    protocol: "replacement",
+    status: "superseded",
+    finishedAt: new Date(input.now?.() ?? Date.now()),
+  })
+  return true
 }
 
 async function findMatchingTerminalRun(
@@ -102,7 +128,7 @@ async function findMatchingTerminalRun(
   if (!run) return null
   assertRunMatchesJob(run, input.job)
   if (run.status === "queued" || run.status === "running") return null
-  if (run.status === "succeeded") return run
+  if (isSettled(run)) return run
   throw createSixbError(
     "projection.run_already_terminal",
     `[SixbProjectionWorker] Projection run '${run.id}' is already '${run.status}'.`,
@@ -248,31 +274,50 @@ function replacementEntries(
   })
 }
 
+/**
+ * Every terminal transition goes through the materializer, including a failure found before
+ * materialization began: an earlier delivery of the same run may have left a candidate, and only
+ * the materializer's finish releases it in the same transaction.
+ */
 async function finishProjection(
   input: RunProjectionJobInput,
   execution: ClaimedProjectionExecution,
-  decision: ProjectionRunTerminalDecision & { readonly finishedAt?: Date },
-  boundary: "run" | "materialization"
+  decision: ProjectionRunTerminalDecision & { readonly finishedAt?: Date }
 ): Promise<void> {
-  if (boundary === "run") {
-    await input.runtime.projectionRunsStorage.finish({
-      id: input.job.id,
-      projectId: input.runtime.projectId,
-      identity: input.job,
-      executionToken: execution.execution.executionToken,
-      ...decision,
-    })
-    return
-  }
-  const common = {
+  await getOntologyMutationRuntime(input.runtime).finishProjection({
     source: { projectionId: input.job.projectionId },
     datasetVersion: input.job.datasetVersion,
     execution: execution.execution,
-  }
-  await getOntologyMutationRuntime(input.runtime).finishProjection({
-    ...common,
     ...decision,
   })
+}
+
+/**
+ * Keeps the failure of an attempt the queue will retry on the run, so a projection that keeps
+ * failing says why while it is still running. Best effort: the error that caused the retry is
+ * what propagates, and the next attempt records its own failure.
+ */
+async function recordAttemptFailure(
+  input: RunProjectionJobInput,
+  execution: ClaimedProjectionExecution,
+  error: unknown
+): Promise<void> {
+  try {
+    await input.runtime.projectionRunsStorage.recordAttemptFailure({
+      projectId: input.runtime.projectId,
+      id: input.job.id,
+      executionToken: execution.execution.executionToken,
+      identity: input.job,
+      error: projectionFailure(input, error, "failed").error,
+    })
+  } catch (writeError) {
+    // Another delivery reclaimed the run: the failure it records is the latest one now.
+    if (isLostExecution(writeError)) return
+    console.warn(
+      `[SixbProjectionWorker] Projection run '${input.job.id}' could not record the failure of its attempt; it will be retried.`,
+      writeError
+    )
+  }
 }
 
 function projectionFailure(
@@ -302,7 +347,9 @@ function projectionFailure(
 function translateProjectionExecutionError(input: RunProjectionJobInput, error: unknown): unknown {
   if (
     isSixbError(error) &&
-    (error.code === "internal.unexpected" || error.code === "projection.execution_failed")
+    (error.code === "internal.unexpected" ||
+      error.code === "projection.execution_failed" ||
+      error.code === "storage.unavailable")
   ) {
     return error
   }
@@ -326,13 +373,18 @@ type ProjectionSuccessfulCompletion =
   | { readonly protocol: "replacement" }
   | { readonly protocol: "telemetry"; readonly inputExhausted: true }
 
-async function findSucceededRun(input: RunProjectionJobInput): Promise<ProjectionRunRecord | null> {
+/** A run that ended without a failure: a redelivery has nothing left to do or report. */
+function isSettled(run: ProjectionRunRecord): boolean {
+  return run.status === "succeeded" || run.status === "superseded"
+}
+
+async function findSettledRun(input: RunProjectionJobInput): Promise<ProjectionRunRecord | null> {
   try {
     const run = await input.runtime.projectionRunsStorage.getById({
       projectId: input.runtime.projectId,
       id: input.job.id,
     })
-    return run?.status === "succeeded" ? run : null
+    return run && isSettled(run) ? run : null
   } catch {
     return null
   }

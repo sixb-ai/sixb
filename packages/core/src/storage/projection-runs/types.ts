@@ -16,7 +16,18 @@ import type {
 export type { ProjectionRunFailureCode } from "../../projections/types"
 export { PROJECTION_RUN_FAILURE_CODES } from "../../projections/types"
 
-export type ProjectionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+/**
+ * `superseded` ends a replacement run whose output would be stale on arrival: a run of the same
+ * projection pinned to a later dataset version exists and has not failed. Telemetry runs append
+ * readings rather than replace a source, so none is ever superseded.
+ */
+export type ProjectionRunStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "cancelled"
+  | "superseded"
 
 export interface ProjectionRunProgress {
   /** Physical immutable-version rows consumed, before normalization or semantic materialization. */
@@ -76,6 +87,11 @@ interface ProjectionRunRecordBase {
   readonly queuedAt: Date
   readonly startedAt?: Date
   readonly finishedAt?: Date
+  /**
+   * The run's most recent failure, read with its status: on a `running` run, why its last attempt
+   * failed while the queue retries it; on a `failed` or `cancelled` run, why it ended. Cleared when
+   * the run succeeds or is superseded, so a present error always describes something current.
+   */
   readonly error?: SixbFailure<ProjectionRunFailureCode>
 }
 
@@ -202,6 +218,17 @@ export interface RecordProjectionMissingTargetInput
   readonly missingTarget: ProjectionMissingTarget
 }
 
+export interface RecordProjectionAttemptFailureInput
+  extends LockProjectionRunForMaterializationInput {
+  readonly error: SixbFailure<ProjectionRunFailureCode>
+}
+
+export interface FindSupersedingProjectionRunInput {
+  readonly projectId: string
+  /** The run that may be superseded. */
+  readonly id: string
+}
+
 export interface ListProjectionRunsInput {
   readonly projectId: string
   readonly projectionId?: string
@@ -258,10 +285,23 @@ export interface ProjectionRunStorage {
   recordMissingTarget(
     input: RecordProjectionMissingTargetInput
   ): Promise<TelemetryProjectionRunRecord>
+  /**
+   * Records the failure of the current attempt as the `error` of a run that stays `running` to be
+   * retried. Fenced like every other write: a delivery that lost the run cannot overwrite the
+   * failure of the one that holds it now. A reclaim keeps it until the run ends.
+   */
+  recordAttemptFailure(input: RecordProjectionAttemptFailureInput): Promise<ProjectionRunRecord>
   /** Telemetry success also records the worker's EOF observation atomically. */
   finish(input: FinishProjectionRunInput): Promise<ProjectionRunRecord>
+  /**
+   * The newest replacement run of the same projection that makes this one stale: pinned to a
+   * later dataset version, and queued, running, or succeeded. A failed or cancelled run replaces
+   * nothing, so it supersedes nothing either. Null for a telemetry run.
+   */
+  findSupersedingRun(input: FindSupersedingProjectionRunInput): Promise<ProjectionRunRecord | null>
   getById(params: { projectId: string; id: string }): Promise<ProjectionRunRecord | null>
   list(input: ListProjectionRunsInput): Promise<ListProjectionRunsResult>
+  /** Superseded runs are skipped: the run that superseded them is the one that matters. */
   listLatestByProjectionIds(
     input: ListLatestProjectionRunsInput
   ): Promise<ListLatestProjectionRunsResult>

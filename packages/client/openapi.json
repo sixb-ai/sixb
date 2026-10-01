@@ -4594,6 +4594,12 @@
                               "type": "string"
                             }
                           },
+                          "managedGroupIds": {
+                            "type": "array",
+                            "items": {
+                              "type": "string"
+                            }
+                          },
                           "capabilities": {
                             "type": "object",
                             "properties": {
@@ -4611,7 +4617,7 @@
                             "additionalProperties": false
                           }
                         },
-                        "required": ["user", "groupIds", "capabilities"],
+                        "required": ["user", "groupIds", "managedGroupIds", "capabilities"],
                         "additionalProperties": false
                       }
                     },
@@ -4804,9 +4810,15 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "managedGroupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
-                      "required": ["user", "groupIds"],
+                      "required": ["user", "groupIds", "managedGroupIds"],
                       "additionalProperties": false
                     }
                   },
@@ -4973,9 +4985,15 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "managedGroupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
-                      "required": ["user", "groupIds"],
+                      "required": ["user", "groupIds", "managedGroupIds"],
                       "additionalProperties": false
                     }
                   },
@@ -5125,9 +5143,15 @@
                           "items": {
                             "type": "string"
                           }
+                        },
+                        "managedGroupIds": {
+                          "type": "array",
+                          "items": {
+                            "type": "string"
+                          }
                         }
                       },
-                      "required": ["user", "groupIds"],
+                      "required": ["user", "groupIds", "managedGroupIds"],
                       "additionalProperties": false
                     }
                   },
@@ -39343,7 +39367,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -39383,7 +39408,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -39531,7 +39557,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -39571,7 +39598,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -39722,7 +39750,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -39762,7 +39791,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -39959,7 +39989,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -39999,7 +40030,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -40147,7 +40179,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -40187,7 +40220,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -40338,7 +40372,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -40378,7 +40413,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -40586,7 +40622,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -40626,7 +40663,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -40774,7 +40812,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -40814,7 +40853,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -40965,7 +41005,8 @@
                                       "running",
                                       "succeeded",
                                       "failed",
-                                      "cancelled"
+                                      "cancelled",
+                                      "superseded"
                                     ]
                                   },
                                   "attempt": {
@@ -41005,7 +41046,8 @@
                                           "internal.unexpected",
                                           "runtime.cancelled",
                                           "queue.enqueue_failed",
-                                          "projection.execution_failed"
+                                          "projection.execution_failed",
+                                          "storage.unavailable"
                                         ]
                                       },
                                       "message": {
@@ -41273,7 +41315,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -41312,7 +41361,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -41455,7 +41505,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -41494,7 +41551,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -41640,7 +41698,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -41679,7 +41744,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -41868,7 +41934,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -41907,7 +41980,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -42050,7 +42124,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -42089,7 +42170,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -42235,7 +42317,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -42274,7 +42363,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -42474,7 +42564,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -42513,7 +42610,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -42656,7 +42754,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -42695,7 +42800,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -42841,7 +42947,14 @@
                                 },
                                 "status": {
                                   "type": "string",
-                                  "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                  "enum": [
+                                    "queued",
+                                    "running",
+                                    "succeeded",
+                                    "failed",
+                                    "cancelled",
+                                    "superseded"
+                                  ]
                                 },
                                 "attempt": {
                                   "type": "number"
@@ -42880,7 +42993,8 @@
                                         "internal.unexpected",
                                         "runtime.cancelled",
                                         "queue.enqueue_failed",
-                                        "projection.execution_failed"
+                                        "projection.execution_failed",
+                                        "storage.unavailable"
                                       ]
                                     },
                                     "message": {
@@ -43095,7 +43209,7 @@
             "required": false,
             "schema": {
               "type": "string",
-              "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+              "enum": ["queued", "running", "succeeded", "failed", "cancelled", "superseded"]
             }
           },
           {
@@ -43166,7 +43280,14 @@
                               },
                               "status": {
                                 "type": "string",
-                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                "enum": [
+                                  "queued",
+                                  "running",
+                                  "succeeded",
+                                  "failed",
+                                  "cancelled",
+                                  "superseded"
+                                ]
                               },
                               "attempt": {
                                 "type": "number"
@@ -43205,7 +43326,8 @@
                                       "internal.unexpected",
                                       "runtime.cancelled",
                                       "queue.enqueue_failed",
-                                      "projection.execution_failed"
+                                      "projection.execution_failed",
+                                      "storage.unavailable"
                                     ]
                                   },
                                   "message": {
@@ -43348,7 +43470,14 @@
                               },
                               "status": {
                                 "type": "string",
-                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                "enum": [
+                                  "queued",
+                                  "running",
+                                  "succeeded",
+                                  "failed",
+                                  "cancelled",
+                                  "superseded"
+                                ]
                               },
                               "attempt": {
                                 "type": "number"
@@ -43387,7 +43516,8 @@
                                       "internal.unexpected",
                                       "runtime.cancelled",
                                       "queue.enqueue_failed",
-                                      "projection.execution_failed"
+                                      "projection.execution_failed",
+                                      "storage.unavailable"
                                     ]
                                   },
                                   "message": {
@@ -43533,7 +43663,14 @@
                               },
                               "status": {
                                 "type": "string",
-                                "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                                "enum": [
+                                  "queued",
+                                  "running",
+                                  "succeeded",
+                                  "failed",
+                                  "cancelled",
+                                  "superseded"
+                                ]
                               },
                               "attempt": {
                                 "type": "number"
@@ -43572,7 +43709,8 @@
                                       "internal.unexpected",
                                       "runtime.cancelled",
                                       "queue.enqueue_failed",
-                                      "projection.execution_failed"
+                                      "projection.execution_failed",
+                                      "storage.unavailable"
                                     ]
                                   },
                                   "message": {
@@ -43791,7 +43929,14 @@
                         },
                         "status": {
                           "type": "string",
-                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          "enum": [
+                            "queued",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled",
+                            "superseded"
+                          ]
                         },
                         "attempt": {
                           "type": "number"
@@ -43830,7 +43975,8 @@
                                 "internal.unexpected",
                                 "runtime.cancelled",
                                 "queue.enqueue_failed",
-                                "projection.execution_failed"
+                                "projection.execution_failed",
+                                "storage.unavailable"
                               ]
                             },
                             "message": {
@@ -43973,7 +44119,14 @@
                         },
                         "status": {
                           "type": "string",
-                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          "enum": [
+                            "queued",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled",
+                            "superseded"
+                          ]
                         },
                         "attempt": {
                           "type": "number"
@@ -44012,7 +44165,8 @@
                                 "internal.unexpected",
                                 "runtime.cancelled",
                                 "queue.enqueue_failed",
-                                "projection.execution_failed"
+                                "projection.execution_failed",
+                                "storage.unavailable"
                               ]
                             },
                             "message": {
@@ -44158,7 +44312,14 @@
                         },
                         "status": {
                           "type": "string",
-                          "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                          "enum": [
+                            "queued",
+                            "running",
+                            "succeeded",
+                            "failed",
+                            "cancelled",
+                            "superseded"
+                          ]
                         },
                         "attempt": {
                           "type": "number"
@@ -44197,7 +44358,8 @@
                                 "internal.unexpected",
                                 "runtime.cancelled",
                                 "queue.enqueue_failed",
-                                "projection.execution_failed"
+                                "projection.execution_failed",
+                                "storage.unavailable"
                               ]
                             },
                             "message": {

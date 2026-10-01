@@ -11,7 +11,7 @@ Choose a strategy:
 | Strategy | Use when |
 | --- | --- |
 | [Magic link](https://github.com/sixb-ai/sixb/tree/main/auth/magic-link#readme) | Users should sign in through a link sent to their email. |
-| [OIDC](https://github.com/sixb-ai/sixb/tree/main/auth/oidc#readme) | You use an identity provider such as Google Workspace. |
+| [OIDC](https://github.com/sixb-ai/sixb/tree/main/auth/oidc#readme) | You use an identity provider such as Google Workspace or Microsoft Entra. |
 
 For magic links, install the strategy:
 
@@ -59,7 +59,22 @@ const auth = oidc({
 })
 ```
 
-Configure your provider's callback URL using the public API origin and `/auth/callback`. To support email invitations with OIDC, also supply `sendInvitation`. See the strategy's README for provider-specific options.
+Configure your provider's callback URL using the public API origin and `/auth/callback`. To support email invitations with OIDC, also supply `sendInvitation`.
+
+Sign-in trusts an address only when the provider marks it verified. Microsoft Entra never does, so return the address to trust with `trustedEmail`. Entra's `preferred_username` is the name people sign in to Microsoft with, and every user has one, including users without a mailbox:
+
+```ts
+const auth = oidc({
+  issuer: `https://login.microsoftonline.com/${process.env.ENTRA_TENANT_ID}/v2.0`,
+  clientId: process.env.ENTRA_CLIENT_ID!,
+  clientSecret: process.env.ENTRA_CLIENT_SECRET!,
+  trustedEmail: (claims) => claims.preferred_username,
+  bootstrapUsers: ["admin@example.com"],
+  bootstrapGroups: [financeAdmins],
+})
+```
+
+To let the identity provider decide group membership instead of inviting each person, return the groups it grants from `groups`. A user granted at least one group signs in without an invitation, and the groups are synced on every sign-in. See the [strategy's README](https://github.com/sixb-ai/sixb/tree/main/auth/oidc#readme) for provider setup and group mapping.
 
 ## Set up the first administrator
 

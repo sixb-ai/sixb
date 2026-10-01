@@ -1,5 +1,9 @@
 import { projectionEntityKey } from "../../packages/core/src/materialization/refs"
-import { utf8SortKey } from "../../packages/core/src/storage/ontology/provider"
+
+/** The legacy layout's sort key: the canonical key's UTF-8 bytes, in hex. */
+function utf8SortKey(canonicalKey: string): string {
+  return Buffer.from(canonicalKey, "utf8").toString("hex")
+}
 
 /** Pre-incremental snapshots: one object root owns both an object and an FK assertion. */
 export function legacySourceFixture(): string {

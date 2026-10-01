@@ -19,6 +19,7 @@ import {
   type AuthStorage,
   AuthStorageError,
   type CompleteDeviceAuthorizationInput,
+  type GroupMembershipRecord,
   type InvitationRecord,
   type ServiceAccountGroupMembershipRecord,
   type ServiceAccountRecord,
@@ -991,9 +992,9 @@ export class AuthRuntime {
 
     const members: MemberSummary[] = []
     for (const user of result.users) {
-      const groupIds = (
+      const { groupIds, managedGroupIds } = memberGroups(
         await storage.groupMemberships.listForUser({ projectId: this.projectId, userId: user.id })
-      ).map((membership) => membership.groupId)
+      )
 
       // Visibility is scope-based: a member is listed when the caller can assign
       // groups or suspend over the member's current groups. This keeps out-of-scope
@@ -1008,6 +1009,7 @@ export class AuthRuntime {
       members.push({
         user,
         groupIds,
+        managedGroupIds,
         capabilities: {
           assignGroups: canAssignGroups,
           // A caller cannot suspend themselves; reactivation only applies to a
@@ -1033,12 +1035,11 @@ export class AuthRuntime {
     // The target must exist and every group it currently holds must be assignable
     // by the caller. Missing and out-of-scope targets raise the same error so a
     // caller cannot probe which users exist.
-    const { user, groupIds: currentGroupIds } = await this.requireManageableMember(
-      storage,
-      scope,
-      "assignGroups",
-      userId
-    )
+    const {
+      user,
+      groupIds: currentGroupIds,
+      managedGroupIds: currentManagedGroupIds,
+    } = await this.requireManageableMember(storage, scope, "assignGroups", userId)
 
     const requestedGroupIds = this.resolveMemberGroupIds(input.groupIds)
     // Every requested group must fall within the caller's assign scope.
@@ -1054,6 +1055,15 @@ export class AuthRuntime {
     const requested = new Set(requestedGroupIds)
     const additions = requestedGroupIds.filter((groupId) => !current.has(groupId))
     const removals = currentGroupIds.filter((groupId) => !requested.has(groupId))
+
+    // The identity provider would restore these at the user's next sign-in.
+    const managedRemovals = removals.filter((groupId) => currentManagedGroupIds.includes(groupId))
+    if (managedRemovals.length > 0) {
+      throw new AuthRuntimeError(
+        "invalid_auth_input",
+        `[Sixb] Group(s) ${managedRemovals.join(", ")} are managed by the identity provider. Change them there; they sync at the user's next sign-in.`
+      )
+    }
 
     // Self-protection: a caller may add in-scope groups to themselves but may not
     // remove any of their own current groups, so they cannot lock themselves out.
@@ -1086,11 +1096,11 @@ export class AuthRuntime {
     // request resolves the updated membership.
     this.sessionCache?.invalidateUser(user.id)
 
-    const groupIds = (
+    const { groupIds, managedGroupIds } = memberGroups(
       await storage.groupMemberships.listForUser({ projectId: this.projectId, userId: user.id })
-    ).map((membership) => membership.groupId)
+    )
 
-    return { user, groupIds }
+    return { user, groupIds, managedGroupIds }
   }
 
   async suspendMember(
@@ -1100,7 +1110,12 @@ export class AuthRuntime {
     const storage = this.requireAuthStorage()
     const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
     const userId = assertNonEmpty(input.userId, "User id")
-    const { user, groupIds } = await this.requireManageableMember(storage, scope, "suspend", userId)
+    const { user, groupIds, managedGroupIds } = await this.requireManageableMember(
+      storage,
+      scope,
+      "suspend",
+      userId
+    )
 
     if (user.id === caller.user.id) {
       throw new AuthRuntimeError(
@@ -1118,7 +1133,7 @@ export class AuthRuntime {
     // user stops authenticating immediately.
     this.sessionCache?.invalidateUser(user.id)
 
-    return { user: suspended, groupIds }
+    return { user: suspended, groupIds, managedGroupIds }
   }
 
   async reactivateMember(
@@ -1128,7 +1143,12 @@ export class AuthRuntime {
     const storage = this.requireAuthStorage()
     const scope = this.resolveMembershipPolicyScopeForUser(caller.groupIds)
     const userId = assertNonEmpty(input.userId, "User id")
-    const { user, groupIds } = await this.requireManageableMember(storage, scope, "suspend", userId)
+    const { user, groupIds, managedGroupIds } = await this.requireManageableMember(
+      storage,
+      scope,
+      "suspend",
+      userId
+    )
 
     // Reactivation restores access but not sessions; the user signs in again.
     const reactivated = await storage.users.updateStatus({
@@ -1138,7 +1158,7 @@ export class AuthRuntime {
       updatedAt: new Date(),
     })
 
-    return { user: reactivated, groupIds }
+    return { user: reactivated, groupIds, managedGroupIds }
   }
 
   /** The caller's active sessions across every audience, most recently active first. */
@@ -1210,13 +1230,15 @@ export class AuthRuntime {
     scope: MembershipPolicyScope,
     operation: MembershipOperation,
     userId: string
-  ): Promise<{ readonly user: UserRecord; readonly groupIds: readonly string[] }> {
+  ): Promise<{
+    readonly user: UserRecord
+    readonly groupIds: readonly string[]
+    readonly managedGroupIds: readonly string[]
+  }> {
     const user = await storage.users.getById({ projectId: this.projectId, id: userId })
-    const groupIds = user
-      ? (await storage.groupMemberships.listForUser({ projectId: this.projectId, userId })).map(
-          (membership) => membership.groupId
-        )
-      : []
+    const { groupIds, managedGroupIds } = memberGroups(
+      user ? await storage.groupMemberships.listForUser({ projectId: this.projectId, userId }) : []
+    )
 
     if (!user || !canPerformMembershipOperation(scope, operation, groupIds)) {
       throw new AuthStorageError(
@@ -1225,7 +1247,7 @@ export class AuthRuntime {
       )
     }
 
-    return { user, groupIds }
+    return { user, groupIds, managedGroupIds }
   }
 
   private resolveMemberGroupIds(input: readonly string[]): readonly string[] {
@@ -1522,6 +1544,18 @@ export class AuthRuntime {
       "authorization_denied",
       `[Sixb] The current user is not allowed to create or manage invitations for group(s): ${missing.join(", ")}.`
     )
+  }
+}
+
+function memberGroups(memberships: readonly GroupMembershipRecord[]): {
+  readonly groupIds: readonly string[]
+  readonly managedGroupIds: readonly string[]
+} {
+  return {
+    groupIds: memberships.map((membership) => membership.groupId),
+    managedGroupIds: memberships
+      .filter((membership) => membership.source === "directory")
+      .map((membership) => membership.groupId),
   }
 }
 

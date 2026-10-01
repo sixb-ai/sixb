@@ -13,6 +13,8 @@ export function queryLatestRunsByOwnerId<TRow>(
     readonly ownerIds: readonly string[]
     readonly projectId: string
     readonly ownerIdFor: (row: TRow) => string
+    /** A status that never counts as the latest run, such as a run made stale by a newer one. */
+    readonly excludedStatus?: string
   } & SqliteLatestRunTarget
 ): readonly TRow[] {
   const ownerIds = [...new Set(input.ownerIds)]
@@ -21,6 +23,8 @@ export function queryLatestRunsByOwnerId<TRow>(
   }
 
   const placeholders = ownerIds.map(() => "?").join(", ")
+  const statusFilter = input.excludedStatus === undefined ? "" : " AND status <> ?"
+  const statusArgs = input.excludedStatus === undefined ? [] : [input.excludedStatus]
   const orderColumn =
     input.tableName === "sync_runs" ||
     input.tableName === "pipeline_runs" ||
@@ -39,12 +43,14 @@ export function queryLatestRunsByOwnerId<TRow>(
               ORDER BY ${orderColumn} DESC, id DESC
             ) AS sixb_latest_rank
           FROM ${input.tableName}
-          WHERE project_id = ? AND ${input.ownerColumn} IN (${placeholders})
+          WHERE project_id = ? AND ${input.ownerColumn} IN (${placeholders})${statusFilter}
         )
         WHERE sixb_latest_rank = 1
       `
     )
-    .all(input.projectId, ...ownerIds) as (TRow & { sixb_latest_rank: SqliteValue })[]
+    .all(input.projectId, ...ownerIds, ...statusArgs) as (TRow & {
+    sixb_latest_rank: SqliteValue
+  })[]
 
   const latestByOwnerId = new Map(rows.map((row) => [input.ownerIdFor(row), row]))
 

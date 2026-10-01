@@ -442,6 +442,15 @@ export function failProjectionRunEnqueue(
   }
 }
 
+/** Validates the failure of an attempt that leaves its run running, before it is stored. */
+export function parseProjectionAttemptFailure(
+  record: Pick<ProjectionRunRecord, "id" | "projectId" | "status">,
+  error: SixbFailure<ProjectionRunFailureCode>
+): SixbFailure<ProjectionRunFailureCode> {
+  assertProjectionRunRunning(record)
+  return parseSixbFailure(error, PROJECTION_RUN_FAILURE_CODES)
+}
+
 export function canRequeueProjectionRunAfterEnqueueFailure(
   record: ProjectionRunRecord,
   input: QueueProjectionRunInput
@@ -454,6 +463,34 @@ export function canRequeueProjectionRunAfterEnqueueFailure(
     projectionRunIdentitiesEqual(record.identity, input.identity) &&
     projectionTargetsEqual(record.target, input.target) &&
     record.telemetryCheckpoint?.fixedBatchSize === input.fixedBatchSize
+  )
+}
+
+/**
+ * Statuses of a run that still stands to replace its projection's source. A later run in one of
+ * them makes an earlier run stale; a failed or cancelled one replaces nothing.
+ */
+export const SUPERSEDING_PROJECTION_RUN_STATUSES = [
+  "queued",
+  "running",
+  "succeeded",
+] as const satisfies readonly ProjectionRunStatus[]
+
+/**
+ * Whether `newer` makes `run` stale. Dataset version timestamps are canonical UTC ISO strings, so
+ * they order as text; SQL adapters compare them under a binary collation for the same reason.
+ */
+export function projectionRunSupersedes(
+  newer: ProjectionRunRecord,
+  run: ProjectionRunRecord
+): boolean {
+  return (
+    run.identity.protocol === "replacement" &&
+    newer.identity.protocol === "replacement" &&
+    newer.projectId === run.projectId &&
+    newer.identity.projectionId === run.identity.projectionId &&
+    newer.identity.datasetVersion.createdAt > run.identity.datasetVersion.createdAt &&
+    (SUPERSEDING_PROJECTION_RUN_STATUSES as readonly ProjectionRunStatus[]).includes(newer.status)
   )
 }
 
@@ -616,8 +653,7 @@ function assertPersistedLifecycle(row: PersistedProjectionRunRecord): void {
       row.attempt < 1 ||
       row.startedAt === undefined ||
       row.finishedAt !== undefined ||
-      row.executionToken === undefined ||
-      hasError
+      row.executionToken === undefined
     ) {
       throw incompleteProjectionRun(row.id)
     }
@@ -641,7 +677,12 @@ function assertPersistedLifecycle(row: PersistedProjectionRunRecord): void {
       return
     }
   }
-  if (row.attempt < 1 || row.startedAt === undefined || (row.status === "succeeded" && hasError)) {
+  if (
+    row.attempt < 1 ||
+    row.startedAt === undefined ||
+    ((row.status === "succeeded" || row.status === "superseded") && hasError) ||
+    (row.status === "superseded" && row.protocol !== "replacement")
+  ) {
     throw incompleteProjectionRun(row.id)
   }
 }
@@ -650,6 +691,17 @@ function assertProjectionRunDate(value: Date, fieldName: string): void {
   if (!Number.isFinite(value.getTime())) {
     throw new ProjectionRunError(`[Sixb] Projection run ${fieldName} is invalid.`)
   }
+}
+
+function isProjectionRunTerminalStatus(
+  status: unknown
+): status is ProjectionRunFinishPlan["status"] {
+  return (
+    status === "succeeded" ||
+    status === "failed" ||
+    status === "cancelled" ||
+    status === "superseded"
+  )
 }
 
 function isProjectionKind(value: unknown): value is ProjectionKind {
@@ -722,7 +774,7 @@ function assertFinishDecision(
   record: ProjectionRunRecord,
   input: ProjectionRunTerminalDecision
 ): void {
-  if (input.status !== "succeeded" && input.status !== "failed" && input.status !== "cancelled") {
+  if (!isProjectionRunTerminalStatus(input.status)) {
     throw new ProjectionRunError(
       `[Sixb] Projection run '${record.id}' finish status must be terminal.`
     )
@@ -733,6 +785,11 @@ function assertFinishDecision(
   if (input.protocol !== record.identity.protocol) {
     throw new ProjectionRunError(
       `[Sixb] Projection run '${record.id}' finish protocol does not match its identity.`
+    )
+  }
+  if (input.status === "superseded" && input.protocol !== "replacement") {
+    throw new ProjectionRunError(
+      `[Sixb] Telemetry projection run '${record.id}' cannot be superseded.`
     )
   }
   const inputExhausted = "inputExhausted" in input ? input.inputExhausted : undefined

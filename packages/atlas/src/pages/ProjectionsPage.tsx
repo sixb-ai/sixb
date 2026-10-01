@@ -37,6 +37,7 @@ import {
   Loader2,
   LoaderCircle,
   Search,
+  SkipForward,
   XCircle,
 } from "lucide-react"
 import { useMemo, useState } from "react"
@@ -89,6 +90,8 @@ function runStatusClasses(status: RunStatus): string {
       return "border-destructive/30 bg-destructive/10 text-destructive"
     case "cancelled":
       return "border-amber-500/30 bg-amber-500/10 text-amber-600 dark:text-amber-300"
+    case "superseded":
+      return "border-border bg-muted text-muted-foreground"
     case "running":
       return "border-sky-500/30 bg-sky-500/10 text-sky-600 dark:text-sky-300"
     case "queued":
@@ -104,13 +107,31 @@ function RunStatusBadge({ status }: { status: RunStatus }) {
         ? XCircle
         : status === "cancelled"
           ? Ban
-          : LoaderCircle
+          : status === "superseded"
+            ? SkipForward
+            : LoaderCircle
 
   return (
     <Badge variant="outline" className={cn("rounded-md", runStatusClasses(status))}>
       <Icon className={cn("h-3 w-3", status === "running" && "animate-spin")} />
       {runStatusLabel(status)}
     </Badge>
+  )
+}
+
+/** Why a run ended, or, while it is still running, why its last attempt failed. */
+function RunFailure({ run, className }: { run: ProjectionRun; className?: string }) {
+  if (!run.error) return null
+  if (run.status !== "running") {
+    return <SixbFailureSummary failure={run.error} showDetails className={className} />
+  }
+  return (
+    <div className={className}>
+      <p className="text-xs font-medium text-amber-600 dark:text-amber-300">
+        Retrying after a failed attempt
+      </p>
+      <SixbFailureSummary failure={run.error} showDetails className="mt-0.5" />
+    </div>
   )
 }
 
@@ -486,9 +507,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                   >
                     {run.identity.datasetVersion.versionId}
                   </p>
-                  {run.error && (
-                    <SixbFailureSummary failure={run.error} showDetails className="mt-1 text-sm" />
-                  )}
+                  <RunFailure run={run} className="mt-1 text-sm" />
                 </td>
                 <td className="whitespace-nowrap px-3 py-3 text-muted-foreground">
                   {formatRelativeTime(runActivityAt(run))}
@@ -538,9 +557,7 @@ function ProjectionRunList({ runs }: { runs: ProjectionRun[] }) {
                 </span>
               ))}
             </div>
-            {run.error && (
-              <SixbFailureSummary failure={run.error} showDetails className="mt-2 text-sm" />
-            )}
+            <RunFailure run={run} className="mt-2 text-sm" />
           </div>
         ))}
       </div>
@@ -812,7 +829,8 @@ export function ProjectionDetailPage() {
 
   const projection = projectionQuery.data
   const runs = runsQuery.data?.runs ?? []
-  const latestRun = runs[0] ?? projection?.latestRun ?? null
+  // A superseded run never counts as the latest: the run that replaced it does.
+  const latestRun = runs.find((run) => run.status !== "superseded") ?? projection?.latestRun ?? null
 
   if (projectionQuery.isLoading) {
     return (

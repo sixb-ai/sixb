@@ -210,6 +210,41 @@ describe("projection routes", () => {
     expect(body.runs[0]?.error).toEqual(projectionFailure)
   })
 
+  test("serializes superseded runs and the last failure of a retrying one", async () => {
+    const retryFailure = {
+      code: "storage.unavailable",
+      message: "Storage is temporarily unavailable.",
+      retryable: true,
+      at: "2026-05-04T09:02:00.000Z",
+    } as const
+    const sixb = createSixbStub({
+      async list() {
+        return {
+          runs: [
+            makeRun({ run: { id: "run-2", status: "running", error: retryFailure } }),
+            makeRun({
+              run: { status: "superseded", finishedAt: new Date("2026-05-04T09:03:00.000Z") },
+            }),
+          ],
+          hasMore: false,
+          total: 2,
+        }
+      },
+    })
+
+    const response = await appWithAuthz(sixb, authzViewing("room")).handle(
+      new Request("http://localhost/api/projection-runs?status=superseded")
+    )
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      runs: [
+        { id: "run-2", status: "running", error: retryFailure },
+        { id: "run-1", status: "superseded", finishedAt: "2026-05-04T09:03:00.000Z" },
+      ],
+    })
+  })
+
   test("serializes only the public run schema even if a provider returns internal fields", async () => {
     const internalRun = {
       ...makeRun({ run: { status: "running" } }),

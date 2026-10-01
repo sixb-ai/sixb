@@ -384,7 +384,7 @@ describe("in-memory run root lock", () => {
     ).rejects.toThrow("execution token is stale")
     await expect(
       storage.ontology.sources.abandon({
-        kind: "reclaim",
+        kind: "run",
         projectId: "project",
         source,
         execution: reclaimed.execution,
