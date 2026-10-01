@@ -118,6 +118,9 @@ import directoryGroupMembershipsSql from "./migrations/050-directory-group-membe
 import projectionRunSupersessionSql from "./migrations/051-projection-run-supersession.sql" with {
   type: "text",
 }
+import compactSourceStorageSql from "./migrations/052-compact-source-storage.sql" with {
+  type: "text",
+}
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -224,6 +227,25 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("049-native-sessions", nativeSessionsSql),
     sqliteSql("050-directory-group-memberships", directoryGroupMembershipsSql),
     sqliteSql("051-projection-run-supersession", projectionRunSupersessionSql),
+    sqliteStep(
+      "052-compact-source-storage",
+      (db) => {
+        // SQLite has no procedural block to check the copy in SQL: count around it instead.
+        const before = sourceStorageCounts(db)
+        db.run(compactSourceStorageSql)
+        const after = sourceStorageCounts(db)
+        if (
+          after.versions !== before.versions ||
+          after.roots !== before.roots ||
+          after.rows !== before.rows
+        ) {
+          throw new Error(
+            "[SixbSqliteStorage] Source versions, roots or rows were lost while compacting source storage."
+          )
+        }
+      },
+      { checksum: checksum(compactSourceStorageSql) }
+    ),
   ],
 })
 
@@ -380,6 +402,18 @@ function rowToMigrationRecord(row: unknown): MigrationRecord {
     startedAt: migration.started_at,
     finishedAt: migration.finished_at ?? undefined,
   }
+}
+
+function sourceStorageCounts(db: Database): {
+  readonly versions: number
+  readonly roots: number
+  readonly rows: number
+} {
+  return db
+    .query(`SELECT (SELECT count(*) FROM ontology_sources) AS versions,
+      (SELECT count(*) FROM ontology_source_roots) AS roots,
+      (SELECT count(*) FROM ontology_source_rows) AS rows`)
+    .get() as { readonly versions: number; readonly roots: number; readonly rows: number }
 }
 
 function checksum(value: string): string {
