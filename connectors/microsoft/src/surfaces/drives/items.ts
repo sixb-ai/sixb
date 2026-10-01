@@ -4,6 +4,7 @@ import {
   MicrosoftConfigurationError,
   MicrosoftProtocolError,
 } from "../../errors"
+import { isRecord } from "../../guards"
 import { checkEmpty, type MicrosoftHttp } from "../../http"
 import { allPages, page } from "../../pagination"
 import type {
@@ -14,7 +15,7 @@ import type {
   SelectOptions,
   WriteOptions,
 } from "../../types/common"
-import type { DriveItem } from "../../types/files"
+import type { DriveItem, DriveItemPreview } from "../../types/files"
 import { fileName, filePath, httpsUrl, nonEmpty, query, resource } from "../../validation"
 import { drivePath, itemPath } from "./paths"
 
@@ -24,6 +25,17 @@ export interface CreateFolderOptions extends RequestOptions {
 
 export interface MoveOptions extends WriteOptions {
   readonly name?: string
+}
+
+export interface PreviewOptions extends RequestOptions {
+  /** Page to open, when the format has pages. */
+  readonly page?: string | number
+  /** Zoom level to open at, when the viewer supports it. */
+  readonly zoom?: number
+  /** Graph picks a suitable viewer when omitted. */
+  readonly viewer?: "onedrive" | "office"
+  /** Graph defaults to true: the embedded view shows no controls. */
+  readonly chromeless?: boolean
 }
 
 export interface DriveItemsResource {
@@ -43,6 +55,11 @@ export interface DriveItemsResource {
   download(driveId: string, itemId: string, options?: RequestOptions): Promise<Uint8Array>
   /** Consume or cancel response.body; it remains bound to the request lifetime. */
   downloadResponse(driveId: string, itemId: string, options?: RequestOptions): Promise<Response>
+  /**
+   * Embeddable viewer URLs, valid for anyone who holds them. The connector acts as the application,
+   * so check that the person who will see the preview may read this item before calling it.
+   */
+  preview(driveId: string, itemId: string, options?: PreviewOptions): Promise<DriveItemPreview>
   createFolder(
     driveId: string,
     parentId: string,
@@ -68,6 +85,43 @@ export function conflict(
   if (!["fail", "replace", "rename"].includes(result))
     throw new MicrosoftProtocolError("Unsupported conflict behavior.")
   return result
+}
+
+function previewBody(options?: PreviewOptions): Record<string, unknown> {
+  const { page, zoom, viewer, chromeless } = options ?? {}
+  const validPage =
+    page === undefined ||
+    (typeof page === "string" ? page.trim() !== "" : Number.isSafeInteger(page) && page > 0)
+  if (!validPage)
+    throw new MicrosoftConfigurationError("page must be a positive integer or a non-empty string.")
+  if (zoom !== undefined && !(Number.isFinite(zoom) && zoom > 0))
+    throw new MicrosoftConfigurationError("zoom must be a positive number.")
+  if (viewer !== undefined && viewer !== "onedrive" && viewer !== "office")
+    throw new MicrosoftConfigurationError("viewer must be onedrive or office.")
+  if (chromeless !== undefined && typeof chromeless !== "boolean")
+    throw new MicrosoftConfigurationError("chromeless must be a boolean.")
+  return Object.fromEntries(
+    Object.entries({ page, zoom, viewer, chromeless }).filter(([, value]) => value !== undefined)
+  )
+}
+
+function previewInfo(value: unknown): DriveItemPreview {
+  if (!isRecord(value)) throw new MicrosoftProtocolError("Graph returned an invalid preview.")
+  const { getUrl, postUrl, postParameters } = value
+  // The caller embeds these in a page: anything but an HTTPS URL could run script there.
+  for (const url of [getUrl, postUrl]) {
+    if (
+      url !== undefined &&
+      (typeof url !== "string" || !URL.canParse(url) || new URL(url).protocol !== "https:")
+    )
+      throw new MicrosoftProtocolError("Graph returned a preview URL that is not HTTPS.")
+  }
+  if (postParameters !== undefined && typeof postParameters !== "string")
+    throw new MicrosoftProtocolError("Graph returned invalid preview postParameters.")
+  if (getUrl === undefined && postUrl === undefined)
+    throw new MicrosoftProtocolError("Graph returned a preview without a URL.")
+  // Provider wire boundary, checked field by field above.
+  return value as DriveItemPreview
 }
 
 export function itemsResource(http: MicrosoftHttp): DriveItemsResource {
@@ -115,6 +169,16 @@ export function itemsResource(http: MicrosoftHttp): DriveItemsResource {
       }
       if (!response.ok) throw new MicrosoftApiError(response, await readResponseBody(response))
       return response
+    },
+    async preview(driveId, itemId, options) {
+      const path = `${itemPath(driveId, itemId)}/preview`
+      return previewInfo(
+        await http.json(
+          path,
+          { method: "POST", body: previewBody(options), signal: options?.signal },
+          { replayable: true }
+        )
+      )
     },
     async createFolder(driveId, parentId, name, options) {
       fileName(name)

@@ -125,6 +125,21 @@ await client.drives.items.delete(driveId, file.id)
 consume it with `Bun.write(destination, response)` or cancel its body. Tokens never follow media
 redirects. Authenticated pagination links are restricted to the configured global Graph v1.0 origin.
 
+`preview` returns short-lived URLs that embed the file in Microsoft's viewer:
+
+```ts
+const preview = await client.drives.items.preview(driveId, file.id, { page: 1 })
+```
+
+Graph returns `getUrl` (an iframe `src`), or `postUrl` with `postParameters` (an
+`application/x-www-form-urlencoded` body to submit from a form targeting the iframe), or both.
+Options: `page`, `zoom`, `viewer` (`onedrive` or `office`, chosen by Graph when omitted) and
+`chromeless` (`true` by default: no viewer controls). Editing from the viewer is not exposed.
+The URLs work for whoever holds them and are minted with the application's access, not the
+viewer's: check that the person who will see the preview may read the item before calling
+`preview`, and never persist or log the URLs. Unlike other `POST` calls, `preview` changes
+nothing and is retried like a read.
+
 New files/folders default to conflict behavior `fail`. File uploads also accept `replace` and `rename`;
 folder creation accepts `rename`. Uploading to `{ itemId }` replaces that file's content by default.
 Use `ifMatch` on rename/move/delete to detect concurrent edits (`412`). For uploads, Graph checks
@@ -380,7 +395,7 @@ Creates, validates, renews and deletes a test subscription. Skips when configura
 
 - `sites`: `get`, `getByUrl`, `listDrives`, `listAllDrives`.
 - `drives`: `get`; `items`: `get`, `getByPath`, `listChildren`, `listAllChildren`, `download`,
-  `downloadResponse`, `createFolder`, `rename`, `move`, `delete`.
+  `downloadResponse`, `preview`, `createFolder`, `rename`, `move`, `delete`.
 - `drives.uploads`: `upload`, `createSession`, `getStatus`, `resume`, `cancel`.
 - `drives.delta`: `list`, `pages`.
 - `mail.subscribe(mailbox, options)`: subscribe to mailbox or folder message changes.

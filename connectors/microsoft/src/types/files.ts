@@ -100,6 +100,17 @@ export type RemoteItem = Partial<
   >
 >
 
+/**
+ * Short-lived embeddable URLs, minted with the connector's identity. Treat them as credentials:
+ * never persist or log them. Graph returns getUrl, or postUrl with postParameters, or both.
+ */
+export interface DriveItemPreview {
+  readonly getUrl?: string
+  readonly postUrl?: string
+  /** application/x-www-form-urlencoded body to submit to postUrl, e.g. from a form into an iframe. */
+  readonly postParameters?: string
+}
+
 export interface DeltaPage extends GraphPage<DriveItem> {
   readonly "@odata.deltaLink"?: string
 }
