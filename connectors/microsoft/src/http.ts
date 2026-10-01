@@ -2,10 +2,15 @@ import { type RestClient, type RestRequestInit, readResponseBody } from "@sixb/c
 import { MicrosoftApiError, MicrosoftProtocolError } from "./errors"
 import { graphUrl, httpsUrl } from "./validation"
 
+export interface GraphRequestOptions {
+  /** A Graph action that changes nothing (such as preview) may be replayed like a read. */
+  readonly replayable?: boolean
+}
+
 export interface MicrosoftHttp {
   readonly signal: AbortSignal
-  request(path: string, init?: RestRequestInit): Promise<Response>
-  json(path: string, init?: RestRequestInit): Promise<unknown>
+  request(path: string, init?: RestRequestInit, options?: GraphRequestOptions): Promise<Response>
+  json(path: string, init?: RestRequestInit, options?: GraphRequestOptions): Promise<unknown>
   media(url: string, init?: RestRequestInit): Promise<Response>
 }
 
@@ -14,22 +19,19 @@ export function createMicrosoftHttp(
   media: RestClient,
   signal: AbortSignal
 ): MicrosoftHttp {
-  const request = (path: string, init: RestRequestInit = {}) => {
-    const method = init.method ?? "GET"
+  const request = (path: string, init: RestRequestInit = {}, options?: GraphRequestOptions) => {
+    const replayable = options?.replayable ?? (init.method ?? "GET") === "GET"
     return graph.request(
       graphUrl(path),
       { ...init, redirect: "manual" },
-      {
-        idempotent: method === "GET",
-        retryable: method === "GET",
-      }
+      { idempotent: replayable, retryable: replayable }
     )
   }
   return {
     signal,
     request,
-    async json(path, init) {
-      return readJson(await request(path, init))
+    async json(path, init, options) {
+      return readJson(await request(path, init, options))
     },
     async media(url, init = {}) {
       // These are preauthenticated URLs returned by Graph, not Graph API endpoints.

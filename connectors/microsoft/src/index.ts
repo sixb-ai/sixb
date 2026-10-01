@@ -22,7 +22,12 @@ export type { CalendarEventsResource } from "./surfaces/calendar/events"
 export type { CalendarViewResource } from "./surfaces/calendar/view"
 export type { DrivesSurface } from "./surfaces/drives"
 export type { DriveDeltaResource } from "./surfaces/drives/delta"
-export type { CreateFolderOptions, DriveItemsResource, MoveOptions } from "./surfaces/drives/items"
+export type {
+  CreateFolderOptions,
+  DriveItemsResource,
+  MoveOptions,
+  PreviewOptions,
+} from "./surfaces/drives/items"
 export type {
   CreateUploadSessionOptions,
   DriveUploadsResource,

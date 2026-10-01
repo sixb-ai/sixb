@@ -147,6 +147,82 @@ describe("sites and drive items", () => {
     expect(requests[4].headers.get("if-match")).toBe('"etag-3"')
   })
 
+  test("preview posts only the given options and returns Graph's embeddable URLs", async () => {
+    const preview = {
+      getUrl: "https://contoso.sharepoint.com/_layouts/15/embed.aspx?UniqueId=1",
+      postUrl: "https://contoso.sharepoint.com/_layouts/15/WopiFrame.aspx",
+      postParameters: "access_token=signed&access_token_ttl=1",
+    }
+    const requests = mockFetch(() => json(preview))
+    const client = await connect()
+    expect(await client.drives.items.preview("d", "file/id")).toEqual(preview)
+    await client.drives.items.preview("d", "f", {
+      page: 2,
+      zoom: 1.5,
+      viewer: "office",
+      chromeless: false,
+    })
+    expect(requests.map((r) => [r.method, r.url])).toEqual([
+      ["POST", `${GRAPH}drives/d/items/file%2Fid/preview`],
+      ["POST", `${GRAPH}drives/d/items/f/preview`],
+    ])
+    expect(JSON.parse(String(requests[0].init.body))).toEqual({})
+    expect(JSON.parse(String(requests[1].init.body))).toEqual({
+      page: 2,
+      zoom: 1.5,
+      viewer: "office",
+      chromeless: false,
+    })
+  })
+
+  // Countercheck: drop { replayable: true } from preview in src/surfaces/drives/items.ts; this must fail.
+  test("preview changes nothing, so a transient failure is retried like a read", async () => {
+    let calls = 0
+    mockFetch(() =>
+      ++calls === 1
+        ? apiError(503, "serviceNotAvailable", { "retry-after": "0" })
+        : json({ getUrl: "https://contoso.sharepoint.com/embed" })
+    )
+    const client = await connect({ retry: { maxRetries: 1 } })
+    expect(await client.drives.items.preview("d", "f")).toEqual({
+      getUrl: "https://contoso.sharepoint.com/embed",
+    })
+    expect(calls).toBe(2)
+  })
+
+  // Countercheck: drop the HTTPS protocol check in previewInfo; this must fail.
+  test("preview rejects invalid options before network I/O and unsafe responses after", async () => {
+    const requests = mockFetch(() => json({ getUrl: "https://unexpected.example" }))
+    const client = await connect()
+    for (const options of [
+      { page: 0 },
+      { page: 1.5 },
+      { page: " " },
+      { zoom: 0 },
+      { zoom: Number.NaN },
+      { viewer: "word" },
+      { chromeless: "false" },
+    ]) {
+      await expect(
+        // @ts-expect-error -- runtime validation of untyped callers
+        client.drives.items.preview("d", "f", options)
+      ).rejects.toBeInstanceOf(MicrosoftConfigurationError)
+    }
+    expect(requests).toHaveLength(0)
+    for (const bad of [
+      {},
+      { getUrl: "javascript:alert(1)" },
+      { getUrl: "http://contoso.sharepoint.com/embed" },
+      { postUrl: "https://contoso.sharepoint.com/frame", postParameters: 1 },
+      { getUrl: 1 },
+    ]) {
+      mockFetch(() => json(bad))
+      await expect(client.drives.items.preview("d", "f")).rejects.toBeInstanceOf(
+        MicrosoftProtocolError
+      )
+    }
+  })
+
   // Countercheck: allow every method to retry in src/http.ts; this must fail.
   test("custom retry policies cannot replay mutations, including after 401 or 503", async () => {
     const client = await connect({

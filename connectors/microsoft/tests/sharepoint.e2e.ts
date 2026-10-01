@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { type DeltaPage, microsoft } from "../src"
+import { type DeltaPage, microsoft, type PreviewOptions } from "../src"
 
 // Opt-in live test; see README. Uses a unique temporary folder and deletes it in finally.
 // Existing tenant data is never modified. Credentials must have write access to this test drive.
@@ -11,7 +11,7 @@ const driveId = process.env.MICROSOFT_TEST_DRIVE_ID
 const enabled = Boolean(tenantId && clientId && clientSecret && siteUrl && driveId)
 
 describe.skipIf(!enabled)("SharePoint Online live application access", () => {
-  test("sites, binary transfers, conflicts, moves, delta and cleanup", async () => {
+  test("sites, binary transfers, conflicts, moves, previews, delta and cleanup", async () => {
     if (!tenantId || !clientId || !clientSecret || !siteUrl || !driveId)
       throw new Error("Missing Microsoft E2E configuration.")
     const client = await microsoft({ auth: { tenantId, clientId, clientSecret } }).connect({
@@ -71,6 +71,20 @@ describe.skipIf(!enabled)("SharePoint Online live application access", () => {
       )
       expect(empty.size).toBe(0)
       await client.drives.items.delete(driveId, uploaded.id)
+
+      const text = await client.drives.uploads.upload(
+        driveId,
+        { parentId: folder.id, name: "preview.txt" },
+        new TextEncoder().encode("Sixb preview\n")
+      )
+      const previewOptions: (PreviewOptions | undefined)[] = [
+        undefined,
+        { viewer: "onedrive", chromeless: false, page: 1, zoom: 1 },
+      ]
+      for (const options of previewOptions) {
+        const preview = await client.drives.items.preview(driveId, text.id, options)
+        expect(preview.getUrl ?? preview.postUrl).toStartWith("https://")
+      }
 
       // Graph change visibility is eventual. Advance only after processing each page.
       let cursor = checkpoint["@odata.deltaLink"]
