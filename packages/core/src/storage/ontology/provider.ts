@@ -718,7 +718,6 @@ export function sourceStageRow(row: StageSourceAssertion): SourceStageRow {
 export interface SourceStageRoot {
   readonly root: StageSourceAssertion["root"]
   readonly rootKey: string
-  readonly sortKey: string
   readonly stagingOrdinal: number
   readonly deleted: boolean
 }
@@ -765,7 +764,6 @@ export function sourceStageRoots(
       roots.set(key, {
         root: row.root,
         rootKey: key,
-        sortKey: utf8SortKey(key),
         stagingOrdinal: row.stagingOrdinal,
         deleted,
       })
@@ -1030,14 +1028,6 @@ export function sourceAssertionFromColumns(
     },
     ...rest,
   } as ProjectionSourceAssertion
-}
-
-export function utf8SortKey(canonicalKey: string): string {
-  let key = ""
-  for (const byte of new TextEncoder().encode(canonicalKey)) {
-    key += byte.toString(16).padStart(2, "0")
-  }
-  return key
 }
 
 export function isExactStagingManifest(

@@ -476,6 +476,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 51,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "052-compact-source-storage",
+    status: "applied",
+    version: 52,
+  },
 ]
 
 afterEach(async () => {
@@ -1593,9 +1600,10 @@ describe("SQLite storage migrations", () => {
           .get()
       ).toEqual({ count: 5 })
       expect(readMemoryTableNames(db)).not.toContain("ontology_overrides")
-      sqliteStorageMigrations.steps
-        .find((step) => step.id === "038-projection-source-roots")!
-        .up(db)
+      // The reader queries the current schema: finish the upgrade before reading.
+      for (const migration of sqliteStorageMigrations.steps.slice(splitOverridesIndex + 1)) {
+        migration.up(db)
+      }
       expect(
         new SqliteMaterializationStateReader(db, "project").linkState({
           source: { objectTypeId: "Device", primaryId: "ambiguous" },

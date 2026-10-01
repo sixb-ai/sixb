@@ -1,7 +1,10 @@
 import type { Database } from "bun:sqlite"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
-import type { ProjectionEntityRef } from "@sixb/core/internal/materialization"
 import { MaterializationConflictError } from "@sixb/core/internal/materialization"
+import {
+  sourceAssertionFromColumns,
+  sourceEntityFromKey,
+} from "@sixb/core/internal/ontology-storage-provider"
 import type {
   AssertSourceMaterializationExecutionInput,
   OntologyCommitRecord,
@@ -48,6 +51,7 @@ export interface SqliteOntologyCommitRow {
 }
 
 export interface SqliteOntologySourceRow {
+  readonly version_id: number
   readonly project_id: string
   readonly source_id: string
   readonly materialization_id: string
@@ -74,19 +78,21 @@ export interface SqliteOntologySourceRow {
   readonly updated_at: string
 }
 
+/** An assertion with its root and version, as `SOURCE_ASSERTION_COLUMNS` selects it. */
 export interface SqliteOntologySourceAssertionRow {
-  readonly project_id: string
   readonly source_id: string
   readonly materialization_id: string
-  readonly entity_kind: "object" | "link"
-  readonly entity_key: string
-  readonly entity_sort_key: string
-  readonly root_kind: "object" | "link"
   readonly root_key: string
-  readonly root_sort_key: string
   readonly staging_ordinal: number
-  readonly root: string
-  readonly assertion: string
+  readonly entity_kind: "object" | "link"
+  readonly object_type_id: string | null
+  readonly primary_id: string | null
+  readonly source_type_id: string | null
+  readonly source_primary_id: string | null
+  readonly link_id: string | null
+  readonly target_type_id: string | null
+  readonly target_primary_id: string | null
+  readonly payload: string | null
 }
 
 export interface SqliteStoredOverrideRow {
@@ -149,8 +155,11 @@ export function sourceRecord(row: SqliteOntologySourceRow): OntologySourceRecord
 
 export function sourceAssertion(row: SqliteOntologySourceAssertionRow): StageSourceAssertion {
   return {
-    root: parseJson<ProjectionEntityRef>(row.root),
-    assertion: parseJson<StageSourceAssertion["assertion"]>(row.assertion),
+    root: sourceEntityFromKey(row.root_key),
+    assertion: sourceAssertionFromColumns(
+      row,
+      row.payload === null ? null : parseJson<unknown>(row.payload)
+    ),
     stagingOrdinal: row.staging_ordinal,
   }
 }

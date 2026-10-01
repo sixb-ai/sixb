@@ -6,9 +6,15 @@ import postgresSplitOverrides from "../../pg/src/migrations/007-split-overrides.
 import postgresSourceRoots from "../../pg/src/migrations/039-projection-source-roots.sql" with {
   type: "text",
 }
+import postgresCompactSources from "../../pg/src/migrations/052-compact-source-storage.sql" with {
+  type: "text",
+}
 import sqliteSchema from "../src/migrations/001-initial-schema.sql" with { type: "text" }
 import sqliteSplitOverrides from "../src/migrations/007-split-overrides.sql" with { type: "text" }
 import sqliteSourceRoots from "../src/migrations/038-projection-source-roots.sql" with {
+  type: "text",
+}
+import sqliteCompactSources from "../src/migrations/052-compact-source-storage.sql" with {
   type: "text",
 }
 
@@ -66,6 +72,31 @@ test("SQLite and PostgreSQL source-root migrations stay aligned", () => {
   const additions = (sql: string) =>
     [...sql.matchAll(/ALTER TABLE (\w+) ADD COLUMN (\w+)/g)].map((match) => [match[1], match[2]])
   expect(additions(sqliteSourceRoots)).toEqual(additions(postgresSourceRoots))
+})
+
+test("SQLite and PostgreSQL compact source storage stays aligned", () => {
+  const tables = ["ontology_source_roots", "ontology_source_rows"]
+  for (const table of tables) {
+    expect(tableColumns(sqliteCompactSources, table)).toEqual(
+      tableColumns(postgresCompactSources, table)
+    )
+  }
+  expect(applicationIndexes(sqliteCompactSources, tables)).toEqual(
+    applicationIndexes(postgresCompactSources, tables)
+  )
+  // PostgreSQL adds `version_id` in place; SQLite rebuilds the table and must lose nothing.
+  const postgresVersionColumns = [
+    ...tableColumns(postgresSchema, "ontology_sources"),
+    ...[postgresSourceRoots, postgresCompactSources].flatMap((sql) =>
+      [...sql.matchAll(/ALTER TABLE ontology_sources ADD COLUMN (\w+)/g)].map((match) => match[1])
+    ),
+  ]
+  expect(tableColumns(sqliteCompactSources, "ontology_sources").sort()).toEqual(
+    postgresVersionColumns.sort()
+  )
+  expect(applicationIndexes(sqliteCompactSources, ["ontology_sources"])).toEqual(
+    applicationIndexes(sqliteSchema, ["ontology_sources"])
+  )
 })
 
 function applicationTables(schema: string): string[] {

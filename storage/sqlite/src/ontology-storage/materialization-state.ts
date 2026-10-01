@@ -43,8 +43,15 @@ import {
   parseJson,
   type SqliteOntologySourceAssertionRow,
   type SqliteStoredOverrideRow,
+  sourceAssertion,
 } from "./shared"
-import { activeSourceRows, replacementAssertionRows, replacementSourceRows } from "./source-roots"
+import {
+  activeSourceRows,
+  LIVE_SOURCE_ROWS_JOIN,
+  replacementAssertionRows,
+  replacementSourceRows,
+  SOURCE_ASSERTION_COLUMNS,
+} from "./source-roots"
 
 export const SQLITE_MATERIALIZATION_WORK_TABLE = "ontology_materialization_work"
 export const SQLITE_REPLACEMENT_WORK_TABLE = "ontology_replacement_work"
@@ -438,19 +445,13 @@ export class SqliteMaterializationStateReader {
              json_extract(value, '$.linkId') AS link_id
            FROM json_each(?)
          )
-         SELECT rows.* FROM requested
+         SELECT ${SOURCE_ASSERTION_COLUMNS} FROM requested
          CROSS JOIN ontology_source_rows AS rows
-           ON rows.project_id = ?
-          AND rows.entity_kind = 'link'
+           ON rows.entity_kind = 'link'
           AND rows.source_type_id = requested.source_type_id
           AND rows.source_primary_id = requested.source_primary_id
           AND rows.link_id = requested.link_id
-         JOIN ontology_source_roots AS sources
-           ON sources.project_id = rows.project_id
-          AND sources.source_id = rows.source_id
-          AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
-         WHERE sources.active = 1`
+         ${LIVE_SOURCE_ROWS_JOIN}`
       )
       .all(requestedJson, this.projectId) as SqliteOntologySourceAssertionRow[]
     const slotOverrideRows = this.db
@@ -570,12 +571,8 @@ export class SqliteMaterializationStateReader {
               SELECT rows.source_type_id, rows.source_primary_id, rows.link_id,
                 rows.target_type_id, rows.target_primary_id
               FROM ontology_source_rows AS rows
-              JOIN ontology_source_roots AS sources
-                ON sources.project_id = rows.project_id
-               AND sources.source_id = rows.source_id
-               AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
-              WHERE rows.project_id = ? AND rows.entity_kind = 'link' AND sources.active = 1
+              ${LIVE_SOURCE_ROWS_JOIN}
+              WHERE rows.entity_kind = 'link'
             ), selected AS (
               SELECT DISTINCT links.*,
                 ${linkSortExpression("links")} AS sort_key
@@ -752,7 +749,7 @@ export class SqliteMaterializationStateReader {
   }
 
   private prepareReplacementObjects(input: ReplacementIdentityInput): void {
-    const rows = replacementSourceRows({
+    const rows = replacementSourceRows(this.db, {
       projectId: this.projectId,
       sourceId: input.sourceId,
       materializationId: input.candidateMaterializationId,
@@ -765,7 +762,7 @@ export class SqliteMaterializationStateReader {
             session_id, entity_kind, identity_key, sort_key, diff_required
           )
           SELECT ?, 'object', json_array(object_type_id, primary_id),
-            MIN(entity_sort_key), 1
+            ${objectSortExpression()}, 1
           FROM (${rows.sql}) AS rows
           WHERE entity_kind = 'object'
           GROUP BY object_type_id, primary_id
@@ -775,7 +772,7 @@ export class SqliteMaterializationStateReader {
   }
 
   private prepareReplacementLinks(input: ReplacementIdentityInput): void {
-    const rows = replacementSourceRows({
+    const rows = replacementSourceRows(this.db, {
       projectId: this.projectId,
       sourceId: input.sourceId,
       materializationId: input.candidateMaterializationId,
@@ -834,31 +831,21 @@ export class SqliteMaterializationStateReader {
             UNION
             SELECT rows.source_type_id, rows.source_primary_id AS source_id,
               rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
-            FROM ontology_source_rows AS rows
-            JOIN ontology_source_roots AS sources
-              ON sources.project_id = rows.project_id
-             AND sources.source_id = rows.source_id
-             AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
-            JOIN incident_objects
-              ON incident_objects.object_type_id = rows.source_type_id
-             AND incident_objects.primary_id = rows.source_primary_id
-            WHERE rows.project_id = ? AND rows.entity_kind = 'link'
-              AND sources.active = 1
+            FROM incident_objects
+            CROSS JOIN ontology_source_rows AS rows
+              ON rows.entity_kind = 'link'
+             AND rows.source_type_id = incident_objects.object_type_id
+             AND rows.source_primary_id = incident_objects.primary_id
+            ${LIVE_SOURCE_ROWS_JOIN}
             UNION
             SELECT rows.source_type_id, rows.source_primary_id AS source_id,
               rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
-            FROM ontology_source_rows AS rows
-            JOIN ontology_source_roots AS sources
-              ON sources.project_id = rows.project_id
-             AND sources.source_id = rows.source_id
-             AND sources.materialization_id = rows.materialization_id
-         AND sources.root_sort_key = rows.root_sort_key
-            JOIN incident_objects
-              ON incident_objects.object_type_id = rows.target_type_id
-             AND incident_objects.primary_id = rows.target_primary_id
-            WHERE rows.project_id = ? AND rows.entity_kind = 'link'
-              AND sources.active = 1
+            FROM incident_objects
+            CROSS JOIN ontology_source_rows AS rows
+              ON rows.entity_kind = 'link'
+             AND rows.target_type_id = incident_objects.object_type_id
+             AND rows.target_primary_id = incident_objects.primary_id
+            ${LIVE_SOURCE_ROWS_JOIN}
           ), diff_links AS (
             SELECT * FROM replacement_links
             UNION SELECT * FROM incident_links
@@ -1062,9 +1049,7 @@ function storedSource(row: SqliteOntologySourceAssertionRow): StoredSourceAssert
   return {
     source: { projectionId: row.source_id },
     materializationId: row.materialization_id,
-    root: parseJson<StoredSourceAssertion["root"]>(row.root),
-    assertion: parseJson<StoredSourceAssertion["assertion"]>(row.assertion),
-    stagingOrdinal: row.staging_ordinal,
+    ...sourceAssertion(row),
   } as StoredSourceAssertion
 }
 
@@ -1128,6 +1113,11 @@ function storedPoint(row: TelemetryRow): StoredTelemetryPoint {
     at: row.at,
     lastCommitId: row.last_commit_id,
   }
+}
+
+function objectSortExpression(alias?: string): string {
+  const prefix = alias ? `${alias}.` : ""
+  return `LOWER(HEX(CAST(json_array(${prefix}object_type_id, ${prefix}primary_id) AS BLOB)))`
 }
 
 export function linkSortExpression(alias?: string): string {

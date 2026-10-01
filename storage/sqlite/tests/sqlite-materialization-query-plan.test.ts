@@ -43,16 +43,8 @@ describe("SQLite materialization query plans", () => {
         "CROSS JOIN ontology_source_roots AS roots",
         "CROSS JOIN ontology_source_rows AS rows"
       )
-      expectRequestedFirstLookup(db, sourceRead, "SEARCH roots", [
-        "project_id=?",
-        "root_sort_key=?",
-      ])
-      expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", [
-        "project_id=?",
-        "source_id=?",
-        "materialization_id=?",
-        "root_sort_key=?",
-      ])
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH roots", ["project_id=?", "root_key=?"])
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", ["root_id=?"])
       expectRequestedFirstLookup(
         db,
         findRecorded(recorded, "CROSS JOIN ontology_object_overrides AS overrides"),
@@ -90,16 +82,8 @@ describe("SQLite materialization query plans", () => {
         "CROSS JOIN ontology_source_roots AS roots",
         "CROSS JOIN ontology_source_rows AS rows"
       )
-      expectRequestedFirstLookup(db, sourceRead, "SEARCH roots", [
-        "project_id=?",
-        "root_sort_key=?",
-      ])
-      expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", [
-        "project_id=?",
-        "source_id=?",
-        "materialization_id=?",
-        "root_sort_key=?",
-      ])
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH roots", ["project_id=?", "root_key=?"])
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", ["root_id=?"])
       expectRequestedFirstLookup(
         db,
         findRecorded(recorded, "CROSS JOIN ontology_link_overrides AS overrides", "'edge'"),
@@ -113,6 +97,23 @@ describe("SQLite materialization query plans", () => {
           "target_primary_id=?",
         ]
       )
+    })
+  })
+
+  // Regression proof: end migration 052 with `ANALYZE ontology_source_roots` again. On a fresh
+  // install the statistics describe an empty table, and SQLite then reaches the roots through the
+  // project's live-root index instead of each row's root id.
+  test("link slot batches reach live roots through each requested row", () => {
+    withRecordedReader(({ db, reader, recorded }) => {
+      reader.linkSlotStates([{ source: objectRef, linkId: "timecards" }])
+
+      const sourceRead = findRecorded(recorded, "rows.link_id = requested.link_id")
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", [
+        "source_type_id=?",
+        "source_primary_id=?",
+        "link_id=?",
+      ])
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH roots", ["rowid=?"])
     })
   })
 
@@ -141,16 +142,13 @@ describe("SQLite materialization query plans", () => {
     })
   })
 
-  test("replacement source batches use entity kind and the full primary key", () => {
+  test("replacement source batches look up the candidate's roots by key", () => {
     withRecordedReader(({ db, reader, recorded }) => {
       reader.replacementObjectStates("employees", "materialization-1", [objectRef])
 
-      expectRequestedFirstLookup(
-        db,
-        findRecorded(recorded, "requested_entities", "SELECT rows.*"),
-        "SEARCH rows",
-        ["project_id=?", "source_id=?", "materialization_id=?", "entity_kind=?", "entity_key=?"]
-      )
+      const sourceRead = findRecorded(recorded, "requested_entities")
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH roots", ["version_id=?", "root_key=?"])
+      expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", ["root_id=?"])
     })
   })
 
@@ -281,50 +279,24 @@ function insertReadyLinkCandidate(db: Database, count: number): void {
       'ontology-revision', ?, ?, ?, ?, NULL, NULL, NULL, ?)`
   ).run(projectId, timestamp, count, count, timestamp, timestamp, timestamp)
 
-  const insert = db.query(
+  const insertRoot = db.query(
+    `INSERT INTO ontology_source_roots (version_id, project_id, root_key, staging_ordinal)
+    SELECT version_id, project_id, ?, ? FROM ontology_sources WHERE materialization_id = 'candidate-1'
+    RETURNING id`
+  )
+  const insertRow = db.query(
     `INSERT INTO ontology_source_rows (
-      project_id, source_id, materialization_id,
-      entity_kind, entity_key, entity_sort_key,
-      root_kind, root_key, root_sort_key, staging_ordinal,
-      root, assertion,
-      object_type_id, primary_id,
-      source_type_id, source_primary_id, link_id, target_type_id, target_primary_id,
-      root_object_type_id, root_primary_id,
-      root_source_type_id, root_source_primary_id, root_link_id,
-      root_target_type_id, root_target_primary_id
-    ) VALUES (?, 'employees', 'candidate-1',
-      'link', json(?), ?, 'object', json(?), ?, ?, json(?), json(?),
-      NULL, NULL, 'Employee', ?, 'timecards', 'Timecard', ?,
-      'Employee', ?, NULL, NULL, NULL, NULL, NULL)`
+      root_id, entity_kind, source_type_id, source_primary_id, link_id, target_type_id,
+      target_primary_id
+    ) VALUES (?, 'link', 'Employee', ?, 'timecards', 'Timecard', ?)`
   )
   for (let index = 0; index < count; index += 1) {
     const employeeId = `employee-${index}`
-    const timecardId = `timecard-${index}`
-    const root = { kind: "object", ref: { objectTypeId: "Employee", primaryId: employeeId } }
-    const assertion = {
-      kind: "link",
-      ref: {
-        source: root.ref,
-        linkId: "timecards",
-        target: { objectTypeId: "Timecard", primaryId: timecardId },
-      },
+    const root = insertRoot.get(JSON.stringify(["object", "Employee", employeeId]), index) as {
+      readonly id: number
     }
-    insert.run(
-      projectId,
-      JSON.stringify(["link", "Employee", employeeId, "timecards", "Timecard", timecardId]),
-      `entity-${index}`,
-      JSON.stringify(["object", "Employee", employeeId]),
-      `root-${index}`,
-      index,
-      JSON.stringify(root),
-      JSON.stringify(assertion),
-      employeeId,
-      timecardId,
-      employeeId
-    )
+    insertRow.run(root.id, employeeId, `timecard-${index}`)
   }
-  db.run(`INSERT INTO ontology_source_roots (project_id, source_id, materialization_id, root_sort_key, root_kind, root_key, root, staging_ordinal)
-    SELECT DISTINCT project_id, source_id, materialization_id, root_sort_key, root_kind, root_key, root, staging_ordinal FROM ontology_source_rows`)
 }
 
 function findRecorded(
