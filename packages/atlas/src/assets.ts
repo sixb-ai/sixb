@@ -86,6 +86,11 @@ export async function buildBuiltInUiBundle(
       "chunk-[name]-[hash].[ext]",
       "--asset-naming",
       "asset-[name]-[hash].[ext]",
+      // Imported files such as connector icons resolve to a URL relative to the output, which the
+      // page would read against its own path. The production server only serves build output from
+      // here.
+      "--public-path",
+      "/__sixb/",
       // React is bundled here rather than external, so without this the production Atlas bundle
       // ships React's development build: every render pays the dev-only checks and the browser
       // downloads them. `--production` sets NODE_ENV=production, which picks the production JSX
@@ -94,8 +99,7 @@ export async function buildBuiltInUiBundle(
       // Moves everything behind a dynamic import out of the entry. Shiki's ~350 language grammars
       // are the bulk of Atlas: without this the browser downloads all 11.5 MB to render the first
       // page, with it 2.3 MB, and the grammars arrive only when a page highlights that language.
-      // The shell loads the entry with `type="module"`, so the relative chunk imports Bun emits
-      // resolve against the same served directory.
+      // The public path above puts the chunk imports Bun emits under `/__sixb/` as well.
       "--splitting",
     ],
     {
