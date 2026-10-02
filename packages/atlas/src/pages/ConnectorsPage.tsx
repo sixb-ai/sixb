@@ -133,9 +133,12 @@ function ConnectorListItem({
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{connectorName(connector)}</p>
-          <span className="shrink-0 rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
-            {connector.type}
-          </span>
+          {/* The id line below already says it when a connector is named after its type. */}
+          {connector.type !== connector.id ? (
+            <span className="shrink-0 rounded-md bg-background px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {connector.type}
+            </span>
+          ) : null}
         </div>
         <p className="mt-0.5 truncate text-xs text-muted-foreground">{connector.id}</p>
       </div>
