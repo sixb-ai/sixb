@@ -13,6 +13,11 @@ import {
   CollectionCardGrid,
   CollectionViewToggle,
   EmptyState,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
   Table,
   TableBody,
   TableCell,
@@ -39,6 +44,7 @@ import {
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate, useParams } from "react-router-dom"
 import { CollectionPageHeader } from "../components/CollectionPageHeader"
+import { ConnectorIcon } from "../components/ConnectorIcon"
 import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import {
   isUnconfiguredStorageError,
@@ -50,6 +56,7 @@ import { formatRelativeTime } from "../lib/time"
 import { getCollectionViewStyle, setCollectionViewStyle } from "../lib/userPreferences"
 
 type SyncSummary = ListSyncsResponse[number] | GetSyncResponse
+type SyncConnector = SyncSummary["connector"]
 type SyncRun = ListSyncRunsResponse["runs"][number]
 type SyncListViewStyle = "cards" | "table"
 type OptimisticQueuedRun = {
@@ -63,6 +70,8 @@ const syncListViewOptions = [
   { value: "cards", label: "Cards" },
   { value: "table", label: "Table" },
 ] as const
+
+const ALL_CONNECTORS = "__all__"
 
 function isOptimisticQueuedRun(run: DisplayRun): run is OptimisticQueuedRun {
   return "optimistic" in run
@@ -165,9 +174,7 @@ function SyncListItem({
 
   return (
     <CollectionCardButton onClick={onSelect}>
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        <RefreshCw className="h-4 w-4" />
-      </div>
+      <ConnectorIcon type={sync.connector.type} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{syncName(sync)}</p>
@@ -188,6 +195,36 @@ function SyncListItem({
         <span className="hidden shrink-0 text-xs text-muted-foreground sm:inline">No runs</span>
       )}
     </CollectionCardButton>
+  )
+}
+
+function SyncConnectorFilter({
+  connectors,
+  value,
+  onChange,
+}: {
+  connectors: readonly SyncConnector[]
+  value: string | undefined
+  onChange: (connectorId: string | undefined) => void
+}) {
+  return (
+    <Select
+      value={value ?? ALL_CONNECTORS}
+      onValueChange={(next) => onChange(next === ALL_CONNECTORS ? undefined : next)}
+    >
+      <SelectTrigger aria-label="Filter by connector" className="min-w-40 bg-white dark:bg-card">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={ALL_CONNECTORS}>All connectors</SelectItem>
+        {connectors.map((connector) => (
+          <SelectItem key={connector.id} value={connector.id}>
+            <ConnectorIcon type={connector.type} className="size-5 rounded" />
+            {humanizeIdentifier(connector.id)}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
   )
 }
 
@@ -215,7 +252,7 @@ function SyncTableView({
             <TableRow key={sync.id} onClick={() => onSelect(sync.id)} className="cursor-pointer">
               <TableCell>
                 <div className="flex min-w-0 items-center gap-2">
-                  <RefreshCw className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <ConnectorIcon type={sync.connector.type} className="size-6 rounded-md" />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">{syncName(sync)}</p>
                     <p className="font-mono text-[11px] text-muted-foreground">{sync.mode}</p>
@@ -564,16 +601,24 @@ export function SyncsPage() {
   useSyncLiveUpdates({ enabled: syncs.length > 0 })
   const navigate = useNavigate()
   const [searchQuery, setSearchQuery] = useState("")
+  const [connectorId, setConnectorId] = useState<string>()
   const [viewStyle, setViewStyle] = useState<SyncListViewStyle>(() =>
     getCollectionViewStyle("syncs", ["cards", "table"], "cards")
   )
 
+  const connectors = useMemo(() => {
+    const byId = new Map(syncs.map((sync) => [sync.connector.id, sync.connector]))
+    return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
+  }, [syncs])
+
   const filteredSyncs = useMemo(() => {
     const query = searchQuery.trim().toLowerCase()
-    if (!query) return syncs
+    if (!query && !connectorId) return syncs
 
     return syncs.filter((sync) => {
+      if (connectorId && sync.connector.id !== connectorId) return false
       return (
+        !query ||
         sync.id.toLowerCase().includes(query) ||
         sync.mode.toLowerCase().includes(query) ||
         sync.connector.id.toLowerCase().includes(query) ||
@@ -582,7 +627,7 @@ export function SyncsPage() {
         sync.latestRun?.status.toLowerCase().includes(query)
       )
     })
-  }, [syncs, searchQuery])
+  }, [syncs, searchQuery, connectorId])
 
   if (isLoading) {
     return (
@@ -630,14 +675,23 @@ export function SyncsPage() {
         }
         actions={
           syncs.length > 0 ? (
-            <CollectionViewToggle
-              value={viewStyle}
-              options={syncListViewOptions}
-              onChange={(style) => {
-                setViewStyle(style)
-                setCollectionViewStyle("syncs", style)
-              }}
-            />
+            <>
+              {connectors.length > 1 ? (
+                <SyncConnectorFilter
+                  connectors={connectors}
+                  value={connectorId}
+                  onChange={setConnectorId}
+                />
+              ) : null}
+              <CollectionViewToggle
+                value={viewStyle}
+                options={syncListViewOptions}
+                onChange={(style) => {
+                  setViewStyle(style)
+                  setCollectionViewStyle("syncs", style)
+                }}
+              />
+            </>
           ) : null
         }
       />
@@ -847,8 +901,19 @@ export function SyncDetailPage() {
               <DetailField label="Mode" value={sync.mode} mono />
               <DetailField
                 label="Connector"
-                value={`${sync.connector.id} (${sync.connector.type})`}
                 mono
+                value={
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto max-w-full justify-start gap-1.5 p-0 font-mono"
+                    onClick={() => navigate(`/connectors/${encodeURIComponent(sync.connector.id)}`)}
+                  >
+                    <ConnectorIcon type={sync.connector.type} className="size-5 rounded" />
+                    <span className="truncate">{sync.connector.id}</span>
+                    <ChevronRight />
+                  </Button>
+                }
               />
               <DetailField
                 label="Dataset"

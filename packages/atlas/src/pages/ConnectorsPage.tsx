@@ -29,6 +29,7 @@ import {
   Cable,
   CheckCircle2,
   ChevronLeft,
+  ChevronRight,
   Clock3,
   GitBranch,
   Loader2,
@@ -38,8 +39,9 @@ import {
   XCircle,
 } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
-import { useNavigate, useParams } from "react-router-dom"
+import { Link, useNavigate, useParams } from "react-router-dom"
 import { CollectionPageHeader } from "../components/CollectionPageHeader"
+import { ConnectorIcon } from "../components/ConnectorIcon"
 import { SixbFailureSummary } from "../components/SixbFailureSummary"
 import {
   isUnconfiguredStorageError,
@@ -127,9 +129,7 @@ function ConnectorListItem({
 }) {
   return (
     <CollectionCardButton onClick={onSelect}>
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
-        <Cable className="h-4 w-4" />
-      </div>
+      <ConnectorIcon type={connector.type} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <p className="truncate text-sm font-medium text-foreground">{connectorName(connector)}</p>
@@ -170,7 +170,7 @@ function ConnectorTableView({
             >
               <TableCell>
                 <div className="flex min-w-0 items-center gap-2">
-                  <Cable className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <ConnectorIcon type={connector.type} className="size-6 rounded-md" />
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-foreground">
                       {connectorName(connector)}
@@ -487,7 +487,7 @@ function ConnectorDetail({ connector }: { connector: Connector | null }) {
         order: "desc",
       },
     }),
-    enabled: connectorId.length > 0,
+    enabled: connectorId.length > 0 && (connector?.webhooks.length ?? 0) > 0,
     refetchInterval(query) {
       const data = query.state.data as ListWebhookRunsResponse | undefined
       return data?.runs.some((run) => run.status === "running") ? 2000 : false
@@ -531,11 +531,14 @@ function ConnectorDetail({ connector }: { connector: Connector | null }) {
   return (
     <div className="space-y-4">
       <section className="overflow-hidden rounded-lg border border-border bg-card">
-        <div className="border-b border-border px-5 py-4">
-          <p className="text-sm text-muted-foreground">{connectorSummary(connector)}</p>
-          <h2 className="mt-1 text-2xl font-semibold tracking-normal text-foreground">
-            {connectorName(connector)}
-          </h2>
+        <div className="flex items-center gap-4 border-b border-border px-5 py-4">
+          <ConnectorIcon type={connector.type} className="size-12 rounded-xl" />
+          <div className="min-w-0">
+            <p className="text-sm text-muted-foreground">{connectorSummary(connector)}</p>
+            <h2 className="mt-1 text-2xl font-semibold tracking-normal text-foreground">
+              {connectorName(connector)}
+            </h2>
+          </div>
         </div>
 
         <dl className="px-5">
@@ -578,26 +581,33 @@ function ConnectorDetail({ connector }: { connector: Connector | null }) {
           title="Syncs"
           empty={connector.syncIds.length === 0}
         >
-          <div className="space-y-1">
+          <div className="flex flex-col items-end gap-1">
             {connector.syncIds.map((syncId) => (
-              <p key={syncId} className="break-all font-mono text-xs text-foreground">
-                {syncId}
-              </p>
+              <Link
+                key={syncId}
+                to={`/syncs/${encodeURIComponent(syncId)}`}
+                className="inline-flex max-w-full items-center gap-1 font-mono text-xs text-foreground underline-offset-4 hover:underline"
+              >
+                <span className="break-all">{syncId}</span>
+                <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+              </Link>
             ))}
           </div>
         </ConnectorSection>
       </section>
 
-      <WebhookRunsSection
-        connector={connector}
-        runs={visibleWebhookRuns}
-        total={runsQuery.data?.total ?? 0}
-        selectedWebhookId={selectedWebhookId}
-        onSelectWebhook={setSelectedWebhookId}
-        isLoading={runsQuery.isLoading}
-        isError={runsQuery.isError}
-        isUnrecorded={isUnconfiguredStorageError(runsQuery.error)}
-      />
+      {connector.webhooks.length > 0 ? (
+        <WebhookRunsSection
+          connector={connector}
+          runs={visibleWebhookRuns}
+          total={runsQuery.data?.total ?? 0}
+          selectedWebhookId={selectedWebhookId}
+          onSelectWebhook={setSelectedWebhookId}
+          isLoading={runsQuery.isLoading}
+          isError={runsQuery.isError}
+          isUnrecorded={isUnconfiguredStorageError(runsQuery.error)}
+        />
+      ) : null}
     </div>
   )
 }

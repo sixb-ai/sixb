@@ -89,6 +89,21 @@ describe("createAtlasApp", () => {
       expect(builtFiles.some((file) => /^chunk-PipelinesPage-[^.]+\.js$/.test(file))).toBe(true)
       // Project workspace views remain lazy so their canvas dependencies stay off the initial path.
 
+      // Bundled files such as connector icons must resolve under `/__sixb/`, the only path the
+      // production server serves build output from. Without `--public-path` in `buildBuiltInUiBundle`
+      // the bundle references `./asset-*`, which the page resolves to `/asset-*` and gets a 404;
+      // remove the flag to watch this fail.
+      const iconFile = builtFiles.find((file) => /^asset-stripe-[^.]+\.svg$/.test(file))
+      expect(iconFile).toBeDefined()
+      const iconPath = `/__sixb/${iconFile}`
+      const bundleSources = await Promise.all(
+        builtFiles
+          .filter((file) => file.endsWith(".js"))
+          .map((file) => Bun.file(join(assetsOutdir, file)).text())
+      )
+      expect(bundleSources.some((source) => source.includes(iconPath))).toBe(true)
+      expect((await fetch(`${baseUrl}${iconPath}`)).status).toBe(200)
+
       for (const assetPath of [scriptPath, stylesheetPath]) {
         const assetResponse = await fetch(`${baseUrl}${assetPath}`)
         expect(assetResponse.status).toBe(200)
