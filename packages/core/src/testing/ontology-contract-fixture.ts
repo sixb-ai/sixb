@@ -25,7 +25,6 @@ export function contractEditHeader(id: string): MaterializationPlanHeader {
       requestHash: `hash:${id}`,
       executionId: `contract-execution:${id}`,
       origin: { kind: "runtime", requestId: id },
-      executor: contractExecutor(id),
       ontologyRevision: "ontology-contract-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
       committedAt: CONTRACT_COMMITTED_AT,
@@ -83,11 +82,7 @@ export async function commitExactObject(
     readonly requestedBy?: AuthorizablePrincipal
   } = {}
 ): Promise<{ readonly eventId: string }> {
-  const defaultHeader = contractEditHeader(id)
-  const header: MaterializationPlanHeader =
-    options.requestedBy === undefined
-      ? defaultHeader
-      : { ...defaultHeader, commit: { ...defaultHeader.commit, requestedBy: options.requestedBy } }
+  const header = contractEditHeader(id)
   const ref = { objectTypeId: "ContractDevice", primaryId: options.primaryId ?? id }
   const row = {
     ref,
@@ -99,22 +94,11 @@ export async function commitExactObject(
   }
   const exactWrite = { row, expected: { ref, exists: false as const } }
   const draft = {
-    schemaVersion: 1 as const,
-    projectId: header.commit.projectId,
-    occurredAt: header.commit.committedAt,
-    correlationId: `contract-correlation:${id}`,
-    origin: header.commit.origin,
-    ...(header.commit.requestedBy === undefined ? {} : { requestedBy: header.commit.requestedBy }),
-    executor: header.commit.executor,
-    commitId: id,
     type: "object.created" as const,
-    topic: "objects" as const,
-    partitionKey: `${ref.objectTypeId}:${ref.primaryId}`,
     payload: {
       objectTypeId: ref.objectTypeId,
       primaryId: ref.primaryId,
       properties: row.properties,
-      propertyChanges: {},
     },
   }
   const work: readonly MaterializationWorkRecord[] = [
@@ -135,7 +119,7 @@ export async function commitExactObject(
   ]
 
   await storage.transaction(async (tx) => {
-    await ensureContractExecution(tx, header)
+    await ensureContractExecution(tx, header, options.requestedBy)
     const materializations = tx.ontology.materializations
     const session = await materializations.begin(header)
     await materializations.stageWork({ session, records: work })
@@ -153,9 +137,14 @@ export async function commitExactObject(
   return { eventId: createEventId(header.commit.projectId, id, 0) }
 }
 
+/**
+ * Records the execution a contract commit runs under: a request, made on behalf of `requestedBy`
+ * when given. Its events read who asked and what wrote from this record.
+ */
 export async function ensureContractExecution(
   storage: Pick<Storage, "executions">,
-  header: MaterializationPlanHeader
+  header: MaterializationPlanHeader,
+  requestedBy?: AuthorizablePrincipal
 ): Promise<void> {
   if (
     await storage.executions.getById({
@@ -165,7 +154,6 @@ export async function ensureContractExecution(
   ) {
     return
   }
-  const { requestedBy } = header.commit
   await storage.executions.create({
     id: header.commit.executionId,
     projectId: header.commit.projectId,

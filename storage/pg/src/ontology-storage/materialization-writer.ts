@@ -505,7 +505,7 @@ export class PgMaterializationWriter {
   }
 
   /**
-   * Writes the staged events in canonical order. Event ids hash the canonical JSON of
+   * Writes the staged event drafts in canonical order. Event ids hash the canonical JSON of
    * `[projectId, commitId, ordinal]`; the provider-fixed prefix is rendered here, the ordinal by
    * PostgreSQL, so the outbox matches `createEventId` without one id crossing the wire.
    */
@@ -525,12 +525,11 @@ export class PgMaterializationWriter {
         FROM candidates
       ), written AS (
         INSERT INTO ontology_outbox (
-          project_id, id, commit_id, commit_ordinal, envelope,
+          project_id, id, commit_id, commit_ordinal, event,
           available_at, attempts, lease_id, lease_expires_at,
           published_at, last_failure, created_at
         )
-        SELECT ${target.projectId}, id, ${target.commitId}, ordinal,
-          draft || jsonb_build_object('id', id, 'commitOrdinal', ordinal),
+        SELECT ${target.projectId}, id, ${target.commitId}, ordinal, draft,
           ${target.committedAt}::timestamptz, 0, NULL, NULL, NULL, NULL,
           ${target.committedAt}::timestamptz
         FROM identified

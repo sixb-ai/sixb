@@ -11,6 +11,7 @@ import { InMemoryOntologyReplacementPlanStorage } from "./replacement-plans"
 import {
   cloneOntologyState,
   createInMemoryOntologyState,
+  type InMemoryExecutionReader,
   type InMemoryOntologyState,
   type InMemoryOntologyStorageTestHooks,
   restoreOntologyState,
@@ -29,7 +30,7 @@ interface InMemoryOntologyStorageOptions {
   readonly getTransactionToken: () => object | null
   readonly getMaterializationLifecycle: () => ProviderMaterializationTransactionLifecycle | null
   readonly assertSourceMaterializationExecution: AssertSourceMaterializationExecution
-  readonly executionExists: (projectId: string, executionId: string) => Promise<boolean>
+  readonly readExecution: InMemoryExecutionReader
 }
 
 import { InMemoryVectorIndexingStorage } from "./vector-indexing"
@@ -75,7 +76,11 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       options.runRootOperation,
       options.assertSourceMaterializationExecution
     )
-    this.outbox = new InMemoryOntologyOutboxStorage(this.state, options.runRootOperation)
+    this.outbox = new InMemoryOntologyOutboxStorage(
+      this.state,
+      options.runRootOperation,
+      options.readExecution
+    )
     const hooks: InMemoryOntologyStorageTestHooks = {
       beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
       beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),
@@ -90,7 +95,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       reader,
       options.getTransactionToken,
       options.getMaterializationLifecycle,
-      options.executionExists,
+      options.readExecution,
       hooks
     )
     this.replacementPlans = new InMemoryOntologyReplacementPlanStorage(

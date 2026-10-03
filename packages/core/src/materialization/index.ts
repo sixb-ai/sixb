@@ -17,7 +17,14 @@ export {
   MaterializationObjectNotFoundError,
   MaterializationValidationError,
 } from "./errors"
-export type { OntologyMaterializationEvent, OntologyMaterializationEventDraft } from "./events"
+export type { OntologyMaterializationEventSequence } from "./event-envelopes"
+export { eventAttribution, materializationEvent } from "./event-envelopes"
+export type {
+  OntologyMaterializationEvent,
+  OntologyMaterializationEventAttribution,
+  OntologyMaterializationEventCommit,
+  OntologyMaterializationEventDraft,
+} from "./events"
 export { createEventId } from "./identity"
 export type {
   BaseCommitResult,

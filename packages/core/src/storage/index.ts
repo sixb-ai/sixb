@@ -527,7 +527,6 @@ export type {
   OntologyOutboxRecord,
   OntologyOutboxStorage,
   OntologyOutboxSummary,
-  OntologyOutboxWrite,
   OntologyReplacementPlanStorage,
   OntologySourceMaterializationStatus,
   OntologySourceRecord,

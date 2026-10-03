@@ -64,7 +64,6 @@ function header(id: string): MaterializationPlanHeader {
       idempotencyKey: `key:${id}`,
       requestHash: `hash:${id}`,
       origin: { kind: "runtime", requestId: id },
-      executor: { type: "request", requestId: id },
       ontologyRevision: "test-ontology",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
       committedAt: timestamp,

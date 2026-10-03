@@ -2,7 +2,12 @@ import { serializeSixbFailure } from "@sixb/core/internal/errors"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
+  type OntologyMaterializationEventCommit,
 } from "@sixb/core/internal/materialization"
+import {
+  claimedOutboxRows,
+  type OutboxEventContext,
+} from "@sixb/core/internal/ontology-storage-provider"
 import type {
   ClaimedOntologyOutboxRow,
   ClaimOntologyOutboxInput,
@@ -14,14 +19,23 @@ import type {
   SummarizeOntologyOutboxInput,
 } from "@sixb/core/storage"
 import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "@sixb/core/storage"
+import { type PgExecutionRow, pgExecutionRecord } from "../pg-execution-storage"
 import {
   assertNonblank,
   assertPositiveInteger,
   assertTimestamp,
-  outboxRecord,
+  claimedOutboxDraft,
   type PgOntologyOutboxRow,
   type PgRootOperation,
+  toIsoString,
 } from "./shared"
+
+/** A commit's own fields, prefixed, beside every column of the execution it ran under. */
+interface PgOutboxContextRow extends PgExecutionRow {
+  readonly commit_id: string
+  readonly commit_committed_at: Date | string
+  readonly commit_origin: OntologyMaterializationEventCommit["origin"]
+}
 
 export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
   constructor(private readonly runRootOperation: PgRootOperation) {}
@@ -57,23 +71,28 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
             lease_expires_at = ${input.leaseExpiresAt}
           FROM candidates
           WHERE outbox.project_id = candidates.project_id AND outbox.id = candidates.id
-          RETURNING outbox.id AS row_id, outbox.envelope, outbox.available_at,
-            outbox.attempts, outbox.lease_id, outbox.lease_expires_at,
-            outbox.published_at, outbox.last_failure, outbox.created_at,
-            outbox.commit_id, outbox.commit_ordinal
+          RETURNING outbox.id, outbox.commit_id, outbox.commit_ordinal, outbox.event,
+            outbox.available_at, outbox.attempts, outbox.lease_id, outbox.lease_expires_at,
+            outbox.published_at, outbox.last_failure, outbox.created_at
         )
         SELECT * FROM claimed ORDER BY created_at, commit_id, commit_ordinal
       `
-      return rows.map((row) => {
-        const record = outboxRecord(row)
-        if (record.leaseId === null || record.leaseExpiresAt === null) {
-          throw new MaterializationConflictError(
-            "outbox-lease",
-            "Ontology outbox claim returned an unpaired lease."
-          )
-        }
-        return { ...record, leaseId: record.leaseId, leaseExpiresAt: record.leaseExpiresAt }
-      })
+      if (rows.length === 0) return []
+      // Each commit and its execution are read once, however many of its events the batch holds.
+      const commitIds = [...new Set(rows.map((row) => row.commit_id))]
+      const contexts = await sql<PgOutboxContextRow[]>`
+        SELECT commits.id AS commit_id, commits.committed_at AS commit_committed_at,
+          commits.origin AS commit_origin, executions.*
+        FROM ontology_commits AS commits
+        JOIN executions
+          ON executions.project_id = commits.project_id AND executions.id = commits.execution_id
+        WHERE commits.project_id = ${input.projectId}
+          AND commits.id = ANY(${sql.array(commitIds)}::text[])
+      `
+      const contextOf = new Map(
+        contexts.map((row) => [row.commit_id, outboxEventContext(input.projectId, row)])
+      )
+      return claimedOutboxRows(rows.map(claimedOutboxDraft), (commitId) => contextOf.get(commitId))
     })
   }
 
@@ -189,6 +208,18 @@ export class PgOntologyOutboxStorage implements OntologyOutboxStorage {
         maxAttempts: summary?.max_attempts ?? 0,
       }
     })
+  }
+}
+
+function outboxEventContext(projectId: string, row: PgOutboxContextRow): OutboxEventContext {
+  return {
+    commit: {
+      projectId,
+      id: row.commit_id,
+      committedAt: toIsoString(row.commit_committed_at),
+      origin: row.commit_origin,
+    },
+    execution: pgExecutionRecord(row),
   }
 }
 

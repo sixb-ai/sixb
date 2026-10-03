@@ -86,7 +86,6 @@ export type {
   OntologyOutboxRecord,
   OntologyOutboxStorage,
   OntologyOutboxSummary,
-  OntologyOutboxWrite,
   PurgePublishedOntologyOutboxInput,
   RescheduleOntologyOutboxLeaseInput,
   SummarizeOntologyOutboxInput,
