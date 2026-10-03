@@ -483,6 +483,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 52,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "053-audio-transcription",
+    status: "applied",
+    version: 53,
+  },
 ]
 
 afterEach(async () => {

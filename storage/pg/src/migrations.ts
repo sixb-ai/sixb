@@ -115,6 +115,7 @@ import projectionRunSupersessionSql from "./migrations/051-projection-run-supers
 import compactSourceStorageSql from "./migrations/052-compact-source-storage.sql" with {
   type: "text",
 }
+import audioTranscriptionSql from "./migrations/053-audio-transcription.sql" with { type: "text" }
 import type { ReservedSQL, SQL, SQLClient } from "./pg-client"
 import { runPgTransactionOn, undoOnFailure, withReservedPgConnection } from "./transactions"
 
@@ -415,6 +416,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("050-directory-group-memberships", directoryGroupMembershipsSql),
     pgSql("051-projection-run-supersession", projectionRunSupersessionSql),
     pgSql("052-compact-source-storage", compactSourceStorageSql),
+    pgSql("053-audio-transcription", audioTranscriptionSql),
   ],
 })
 

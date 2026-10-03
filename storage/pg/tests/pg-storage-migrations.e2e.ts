@@ -343,6 +343,7 @@ describe("Postgres storage migrations", () => {
             "050-directory-group-memberships",
             "051-projection-run-supersession",
             "052-compact-source-storage",
+            "053-audio-transcription",
           ],
         },
       ])
@@ -710,6 +711,13 @@ describe("Postgres storage migrations", () => {
           id: "052-compact-source-storage",
           status: "applied",
           version: 52,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "053-audio-transcription",
+          status: "applied",
+          version: 53,
         },
       ])
     })
@@ -2160,6 +2168,8 @@ describe("Postgres storage migrations", () => {
             ...row,
             requested_reasoning: null,
             provider_ids: null,
+            audio_duration_ms: null,
+            model_kind: null,
           }))
         )
         await expect(
@@ -2716,6 +2726,13 @@ describe("Postgres storage migrations", () => {
           id: "052-compact-source-storage",
           status: "applied",
           version: 52,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "053-audio-transcription",
+          status: "applied",
+          version: 53,
         },
       ])
     } finally {

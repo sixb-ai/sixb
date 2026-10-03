@@ -1,5 +1,5 @@
 import type { AiModelCallReservationIdentity } from "../../storage"
-import type { ModelCostEstimator } from "../pricing"
+import type { ModelCostEstimator, ModelMoney } from "../pricing"
 
 /** Default output ceiling when a call and its resolved model supply no limit. */
 export const AI_MODEL_CALL_OUTPUT_TOKEN_ALLOWANCE = 4_096
@@ -25,6 +25,8 @@ export interface AiModelCallAdmissionInput {
   readonly providerId: string
   readonly modelId: string
   readonly costEstimator?: ModelCostEstimator
+  /** A non-token estimate, computed by the resolved binding before inference. */
+  readonly reservationCost?: ModelMoney
   readonly inputTokens: AiModelCallInputTokenEstimate
   readonly outputTokenAllowance: number
   readonly estimatedTotalTokens?: number

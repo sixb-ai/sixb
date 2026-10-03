@@ -8,3 +8,4 @@ export {
   type VercelGatewayOptions,
   vercelGateway,
 } from "./provider"
+export type { VercelGatewayTranscriptionOptions } from "./transcription"

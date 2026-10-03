@@ -26,6 +26,8 @@ import {
   type ModelUsage,
   modelReasoningSupportIssue,
   rateModelCall,
+  type TranscriptionCostEstimator,
+  type TranscriptionModel,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { responsesEvents, responsesInput, responsesUsage } from "@sixb/model-protocols/responses"
@@ -39,6 +41,8 @@ import {
 import { createGatewayEmbedding, type VercelGatewayEmbeddingOptions } from "./embedding"
 import { withAutomaticPromptCaching } from "./provider-caching"
 import { isStrictGatewaySchema } from "./structured-output"
+import { createGatewayTranscription, type VercelGatewayTranscriptionOptions } from "./transcription"
+import { transcriptionDurationEstimator } from "./transcription-pricing"
 
 type ValueSource<T> = T | (() => T)
 
@@ -51,6 +55,8 @@ const DEFAULT_MAX_RETRY_DELAY_MS = 60_000
 
 export interface VercelGatewayOptions {
   readonly baseUrl?: string
+  /** Full endpoint for proxies without the standard /v1 and /v4 URL layout. */
+  readonly transcriptionUrl?: string
   readonly apiKey?: ValueSource<string | undefined>
   readonly headers?: ValueSource<Readonly<Record<string, string>>>
   readonly fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>
@@ -82,6 +88,7 @@ export interface VercelGateway extends LanguageModelProvider {
   readonly catalog: VercelGatewayCatalog
   embedding(modelId: string, options: VercelGatewayEmbeddingOptions): EmbeddingModel
   decision(modelId: string, options?: VercelGatewayDecisionOptions): DecisionModel
+  transcription(modelId: string, options?: VercelGatewayTranscriptionOptions): TranscriptionModel
 }
 
 export function createVercelGateway(options: VercelGatewayOptions = {}): VercelGateway {
@@ -113,6 +120,40 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
   return Object.assign(model, {
     providerId: PROVIDER_ID as typeof PROVIDER_ID,
     catalog,
+    transcription: (
+      modelId: string,
+      transcriptionOptions: VercelGatewayTranscriptionOptions = {}
+    ) => {
+      const url =
+        options.transcriptionUrl ??
+        (baseUrl.endsWith("/v1") ? `${baseUrl.slice(0, -3)}/v4/ai/transcription-model` : undefined)
+      if (!url || !URL.canParse(url) || !["http:", "https:"].includes(new URL(url).protocol)) {
+        throw new TypeError(
+          "[SixbVercelGateway] Set transcriptionUrl when baseUrl does not end in /v1."
+        )
+      }
+
+      const snapshot = structuredClone(transcriptionOptions)
+      return createGatewayTranscription(modelId, snapshot, {
+        url,
+        fetch: transport.fetch ?? fetch,
+        headers: () => gatewayHeaders(transport, "application/json"),
+        estimator: () => catalog.transcriptionEstimator(modelId, snapshot.providerOptions),
+        metadata: (payload, requestId) => {
+          const gateway = gatewayMetadata(payload)
+
+          // Transcription usage is provider-specific. Preserve it without guessing token semantics.
+          const raw = object(payload.usage)
+          return {
+            usage: raw ? { raw } : {},
+            providerIds: gatewayProviderIds(payload, requestId),
+            ...(string(payload.modelId) ? { responseModelId: string(payload.modelId) } : {}),
+            reportedCost: gatewayReportedCost(gateway),
+            route: gatewayRoute(gateway),
+          }
+        },
+      })
+    },
     decision: (modelId: string, decisionOptions: VercelGatewayDecisionOptions = {}) => {
       const timeoutMs = decisionOptions.timeoutMs ?? 30_000
       assertPositiveIntegerOption(timeoutMs, "decision.timeoutMs")
@@ -260,6 +301,25 @@ function configuredModelDefinitions(
 class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
   private readonly rateCards = new Map<string, LanguageModelRateCard>()
   private readonly decisionDefinitions = new Map<string, DecisionModelDefinition>()
+  private readonly transcriptionRates = new Map<string, string>()
+
+  async transcriptionEstimator(
+    modelId: string,
+    providerOptions: JsonObject | undefined
+  ): Promise<TranscriptionCostEstimator> {
+    let dollarsPerSecond: string | undefined
+    try {
+      await this.load()
+      if (hasFixedTokenPricing({ providerOptions })) {
+        dollarsPerSecond = this.transcriptionRates.get(modelId)
+      }
+    } catch {
+      console.warn(
+        "[SixbVercelGateway] Transcription pricing unavailable; preserving provider-reported costs."
+      )
+    }
+    return transcriptionDurationEstimator(modelId, dollarsPerSecond)
+  }
 
   async decisionResolution(
     modelId: string,
@@ -404,10 +464,15 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     })
     const rateCards = new Map<string, LanguageModelRateCard>()
     const decisions = new Map<string, DecisionModelDefinition>()
+    const transcriptionRates = new Map<string, string>()
     for (const entry of body.data) {
       const model = object(entry)
       const id = string(model?.id)
       const pricing = object(model?.pricing)
+      if (id && model?.type === "transcription" && pricing?.varies_by_provider !== true) {
+        const rate = string(pricing?.transcription_duration_cost_per_second)
+        if (rate.length <= 64 && decimal(rate)) transcriptionRates.set(id, rate)
+      }
       if (id && model?.type === "evaluation") {
         decisions.set(
           id,
@@ -425,6 +490,8 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
       )
       if (id && card) rateCards.set(id, card)
     }
+    this.transcriptionRates.clear()
+    for (const [id, rate] of transcriptionRates) this.transcriptionRates.set(id, rate)
     this.rateCards.clear()
     for (const [id, card] of rateCards) this.rateCards.set(id, card)
     this.decisionDefinitions.clear()

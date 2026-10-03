@@ -5361,6 +5361,11 @@
                               "type": "integer",
                               "minimum": 0
                             },
+                            "audioDurationMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Audio content duration in milliseconds; not billed duration."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -5408,6 +5413,10 @@
                                 "reasoningOutputTokens": {
                                   "type": "integer",
                                   "minimum": 0
+                                },
+                                "audioDurationMs": {
+                                  "type": "integer",
+                                  "minimum": 0
                                 }
                               },
                               "required": [
@@ -5417,7 +5426,8 @@
                                 "cacheReadInputTokens",
                                 "cacheWriteInputTokens",
                                 "textOutputTokens",
-                                "reasoningOutputTokens"
+                                "reasoningOutputTokens",
+                                "audioDurationMs"
                               ],
                               "additionalProperties": false
                             }
@@ -5515,6 +5525,11 @@
                                 "type": "integer",
                                 "minimum": 0
                               },
+                              "audioDurationMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Audio content duration in milliseconds; not billed duration."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -5562,6 +5577,10 @@
                                   "reasoningOutputTokens": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -5571,7 +5590,8 @@
                                   "cacheReadInputTokens",
                                   "cacheWriteInputTokens",
                                   "textOutputTokens",
-                                  "reasoningOutputTokens"
+                                  "reasoningOutputTokens",
+                                  "audioDurationMs"
                                 ],
                                 "additionalProperties": false
                               }
@@ -5685,6 +5705,11 @@
                                 "type": "integer",
                                 "minimum": 0
                               },
+                              "audioDurationMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Audio content duration in milliseconds; not billed duration."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -5732,6 +5757,10 @@
                                   "reasoningOutputTokens": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -5741,7 +5770,8 @@
                                   "cacheReadInputTokens",
                                   "cacheWriteInputTokens",
                                   "textOutputTokens",
-                                  "reasoningOutputTokens"
+                                  "reasoningOutputTokens",
+                                  "audioDurationMs"
                                 ],
                                 "additionalProperties": false
                               }
@@ -5855,6 +5885,11 @@
                                     "type": "integer",
                                     "minimum": 0
                                   },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Audio content duration in milliseconds; not billed duration."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -5902,6 +5937,10 @@
                                       "reasoningOutputTokens": {
                                         "type": "integer",
                                         "minimum": 0
+                                      },
+                                      "audioDurationMs": {
+                                        "type": "integer",
+                                        "minimum": 0
                                       }
                                     },
                                     "required": [
@@ -5911,7 +5950,8 @@
                                       "cacheReadInputTokens",
                                       "cacheWriteInputTokens",
                                       "textOutputTokens",
-                                      "reasoningOutputTokens"
+                                      "reasoningOutputTokens",
+                                      "audioDurationMs"
                                     ],
                                     "additionalProperties": false
                                   }
@@ -6017,6 +6057,11 @@
                                     "type": "integer",
                                     "minimum": 0
                                   },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Audio content duration in milliseconds; not billed duration."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -6064,6 +6109,10 @@
                                       "reasoningOutputTokens": {
                                         "type": "integer",
                                         "minimum": 0
+                                      },
+                                      "audioDurationMs": {
+                                        "type": "integer",
+                                        "minimum": 0
                                       }
                                     },
                                     "required": [
@@ -6073,7 +6122,8 @@
                                       "cacheReadInputTokens",
                                       "cacheWriteInputTokens",
                                       "textOutputTokens",
-                                      "reasoningOutputTokens"
+                                      "reasoningOutputTokens",
+                                      "audioDurationMs"
                                     ],
                                     "additionalProperties": false
                                   }
@@ -6192,6 +6242,11 @@
                                 "type": "integer",
                                 "minimum": 0
                               },
+                              "audioDurationMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Audio content duration in milliseconds; not billed duration."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -6239,6 +6294,10 @@
                                   "reasoningOutputTokens": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0
                                   }
                                 },
                                 "required": [
@@ -6248,7 +6307,8 @@
                                   "cacheReadInputTokens",
                                   "cacheWriteInputTokens",
                                   "textOutputTokens",
-                                  "reasoningOutputTokens"
+                                  "reasoningOutputTokens",
+                                  "audioDurationMs"
                                 ],
                                 "additionalProperties": false
                               }
@@ -6504,6 +6564,17 @@
                               "requestedModelId": {
                                 "type": "string"
                               },
+                              "modelKind": {
+                                "type": "string",
+                                "enum": [
+                                  "language",
+                                  "image",
+                                  "video",
+                                  "embedding",
+                                  "decision",
+                                  "transcription"
+                                ]
+                              },
                               "requestedReasoning": {
                                 "anyOf": [
                                   {
@@ -6588,6 +6659,11 @@
                                   "reasoningOutputTokens": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Audio content duration in milliseconds; not billed duration."
                                   },
                                   "reportingStatus": {
                                     "type": "string",
@@ -6789,7 +6865,8 @@
                                                     "tokens.input.cacheWrite1h",
                                                     "tokens.output.total",
                                                     "tokens.output.text",
-                                                    "tokens.output.reasoning"
+                                                    "tokens.output.reasoning",
+                                                    "audio.input.milliseconds"
                                                   ]
                                                 },
                                                 "quantity": {
@@ -6848,7 +6925,8 @@
                                                 "tokens.input.cacheWrite1h",
                                                 "tokens.output.total",
                                                 "tokens.output.text",
-                                                "tokens.output.reasoning"
+                                                "tokens.output.reasoning",
+                                                "audio.input.milliseconds"
                                               ]
                                             }
                                           }
@@ -6969,7 +7047,8 @@
                                             "tokens.input.cacheWrite1h",
                                             "tokens.output.total",
                                             "tokens.output.text",
-                                            "tokens.output.reasoning"
+                                            "tokens.output.reasoning",
+                                            "audio.input.milliseconds"
                                           ]
                                         },
                                         "quantity": {
@@ -7062,7 +7141,8 @@
                                                     "tokens.input.cacheWrite1h",
                                                     "tokens.output.total",
                                                     "tokens.output.text",
-                                                    "tokens.output.reasoning"
+                                                    "tokens.output.reasoning",
+                                                    "audio.input.milliseconds"
                                                   ]
                                                 },
                                                 "quantity": {
@@ -7121,7 +7201,8 @@
                                                 "tokens.input.cacheWrite1h",
                                                 "tokens.output.total",
                                                 "tokens.output.text",
-                                                "tokens.output.reasoning"
+                                                "tokens.output.reasoning",
+                                                "audio.input.milliseconds"
                                               ]
                                             }
                                           }
@@ -7234,7 +7315,8 @@
                                         "tokens.input.cacheWrite1h",
                                         "tokens.output.total",
                                         "tokens.output.text",
-                                        "tokens.output.reasoning"
+                                        "tokens.output.reasoning",
+                                        "audio.input.milliseconds"
                                       ]
                                     }
                                   },
@@ -20475,6 +20557,11 @@
                                     "type": "integer",
                                     "minimum": 0
                                   },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Audio content duration in milliseconds; not billed duration."
+                                  },
                                   "reportingStatus": {
                                     "type": "string",
                                     "enum": ["complete", "partial", "unavailable"]
@@ -20702,6 +20789,11 @@
                         "reasoningOutputTokens": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Audio content duration in milliseconds; not billed duration."
                         },
                         "reportingStatus": {
                           "type": "string",
@@ -21836,6 +21928,11 @@
                                   "reasoningOutputTokens": {
                                     "type": "integer",
                                     "minimum": 0
+                                  },
+                                  "audioDurationMs": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "description": "Audio content duration in milliseconds; not billed duration."
                                   },
                                   "reportingStatus": {
                                     "type": "string",
@@ -31982,6 +32079,11 @@
                               "type": "integer",
                               "minimum": 0
                             },
+                            "audioDurationMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Audio content duration in milliseconds; not billed duration."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -32749,6 +32851,11 @@
                               "type": "integer",
                               "minimum": 0
                             },
+                            "audioDurationMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Audio content duration in milliseconds; not billed duration."
+                            },
                             "reportingStatus": {
                               "type": "string",
                               "enum": ["complete", "partial", "unavailable"]
@@ -33172,6 +33279,11 @@
                             "reasoningOutputTokens": {
                               "type": "integer",
                               "minimum": 0
+                            },
+                            "audioDurationMs": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "description": "Audio content duration in milliseconds; not billed duration."
                             },
                             "reportingStatus": {
                               "type": "string",
@@ -33661,6 +33773,11 @@
                                 "type": "integer",
                                 "minimum": 0
                               },
+                              "audioDurationMs": {
+                                "type": "integer",
+                                "minimum": 0,
+                                "description": "Audio content duration in milliseconds; not billed duration."
+                              },
                               "reportingStatus": {
                                 "type": "string",
                                 "enum": ["complete", "partial", "unavailable"]
@@ -34054,6 +34171,11 @@
                         "reasoningOutputTokens": {
                           "type": "integer",
                           "minimum": 0
+                        },
+                        "audioDurationMs": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "description": "Audio content duration in milliseconds; not billed duration."
                         },
                         "reportingStatus": {
                           "type": "string",

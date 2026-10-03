@@ -69,6 +69,26 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
   }
 
   describe(label, () => {
+    // Removal proof: omit audioDurationMs from a row codec; this round trip fails.
+    test("persists transcription usage and kind without invented token totals", async () => {
+      await withStorage(async (storage) => {
+        const input = modelCallInput({
+          modelKind: "transcription",
+          usage: { audioDurationMs: 1250 },
+        })
+        await storage.recordModelCall(input)
+        const latest = await storage.getLatestForExecution({
+          projectId,
+          executionId: agentExecutionId,
+        })
+        expect(latest?.modelKind).toBe("transcription")
+        expect(latest?.usage).toEqual({ audioDurationMs: 1250, reportingStatus: "partial" })
+        expect((await storage.recordModelCall(input)).created).toBe(false)
+        expect(
+          await storage.summarizeExecution({ projectId, executionId: agentExecutionId })
+        ).toMatchObject({ modelCallCount: 1, usage: { audioDurationMs: 1250 } })
+      })
+    })
     test("retains native provider IDs across reads and replay", async () => {
       // Regression proof: omit providerIds in normalization or a storage row codec.
       await withStorage(async (storage) => {

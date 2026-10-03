@@ -38,6 +38,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
           provider_id,
           provider_ids,
           requested_model_id,
+          model_kind,
           requested_reasoning,
           response_model_id,
           response_id,
@@ -49,6 +50,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
           cache_write_input_tokens,
           text_output_tokens,
           reasoning_output_tokens,
+          audio_duration_ms,
           reporting_status,
           raw_usage,
           occurred_at,
@@ -62,6 +64,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
           ${record.providerId},
           ${record.providerIds === undefined ? null : JSON.stringify(record.providerIds)}::jsonb,
           ${record.requestedModelId},
+          ${record.modelKind ?? null},
           ${
             record.requestedReasoning === undefined
               ? null
@@ -77,6 +80,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
           ${record.usage.cacheWriteInputTokens ?? null},
           ${record.usage.textOutputTokens ?? null},
           ${record.usage.reasoningOutputTokens ?? null},
+          ${record.usage.audioDurationMs ?? null},
           ${record.usage.reportingStatus},
           ${record.rawUsage === undefined ? null : JSON.stringify(record.rawUsage)}::text::jsonb,
           ${record.occurredAt},
@@ -197,6 +201,7 @@ export class PgAiUsageStorage implements AiUsageStorage {
             ),
           }),
       requestedModelId: row.requested_model_id,
+      ...(row.model_kind === null ? {} : { modelKind: row.model_kind }),
       ...(row.requested_reasoning === null
         ? {}
         : { requestedReasoning: requestedReasoningFromRow(row.requested_reasoning) }),
@@ -257,6 +262,7 @@ interface AiUsageRow {
   readonly provider_id: string
   readonly provider_ids: Record<string, unknown> | string | null
   readonly requested_model_id: string
+  readonly model_kind: AiModelCallUsageRecord["modelKind"] | null
   readonly requested_reasoning: string | Record<string, unknown> | null
   readonly response_model_id: string | null
   readonly response_id: string
@@ -268,6 +274,7 @@ interface AiUsageRow {
   readonly cache_write_input_tokens: number | string | null
   readonly text_output_tokens: number | string | null
   readonly reasoning_output_tokens: number | string | null
+  readonly audio_duration_ms: number | string | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: ReadonlyJsonObject | string | null
   readonly occurred_at: Date | string
@@ -311,6 +318,7 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
     ...(row.reasoning_output_tokens === null
       ? {}
       : { reasoningOutputTokens: Number(row.reasoning_output_tokens) }),
+    ...(row.audio_duration_ms === null ? {} : { audioDurationMs: Number(row.audio_duration_ms) }),
   }
 }
 
