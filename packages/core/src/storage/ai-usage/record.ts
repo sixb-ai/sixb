@@ -19,6 +19,14 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
   }
   assertNonBlank(input.responseId, "responseId")
 
+  if (
+    input.modelKind !== undefined &&
+    !["language", "image", "video", "embedding", "decision", "transcription"].includes(
+      input.modelKind
+    )
+  ) {
+    throw new TypeError("[Sixb] AI model kind is invalid.")
+  }
   const occurredAt = cloneValidDate(input.occurredAt, "occurredAt")
   const recordedAt = cloneValidDate(input.recordedAt ?? new Date(), "recordedAt")
   const requesterGroupIds = normalizeRequesterGroupIds(input.requesterGroupIds)
@@ -37,6 +45,7 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
       ? {}
       : { providerIds: normalizeModelProviderIds(input.providerIds) }),
     requestedModelId: input.requestedModelId,
+    ...(input.modelKind === undefined ? {} : { modelKind: input.modelKind }),
     ...(requestedReasoning === undefined ? {} : { requestedReasoning }),
     ...(input.responseModelId === undefined ? {} : { responseModelId: input.responseModelId }),
     responseId: input.responseId,

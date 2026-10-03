@@ -12,5 +12,8 @@ export const AiUsageSummarySchema = z.object({
   cacheWriteInputTokens: TokenCountSchema.optional(),
   textOutputTokens: TokenCountSchema.optional(),
   reasoningOutputTokens: TokenCountSchema.optional(),
+  audioDurationMs: TokenCountSchema.optional().describe(
+    "Audio content duration in milliseconds; not billed duration."
+  ),
   reportingStatus: z.enum(["complete", "partial", "unavailable"]),
 })

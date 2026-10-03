@@ -1845,6 +1845,10 @@ export type GetAiAccountingOverviewResponses = {
         cacheWriteInputTokens?: number
         textOutputTokens?: number
         reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -1860,6 +1864,7 @@ export type GetAiAccountingOverviewResponses = {
           cacheWriteInputTokens: number
           textOutputTokens: number
           reasoningOutputTokens: number
+          audioDurationMs: number
         }
       }
       costs: {
@@ -1886,6 +1891,10 @@ export type GetAiAccountingOverviewResponses = {
         cacheWriteInputTokens?: number
         textOutputTokens?: number
         reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -1901,6 +1910,7 @@ export type GetAiAccountingOverviewResponses = {
           cacheWriteInputTokens: number
           textOutputTokens: number
           reasoningOutputTokens: number
+          audioDurationMs: number
         }
       }
       costs: {
@@ -1929,6 +1939,10 @@ export type GetAiAccountingOverviewResponses = {
         cacheWriteInputTokens?: number
         textOutputTokens?: number
         reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -1944,6 +1958,7 @@ export type GetAiAccountingOverviewResponses = {
           cacheWriteInputTokens: number
           textOutputTokens: number
           reasoningOutputTokens: number
+          audioDurationMs: number
         }
       }
       costs: {
@@ -1973,6 +1988,10 @@ export type GetAiAccountingOverviewResponses = {
             cacheWriteInputTokens?: number
             textOutputTokens?: number
             reasoningOutputTokens?: number
+            /**
+             * Audio content duration in milliseconds; not billed duration.
+             */
+            audioDurationMs?: number
             reportingStatus: "complete" | "partial" | "unavailable"
           }
           usageCoverage: {
@@ -1988,6 +2007,7 @@ export type GetAiAccountingOverviewResponses = {
               cacheWriteInputTokens: number
               textOutputTokens: number
               reasoningOutputTokens: number
+              audioDurationMs: number
             }
           }
           costs: {
@@ -2015,6 +2035,10 @@ export type GetAiAccountingOverviewResponses = {
             cacheWriteInputTokens?: number
             textOutputTokens?: number
             reasoningOutputTokens?: number
+            /**
+             * Audio content duration in milliseconds; not billed duration.
+             */
+            audioDurationMs?: number
             reportingStatus: "complete" | "partial" | "unavailable"
           }
           usageCoverage: {
@@ -2030,6 +2054,7 @@ export type GetAiAccountingOverviewResponses = {
               cacheWriteInputTokens: number
               textOutputTokens: number
               reasoningOutputTokens: number
+              audioDurationMs: number
             }
           }
           costs: {
@@ -2060,6 +2085,10 @@ export type GetAiAccountingOverviewResponses = {
         cacheWriteInputTokens?: number
         textOutputTokens?: number
         reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       usageCoverage: {
@@ -2075,6 +2104,7 @@ export type GetAiAccountingOverviewResponses = {
           cacheWriteInputTokens: number
           textOutputTokens: number
           reasoningOutputTokens: number
+          audioDurationMs: number
         }
       }
       costs: {
@@ -2146,6 +2176,7 @@ export type ListAiModelCallsResponses = {
         callId: string
         providerId: string
         requestedModelId: string
+        modelKind?: "language" | "image" | "video" | "embedding" | "decision" | "transcription"
         requestedReasoning?:
           | "provider-default"
           | "none"
@@ -2174,6 +2205,10 @@ export type ListAiModelCallsResponses = {
           cacheWriteInputTokens?: number
           textOutputTokens?: number
           reasoningOutputTokens?: number
+          /**
+           * Audio content duration in milliseconds; not billed duration.
+           */
+          audioDurationMs?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         occurredAt: string
@@ -2233,6 +2268,7 @@ export type ListAiModelCallsResponses = {
                       | "tokens.output.total"
                       | "tokens.output.text"
                       | "tokens.output.reasoning"
+                      | "audio.input.milliseconds"
                     quantity: string
                     rateAmountNanosPerMillion: string
                     chargeAmountNanos: string
@@ -2256,6 +2292,7 @@ export type ListAiModelCallsResponses = {
                     | "tokens.output.total"
                     | "tokens.output.text"
                     | "tokens.output.reasoning"
+                    | "audio.input.milliseconds"
                   >
                 }
             billingIdentity: {
@@ -2296,6 +2333,7 @@ export type ListAiModelCallsResponses = {
                 | "tokens.output.total"
                 | "tokens.output.text"
                 | "tokens.output.reasoning"
+                | "audio.input.milliseconds"
               quantity: string
               rateAmountNanosPerMillion: string
               chargeAmountNanos: string
@@ -2323,6 +2361,7 @@ export type ListAiModelCallsResponses = {
                       | "tokens.output.total"
                       | "tokens.output.text"
                       | "tokens.output.reasoning"
+                      | "audio.input.milliseconds"
                     quantity: string
                     rateAmountNanosPerMillion: string
                     chargeAmountNanos: string
@@ -2346,6 +2385,7 @@ export type ListAiModelCallsResponses = {
                     | "tokens.output.total"
                     | "tokens.output.text"
                     | "tokens.output.reasoning"
+                    | "audio.input.milliseconds"
                   >
                 }
             billingIdentity?: {
@@ -2387,6 +2427,7 @@ export type ListAiModelCallsResponses = {
               | "tokens.output.total"
               | "tokens.output.text"
               | "tokens.output.reasoning"
+              | "audio.input.milliseconds"
             >
             ratedAt: string
           }
@@ -6808,6 +6849,10 @@ export type GetWorkflowRunResponses = {
           cacheWriteInputTokens?: number
           textOutputTokens?: number
           reasoningOutputTokens?: number
+          /**
+           * Audio content duration in milliseconds; not billed duration.
+           */
+          audioDurationMs?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         cost?: {
@@ -6880,6 +6925,10 @@ export type GetWorkflowAgentNodeExecutionResponses = {
       cacheWriteInputTokens?: number
       textOutputTokens?: number
       reasoningOutputTokens?: number
+      /**
+       * Audio content duration in milliseconds; not billed duration.
+       */
+      audioDurationMs?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
     cost?: {
@@ -7296,6 +7345,10 @@ export type CancelWorkflowRunResponses = {
           cacheWriteInputTokens?: number
           textOutputTokens?: number
           reasoningOutputTokens?: number
+          /**
+           * Audio content duration in milliseconds; not billed duration.
+           */
+          audioDurationMs?: number
           reportingStatus: "complete" | "partial" | "unavailable"
         }
         cost?: {
@@ -10689,6 +10742,10 @@ export type PostAgentThreadMessageResponses = {
         cacheWriteInputTokens?: number
         textOutputTokens?: number
         reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -10952,6 +11009,10 @@ export type CancelAgentRunResponses = {
         cacheWriteInputTokens?: number
         textOutputTokens?: number
         reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -11124,6 +11185,10 @@ export type RetryAgentRunResponses = {
         cacheWriteInputTokens?: number
         textOutputTokens?: number
         reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -11272,6 +11337,10 @@ export type ListAgentThreadRunsResponses = {
         cacheWriteInputTokens?: number
         textOutputTokens?: number
         reasoningOutputTokens?: number
+        /**
+         * Audio content duration in milliseconds; not billed duration.
+         */
+        audioDurationMs?: number
         reportingStatus: "complete" | "partial" | "unavailable"
       }
       cost?: {
@@ -11417,6 +11486,10 @@ export type GetAgentRunResponses = {
       cacheWriteInputTokens?: number
       textOutputTokens?: number
       reasoningOutputTokens?: number
+      /**
+       * Audio content duration in milliseconds; not billed duration.
+       */
+      audioDurationMs?: number
       reportingStatus: "complete" | "partial" | "unavailable"
     }
     cost?: {

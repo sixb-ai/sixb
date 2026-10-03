@@ -6,6 +6,7 @@ import type {
 
 /** Token meters supported by deterministic local rate cards. */
 export type AiBillableMeter =
+  | "audio.input.milliseconds"
   | "tokens.input.total"
   | "tokens.input.uncached"
   | "tokens.input.cacheRead"

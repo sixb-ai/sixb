@@ -72,7 +72,7 @@ export function AiModelCallsTable({
                 <TableHead className="min-w-60 pl-6">Execution</TableHead>
                 <TableHead className="min-w-40">Model</TableHead>
                 <TableHead className="text-right">Calls</TableHead>
-                <TableHead className="text-right">Tokens</TableHead>
+                <TableHead className="text-right">Usage</TableHead>
                 <TableHead className="text-right">Cost</TableHead>
                 <TableHead className="pr-6">Valuation</TableHead>
               </TableRow>
@@ -338,6 +338,9 @@ function ExecutionCalls({
 }
 
 export function ModelCallRow({ call, nested = false }: { call: ModelCall; nested?: boolean }) {
+  const { audioDurationMs, totalTokens } = call.usage.usage
+  const hasUsage = audioDurationMs !== undefined || totalTokens !== undefined
+
   return (
     <TableRow className="text-xs">
       <TableCell className={nested ? "pl-20" : "pl-14"}>
@@ -352,6 +355,9 @@ export function ModelCallRow({ call, nested = false }: { call: ModelCall; nested
         <Models
           models={[{ providerId: call.usage.providerId, modelId: call.usage.requestedModelId }]}
         />
+        {call.usage.modelKind === "transcription" ? (
+          <p className="text-xs text-muted-foreground">Transcription</p>
+        ) : null}
         {call.usage.requestedReasoning === undefined ? null : (
           <p className="text-xs text-muted-foreground">
             {formatReasoning(call.usage.requestedReasoning)}
@@ -360,7 +366,16 @@ export function ModelCallRow({ call, nested = false }: { call: ModelCall; nested
       </TableCell>
       <TableCell className="text-right font-mono text-muted-foreground">1</TableCell>
       <TableCell className="text-right font-mono tabular-nums">
-        {tokens(call.usage.usage.totalTokens)}
+        {audioDurationMs !== undefined ? (
+          <div title="Audio content duration">
+            {(audioDurationMs / 1000).toLocaleString(undefined, {
+              maximumFractionDigits: 3,
+            })}{" "}
+            s audio
+          </div>
+        ) : null}
+        {totalTokens !== undefined ? <div>{tokens(totalTokens)} tokens</div> : null}
+        {hasUsage ? null : "—"}
       </TableCell>
       <TableCell className="whitespace-nowrap text-right font-mono tabular-nums">
         {call.cost && call.cost.status !== "unpriceable" ? formatMoney(call.cost.money) : "—"}
@@ -389,7 +404,7 @@ function SummaryCells({
         {summary.modelCallCount.toLocaleString()}
       </TableCell>
       <TableCell className="text-right font-mono text-xs tabular-nums">
-        {tokens(summary.totalTokens)}
+        {summary.totalTokens === undefined ? "—" : `${tokens(summary.totalTokens)} tokens`}
       </TableCell>
       <TableCell className="whitespace-nowrap text-right font-mono text-xs tabular-nums">
         {summary.costs.amounts.length

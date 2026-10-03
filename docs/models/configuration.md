@@ -2,7 +2,7 @@
 
 Configure the AI models available to your project. Language models power conversations and
 generation. Decision models classify inputs, score them against a rubric, and estimate probabilities.
-Embedding models power semantic search. [Browse providers](#providers) for installation and credentials.
+Embedding models power semantic search. Audio models transcribe stored files. [Browse providers](#providers) for installation and credentials.
 
 ## Language models
 
@@ -211,6 +211,46 @@ export const triage = defineWorkflowStep("triage")
 ```
 
 Add it to a [workflow](../workflows/overview.md#define-a-workflow) with `.then(triage)`.
+
+## Audio transcription
+
+Register a transcriber in `models.audio.transcription`. The first is the default:
+
+```ts
+import { createSixb } from "@sixb/core"
+import { vercelGateway } from "@sixb/vercel-ai-gateway"
+
+export const sixb = createSixb({
+  // ...your existing providers
+  models: {
+    audio: { transcription: [vercelGateway.transcription("microsoft/mai-transcribe-2")] },
+  },
+})
+```
+
+Use an ordinary workflow step or an action's writeback/effects handler:
+
+```ts
+import { defineWorkflowStep, ref } from "@sixb/core"
+
+export const transcribe = defineWorkflowStep("transcribe")
+  .input({ audio: ref.file() })
+  .output({ text: "string" })
+  .run(async ({ input, sixb }) => {
+    const { output } = await sixb.models.audio.transcribe({ audio: input.audio })
+    return output
+  })
+```
+
+The file must already exist in the project's blob storage, with an `audio/*` media type.
+Sixb verifies its size and digest before sending it. Supported encodings and provider limits
+depend on the selected model; Sixb does not transcode files or extract audio from video.
+Pass a configured `model` to override the default, or an `AbortSignal` as `signal` to cancel.
+
+The result contains `output.text`, `usage`, `cost`, and `callId`. Audio-only projects need
+neither a language model nor a sandbox. Calls use the same [accounting and limits](./usage-and-limits.md#audio-transcription)
+as other models. Authorize access to the owning object in the application before accepting
+a user-supplied file reference; a `FileRef` is an identifier, not an access grant.
 
 ## Embedding models
 

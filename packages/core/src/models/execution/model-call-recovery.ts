@@ -73,6 +73,7 @@ function toQueuePayload(record: RecordAiModelCallInput): AiModelCallRecordPayloa
       ? {}
       : { providerIds: structuredClone(record.providerIds) }),
     requestedModelId: record.requestedModelId,
+    ...(record.modelKind === undefined ? {} : { modelKind: record.modelKind }),
     ...(record.requestedReasoning === undefined
       ? {}
       : { requestedReasoning: structuredClone(record.requestedReasoning) }),

@@ -1,7 +1,9 @@
 import { runModelLoop } from "../agents/model-loop"
 import { assertProviderAccess } from "../authorization"
+import type { BlobStorage } from "../blob-storage/types"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
+import { createAudioRuntime } from "./audio/runtime"
 import type { ModelCatalog } from "./catalog"
 import { createDecisionRuntime } from "./decision/runtime"
 import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } from "./errors"
@@ -24,7 +26,8 @@ import { resolveLanguageModel } from "./resolve"
 export function createModelsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  catalog: ModelCatalog | undefined
+  catalog: ModelCatalog | undefined,
+  blobs?: BlobStorage
 ): ModelsRuntime {
   const session = runtime.modelExecution ?? new ModelExecutionSession(runtime, execution)
 
@@ -123,6 +126,7 @@ export function createModelsRuntime(
   const models: ModelsRuntime = {
     language: { generate },
     decision: createDecisionRuntime(runtime, execution, catalog, session),
+    audio: createAudioRuntime(runtime, execution, catalog, session, blobs),
   }
   registerModelExecutionBinding(models, (input) => {
     session.bind(input)
