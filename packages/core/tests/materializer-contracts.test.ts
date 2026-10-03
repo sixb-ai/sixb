@@ -1,28 +1,27 @@
 import { describe, expect, test } from "bun:test"
 import type {
   AdvanceProjectionTelemetryCheckpointInput,
-  ApplyMaterializationChunkInput,
+  AppliedMaterialization,
+  ApplyMaterializationInput,
   ApplyMaterializationResult,
   FinalizeMaterializationInput,
   MaterializationPlanHeader,
   MaterializationSession,
   MaterializationStatePage,
-  MaterializationWorkPage,
+  MaterializationVectorChangePage,
   OntologyCommitRecord,
   OntologyCommitWrite,
   OntologyMaterializationEvent,
   OntologyMaterializationStorage,
   OntologyOutboxWrite,
   OntologySourceStorage,
-  ReadMaterializationObjectExistenceInput,
-  SourceReplacementStatePage,
   StageMaterializationWorkInput,
   StageSourceAssertion,
   StreamMaterializationStateInput,
-  StreamMaterializationWorkInput,
-  StreamSourceReplacementStateInput,
+  StreamMaterializationVectorChangesInput,
 } from "@sixb/core/storage"
 import * as rootExports from "../src"
+import { utf8JsonByteLength } from "../src/materialization/refs"
 import {
   createCommitId,
   createEventId,
@@ -37,11 +36,11 @@ import {
   projectionEntityKey,
   sha256Canonical,
 } from "../src/materializer"
-import { planStream } from "../src/materializer/execution/plan-stream"
 import {
   DEFAULT_MATERIALIZATION_BATCHING,
   resolveMaterializationBatching,
 } from "../src/materializer/shared/batching"
+import { chunkBySize } from "../src/materializer/shared/chunking"
 import { createMaterializerFixture } from "./materializer-fixture"
 
 const leftObject = { objectTypeId: "a:b", primaryId: "c" }
@@ -63,29 +62,20 @@ class FakeMaterializationStorage implements OntologyMaterializationStorage {
     yield* []
   }
 
-  async *streamSourceReplacementState(
-    input: StreamSourceReplacementStateInput
-  ): AsyncIterable<SourceReplacementStatePage> {
-    this.requireActive(input.session)
-    yield* []
-  }
-
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {
     this.requireActive(input.session)
   }
 
-  async *streamWork(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
+  async *streamVectorChanges(
+    input: StreamMaterializationVectorChangesInput
+  ): AsyncIterable<MaterializationVectorChangePage> {
     this.requireActive(input.session)
     yield* []
   }
 
-  async readObjectExistence(input: ReadMaterializationObjectExistenceInput) {
+  async apply(input: ApplyMaterializationInput): Promise<AppliedMaterialization> {
     this.requireActive(input.session)
-    return []
-  }
-
-  async applyChunk(input: ApplyMaterializationChunkInput): Promise<void> {
-    this.requireActive(input.session)
+    return { eventCount: 0 }
   }
 
   async finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult> {
@@ -425,24 +415,12 @@ describe("materializer canonical contracts", () => {
     const session = await provider.begin(header)
     expect(Object.keys(session)).toEqual(["providerToken"])
 
-    const emptyChunk = {
-      overrides: {
-        objects: { upserts: [], deletes: [] },
-        links: {
-          edges: { upserts: [], deletes: [] },
-          slots: { upserts: [], deletes: [] },
-        },
-      },
-      effective: { objectUpserts: [], objectDeletes: [], linkUpserts: [], linkDeletes: [] },
-      timeseries: { pointUpserts: [] },
-      outbox: [],
-    } as const
-    await expect(provider.applyChunk({ session, chunk: emptyChunk })).resolves.toBeUndefined()
+    await expect(provider.apply({ session })).resolves.toEqual({ eventCount: 0 })
 
     const inactiveSession: MaterializationSession = { providerToken: {} }
-    await expect(
-      provider.applyChunk({ session: inactiveSession, chunk: emptyChunk })
-    ).rejects.toThrow("Inactive materialization session")
+    await expect(provider.apply({ session: inactiveSession })).rejects.toThrow(
+      "Inactive materialization session"
+    )
   })
 
   test("correlates finalized commits and returns one authoritative result", () => {
@@ -594,7 +572,7 @@ describe("materializer canonical contracts", () => {
     )
   })
 
-  test("uses UTF-8 bytes for plan chunk thresholds", async () => {
+  test("uses UTF-8 bytes for staged work chunk thresholds", async () => {
     const item = {
       kind: "object-override-delete" as const,
       value: {
@@ -604,15 +582,14 @@ describe("materializer canonical contracts", () => {
     }
     const utf8Bytes = new TextEncoder().encode(JSON.stringify(item)).byteLength
     const chunks = []
-    for await (const chunk of planStream([item, item], {
-      ...DEFAULT_MATERIALIZATION_BATCHING,
-      planChunkRows: 10,
-      planChunkBytes: utf8Bytes * 2 - 1,
+    for await (const chunk of chunkBySize([item, item], {
+      maxRows: 10,
+      maxBytes: utf8Bytes * 2 - 1,
+      byteLength: utf8JsonByteLength,
     })) {
       chunks.push(chunk)
     }
-    expect(chunks).toHaveLength(2)
-    expect(chunks.map((chunk) => chunk.overrides.objects.deletes.length)).toEqual([1, 1])
+    expect(chunks.map((chunk) => chunk.length)).toEqual([1, 1])
   })
 
   test("does not expose materializer values or tuning from the package root", () => {

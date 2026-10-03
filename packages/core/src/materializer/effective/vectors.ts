@@ -1,14 +1,13 @@
 import { objectRefKey } from "../../materialization/refs"
 import { vectorSources } from "../../objects/vectors/profile"
-import type { MaterializationSession } from "../../storage/ontology"
+import type { MaterializationSession, MaterializationVectorChange } from "../../storage/ontology"
 import type { OntologyVectorStorage } from "../../storage/ontology/vectors"
-import type { MaterializationPlanItem } from "../execution/plan-stream"
 
 /** Invalidate a bounded materialization page, including stored profiles no longer declared. */
 export async function invalidateVectorChanges(
   projectId: string,
   vectors: OntologyVectorStorage | undefined,
-  items: readonly MaterializationPlanItem[],
+  items: readonly MaterializationVectorChange[],
   session: MaterializationSession
 ): Promise<void> {
   if (!vectors) return

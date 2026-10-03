@@ -46,6 +46,7 @@ test("SQLite work staging rolls back a partial batch after a later record confli
       await expect(
         materializations.stageWork({ session, records: [pending] })
       ).resolves.toBeUndefined()
+      await materializations.apply({ session })
       await materializations.finalize({
         session,
         finalization: {

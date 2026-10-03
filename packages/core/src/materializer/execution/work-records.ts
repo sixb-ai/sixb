@@ -6,14 +6,11 @@ import type {
   MaterializationPlanWorkItem,
   MaterializationPlanWorkRecord,
   MaterializationWorkEntityKind,
-  OntologyMaterializationEvent,
-  OntologyOutboxWrite,
 } from "../../storage/ontology"
 import { materializationApplyPhase } from "../../storage/ontology/materializations"
 import type { WorkingLinkEdge, WorkingLinkSlot, WorkingObject } from "../edits/working-state"
 import type { OrderedMaterializationEventDraft } from "../effective/build-events"
 import type { TimedCommitIdentity } from "../shared/identity"
-import type { MaterializationPlanItem } from "./plan-stream"
 
 export function appendObjectOverrideWork(
   items: MaterializationPlanWorkItem[],
@@ -156,18 +153,6 @@ export function appendEffectiveLinkWork(
       },
     })
   }
-}
-
-export function outboxItem(
-  event: OntologyMaterializationEvent,
-  committedAt: string
-): MaterializationPlanItem {
-  const value: OntologyOutboxWrite = {
-    envelope: event,
-    availableAt: committedAt,
-    createdAt: committedAt,
-  }
-  return { kind: "outbox", value }
 }
 
 export function classificationWork(

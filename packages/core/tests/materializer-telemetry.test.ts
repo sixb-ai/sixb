@@ -266,7 +266,7 @@ describe("ontology materializer telemetry", () => {
     await expect(materializer.projections.finishRun(finish)).resolves.toBeUndefined()
   })
 
-  test("classifies a large point batch once while bounding provider pages and plan chunks", async () => {
+  test("classifies a large point batch once while bounding provider pages and staged work", async () => {
     let maxCoreExistingPoints = 0
     const { materializer, storage } = createMaterializerFixture({
       dependencies: {
@@ -308,10 +308,7 @@ describe("ontology materializer telemetry", () => {
     expect(classifications).toHaveLength(400)
     expect(new Set(classifications).size).toBe(400)
     expect(buffers.get("state.point.page")).toBeLessThanOrEqual(3)
-    expect(buffers.get("work.apply.page")).toBeLessThanOrEqual(5)
-    expect(buffers.get("work.event.page")).toBeLessThanOrEqual(5)
     expect(buffers.get("work.stage")).toBeLessThanOrEqual(5)
-    expect(buffers.get("apply.chunk")).toBeLessThanOrEqual(5)
     expect(maxCoreExistingPoints).toBeLessThanOrEqual(3)
   })
 

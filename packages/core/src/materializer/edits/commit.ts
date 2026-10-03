@@ -21,7 +21,7 @@ import {
   type MaterializerExecution,
   prepareMaterializerExecution,
 } from "../execution/scope"
-import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
+import { applyStagedWork } from "../execution/work-executor"
 import type { MaterializerCommand } from "../materializer"
 import {
   createActionIdempotencyKey,
@@ -189,14 +189,8 @@ async function executeEditTransaction(
     workingState,
     editPlanContext(command)
   )
-  await drainStagedWork(context, storage, session)
+  const eventCount = await applyStagedWork(context, storage, session)
   await commitVectorWrites(context, storage, command.input, command.identity.commitId, session)
-  const eventCount = await drainStagedEvents(
-    context,
-    storage.ontology.materializations,
-    session,
-    command.identity
-  )
 
   const result: EditCommitResult = {
     kind: "edit",

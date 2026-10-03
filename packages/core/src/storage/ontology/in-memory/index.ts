@@ -7,6 +7,7 @@ import type { AssertSourceMaterializationExecution } from "../sources"
 import { InMemoryOntologyCommitStorage } from "./commits"
 import { InMemoryOntologyMaterializationStorage } from "./materializations"
 import { InMemoryOntologyOutboxStorage } from "./outbox"
+import { InMemoryOntologyReplacementPlanStorage } from "./replacement-plans"
 import {
   cloneOntologyState,
   createInMemoryOntologyState,
@@ -15,6 +16,7 @@ import {
   restoreOntologyState,
 } from "./shared-state"
 import { InMemoryOntologySourceStorage } from "./sources"
+import { InMemoryMaterializationStateReader } from "./state-reader"
 import {
   type InMemoryOntologyStorageTestingAdapter,
   registerInMemoryOntologyStorageTestingAdapter,
@@ -40,6 +42,7 @@ export class InMemoryOntologyStorage implements OntologyStorage {
   readonly commits: InMemoryOntologyCommitStorage
   readonly sources: InMemoryOntologySourceStorage
   readonly materializations: InMemoryOntologyMaterializationStorage
+  readonly replacementPlans: InMemoryOntologyReplacementPlanStorage
   readonly outbox: InMemoryOntologyOutboxStorage
   private testHooks: InMemoryOntologyStorageTestHooks = {}
   private readonly testingAdapter: InMemoryOntologyStorageTestingAdapter = {
@@ -73,19 +76,30 @@ export class InMemoryOntologyStorage implements OntologyStorage {
       options.assertSourceMaterializationExecution
     )
     this.outbox = new InMemoryOntologyOutboxStorage(this.state, options.runRootOperation)
+    const hooks: InMemoryOntologyStorageTestHooks = {
+      beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
+      beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),
+      observeBuffer: (boundary, rows) => this.testHooks.observeBuffer?.(boundary, rows),
+      observeWork: (records) => this.testHooks.observeWork?.(records),
+    }
+    const reader = new InMemoryMaterializationStateReader(this.state, objects, timeseries, hooks)
     this.materializations = new InMemoryOntologyMaterializationStorage(
       this.state,
       objects,
       timeseries,
+      reader,
       options.getTransactionToken,
       options.getMaterializationLifecycle,
       options.executionExists,
-      {
-        beforeRead: (boundary) => this.testHooks.beforeRead?.(boundary),
-        beforeWrite: (boundary, ordinal) => this.testHooks.beforeWrite?.(boundary, ordinal),
-        observeBuffer: (boundary, rows) => this.testHooks.observeBuffer?.(boundary, rows),
-        observeWork: (records) => this.testHooks.observeWork?.(records),
-      }
+      hooks
+    )
+    this.replacementPlans = new InMemoryOntologyReplacementPlanStorage(
+      this.state,
+      objects,
+      reader,
+      options.runRootOperation,
+      options.assertSourceMaterializationExecution,
+      hooks
     )
     registerInMemoryOntologyStorageTestingAdapter(this, this.testingAdapter)
   }

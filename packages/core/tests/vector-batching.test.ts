@@ -123,7 +123,7 @@ function fixture(
 
 describe("durable projection embedding batches", () => {
   test("projects multiple objects, embeds once, and accounts one project call", async () => {
-    // Removal proof: disable projection grouping in drainStagedWork; the shared batch assertion fails.
+    // Removal proof: disable projection grouping in applyStagedWork; the shared batch assertion fails.
     const f = fixture()
     const names = ["Alpha", "Longer description", "Third"]
     await f.project(names)

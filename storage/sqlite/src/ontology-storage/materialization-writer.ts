@@ -5,12 +5,11 @@ import {
   objectRefKey,
   telemetryPointKey,
 } from "@sixb/core/internal/materialization"
-import { effectiveConflict } from "@sixb/core/internal/ontology-storage-provider"
-import type {
-  ExactEffectiveLinkWrite,
-  ExactEffectiveObjectWrite,
-  MaterializationPlanChunk,
-} from "@sixb/core/storage"
+import {
+  effectiveConflict,
+  type MaterializationPlanChunk,
+} from "@sixb/core/internal/ontology-storage-provider"
+import type { ExactEffectiveLinkWrite, ExactEffectiveObjectWrite } from "@sixb/core/storage"
 import { assertTimestamp, canonicalJson, isSqliteConstraintError, requireChanges } from "./shared"
 
 function linkOverrideConflictMessage(identityKind: "edge" | "slot"): string {

@@ -20,6 +20,7 @@ import type {
 } from "../sources"
 import type { VectorIndexingWork } from "../vector-indexing"
 import type { StoredObjectVector } from "../vectors"
+import type { InMemoryReplacementPlan } from "./replacement-plans"
 
 export interface InMemorySourceRoot {
   readonly root: ProjectionEntityRef
@@ -68,6 +69,7 @@ export interface InMemoryOntologyState {
   readonly linkOverrides: Map<string, InMemoryStoredLinkOverride>
   readonly linkSlotOverrides: Map<string, InMemoryStoredLinkSlotOverride>
   readonly outbox: Map<string, OntologyOutboxRecord>
+  readonly replacementPlans: Map<string, InMemoryReplacementPlan>
 }
 
 /** @internal Test-only failure injection for the in-memory ontology provider. */
@@ -94,6 +96,7 @@ export function createInMemoryOntologyState(): InMemoryOntologyState {
     linkOverrides: new Map(),
     linkSlotOverrides: new Map(),
     outbox: new Map(),
+    replacementPlans: new Map(),
   }
 }
 

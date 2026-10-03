@@ -1,4 +1,3 @@
-import type { EffectiveChangeCounts } from "@sixb/core/internal/materialization"
 import {
   assertPinnedDatasetWatermark,
   linkRefKey,
@@ -17,32 +16,30 @@ import {
   assertExpectedObjectRevision,
   assertMaterializationFinalizationCorrelation,
   assertMaterializationHeader,
-  assertMaterializationLaneCompletion,
   assertPageRows,
-  assertPlanChunkCorrelations,
   assertSourceActivationCorrelation,
+  beginMaterializationApply,
+  beginMaterializationVectorChanges,
+  cardinalityViolation,
   invalidCorrelation,
   sameNonnegativeCounts as sameCounts,
   uniqueSorted,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
-  ApplyMaterializationChunkInput,
+  AppliedMaterialization,
+  ApplyMaterializationInput,
   ApplyMaterializationResult,
   FinalizeMaterializationInput,
-  MaterializationObjectExistence,
   MaterializationPlanHeader,
   MaterializationSession,
   MaterializationStatePage,
-  MaterializationWorkPage,
+  MaterializationVectorChangePage,
   OntologyCommitRecord,
   OntologyMaterializationStorage,
-  ReadMaterializationObjectExistenceInput,
   SourceActivationWrite,
-  SourceReplacementStatePage,
   StageMaterializationWorkInput,
   StreamMaterializationStateInput,
-  StreamMaterializationWorkInput,
-  StreamSourceReplacementStateInput,
+  StreamMaterializationVectorChangesInput,
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
@@ -52,12 +49,9 @@ import {
   PgMaterializationSessions,
   type PgOntologyTransactionContext,
 } from "./materialization-session"
-import {
-  linkSortExpression,
-  PG_MATERIALIZATION_WORK_TABLE,
-  PgMaterializationStateReader,
-} from "./materialization-state"
+import { linkSortExpression, PgMaterializationStateReader } from "./materialization-state"
 import { PgMaterializationWriter } from "./materialization-writer"
+import { boundReplacementPlan } from "./replacement-plans"
 import {
   assertProjectionExecution,
   commitRecord,
@@ -69,17 +63,6 @@ import {
   toIsoString,
 } from "./shared"
 import { activateSourceRoots } from "./source-roots"
-
-interface ProjectionCountsRow {
-  readonly object_classifications: number | string
-  readonly link_classifications: number | string
-  readonly objects_created: number | string
-  readonly objects_updated: number | string
-  readonly objects_deleted: number | string
-  readonly links_created: number | string
-  readonly links_updated: number | string
-  readonly links_deleted: number | string
-}
 
 interface TelemetrySummaryRow {
   readonly classified_points: number | string
@@ -114,7 +97,10 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
 
   async begin(input: MaterializationPlanHeader): Promise<MaterializationSession> {
     assertMaterializationHeader(input)
-    const session = await this.sessions.create(input)
+    const session = await this.sessions.create(
+      input,
+      input.plan ? await boundReplacementPlan(this.sql, input) : null
+    )
     try {
       await lockAdvisoryKeys(this.sql, materializationLockKeys(input))
       await this.assertCommitAbsent(input)
@@ -220,128 +206,43 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     }
   }
 
-  async *streamSourceReplacementState(
-    input: StreamSourceReplacementStateInput
-  ): AsyncIterable<SourceReplacementStatePage> {
-    const session = this.sessions.require(input.session)
-    assertPageRows(input.pageRows)
-    const replacement = await this.requireReplacement(session, input)
-    const reader = new PgMaterializationStateReader(this.sql, session.header.commit.projectId)
-    if (input.entityKind === "object") {
-      if (replacement.projectionKind !== "object") {
-        throw new MaterializationConflictError(
-          "source-materialization",
-          "Link projection replacement cannot stream object state."
-        )
-      }
-      if (replacement.objectStreamStarted) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          "Replacement object state may only be streamed once per session."
-        )
-      }
-      replacement.objectStreamStarted = true
-      for await (const identities of reader.replacementIdentities({
-        sessionId: session.id,
-        sourceId: replacement.sourceId,
-        candidateMaterializationId: replacement.candidateMaterializationId,
-        previousMaterializationId: replacement.previousMaterializationId,
-        incremental: replacement.incremental,
-        kind: "object",
-        pageRows: input.pageRows,
-      })) {
-        this.sessions.require(input.session)
-        const refs = identities.map((identity) => {
-          if (identity.kind !== "object") {
-            invalidCorrelation("Object replacement returned a link identity.")
-          }
-          return identity.ref
-        })
-        const objects = await reader.replacementObjectStates(
-          replacement.sourceId,
-          replacement.candidateMaterializationId,
-          refs
-        )
-        yield { objects, links: [] }
-      }
-      this.sessions.require(input.session)
-      replacement.objectStreamCompleted = true
-      return
-    }
-
-    if (replacement.projectionKind === "object" && !replacement.objectStreamCompleted) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Object projection replacement must fully stream object state before link state."
-      )
-    }
-    if (replacement.linkStreamStarted) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Replacement link state may only be streamed once per session."
-      )
-    }
-    replacement.linkStreamStarted = true
-    const materializationIds = [
-      replacement.candidateMaterializationId,
-      ...(replacement.previousMaterializationId ? [replacement.previousMaterializationId] : []),
-    ]
-    for await (const identities of reader.replacementIdentities({
-      sessionId: session.id,
-      sourceId: replacement.sourceId,
-      candidateMaterializationId: replacement.candidateMaterializationId,
-      previousMaterializationId: replacement.previousMaterializationId,
-      incremental: replacement.incremental,
-      kind: "link",
-      pageRows: input.pageRows,
-    })) {
-      this.sessions.require(input.session)
-      const linkIdentities = identities.map((identity) => {
-        if (identity.kind !== "link") {
-          invalidCorrelation("Link replacement returned an object identity.")
-        }
-        return identity
-      })
-      const links = await reader.replacementLinkStates(
-        replacement.sourceId,
-        replacement.candidateMaterializationId,
-        materializationIds,
-        linkIdentities,
-        replacement.incremental
-      )
-      yield { objects: [], links }
-    }
-    this.sessions.require(input.session)
-    replacement.linkStreamCompleted = true
-  }
-
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {
     await this.sessions.stage(input)
   }
 
-  streamWork(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
+  async *streamVectorChanges(
+    input: StreamMaterializationVectorChangesInput
+  ): AsyncIterable<MaterializationVectorChangePage> {
+    const session = this.sessions.require(input.session)
     assertPageRows(input.pageRows)
-    return this.sessions.stream(input)
+    beginMaterializationVectorChanges(session)
+    await this.sessions.analyzeSealedWork(session)
+    for await (const items of this.sessions.vectorChangePages(
+      session,
+      input.objectTypeIds,
+      input.pageRows
+    )) {
+      yield { items }
+    }
   }
 
-  async readObjectExistence(
-    input: ReadMaterializationObjectExistenceInput
-  ): Promise<readonly MaterializationObjectExistence[]> {
+  async apply(input: ApplyMaterializationInput): Promise<AppliedMaterialization> {
     const session = this.sessions.require(input.session)
-    return this.sessions.readObjectExistence(session, input.refs)
-  }
-
-  async applyChunk(input: ApplyMaterializationChunkInput): Promise<void> {
-    const session = this.sessions.require(input.session)
+    beginMaterializationApply(session)
+    await this.sessions.analyzeSealedWork(session)
+    await this.assertStagedCardinality(session)
     const { commit } = session.header
-    assertPlanChunkCorrelations(input.chunk, commit)
-    const progress = await this.sessions.prepareChunkSequence(session, input.chunk)
-    await this.writer.apply(commit.projectId, commit.id, input.chunk)
-    session.changedObjects +=
-      input.chunk.effective.objectUpserts.length + input.chunk.effective.objectDeletes.length
-    session.changedLinks +=
-      input.chunk.effective.linkUpserts.length + input.chunk.effective.linkDeletes.length
-    this.sessions.commitChunkSequence(session, progress)
+    const applied = await this.writer.applyStaged({
+      workTable: session.workTable,
+      workId: session.workId,
+      projectId: commit.projectId,
+      commitId: commit.id,
+      committedAt: commit.committedAt,
+    })
+    session.changedObjects = applied.objectWrites
+    session.changedLinks = applied.linkWrites
+    session.appliedEventCount = applied.eventCount
+    return { eventCount: applied.eventCount }
   }
 
   async finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult> {
@@ -362,67 +263,6 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
 
   deactivateSessions(): void {
     this.sessions.deactivateAll()
-  }
-
-  private async requireReplacement(
-    session: PgMaterializationSessionState,
-    input: StreamSourceReplacementStateInput
-  ): Promise<NonNullable<PgMaterializationSessionState["replacement"]>> {
-    if (session.replacement) {
-      if (
-        session.replacement.sourceId !== input.source.projectionId ||
-        session.replacement.candidateMaterializationId !== input.candidateMaterializationId
-      ) {
-        throw new MaterializationConflictError(
-          "source-materialization",
-          "Materialization session already owns another replacement union."
-        )
-      }
-      return session.replacement
-    }
-    const projectId = session.header.commit.projectId
-    const candidate = await this.getSource(
-      projectId,
-      input.source.projectionId,
-      input.candidateMaterializationId,
-      true
-    )
-    if (!candidate || candidate.status !== "ready" || candidate.execution_token === null) {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        `Candidate source materialization '${input.candidateMaterializationId}' is missing or is not ready.`
-      )
-    }
-    await assertProjectionExecution(this.sql, {
-      projectId,
-      sourceId: input.source.projectionId,
-      projectionRunId: candidate.projection_run_id,
-      executionToken: candidate.execution_token,
-    })
-    const previous = await this.getActiveSource(projectId, input.source.projectionId, true)
-    if (
-      candidate.protocol !== "replacement" ||
-      (previous &&
-        (previous.protocol !== candidate.protocol ||
-          previous.projection_kind !== candidate.projection_kind))
-    ) {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        "Source replacement kind or protocol does not match its active materialization."
-      )
-    }
-    session.replacement = {
-      sourceId: input.source.projectionId,
-      candidateMaterializationId: input.candidateMaterializationId,
-      previousMaterializationId: previous?.materialization_id ?? null,
-      incremental: candidate.base_materialization_id !== null,
-      projectionKind: candidate.projection_kind,
-      objectStreamStarted: false,
-      objectStreamCompleted: false,
-      linkStreamStarted: false,
-      linkStreamCompleted: false,
-    }
-    return session.replacement
   }
 
   private async assertCommitAbsent(header: MaterializationPlanHeader): Promise<void> {
@@ -518,10 +358,8 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     const { commit } = session.header
     const { result } = input.finalization
     assertMaterializationFinalizationCorrelation(session, input)
-    const laneCounts = await this.sessions.laneCounts(session)
-    assertMaterializationLaneCompletion(session, laneCounts)
-    if (laneCounts.cardinality > 0) await this.assertFinalCardinality(session)
-    const eventCount = laneCounts.event
+    if (await this.sessions.hasCardinalityWork(session)) await this.assertFinalCardinality(session)
+    const eventCount = session.appliedEventCount
     const [outbox] = await this.sql<
       {
         readonly count: number | string
@@ -558,10 +396,43 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     if (commit.intent.kind === "projection") {
       if (result.kind !== "projection") return
       await this.sessions.assertClassificationCoverage(session)
-      if (!sameCounts(result.counts, await this.projectionCounts(session))) {
+      const counts = await this.sessions.projectionCounts(session)
+      if (!counts || !sameCounts(result.counts, counts)) {
         invalidCorrelation("Projection result counts do not correlate with finalized work.")
       }
     }
+  }
+
+  /** Rejects a cardinality-one scope that two staged occupants claim, effective view first. */
+  private async assertStagedCardinality(session: PgMaterializationSessionState): Promise<void> {
+    // Cardinality records are unique per view, scope and link: two occupied in one scope is the
+    // violation, and only its scope needs reading back.
+    const [violation] = await this.sql<
+      { readonly major_order: number; readonly sort_one: string }[]
+    >`
+      SELECT major_order, sort_one
+      FROM ${this.sql(session.workTable)}
+      WHERE work_id = ${session.workId} AND lane = 'cardinality'
+        AND cardinality_occupied
+      GROUP BY major_order, sort_one
+      HAVING COUNT(*) > 1
+      ORDER BY major_order, sort_one
+      LIMIT 1
+    `
+    if (!violation) return
+    const [scope] = await this.sql<{ readonly source_type_id: string; readonly link_id: string }[]>`
+      SELECT payload->'ref'->'source'->>'objectTypeId' AS source_type_id,
+        payload->'ref'->>'linkId' AS link_id
+      FROM ${this.sql(session.workTable)}
+      WHERE work_id = ${session.workId} AND lane = 'cardinality'
+        AND major_order = ${violation.major_order} AND sort_one = ${violation.sort_one}
+      LIMIT 1
+    `
+    throw cardinalityViolation(
+      violation.major_order === 0 ? "effective" : "candidate",
+      scope?.source_type_id ?? "",
+      scope?.link_id ?? ""
+    )
   }
 
   private async assertFinalCardinality(session: PgMaterializationSessionState): Promise<void> {
@@ -574,21 +445,19 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     await this.sql.unsafe(
       `CREATE TEMP TABLE ${table} ON COMMIT DROP AS
         SELECT sort_one AS scope_sort_key, sort_two AS link_sort_key,
-          (payload->>'occupied')::boolean AS occupied,
+          cardinality_occupied AS occupied,
           payload->'ref'->'source'->>'objectTypeId' AS source_type_id,
           payload->'ref'->'source'->>'primaryId' AS source_id,
           payload->'ref'->>'linkId' AS link_id
-        FROM ${PG_MATERIALIZATION_WORK_TABLE}
-        WHERE session_id = $1 AND lane = 'cardinality' AND major_order = 0`,
-      [session.id]
+        FROM ${session.workTable}
+        WHERE work_id = $1 AND lane = 'cardinality' AND major_order = 0`,
+      [session.workId]
     )
     await this.sql.unsafe(`ANALYZE ${table}`)
-    const [violation] = await this.sql.unsafe<{ readonly reason: "duplicate" | "mismatch" }[]>(
+    // Apply already rejected a scope with two staged occupants; this checks what it wrote.
+    const [violation] = await this.sql.unsafe<{ readonly mismatch: number }[]>(
       `WITH work AS (
         SELECT * FROM ${table}
-      ), duplicate AS (
-        SELECT scope_sort_key FROM work WHERE occupied
-        GROUP BY scope_sort_key HAVING COUNT(*) > 1
       ), scopes AS (
         SELECT DISTINCT scope_sort_key, source_type_id, source_id, link_id FROM work
       ), expected AS (
@@ -604,79 +473,14 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         UNION ALL
         (SELECT * FROM actual EXCEPT SELECT * FROM expected)
       )
-      SELECT 'duplicate'::text AS reason FROM duplicate
-      UNION ALL
-      SELECT 'mismatch'::text AS reason FROM differences
-      LIMIT 1`,
+      SELECT 1 AS mismatch FROM differences LIMIT 1`,
       [session.header.commit.projectId]
     )
     await this.sql.unsafe(`DROP TABLE ${table}`)
-    if (violation?.reason === "duplicate") {
-      invalidCorrelation("Materialization cardinality work violates cardinality-one.")
-    }
     if (violation) {
       invalidCorrelation(
         "Materialization cardinality work does not match the final effective link scope."
       )
-    }
-  }
-
-  private async projectionCounts(
-    session: PgMaterializationSessionState
-  ): Promise<EffectiveChangeCounts> {
-    const [row] = await this.sql<ProjectionCountsRow[]>`
-      SELECT
-        COUNT(*) FILTER (
-          WHERE kind = 'classification' AND payload->>'entityKind' = 'object'
-        ) AS object_classifications,
-        COUNT(*) FILTER (
-          WHERE kind = 'classification' AND payload->>'entityKind' = 'link'
-        ) AS link_classifications,
-        COUNT(*) FILTER (
-          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'object-upsert'
-            AND NOT (payload->'item'->'value'->'expected'->>'exists')::boolean
-        ) AS objects_created,
-        COUNT(*) FILTER (
-          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'object-upsert'
-            AND (payload->'item'->'value'->'expected'->>'exists')::boolean
-        ) AS objects_updated,
-        COUNT(*) FILTER (
-          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'object-delete'
-        ) AS objects_deleted,
-        COUNT(*) FILTER (
-          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'link-upsert'
-            AND NOT (payload->'item'->'value'->'expected'->>'exists')::boolean
-        ) AS links_created,
-        COUNT(*) FILTER (
-          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'link-upsert'
-            AND (payload->'item'->'value'->'expected'->>'exists')::boolean
-        ) AS links_updated,
-        COUNT(*) FILTER (
-          WHERE kind = 'plan' AND payload->'item'->>'kind' = 'link-delete'
-        ) AS links_deleted
-      FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-      WHERE session_id = ${session.id}
-    `
-    const objectsCreated = databaseCount(row?.objects_created)
-    const objectsUpdated = databaseCount(row?.objects_updated)
-    const objectsDeleted = databaseCount(row?.objects_deleted)
-    const linksCreated = databaseCount(row?.links_created)
-    const linksUpdated = databaseCount(row?.links_updated)
-    const linksDeleted = databaseCount(row?.links_deleted)
-    return {
-      objectsCreated,
-      objectsUpdated,
-      objectsDeleted,
-      objectsUnchanged:
-        databaseCount(row?.object_classifications) -
-        objectsCreated -
-        objectsUpdated -
-        objectsDeleted,
-      linksCreated,
-      linksUpdated,
-      linksDeleted,
-      linksUnchanged:
-        databaseCount(row?.link_classifications) - linksCreated - linksUpdated - linksDeleted,
     }
   }
 
@@ -697,8 +501,8 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
         COUNT(*) FILTER (
           WHERE kind = 'plan' AND payload->'item'->>'kind' = 'object-upsert'
         ) AS latest_objects_changed
-      FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-      WHERE session_id = ${session.id}
+      FROM ${this.sql(session.workTable)}
+      WHERE work_id = ${session.workId}
     `
     const pointsCreated = databaseCount(row?.points_created)
     const pointsUpdated = databaseCount(row?.points_updated)

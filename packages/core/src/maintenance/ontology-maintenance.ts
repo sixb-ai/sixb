@@ -179,6 +179,8 @@ export class OntologyMaintenance {
       failures,
       0
     )
+    // Plans go first: a source version is cleaned only once its plan is gone.
+    const spentPlanRows = await captureFailure(() => this.purgeSpentPlans(started), failures, 0)
     const terminalSources = await captureFailure(
       () =>
         this.storage.ontology.sources.cleanupTerminal({
@@ -205,7 +207,8 @@ export class OntologyMaintenance {
 
     return {
       publishedOutboxRowsDeleted,
-      terminalSourceRowsDeleted: terminalSources.rowsDeleted + abandonedSources.rowsDeleted,
+      terminalSourceRowsDeleted:
+        terminalSources.rowsDeleted + abandonedSources.rowsDeleted + spentPlanRows,
       terminalSourceMaterializationsDeleted:
         terminalSources.materializationsDeleted + abandonedSources.materializationsDeleted,
     }
@@ -228,6 +231,24 @@ export class OntologyMaintenance {
         purged.rowsDeleted + purged.materializationsDeleted < ABANDONED_SOURCE_PURGE_BATCH
       if (exhausted || this.now().getTime() - started.getTime() >= this.intervalMs) {
         return { rowsDeleted, materializationsDeleted }
+      }
+    }
+  }
+
+  /** Deletes the plans of candidates that left `ready`, batch after batch, like candidates. */
+  private async purgeSpentPlans(started: Date): Promise<number> {
+    let rowsDeleted = 0
+    while (true) {
+      const purged = await this.storage.ontology.replacementPlans.purge({
+        projectId: this.projectId,
+        limit: ABANDONED_SOURCE_PURGE_BATCH,
+      })
+      rowsDeleted += purged
+      if (
+        purged < ABANDONED_SOURCE_PURGE_BATCH ||
+        this.now().getTime() - started.getTime() >= this.intervalMs
+      ) {
+        return rowsDeleted
       }
     }
   }

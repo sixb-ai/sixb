@@ -27,13 +27,26 @@ import {
   type ProjectionSourceDeletion,
   type ProjectionSourceEntry,
 } from "../materializer"
-import type { ActionRunStorage, ProjectionRunStorage } from "../storage"
+import type {
+  ActionRunStorage,
+  OntologyReplacementPlanStorage,
+  PlannedReplacementIdentity,
+  ProjectionExecution,
+  ProjectionRunStorage,
+} from "../storage"
 import { createTestActionExecution, queueTestActionRun } from "./action-execution"
 import { createTestProjectionExecution, startTestProjectionRun } from "./projection-execution"
 
 export interface MaterializerStorageContractProvider<TStorage extends Storage> {
   readonly createStorage: () => TStorage | Promise<TStorage>
   readonly cleanup?: (storage: TStorage) => void | Promise<void>
+  /** Write transactions run side by side instead of one after another. */
+  readonly concurrentTransactions?: boolean
+  /**
+   * Moves the transaction ids that commits and plans recorded far ahead of the store's own, as a
+   * logical restore from a cluster further along leaves them.
+   */
+  readonly restoreFromClusterAhead?: (storage: TStorage) => Promise<void>
 }
 
 type ContractStorage = Storage & {
@@ -982,6 +995,532 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       await provider.cleanup?.(createdStorage)
     }
   })
+
+  // Removal proof: make every provider's `refresh` answer fresh; the edited object's planned
+  // upsert then fails its revision check and the publication rejects.
+  test(`${name} plans again only the identity an edit changed while it planned`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    const runtime = contractMaterializer(storage).withScope(runtimeScope())
+    let armed = false
+    let edited = false
+    const staged: string[] = []
+    const observed = observePlanning(storage, async (planned) => {
+      if (!armed) return
+      staged.push(...planned.map(plannedId))
+      if (edited || !planned.some((value) => plannedId(value) === "a")) return
+      edited = true
+      await runtime.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "edit-while-planned" },
+        operations: [
+          {
+            id: "rename",
+            kind: "object.patch",
+            ref: deviceRef("a"),
+            set: { name: "edited" },
+            unset: [],
+            reset: [],
+          },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+    })
+    const materializer = contractMaterializer(observed)
+    try {
+      await publishDevices(materializer, storage, 1, [sourceEntry("a", "A"), sourceEntry("b", "B")])
+      armed = true
+      await publishDevices(materializer, storage, 2, [
+        sourceEntry("a", "A2"),
+        sourceEntry("b", "B2"),
+      ])
+      expect(staged.filter((id) => id === "a")).toHaveLength(2)
+      expect(staged.filter((id) => id === "b")).toHaveLength(1)
+      expect(await device(storage, "a")).toMatchObject({ properties: { name: "edited" } })
+      expect(await device(storage, "b")).toMatchObject({ properties: { name: "B2" } })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // Removal proof: drop the link expansion from every provider's `refresh`; the link the edit
+  // added keeps pointing at the object the publication deleted.
+  test(`${name} plans the links an edit adds to an object the projection deletes`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    const runtime = contractMaterializer(storage).withScope(runtimeScope())
+    let armed = false
+    const observed = observePlanning(storage, async (planned) => {
+      if (!armed || !planned.some(({ identity }) => identity.kind === "link")) return
+      armed = false
+      await runtime.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "link-while-planned" },
+        operations: [
+          {
+            id: "peer",
+            kind: "link.upsert",
+            ref: { source: deviceRef("c"), linkId: "peers", target: deviceRef("a") },
+          },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+    })
+    const materializer = contractMaterializer(observed)
+    try {
+      await publishDevices(materializer, storage, 1, [
+        sourceEntry("a", "A"),
+        sourceEntry("b", "B", "a"),
+        sourceEntry("c", "C"),
+      ])
+      armed = true
+      await publishDevices(materializer, storage, 2, [sourceEntry("b", "B"), sourceEntry("c", "C")])
+      expect(await device(storage, "a")).toBeNull()
+      for (const id of ["b", "c"]) {
+        expect(
+          await storage.objects.listLinks({
+            projectId: CONTRACT_PROJECT,
+            objectTypeId: Device.id,
+            objectId: id,
+          })
+        ).toEqual([])
+      }
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // Removal proof: compare a link's edge override by an unqualified `identity_key` in the SQLite
+  // revision; it then reads another link's override, and the untouched link is planned again.
+  test(`${name} plans again only the link whose override an edit changed while it planned`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    const runtime = contractMaterializer(storage).withScope(runtimeScope())
+    let armed = false
+    let edited = false
+    const staged: string[] = []
+    const observed = observePlanning(storage, async (planned) => {
+      if (!armed) return
+      const links = planned.flatMap(({ identity }) =>
+        identity.kind === "link" ? [identity.ref.source.primaryId] : []
+      )
+      staged.push(...links)
+      if (edited || !links.includes("c")) return
+      edited = true
+      // Once both links are planned, keeps the one of b the publication retracts; its effective
+      // row stays as it was.
+      await runtime.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "override-while-planned" },
+        operations: [
+          {
+            id: "keep",
+            kind: "link.upsert",
+            ref: { source: deviceRef("b"), linkId: "parent", target: deviceRef("a") },
+          },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+    })
+    const materializer = contractMaterializer(observed)
+    const parent = (id: string) =>
+      storage.objects.listLinks({
+        projectId: CONTRACT_PROJECT,
+        objectTypeId: Device.id,
+        objectId: id,
+      })
+    try {
+      await publishDevices(materializer, storage, 1, [
+        sourceEntry("a", "A"),
+        sourceEntry("b", "B", "a"),
+        sourceEntry("c", "C", "a"),
+      ])
+      armed = true
+      await publishDevices(materializer, storage, 2, [
+        sourceEntry("a", "A"),
+        sourceEntry("b", "B"),
+        sourceEntry("c", "C"),
+      ])
+      expect(staged.filter((id) => id === "b")).toHaveLength(2)
+      expect(staged.filter((id) => id === "c")).toHaveLength(1)
+      expect(await parent("b")).toHaveLength(1)
+      expect(await parent("c")).toEqual([])
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // Removal proof: make SQLite's plan-bound session compare its watermark with the last commit of
+  // any project; the commit then rejects the plan its refresh just found fresh.
+  test(`${name} commits a plan another project committed beside`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    const other = createOntologyMaterializer({
+      projectId: "other-project",
+      ontology,
+      projections,
+      storage,
+    }).withScope(
+      createTestingScope({
+        projectId: "other-project",
+        executionId: "other-project-runtime-execution",
+        requestId: "other-project-runtime-request",
+        correlationId: "other-project-runtime-correlation",
+      })
+    )
+    let armed = false
+    let staged = 0
+    const observed = observePlanning(storage, async (planned) => {
+      if (!armed) return
+      staged += planned.length
+      if (staged !== 1) return
+      await other.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: "other-project-edit" },
+        operations: [
+          { id: "create", kind: "object.create", ref: deviceRef("x"), properties: { name: "X" } },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+    })
+    const materializer = contractMaterializer(observed)
+    try {
+      await publishDevices(materializer, storage, 1, [sourceEntry("a", "A")])
+      armed = true
+      await publishDevices(materializer, storage, 2, [
+        sourceEntry("a", "A2"),
+        sourceEntry("b", "B"),
+      ])
+      expect(staged).toBe(2)
+      expect(await device(storage, "b")).toMatchObject({ properties: { name: "B" } })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // Removal proof: in PostgreSQL's `committedSince`, count only commits at or past the
+  // watermark's xmax; the edit, in flight when the plan opened, is then taken as seen.
+  if (provider.concurrentTransactions) {
+    test(`${name} plans again what a commit in flight when the plan opened changed`, async () => {
+      const createdStorage = await provider.createStorage()
+      const storage = requireContractStorage(createdStorage)
+      const paused = pauseBeforeFinalize(storage)
+      const runtime = contractMaterializer(paused.storage).withScope(runtimeScope())
+      let edit: Promise<unknown> | undefined
+      let armed = false
+      let staged = 0
+      const observed = observePlanning(storage, async (planned) => {
+        if (!armed) return
+        staged += planned.length
+        if (staged !== 1) return
+        // The page read the object before the edit committed.
+        paused.release()
+        await edit
+      })
+      const materializer = contractMaterializer(observed)
+      try {
+        await publishDevices(materializer, storage, 1, [sourceEntry("a", "A")])
+        edit = runtime.edits.commit({
+          mode: "atomic",
+          source: { kind: "runtime", requestId: "edit-in-flight" },
+          operations: [
+            {
+              id: "rename",
+              kind: "object.patch",
+              ref: deviceRef("a"),
+              set: { name: "edited" },
+              unset: [],
+              reset: [],
+            },
+          ],
+          expectedObjects: [],
+          expectedLinks: [],
+          expectedLinkScopes: [],
+        })
+        // It has written the object and holds its transaction open.
+        await paused.reached
+        armed = true
+        await publishDevices(materializer, storage, 2, [sourceEntry("a", "A2")])
+        await edit
+        expect(staged).toBe(2)
+        expect(await device(storage, "a")).toMatchObject({ properties: { name: "edited" } })
+      } finally {
+        paused.release()
+        await provider.cleanup?.(createdStorage)
+      }
+    })
+  }
+
+  // Removal proof: let the in-memory `streamState` keep the identities it listed instead of
+  // looking each page's up again; the rollback restores the plan as copies, and the next page
+  // marks as read identities the plan no longer holds.
+  test(`${name} keeps planning across a transaction that rolls back meanwhile`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let staged = 0
+    const observed = observePlanning(storage, async (planned) => {
+      staged += planned.length
+      if (staged !== 1) return
+      await expect(
+        storage.transaction(async () => {
+          throw new Error("rolled back")
+        })
+      ).rejects.toThrow("rolled back")
+    })
+    const materializer = contractMaterializer(observed)
+    try {
+      await publishDevices(materializer, storage, 1, [sourceEntry("a", "A"), sourceEntry("b", "B")])
+      expect(staged).toBe(2)
+      expect(await device(storage, "b")).toMatchObject({ properties: { name: "B" } })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // Removal proof: in PostgreSQL's `committedSince`, drop the check of a watermark from beyond
+  // this snapshot (the stale plan applies and conflicts with the edit), or the filter on commits
+  // this snapshot sees (no plan reads as just refreshed again).
+  const restoreFromClusterAhead = provider.restoreFromClusterAhead
+  if (restoreFromClusterAhead) {
+    test(`${name} plans again after a restore from a cluster further along`, async () => {
+      const createdStorage = await provider.createStorage()
+      const storage = requireContractStorage(createdStorage)
+      const runtime = contractMaterializer(storage).withScope(runtimeScope())
+      let failNextCommit = false
+      let staged = 0
+      const observed = observePlanning(
+        storage,
+        async (planned) => {
+          staged += planned.length
+        },
+        async () => {
+          if (!failNextCommit || staged === 0) return
+          failNextCommit = false
+          throw new Error("commit lost")
+        }
+      )
+      const materializer = contractMaterializer(observed)
+      try {
+        await publishDevices(materializer, storage, 1, [sourceEntry("a", "A")])
+        const execution = await claimDevices(storage, 2)
+        failNextCommit = true
+        staged = 0
+        await expect(
+          publishDevices(materializer, storage, 2, [sourceEntry("a", "A2")], execution)
+        ).rejects.toThrow("commit lost")
+        await runtime.edits.commit({
+          mode: "atomic",
+          source: { kind: "runtime", requestId: "edit-before-restore" },
+          operations: [
+            {
+              id: "rename",
+              kind: "object.patch",
+              ref: deviceRef("a"),
+              set: { name: "edited" },
+              unset: [],
+              reset: [],
+            },
+          ],
+          expectedObjects: [],
+          expectedLinks: [],
+          expectedLinkScopes: [],
+        })
+        await restoreFromClusterAhead(createdStorage)
+        await publishDevices(materializer, storage, 2, [sourceEntry("a", "A2")], execution)
+        expect(await device(storage, "a")).toMatchObject({ properties: { name: "edited" } })
+      } finally {
+        await provider.cleanup?.(createdStorage)
+      }
+    })
+  }
+
+  // Removal proof: let `open` reset an existing plan; the redelivery stages all three identities
+  // again. Let it keep the plan but answer the time it was given: the redelivery cannot commit.
+  test(`${name} resumes the plan a failed commit left to the next delivery`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let failNextCommit = true
+    let stagedIdentities = 0
+    let plannedAt: string | undefined
+    const observed = observePlanning(
+      storage,
+      async (planned) => {
+        stagedIdentities += planned.length
+        for (const record of planned.flatMap(({ records }) => records)) {
+          if (record.kind === "event") plannedAt ??= record.draft.occurredAt
+        }
+      },
+      async () => {
+        // Admission opens a transaction before anything is planned: fail the commit's.
+        if (!failNextCommit || stagedIdentities === 0) return
+        failNextCommit = false
+        throw new Error("commit lost")
+      }
+    )
+    const materializer = contractMaterializer(observed)
+    try {
+      const execution = await claimDevices(storage, 1)
+      const values = [sourceEntry("a", "A"), sourceEntry("b", "B", "a")]
+      await expect(publishDevices(materializer, storage, 1, values, execution)).rejects.toThrow(
+        "commit lost"
+      )
+      expect(stagedIdentities).toBe(3)
+      // The redelivery's clock has moved on; its commit keeps the time its events were planned at.
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      const result = await publishDevices(materializer, storage, 1, values, execution)
+      expect(stagedIdentities).toBe(3)
+      expect(result.committedAt).toBe(plannedAt!)
+      expect(await device(storage, "b")).toMatchObject({ properties: { name: "B" } })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // Removal proof: let `open` resume a plan whatever source it replaces; the redelivery then
+  // keeps an entity only the newer active source asserted, or rejects its own activation.
+  test(`${name} plans again from scratch when the source a plan replaces moved`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let failNextCommit = false
+    let staged = 0
+    const observed = observePlanning(
+      storage,
+      async (planned) => {
+        staged += planned.length
+      },
+      async () => {
+        if (!failNextCommit || staged === 0) return
+        failNextCommit = false
+        throw new Error("commit lost")
+      }
+    )
+    const materializer = contractMaterializer(observed)
+    try {
+      await publishDevices(materializer, storage, 1, [sourceEntry("a", "A")])
+      const execution = await claimDevices(storage, 3)
+      failNextCommit = true
+      staged = 0
+      await expect(
+        publishDevices(materializer, storage, 3, [sourceEntry("a", "A3")], execution)
+      ).rejects.toThrow("commit lost")
+      await publishDevices(materializer, storage, 2, [
+        sourceEntry("a", "A2"),
+        sourceEntry("z", "Z"),
+      ])
+      staged = 0
+      await publishDevices(materializer, storage, 3, [sourceEntry("a", "A3")], execution)
+      expect(staged).toBe(2)
+      expect(await device(storage, "a")).toMatchObject({ properties: { name: "A3" } })
+      expect(await device(storage, "z")).toBeNull()
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // Removal proof: drop the round bound in `commitProjectionCandidate`; the delivery plans again
+  // after every edit and never returns.
+  test(`${name} gives the delivery back when an identity keeps changing while planned`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    const runtime = contractMaterializer(storage).withScope(runtimeScope())
+    let armed = false
+    let edits = 0
+    const observed = observePlanning(storage, async (planned) => {
+      if (!armed || !planned.some((value) => plannedId(value) === "a")) return
+      edits += 1
+      await runtime.edits.commit({
+        mode: "atomic",
+        source: { kind: "runtime", requestId: `keeps-changing-${edits}` },
+        operations: [
+          {
+            id: "rename",
+            kind: "object.patch",
+            ref: deviceRef("a"),
+            set: { name: `e${edits}` },
+            unset: [],
+            reset: [],
+          },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+    })
+    const materializer = contractMaterializer(observed)
+    try {
+      await publishDevices(materializer, storage, 1, [sourceEntry("a", "A")])
+      armed = true
+      await expect(
+        publishDevices(materializer, storage, 2, [sourceEntry("a", "A2")])
+      ).rejects.toMatchObject({
+        kind: "effective-state",
+        message: expect.stringContaining("(1 changed during the last of 3 rounds)"),
+      })
+      expect(edits).toBe(3)
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
+
+  // Removal proof: let `purge` take plans whose candidate is still ready; the second delivery
+  // then plans every identity again instead of resuming. Let it stop after one plan: a second
+  // call still finds the other.
+  test(`${name} purges only the plans of candidates that moved on`, async () => {
+    const createdStorage = await provider.createStorage()
+    const storage = requireContractStorage(createdStorage)
+    let interrupt = false
+    let staged = 0
+    const observed = observePlanning(storage, async (planned) => {
+      staged += planned.length
+      if (interrupt && staged === 1) throw new Error("delivery lost")
+    })
+    const materializer = contractMaterializer(observed)
+    const purgeAll = async () => {
+      let rounds = 0
+      while (
+        (await storage.ontology.replacementPlans.purge({ projectId: CONTRACT_PROJECT, limit: 2 })) >
+        0
+      ) {
+        rounds += 1
+        if (rounds > 100) throw new Error("Plan purge never ran out.")
+      }
+    }
+    try {
+      await publishDevices(materializer, storage, 1, [sourceEntry("a", "A"), sourceEntry("b", "B")])
+      await purgeAll()
+      const execution = await claimDevices(storage, 2)
+      const values = [sourceEntry("a", "A2"), sourceEntry("c", "C")]
+      interrupt = true
+      staged = 0
+      await expect(publishDevices(materializer, storage, 2, values, execution)).rejects.toThrow(
+        "delivery lost"
+      )
+      interrupt = false
+      await purgeAll()
+      staged = 0
+      await publishDevices(materializer, storage, 2, values, execution)
+      expect(staged).toBe(2)
+      // Two spent plans: one call within its budget purges both.
+      await publishDevices(materializer, storage, 3, values)
+      await storage.ontology.replacementPlans.purge({ projectId: CONTRACT_PROJECT, limit: 1_000 })
+      expect(
+        await storage.ontology.replacementPlans.purge({ projectId: CONTRACT_PROJECT, limit: 1_000 })
+      ).toBe(0)
+      expect(await device(storage, "a")).toMatchObject({ properties: { name: "A2" } })
+      expect(await device(storage, "b")).toBeNull()
+      expect(await device(storage, "c")).toMatchObject({ properties: { name: "C" } })
+    } finally {
+      await provider.cleanup?.(createdStorage)
+    }
+  })
 }
 
 function runtimeScope() {
@@ -1127,4 +1666,153 @@ async function claim(
     target: { objectTypeId: definition.objectTypeId },
   })
   return claim.execution
+}
+
+const CONTRACT_PROJECT = "materializer-storage-contract"
+
+function contractMaterializer(storage: Storage): OntologyMaterializer {
+  return createOntologyMaterializer({
+    projectId: CONTRACT_PROJECT,
+    ontology,
+    projections,
+    storage,
+    dependencies: { batching: { sourceStageRows: 1, statePageRows: 1, planChunkRows: 1 } },
+  })
+}
+
+function deviceRef(primaryId: string) {
+  return { objectTypeId: Device.id, primaryId }
+}
+
+function device(storage: ContractStorage, primaryId: string) {
+  return storage.objects.getByPrimaryId({ projectId: CONTRACT_PROJECT, ...deviceRef(primaryId) })
+}
+
+function plannedId({ identity }: PlannedReplacementIdentity): string {
+  return identity.kind === "object" ? identity.ref.primaryId : "link"
+}
+
+/**
+ * The same storage, whose plan staging runs `afterStage` once a page is staged and whose
+ * transactions run `beforeTransaction` first: a way to interleave writes with a projection's plan.
+ */
+function observePlanning(
+  storage: ContractStorage,
+  afterStage: (planned: readonly PlannedReplacementIdentity[]) => Promise<void>,
+  beforeTransaction?: () => Promise<void>
+): ContractStorage {
+  const plans = storage.ontology.replacementPlans
+  const observed: OntologyReplacementPlanStorage = {
+    open: (input) => plans.open(input),
+    streamState: (input) => plans.streamState(input),
+    async stage(input) {
+      await plans.stage(input)
+      await afterStage(input.planned)
+    },
+    refresh: (input) => plans.refresh(input),
+    purge: (input) => plans.purge(input),
+  }
+  const ontologyFacade = new Proxy(storage.ontology, {
+    get(target, property) {
+      if (property === "replacementPlans") return observed
+      const value = Reflect.get(target, property, target)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+  return new Proxy(storage, {
+    get(target, property) {
+      if (property === "ontology") return ontologyFacade
+      if (property === "transaction" && beforeTransaction) {
+        return async (...args: Parameters<Storage["transaction"]>) => {
+          await beforeTransaction()
+          return target.transaction(...args)
+        }
+      }
+      const value = Reflect.get(target, property, target)
+      return typeof value === "function" ? value.bind(target) : value
+    },
+  })
+}
+
+/** The same storage, whose transactions wait before they finalize until `release` is called. */
+function pauseBeforeFinalize(storage: ContractStorage) {
+  let reach!: () => void
+  const reached = new Promise<void>((resolve) => {
+    reach = resolve
+  })
+  let release!: () => void
+  const released = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const paused = new Proxy(storage, {
+    get(target, property) {
+      if (property !== "transaction") {
+        const value = Reflect.get(target, property, target)
+        return typeof value === "function" ? value.bind(target) : value
+      }
+      return (run: (tx: Storage) => unknown, options?: Parameters<Storage["transaction"]>[1]) =>
+        target.transaction((tx) => {
+          const materializations = new Proxy(tx.ontology.materializations, {
+            get(store, key) {
+              const value = Reflect.get(store, key, store)
+              if (key !== "finalize") return typeof value === "function" ? value.bind(store) : value
+              return async (...args: Parameters<typeof store.finalize>) => {
+                reach()
+                await released
+                return store.finalize(...args)
+              }
+            },
+          })
+          const ontology = new Proxy(tx.ontology, {
+            get: (store, key) =>
+              key === "materializations" ? materializations : Reflect.get(store, key, store),
+          })
+          return run(
+            new Proxy(tx, {
+              get: (store, key) => (key === "ontology" ? ontology : Reflect.get(store, key, store)),
+            })
+          )
+        }, options)
+    },
+  })
+  return { storage: paused, reached, release }
+}
+
+function deviceVersion(version: number) {
+  return {
+    datasetId: devices.id,
+    versionId: `plan-v${version}`,
+    createdAt: `2026-02-${String(version).padStart(2, "0")}T00:00:00.000Z`,
+  }
+}
+
+function claimDevices(storage: ContractStorage, version: number): Promise<ProjectionExecution> {
+  return claim(storage, {
+    runId: `plan-run-${version}`,
+    projectionId: devices.id,
+    protocol: "replacement",
+    datasetVersion: deviceVersion(version),
+  })
+}
+
+async function publishDevices(
+  materializer: OntologyMaterializer,
+  storage: ContractStorage,
+  version: number,
+  values: readonly ProjectionSourceEntry[],
+  execution?: ProjectionExecution
+) {
+  const claimed = execution ?? (await claimDevices(storage, version))
+  const bound = await projectionMaterializer(
+    materializer,
+    storage,
+    devices.id,
+    claimed.projectionRunId
+  )
+  return bound.projections.replace({
+    source: { projectionId: devices.id },
+    datasetVersion: deviceVersion(version),
+    execution: claimed,
+    entries: entries(values),
+  })
 }
