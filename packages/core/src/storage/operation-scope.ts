@@ -181,11 +181,42 @@ function scopeMethod(
   if (kind === "async-generator") {
     return (...args: unknown[]) => {
       scope.assertAvailable()
-      return Reflect.apply(implementation, target, args)
+      return scopeSteps(
+        Reflect.apply(implementation, target, args) as AsyncIterable<unknown>,
+        scope
+      )
     }
   }
 
   return implementation.bind(target)
+}
+
+/**
+ * Each step of a stream runs in its own operation scope, released between steps: a page holds the
+ * provider's lock while it reads, never while its consumer works on it.
+ */
+function scopeSteps<T>(
+  stream: AsyncIterable<T>,
+  scope: StorageOperationScope
+): AsyncIterableIterator<T> {
+  let iterator: AsyncIterator<T> | undefined
+  const steps = () => {
+    iterator ??= stream[Symbol.asyncIterator]()
+    return iterator
+  }
+  const scoped: AsyncIterableIterator<T> = {
+    next: (...args) => scope.run(() => steps().next(...args)),
+    return: (value) =>
+      scope.run(async () => (await steps().return?.(value)) ?? { done: true, value }),
+    throw: (error) =>
+      scope.run(async () => {
+        const current = steps()
+        if (!current.throw) throw error
+        return current.throw(error)
+      }),
+    [Symbol.asyncIterator]: () => scoped,
+  }
+  return scoped
 }
 
 export function createAuthOperationScope<T extends AuthStorage>(
@@ -230,6 +261,7 @@ export function createOntologyOperationScope<T extends OntologyStorage>(
     commits: createOperationScopedFacade(target.commits, scope),
     sources: createOperationScopedFacade(target.sources, scope),
     materializations: createOperationScopedFacade(target.materializations, scope),
+    replacementPlans: createOperationScopedFacade(target.replacementPlans, scope),
     outbox: createOperationScopedFacade(target.outbox, scope),
     ...(target.vectors ? { vectors: createOperationScopedFacade(target.vectors, scope) } : {}),
   }) as T

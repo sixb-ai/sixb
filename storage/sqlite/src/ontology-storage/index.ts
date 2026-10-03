@@ -4,9 +4,9 @@ import { SqliteOntologyCommitStorage } from "./commits"
 import type { SqliteOntologyTransactionContext } from "./materialization-session"
 import { SqliteOntologyMaterializationStorage } from "./materializations"
 import { SqliteOntologyOutboxStorage } from "./outbox"
+import { SqliteOntologyReplacementPlanStorage } from "./replacement-plans"
 import type { SqliteRootOperation } from "./shared"
 import { SqliteOntologySourceStorage } from "./sources"
-
 import { SqliteVectorIndexingStorage } from "./vector-indexing"
 import { SqliteOntologyVectorStorage } from "./vectors"
 
@@ -14,6 +14,7 @@ export class SqliteOntologyStorage implements OntologyStorage {
   readonly commits: SqliteOntologyCommitStorage
   readonly sources: SqliteOntologySourceStorage
   readonly materializations: SqliteOntologyMaterializationStorage
+  readonly replacementPlans: SqliteOntologyReplacementPlanStorage
   readonly vectorIndexing: SqliteVectorIndexingStorage
   readonly vectors: SqliteOntologyVectorStorage
   readonly outbox: SqliteOntologyOutboxStorage
@@ -28,6 +29,10 @@ export class SqliteOntologyStorage implements OntologyStorage {
     this.materializations = new SqliteOntologyMaterializationStorage(
       input.db,
       input.transactionContext
+    )
+    this.replacementPlans = new SqliteOntologyReplacementPlanStorage(
+      input.db,
+      input.runRootOperation
     )
     this.vectorIndexing = new SqliteVectorIndexingStorage(
       input.db,

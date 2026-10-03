@@ -3,16 +3,15 @@ import type { OntologyObjectRef } from "../../materialization/model"
 import { vectorConfiguration, vectorSources } from "../../objects/vectors/profile"
 import type { Storage } from "../../storage"
 import { objectBatchKey } from "../../storage/objects/keys"
-import type { MaterializationSession } from "../../storage/ontology"
+import type { MaterializationSession, MaterializationVectorChange } from "../../storage/ontology"
 import type { VectorIndexingRequest } from "../../storage/ontology/vector-indexing"
 import type { MaterializerContext } from "../context"
-import type { MaterializationPlanItem } from "../execution/plan-stream"
 
 /** Source assertions are not effective values: schedule only after conflict resolution. */
 export async function scheduleVectorChanges(
   context: Pick<MaterializerContext, "projectId" | "ontology" | "clock">,
   storage: Storage,
-  items: readonly MaterializationPlanItem[],
+  items: readonly MaterializationVectorChange[],
   session: MaterializationSession,
   projection = false
 ): Promise<void> {

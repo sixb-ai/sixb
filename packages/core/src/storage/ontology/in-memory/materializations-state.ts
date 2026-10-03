@@ -4,7 +4,6 @@ import type {
   EffectiveObjectSnapshot,
   OntologyLinkRef,
 } from "../../../materialization/model"
-import { linkRefKey, linkRefSortKey, linkScopeSortKey } from "../../../materialization/refs"
 import type { ObjectLinkRow, ObjectRow } from "../../objects/types"
 import type { TimeseriesPoint } from "../../timeseries/types"
 import type {
@@ -19,7 +18,6 @@ import type {
   StoredSourceLinkAssertion,
   StoredSourceObjectAssertion,
 } from "../sources"
-import type { ReplacementSessionState } from "./materializations"
 import type {
   InMemoryOntologyState,
   InMemorySourceMaterialization,
@@ -157,24 +155,4 @@ export function storedSourceLink(
 ): StoredSourceLinkAssertion | null {
   if (!materializationId || !row || row.assertion.kind !== "link") return null
   return storedSource(sourceId, materializationId, row) as StoredSourceLinkAssertion
-}
-
-export function addReplacementLink(
-  replacement: ReplacementSessionState,
-  ref: OntologyLinkRef,
-  diffRequired: boolean
-): void {
-  const key = linkRefKey(ref)
-  const existing = replacement.links.get(key)
-  if (existing) {
-    existing.diffRequired ||= diffRequired
-    if (diffRequired) replacement.affectedScopes.add(linkScopeSortKey(ref.source, ref.linkId))
-    return
-  }
-  replacement.links.set(key, {
-    ref: structuredClone(ref),
-    sortKey: linkRefSortKey(ref),
-    diffRequired,
-  })
-  if (diffRequired) replacement.affectedScopes.add(linkScopeSortKey(ref.source, ref.linkId))
 }

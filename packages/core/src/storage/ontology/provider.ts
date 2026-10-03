@@ -18,20 +18,16 @@ import { linkRefKey, objectRefKey, projectionEntityKey } from "../../materializa
 import type { OntologyCommitOriginSelector, OntologyCommitWrite } from "./commits"
 import type {
   FinalizeMaterializationInput,
-  MaterializationEventWorkRecord,
   MaterializationLinkScopeRevision,
-  MaterializationPlanChunk,
   MaterializationPlanHeader,
-  MaterializationPlanWorkItem,
   MaterializationSession,
   MaterializationWorkRecord,
   SourceActivationWrite,
   StageMaterializationWorkInput,
   StoredLinkSlotOverride,
-  StreamMaterializationWorkInput,
 } from "./materializations"
 import { assertNonblank, assertTimestamp } from "./provider-validation"
-import { assertWorkRecord, workUniquenessKey } from "./provider-work"
+import { assertWorkRecord, materializationPlanKindRank, workUniquenessKey } from "./provider-work"
 import type {
   AssertSourceMaterializationExecutionInput,
   BeginSourceMaterializationInput,
@@ -46,6 +42,7 @@ import type {
  * from `@sixb/core/storage` instead.
  */
 
+export { materializationApplyPhase } from "./materializations"
 export { assertMaterializationHeader } from "./provider-header-validation"
 export {
   assertNonblank,
@@ -56,13 +53,24 @@ export {
 } from "./provider-validation"
 export {
   assertPageRows,
-  assertPlanChunkCorrelations,
+  assertReplacementPlanCommit,
   assertWorkRecord,
+  type CardinalityValidator,
+  cardinalityViolation,
   compareCardinalityWork,
   compareEventWork,
   comparePlanWork,
+  createCardinalityValidator,
+  type ExactEffectiveWrites,
+  type ExactOverrideWrites,
+  type ExactTimeseriesWrites,
+  type MaterializationPlanChunk,
   materializationChunkRows,
-  materializationPlanItems,
+  materializationOutboxWrite,
+  materializationPlanChunk,
+  materializationPlanKindRank,
+  type PreparedReplacementIdentity,
+  prepareReplacementIdentities,
   workUniquenessKey,
 } from "./provider-work"
 
@@ -168,40 +176,15 @@ function isJsonValue(value: unknown): value is import("../../json").JsonValue {
   return isRecord(value) && Object.values(value).every(isJsonValue)
 }
 
-export interface ProviderReplacementSessionState {
-  readonly incremental?: boolean
-  readonly sourceId: string
-  readonly candidateMaterializationId: string
-  readonly previousMaterializationId: string | null
-  readonly projectionKind: "object" | "link"
-  objectStreamStarted: boolean
-  objectStreamCompleted: boolean
-  linkStreamStarted: boolean
-  linkStreamCompleted: boolean
-}
-
-export interface ProviderMaterializationLaneState {
-  started: boolean
-  completed: boolean
-  emittedCount: number
-}
-
 export class ProviderMaterializationSessionState {
   readonly id = randomUUID()
   readonly providerToken = {}
-  readonly workStreams: Record<
-    StreamMaterializationWorkInput["order"],
-    ProviderMaterializationLaneState
-  > = {
-    apply: { started: false, completed: false, emittedCount: 0 },
-    cardinality: { started: false, completed: false, emittedCount: 0 },
-    event: { started: false, completed: false, emittedCount: 0 },
-  }
   active = true
+  /** Staging closes once vector changes stream or the plan applies. */
   workSealed = false
-  appliedPlanCount = 0
-  appliedOutboxCount = 0
-  replacement: ProviderReplacementSessionState | null = null
+  vectorChangesStreamed = false
+  applied = false
+  appliedEventCount = 0
 
   constructor(
     readonly header: MaterializationPlanHeader,
@@ -211,6 +194,37 @@ export class ProviderMaterializationSessionState {
   publicSession(): MaterializationSession {
     return { providerToken: this.providerToken }
   }
+}
+
+/** Seals staging for the vector-change stream: once per session, before the plan applies. */
+export function beginMaterializationVectorChanges(
+  state: Pick<
+    ProviderMaterializationSessionState,
+    "workSealed" | "vectorChangesStreamed" | "applied"
+  >
+): void {
+  if (state.vectorChangesStreamed || state.applied) {
+    throw new MaterializationConflictError(
+      "effective-state",
+      "Materialization vector changes stream once per session, before the plan applies."
+    )
+  }
+  state.vectorChangesStreamed = true
+  state.workSealed = true
+}
+
+/** Seals staging for the apply step: once per session. */
+export function beginMaterializationApply(
+  state: Pick<ProviderMaterializationSessionState, "workSealed" | "applied">
+): void {
+  if (state.applied) {
+    throw new MaterializationConflictError(
+      "effective-state",
+      "A materialization plan applies once per session."
+    )
+  }
+  state.applied = true
+  state.workSealed = true
 }
 
 /**
@@ -258,13 +272,19 @@ export interface PreparedMaterializationWork {
 }
 
 export function prepareMaterializationWork(
-  state: Pick<ProviderMaterializationSessionState, "header" | "workSealed" | "replacement">,
+  state: Pick<ProviderMaterializationSessionState, "header" | "workSealed">,
   input: StageMaterializationWorkInput
 ): readonly PreparedMaterializationWork[] {
+  if (state.header.plan) {
+    throw new MaterializationConflictError(
+      "effective-state",
+      "A plan-bound materialization session applies its plan and stages no work."
+    )
+  }
   if (state.workSealed) {
     throw new MaterializationConflictError(
       "effective-state",
-      "Materialization work cannot be staged after draining begins."
+      "Materialization work cannot be staged once vector changes stream or the plan applies."
     )
   }
   const keys = new Set<string>()
@@ -275,13 +295,10 @@ export function prepareMaterializationWork(
     if (keys.has(record.recordKey) || uniqueKeys.has(uniqueKey)) {
       throw duplicateMaterializationWork(record.recordKey)
     }
-    if (
-      record.kind === "incident-object" &&
-      (!state.replacement || state.replacement.linkStreamStarted)
-    ) {
+    if (record.kind === "incident-object" || record.kind === "object-existence") {
       throw new MaterializationConflictError(
         "effective-state",
-        "Incident replacement work must be staged before link state is streamed."
+        "Replacement work is staged on a replacement plan, not on a session."
       )
     }
     keys.add(record.recordKey)
@@ -290,75 +307,15 @@ export function prepareMaterializationWork(
   })
 }
 
-export interface MaterializationChunkSequenceState {
-  readonly workStreams: ProviderMaterializationSessionState["workStreams"]
-  readonly appliedPlanCount: number
-  readonly appliedOutboxCount: number
-}
-
-export function correlateMaterializationChunk(
-  state: MaterializationChunkSequenceState,
-  chunk: MaterializationPlanChunk,
-  actualItems: readonly MaterializationPlanWorkItem[],
-  expectedItems: readonly MaterializationPlanWorkItem[],
-  expectedEvents: readonly MaterializationEventWorkRecord[]
-): { readonly appliedPlanCount: number; readonly appliedOutboxCount: number } {
-  if (
-    actualItems.length > 0 &&
-    (!state.workStreams.apply.started ||
-      state.appliedPlanCount + actualItems.length > state.workStreams.apply.emittedCount)
-  ) {
-    invalidMaterializationCorrelation(
-      "Materialization plan items cannot be applied before they are streamed."
-    )
-  }
-  for (let index = 0; index < actualItems.length; index += 1) {
-    if (stableJsonStringify(actualItems[index]) !== stableJsonStringify(expectedItems[index])) {
-      invalidMaterializationCorrelation(
-        "Materialization plan items must be applied in exact streamed order."
-      )
-    }
-  }
-
-  if (
-    chunk.outbox.length > 0 &&
-    (!state.workStreams.event.started ||
-      state.appliedOutboxCount + chunk.outbox.length > state.workStreams.event.emittedCount)
-  ) {
-    invalidMaterializationCorrelation(
-      "Materialization events cannot be applied before they are streamed."
-    )
-  }
-  for (let index = 0; index < chunk.outbox.length; index += 1) {
-    const expected = expectedEvents[index]
-    const actual = chunk.outbox[index]?.envelope
-    if (!expected || !actual) {
-      invalidMaterializationCorrelation(
-        "Materialization outbox events must follow exact streamed order."
-      )
-    }
-    const { id: _id, commitOrdinal, ...draft } = actual
-    if (
-      commitOrdinal !== state.appliedOutboxCount + index ||
-      stableJsonStringify(draft) !== stableJsonStringify(expected.draft)
-    ) {
-      invalidMaterializationCorrelation(
-        "Materialization outbox events must follow exact streamed order."
-      )
-    }
-  }
-  return {
-    appliedPlanCount: state.appliedPlanCount + actualItems.length,
-    appliedOutboxCount: state.appliedOutboxCount + chunk.outbox.length,
-  }
-}
-
 export function assertMaterializationFinalizationCorrelation(
-  state: Pick<ProviderMaterializationSessionState, "header" | "appliedOutboxCount">,
+  state: Pick<ProviderMaterializationSessionState, "header" | "applied" | "appliedEventCount">,
   input: FinalizeMaterializationInput
 ): void {
   const { commit } = state.header
   const { result, sourceActivations } = input.finalization
+  if (!state.applied) {
+    invalidMaterializationCorrelation("A materialization plan must apply before it finalizes.")
+  }
   if (
     result.commitId !== commit.id ||
     result.kind !== commit.intent.kind ||
@@ -366,7 +323,7 @@ export function assertMaterializationFinalizationCorrelation(
     result.created !== true ||
     !Number.isSafeInteger(result.eventCount) ||
     result.eventCount < 0 ||
-    result.eventCount !== state.appliedOutboxCount
+    result.eventCount !== state.appliedEventCount
   ) {
     invalidMaterializationCorrelation(
       "Materialization result does not correlate with its commit intent."
@@ -392,34 +349,8 @@ export function assertMaterializationFinalizationCorrelation(
   }
 }
 
-export function assertMaterializationLaneCompletion(
-  state: Pick<
-    ProviderMaterializationSessionState,
-    "workStreams" | "appliedPlanCount" | "appliedOutboxCount"
-  >,
-  counts: { readonly apply: number; readonly cardinality: number; readonly event: number }
-): void {
-  if (counts.apply > 0 && !state.workStreams.apply.completed) {
-    invalidMaterializationCorrelation("Materialization plan work was not fully streamed.")
-  }
-  if (state.appliedPlanCount !== counts.apply) {
-    invalidMaterializationCorrelation("Materialization plan work was not applied exactly once.")
-  }
-  if (counts.cardinality > 0 && !state.workStreams.cardinality.completed) {
-    invalidMaterializationCorrelation("Materialization cardinality work was not fully validated.")
-  }
-  if (counts.event > 0 && !state.workStreams.event.completed) {
-    invalidMaterializationCorrelation("Materialization event work was not fully drained.")
-  }
-  if (counts.event !== state.appliedOutboxCount) {
-    invalidMaterializationCorrelation(
-      "Materialization event work was not fully written to the outbox."
-    )
-  }
-}
-
 export function assertSourceActivationCorrelation(
-  state: Pick<ProviderMaterializationSessionState, "header" | "replacement">,
+  state: Pick<ProviderMaterializationSessionState, "header">,
   activation: SourceActivationWrite
 ): void {
   const { commit } = state.header
@@ -445,18 +376,13 @@ export function assertSourceActivationCorrelation(
       "Source activation does not correlate with its projection commit."
     )
   }
-  const replacement = state.replacement
   if (
-    !replacement ||
-    replacement.sourceId !== activation.source.projectionId ||
-    replacement.candidateMaterializationId !== activation.materializationId ||
-    replacement.projectionKind !== activation.projectionKind ||
-    (activation.projectionKind === "object" &&
-      (!replacement.objectStreamCompleted || !replacement.linkStreamCompleted)) ||
-    (activation.projectionKind === "link" && !replacement.linkStreamCompleted)
+    !state.header.plan ||
+    state.header.plan.source.projectionId !== activation.source.projectionId ||
+    state.header.plan.materializationId !== activation.materializationId
   ) {
     invalidMaterializationCorrelation(
-      "Source activation does not match fully streamed replacement state."
+      "Source activation does not match the replacement plan the session applies."
     )
   }
 }
@@ -580,33 +506,6 @@ export function materializationWorkColumns(record: MaterializationWorkRecord): {
     }
   }
   return { lane: "none", majorOrder: 0, minorOrder: 0, sortOne: "", sortTwo: "" }
-}
-
-function materializationPlanKindRank(kind: MaterializationPlanWorkItem["kind"]): number {
-  switch (kind) {
-    case "object-override-upsert":
-      return 0
-    case "object-override-delete":
-      return 1
-    case "link-override-upsert":
-      return 2
-    case "link-override-delete":
-      return 3
-    case "link-slot-override-upsert":
-      return 4
-    case "link-slot-override-delete":
-      return 5
-    case "point-upsert":
-      return 6
-    case "link-delete":
-      return 7
-    case "object-delete":
-      return 8
-    case "object-upsert":
-      return 9
-    case "link-upsert":
-      return 10
-  }
 }
 
 export function duplicateMaterializationWork(key?: string): MaterializationConflictError {

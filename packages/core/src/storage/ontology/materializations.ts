@@ -20,7 +20,7 @@ import type {
   TelemetrySeriesRef,
 } from "../../materialization/model"
 import type { OntologyCommitRecord, OntologyCommitWrite } from "./commits"
-import type { OntologyMaterializationEventDraft, OntologyOutboxWrite } from "./outbox"
+import type { OntologyMaterializationEventDraft } from "./outbox"
 import type { StoredSourceLinkAssertion, StoredSourceObjectAssertion } from "./sources"
 
 export interface StoredObjectOverride {
@@ -112,11 +112,6 @@ export interface SourceReplacementLinkState extends Omit<MaterializationLinkStat
   readonly diffRequired: boolean
 }
 
-export interface SourceReplacementStatePage {
-  readonly objects: readonly SourceReplacementObjectState[]
-  readonly links: readonly SourceReplacementLinkState[]
-}
-
 export interface MaterializationStateRequestChunk {
   readonly objects: readonly OntologyObjectRef[]
   readonly links: readonly OntologyLinkRef[]
@@ -162,6 +157,14 @@ export interface MaterializationPlanHeader {
    */
   readonly commit: OntologyCommitWrite
   readonly expected: MaterializationCasState
+  /**
+   * A projection commit applies the durable plan of this candidate, refreshed in the same
+   * transaction, instead of work staged on the session.
+   */
+  readonly plan?: {
+    readonly source: ProjectionSourceRef
+    readonly materializationId: string
+  }
 }
 
 export interface ExactObjectOverrideWrite {
@@ -204,23 +207,6 @@ export interface ExactLinkSlotOverrideDelete {
   readonly expectedLastCommitId: string
 }
 
-export interface ExactOverrideWrites {
-  readonly objects: {
-    readonly upserts: readonly ExactObjectOverrideWrite[]
-    readonly deletes: readonly ExactObjectOverrideDelete[]
-  }
-  readonly links: {
-    readonly edges: {
-      readonly upserts: readonly ExactLinkOverrideWrite[]
-      readonly deletes: readonly ExactLinkOverrideDelete[]
-    }
-    readonly slots: {
-      readonly upserts: readonly ExactLinkSlotOverrideWrite[]
-      readonly deletes: readonly ExactLinkSlotOverrideDelete[]
-    }
-  }
-}
-
 export interface ExactEffectiveObjectWrite {
   readonly row: EffectiveObjectSnapshot
   readonly expected: ExpectedObjectRevision
@@ -241,27 +227,9 @@ export interface ExactEffectiveLinkDelete {
   readonly expected: Extract<ExpectedLinkRevision, { readonly exists: true }>
 }
 
-export interface ExactEffectiveWrites {
-  readonly objectUpserts: readonly ExactEffectiveObjectWrite[]
-  readonly objectDeletes: readonly ExactEffectiveObjectDelete[]
-  readonly linkUpserts: readonly ExactEffectiveLinkWrite[]
-  readonly linkDeletes: readonly ExactEffectiveLinkDelete[]
-}
-
 export interface ExactTimeseriesPointWrite {
   readonly point: StoredTelemetryPoint
   readonly expected: ExpectedTimeseriesPointRevision
-}
-
-export interface ExactTimeseriesWrites {
-  readonly pointUpserts: readonly ExactTimeseriesPointWrite[]
-}
-
-export interface MaterializationPlanChunk {
-  readonly overrides: ExactOverrideWrites
-  readonly effective: ExactEffectiveWrites
-  readonly timeseries: ExactTimeseriesWrites
-  readonly outbox: readonly OntologyOutboxWrite[]
 }
 
 export interface SourceActivationWrite {
@@ -284,11 +252,6 @@ export interface MaterializationPlanFinalization {
   readonly result: EditCommitResult | ProjectionCommitResult | TelemetryCommitResult
 }
 
-export interface ApplyMaterializationChunkInput {
-  readonly session: MaterializationSession
-  readonly chunk: MaterializationPlanChunk
-}
-
 export interface FinalizeMaterializationInput {
   readonly session: MaterializationSession
   readonly finalization: MaterializationPlanFinalization
@@ -304,14 +267,6 @@ export interface StreamMaterializationStateInput {
   readonly pageRows: number
 }
 
-export interface StreamSourceReplacementStateInput {
-  readonly session: MaterializationSession
-  readonly source: ProjectionSourceRef
-  readonly candidateMaterializationId: string
-  readonly entityKind: "object" | "link"
-  readonly pageRows: number
-}
-
 export type MaterializationWorkEntityKind = "object" | "link" | "point"
 
 export interface MaterializationClassificationWorkRecord {
@@ -321,6 +276,7 @@ export interface MaterializationClassificationWorkRecord {
   readonly identityKey: string
 }
 
+/** Replacement plans only: the existence an object is planned to have, read by its links. */
 export interface MaterializationObjectExistenceWorkRecord {
   readonly kind: "object-existence"
   readonly recordKey: string
@@ -328,6 +284,7 @@ export interface MaterializationObjectExistenceWorkRecord {
   readonly exists: boolean
 }
 
+/** Replacement plans only: an object whose existence flips, so its links join the plan. */
 export interface MaterializationIncidentObjectWorkRecord {
   readonly kind: "incident-object"
   readonly recordKey: string
@@ -419,28 +376,36 @@ export type MaterializationWorkRecord =
 
 export interface StageMaterializationWorkInput {
   readonly session: MaterializationSession
-  /** Insert-only and batch-atomic. Staging closes when any work lane starts streaming. */
+  /**
+   * Insert-only and batch-atomic. Staging closes once vector changes stream or the plan applies.
+   * Object existence and incident objects belong to replacement plans and are rejected here.
+   */
   readonly records: readonly MaterializationWorkRecord[]
 }
 
-export interface StreamMaterializationWorkInput {
+export interface StreamMaterializationVectorChangesInput {
   readonly session: MaterializationSession
-  /** Canonical provider-owned lanes: physical writes, cardinality occupants, then event drafts. */
-  readonly order: "apply" | "cardinality" | "event"
+  /** Object types that declare vector profiles. */
+  readonly objectTypeIds: readonly string[]
   readonly pageRows: number
 }
 
-export interface MaterializationWorkPage {
-  readonly records: readonly (
-    | MaterializationPlanWorkRecord
-    | MaterializationCardinalityOccupantWorkRecord
-    | MaterializationEventWorkRecord
-  )[]
+export type MaterializationVectorChange = Extract<
+  MaterializationPlanWorkItem,
+  { readonly kind: "object-upsert" | "object-delete" }
+>
+
+export interface MaterializationVectorChangePage {
+  readonly items: readonly MaterializationVectorChange[]
 }
 
-export interface ReadMaterializationObjectExistenceInput {
+export interface ApplyMaterializationInput {
   readonly session: MaterializationSession
-  readonly refs: readonly OntologyObjectRef[]
+}
+
+export interface AppliedMaterialization {
+  /** Outbox events written, with commit ordinals contiguous from zero. */
+  readonly eventCount: number
 }
 
 export interface MaterializationObjectExistence {
@@ -451,15 +416,21 @@ export interface MaterializationObjectExistence {
 export interface OntologyMaterializationStorage {
   begin(input: MaterializationPlanHeader): Promise<MaterializationSession>
   streamState(input: StreamMaterializationStateInput): AsyncIterable<MaterializationStatePage>
-  streamSourceReplacementState(
-    input: StreamSourceReplacementStateInput
-  ): AsyncIterable<SourceReplacementStatePage>
+  /** Not on a plan-bound session: its work is the durable plan. */
   stageWork(input: StageMaterializationWorkInput): Promise<void>
-  streamWork(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage>
-  readObjectExistence(
-    input: ReadMaterializationObjectExistenceInput
-  ): Promise<readonly MaterializationObjectExistence[]>
-  applyChunk(input: ApplyMaterializationChunkInput): Promise<void>
+  /**
+   * Staged object upserts and deletes that vector profiles must see before they apply: those of
+   * `objectTypeIds`, and any other object that still holds a stored vector. Streams once, before
+   * `apply`.
+   */
+  streamVectorChanges(
+    input: StreamMaterializationVectorChangesInput
+  ): AsyncIterable<MaterializationVectorChangePage>
+  /**
+   * Validates the staged cardinality, applies the staged plan in phase order and writes the staged
+   * events to the outbox in canonical order. Once per session, before `finalize`.
+   */
+  apply(input: ApplyMaterializationInput): Promise<AppliedMaterialization>
   /**
    * Finalizes ontology-owned state only. Execution checkpoints remain owned by their run stores
    * and are coordinated by the Materializer through the enclosing Storage transaction.

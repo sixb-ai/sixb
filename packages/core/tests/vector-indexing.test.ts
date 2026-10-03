@@ -74,7 +74,7 @@ function fixture(resolve?: EmbeddingModel["resolve"]) {
 
 describe("automatic vector indexing", () => {
   test("coalesces changes to effective sources and ignores unrelated properties", async () => {
-    // Removal proof: omit scheduleVectorChanges in drainStagedWork; the first assertion fails.
+    // Removal proof: omit scheduleVectorChanges in applyStagedWork; the first assertion fails.
     const f = fixture()
     await f.write("first")
     const [first] = await f.due()

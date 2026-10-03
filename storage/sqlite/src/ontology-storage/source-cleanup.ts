@@ -6,6 +6,14 @@ import type {
 } from "@sixb/core/storage"
 
 /**
+ * A version outlives its replacement plan, which references it: the next version may take a
+ * deleted one's id, and would then resume the plan left under it.
+ */
+const PLAN_PURGED = `NOT EXISTS (
+  SELECT 1 FROM ontology_replacement_plans AS plans WHERE plans.version_id = versions.version_id
+)`
+
+/**
  * Superseded versions can still hold live roots (a delta keeps unchanged roots where they were),
  * so they are cleaned root by root once retired. An abandoned candidate was never published:
  * everything it holds goes, one whole version at a time, each delete on its own version prefix.
@@ -18,8 +26,8 @@ export function purgeAbandonedSourceVersions(
   let rowsDeleted = 0
   let materializationsDeleted = 0
   const nextCandidate = db.query(`
-    SELECT version_id FROM ontology_sources
-    WHERE project_id = ? AND status = 'abandoned'
+    SELECT version_id FROM ontology_sources AS versions
+    WHERE project_id = ? AND status = 'abandoned' AND ${PLAN_PURGED}
     ORDER BY terminal_at, source_id, materialization_id LIMIT 1
   `)
   const deleteRows = db.query(`DELETE FROM ontology_source_rows WHERE rowid IN (
@@ -86,7 +94,7 @@ export function cleanupSourceVersions(
       : db
           .query(`DELETE FROM ontology_sources WHERE version_id IN (
     SELECT versions.version_id FROM ontology_sources AS versions
-    WHERE project_id = ? AND status = 'superseded' AND terminal_at < ?
+    WHERE project_id = ? AND status = 'superseded' AND terminal_at < ? AND ${PLAN_PURGED}
       AND NOT EXISTS (SELECT 1 FROM ontology_source_roots AS roots
         WHERE roots.version_id = versions.version_id)
     ORDER BY terminal_at, source_id, materialization_id LIMIT ?

@@ -4,6 +4,7 @@ import { PgOntologyCommitStorage } from "./commits"
 import type { PgOntologyTransactionContext } from "./materialization-session"
 import { PgOntologyMaterializationStorage } from "./materializations"
 import { PgOntologyOutboxStorage } from "./outbox"
+import { PgOntologyReplacementPlanStorage } from "./replacement-plans"
 import type { PgRootOperation } from "./shared"
 import { PgOntologySourceStorage } from "./sources"
 import { PgVectorIndexingStorage } from "./vector-indexing"
@@ -13,6 +14,7 @@ export class PgOntologyStorage implements OntologyStorage {
   readonly commits: PgOntologyCommitStorage
   readonly sources: PgOntologySourceStorage
   readonly materializations: PgOntologyMaterializationStorage
+  readonly replacementPlans: PgOntologyReplacementPlanStorage
   readonly outbox: PgOntologyOutboxStorage
   readonly vectorIndexing: PgVectorIndexingStorage
   readonly vectors: PgOntologyVectorStorage
@@ -28,6 +30,7 @@ export class PgOntologyStorage implements OntologyStorage {
       input.sql,
       input.transactionContext
     )
+    this.replacementPlans = new PgOntologyReplacementPlanStorage(input.sql)
     this.outbox = new PgOntologyOutboxStorage(input.runRootOperation)
     this.vectorIndexing = new PgVectorIndexingStorage(
       input.sql,

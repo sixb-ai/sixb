@@ -3,7 +3,6 @@ import { createEventId } from "../materialization/identity"
 import type {
   MaterializationPlanHeader,
   MaterializationWorkRecord,
-  OntologyMaterializationEvent,
   OntologyStorage,
 } from "../storage/ontology"
 import type { Storage } from "../storage/types"
@@ -11,24 +10,6 @@ import type { Storage } from "../storage/types"
 export interface OntologyContractStorage extends Storage {
   readonly ontology: OntologyStorage
 }
-
-const emptyChunk = {
-  overrides: {
-    objects: { upserts: [], deletes: [] },
-    links: {
-      edges: { upserts: [], deletes: [] },
-      slots: { upserts: [], deletes: [] },
-    },
-  },
-  effective: {
-    objectUpserts: [],
-    objectDeletes: [],
-    linkUpserts: [],
-    linkDeletes: [],
-  },
-  timeseries: { pointUpserts: [] },
-  outbox: [],
-} as const
 
 /** The request executor `ensureContractExecution` records for a contract commit. */
 export function contractExecutor(id: string) {
@@ -78,6 +59,7 @@ export async function commitEmptyEdit(storage: OntologyContractStorage, id: stri
     const header = contractEditHeader(id)
     await ensureContractExecution(tx, header)
     const session = await tx.ontology.materializations.begin(header)
+    await tx.ontology.materializations.apply({ session })
     await tx.ontology.materializations.finalize({
       session,
       finalization: { sourceActivations: [], result: contractEditResult(id) },
@@ -135,12 +117,6 @@ export async function commitExactObject(
       propertyChanges: {},
     },
   }
-  const eventId = createEventId(header.commit.projectId, id, 0)
-  const envelope: OntologyMaterializationEvent = {
-    ...draft,
-    id: eventId,
-    commitOrdinal: 0,
-  }
   const work: readonly MaterializationWorkRecord[] = [
     {
       kind: "plan",
@@ -164,47 +140,7 @@ export async function commitExactObject(
     const session = await materializations.begin(header)
     await materializations.stageWork({ session, records: work })
 
-    const applyRecords = []
-    for await (const page of materializations.streamWork({
-      session,
-      order: "apply",
-      pageRows: 1,
-    })) {
-      applyRecords.push(...page.records)
-    }
-    const objectUpserts = applyRecords.flatMap((record) =>
-      record.kind === "plan" && record.item.kind === "object-upsert" ? [record.item.value] : []
-    )
-    await materializations.applyChunk({
-      session,
-      chunk: {
-        ...emptyChunk,
-        effective: { ...emptyChunk.effective, objectUpserts },
-      },
-    })
-
-    const eventRecords = []
-    for await (const page of materializations.streamWork({
-      session,
-      order: "event",
-      pageRows: 1,
-    })) {
-      eventRecords.push(...page.records)
-    }
-    await materializations.applyChunk({
-      session,
-      chunk: {
-        ...emptyChunk,
-        outbox: eventRecords.map((record) => {
-          if (record.kind !== "event") throw new Error("Expected event work record.")
-          return {
-            envelope,
-            availableAt: header.commit.committedAt,
-            createdAt: header.commit.committedAt,
-          }
-        }),
-      },
-    })
+    await materializations.apply({ session })
     if (!options.omitFinalize) {
       await materializations.finalize({
         session,
@@ -214,7 +150,7 @@ export async function commitExactObject(
     if (options.throwAfterFinalize) throw new Error("contract rollback")
   })
 
-  return { eventId }
+  return { eventId: createEventId(header.commit.projectId, id, 0) }
 }
 
 export async function ensureContractExecution(

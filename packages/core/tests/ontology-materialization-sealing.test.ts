@@ -3,16 +3,15 @@ import { InMemoryStorage } from "../src"
 import { linkRefSortKey, linkScopeSortKey } from "../src/materialization/refs"
 import type {
   MaterializationCardinalityOccupantWorkRecord,
-  MaterializationPlanChunk,
   MaterializationPlanFinalization,
   MaterializationPlanHeader,
   MaterializationPlanWorkRecord,
   MaterializationSession,
   MaterializationStatePage,
-  OntologyMaterializationStorage,
   ProjectionRunClaim,
   Storage,
 } from "../src/storage"
+import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { startTestProjectionRun } from "../src/testing"
 import { createMaterializerFixture } from "./materializer-fixture"
 
@@ -217,31 +216,37 @@ function replacementFinalization(
   }
 }
 
-async function drainReplacementState(
-  materializations: OntologyMaterializationStorage,
-  session: MaterializationSession,
+/** Plans an empty candidate inside `tx`, so a failed commit forgets the plan with it. */
+async function beginPlanned(
+  tx: Pick<Storage, "executions" | "ontology">,
+  header: MaterializationPlanHeader,
   candidate: CandidateFixture
-): Promise<void> {
-  if (candidate.projectionKind === "object") {
-    for await (const _page of materializations.streamSourceReplacementState({
-      session,
-      source: candidate.source,
-      candidateMaterializationId: candidate.materializationId,
-      entityKind: "object",
+): Promise<MaterializationSession> {
+  if (!tx.ontology) throw new Error("missing ontology")
+  const plan = {
+    projectId,
+    source: candidate.source,
+    materializationId: candidate.materializationId,
+    execution: candidate.execution,
+  }
+  await tx.ontology.replacementPlans.open({ ...plan, commit: header.commit })
+  for (const entityKind of candidate.projectionKind === "object"
+    ? (["object", "link"] as const)
+    : (["link"] as const)) {
+    for await (const _page of tx.ontology.replacementPlans.streamState({
+      ...plan,
+      entityKind,
       pageRows: 1,
     })) {
-      // Empty candidates still have to exhaust the lane.
+      // Empty candidates have no identity to plan.
     }
   }
-  for await (const _page of materializations.streamSourceReplacementState({
-    session,
-    source: candidate.source,
-    candidateMaterializationId: candidate.materializationId,
-    entityKind: "link",
-    pageRows: 1,
-  })) {
-    // Empty candidates still have to exhaust the lane.
-  }
+  const status = await tx.ontology.replacementPlans.refresh(plan)
+  if (!status.fresh) throw new Error("An empty plan has nothing to plan again.")
+  return beginMaterialization(tx, {
+    ...header,
+    plan: { source: candidate.source, materializationId: candidate.materializationId },
+  })
 }
 
 function emptyEditHeader(commitId: string): MaterializationPlanHeader {
@@ -304,31 +309,6 @@ function objectUpsertWork(
         },
       },
     },
-  }
-}
-
-function objectUpsertChunk(
-  records: readonly MaterializationPlanWorkRecord[]
-): MaterializationPlanChunk {
-  return {
-    overrides: {
-      objects: { upserts: [], deletes: [] },
-      links: {
-        edges: { upserts: [], deletes: [] },
-        slots: { upserts: [], deletes: [] },
-      },
-    },
-    effective: {
-      objectUpserts: records.map((record) => {
-        if (record.item.kind !== "object-upsert") throw new Error("Expected object upsert")
-        return record.item.value
-      }),
-      objectDeletes: [],
-      linkUpserts: [],
-      linkDeletes: [],
-    },
-    timeseries: { pointUpserts: [] },
-    outbox: [],
   }
 }
 
@@ -405,7 +385,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(leaked.next()).rejects.toThrow("session is inactive")
   })
 
-  test("requires every replacement lane even when the object projection is empty", async () => {
+  test("begins a plan-bound session only with the commit its plan carries", async () => {
     const storage = new InMemoryStorage()
     const candidate = await prepareEmptyCandidate(storage, {
       projectionId: "devices",
@@ -420,26 +400,16 @@ describe("in-memory ontology materialization finalization", () => {
     const header = replacementHeader(candidate, "empty-object-commit", "2026-01-03T00:00:00.000Z")
     await expect(
       storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, header)
-        for await (const _page of tx.ontology.materializations.streamSourceReplacementState({
-          session,
-          source: candidate.source,
-          candidateMaterializationId: candidate.materializationId,
-          entityKind: "object",
-          pageRows: 1,
-        })) {
-          // Intentionally omit the required link lane.
-        }
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: replacementFinalization(candidate, header),
+        await beginPlanned(tx, header, candidate)
+        await beginMaterialization(tx, {
+          ...replacementHeader(candidate, "empty-object-commit", "2026-01-03T00:00:01.000Z"),
+          plan: { source: candidate.source, materializationId: candidate.materializationId },
         })
       })
-    ).rejects.toThrow("not fully streamed")
+    ).rejects.toThrow("must begin with the commit its plan carries")
   })
 
-  test("requires only the link lane for an empty link projection", async () => {
+  test("plans only links for an empty link projection", async () => {
     const storage = new InMemoryStorage()
     const candidate = await prepareEmptyCandidate(storage, {
       projectionId: "device-links",
@@ -454,8 +424,8 @@ describe("in-memory ontology materialization finalization", () => {
     const header = replacementHeader(candidate, "empty-link-commit", "2026-01-03T00:00:00.000Z")
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await beginMaterialization(tx, header)
-      await drainReplacementState(tx.ontology.materializations, session, candidate)
+      const session = await beginPlanned(tx, header, candidate)
+      await tx.ontology.materializations.apply({ session })
       await tx.ontology.materializations.finalize({
         session,
         finalization: replacementFinalization(candidate, header),
@@ -470,7 +440,7 @@ describe("in-memory ontology materialization finalization", () => {
     })
   })
 
-  test("requires exact replacement and telemetry classification coverage", async () => {
+  test("keeps a plan-bound session to its plan and requires telemetry classification coverage", async () => {
     const storage = new InMemoryStorage()
     const candidate = await prepareEmptyCandidate(storage, {
       projectionId: "device-links",
@@ -486,8 +456,7 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, header)
-        await drainReplacementState(tx.ontology.materializations, session, candidate)
+        const session = await beginPlanned(tx, header, candidate)
         await tx.ontology.materializations.stageWork({
           session,
           records: [
@@ -499,12 +468,8 @@ describe("in-memory ontology materialization finalization", () => {
             },
           ],
         })
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: replacementFinalization(candidate, header),
-        })
       })
-    ).rejects.toThrow("classification coverage")
+    ).rejects.toThrow("applies its plan and stages no work")
 
     const telemetryHeader: MaterializationPlanHeader = {
       commit: {
@@ -533,6 +498,7 @@ describe("in-memory ontology materialization finalization", () => {
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
         const session = await beginMaterialization(tx, telemetryHeader)
+        await tx.ontology.materializations.apply({ session })
         await tx.ontology.materializations.finalize({
           session,
           finalization: {
@@ -554,156 +520,96 @@ describe("in-memory ontology materialization finalization", () => {
     ).rejects.toThrow("point classification coverage")
   })
 
-  test("rejects unapplied plan work and undelivered staged events", async () => {
+  test("finalizes only once the staged plan applies, and stages nothing after", async () => {
     const storage = new InMemoryStorage()
-    const planHeader = emptyEditHeader("unapplied-plan")
+    const header = emptyEditHeader("unapplied-plan")
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, planHeader)
+        const session = await beginMaterialization(tx, header)
         await tx.ontology.materializations.stageWork({
           session,
-          records: [
-            {
-              kind: "plan",
-              recordKey: "plan:object-upsert:61",
-              applyPhase: 4,
-              sortKey: "61",
-              item: {
-                kind: "object-upsert",
-                value: {
-                  row: {
-                    ref: { objectTypeId: "Device", primaryId: "one" },
-                    properties: { name: "one" },
-                    version: 1,
-                    createdAt: planHeader.commit.committedAt,
-                    updatedAt: planHeader.commit.committedAt,
-                    lastCommitId: planHeader.commit.id,
-                  },
-                  expected: {
-                    ref: { objectTypeId: "Device", primaryId: "one" },
-                    exists: false,
-                  },
-                },
-              },
-            },
-          ],
+          records: [objectUpsertWork(header, "one", "61")],
         })
-        for await (const _page of tx.ontology.materializations.streamWork({
-          session,
-          order: "apply",
-          pageRows: 1,
-        })) {
-          // Intentionally do not apply the streamed exact plan.
-        }
         await tx.ontology.materializations.finalize({
           session,
-          finalization: emptyEditFinalization(planHeader),
+          finalization: emptyEditFinalization(header),
         })
       })
-    ).rejects.toThrow("not applied exactly once")
-
-    const eventHeader = emptyEditHeader("undelivered-event")
-    await expect(
-      storage.transaction(async (tx) => {
-        if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, eventHeader)
-        await tx.ontology.materializations.stageWork({
-          session,
-          records: [
-            {
-              kind: "event",
-              recordKey: "event:0:61",
-              eventKindRank: 0,
-              sortKey: "61",
-              draft: {
-                schemaVersion: 1,
-                projectId,
-                occurredAt: eventHeader.commit.committedAt,
-                correlationId: `correlation:${eventHeader.commit.id}`,
-                origin: eventHeader.commit.origin,
-                executor: eventHeader.commit.executor,
-                commitId: eventHeader.commit.id,
-                type: "object.created",
-                topic: "objects",
-                partitionKey: "Device:one",
-                payload: {
-                  objectTypeId: "Device",
-                  primaryId: "one",
-                  properties: { name: "one" },
-                  propertyChanges: {},
-                },
-              },
-            },
-          ],
-        })
-        for await (const _page of tx.ontology.materializations.streamWork({
-          session,
-          order: "event",
-          pageRows: 1,
-        })) {
-          // Intentionally do not materialize the staged event into the outbox.
-        }
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: emptyEditFinalization(eventHeader),
-        })
-      })
-    ).rejects.toThrow("not fully written to the outbox")
-  })
-
-  test("applies only plan items already emitted by the provider, in exact order", async () => {
-    const storage = new InMemoryStorage()
-    const header = emptyEditHeader("ordered-plan")
-    const first = objectUpsertWork(header, "one", "61")
-    const second = objectUpsertWork(header, "two", "62")
+    ).rejects.toThrow("must apply before it finalizes")
 
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
         const session = await beginMaterialization(tx, header)
-        await tx.ontology.materializations.stageWork({ session, records: [first, second] })
-
-        await expect(
-          tx.ontology.materializations.applyChunk({
-            session,
-            chunk: objectUpsertChunk([first]),
-          })
-        ).rejects.toThrow("before they are streamed")
-
-        for await (const _page of tx.ontology.materializations.streamWork({
+        await tx.ontology.materializations.apply({ session })
+        await tx.ontology.materializations.stageWork({
           session,
-          order: "apply",
-          pageRows: 2,
-        })) {
-          // Drain the canonical provider order before trying an inverted chunk.
-        }
-        await expect(
-          tx.ontology.materializations.applyChunk({
-            session,
-            chunk: objectUpsertChunk([second, first]),
-          })
-        ).rejects.toThrow("exact streamed order")
+          records: [objectUpsertWork(header, "one", "61")],
+        })
       })
-    ).rejects.toThrow("unfinished materialization session")
-
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId,
-        objectTypeId: "Device",
-        primaryId: "one",
-      })
-    ).toBeNull()
-    expect(
-      await storage.objects.getByPrimaryId({
-        projectId,
-        objectTypeId: "Device",
-        primaryId: "two",
-      })
-    ).toBeNull()
+    ).rejects.toThrow("once vector changes stream or the plan applies")
   })
 
-  test("revalidates cardinality mechanically at finalization", async () => {
+  test("applies the staged plan once, in phase order", async () => {
+    const storage = new InMemoryStorage()
+    const header = emptyEditHeader("ordered-plan")
+    const writes: string[] = []
+    getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
+      beforeWrite(boundary) {
+        writes.push(boundary)
+      },
+    })
+    const link = {
+      source: { objectTypeId: "Device", primaryId: "one" },
+      linkId: "parent",
+      target: { objectTypeId: "Device", primaryId: "two" },
+    }
+    await storage.transaction(async (tx) => {
+      if (!tx.ontology) throw new Error("missing ontology")
+      const session = await beginMaterialization(tx, header)
+      await tx.ontology.materializations.stageWork({
+        session,
+        records: [
+          {
+            kind: "plan",
+            recordKey: "plan:link-upsert:61",
+            applyPhase: 5,
+            sortKey: "61",
+            item: {
+              kind: "link-upsert",
+              value: {
+                row: {
+                  ref: link,
+                  createdAt: header.commit.committedAt,
+                  updatedAt: header.commit.committedAt,
+                  lastCommitId: header.commit.id,
+                },
+                expected: { ref: link, exists: false },
+              },
+            },
+          },
+          objectUpsertWork(header, "two", "62"),
+          objectUpsertWork(header, "one", "61"),
+        ],
+      })
+      await tx.ontology.materializations.apply({ session })
+      await expect(tx.ontology.materializations.apply({ session })).rejects.toThrow(
+        "applies once per session"
+      )
+      await tx.ontology.materializations.finalize({
+        session,
+        finalization: emptyEditFinalization(header),
+      })
+    })
+    expect(writes.filter((boundary) => boundary.startsWith("effective."))).toEqual([
+      "effective.object.upsert",
+      "effective.object.upsert",
+      "effective.link.upsert",
+    ])
+  })
+
+  test("rejects a cardinality-one scope with two occupants before applying", async () => {
     const storage = new InMemoryStorage()
     const header = emptyEditHeader("cardinality-seal")
     const sourceRef = { objectTypeId: "Device", primaryId: "one" }
@@ -731,19 +637,9 @@ describe("in-memory ontology materialization finalization", () => {
         if (!tx.ontology) throw new Error("missing ontology")
         const session = await beginMaterialization(tx, header)
         await tx.ontology.materializations.stageWork({ session, records })
-        for await (const _page of tx.ontology.materializations.streamWork({
-          session,
-          order: "cardinality",
-          pageRows: 2,
-        })) {
-          // A malicious/buggy consumer drains without running its own validation.
-        }
-        await tx.ontology.materializations.finalize({
-          session,
-          finalization: emptyEditFinalization(header),
-        })
+        await tx.ontology.materializations.apply({ session })
       })
-    ).rejects.toThrow("violates cardinality-one")
+    ).rejects.toThrow("Link scope 'Device.parent' has cardinality one.")
   })
 
   test("rescans final link scopes instead of trusting staged occupancy", async () => {
@@ -796,13 +692,8 @@ describe("in-memory ontology materialization finalization", () => {
             },
           ],
         })
-        for await (const _page of tx.ontology.materializations.streamWork({
-          session,
-          order: "cardinality",
-          pageRows: 1,
-        })) {
-          // Deliberately trust the dishonest record; finalization must inspect the durable scope.
-        }
+        // Apply accepts the dishonest record; finalization must inspect the durable scope.
+        await tx.ontology.materializations.apply({ session })
         await tx.ontology.materializations.finalize({
           session,
           finalization: emptyEditFinalization(header),
@@ -841,14 +732,14 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, header)
-        await drainReplacementState(tx.ontology.materializations, session, opened)
+        const session = await beginPlanned(tx, header, opened)
+        await tx.ontology.materializations.apply({ session })
         await tx.ontology.materializations.finalize({
           session,
           finalization: replacementFinalization(activated, header),
         })
       })
-    ).rejects.toThrow("candidate opened by the session")
+    ).rejects.toThrow("does not match the replacement plan the session applies")
   })
 
   test("rejects activation before candidate readiness or the prior active update", async () => {
@@ -871,8 +762,8 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, tooEarlyHeader)
-        await drainReplacementState(tx.ontology.materializations, session, first)
+        const session = await beginPlanned(tx, tooEarlyHeader, first)
+        await tx.ontology.materializations.apply({ session })
         await tx.ontology.materializations.finalize({
           session,
           finalization: replacementFinalization(first, tooEarlyHeader),
@@ -883,8 +774,8 @@ describe("in-memory ontology materialization finalization", () => {
     const firstHeader = replacementHeader(first, "first-commit", "2026-01-03T00:00:00.000Z")
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await beginMaterialization(tx, firstHeader)
-      await drainReplacementState(tx.ontology.materializations, session, first)
+      const session = await beginPlanned(tx, firstHeader, first)
+      await tx.ontology.materializations.apply({ session })
       await tx.ontology.materializations.finalize({
         session,
         finalization: replacementFinalization(first, firstHeader),
@@ -910,8 +801,8 @@ describe("in-memory ontology materialization finalization", () => {
     await expect(
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, secondHeader)
-        await drainReplacementState(tx.ontology.materializations, session, second)
+        const session = await beginPlanned(tx, secondHeader, second)
+        await tx.ontology.materializations.apply({ session })
         await tx.ontology.materializations.finalize({
           session,
           finalization: replacementFinalization(second, secondHeader),
@@ -939,8 +830,8 @@ describe("in-memory ontology materialization finalization", () => {
     )
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await beginMaterialization(tx, activeHeader)
-      await drainReplacementState(tx.ontology.materializations, session, active)
+      const session = await beginPlanned(tx, activeHeader, active)
+      await tx.ontology.materializations.apply({ session })
       await tx.ontology.materializations.finalize({
         session,
         finalization: replacementFinalization(active, activeHeader),
@@ -985,8 +876,8 @@ describe("in-memory ontology materialization finalization", () => {
       await expect(
         storage.transaction(async (tx) => {
           if (!tx.ontology) throw new Error("missing ontology")
-          const session = await beginMaterialization(tx, header)
-          await drainReplacementState(tx.ontology.materializations, session, candidate)
+          const session = await beginPlanned(tx, header, candidate)
+          await tx.ontology.materializations.apply({ session })
           await tx.ontology.materializations.finalize({
             session,
             finalization: replacementFinalization(candidate, header),
@@ -1017,8 +908,8 @@ describe("in-memory ontology materialization finalization", () => {
     )
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
-      const session = await beginMaterialization(tx, reboundHeader)
-      await drainReplacementState(tx.ontology.materializations, session, rebound)
+      const session = await beginPlanned(tx, reboundHeader, rebound)
+      await tx.ontology.materializations.apply({ session })
       await tx.ontology.materializations.finalize({
         session,
         finalization: replacementFinalization(rebound, reboundHeader),

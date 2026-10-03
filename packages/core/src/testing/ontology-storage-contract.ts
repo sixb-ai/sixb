@@ -200,6 +200,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         await expect(
           storage.transaction(async (tx) => {
             const session = await tx.ontology.materializations.begin(header)
+            await tx.ontology.materializations.apply({ session })
             await tx.ontology.materializations.finalize({
               session,
               finalization: {
@@ -603,10 +604,44 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             origin: { kind: "projection", projectionRunId: first.execution.projectionRunId },
           })
         ).toMatchObject({ id: "commit-source-one" })
+        // An active candidate has no plan to open again.
         await expect(
           activateEmptyCandidate(
             storage,
             first,
+            activeOne,
+            "duplicate-projection-origin",
+            "2026-01-03T01:00:00.000Z"
+          )
+        ).rejects.toMatchObject({ kind: "source-materialization" })
+        // Another candidate of the same run reaches its commit, which repeats the run's origin.
+        const again = { ...first, materializationId: "candidate-one-again" }
+        await storage.ontology.sources.beginMaterialization({
+          projectId: "contract-project",
+          source: again.source,
+          materializationId: again.materializationId,
+          execution: again.execution,
+          projectionKind: "object",
+          protocol: "replacement",
+          datasetVersion: again.identity.datasetVersion,
+          projectionRevision: again.identity.projectionRevision,
+          ownershipHash: again.identity.ownershipHash,
+          ontologyRevision: again.identity.ontologyRevision,
+          createdAt: "2026-01-03T00:30:00.000Z",
+        })
+        await storage.ontology.sources.markReady({
+          projectId: "contract-project",
+          source: again.source,
+          materializationId: again.materializationId,
+          execution: again.execution,
+          rootCount: 0,
+          assertionCount: 0,
+          readyAt: "2026-01-03T00:31:00.000Z",
+        })
+        await expect(
+          activateEmptyCandidate(
+            storage,
+            again,
             activeOne,
             "duplicate-projection-origin",
             "2026-01-03T01:00:00.000Z"
@@ -928,6 +963,7 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             }
             const header = telemetryHeader(identity, run.run.id, run.run.executionId)
             const session = await tx.ontology.materializations.begin(header)
+            await tx.ontology.materializations.apply({ session })
             await tx.ontology.materializations.finalize({
               session,
               finalization: {
@@ -1099,6 +1135,22 @@ async function activateEmptyCandidate(
       counts: emptyProjectionCounts,
     },
   }
+  const plan = {
+    projectId: header.commit.projectId,
+    source: candidate.source,
+    materializationId: candidate.materializationId,
+    execution: candidate.execution,
+  }
+  await storage.ontology.replacementPlans.open({ ...plan, commit: header.commit })
+  for (const entityKind of ["object", "link"] as const) {
+    for await (const _page of storage.ontology.replacementPlans.streamState({
+      ...plan,
+      entityKind,
+      pageRows: 1,
+    })) {
+      // Empty output intentionally has no identities to plan.
+    }
+  }
   await storage.transaction(async (tx) => {
     if (!tx.projectionRuns) {
       throw new Error("Contract transaction omitted required storage facades.")
@@ -1109,18 +1161,13 @@ async function activateEmptyCandidate(
       identity: candidate.identity,
       executionToken: candidate.execution.executionToken,
     })
-    const session = await tx.ontology.materializations.begin(header)
-    for (const entityKind of ["object", "link"] as const) {
-      for await (const _page of tx.ontology.materializations.streamSourceReplacementState({
-        session,
-        source: candidate.source,
-        candidateMaterializationId: candidate.materializationId,
-        entityKind,
-        pageRows: 1,
-      })) {
-        // Empty output intentionally has no classifications or exact writes.
-      }
-    }
+    const status = await tx.ontology.replacementPlans.refresh(plan)
+    if (!status.fresh) throw new Error("An empty plan has nothing to plan again.")
+    const session = await tx.ontology.materializations.begin({
+      ...header,
+      plan: { source: candidate.source, materializationId: candidate.materializationId },
+    })
+    await tx.ontology.materializations.apply({ session })
     await tx.ontology.materializations.finalize({ session, finalization })
   })
 }

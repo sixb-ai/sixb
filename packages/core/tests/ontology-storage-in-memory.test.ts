@@ -9,7 +9,6 @@ import {
 } from "../src/materializer"
 import { planWork } from "../src/materializer/execution/work-records"
 import {
-  type MaterializationPlanChunk,
   type MaterializationPlanFinalization,
   type MaterializationPlanHeader,
   type MaterializationPlanWorkItem,
@@ -22,6 +21,7 @@ import {
 } from "../src/storage"
 import { getInMemoryStorageTestingAdapter } from "../src/storage/in-memory/testing"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
+import type { MaterializationPlanChunk } from "../src/storage/ontology/provider-work"
 import { claimTestProjectionRun, queueTestActionRun, startTestProjectionRun } from "../src/testing"
 import {
   atomic,
@@ -401,12 +401,15 @@ describe("in-memory ontology storage", () => {
       const after = getInMemoryStorageTestingAdapter(storage).snapshot()
       expect(after.objects).toEqual(before.objects)
       expect(after.timeseries).toEqual(before.timeseries)
-      const afterOntology = getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()
+      // A plan outlives a failed commit by design: the next attempt resumes it.
+      const { replacementPlans: _plans, ...afterOntology } =
+        getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()
+      const { replacementPlans: _before, ...beforeOntology } = before.ontology
       if (boundary === "source.activate") {
         expect({
           ...afterOntology,
-          sourceMaterializations: before.ontology.sourceMaterializations,
-        }).toEqual(before.ontology)
+          sourceMaterializations: beforeOntology.sourceMaterializations,
+        }).toEqual(beforeOntology)
         expect(
           [...afterOntology.sourceMaterializations.values()].map(({ status }) => status)
         ).toEqual(["ready"])
@@ -417,7 +420,7 @@ describe("in-memory ontology storage", () => {
           })
         ).toBeNull()
       } else {
-        expect(afterOntology).toEqual(before.ontology)
+        expect(afterOntology).toEqual(beforeOntology)
       }
     }
   })
@@ -448,6 +451,7 @@ describe("in-memory ontology storage", () => {
     await storage.transaction(async (tx) => {
       if (!tx.ontology) throw new Error("missing ontology")
       const session = await beginMaterialization(tx, header)
+      await tx.ontology.materializations.apply({ session })
       await tx.ontology.materializations.finalize({
         session,
         finalization: {
@@ -463,28 +467,7 @@ describe("in-memory ontology storage", () => {
           },
         },
       })
-      await expect(
-        tx.ontology.materializations.applyChunk({
-          session,
-          chunk: {
-            overrides: {
-              objects: { upserts: [], deletes: [] },
-              links: {
-                edges: { upserts: [], deletes: [] },
-                slots: { upserts: [], deletes: [] },
-              },
-            },
-            effective: {
-              objectUpserts: [],
-              objectDeletes: [],
-              linkUpserts: [],
-              linkDeletes: [],
-            },
-            timeseries: { pointUpserts: [] },
-            outbox: [],
-          },
-        })
-      ).rejects.toThrow("inactive")
+      await expect(tx.ontology.materializations.apply({ session })).rejects.toThrow("inactive")
     })
 
     const { materializer } = createMaterializerFixture({ storage })
@@ -664,7 +647,7 @@ describe("in-memory ontology storage", () => {
     ).toEqual({ inserted: 0, unchanged: 1 })
   })
 
-  test("stages insert-only session work atomically and drains deterministic bounded pages", async () => {
+  test("stages insert-only session work atomically and applies it in canonical order", async () => {
     const storage = new InMemoryStorage()
     const header = {
       commit: {
@@ -708,15 +691,22 @@ describe("in-memory ontology storage", () => {
         materializations.stageWork({ session, records: [classification] })
       ).rejects.toThrow("Duplicate materialization work key")
 
+      await expect(
+        materializations.stageWork({
+          session,
+          records: [
+            {
+              kind: "object-existence",
+              recordKey: "existence:61",
+              ref: { objectTypeId: "Device", primaryId: "a" },
+              exists: true,
+            },
+          ],
+        })
+      ).rejects.toThrow("staged on a replacement plan")
       await materializations.stageWork({
         session,
         records: [
-          {
-            kind: "object-existence",
-            recordKey: "existence:61",
-            ref: { objectTypeId: "Device", primaryId: "a" },
-            exists: true,
-          },
           {
             kind: "plan",
             recordKey: "plan:object-upsert:62",
@@ -814,94 +804,7 @@ describe("in-memory ontology storage", () => {
         ],
       })
 
-      const existence = await materializations.readObjectExistence({
-        session,
-        refs: [
-          { objectTypeId: "Device", primaryId: "missing" },
-          { objectTypeId: "Device", primaryId: "a" },
-        ],
-      })
-      expect(existence).toEqual([{ ref: { objectTypeId: "Device", primaryId: "a" }, exists: true }])
-      const applyPages = []
-      for await (const page of materializations.streamWork({
-        session,
-        order: "apply",
-        pageRows: 1,
-      })) {
-        applyPages.push(page.records)
-      }
-      expect(applyPages.map((page) => page.length)).toEqual([1, 1])
-      expect(
-        applyPages
-          .flat()
-          .filter((record) => record.kind === "plan")
-          .map((record) => record.sortKey)
-      ).toEqual(["61", "62"])
-      const objectUpserts = applyPages
-        .flat()
-        .flatMap((record) =>
-          record.kind === "plan" && record.item.kind === "object-upsert" ? [record.item.value] : []
-        )
-      await materializations.applyChunk({
-        session,
-        chunk: {
-          overrides: {
-            objects: { upserts: [], deletes: [] },
-            links: {
-              edges: { upserts: [], deletes: [] },
-              slots: { upserts: [], deletes: [] },
-            },
-          },
-          effective: {
-            objectUpserts,
-            objectDeletes: [],
-            linkUpserts: [],
-            linkDeletes: [],
-          },
-          timeseries: { pointUpserts: [] },
-          outbox: [],
-        },
-      })
-      const eventRecords = []
-      for await (const page of materializations.streamWork({
-        session,
-        order: "event",
-        pageRows: 1,
-      })) {
-        eventRecords.push(...page.records)
-      }
-      expect(eventRecords.map((record) => record.recordKey)).toEqual(["event:0:61", "event:1:62"])
-      await materializations.applyChunk({
-        session,
-        chunk: {
-          overrides: {
-            objects: { upserts: [], deletes: [] },
-            links: {
-              edges: { upserts: [], deletes: [] },
-              slots: { upserts: [], deletes: [] },
-            },
-          },
-          effective: {
-            objectUpserts: [],
-            objectDeletes: [],
-            linkUpserts: [],
-            linkDeletes: [],
-          },
-          timeseries: { pointUpserts: [] },
-          outbox: eventRecords.map((record, commitOrdinal) => {
-            if (record.kind !== "event") throw new Error("Expected event work")
-            return {
-              envelope: {
-                ...record.draft,
-                id: createEventId("project", "work-commit", commitOrdinal),
-                commitOrdinal,
-              },
-              availableAt: "2026-01-01T00:00:00.000Z",
-              createdAt: "2026-01-01T00:00:00.000Z",
-            }
-          }),
-        },
-      })
+      await expect(materializations.apply({ session })).resolves.toEqual({ eventCount: 2 })
       await expect(
         materializations.stageWork({
           session,
@@ -914,8 +817,9 @@ describe("in-memory ontology storage", () => {
             },
           ],
         })
-      ).rejects.toThrow("after draining begins")
+      ).rejects.toThrow("once vector changes stream or the plan applies")
 
+      await expect(materializations.apply({ session })).rejects.toThrow("applies once per session")
       await materializations.finalize({
         session,
         finalization: {
@@ -933,12 +837,22 @@ describe("in-memory ontology storage", () => {
       })
       await expect(materializations.stageWork({ session, records: [] })).rejects.toThrow("inactive")
     })
-    const stream = storage.ontology.materializations.streamWork({
-      session: closedSession!,
-      order: "apply",
-      pageRows: 1,
+    await expect(
+      storage.ontology.materializations.apply({ session: closedSession! })
+    ).rejects.toThrow("inactive")
+    const events = await storage.ontology.outbox.claim({
+      projectId: "project",
+      now: "2026-01-01T00:00:00.000Z",
+      limit: 10,
+      leaseId: "work-lease",
+      leaseExpiresAt: "2026-01-01T01:00:00.000Z",
     })
-    await expect(stream[Symbol.asyncIterator]().next()).rejects.toThrow("inactive")
+    expect(
+      events.map(({ envelope }) => [envelope.commitOrdinal, envelope.partitionKey, envelope.id])
+    ).toEqual([
+      [0, "Device:a", createEventId("project", "work-commit", 0)],
+      [1, "Device:b", createEventId("project", "work-commit", 1)],
+    ])
   })
 
   test("deactivates every live materialization session on rollback", async () => {
@@ -984,26 +898,7 @@ describe("in-memory ontology storage", () => {
       })
     ).rejects.toThrow("rollback session")
     await expect(
-      storage.ontology.materializations.applyChunk({
-        session: leakedSession!,
-        chunk: {
-          overrides: {
-            objects: { upserts: [], deletes: [] },
-            links: {
-              edges: { upserts: [], deletes: [] },
-              slots: { upserts: [], deletes: [] },
-            },
-          },
-          effective: {
-            objectUpserts: [],
-            objectDeletes: [],
-            linkUpserts: [],
-            linkDeletes: [],
-          },
-          timeseries: { pointUpserts: [] },
-          outbox: [],
-        },
-      })
+      storage.ontology.materializations.apply({ session: leakedSession! })
     ).rejects.toThrow("inactive")
     await expect(
       storage.ontology.materializations.stageWork({ session: leakedSession!, records: [] })
@@ -1477,6 +1372,7 @@ describe("in-memory ontology storage", () => {
           ],
         },
       })
+      await tx.ontology.materializations.apply({ session })
       await tx.ontology.materializations.finalize({
         session,
         finalization: {
@@ -1590,6 +1486,7 @@ describe("in-memory ontology storage", () => {
           points: [],
         },
       })
+      await tx.ontology.materializations.apply({ session })
       await tx.ontology.materializations.finalize({
         session,
         finalization: {
@@ -1888,7 +1785,7 @@ describe("in-memory ontology storage", () => {
             createdAt: committedAt,
           })
         },
-        message: "Outbox event",
+        message: "event work is invalid",
       },
     ]
     for (const testCase of cases) {
@@ -1926,22 +1823,24 @@ describe("in-memory ontology storage", () => {
               session,
               records: [planWork(stagedItem, "61")],
             })
-            for await (const _page of tx.ontology.materializations.streamWork({
-              session,
-              order: "apply",
-              pageRows: 1,
-            })) {
-              // Make the exact provider plan eligible for application.
-            }
           }
-          await tx.ontology.materializations.applyChunk({ session, chunk: plan })
+          for (const { envelope } of plan.outbox) {
+            const { id: _id, commitOrdinal: _ordinal, ...draft } = envelope
+            await tx.ontology.materializations.stageWork({
+              session,
+              records: [
+                { kind: "event", recordKey: "event:0:61", eventKindRank: 0, sortKey: "61", draft },
+              ],
+            })
+          }
+          await tx.ontology.materializations.apply({ session })
         })
       ).rejects.toThrow(testCase.message)
       expect(getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()).toEqual(before)
     }
   })
 
-  test("rejects ordinal finalization mismatches with rollback", async () => {
+  test("rejects a result whose event count differs from the applied outbox, with rollback", async () => {
     const storage = new InMemoryStorage()
     await queueTestActionRun(storage, {
       id: "run",
@@ -2008,57 +1907,8 @@ describe("in-memory ontology storage", () => {
             },
           ],
         })
-        for await (const _page of tx.ontology.materializations.streamWork({
-          session,
-          order: "event",
-          pageRows: 1,
-        })) {
-          // The outbox write below deliberately skips canonical ordinal zero.
-        }
-        await tx.ontology.materializations.applyChunk({
-          session,
-          chunk: {
-            overrides: {
-              objects: { upserts: [], deletes: [] },
-              links: {
-                edges: { upserts: [], deletes: [] },
-                slots: { upserts: [], deletes: [] },
-              },
-            },
-            effective: {
-              objectUpserts: [],
-              objectDeletes: [],
-              linkUpserts: [],
-              linkDeletes: [],
-            },
-            timeseries: { pointUpserts: [] },
-            outbox: [
-              {
-                envelope: {
-                  id: createEventId("project", "ordinal-gap", 1),
-                  schemaVersion: 1,
-                  projectId: "project",
-                  occurredAt: committedAt,
-                  correlationId: "correlation:ordinal-gap",
-                  origin: { kind: "action", actionId: "action", runId: "run" },
-                  executor: { type: "primitive", kind: "action", id: "action", runId: "run" },
-                  commitId: "ordinal-gap",
-                  commitOrdinal: 1,
-                  partitionKey: "Device:one",
-                  type: "object.created",
-                  topic: "objects",
-                  payload: {
-                    objectTypeId: "Device",
-                    primaryId: "one",
-                    properties: { name: "one" },
-                    propertyChanges: {},
-                  },
-                },
-                availableAt: committedAt,
-                createdAt: committedAt,
-              },
-            ],
-          },
+        await expect(tx.ontology.materializations.apply({ session })).resolves.toEqual({
+          eventCount: 1,
         })
         await tx.ontology.materializations.finalize({
           session,
@@ -2068,7 +1918,7 @@ describe("in-memory ontology storage", () => {
               kind: "edit",
               commitId: "ordinal-gap",
               created: true,
-              eventCount: 1,
+              eventCount: 2,
               committedAt: header("ordinal-gap").commit.committedAt,
               outcomes: [],
               changes: { objects: [], links: [] },
@@ -2076,11 +1926,11 @@ describe("in-memory ontology storage", () => {
           },
         })
       })
-    ).rejects.toThrow("exact streamed order")
+    ).rejects.toThrow("does not correlate with its commit intent")
     expect(getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot()).toEqual(before)
   })
 
-  test("refuses activation until replacement state is fully streamed and classified", async () => {
+  test("refuses activation until the plan covers its replacement state", async () => {
     const storage = new InMemoryStorage()
     const source = { projectionId: "devices" }
     const datasetVersion = {
@@ -2199,29 +2049,40 @@ describe("in-memory ontology storage", () => {
         counts,
       },
     }
-    const finalizeWithoutSemanticWork = (streamReplacement: boolean) =>
+    const plan = { projectId: "project", source, materializationId: "sealed-candidate", execution }
+    const finalizeWithoutSemanticWork = (planned: boolean) =>
       storage.transaction(async (tx) => {
         if (!tx.ontology) throw new Error("missing ontology")
-        const session = await beginMaterialization(tx, header)
-        if (streamReplacement) {
-          for (const entityKind of ["object", "link"] as const) {
-            for await (const _page of tx.ontology.materializations.streamSourceReplacementState({
-              session,
-              source,
-              candidateMaterializationId: "sealed-candidate",
-              entityKind,
-              pageRows: 1,
-            })) {
-              // Deliberately omit classification work to exercise provider sealing.
-            }
-          }
-        }
+        if (planned) await tx.ontology.replacementPlans.refresh(plan)
+        const session = await beginMaterialization(
+          tx,
+          planned ? { ...header, plan: { source, materializationId: "sealed-candidate" } } : header
+        )
+        await tx.ontology.materializations.apply({ session })
         return tx.ontology.materializations.finalize({ session, finalization })
       })
 
     await expect(finalizeWithoutSemanticWork(false)).rejects.toThrow(
-      "does not match the replacement candidate opened"
+      "does not match the replacement plan the session applies"
     )
+    // A plan whose identity stages no classification cannot activate its candidate.
+    await storage.ontology.replacementPlans.open({ ...plan, commit: header.commit })
+    for (const entityKind of ["object", "link"] as const) {
+      for await (const page of storage.ontology.replacementPlans.streamState({
+        ...plan,
+        entityKind,
+        pageRows: 1,
+      })) {
+        await storage.ontology.replacementPlans.stage({
+          ...plan,
+          commit: header.commit,
+          planned: page.objects.map((state) => ({
+            identity: { kind: "object" as const, ref: state.ref },
+            records: [],
+          })),
+        })
+      }
+    }
     await expect(finalizeWithoutSemanticWork(true)).rejects.toThrow("classification coverage")
     expect(await storage.ontology.sources.getActive({ projectId: "project", source })).toBeNull()
   })
@@ -2435,6 +2296,7 @@ describe("in-memory ontology storage", () => {
         storage.transaction(async (tx) => {
           if (!tx.ontology) throw new Error("missing ontology")
           const session = await beginMaterialization(tx, header)
+          await tx.ontology.materializations.apply({ session })
           await tx.ontology.materializations.finalize({ session, finalization })
         })
       ).rejects.toThrow(testCase.message)

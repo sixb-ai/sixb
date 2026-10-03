@@ -19,6 +19,7 @@ export interface OntologyMaintenanceOptions {
 
 export interface OntologyMaintenanceCleanupSnapshot {
   readonly publishedOutboxRowsDeleted: number
+  /** Rows of candidates that will not be published again, their replacement plans included. */
   readonly terminalSourceRowsDeleted: number
   readonly terminalSourceMaterializationsDeleted: number
 }

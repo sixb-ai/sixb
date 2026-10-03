@@ -16,6 +16,7 @@ import {
   ProjectionRegistry,
 } from "../src/materializer"
 import {
+  type MaterializationObjectExistence,
   type SourceReplacementLinkState,
   type Storage,
   StorageTransactionError,
@@ -131,10 +132,9 @@ describe("ontology materializer projection replacement", () => {
       const streamCalls: string[] = []
       const classifications: string[] = []
       const buffers = new Map<string, number>()
-      const applyChunkSizes: number[] = []
       getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
         beforeRead(boundary) {
-          if (boundary.startsWith("source-replacement.")) streamCalls.push(boundary)
+          if (boundary.startsWith("replacement-plan.")) streamCalls.push(boundary)
         },
         observeWork(records) {
           for (const record of records) {
@@ -143,7 +143,6 @@ describe("ontology materializer projection replacement", () => {
         },
         observeBuffer(boundary, rows) {
           buffers.set(boundary, Math.max(buffers.get(boundary) ?? 0, rows))
-          if (boundary === "apply.chunk") applyChunkSizes.push(rows)
         },
       })
       const values = Array.from({ length: 200 }, (_, index) =>
@@ -175,7 +174,6 @@ describe("ontology materializer projection replacement", () => {
         streamCalls,
         classifications,
         buffers,
-        applyChunkSizes,
         events: claimed
           .map((row) => row.envelope)
           .sort((a, b) => a.commitOrdinal - b.commitOrdinal),
@@ -184,18 +182,14 @@ describe("ontology materializer projection replacement", () => {
 
     const tiny = await run(1, true)
     const broad = await run(100, false)
-    expect(tiny.streamCalls).toEqual(["source-replacement.object", "source-replacement.link"])
+    expect(tiny.streamCalls).toEqual(["replacement-plan.object", "replacement-plan.link"])
     expect(new Set(tiny.classifications).size).toBe(tiny.classifications.length)
     expect(tiny.classifications).toHaveLength(399)
     expect(tiny.result).toEqual(broad.result)
     expect(tiny.events).toEqual(broad.events)
     expect(tiny.buffers.get("replacement.object.page")).toBeLessThanOrEqual(1)
     expect(tiny.buffers.get("replacement.link.page")).toBeLessThanOrEqual(1)
-    expect(tiny.buffers.get("work.apply.page")).toBeLessThanOrEqual(1)
-    expect(tiny.buffers.get("work.event.page")).toBeLessThanOrEqual(1)
-    expect(tiny.buffers.get("work.stage")).toBeLessThanOrEqual(1)
-    expect(tiny.buffers.get("apply.chunk")).toBeLessThanOrEqual(1)
-    expect(broad.applyChunkSizes).toContain(3)
+    expect(tiny.buffers.get("plan.stage")).toBeLessThanOrEqual(1)
   })
 
   test("records one classification for every unchanged replacement identity", async () => {
@@ -244,7 +238,7 @@ describe("ontology materializer projection replacement", () => {
     expect(result.counts).toMatchObject({ objectsCreated: 2, linksCreated: 1 })
   })
 
-  test("drains exact work in safe physical phases before outbox and activation", async () => {
+  test("applies exact work in safe physical phases before outbox and activation", async () => {
     const { materializer, storage } = createMaterializerFixture({
       dependencies: { batching: { statePageRows: 1, planChunkRows: 50 } },
     })
@@ -1234,21 +1228,24 @@ describe("ontology materializer projection replacement", () => {
     const { materializer, storage } = createMaterializerFixture({
       dependencies: { batching: { statePageRows: 1 } },
     })
-    const materializations = storage.ontology.materializations
     let shuffled = false
     decorateOperationScopedMethodForTesting(
-      materializations,
-      "streamSourceReplacementState",
-      (streamSourceReplacementState) => (input) => {
-        const streamed = streamSourceReplacementState(input)
+      storage.ontology.replacementPlans,
+      "streamState",
+      (streamState) => (input) => {
+        const streamed = streamState(input)
         if (input.entityKind !== "link") return streamed
         return {
           async *[Symbol.asyncIterator]() {
             const links: SourceReplacementLinkState[] = []
-            for await (const page of streamed) links.push(...page.links)
+            const endpoints: MaterializationObjectExistence[] = []
+            for await (const page of streamed) {
+              links.push(...page.links)
+              endpoints.push(...page.endpoints)
+            }
             links.reverse()
             shuffled = links.length > 1
-            for (const link of links) yield { objects: [], links: [link] }
+            for (const link of links) yield { objects: [], links: [link], endpoints }
           },
         }
       }
@@ -1279,19 +1276,22 @@ describe("ontology materializer projection replacement", () => {
     const conflict = createMaterializerFixture({
       dependencies: { batching: { statePageRows: 1 } },
     })
-    const conflictStorage = conflict.storage.ontology.materializations
     decorateOperationScopedMethodForTesting(
-      conflictStorage,
-      "streamSourceReplacementState",
-      (streamSourceReplacementState) => (input) => {
-        const streamed = streamSourceReplacementState(input)
+      conflict.storage.ontology.replacementPlans,
+      "streamState",
+      (streamState) => (input) => {
+        const streamed = streamState(input)
         if (input.entityKind !== "link") return streamed
         return {
           async *[Symbol.asyncIterator]() {
             const links: SourceReplacementLinkState[] = []
-            for await (const page of streamed) links.push(...page.links)
+            const endpoints: MaterializationObjectExistence[] = []
+            for await (const page of streamed) {
+              links.push(...page.links)
+              endpoints.push(...page.endpoints)
+            }
             for (const link of links.reverse()) {
-              yield { objects: [], links: [link] }
+              yield { objects: [], links: [link], endpoints }
             }
           },
         }
@@ -1540,7 +1540,7 @@ describe("ontology materializer projection replacement", () => {
     const streamedLanes: string[] = []
     getInMemoryOntologyStorageTestingAdapter(storage.ontology).setTestHooks({
       beforeRead(boundary) {
-        if (boundary.startsWith("source-replacement.")) streamedLanes.push(boundary)
+        if (boundary.startsWith("replacement-plan.")) streamedLanes.push(boundary)
       },
     })
     const materializer = createOntologyMaterializer({
@@ -1610,7 +1610,7 @@ describe("ontology materializer projection replacement", () => {
         ]),
       })
     expect(result.counts).toMatchObject({ linksCreated: 1 })
-    expect(streamedLanes).toEqual(["source-replacement.link"])
+    expect(streamedLanes).toEqual(["replacement-plan.link"])
     expect(
       await storage.objects.listLinks({
         projectId: "project",

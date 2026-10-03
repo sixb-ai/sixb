@@ -23,6 +23,7 @@ import type {
   OntologyMaterializationStorage,
   OntologySourceRecord,
   OntologyStorage,
+  ReplacementPlanRef,
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { replayCommitRecord, withSerializationRetry } from "../execution/commit-lifecycle"
@@ -34,7 +35,7 @@ import {
   type MaterializerExecution,
   prepareMaterializerExecution,
 } from "../execution/scope"
-import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
+import { applyStagedWork } from "../execution/work-executor"
 import type { MaterializerCommand } from "../materializer"
 import { throwIfAborted } from "../shared/abort"
 import {
@@ -51,7 +52,7 @@ import {
 } from "../shared/normalize"
 import { createProjectionRunMaterializationIdentity } from "../shared/projection-run"
 import { createProjectionEntryValidator } from "./entry-validator"
-import { planProjectionReplacement } from "./replacement-plan"
+import { type ProjectionReplacementPlanInput, planProjectionReplacement } from "./replacement-plan"
 import {
   type StagedProjectionMaterialization,
   stageProjectionMaterialization,
@@ -324,25 +325,66 @@ async function stageCandidateEntries(
   return stageProjectionMaterialization(context, { ...input, signal })
 }
 
+/**
+ * Rounds of planning a commit tolerates before it gives the delivery back: each round plans again
+ * only what changed under the previous one, and the next delivery resumes the same plan.
+ */
+const MAX_PLAN_ROUNDS = 3
+
 async function commitProjectionCandidate(
   context: MaterializerContext,
   command: PreparedProjectionReplacement,
   ready: ReadyProjectionReplacement
 ): Promise<ProjectionCommitResult> {
-  return withSerializationRetry(context, () =>
-    context.storage.transaction(
-      (storage) => executeProjectionTransaction(context, storage, command, ready),
-      { isolation: "serializable" }
+  const plans = context.storage.ontology.replacementPlans
+  const plan: ReplacementPlanRef = {
+    projectId: context.projectId,
+    source: command.source,
+    materializationId: ready.materializationId,
+    execution: command.execution,
+  }
+  // A resumed plan keeps the commit time it was opened with, since its planned rows and events
+  // carry that time; its session begins with the commit at exactly that time.
+  const { committedAt } = await plans.open({
+    ...plan,
+    commit: projectionCommit(context.projectId, command, ready.identity),
+  })
+  const commit = projectionCommit(context.projectId, command, { ...ready.identity, committedAt })
+  for (let round = 1; ; round += 1) {
+    await planProjectionReplacement(context, plans, plan, planInput(command, commit))
+    const attempt = await withSerializationRetry(context, () =>
+      context.storage.transaction(
+        (storage) => executeProjectionTransaction(context, storage, command, ready, commit, plan),
+        { isolation: "serializable" }
+      )
     )
-  )
+    if (attempt.kind === "committed") return attempt.result
+    if (round === MAX_PLAN_ROUNDS) {
+      throw new MaterializationConflictError(
+        "effective-state",
+        `Projection '${command.source.projectionId}' inputs kept changing while it was planned ` +
+          `(${attempt.unplanned} changed during the last of ${MAX_PLAN_ROUNDS} rounds).`
+      )
+    }
+  }
 }
+
+/**
+ * One commit transaction. `stale` commits only the refresh: the identities whose inputs changed
+ * since they were planned are unplanned, for the next round to plan again outside the transaction.
+ */
+type ProjectionCommitAttempt =
+  | { readonly kind: "committed"; readonly result: ProjectionCommitResult }
+  | { readonly kind: "stale"; readonly unplanned: number }
 
 async function executeProjectionTransaction(
   context: MaterializerContext,
   storage: MaterializerStorage,
   command: PreparedProjectionReplacement,
-  ready: ReadyProjectionReplacement
-): Promise<ProjectionCommitResult> {
+  ready: ReadyProjectionReplacement,
+  commit: OntologyCommitWrite,
+  plan: ReplacementPlanRef
+): Promise<ProjectionCommitAttempt> {
   await ensureMaterializerExecution(storage.executions, command.scopeExecution)
   await assertProjectionExecution(storage, context.projectId, command)
   const replay = await replayCommitRecord(
@@ -351,7 +393,7 @@ async function executeProjectionTransaction(
     command.scopeExecution.executionId,
     storage
   )
-  if (replay) return projectionReplayResult(replay, command)
+  if (replay) return { kind: "committed", result: projectionReplayResult(replay, command) }
 
   if (command.base) {
     const active = await storage.ontology.sources.getActive({
@@ -361,10 +403,11 @@ async function executeProjectionTransaction(
     validateProjectionWatermark(active, command.datasetVersion)
     assertDeltaBase(active, command)
   }
-  const origin = projectionOrigin(command)
   throwIfAborted(command.signal)
+  const status = await storage.ontology.replacementPlans.refresh(plan)
+  if (!status.fresh) return { kind: "stale", unplanned: status.unplanned }
   const session = await storage.ontology.materializations.begin({
-    commit: projectionCommit(context.projectId, command, ready.identity, origin),
+    commit,
     expected: {
       sources: [ready.expectedSource],
       objects: [],
@@ -372,33 +415,29 @@ async function executeProjectionTransaction(
       linkScopes: [],
       points: [],
     },
+    plan: { source: command.source, materializationId: ready.materializationId },
   })
-  const counts = await planReadyProjection(
-    context,
-    storage.ontology.materializations,
-    session,
-    command,
-    ready,
-    origin
-  )
-  await drainStagedWork(context, storage, session, command.signal, true)
-  const eventCount = await drainStagedEvents(
-    context,
-    storage.ontology.materializations,
-    session,
-    ready.identity,
-    command.signal
-  )
+  const eventCount = await applyStagedWork(context, storage, session, command.signal, true)
   const result: ProjectionCommitResult = {
     kind: "projection",
-    commitId: ready.identity.commitId,
+    commitId: commit.id,
     created: true,
     eventCount,
-    committedAt: ready.identity.committedAt,
-    counts,
+    committedAt: commit.committedAt,
+    counts: status.counts,
   }
   throwIfAborted(command.signal)
-  return finalizeProjectionMaterialization(storage, session, command, ready, result)
+  return {
+    kind: "committed",
+    result: await finalizeProjectionMaterialization(
+      storage,
+      session,
+      command,
+      ready,
+      commit,
+      result
+    ),
+  }
 }
 
 async function finalizeProjectionMaterialization(
@@ -406,12 +445,13 @@ async function finalizeProjectionMaterialization(
   session: Parameters<OntologyMaterializationStorage["finalize"]>[0]["session"],
   command: PreparedProjectionReplacement,
   ready: ReadyProjectionReplacement,
+  commit: OntologyCommitWrite,
   result: ProjectionCommitResult
 ): Promise<ProjectionCommitResult> {
   const applied = await storage.ontology.materializations.finalize({
     session,
     finalization: {
-      sourceActivations: [projectionActivation(command, ready)],
+      sourceActivations: [projectionActivation(command, ready, commit)],
       result,
     },
   })
@@ -431,8 +471,7 @@ function projectionOrigin(command: PreparedProjectionReplacement): OntologyMater
 function projectionCommit(
   projectId: string,
   command: PreparedProjectionReplacement,
-  identity: TimedCommitIdentity,
-  origin: OntologyMaterializationOrigin
+  identity: TimedCommitIdentity
 ): OntologyCommitWrite {
   return {
     projectId,
@@ -440,7 +479,7 @@ function projectionCommit(
     idempotencyKey: identity.idempotencyKey,
     requestHash: identity.requestHash,
     executionId: command.scopeExecution.executionId,
-    origin,
+    origin: projectionOrigin(command),
     ...command.scopeExecution.attribution,
     ontologyRevision: command.runIdentity.ontologyRevision,
     projectionRevision: command.runIdentity.projectionRevision,
@@ -450,35 +489,23 @@ function projectionCommit(
   }
 }
 
-async function planReadyProjection(
-  context: MaterializerContext,
-  storage: OntologyMaterializationStorage,
-  session: Parameters<OntologyMaterializationStorage["finalize"]>[0]["session"],
+function planInput(
   command: PreparedProjectionReplacement,
-  ready: ReadyProjectionReplacement,
-  origin: OntologyMaterializationOrigin
-) {
+  commit: OntologyCommitWrite
+): ProjectionReplacementPlanInput {
   const input = {
-    source: command.source,
-    materializationId: ready.materializationId,
     projectionKind: command.projectionKind,
-    identity: ready.identity,
-    origin,
+    commit,
     correlationId: command.scopeExecution.correlationId,
     attribution: command.scopeExecution.attribution,
   }
-  if (command.signal === undefined) {
-    return planProjectionReplacement(context, storage, session, input)
-  }
-  return planProjectionReplacement(context, storage, session, {
-    ...input,
-    signal: command.signal,
-  })
+  return command.signal === undefined ? input : { ...input, signal: command.signal }
 }
 
 function projectionActivation(
   command: PreparedProjectionReplacement,
-  ready: ReadyProjectionReplacement
+  ready: ReadyProjectionReplacement,
+  commit: OntologyCommitWrite
 ) {
   return {
     source: command.source,
@@ -491,8 +518,8 @@ function projectionActivation(
     ownershipHash: command.runIdentity.ownershipHash,
     ontologyRevision: command.runIdentity.ontologyRevision,
     expected: ready.expectedSource,
-    lastCommitId: ready.identity.commitId,
-    updatedAt: ready.identity.committedAt,
+    lastCommitId: commit.id,
+    updatedAt: commit.committedAt,
   }
 }
 

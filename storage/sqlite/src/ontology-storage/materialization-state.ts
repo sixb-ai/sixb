@@ -49,12 +49,10 @@ import {
   activeSourceRows,
   LIVE_SOURCE_ROWS_JOIN,
   replacementAssertionRows,
-  replacementSourceRows,
   SOURCE_ASSERTION_COLUMNS,
 } from "./source-roots"
 
 export const SQLITE_MATERIALIZATION_WORK_TABLE = "ontology_materialization_work"
-export const SQLITE_REPLACEMENT_WORK_TABLE = "ontology_replacement_work"
 
 interface EffectiveObjectRow {
   readonly object_type_id: string
@@ -135,40 +133,11 @@ interface ReplacementSources {
   readonly byMaterialization: ReadonlyMap<string, ReadonlyMap<string, StoredSourceAssertion>>
 }
 
-export type ReplacementIdentity =
-  | {
-      readonly kind: "object"
-      readonly ref: OntologyObjectRef
-      readonly sortKey: string
-      readonly diffRequired: true
-    }
-  | {
-      readonly kind: "link"
-      readonly ref: OntologyLinkRef
-      readonly sortKey: string
-      readonly diffRequired: boolean
-    }
-
-interface ReplacementIdentityInput {
-  readonly incremental?: boolean
-  readonly sessionId: string
-  readonly sourceId: string
-  readonly candidateMaterializationId: string
-  readonly previousMaterializationId: string | null
-  readonly kind: "object" | "link"
-  readonly pageRows: number
-}
-
-interface ReplacementWorkRow {
-  readonly entity_kind: "object" | "link"
-  readonly identity_key: string
-  readonly sort_key: string
-  readonly diff_required: number
-}
-
-interface ReplacementCursor {
+/** A link a replacement plan decides, and whether its plan needs a diff. */
+export interface ReplacementLinkIdentity {
+  readonly ref: OntologyLinkRef
   readonly sortKey: string
-  readonly identityKey: string
+  readonly diffRequired: boolean
 }
 
 export class SqliteMaterializationStateReader {
@@ -606,19 +575,6 @@ export class SqliteMaterializationStateReader {
     }
   }
 
-  *replacementIdentities(input: ReplacementIdentityInput): Iterable<ReplacementIdentity[]> {
-    this.prepareReplacementIdentities(input)
-    let cursor: ReplacementCursor | null = null
-    while (true) {
-      const rows = this.replacementRows(input, cursor)
-      if (rows.length === 0) break
-      yield rows.map(replacementIdentity)
-      if (rows.length < input.pageRows) break
-      const last = rows[rows.length - 1]!
-      cursor = { sortKey: last.sort_key, identityKey: last.identity_key }
-    }
-  }
-
   replacementObjectStates(
     sourceId: string,
     candidateMaterializationId: string,
@@ -647,7 +603,7 @@ export class SqliteMaterializationStateReader {
     sourceId: string,
     candidateMaterializationId: string,
     materializationIds: readonly string[],
-    identities: readonly Extract<ReplacementIdentity, { readonly kind: "link" }>[],
+    identities: readonly ReplacementLinkIdentity[],
     incremental = false
   ): readonly SourceReplacementLinkState[] {
     const refs = identities.map((identity) => identity.ref)
@@ -738,213 +694,6 @@ export class SqliteMaterializationStateReader {
       byMaterialization.set(row.materialization_id, materialization)
     }
     return { owned, byMaterialization }
-  }
-
-  private prepareReplacementIdentities(input: ReplacementIdentityInput): void {
-    if (input.kind === "object") {
-      this.prepareReplacementObjects(input)
-      return
-    }
-    this.prepareReplacementLinks(input)
-  }
-
-  private prepareReplacementObjects(input: ReplacementIdentityInput): void {
-    const rows = replacementSourceRows(this.db, {
-      projectId: this.projectId,
-      sourceId: input.sourceId,
-      materializationId: input.candidateMaterializationId,
-      incremental: input.incremental ?? false,
-    })
-    this.db
-      .query(
-        `
-          INSERT INTO ${SQLITE_REPLACEMENT_WORK_TABLE} (
-            session_id, entity_kind, identity_key, sort_key, diff_required
-          )
-          SELECT ?, 'object', json_array(object_type_id, primary_id),
-            ${objectSortExpression()}, 1
-          FROM (${rows.sql}) AS rows
-          WHERE entity_kind = 'object'
-          GROUP BY object_type_id, primary_id
-        `
-      )
-      .run(input.sessionId, ...rows.values)
-  }
-
-  private prepareReplacementLinks(input: ReplacementIdentityInput): void {
-    const rows = replacementSourceRows(this.db, {
-      projectId: this.projectId,
-      sourceId: input.sourceId,
-      materializationId: input.candidateMaterializationId,
-      incremental: input.incremental ?? false,
-    })
-    this.db
-      .query(
-        `
-          WITH incident_objects AS (
-            SELECT DISTINCT
-              json_extract(payload, '$.ref.objectTypeId') AS object_type_id,
-              json_extract(payload, '$.ref.primaryId') AS primary_id
-            FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
-            WHERE session_id = ? AND kind = 'incident-object'
-          ), replacement_links AS (
-            SELECT source_type_id, source_primary_id AS source_id, link_id,
-              target_type_id, target_primary_id AS target_id
-            FROM (${rows.sql}) AS rows
-            WHERE entity_kind = 'link'
-          ), incident_links AS (
-            SELECT links.source_type_id, links.source_id, links.link_id,
-              links.target_type_id, links.target_id
-            FROM links
-            JOIN incident_objects
-              ON incident_objects.object_type_id = links.source_type_id
-             AND incident_objects.primary_id = links.source_id
-            WHERE links.project_id = ?
-            UNION
-            SELECT links.source_type_id, links.source_id, links.link_id,
-              links.target_type_id, links.target_id
-            FROM links
-            JOIN incident_objects
-              ON incident_objects.object_type_id = links.target_type_id
-             AND incident_objects.primary_id = links.target_id
-            WHERE links.project_id = ?
-            UNION
-            SELECT overrides.source_type_id,
-              overrides.source_primary_id AS source_id,
-              overrides.link_id, overrides.target_type_id,
-              overrides.target_primary_id AS target_id
-            FROM ontology_link_overrides AS overrides
-            JOIN incident_objects
-              ON incident_objects.object_type_id = overrides.source_type_id
-             AND incident_objects.primary_id = overrides.source_primary_id
-            WHERE overrides.project_id = ?
-            UNION
-            SELECT overrides.source_type_id,
-              overrides.source_primary_id AS source_id,
-              overrides.link_id, overrides.target_type_id,
-              overrides.target_primary_id AS target_id
-            FROM ontology_link_overrides AS overrides
-            JOIN incident_objects
-              ON incident_objects.object_type_id = overrides.target_type_id
-             AND incident_objects.primary_id = overrides.target_primary_id
-            WHERE overrides.project_id = ?
-            UNION
-            SELECT rows.source_type_id, rows.source_primary_id AS source_id,
-              rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
-            FROM incident_objects
-            CROSS JOIN ontology_source_rows AS rows
-              ON rows.entity_kind = 'link'
-             AND rows.source_type_id = incident_objects.object_type_id
-             AND rows.source_primary_id = incident_objects.primary_id
-            ${LIVE_SOURCE_ROWS_JOIN}
-            UNION
-            SELECT rows.source_type_id, rows.source_primary_id AS source_id,
-              rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
-            FROM incident_objects
-            CROSS JOIN ontology_source_rows AS rows
-              ON rows.entity_kind = 'link'
-             AND rows.target_type_id = incident_objects.object_type_id
-             AND rows.target_primary_id = incident_objects.primary_id
-            ${LIVE_SOURCE_ROWS_JOIN}
-          ), diff_links AS (
-            SELECT * FROM replacement_links
-            UNION SELECT * FROM incident_links
-          ), affected_scopes AS (
-            SELECT DISTINCT source_type_id, source_id, link_id FROM diff_links
-          ), all_links AS (
-            SELECT *, 1 AS diff_required FROM diff_links
-            UNION ALL
-            SELECT links.source_type_id, links.source_id, links.link_id,
-              links.target_type_id, links.target_id, 0 AS diff_required
-            FROM links
-            JOIN affected_scopes USING (source_type_id, source_id, link_id)
-            WHERE links.project_id = ?
-            UNION ALL
-            SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
-              overrides.link_id, overrides.target_type_id,
-              overrides.target_primary_id AS target_id, 0 AS diff_required
-            FROM ontology_link_overrides AS overrides
-            JOIN affected_scopes
-              ON affected_scopes.source_type_id = overrides.source_type_id
-             AND affected_scopes.source_id = overrides.source_primary_id
-             AND affected_scopes.link_id = overrides.link_id
-            WHERE overrides.project_id = ? AND overrides.identity_kind = 'slot'
-          ), selected AS (
-            SELECT source_type_id, source_id, link_id, target_type_id, target_id,
-              ${linkSortExpression("all_links")} AS sort_key,
-              MAX(diff_required) AS diff_required
-            FROM all_links
-            GROUP BY source_type_id, source_id, link_id, target_type_id, target_id
-          )
-          INSERT INTO ${SQLITE_REPLACEMENT_WORK_TABLE} (
-            session_id, entity_kind, identity_key, sort_key, diff_required
-          )
-          SELECT ?, 'link',
-            json_array(source_type_id, source_id, link_id, target_type_id, target_id),
-            sort_key, diff_required
-          FROM selected
-        `
-      )
-      .run(
-        input.sessionId,
-        ...rows.values,
-        this.projectId,
-        this.projectId,
-        this.projectId,
-        this.projectId,
-        this.projectId,
-        this.projectId,
-        this.projectId,
-        this.projectId,
-        input.sessionId
-      )
-  }
-
-  private replacementRows(
-    input: ReplacementIdentityInput,
-    cursor: ReplacementCursor | null
-  ): ReplacementWorkRow[] {
-    return this.db
-      .query(
-        `
-          SELECT entity_kind, identity_key, sort_key, diff_required
-          FROM ${SQLITE_REPLACEMENT_WORK_TABLE}
-          WHERE session_id = ? AND entity_kind = ?
-            AND (? IS NULL OR (sort_key, identity_key) > (?, ?))
-          ORDER BY sort_key, identity_key
-          LIMIT ?
-        `
-      )
-      .all(
-        input.sessionId,
-        input.kind,
-        cursor?.sortKey ?? null,
-        cursor?.sortKey ?? null,
-        cursor?.identityKey ?? null,
-        input.pageRows
-      ) as ReplacementWorkRow[]
-  }
-}
-
-function replacementIdentity(row: ReplacementWorkRow): ReplacementIdentity {
-  const parts = parseJson<string[]>(row.identity_key)
-  if (row.entity_kind === "object") {
-    return {
-      kind: "object",
-      ref: { objectTypeId: parts[0]!, primaryId: parts[1]! },
-      sortKey: row.sort_key,
-      diffRequired: true,
-    }
-  }
-  return {
-    kind: "link",
-    ref: {
-      source: { objectTypeId: parts[0]!, primaryId: parts[1]! },
-      linkId: parts[2]!,
-      target: { objectTypeId: parts[3]!, primaryId: parts[4]! },
-    },
-    sortKey: row.sort_key,
-    diffRequired: row.diff_required === 1,
   }
 }
 
@@ -1113,11 +862,6 @@ function storedPoint(row: TelemetryRow): StoredTelemetryPoint {
     at: row.at,
     lastCommitId: row.last_commit_id,
   }
-}
-
-function objectSortExpression(alias?: string): string {
-  const prefix = alias ? `${alias}.` : ""
-  return `LOWER(HEX(CAST(json_array(${prefix}object_type_id, ${prefix}primary_id) AS BLOB)))`
 }
 
 export function linkSortExpression(alias?: string): string {
