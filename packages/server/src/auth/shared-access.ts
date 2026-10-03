@@ -11,6 +11,7 @@ import { type SharedSessionContext, SharedSessionProtocol } from "@sixb/core/int
 import { hasForegroundSessionActivity } from "./session-activity"
 
 export const SHARED_ACCESS_GRANT_HEADER_NAME = "x-sixb-share-grant"
+const SHARED_ACCESS_GRANT_QUERY_PARAM = "shareGrant"
 
 const SHARED_SESSION_COOKIE_PREFIX = "sixb_share_session_"
 const SHARED_CSRF_COOKIE_PREFIX = "sixb_share_csrf_"
@@ -18,6 +19,10 @@ const SHARED_COOKIE_PATH = "/api"
 const STORED_IDENTIFIER_MAX_LENGTH = 128
 
 const SHARED_SESSION_ROUTES = SIXB_API_ROUTES.filter((route) => route.sharedSession)
+const SHARED_FILE_CONTENT_ROUTES = SHARED_SESSION_ROUTES.filter(
+  (route) =>
+    (route.method === "GET" || route.method === "HEAD") && route.path.endsWith("/files/content")
+)
 
 export interface SixbSharedAccessOptions {
   /** Sliding inactivity window, always bounded by the grant's absolute expiration. */
@@ -33,6 +38,11 @@ export interface ResolvedSharedAccess {
   readonly context: SharedSessionContext
   readonly cookies: SharedAccessCookieHeaders
 }
+
+type SharedAccessGrantSelection =
+  | { readonly kind: "absent" }
+  | { readonly kind: "conflict" }
+  | { readonly kind: "selected"; readonly grantId: string }
 
 export type SharedAccessRequestDecision =
   | { readonly kind: "absent" }
@@ -63,22 +73,30 @@ export class SharedAccessBoundary {
   /** Fail closed before route parsing can emit a route-specific validation response. */
   preflightResponse(request: Request): Response | undefined {
     if (isSharedAccessPublicRoute(request)) return
-    const selectedGrantId = request.headers.get(SHARED_ACCESS_GRANT_HEADER_NAME)
-    if (selectedGrantId === null) return
-    if (request.headers.has("authorization") || !isSharedSessionRoute(request)) {
+    const selection = selectSharedAccessGrant(request)
+    if (selection.kind === "absent") return
+    if (
+      selection.kind === "conflict" ||
+      request.headers.has("authorization") ||
+      !isSharedSessionRoute(request)
+    ) {
       return sharedAccessForbiddenResponse()
     }
-    if (!isStoredIdentifier(selectedGrantId)) return sharedAccessUnauthenticatedResponse()
+    if (!isStoredIdentifier(selection.grantId)) return sharedAccessUnauthenticatedResponse()
   }
 
   async resolveRequest(request: Request): Promise<SharedAccessRequestDecision> {
     if (isSharedAccessPublicRoute(request)) return { kind: "absent" }
 
-    const selectedGrantId = request.headers.get(SHARED_ACCESS_GRANT_HEADER_NAME)
-    if (selectedGrantId === null) return { kind: "absent" }
+    const selection = selectSharedAccessGrant(request)
+    if (selection.kind === "absent") return { kind: "absent" }
+    if (selection.kind === "conflict") {
+      return { kind: "deny", response: sharedAccessForbiddenResponse() }
+    }
 
     const preflight = this.preflightResponse(request)
     if (preflight) return { kind: "deny", response: preflight }
+    const selectedGrantId = selection.grantId
 
     let resolved: ResolvedSharedAccess | null
     try {
@@ -276,6 +294,30 @@ export function isSharedAccessPublicPath(pathname: string, requestMethod: string
           : null
   if (!suffix) return false
   return matchesPathPattern(normalizedPathname, `/api/shared-access/:grantId/${suffix}`)
+}
+
+/**
+ * The header selects the grant. File GET/HEAD routes also accept the selector in the query, because
+ * `<img>`, `<video>`, and download links cannot send headers. Either way it only names which
+ * grant cookie to read; the HttpOnly cookie remains the credential, as with a file `audience`.
+ */
+function selectSharedAccessGrant(request: Request): SharedAccessGrantSelection {
+  const header = request.headers.get(SHARED_ACCESS_GRANT_HEADER_NAME)
+  const url = new URL(request.url)
+  const method = request.method.toUpperCase()
+  const pathname = normalizeRoutePath(url.pathname)
+  const queryValues = SHARED_FILE_CONTENT_ROUTES.some(
+    (route) => route.method === method && matchesPathPattern(pathname, route.path)
+  )
+    ? url.searchParams.getAll(SHARED_ACCESS_GRANT_QUERY_PARAM)
+    : []
+
+  const [query, ...extra] = queryValues
+  if (query === undefined) {
+    return header === null ? { kind: "absent" } : { kind: "selected", grantId: header }
+  }
+  if (extra.length > 0 || (header !== null && header !== query)) return { kind: "conflict" }
+  return { kind: "selected", grantId: query }
 }
 
 export function isSharedSessionRoute(request: Request): boolean {

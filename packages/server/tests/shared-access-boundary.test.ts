@@ -327,6 +327,65 @@ describe("shared-access request boundary", () => {
     }
   })
 
+  // <img>, <video>, and download links cannot send the selector header. Regression proof: make
+  // selectSharedAccessGrant ignore the query; the media requests then fall through to ambient auth
+  // and return 401.
+  test("accepts the grant selector in the query for file content only", async () => {
+    const fixture = await createFixture()
+    const invitation = await issueGrant(fixture, "report-1")
+    const grantId = invitation.grant.id
+    const sharedCookies = requestCookieHeader(getSetCookies(await exchange(fixture, invitation)))
+    const fileUrl = (primaryId: string, query = `shareGrant=${grantId}`) =>
+      `http://api.localhost/api/objects/${Report.id}/${primaryId}/files/content?path=/properties/attachment&${query}`
+    const fetchFile = (url: string, headers: Record<string, string> = {}, method = "GET") =>
+      fixture.app.fetch(new Request(url, { method, headers }))
+
+    for (const method of ["GET", "HEAD"]) {
+      const media = await fetchFile(fileUrl("report-1"), { cookie: sharedCookies }, method)
+      expect(media.status, method).toBe(200)
+      expect(media.headers.get("cache-control"), method).toBe("no-store")
+      if (method === "GET") expect(await media.text()).toBe("shared attachment")
+    }
+
+    // Video players seek with byte ranges.
+    const ranged = await fetchFile(fileUrl("report-1"), {
+      cookie: sharedCookies,
+      range: "bytes=0-5",
+    })
+    expect(ranged.status).toBe(206)
+    expect(await ranged.text()).toBe("shared")
+
+    // Same grant through header and query is one selection.
+    const both = await fetchFile(fileUrl("report-1"), {
+      cookie: sharedCookies,
+      [SHARED_ACCESS_GRANT_HEADER_NAME]: grantId,
+    })
+    expect(both.status).toBe(200)
+
+    // The query names the grant; the share cookie stays the credential and the grant its scope.
+    expect((await fetchFile(fileUrl("report-1"))).status).toBe(401)
+    expect((await fetchFile(fileUrl("report-1"), { cookie: fixture.ambient.cookie })).status).toBe(
+      401
+    )
+    expect((await fetchFile(fileUrl("report-2"), { cookie: sharedCookies })).status).toBe(404)
+
+    for (const [label, url, headers] of [
+      ["header conflict", fileUrl("report-1"), { [SHARED_ACCESS_GRANT_HEADER_NAME]: "shr_other" }],
+      ["repeated", fileUrl("report-1", `shareGrant=${grantId}&shareGrant=${grantId}`), {}],
+      ["bearer", fileUrl("report-1"), { authorization: "Bearer sixb_test" }],
+    ] as const) {
+      const denied = await fetchFile(url, { cookie: sharedCookies, ...headers })
+      expect(denied.status, label).toBe(403)
+    }
+
+    // Elsewhere the query selects nothing, so the request is not shared.
+    const object = await fetchFile(
+      `http://api.localhost/api/objects/${Report.id}/report-1?shareGrant=${grantId}`,
+      { cookie: sharedCookies }
+    )
+    expect(object.status).toBe(401)
+  })
+
   test("uses dedicated shared CSRF for POST reads and sign-out", async () => {
     const fixture = await createFixture()
     const invitation = await issueGrant(fixture, "report-1")

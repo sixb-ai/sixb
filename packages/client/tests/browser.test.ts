@@ -15,6 +15,7 @@ import {
   type SixbBrowserRuntimeConfig,
 } from "../src/browser"
 import { createSixbEventsWebSocketUrl } from "../src/events-transport"
+import { objectFileContentUrl } from "../src/file"
 import { client } from "../src/generated/client.gen"
 import {
   listAuthMembers,
@@ -280,8 +281,26 @@ describe("shared browser client", () => {
     expect(requests[3]?.headers.get("x-sixb-csrf")).toBe(csrfToken)
     expect(controller.getCsrfToken()).toBeNull()
 
+    // File URLs feed <img>/<video> elements, which cannot carry the selector header.
+    const fileUrl = () =>
+      new URL(
+        objectFileContentUrl({
+          objectTypeId: "report",
+          objectId: "report-1",
+          pathSegments: ["video"],
+          fileRef: {
+            blobId: `blob_${"a".repeat(64)}`,
+            digest: `sha256:${"a".repeat(64)}`,
+            sizeBytes: 1,
+          },
+        }),
+        "http://localhost:3001"
+      )
+    expect(fileUrl().searchParams.get("shareGrant")).toBe("shr_1")
+
     controller.dispose()
     expect(client.getConfig().fetch).toBeUndefined()
+    expect(fileUrl().searchParams.has("shareGrant")).toBe(false)
   })
 
   test("rejects malformed secrets before making a request", async () => {

@@ -67,7 +67,7 @@ const { data } = await issueSharedAccessGrant({
 const url = data.url
 ```
 
-The URL is returned only when issued. Anyone holding it can use its permitted access until it expires or is revoked. The destination is a normal [app page](../apps/overview.md); its queries and action buttons use the shared session automatically.
+The URL is returned only when issued. Anyone holding it can use its permitted access until it expires or is revoked. The destination is a normal [app page](../apps/overview.md); its queries and action buttons use the shared session automatically. So do images, videos, and download links whose URL comes from [`objectFileContentUrl`](../client/overview.md#display-files); a file URL built by hand is not part of the shared session.
 
 ## Revoke access
 
