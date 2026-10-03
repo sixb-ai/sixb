@@ -23,6 +23,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Bot,
   CircleDollarSign,
+  Clock,
   Coins,
   Cpu,
   DatabaseZap,
@@ -323,7 +324,9 @@ export function AiUsagePage() {
         />
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <div
+            className={`grid gap-3 sm:grid-cols-2 ${totals.usage.audioDurationMs === undefined ? "xl:grid-cols-4" : "xl:grid-cols-5"}`}
+          >
             <AiUsageMetricCard
               label="Tracked cost"
               value={selectedAmount ? formatMoney(selectedAmount) : "—"}
@@ -367,6 +370,20 @@ export function AiUsagePage() {
               description={`${ratedCalls.toLocaleString()} of ${totals.modelCallCount.toLocaleString()} calls valued`}
               icon={<Coins className="size-4" />}
             />
+            {totals.usage.audioDurationMs === undefined ? null : (
+              <AiUsageMetricCard
+                label="Audio duration"
+                value={`${(totals.usage.audioDurationMs / 1000).toLocaleString(undefined, {
+                  maximumFractionDigits: 3,
+                })} s`}
+                description={
+                  "Content duration reported for " +
+                  totals.usageCoverage.fieldCallCounts.audioDurationMs.toLocaleString() +
+                  " calls"
+                }
+                icon={<Clock className="size-4" />}
+              />
+            )}
           </div>
 
           {(totals.usage.reportingStatus !== "complete" || coverage < 100) && (

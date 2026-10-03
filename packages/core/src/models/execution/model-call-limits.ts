@@ -94,24 +94,30 @@ function reservationEstimates(
   input: AiModelCallAdmissionInput,
   needsCost: boolean
 ): readonly AiLimitQuantity[] {
-  if (input.inputTokens.status !== "estimated" || input.estimatedTotalTokens === undefined) {
-    return []
+  const estimates: AiLimitQuantity[] = []
+  if (input.inputTokens.status === "estimated" && input.estimatedTotalTokens !== undefined) {
+    estimates.push({ meter: "tokens.total", amount: input.estimatedTotalTokens })
   }
-  const estimates: AiLimitQuantity[] = [
-    { meter: "tokens.total", amount: input.estimatedTotalTokens },
-  ]
+
   if (needsCost) {
     try {
-      const money = input.costEstimator?.estimateReservation?.({
-        inputTokens: input.inputTokens.tokens,
-        outputTokens: input.outputTokenAllowance,
-      })
-      if (money) estimates.push({ meter: "cost.catalogEstimated", amount: money })
+      let money = input.reservationCost
+      if (money == null && input.inputTokens.status === "estimated") {
+        money = input.costEstimator?.estimateReservation?.({
+          inputTokens: input.inputTokens.tokens,
+          outputTokens: input.outputTokenAllowance,
+        })
+      }
+
+      if (money) {
+        estimates.push({ meter: "cost.catalogEstimated", amount: money })
+      }
     } catch {
       // An unavailable price must not prevent a token-only policy from being evaluated.
       return estimates
     }
   }
+
   return estimates
 }
 

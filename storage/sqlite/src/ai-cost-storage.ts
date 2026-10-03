@@ -246,6 +246,7 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
       usage.cache_write_input_tokens,
       usage.text_output_tokens,
       usage.reasoning_output_tokens,
+      usage.audio_duration_ms,
       usage.reporting_status,
       CASE
         WHEN direct_agent.kind = 'conversation' THEN 'agent'
@@ -330,6 +331,8 @@ const SQLITE_ACCOUNTING_OVERVIEW_SQL = `
     CAST(SUM(text_output_tokens) AS TEXT) AS text_output_tokens_sum,
     CAST(COUNT(reasoning_output_tokens) AS TEXT) AS reasoning_output_tokens_count,
     CAST(SUM(reasoning_output_tokens) AS TEXT) AS reasoning_output_tokens_sum,
+    CAST(COUNT(audio_duration_ms) AS TEXT) AS audio_duration_ms_count,
+    CAST(SUM(audio_duration_ms) AS TEXT) AS audio_duration_ms_sum,
     CAST(SUM(CASE WHEN valuation_status = 'rated' THEN 1 ELSE 0 END) AS TEXT)
       AS rated_call_count,
     CAST(SUM(CASE WHEN valuation_status = 'unpriceable' THEN 1 ELSE 0 END) AS TEXT)
@@ -382,6 +385,7 @@ interface UsageRow {
   readonly call_id: string
   readonly provider_id: string
   readonly requested_model_id: string
+  readonly model_kind: AiModelCallUsageRecord["modelKind"] | null
   readonly requested_reasoning: string | null
   readonly response_model_id: string | null
   readonly response_id: string
@@ -393,6 +397,7 @@ interface UsageRow {
   readonly cache_write_input_tokens: number | null
   readonly text_output_tokens: number | null
   readonly reasoning_output_tokens: number | null
+  readonly audio_duration_ms: number | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: string | null
   readonly provider_ids: string | null
@@ -447,6 +452,8 @@ interface AggregateRow {
   readonly text_output_tokens_sum: string | null
   readonly reasoning_output_tokens_count: string
   readonly reasoning_output_tokens_sum: string | null
+  readonly audio_duration_ms_count: string
+  readonly audio_duration_ms_sum: string | null
   readonly rated_call_count: string
   readonly unpriceable_call_count: string
   readonly unvalued_call_count: string
@@ -508,6 +515,7 @@ function aggregateFragmentFromRow(row: AggregateRow): AiAccountingAggregateFragm
         row.reasoning_output_tokens_count,
         row.reasoning_output_tokens_sum
       ),
+      audioDurationMs: meterFragment(row.audio_duration_ms_count, row.audio_duration_ms_sum),
     },
     costs: {
       ...(row.amount_currency === null ||
@@ -587,6 +595,7 @@ function usageFromRow(row: UsageRow, requesterGroupIds: readonly string[]): AiMo
       ? {}
       : { providerIds: normalizeModelProviderIds(JSON.parse(row.provider_ids)) }),
     requestedModelId: row.requested_model_id,
+    ...(row.model_kind === null ? {} : { modelKind: row.model_kind }),
     ...(row.requested_reasoning === null
       ? {}
       : { requestedReasoning: requestedReasoningFromRow(row.requested_reasoning) }),
@@ -609,6 +618,7 @@ function usageFromRow(row: UsageRow, requesterGroupIds: readonly string[]): AiMo
       ...(row.reasoning_output_tokens === null
         ? {}
         : { reasoningOutputTokens: row.reasoning_output_tokens }),
+      ...(row.audio_duration_ms === null ? {} : { audioDurationMs: row.audio_duration_ms }),
       reportingStatus: row.reporting_status,
     },
     ...(row.raw_usage === null

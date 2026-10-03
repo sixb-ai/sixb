@@ -1,4 +1,9 @@
 import { RuntimeError } from "../runtime/errors"
+import {
+  type AudioModelCatalog,
+  type AudioModelCatalogInput,
+  createAudioCatalog,
+} from "./audio/catalog"
 import { indexModelBindings } from "./catalog-index"
 import { createDecisionCatalog, type DecisionModelCatalog } from "./decision/catalog"
 import type { DecisionModel } from "./decision/types"
@@ -47,12 +52,14 @@ export interface LanguageModelEntry extends LanguageModelRef {
 
 /** Models a project allows Sixb to use, organized by technical model kind. */
 export interface ModelCatalog {
+  readonly audio?: AudioModelCatalog
   readonly language?: LanguageModelCatalog
   readonly decision?: DecisionModelCatalog
   readonly embedding: EmbeddingModelCatalog
 }
 
 export interface ModelCatalogInput {
+  readonly audio?: AudioModelCatalogInput
   /** Ordered; the first entry is the project default. */
   readonly language?: readonly LanguageModel[]
   /** Ordered; the first entry is the project default decision model. */
@@ -66,7 +73,14 @@ type ConfiguredModelKinds<TInput> = {
 }[keyof ModelCatalog]
 
 export type ModelCatalogFor<TInput extends ModelCatalogInput> = ModelCatalog &
-  Required<Pick<ModelCatalog, ConfiguredModelKinds<TInput>>>
+  Required<Pick<ModelCatalog, ConfiguredModelKinds<TInput>>> &
+  ([TInput] extends [{ readonly audio: { readonly transcription: readonly unknown[] } }]
+    ? {
+        readonly audio: AudioModelCatalog & {
+          readonly transcription: NonNullable<AudioModelCatalog["transcription"]>
+        }
+      }
+    : unknown)
 
 /** Build an immutable catalog while preserving each family's default and empty-list rules. */
 export function createModelCatalog<TInput extends ModelCatalogInput>(
@@ -80,12 +94,15 @@ export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
   const language = createLanguageCatalog(input.language)
   const embedding = createEmbeddingCatalog(input.embedding)
   const decision = createDecisionCatalog(input.decision)
+  const audio = createAudioCatalog(input.audio)
 
-  if (!language && !decision && embedding.list().length === 0) {
-    throw new RuntimeError("[Sixb] Configure at least one language, embedding or decision model.")
+  if (!language && !decision && !audio && embedding.list().length === 0) {
+    throw new RuntimeError(
+      "[Sixb] Configure at least one language, embedding, decision or audio model."
+    )
   }
 
-  return Object.freeze({ language, embedding, decision })
+  return Object.freeze({ language, embedding, decision, audio })
 }
 
 function createLanguageCatalog(

@@ -110,7 +110,8 @@ function billableMeter(value: unknown): AiBillableMeter {
     value !== "tokens.input.cacheWrite1h" &&
     value !== "tokens.output.total" &&
     value !== "tokens.output.text" &&
-    value !== "tokens.output.reasoning"
+    value !== "tokens.output.reasoning" &&
+    value !== "audio.input.milliseconds"
   ) {
     throw invalidDetails()
   }

@@ -1,6 +1,6 @@
 # Usage and limits
 
-Sixb records model usage across generation, conversations, AI workflow steps, and embeddings.
+Sixb records model usage across generation, conversations, AI workflow steps, embeddings, decisions, and transcription.
 View consumption in Atlas and set monthly limits for your project or specific users and groups.
 
 ## View usage
@@ -14,7 +14,7 @@ remain unknown rather than being counted as zero.
 Keep the [workers](../deployment/overview.md#start-services) running so accounting can recover
 from temporary storage failures. `sixb dev` and automatic `sixb worker-group` selection
 include the required worker. If you select worker types explicitly, include `agent`, even
-for projects that only use decision or embedding models. Accounting recovery does not require a sandbox.
+for projects that only use decision, embedding, or audio models. Accounting recovery does not require a sandbox.
 
 ## Set a monthly limit
 
@@ -40,6 +40,14 @@ cannot be saved. Calling a provider's `embed()` method directly bypasses these c
 
 Automatic projection indexing uses the project's budget. If the budget is exhausted, embedding
 generation waits while projections continue updating objects.
+
+## Audio transcription
+
+Calls to `sixb.models.audio.transcribe()` appear in Atlas with their cost and audio duration,
+when available.
+
+Vercel Gateway transcription is currently blocked when a token or cost limit applies,
+because Sixb cannot estimate its usage before the call.
 
 ## Permissions
 

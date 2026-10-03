@@ -8,6 +8,7 @@ const USAGE_FIELDS = [
   "cacheWriteInputTokens",
   "textOutputTokens",
   "reasoningOutputTokens",
+  "audioDurationMs",
 ] as const
 
 type AiUsageField = (typeof USAGE_FIELDS)[number]
@@ -30,6 +31,7 @@ export function normalizeAiModelCallUsage(input: AiModelCallUsageInput): AiModel
         : "unavailable"
 
   return {
+    ...(input.audioDurationMs === undefined ? {} : { audioDurationMs: input.audioDurationMs }),
     ...(input.inputTokens === undefined ? {} : { inputTokens: input.inputTokens }),
     ...(input.outputTokens === undefined ? {} : { outputTokens: input.outputTokens }),
     ...(totalTokens === undefined ? {} : { totalTokens }),

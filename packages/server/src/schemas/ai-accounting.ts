@@ -58,6 +58,7 @@ const AiAccountingAggregateSchema = z.object({
       cacheWriteInputTokens: z.number().int().nonnegative(),
       textOutputTokens: z.number().int().nonnegative(),
       reasoningOutputTokens: z.number().int().nonnegative(),
+      audioDurationMs: z.number().int().nonnegative(),
     }),
   }),
   costs: AiCostSummarySchema,
@@ -120,6 +121,7 @@ const AiCostComponentSchema = z.object({
     "tokens.output.total",
     "tokens.output.text",
     "tokens.output.reasoning",
+    "audio.input.milliseconds",
   ]),
   quantity: IntegerStringSchema,
   rateAmountNanosPerMillion: IntegerStringSchema,
@@ -192,6 +194,9 @@ const AiModelCallUsageRecordSchema = z.object({
   callId: z.string(),
   providerId: z.string(),
   requestedModelId: z.string(),
+  modelKind: z
+    .enum(["language", "image", "video", "embedding", "decision", "transcription"])
+    .optional(),
   requestedReasoning: ModelReasoningSchema.optional(),
   responseModelId: z.string().optional(),
   responseId: z.string(),

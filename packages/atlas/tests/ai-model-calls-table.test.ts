@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createElement } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { MemoryRouter } from "react-router-dom"
-import { AiModelCallsTable } from "../src/components/AiModelCallsTable"
+import { AiModelCallsTable, ModelCallRow } from "../src/components/AiModelCallsTable"
 
 const time = "2026-09-01T12:00:00Z"
 const costs = {
@@ -113,4 +113,33 @@ test("distinguishes unavailable data from an empty result", () => {
   expect(render({ data: { items: [], hasMore: false, total: 0 } })).toContain(
     "No model calls match these filters."
   )
+})
+
+// Removal proof: remove the audio duration cell from ModelCallRow; the rendered duration disappears.
+test("shows transcription duration without inventing token usage", () => {
+  const html = renderToStaticMarkup(
+    createElement(ModelCallRow, {
+      call: {
+        usage: {
+          id: "audio",
+          executionId: "exec",
+          callId: "call",
+          attempt: 1,
+          providerId: "gateway",
+          requestedModelId: "transcriber",
+          modelKind: "transcription",
+          providerIds: {},
+          responseId: "response",
+          usage: { audioDurationMs: 1250, reportingStatus: "partial" },
+          occurredAt: time,
+          recordedAt: time,
+        },
+        valuationStatus: "unvalued",
+      },
+    })
+  )
+  expect(html).toContain("Transcription")
+  expect(html).toContain("1.25")
+  expect(html).toContain("s audio")
+  expect(html).not.toContain("0 tokens")
 })

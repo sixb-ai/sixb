@@ -1146,6 +1146,12 @@ export type {
   ActionParamDescriptor,
   ActionPhaseDescriptor,
 } from "./actions/descriptor"
+export type {
+  AudioModelsRuntime,
+  AudioTranscribeInput,
+  AudioTranscribeResult,
+  TranscriptionOutput,
+} from "./models/audio/types"
 export type { DecisionAnswerSchema, DecisionOutputShape } from "./models/decision/output"
 export { decisionOutput } from "./models/decision/output"
 export { question } from "./models/decision/questions"

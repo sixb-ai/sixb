@@ -131,6 +131,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             provider_id,
             provider_ids,
             requested_model_id,
+            model_kind,
             requested_reasoning,
             response_model_id,
             response_id,
@@ -142,12 +143,13 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
             cache_write_input_tokens,
             text_output_tokens,
             reasoning_output_tokens,
+            audio_duration_ms,
             reporting_status,
             raw_usage,
             occurred_at,
             recorded_at
           ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
           )
         `
       )
@@ -160,6 +162,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
         record.providerId,
         record.providerIds === undefined ? null : JSON.stringify(record.providerIds),
         record.requestedModelId,
+        record.modelKind ?? null,
         record.requestedReasoning === undefined ? null : JSON.stringify(record.requestedReasoning),
         record.responseModelId ?? null,
         record.responseId,
@@ -171,6 +174,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
         record.usage.cacheWriteInputTokens ?? null,
         record.usage.textOutputTokens ?? null,
         record.usage.reasoningOutputTokens ?? null,
+        record.usage.audioDurationMs ?? null,
         record.usage.reportingStatus,
         record.rawUsage === undefined ? null : JSON.stringify(record.rawUsage),
         record.occurredAt.toISOString(),
@@ -236,6 +240,7 @@ export class SqliteAiUsageStorage implements AiUsageStorage {
         ? {}
         : { providerIds: normalizeModelProviderIds(JSON.parse(row.provider_ids)) }),
       requestedModelId: row.requested_model_id,
+      ...(row.model_kind === null ? {} : { modelKind: row.model_kind }),
       ...(row.requested_reasoning === null
         ? {}
         : { requestedReasoning: requestedReasoningFromRow(row.requested_reasoning) }),
@@ -293,6 +298,7 @@ interface AiUsageRow {
   readonly provider_id: string
   readonly provider_ids: string | null
   readonly requested_model_id: string
+  readonly model_kind: AiModelCallUsageRecord["modelKind"] | null
   readonly requested_reasoning: string | null
   readonly response_model_id: string | null
   readonly response_id: string
@@ -304,6 +310,7 @@ interface AiUsageRow {
   readonly cache_write_input_tokens: number | null
   readonly text_output_tokens: number | null
   readonly reasoning_output_tokens: number | null
+  readonly audio_duration_ms: number | null
   readonly reporting_status: AiModelCallUsageRecord["usage"]["reportingStatus"]
   readonly raw_usage: string | null
   readonly occurred_at: string
@@ -345,6 +352,7 @@ function usageFromRow(row: AiUsageRow): AiModelCallUsageInput {
     ...(row.reasoning_output_tokens === null
       ? {}
       : { reasoningOutputTokens: row.reasoning_output_tokens }),
+    ...(row.audio_duration_ms === null ? {} : { audioDurationMs: row.audio_duration_ms }),
   }
 }
 

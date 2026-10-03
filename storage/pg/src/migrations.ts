@@ -121,6 +121,7 @@ import objectQueryPreparationSql from "./migrations/055-object-query-preparation
   type: "text",
 }
 import commitTouchesSql from "./migrations/056-commit-touches.sql" with { type: "text" }
+import audioTranscriptionSql from "./migrations/057-audio-transcription.sql" with { type: "text" }
 import type { ReservedSQL, SQL, SQLClient } from "./pg-client"
 import { runPgTransactionOn, undoOnFailure, withReservedPgConnection } from "./transactions"
 
@@ -425,6 +426,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("054-slim-ontology-outbox", slimOntologyOutboxSql),
     pgSql("055-object-query-preparation", objectQueryPreparationSql),
     pgSql("056-commit-touches", commitTouchesSql),
+    pgSql("057-audio-transcription", audioTranscriptionSql),
   ],
 })
 

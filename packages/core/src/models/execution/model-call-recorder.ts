@@ -157,6 +157,7 @@ export class AiModelCallRecorder {
         providerId: event.providerId,
         ...(event.providerIds === undefined ? {} : { providerIds: event.providerIds }),
         requestedModelId: event.modelId,
+        ...(event.modelKind === undefined ? {} : { modelKind: event.modelKind }),
         ...(event.requestedReasoning === undefined
           ? {}
           : { requestedReasoning: event.requestedReasoning }),
