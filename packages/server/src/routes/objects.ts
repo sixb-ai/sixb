@@ -41,7 +41,16 @@ import {
 } from "../schemas/objects"
 import { handleRouteError, parseOptionalInt, toIsoString } from "../utils/http"
 
-const ObjectFileContentQuerySchema = FileContentQuerySchema.extend({
+// Only object files are served to shared sessions. The boundary reads `shareGrant` before routing;
+// declaring it here keeps it in the OpenAPI contract and through query validation.
+const ObjectFileContentRouteQuerySchema = FileContentQuerySchema.extend({
+  shareGrant: z
+    .string()
+    .optional()
+    .describe("Share grant selector for elements that cannot send the x-sixb-share-grant header"),
+})
+
+const ObjectFileContentQuerySchema = ObjectFileContentRouteQuerySchema.extend({
   path: z
     .string()
     .min(1)
@@ -812,7 +821,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         // the handler applies the stricter `^/properties` check and returns a
         // consistent `{ error }` 400. Registering the strict schema here would
         // make Elysia emit its own 422 validation body, breaking that contract.
-        query: FileContentQuerySchema,
+        query: ObjectFileContentRouteQuerySchema,
         // No top-level `response` map: Elysia's OpenAPI builder resets responses
         // to JSON-only whenever one is present, which would erase the binary
         // `application/octet-stream` bodies. Declaring every status in
@@ -833,7 +842,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
         params: ObjectParamsSchema,
         // See the GET route: register the loose query so the handler owns the
         // strict `^/properties` check and its consistent 400.
-        query: FileContentQuerySchema,
+        query: ObjectFileContentRouteQuerySchema,
         // See the GET route: no top-level `response` map, so the binary responses
         // declared in `detail.responses` survive into the spec.
         detail: {

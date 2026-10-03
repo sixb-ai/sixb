@@ -8847,6 +8847,10 @@ export type GetObjectFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Share grant selector for elements that cannot send the x-sixb-share-grant header
+     */
+    shareGrant?: string
   }
   url: "/api/objects/{objectTypeId}/{objectId}/files/content"
 }
@@ -8899,6 +8903,10 @@ export type HeadObjectFileContentData = {
      * Client cache key; the route still resolves the current file
      */
     v?: string
+    /**
+     * Share grant selector for elements that cannot send the x-sixb-share-grant header
+     */
+    shareGrant?: string
   }
   url: "/api/objects/{objectTypeId}/{objectId}/files/content"
 }

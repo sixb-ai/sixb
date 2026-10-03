@@ -26678,6 +26678,15 @@
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
             }
+          },
+          {
+            "name": "shareGrant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Share grant selector for elements that cannot send the x-sixb-share-grant header"
+            }
           }
         ]
       },
@@ -26784,6 +26793,15 @@
             "schema": {
               "type": "string",
               "description": "Client cache key; the route still resolves the current file"
+            }
+          },
+          {
+            "name": "shareGrant",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "Share grant selector for elements that cannot send the x-sixb-share-grant header"
             }
           }
         ]
