@@ -120,6 +120,28 @@ bun run demo:approve-quote  # approve a pending source-system quote
 Mutable source state lives under `.sixb/demo-sources/` and survives ordinary restarts. Only
 `demo:reset` replaces it.
 
+## Deploy
+
+Northline deploys to a Linux server with [`sixb deploy`](../../docs/deployment/servers.md). Deployed,
+it runs on PostgreSQL and Redis (`lib/runtime/production.ts`) and stays open to anyone, as it is in
+development. `sixb.deploy.ts` reads the server and domain from the environment, so neither is
+committed.
+
+1. Point `*.<your domain>` at the server, and have PostgreSQL and Redis running where it can reach
+   them.
+2. Set up the server, naming an account on it with `sudo`:
+
+   ```bash
+   cd examples/northline
+   export NORTHLINE_DEPLOY_HOST=203.0.113.10 NORTHLINE_DEPLOY_DOMAIN=example.com
+   bun run deploy setup --admin <login>
+   ```
+
+3. Put `DATABASE_URL` and `REDIS_URL` in the project's `.env` on the server;
+   `bun run deploy check` prints where it goes.
+4. Deploy the committed code with `bun run deploy`. It serves `northline-app`, `northline-atlas`,
+   and `northline-api` under your domain.
+
 ## Source ownership
 
 | System | Owns |
