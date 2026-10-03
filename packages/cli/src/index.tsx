@@ -321,6 +321,12 @@ async function main(): Promise<void> {
       break
     }
 
+    case "deploy": {
+      const { runDeploy } = await import("./commands/deploy")
+      await runDeploy({ dryRun: hasFlag("dry-run"), json: hasFlag("json") })
+      break
+    }
+
     case "init": {
       const { runInit } = await import("./commands/init")
       await runInit(positionals[0])

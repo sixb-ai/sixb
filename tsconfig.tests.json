@@ -23,6 +23,7 @@
     "models/*/tests/**/*.tsx",
     "connectors/*/tests/**/*.ts",
     "connectors/*/tests/**/*.tsx",
+    "deploy/*/tests/**/*.ts",
     "storage/*/tests/**/*.ts",
     "broker/*/tests/**/*.ts",
     "queues/*/tests/**/*.ts",

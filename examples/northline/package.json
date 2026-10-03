@@ -7,6 +7,7 @@
     "dev:runtime": "bun ../../packages/cli/src/index.tsx dev",
     "build": "bun ../../packages/cli/src/index.tsx build",
     "check": "bun ../../packages/cli/src/index.tsx check",
+    "deploy": "bun ../../packages/cli/src/index.tsx deploy",
     "demo:reset": "bun scripts/reset-demo.ts",
     "demo:sync": "bun scripts/sync-demo.ts",
     "demo:alarm": "bun scripts/send-alarm.ts",
@@ -35,6 +36,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@sixb/deploy-ssh": "workspace:*",
     "@sixb/server": "workspace:*",
     "@types/bun": "latest",
     "@types/node": "^22.15.30",

@@ -1,0 +1,58 @@
+{
+  "name": "@sixb/deploy-ssh",
+  "version": "0.1.0",
+  "description": "Deploy a Sixb project to your own server over SSH",
+  "keywords": [
+    "sixb",
+    "bun",
+    "deploy",
+    "ssh"
+  ],
+  "homepage": "https://sixb.ai",
+  "bugs": {
+    "url": "https://github.com/sixb-ai/sixb/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/sixb-ai/sixb.git",
+    "directory": "deploy/ssh"
+  },
+  "author": "Sixb contributors",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "bun ../../scripts/build-package.ts",
+    "typecheck": "tsc --noEmit",
+    "prepack": "bun run build"
+  },
+  "peerDependencies": {
+    "@sixb/core": "workspace:^"
+  },
+  "devDependencies": {
+    "@sixb/core": "workspace:*",
+    "@types/bun": "latest",
+    "typescript": "^5.7.0"
+  },
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.4.2"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md",
+    "LICENSE"
+  ]
+}

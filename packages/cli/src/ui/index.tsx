@@ -2,6 +2,7 @@ import { Box, render, Text } from "ink"
 import type React from "react"
 import { useEffect, useMemo, useState } from "react"
 import { CLI_EXAMPLES, type CliHelp, ROOT_HELP } from "../lib/command-line"
+import type { DeployCommand, DeployRelease } from "../lib/deploy-release"
 import { errorMessage, errorRemediation } from "../lib/errors"
 
 // ─── Primitives ──────────────────────────────────────────────────────────────
@@ -779,6 +780,110 @@ export function LakeCheckView({ projectId, status }: { projectId: string; status
       <KeyValueList items={[{ label: "Lake", value: status }]} />
     </Box>
   )
+}
+
+export function DeployReleaseView({
+  release,
+  configPath,
+}: {
+  release: DeployRelease
+  configPath: string
+}) {
+  const steps = [
+    { label: "build", commands: release.steps.build },
+    { label: "before start", commands: release.steps.beforeStart },
+  ]
+  const labelWidth =
+    Math.max(
+      ...release.services.map((service) => service.name.length),
+      ...steps.map((step) => step.label.length)
+    ) + 2
+  const originWidth = Math.max(
+    0,
+    ...release.services.map((service) => service.http?.publicOrigin.length ?? 0)
+  )
+  const origins = new Set(
+    release.services.flatMap((service) => (service.http ? [service.http.publicOrigin] : []))
+  )
+  // The public origins already show beside their services; list only what the config set.
+  const env = Object.entries(release.env).filter(
+    ([key, value]) => !(key.endsWith("_PUBLIC_ORIGIN") && origins.has(value))
+  )
+
+  return (
+    <Box flexDirection="column">
+      <Text color="green" bold>
+        {release.name} · dry run
+      </Text>
+      <Text dimColor>
+        {release.target.kind} {release.target.location} · {configPath}
+      </Text>
+      <Spacer />
+      <SectionTitle>Services</SectionTitle>
+      {release.services.map((service) => (
+        <Box key={service.name}>
+          <Box width={labelWidth} flexShrink={0}>
+            <Text bold>{service.name}</Text>
+          </Box>
+          <Box flexDirection="column">
+            {service.http ? (
+              <Text>
+                <Text color="cyan">{padLabel(service.http.publicOrigin, originWidth + 2)}</Text>
+                <Text dimColor>
+                  → {service.http.host}:{service.http.port}
+                </Text>
+              </Text>
+            ) : (
+              <Text dimColor>{describeDeployProcess(service)}</Text>
+            )}
+            <Text dimColor>{formatDeployCommand(service.command)}</Text>
+            {Object.entries(service.env)
+              .filter(([key, value]) => release.env[key] !== value)
+              .map(([key, value]) => (
+                <Text key={key} dimColor>
+                  {key}={value}
+                </Text>
+              ))}
+          </Box>
+        </Box>
+      ))}
+      <Spacer />
+      <SectionTitle>Steps</SectionTitle>
+      {steps.map((step) => (
+        <Box key={step.label}>
+          <Box width={labelWidth} flexShrink={0}>
+            <Text bold>{step.label}</Text>
+          </Box>
+          <Text>{step.commands.map(formatDeployCommand).join(" → ")}</Text>
+        </Box>
+      ))}
+      <Spacer />
+      <SectionTitle>Environment</SectionTitle>
+      {env.map(([key, value]) => (
+        <Text key={key}>
+          {key}={value}
+        </Text>
+      ))}
+      {origins.size > 0 ? <Text dimColor>plus the public origins above</Text> : null}
+      <Spacer />
+      <Text dimColor>Nothing was deployed · --json prints the full release</Text>
+    </Box>
+  )
+}
+
+function describeDeployProcess(service: DeployRelease["services"][number]): string {
+  const count = `${service.instances} ${service.instances === 1 ? "process" : "processes"}`
+  if (service.role === "custom") return `project script · ${count}`
+  // `worker-group` without worker types runs every type the project registers work for.
+  const namesWorkerTypes = service.command.args[1] && !service.command.args[1].startsWith("-")
+  if (service.role === "worker-group" && !namesWorkerTypes) {
+    return `${count} · every worker type the project registers`
+  }
+  return count
+}
+
+function formatDeployCommand(command: DeployCommand): string {
+  return [command.program, ...command.args].join(" ")
 }
 
 export interface LakeCleanupReport {
