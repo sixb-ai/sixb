@@ -8,7 +8,7 @@ import type {
   PinnedDatasetVersion,
   TelemetryCommitResult,
 } from "../../../materialization/model"
-import { linkRefSortKey } from "../../../materialization/refs"
+import { linkRefKey, linkRefSortKey, objectRefKey } from "../../../materialization/refs"
 import {
   getInMemoryObjectMaterializerAdapter,
   type InMemoryObjectStorage,
@@ -63,7 +63,7 @@ export function assertFinalizationCorrelations(
     assertSourceActivationCorrelation(activation, session, state)
   }
   if (sourceActivations[0]) {
-    assertReplacementFullyStreamed(session, sourceActivations[0])
+    assertPlanCoverage(session, sourceActivations[0])
   }
   assertFinalizedWork(session, state, objects)
   if (commit.intent.kind === "projection") {
@@ -317,16 +317,8 @@ function assertFinalizedWork(
   state: InMemoryOntologyState,
   objects: InMemoryObjectStorage
 ): void {
-  const expectedPlanItems = session.applyWork.map((record) => stableJsonStringify(record.item))
-  const appliedPlanItems = session.appliedPlanItems
-  if (expectedPlanItems.length > 0 && !session.workStreams.apply.completed) {
-    invalidCorrelation("Materialization plan work was not fully streamed.")
-  }
-  if (stableJsonStringify(appliedPlanItems) !== stableJsonStringify(expectedPlanItems)) {
-    invalidCorrelation("Materialization plan work was not applied exactly once.")
-  }
-  if (session.cardinalityWork.length > 0 && !session.workStreams.cardinality.completed) {
-    invalidCorrelation("Materialization cardinality work was not fully validated.")
+  if (!session.applied) {
+    invalidCorrelation("A materialization plan must apply before it finalizes.")
   }
   assertFinalCardinality(session.cardinalityWork, session.header.commit.projectId, objects)
   if (session.header.commit.intent.kind === "telemetry") {
@@ -339,9 +331,6 @@ function assertFinalizedWork(
   }
 
   const expectedEvents = [...session.eventWork].sort(compareEventWork)
-  if (expectedEvents.length > 0 && !session.workStreams.event.completed) {
-    invalidCorrelation("Materialization event work was not fully drained.")
-  }
   if (session.outboxEnvelopes.size !== expectedEvents.length) {
     invalidCorrelation("Materialization event work was not fully written to the outbox.")
   }
@@ -380,26 +369,15 @@ function assertFinalCardinality(
       readonly occupiedLinkKeys: Set<string>
     }
   >()
-  let currentScope: string | null = null
-  let occupiedCount = 0
+  // Apply already rejected a scope with two staged occupants; this checks what it wrote.
   for (const record of effectiveOccupants) {
-    if (record.scopeSortKey !== currentScope) {
-      currentScope = record.scopeSortKey
-      occupiedCount = 0
-    }
     const scope = scopes.get(record.scopeSortKey) ?? {
       source: structuredClone(record.ref.source),
       linkId: record.ref.linkId,
       occupiedLinkKeys: new Set<string>(),
     }
     scopes.set(record.scopeSortKey, scope)
-    if (record.occupied) {
-      occupiedCount += 1
-      scope.occupiedLinkKeys.add(record.linkSortKey)
-      if (occupiedCount > 1) {
-        invalidCorrelation("Materialization cardinality work violates cardinality-one.")
-      }
-    }
+    if (record.occupied) scope.occupiedLinkKeys.add(record.linkSortKey)
   }
 
   const adapter = getInMemoryObjectMaterializerAdapter(objects)
@@ -422,48 +400,37 @@ function assertFinalCardinality(
   }
 }
 
-function assertReplacementFullyStreamed(
+/** Every identity the plan decides with a diff is classified once, and nothing else is. */
+function assertPlanCoverage(
   session: SessionState,
   activation: import("../materializations").SourceActivationWrite
 ): void {
-  const replacement = session.replacement
+  const plan = session.plan
   if (
-    !replacement ||
-    replacement.sourceId !== activation.source.projectionId ||
-    replacement.candidateMaterializationId !== activation.materializationId ||
-    replacement.candidate.materializationId !== activation.materializationId ||
-    replacement.candidate.projectionKind !== activation.projectionKind ||
-    replacement.candidate.protocol !== activation.protocol
+    !plan ||
+    plan.sourceId !== activation.source.projectionId ||
+    plan.materializationId !== activation.materializationId ||
+    plan.projectionKind !== activation.projectionKind
   ) {
-    invalidCorrelation(
-      "Source activation does not match the replacement candidate opened by the session."
-    )
+    invalidCorrelation("Source activation does not match the replacement plan the session applies.")
   }
-  if (
-    activation.projectionKind === "object" &&
-    (!replacement.objectStreamCompleted || !replacement.linkStreamCompleted)
-  ) {
-    invalidCorrelation("Object projection replacement state was not fully streamed.")
-  }
-  if (activation.projectionKind === "link" && !replacement.linkStreamCompleted) {
-    invalidCorrelation("Link projection replacement state was not fully streamed.")
-  }
-  const expectedObjectKeys =
-    activation.projectionKind === "object" ? [...replacement.objects.keys()].sort() : []
-  const expectedLinkKeys = [...replacement.links.entries()]
-    .filter(([, value]) => value.diffRequired)
-    .map(([key]) => key)
-    .sort()
+  const expected = (kind: "object" | "link") =>
+    [...plan.identities.values()]
+      .filter((identity) => identity.entity.kind === kind && identity.diffRequired)
+      .map((identity) =>
+        identity.entity.kind === "object"
+          ? objectRefKey(identity.entity.ref)
+          : linkRefKey(identity.entity.ref)
+      )
+      .sort()
   if (
     stableJsonStringify(classificationKeys(session, "object")) !==
-      stableJsonStringify(expectedObjectKeys) ||
+      stableJsonStringify(expected("object")) ||
     stableJsonStringify(classificationKeys(session, "link")) !==
-      stableJsonStringify(expectedLinkKeys) ||
+      stableJsonStringify(expected("link")) ||
     classificationKeys(session, "point").length > 0
   ) {
-    invalidCorrelation(
-      "Projection replacement classification coverage does not match its streamed state."
-    )
+    invalidCorrelation("Projection replacement classification coverage does not match its plan.")
   }
 }
 

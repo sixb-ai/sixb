@@ -13,21 +13,38 @@ runOntologyStorageContractSuite("PostgreSQL ontology storage contract", {
   cleanup: cleanupStorage,
 })
 
-runMaterializerStorageContractSuite("PostgreSQL materializer storage contract", {
-  createStorage: async () => (await createTestStorage()).storage,
-  cleanup: cleanupStorage,
-})
-
-interface FailureStorage extends PostgresStorage {
+interface SchemaStorage extends PostgresStorage {
   readonly testSchemaName: string
 }
 
-runMaterializationFailureContractSuite("PostgreSQL materialization failure contract", {
-  async createStorage(): Promise<FailureStorage> {
-    const { storage, schemaName } = await createTestStorage()
-    Object.defineProperty(storage, "testSchemaName", { value: schemaName })
-    return storage as FailureStorage
+async function createSchemaStorage(): Promise<SchemaStorage> {
+  const { storage, schemaName } = await createTestStorage()
+  Object.defineProperty(storage, "testSchemaName", { value: schemaName })
+  return storage as SchemaStorage
+}
+
+runMaterializerStorageContractSuite("PostgreSQL materializer storage contract", {
+  createStorage: createSchemaStorage,
+  cleanup: cleanupStorage,
+  concurrentTransactions: true,
+  restoreFromClusterAhead(storage) {
+    // A billion transactions ahead of this cluster, for commits and plans alike.
+    return withDatabase(storage.testSchemaName, async (sql, schema) => {
+      await sql.unsafe(`
+        UPDATE ${schema}.ontology_commits
+        SET xact_id = (xact_id::text::numeric + 1000000000)::text::xid8;
+        UPDATE ${schema}.ontology_replacement_plans
+        SET watermark = (
+          (pg_snapshot_xmax(pg_current_snapshot())::text::numeric + 1000000000)::text || ':' ||
+          (pg_snapshot_xmax(pg_current_snapshot())::text::numeric + 1000000000)::text || ':'
+        )::pg_snapshot;
+      `)
+    })
   },
+})
+
+runMaterializationFailureContractSuite("PostgreSQL materialization failure contract", {
+  createStorage: createSchemaStorage,
   cleanup: cleanupStorage,
   captureState(storage) {
     return withDatabase(storage.testSchemaName, async (sql, schema) => ({

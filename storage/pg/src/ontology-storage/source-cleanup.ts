@@ -5,6 +5,11 @@ import type {
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 
+/** A version outlives its replacement plan, which references it. */
+const PLAN_PURGED = `NOT EXISTS (
+  SELECT 1 FROM ontology_replacement_plans AS plans WHERE plans.version_id = versions.version_id
+)`
+
 /**
  * Superseded versions can still hold live roots (a delta keeps unchanged roots where they were),
  * so they are cleaned root by root once retired. An abandoned candidate was never published:
@@ -19,8 +24,8 @@ export async function purgeAbandonedSourceVersions(
   let materializationsDeleted = 0
   while (remaining > 0) {
     const [candidate] = await sql<{ readonly version_id: string }[]>`
-      SELECT version_id FROM ontology_sources
-      WHERE project_id = ${input.projectId} AND status = 'abandoned'
+      SELECT version_id FROM ontology_sources AS versions
+      WHERE project_id = ${input.projectId} AND status = 'abandoned' AND ${sql.unsafe(PLAN_PURGED)}
       ORDER BY terminal_at, source_id, materialization_id
       LIMIT 1 FOR UPDATE SKIP LOCKED
     `
@@ -95,7 +100,7 @@ export async function cleanupSourceVersions(
     WITH selected AS (
       SELECT versions.ctid FROM ontology_sources AS versions
       WHERE project_id = ${input.projectId} AND status = 'superseded'
-        AND terminal_at < ${input.terminalBefore}
+        AND terminal_at < ${input.terminalBefore} AND ${sql.unsafe(PLAN_PURGED)}
         AND NOT EXISTS (SELECT 1 FROM ontology_source_roots AS roots
           WHERE roots.version_id = versions.version_id)
       ORDER BY terminal_at, source_id, materialization_id LIMIT ${remaining} FOR UPDATE SKIP LOCKED

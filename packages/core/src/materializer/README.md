@@ -32,20 +32,22 @@ normalize + validate intent
   -> resolve effective state
   -> diff against committed state
   -> stage deterministic work
-  -> apply work in dependency order
-  -> write outbox events with stable commit ordinals
+  -> storage applies the work in dependency order and writes its outbox events
   -> finalize ontology commit atomically
   -> advance a run resume checkpoint when required
 ```
 
-`staged work` is a transaction-local execution plan. It is not a source materialization and is
-never queried as Ontology state.
+Staged work is an execution plan, never queried as Ontology state. Edits and telemetry stage it on
+their session; a projection replacement stages it on the candidate's durable plan (below). Either
+way the Materializer plans and storage applies: it validates cardinality, writes every item in
+phase order and sequences the events, so planned rows are not read back to be sent again. Vector
+profiles see the changed objects first, while those still hold their previous values.
 
 ## Durable ownership
 
 ```text
 run storage       -> execution ownership, lifecycle, progress, and resume checkpoints
-ontology storage  -> sources, effective state, telemetry, commits, and outbox
+ontology storage  -> sources, replacement plans, effective state, telemetry, commits, and outbox
 Materializer      -> semantic planning and cross-store transaction orchestration
 ```
 
@@ -65,13 +67,40 @@ listing is reserved for history and observability.
 dataset entries
   -> staging source candidate
   -> ready source candidate
-  -> compare candidate + overrides + telemetry with effective state
-  -> plan and apply changes
-  -> atomically activate candidate and finalize commit
+  -> plan the candidate, outside any transaction, page by page
+  -> commit transaction: refresh the plan, apply it, activate the candidate, finalize the commit
 ```
 
 Source ingress is sealed before commit time is assigned. Activation and ontology commit
 finalization are atomic; the projection run stores no separate commit pointer.
+
+The plan is built outside the commit transaction, which never plans: it refreshes the plan, then
+applies it. The plan is durable and belongs to the candidate:
+
+```text
+open      -> the candidate's identities: its entities and those of the roots it replaces
+plan      -> each page reads its state in one snapshot, records the revision of what it read,
+             and stages the resulting work; links are planned after objects, then extended to
+             the links of objects whose existence flips and to the members of changed scopes
+refresh   -> in the commit transaction: a planned identity whose inputs moved since is planned
+             again, with the links that now belong to the plan
+apply     -> only a plan that refresh found fresh; the commit reports its planned counts
+```
+
+An identity's revision covers everything its plan read: an object's effective row, override and
+latest telemetry; a link's effective row, edge and slot overrides, live source, and the existence
+of both endpoints (the whole revision of an endpoint the plan decides, whose planned existence
+follows it). When no commit of the project landed since the plan last proved fresh, refresh checks
+nothing; otherwise it reads every planned identity's revision again, in the commit transaction. A
+commit that keeps finding stale identities gives the delivery back after three rounds; the next
+delivery resumes the same plan, as does any redelivery of the run, unless the active source the
+plan replaces moved meanwhile: the plan then starts over. Storage keeps a plan while its candidate
+is ready and maintenance deletes it afterwards, before the candidate itself.
+
+The commit time is fixed when the plan opens: every planned row carries it as `updatedAt`, every
+planned event as `occurredAt`. A resumed plan keeps it, so a publication that commits later than
+it opened, after retries, stamps its writes with that earlier time, even over an edit committed in
+between. Commit order is the order of the ontology ledger and the outbox, never these timestamps.
 
 A candidate belongs to its run, not to the delivery that staged it:
 
@@ -141,7 +170,8 @@ finish still commit atomically.
 - `effective/`: pure resolution, validation, diff, and event construction.
 - `execution/`: storage-neutral plan execution, replay, retry, and run correlation.
 - `shared/`: normalization, identity, batching, and chunking primitives.
-- `storage/ontology/`: durable ontology commit, source, materialization, and outbox contracts.
+- `storage/ontology/`: durable ontology commit, source, replacement plan, materialization, and
+  outbox contracts.
 
 Keep use-case entrypoints explicit. Share mechanics only after they have identical semantics; do
 not hide projection candidate lifecycle, edit continuation, or telemetry batching behind a generic

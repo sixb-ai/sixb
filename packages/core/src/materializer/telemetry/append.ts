@@ -32,7 +32,7 @@ import {
   type MaterializerExecution,
   prepareMaterializerExecution,
 } from "../execution/scope"
-import { drainStagedEvents, drainStagedWork } from "../execution/work-executor"
+import { applyStagedWork } from "../execution/work-executor"
 import type { MaterializerCommand } from "../materializer"
 import {
   createProjectionTelemetryIdempotencyKey,
@@ -404,13 +404,7 @@ async function executeTelemetryTransaction(
       attribution: command.execution.attribution,
     }
   )
-  await drainStagedWork(context, storage, session)
-  const eventCount = await drainStagedEvents(
-    context,
-    storage.ontology.materializations,
-    session,
-    command.identity
-  )
+  const eventCount = await applyStagedWork(context, storage, session)
   const result: TelemetryCommitResult = {
     kind: "telemetry",
     commitId: command.identity.commitId,

@@ -121,6 +121,7 @@ import projectionRunSupersessionSql from "./migrations/051-projection-run-supers
 import compactSourceStorageSql from "./migrations/052-compact-source-storage.sql" with {
   type: "text",
 }
+import replacementPlansSql from "./migrations/053-replacement-plans.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -246,6 +247,7 @@ export const sqliteStorageMigrations = defineMigrations({
       },
       { checksum: checksum(compactSourceStorageSql) }
     ),
+    sqliteSql("053-replacement-plans", replacementPlansSql),
   ],
 })
 

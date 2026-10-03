@@ -20,6 +20,17 @@ class TestStorage {
   }
 }
 
+class TestStream {
+  constructor(private readonly observe: (step: string) => void) {}
+
+  async *pages(): AsyncGenerator<number> {
+    this.observe("first")
+    yield 1
+    this.observe("second")
+    yield 2
+  }
+}
+
 describe("storage operation scope", () => {
   test("fails closed when object storage omits the selected-read factory", () => {
     const malformed = { createSelectedReadScope: undefined } as unknown as ObjectStorage
@@ -124,6 +135,30 @@ describe("storage operation scope", () => {
     })
 
     await expect(facade.read()).rejects.toThrow("scope became unavailable")
+  })
+
+  // A stream page read outside the provider's lock lands inside another request's open
+  // transaction on SQLite. Reproduce: return the generator unwrapped from scopeMethod.
+  test("runs each step of a stream in its own operation scope", async () => {
+    let held = false
+    const steps: string[] = []
+    const facade = createOperationScopedFacade(
+      new TestStream((step) => steps.push(`${step}:${held}`)),
+      createStorageOperationScope(async (operation) => {
+        held = true
+        try {
+          return await operation()
+        } finally {
+          held = false
+        }
+      })
+    )
+
+    const seen: string[] = []
+    for await (const page of facade.pages()) seen.push(`${page}:${held}`)
+
+    expect(steps).toEqual(["first:true", "second:true"])
+    expect(seen).toEqual(["1:false", "2:false"])
   })
 
   test("runs selected-reader terminals through the same root operation lock", async () => {

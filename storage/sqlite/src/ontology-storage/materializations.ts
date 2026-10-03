@@ -17,32 +17,33 @@ import {
   assertExpectedObjectRevision,
   assertMaterializationFinalizationCorrelation,
   assertMaterializationHeader,
-  assertMaterializationLaneCompletion,
   assertPageRows,
-  assertPlanChunkCorrelations,
   assertSourceActivationCorrelation,
+  beginMaterializationApply,
+  beginMaterializationVectorChanges,
+  createCardinalityValidator,
   invalidCorrelation,
+  materializationOutboxWrite,
+  materializationPlanChunk,
   sameNonnegativeCounts as sameCounts,
   uniqueSorted,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
-  ApplyMaterializationChunkInput,
+  AppliedMaterialization,
+  ApplyMaterializationInput,
   ApplyMaterializationResult,
   FinalizeMaterializationInput,
-  MaterializationObjectExistence,
   MaterializationPlanHeader,
+  MaterializationPlanWorkRecord,
   MaterializationSession,
   MaterializationStatePage,
-  MaterializationWorkPage,
+  MaterializationVectorChangePage,
   OntologyCommitRecord,
   OntologyMaterializationStorage,
-  ReadMaterializationObjectExistenceInput,
   SourceActivationWrite,
-  SourceReplacementStatePage,
   StageMaterializationWorkInput,
   StreamMaterializationStateInput,
-  StreamMaterializationWorkInput,
-  StreamSourceReplacementStateInput,
+  StreamMaterializationVectorChangesInput,
 } from "@sixb/core/storage"
 import { yieldSqliteEventLoop } from "../transactions"
 import {
@@ -50,11 +51,9 @@ import {
   SqliteMaterializationSessions,
   type SqliteOntologyTransactionContext,
 } from "./materialization-session"
-import {
-  SQLITE_MATERIALIZATION_WORK_TABLE,
-  SqliteMaterializationStateReader,
-} from "./materialization-state"
+import { SqliteMaterializationStateReader } from "./materialization-state"
 import { SqliteMaterializationWriter } from "./materialization-writer"
+import { boundReplacementPlan } from "./replacement-plans"
 import {
   assertProjectionExecution,
   canonicalJson,
@@ -66,6 +65,9 @@ import {
   type SqliteOntologySourceRow,
 } from "./shared"
 import { activateSourceRoots } from "./source-roots"
+
+/** Rows the provider reads and writes at once while it applies a staged plan. */
+const APPLY_PAGE_ROWS = 1_000
 
 export class SqliteOntologyMaterializationStorage implements OntologyMaterializationStorage {
   private readonly sessions: SqliteMaterializationSessions
@@ -93,7 +95,10 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
 
   async begin(input: MaterializationPlanHeader): Promise<MaterializationSession> {
     assertMaterializationHeader(input)
-    const session = this.sessions.create(input)
+    const session = this.sessions.create(
+      input,
+      input.plan ? boundReplacementPlan(this.db, input) : null
+    )
     try {
       this.assertCommitAbsent(input)
       const reader = new SqliteMaterializationStateReader(this.db, input.commit.projectId)
@@ -178,134 +183,64 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     }
   }
 
-  async *streamSourceReplacementState(
-    input: StreamSourceReplacementStateInput
-  ): AsyncIterable<SourceReplacementStatePage> {
-    const session = this.sessions.require(input.session)
-    assertPageRows(input.pageRows)
-    const replacement = this.requireReplacement(session, input)
-    const reader = new SqliteMaterializationStateReader(this.db, session.header.commit.projectId)
-    if (input.entityKind === "object") {
-      if (replacement.projectionKind !== "object") {
-        throw new MaterializationConflictError(
-          "source-materialization",
-          "Link projection replacement cannot stream object state."
-        )
-      }
-      if (replacement.objectStreamStarted) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          "Replacement object state may only be streamed once per session."
-        )
-      }
-      replacement.objectStreamStarted = true
-      for (const identities of reader.replacementIdentities({
-        sessionId: session.id,
-        sourceId: replacement.sourceId,
-        candidateMaterializationId: replacement.candidateMaterializationId,
-        previousMaterializationId: replacement.previousMaterializationId,
-        incremental: replacement.incremental,
-        kind: "object",
-        pageRows: input.pageRows,
-      })) {
-        this.sessions.require(input.session)
-        const refs = identities.map((identity) => {
-          if (identity.kind !== "object") {
-            invalidCorrelation("Object replacement returned a link identity.")
-          }
-          return identity.ref
-        })
-        const objects = reader.replacementObjectStates(
-          replacement.sourceId,
-          replacement.candidateMaterializationId,
-          refs
-        )
-        yield { objects, links: [] }
-      }
-      this.sessions.require(input.session)
-      replacement.objectStreamCompleted = true
-      return
-    }
-
-    if (replacement.projectionKind === "object" && !replacement.objectStreamCompleted) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Object projection replacement must fully stream object state before link state."
-      )
-    }
-    if (replacement.linkStreamStarted) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Replacement link state may only be streamed once per session."
-      )
-    }
-    replacement.linkStreamStarted = true
-    const materializationIds = [
-      replacement.candidateMaterializationId,
-      ...(replacement.previousMaterializationId ? [replacement.previousMaterializationId] : []),
-    ]
-    for (const identities of reader.replacementIdentities({
-      sessionId: session.id,
-      sourceId: replacement.sourceId,
-      candidateMaterializationId: replacement.candidateMaterializationId,
-      previousMaterializationId: replacement.previousMaterializationId,
-      incremental: replacement.incremental,
-      kind: "link",
-      pageRows: input.pageRows,
-    })) {
-      this.sessions.require(input.session)
-      const linkIdentities = identities.map((identity) => {
-        if (identity.kind !== "link") {
-          invalidCorrelation("Link replacement returned an object identity.")
-        }
-        return identity
-      })
-      const links = reader.replacementLinkStates(
-        replacement.sourceId,
-        replacement.candidateMaterializationId,
-        materializationIds,
-        linkIdentities,
-        replacement.incremental
-      )
-      yield { objects: [], links }
-    }
-    this.sessions.require(input.session)
-    replacement.linkStreamCompleted = true
-  }
-
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {
     this.sessions.stage(input)
     await yieldSqliteEventLoop()
   }
 
-  streamWork(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
+  async *streamVectorChanges(
+    input: StreamMaterializationVectorChangesInput
+  ): AsyncIterable<MaterializationVectorChangePage> {
+    const session = this.sessions.require(input.session)
     assertPageRows(input.pageRows)
-    return this.sessions.stream(input)
+    beginMaterializationVectorChanges(session)
+    for (const items of this.sessions.vectorChangePages(
+      session,
+      input.objectTypeIds,
+      input.pageRows
+    )) {
+      yield { items }
+    }
   }
 
-  async readObjectExistence(
-    input: ReadMaterializationObjectExistenceInput
-  ): Promise<readonly MaterializationObjectExistence[]> {
+  async apply(input: ApplyMaterializationInput): Promise<AppliedMaterialization> {
     const session = this.sessions.require(input.session)
-    return this.sessions.readObjectExistence(session, input.refs)
-  }
-
-  async applyChunk(input: ApplyMaterializationChunkInput): Promise<void> {
-    const session = this.sessions.require(input.session)
+    beginMaterializationApply(session)
     const { commit } = session.header
-    assertPlanChunkCorrelations(input.chunk, commit)
-    const sequence = this.sessions.prepareChunkSequence(session, input.chunk)
-    this.db.run("SAVEPOINT sixb_ontology_apply_chunk")
+    const cardinality = createCardinalityValidator()
+    for (const records of this.sessions.lanePages(session, "cardinality", APPLY_PAGE_ROWS)) {
+      for (const record of records) cardinality.accept(record)
+    }
+    let eventCount = 0
+    this.db.run("SAVEPOINT sixb_ontology_apply")
     try {
-      this.writer.apply(commit.projectId, commit.id, input.chunk)
-      this.db.run("RELEASE SAVEPOINT sixb_ontology_apply_chunk")
-      this.sessions.commitChunkSequence(session, sequence)
+      for (const records of this.sessions.lanePages(session, "apply", APPLY_PAGE_ROWS)) {
+        // The writer orders tables its own way within a chunk; one phase per chunk keeps the
+        // canonical phase order.
+        for (const phase of splitByPhase(records)) {
+          this.writer.apply(
+            commit.projectId,
+            commit.id,
+            materializationPlanChunk(phase.map((record) => record.item))
+          )
+        }
+        await yieldSqliteEventLoop()
+      }
+      for (const records of this.sessions.lanePages(session, "event", APPLY_PAGE_ROWS)) {
+        const outbox = records.map((record) =>
+          materializationOutboxWrite(record.draft, eventCount++)
+        )
+        this.writer.apply(commit.projectId, commit.id, materializationPlanChunk([], outbox))
+        await yieldSqliteEventLoop()
+      }
+      this.db.run("RELEASE SAVEPOINT sixb_ontology_apply")
     } catch (error) {
-      this.db.run("ROLLBACK TO SAVEPOINT sixb_ontology_apply_chunk")
-      this.db.run("RELEASE SAVEPOINT sixb_ontology_apply_chunk")
+      this.db.run("ROLLBACK TO SAVEPOINT sixb_ontology_apply")
+      this.db.run("RELEASE SAVEPOINT sixb_ontology_apply")
       throw error
     }
-    await yieldSqliteEventLoop()
+    session.appliedEventCount = eventCount
+    return { eventCount }
   }
 
   async finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult> {
@@ -322,66 +257,6 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
 
   deactivateSessions(): void {
     this.sessions.deactivateAll()
-  }
-
-  private requireReplacement(
-    session: SqliteMaterializationSessionState,
-    input: StreamSourceReplacementStateInput
-  ): NonNullable<SqliteMaterializationSessionState["replacement"]> {
-    if (session.replacement) {
-      if (
-        session.replacement.sourceId !== input.source.projectionId ||
-        session.replacement.candidateMaterializationId !== input.candidateMaterializationId
-      ) {
-        throw new MaterializationConflictError(
-          "source-materialization",
-          "Materialization session already owns another replacement union."
-        )
-      }
-      return session.replacement
-    }
-    const projectId = session.header.commit.projectId
-    const candidate = this.getSource(
-      projectId,
-      input.source.projectionId,
-      input.candidateMaterializationId
-    )
-    if (!candidate || candidate.status !== "ready" || candidate.execution_token === null) {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        `Candidate source materialization '${input.candidateMaterializationId}' is missing or is not ready.`
-      )
-    }
-    assertProjectionExecution(this.db, {
-      projectId,
-      sourceId: input.source.projectionId,
-      projectionRunId: candidate.projection_run_id,
-      executionToken: candidate.execution_token,
-    })
-    const previous = this.getActiveSource(projectId, input.source.projectionId)
-    if (
-      candidate.protocol !== "replacement" ||
-      (previous &&
-        (previous.protocol !== candidate.protocol ||
-          previous.projection_kind !== candidate.projection_kind))
-    ) {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        "Source replacement kind or protocol does not match its active materialization."
-      )
-    }
-    session.replacement = {
-      sourceId: input.source.projectionId,
-      candidateMaterializationId: input.candidateMaterializationId,
-      previousMaterializationId: previous?.materialization_id ?? null,
-      incremental: candidate.base_materialization_id !== null,
-      projectionKind: candidate.projection_kind,
-      objectStreamStarted: false,
-      objectStreamCompleted: false,
-      linkStreamStarted: false,
-      linkStreamCompleted: false,
-    }
-    return session.replacement
   }
 
   private assertCommitAbsent(header: MaterializationPlanHeader): void {
@@ -454,11 +329,9 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
     const { commit } = session.header
     const { result } = input.finalization
     assertMaterializationFinalizationCorrelation(session, input)
-    const laneCounts = this.sessions.laneCounts(session)
-    assertMaterializationLaneCompletion(session, laneCounts)
     this.assertFinalCardinality(session)
     await yieldSqliteEventLoop()
-    const eventCount = laneCounts.event
+    const eventCount = session.appliedEventCount
     const outbox = this.db
       .query(
         `
@@ -517,8 +390,8 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
                 THEN cardinality_target_type_id END) AS expected_target_type_id,
               MAX(CASE WHEN cardinality_occupied = 1
                 THEN cardinality_target_primary_id END) AS expected_target_id
-            FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
-            WHERE session_id = ? AND kind = 'cardinality'
+            FROM ${session.workTable}
+            WHERE work_id = ? AND kind = 'cardinality'
               AND cardinality_view = 'effective'
             GROUP BY sort_one, cardinality_source_type_id,
               cardinality_source_primary_id, cardinality_link_id
@@ -538,20 +411,14 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
             GROUP BY scopes.scope_sort_key, scopes.expected_count,
               scopes.expected_target_type_id, scopes.expected_target_id
           )
-          SELECT CASE WHEN expected_count > 1 THEN 'duplicate' ELSE 'mismatch' END AS reason
+          SELECT 1 AS mismatch
           FROM validated
-          WHERE expected_count > 1
-            OR actual_count <> expected_count
-            OR matching_count <> expected_count
+          WHERE actual_count <> expected_count OR matching_count <> expected_count
           LIMIT 1
         `
       )
-      .get(session.id, session.header.commit.projectId) as {
-      readonly reason: "duplicate" | "mismatch"
-    } | null
-    if (violation?.reason === "duplicate") {
-      invalidCorrelation("Materialization cardinality work violates cardinality-one.")
-    }
+      .get(session.workId, session.header.commit.projectId)
+    // Apply already rejected a scope with two staged occupants; this checks what it wrote.
     if (violation) {
       invalidCorrelation(
         "Materialization cardinality work does not match the final effective link scope."
@@ -736,4 +603,16 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       )
       .get(projectId, sourceId, materializationId) as SqliteOntologySourceRow | null
   }
+}
+
+function splitByPhase(
+  records: readonly MaterializationPlanWorkRecord[]
+): MaterializationPlanWorkRecord[][] {
+  const phases: MaterializationPlanWorkRecord[][] = []
+  for (const record of records) {
+    const current = phases[phases.length - 1]
+    if (current && current[0]!.applyPhase === record.applyPhase) current.push(record)
+    else phases.push([record])
+  }
+  return phases
 }

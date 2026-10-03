@@ -4,28 +4,28 @@ import {
   MaterializationConflictError,
 } from "@sixb/core/internal/materialization"
 import {
-  correlateMaterializationChunk,
   duplicateMaterializationWork as duplicateWork,
-  invalidCorrelation,
-  materializationPlanItems,
   ProviderMaterializationSessionState,
   type ProviderMaterializationTransactionLifecycle,
   prepareMaterializationWork,
 } from "@sixb/core/internal/ontology-storage-provider"
 import type {
+  MaterializationCardinalityOccupantWorkRecord,
   MaterializationEventWorkRecord,
-  MaterializationPlanChunk,
   MaterializationPlanHeader,
+  MaterializationPlanWorkRecord,
   MaterializationSession,
-  MaterializationWorkPage,
+  MaterializationVectorChange,
   MaterializationWorkRecord,
   StageMaterializationWorkInput,
-  StreamMaterializationWorkInput,
 } from "@sixb/core/storage"
+import { SQLITE_MATERIALIZATION_WORK_TABLE } from "./materialization-state"
 import {
-  SQLITE_MATERIALIZATION_WORK_TABLE,
-  SQLITE_REPLACEMENT_WORK_TABLE,
-} from "./materialization-state"
+  assertReplacementPlanCoverage,
+  replacementPlanCounts,
+  SQLITE_PLAN_WORK_TABLE,
+  type SqliteReplacementPlan,
+} from "./replacement-plans"
 import { canonicalJson, isSqliteConstraintError, parseJson } from "./shared"
 
 export interface SqliteOntologyTransactionContext {
@@ -52,9 +52,6 @@ interface WorkDatabaseRow {
 }
 
 interface WorkSummary {
-  apply: number
-  cardinality: number
-  event: number
   objectClassifications: number
   linkClassifications: number
   pointClassifications: number
@@ -69,17 +66,29 @@ interface WorkSummary {
   latestObjectsChanged: number
 }
 
-export interface SqliteChunkSequenceProgress {
-  readonly appliedPlanCount: number
-  readonly appliedOutboxCount: number
-  readonly appliedPlanCursor: WorkCursor | null
-  readonly appliedEventCursor: WorkCursor | null
+type WorkLane = "apply" | "cardinality" | "event"
+
+interface LaneRecord {
+  readonly apply: MaterializationPlanWorkRecord
+  readonly cardinality: MaterializationCardinalityOccupantWorkRecord
+  readonly event: MaterializationEventWorkRecord
 }
 
 export class SqliteMaterializationSessionState extends ProviderMaterializationSessionState {
-  appliedPlanCursor: WorkCursor | null = null
-  appliedEventCursor: WorkCursor | null = null
   readonly summary: WorkSummary = emptyWorkSummary()
+  /** Work staged on the session lives in a temp table; a plan-bound session reads its plan's. */
+  readonly workTable: string
+  readonly workId: string | number
+
+  constructor(
+    header: MaterializationPlanHeader,
+    transactionId: object,
+    readonly plan: SqliteReplacementPlan | null
+  ) {
+    super(header, transactionId)
+    this.workTable = plan ? SQLITE_PLAN_WORK_TABLE : SQLITE_MATERIALIZATION_WORK_TABLE
+    this.workId = plan ? plan.versionId : this.id
+  }
 }
 
 export class SqliteMaterializationSessions {
@@ -91,7 +100,10 @@ export class SqliteMaterializationSessions {
     private readonly context: SqliteOntologyTransactionContext | null
   ) {}
 
-  create(header: MaterializationPlanHeader): SqliteMaterializationSessionState {
+  create(
+    header: MaterializationPlanHeader,
+    plan: SqliteReplacementPlan | null
+  ): SqliteMaterializationSessionState {
     if (!this.context?.active) {
       throw new MaterializationConflictError(
         "effective-state",
@@ -99,7 +111,11 @@ export class SqliteMaterializationSessions {
       )
     }
     this.ensureTables()
-    const session = new SqliteMaterializationSessionState(structuredClone(header), this.context.id)
+    const session = new SqliteMaterializationSessionState(
+      structuredClone(header),
+      this.context.id,
+      plan
+    )
     this.sessions.set(session.providerToken, session)
     this.live.add(session)
     this.context.materializations.register(session.providerToken)
@@ -125,13 +141,13 @@ export class SqliteMaterializationSessions {
   release(session: SqliteMaterializationSessionState): void {
     if (!session.active) return
     session.active = false
-    session.replacement = null
     this.live.delete(session)
     // The normal transaction has one session. Dropping its transaction-local spool avoids an
     // indexed DELETE over hundreds of thousands of rows and releases temp pages immediately.
     // Preserve per-session deletion only when another live session still shares the tables.
+    // A plan's rows outlive the session: maintenance deletes them once the candidate moved on.
     if (this.live.size === 0) this.dropWorkTables()
-    else this.deleteWork(session.id)
+    else if (!session.plan) this.deleteWork(session.id)
     this.context?.materializations.complete(session.providerToken)
   }
 
@@ -146,7 +162,7 @@ export class SqliteMaterializationSessions {
     const insert = this.db.query(
       `
         INSERT INTO ${SQLITE_MATERIALIZATION_WORK_TABLE} (
-          session_id, record_key, unique_key, kind, lane,
+          work_id, record_key, unique_key, kind, lane,
           major_order, minor_order, sort_one, sort_two,
           classification_entity_kind, classification_identity_key,
           cardinality_view, cardinality_occupied, cardinality_source_type_id,
@@ -193,125 +209,87 @@ export class SqliteMaterializationSessions {
       }
       throw error
     }
-    for (const prepared of records)
-      recordSummary(session.summary, prepared.record, prepared.columns)
+    for (const prepared of records) recordSummary(session.summary, prepared.record)
   }
 
-  async *stream(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
-    const session = this.require(input.session)
-    const stream = session.workStreams[input.order]
-    if (stream.started) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        `Materialization ${input.order} work may only be streamed once per session.`
-      )
-    }
-    stream.started = true
-    session.workSealed = true
+  /** Pages of one work lane in canonical order. */
+  *lanePages<TLane extends WorkLane>(
+    session: SqliteMaterializationSessionState,
+    lane: TLane,
+    pageRows: number
+  ): Iterable<readonly LaneRecord[TLane][]> {
     let cursor: WorkCursor | null = null
     while (true) {
-      this.require(input.session)
-      const rows = this.readLane(input.order, session.id, cursor, input.pageRows)
-      if (rows.length === 0) break
-      const records = rows.map((row) =>
-        parseJson<MaterializationWorkRecord>(row.payload)
-      ) as MaterializationWorkPage["records"]
+      this.require(session.publicSession())
+      const rows = this.readLane(session, lane, cursor, pageRows)
+      if (rows.length === 0) return
       cursor = workCursor(rows[rows.length - 1]!)
-      stream.emittedCount += records.length
-      yield { records }
-    }
-    this.require(input.session)
-    stream.completed = true
-  }
-
-  readObjectExistence(
-    session: SqliteMaterializationSessionState,
-    refs: readonly { readonly objectTypeId: string; readonly primaryId: string }[]
-  ): readonly {
-    readonly ref: { readonly objectTypeId: string; readonly primaryId: string }
-    readonly exists: boolean
-  }[] {
-    const lookup = this.db.query(
-      `
-        SELECT payload FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
-        WHERE session_id = ? AND unique_key = ? AND kind = 'object-existence'
-      `
-    )
-    return refs.flatMap((ref) => {
-      const key = `object-existence:${JSON.stringify([ref.objectTypeId, ref.primaryId])}`
-      const row = lookup.get(session.id, key) as { readonly payload: string } | null
-      if (!row) return []
-      const record = parseJson<
-        Extract<MaterializationWorkRecord, { readonly kind: "object-existence" }>
-      >(row.payload)
-      return [{ ref: record.ref, exists: record.exists }]
-    })
-  }
-
-  prepareChunkSequence(
-    session: SqliteMaterializationSessionState,
-    chunk: MaterializationPlanChunk
-  ): SqliteChunkSequenceProgress {
-    const items = materializationPlanItems(chunk)
-    const planRows = this.readLane("apply", session.id, session.appliedPlanCursor, items.length)
-    const expectedItems = planRows.map((row) => {
-      const record = parseJson<Extract<MaterializationWorkRecord, { readonly kind: "plan" }>>(
-        row.payload
-      )
-      return record.item
-    })
-    const eventRows = this.readLane(
-      "event",
-      session.id,
-      session.appliedEventCursor,
-      chunk.outbox.length
-    )
-    const expectedEvents = eventRows.map((row) =>
-      parseJson<MaterializationEventWorkRecord>(row.payload)
-    )
-    const progress = correlateMaterializationChunk(
-      session,
-      chunk,
-      items,
-      expectedItems,
-      expectedEvents
-    )
-    return {
-      ...progress,
-      appliedPlanCursor:
-        planRows.length === 0
-          ? session.appliedPlanCursor
-          : workCursor(planRows[planRows.length - 1]!),
-      appliedEventCursor:
-        eventRows.length === 0
-          ? session.appliedEventCursor
-          : workCursor(eventRows[eventRows.length - 1]!),
+      yield rows.map((row) => parseJson<LaneRecord[TLane]>(row.payload))
     }
   }
 
-  commitChunkSequence(
+  /** Staged object upserts and deletes of profiled types, or of objects with a stored vector. */
+  *vectorChangePages(
     session: SqliteMaterializationSessionState,
-    progress: SqliteChunkSequenceProgress
-  ): void {
-    session.appliedPlanCount = progress.appliedPlanCount
-    session.appliedOutboxCount = progress.appliedOutboxCount
-    session.appliedPlanCursor = progress.appliedPlanCursor
-    session.appliedEventCursor = progress.appliedEventCursor
-  }
-
-  laneCounts(session: SqliteMaterializationSessionState): {
-    readonly apply: number
-    readonly cardinality: number
-    readonly event: number
-  } {
-    return {
-      apply: session.summary.apply,
-      cardinality: session.summary.cardinality,
-      event: session.summary.event,
+    objectTypeIds: readonly string[],
+    pageRows: number
+  ): Iterable<readonly MaterializationVectorChange[]> {
+    if (
+      objectTypeIds.length === 0 &&
+      !this.db
+        .query(`SELECT 1 FROM object_vectors WHERE project_id = ? LIMIT 1`)
+        .get(session.header.commit.projectId)
+    ) {
+      return
+    }
+    const query = this.db.query(
+      `
+        WITH changes AS (
+          SELECT record_key, payload,
+            coalesce(
+              json_extract(payload, '$.item.value.row.ref.objectTypeId'),
+              json_extract(payload, '$.item.value.ref.objectTypeId')
+            ) AS object_type_id,
+            coalesce(
+              json_extract(payload, '$.item.value.row.ref.primaryId'),
+              json_extract(payload, '$.item.value.ref.primaryId')
+            ) AS primary_id
+          FROM ${session.workTable}
+          WHERE work_id = ? AND lane = 'apply' AND kind = 'plan'
+            AND json_extract(payload, '$.item.kind') IN ('object-upsert', 'object-delete')
+            AND record_key > ?
+        )
+        SELECT record_key, payload FROM changes
+        WHERE object_type_id IN (SELECT value FROM json_each(?))
+          OR EXISTS (
+            SELECT 1 FROM object_vectors
+            WHERE project_id = ? AND object_type_id = changes.object_type_id
+              AND primary_id = changes.primary_id
+          )
+        ORDER BY record_key
+        LIMIT ?
+      `
+    )
+    let after = ""
+    while (true) {
+      this.require(session.publicSession())
+      const rows = query.all(
+        session.workId,
+        after,
+        JSON.stringify(objectTypeIds),
+        session.header.commit.projectId,
+        pageRows
+      ) as { readonly record_key: string; readonly payload: string }[]
+      if (rows.length === 0) return
+      after = rows[rows.length - 1]!.record_key
+      yield rows.map(
+        (row) => parseJson<MaterializationPlanWorkRecord>(row.payload).item
+      ) as MaterializationVectorChange[]
     }
   }
 
   projectionCounts(session: SqliteMaterializationSessionState): EffectiveChangeCounts {
+    if (session.plan) return replacementPlanCounts(this.db, session.plan.versionId)
     const summary = session.summary
     return {
       objectsCreated: summary.objectsCreated,
@@ -347,56 +325,12 @@ export class SqliteMaterializationSessions {
   }
 
   assertClassificationCoverage(session: SqliteMaterializationSessionState): void {
-    if (!session.replacement) return
-    const expectedObject = session.replacement.projectionKind === "object" ? 1 : 0
-    const mismatch = this.db
-      .query(
-        `
-          WITH invalid AS (
-            SELECT 1
-            FROM ${SQLITE_REPLACEMENT_WORK_TABLE} AS expected
-            WHERE expected.session_id = ? AND expected.diff_required = 1
-              AND (expected.entity_kind = 'link' OR ? = 1)
-              AND NOT EXISTS (
-                SELECT 1 FROM ${SQLITE_MATERIALIZATION_WORK_TABLE} AS actual
-                WHERE actual.session_id = expected.session_id
-                  AND actual.unique_key = 'classification:' || expected.entity_kind || ':'
-                    || expected.identity_key
-              )
-            UNION ALL
-            SELECT 1
-            FROM ${SQLITE_MATERIALIZATION_WORK_TABLE} AS actual
-            WHERE actual.session_id = ?
-              -- A bounded range uses the existing (session_id, unique_key) unique index and scans
-              -- classification entries only, instead of sorting the complete JSON work spool.
-              AND actual.unique_key >= 'classification:'
-              AND actual.unique_key < 'classification;'
-              AND (
-                actual.classification_entity_kind = 'point'
-                OR NOT EXISTS (
-                  SELECT 1 FROM ${SQLITE_REPLACEMENT_WORK_TABLE} AS expected
-                  WHERE expected.session_id = actual.session_id
-                    AND expected.entity_kind = actual.classification_entity_kind
-                    AND expected.identity_key = actual.classification_identity_key
-                    AND expected.diff_required = 1
-                    AND (expected.entity_kind = 'link' OR ? = 1)
-                )
-              )
-          )
-          SELECT 1 FROM invalid LIMIT 1
-        `
-      )
-      .get(session.id, expectedObject, session.id, expectedObject)
-    if (mismatch) {
-      invalidCorrelation(
-        "Projection replacement classification coverage does not match its streamed state."
-      )
-    }
+    if (session.plan) assertReplacementPlanCoverage(this.db, session.plan)
   }
 
   private readLane(
-    lane: StreamMaterializationWorkInput["order"],
-    sessionId: string,
+    session: SqliteMaterializationSessionState,
+    lane: WorkLane,
     cursor: WorkCursor | null,
     limit: number
   ): WorkDatabaseRow[] {
@@ -405,23 +339,23 @@ export class SqliteMaterializationSessions {
     if (!cursor) {
       return this.db
         .query(
-          `SELECT ${selected} FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
-           WHERE session_id = ? AND lane = ?
+          `SELECT ${selected} FROM ${session.workTable}
+           WHERE work_id = ? AND lane = ?
            ORDER BY major_order, minor_order, sort_one, sort_two, record_key
            LIMIT ?`
         )
-        .all(sessionId, lane, limit) as WorkDatabaseRow[]
+        .all(session.workId, lane, limit) as WorkDatabaseRow[]
     }
     return this.db
       .query(
-        `SELECT ${selected} FROM ${SQLITE_MATERIALIZATION_WORK_TABLE}
-         WHERE session_id = ? AND lane = ?
+        `SELECT ${selected} FROM ${session.workTable}
+         WHERE work_id = ? AND lane = ?
            AND (major_order, minor_order, sort_one, sort_two, record_key) > (?, ?, ?, ?, ?)
          ORDER BY major_order, minor_order, sort_one, sort_two, record_key
          LIMIT ?`
       )
       .all(
-        sessionId,
+        session.workId,
         lane,
         cursor.majorOrder,
         cursor.minorOrder,
@@ -435,7 +369,7 @@ export class SqliteMaterializationSessions {
   private ensureTables(): void {
     this.db.run(`
       CREATE TEMP TABLE IF NOT EXISTS ${SQLITE_MATERIALIZATION_WORK_TABLE} (
-        session_id TEXT NOT NULL,
+        work_id TEXT NOT NULL,
         record_key TEXT NOT NULL,
         unique_key TEXT NOT NULL,
         kind TEXT NOT NULL,
@@ -454,41 +388,25 @@ export class SqliteMaterializationSessions {
         cardinality_target_type_id TEXT,
         cardinality_target_primary_id TEXT,
         payload TEXT NOT NULL CHECK (json_valid(payload)),
-        PRIMARY KEY (session_id, record_key),
-        UNIQUE (session_id, unique_key)
+        PRIMARY KEY (work_id, record_key),
+        UNIQUE (work_id, unique_key)
       );
       CREATE INDEX IF NOT EXISTS idx_ontology_materialization_work_lane
         ON ${SQLITE_MATERIALIZATION_WORK_TABLE}(
-          session_id, lane, major_order, minor_order, sort_one, sort_two, record_key
-        );
-      CREATE TEMP TABLE IF NOT EXISTS ${SQLITE_REPLACEMENT_WORK_TABLE} (
-        session_id TEXT NOT NULL,
-        entity_kind TEXT NOT NULL,
-        identity_key TEXT NOT NULL,
-        sort_key TEXT NOT NULL,
-        diff_required INTEGER NOT NULL CHECK (diff_required IN (0, 1)),
-        PRIMARY KEY (session_id, entity_kind, identity_key)
-      );
-      CREATE INDEX IF NOT EXISTS idx_ontology_replacement_work_order
-        ON ${SQLITE_REPLACEMENT_WORK_TABLE}(
-          session_id, entity_kind, sort_key, identity_key
+          work_id, lane, major_order, minor_order, sort_one, sort_two, record_key
         );
     `)
   }
 
   private deleteWork(sessionId: string): void {
     this.db
-      .query(`DELETE FROM ${SQLITE_MATERIALIZATION_WORK_TABLE} WHERE session_id = ?`)
-      .run(sessionId)
-    this.db
-      .query(`DELETE FROM ${SQLITE_REPLACEMENT_WORK_TABLE} WHERE session_id = ?`)
+      .query(`DELETE FROM ${SQLITE_MATERIALIZATION_WORK_TABLE} WHERE work_id = ?`)
       .run(sessionId)
   }
 
   private dropWorkTables(): void {
     this.db.run(`
       DROP TABLE IF EXISTS ${SQLITE_MATERIALIZATION_WORK_TABLE};
-      DROP TABLE IF EXISTS ${SQLITE_REPLACEMENT_WORK_TABLE};
     `)
   }
 }
@@ -505,9 +423,6 @@ function workCursor(row: WorkDatabaseRow): WorkCursor {
 
 function emptyWorkSummary(): WorkSummary {
   return {
-    apply: 0,
-    cardinality: 0,
-    event: 0,
     objectClassifications: 0,
     linkClassifications: 0,
     pointClassifications: 0,
@@ -523,13 +438,7 @@ function emptyWorkSummary(): WorkSummary {
   }
 }
 
-function recordSummary(
-  summary: WorkSummary,
-  record: MaterializationWorkRecord,
-  columns: { readonly lane: "none" | "apply" | "cardinality" | "event" }
-): void {
-  if (columns.lane !== "none") summary[columns.lane] += 1
-
+function recordSummary(summary: WorkSummary, record: MaterializationWorkRecord): void {
   if (record.kind === "classification") {
     if (record.entityKind === "object") summary.objectClassifications += 1
     if (record.entityKind === "link") summary.linkClassifications += 1

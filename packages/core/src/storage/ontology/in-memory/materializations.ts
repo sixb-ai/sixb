@@ -1,4 +1,3 @@
-import { stableJsonStringify } from "../../../json"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
@@ -16,7 +15,6 @@ import {
   linkScopeSortKey,
   objectRefKey,
   objectRefSortKey,
-  projectionEntityKey,
   telemetryPointKey,
   telemetryPointSortKey,
 } from "../../../materialization/refs"
@@ -24,14 +22,14 @@ import {
   getInMemoryObjectMaterializerAdapter,
   type InMemoryObjectStorage,
 } from "../../objects/in-memory"
-import type { ObjectLinkRow } from "../../objects/types"
 import {
   getInMemoryTimeseriesMaterializerAdapter,
   type InMemoryTimeseriesStorage,
 } from "../../timeseries/store"
 import type { OntologyCommitRecord } from "../commits"
 import type {
-  ApplyMaterializationChunkInput,
+  AppliedMaterialization,
+  ApplyMaterializationInput,
   ApplyMaterializationResult,
   ExpectedSourceRevision,
   ExpectedTimeseriesPointRevision,
@@ -41,85 +39,65 @@ import type {
   MaterializationLinkScopeRevision,
   MaterializationLinkScopeState,
   MaterializationLinkState,
-  MaterializationObjectExistence,
-  MaterializationObjectExistenceWorkRecord,
   MaterializationObjectState,
   MaterializationPlanHeader,
   MaterializationPlanWorkRecord,
   MaterializationSession,
   MaterializationStatePage,
-  MaterializationWorkPage,
+  MaterializationVectorChange,
+  MaterializationVectorChangePage,
   MaterializationWorkRecord,
   OntologyMaterializationStorage,
-  ReadMaterializationObjectExistenceInput,
-  SourceReplacementLinkState,
-  SourceReplacementObjectState,
-  SourceReplacementStatePage,
   StageMaterializationWorkInput,
   StoredTelemetryPoint,
   StreamMaterializationStateInput,
-  StreamMaterializationWorkInput,
-  StreamSourceReplacementStateInput,
+  StreamMaterializationVectorChangesInput,
 } from "../materializations"
 import type { OntologyMaterializationEvent } from "../outbox"
 import {
-  appendScopeSnapshot,
   assertExpectedLinkRevision,
   assertExpectedLinkScopeRevision,
   assertExpectedObjectRevision,
   assertMaterializationHeader,
-  finishScopeAccumulator,
+  beginMaterializationApply,
+  beginMaterializationVectorChanges,
+  duplicateMaterializationWork,
   type ProviderMaterializationTransactionLifecycle,
-  startScopeAccumulator,
+  prepareMaterializationWork,
   uniqueSorted,
 } from "../provider"
-import type {
-  StoredSourceAssertion,
-  StoredSourceLinkAssertion,
-  StoredSourceObjectAssertion,
-} from "../sources"
 import { assertFinalizationCorrelations } from "./materializations-finalization"
+import { findActiveSourceMaterialization, storedPoint, uniqueBy } from "./materializations-state"
 import {
-  addReplacementLink,
-  findActiveSourceMaterialization,
-  linkRef,
-  linkSnapshot,
-  objectSnapshot,
-  publicLinkOverride,
-  publicLinkSlotOverride,
-  publicObjectOverride,
-  storedPoint,
-  storedSourceLink,
-  storedSourceObject,
-  uniqueBy,
-} from "./materializations-state"
-import {
-  assertChunkSequence,
   assertLastCommit,
   assertPageRows,
-  assertPlanChunkCorrelations,
-  assertWorkRecord,
   compareCardinalityWork,
   compareEventWork,
   comparePlanWork,
+  createCardinalityValidator,
+  invalidCorrelation,
+  type MaterializationPlanChunk,
   materializationChunkRows,
-  materializationPlanItems,
+  materializationOutboxWrite,
+  materializationPlanChunk,
   workUniquenessKey,
 } from "./materializations-work"
+import { type InMemoryReplacementPlan, replacementPlanKey } from "./replacement-plans"
 import {
   assertTimestamp,
   commitKey,
   commitOriginKey,
   type InMemoryOntologyState,
   type InMemoryOntologyStorageTestHooks,
-  type InMemorySourceMaterialization,
   idempotencyKey,
   ontologyCommitOriginSelector,
   outboxKey,
   projectEntityKey,
   sourceMaterializationKey,
 } from "./shared-state"
-import { activateSourceRoots, previousSourceRows } from "./source-roots"
+import { activateSourceRoots } from "./source-roots"
+import type { InMemoryMaterializationStateReader } from "./state-reader"
+import { vectorObjectKey } from "./vectors"
 
 export interface SessionState {
   readonly providerToken: object
@@ -133,49 +111,15 @@ export interface SessionState {
   readonly applyWork: MaterializationPlanWorkRecord[]
   readonly cardinalityWork: MaterializationCardinalityOccupantWorkRecord[]
   readonly eventWork: MaterializationEventWorkRecord[]
-  readonly appliedPlanItems: string[]
   readonly outboxEnvelopes: Map<number, OntologyMaterializationEvent>
-  readonly workStreams: Record<StreamMaterializationWorkInput["order"], WorkStreamState>
   workSealed: boolean
+  vectorChangesStreamed: boolean
+  applied: boolean
+  appliedEventCount: number
   incidentLinksByObject: Map<string, readonly OntologyLinkRef[]> | null
   linkSlotStates: Map<string, MaterializationLinkScopeState> | null
-  readonly objectExistence: Map<string, MaterializationObjectExistenceWorkRecord>
-  replacement: ReplacementSessionState | null
-}
-
-export interface WorkStreamState {
-  started: boolean
-  completed: boolean
-  emittedCount: number
-}
-
-export interface ReplacementObjectWork {
-  readonly ref: OntologyObjectRef
-  readonly sortKey: string
-}
-
-export interface ReplacementLinkWork {
-  readonly ref: OntologyLinkRef
-  readonly sortKey: string
-  diffRequired: boolean
-}
-
-export interface ReplacementSessionState {
-  readonly sourceId: string
-  readonly candidateMaterializationId: string
-  readonly owned: Set<string>
-  readonly candidate: InMemorySourceMaterialization
-  readonly objects: Map<string, ReplacementObjectWork>
-  readonly links: Map<string, ReplacementLinkWork>
-  orderedObjects: ReplacementObjectWork[]
-  orderedLinks: ReplacementLinkWork[] | null
-  readonly affectedScopes: Set<string>
-  readonly incidentObjects: Map<string, OntologyObjectRef>
-  objectStreamStarted: boolean
-  objectStreamCompleted: boolean
-  linkStreamStarted: boolean
-  linkStreamCompleted: boolean
-  linksExpanded: boolean
+  /** The durable replacement plan this session applies instead of staged work. */
+  readonly plan: InMemoryReplacementPlan | null
 }
 
 export class InMemoryOntologyMaterializationStorage implements OntologyMaterializationStorage {
@@ -186,6 +130,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     private readonly state: InMemoryOntologyState,
     private readonly objects: InMemoryObjectStorage,
     private readonly timeseries: InMemoryTimeseriesStorage,
+    private readonly reader: InMemoryMaterializationStateReader,
     private readonly getTransactionToken: () => object | null,
     private readonly getMaterializationLifecycle: () => ProviderMaterializationTransactionLifecycle | null,
     private readonly executionExists: (projectId: string, executionId: string) => Promise<boolean>,
@@ -218,11 +163,12 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       const key = linkScopeSortKey(expected.source, expected.linkId)
       const current =
         expectedScopeRevisions.get(key) ??
-        this.computeEffectiveLinkScope(input.commit.projectId, expected.source, expected.linkId)
+        this.reader.effectiveLinkScope(input.commit.projectId, expected.source, expected.linkId)
       expectedScopeRevisions.set(key, current)
       assertExpectedLinkScopeRevision(current.fingerprint, expected)
     }
     for (const expected of input.expected.points) this.assertPoint(expected, input.commit.projectId)
+    const plan = input.plan ? this.requirePlan(input) : null
 
     const providerToken = {}
     const session = {
@@ -237,18 +183,19 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       applyWork: [],
       cardinalityWork: [],
       eventWork: [],
-      appliedPlanItems: [],
       outboxEnvelopes: new Map<number, OntologyMaterializationEvent>(),
-      workStreams: {
-        apply: { started: false, completed: false, emittedCount: 0 },
-        cardinality: { started: false, completed: false, emittedCount: 0 },
-        event: { started: false, completed: false, emittedCount: 0 },
-      },
       workSealed: false,
+      vectorChangesStreamed: false,
+      applied: false,
+      appliedEventCount: 0,
       incidentLinksByObject: null,
       linkSlotStates: new Map(),
-      objectExistence: new Map<string, MaterializationObjectExistenceWorkRecord>(),
-      replacement: null,
+      plan,
+    }
+    if (plan) {
+      for (const identity of plan.identities.values()) {
+        for (const record of structuredClone(identity.records)) this.addWork(session, record)
+      }
     }
     this.sessions.set(providerToken, session)
     this.liveSessions.add(session)
@@ -271,12 +218,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     session.applyWork.length = 0
     session.cardinalityWork.length = 0
     session.eventWork.length = 0
-    session.appliedPlanItems.length = 0
     session.outboxEnvelopes.clear()
     session.incidentLinksByObject = null
     session.linkSlotStates = null
-    session.objectExistence.clear()
-    session.replacement = null
     this.liveSessions.delete(session)
     session.lifecycle.complete(session.providerToken)
   }
@@ -294,7 +238,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         this.requireSession(input.session)
         const objects: MaterializationObjectState[] = []
         for (const ref of objectRefs.slice(offset, offset + input.pageRows)) {
-          objects.push(await this.objectState(session, ref))
+          objects.push(await this.reader.objectState(session.header.commit.projectId, ref))
         }
         this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.object.page", objects.length)
@@ -306,7 +250,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         this.requireSession(input.session)
         const links: MaterializationLinkState[] = []
         for (const ref of linkRefs.slice(offset, offset + input.pageRows)) {
-          links.push(await this.linkState(session, ref))
+          links.push(await this.reader.linkState(session.header.commit.projectId, ref))
         }
         this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.link.page", links.length)
@@ -318,7 +262,8 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         this.requireSession(input.session)
         const refs = incidentRefs.slice(offset, offset + input.pageRows)
         const links: MaterializationLinkState[] = []
-        for (const ref of refs) links.push(await this.linkState(session, ref))
+        for (const ref of refs)
+          links.push(await this.reader.linkState(session.header.commit.projectId, ref))
         this.requireSession(input.session)
         this.hooks.observeBuffer?.("state.incident-link.page", links.length)
         yield { objects: [], links, linkScopes: [], points: [] }
@@ -358,221 +303,81 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     }
   }
 
-  async *streamSourceReplacementState(
-    input: StreamSourceReplacementStateInput
-  ): AsyncIterable<SourceReplacementStatePage> {
-    const session = this.requireSession(input.session)
-    assertPageRows(input.pageRows)
-    const replacement = this.requireReplacement(session, input)
-    if (input.entityKind === "object") {
-      if (replacement.candidate.projectionKind !== "object") {
-        throw new MaterializationConflictError(
-          "source-materialization",
-          "Link projection replacement cannot stream object state."
-        )
-      }
-      if (replacement.objectStreamStarted)
-        throw new MaterializationConflictError(
-          "effective-state",
-          "Replacement object state may only be streamed once per session."
-        )
-      replacement.objectStreamStarted = true
-      this.hooks.beforeRead?.("source-replacement.object")
-      for (let offset = 0; offset < replacement.orderedObjects.length; offset += input.pageRows) {
-        this.requireSession(input.session)
-        const selected = replacement.orderedObjects.slice(offset, offset + input.pageRows)
-        const objects: SourceReplacementObjectState[] = []
-        for (const entry of selected) {
-          const key = projectionEntityKey({ kind: "object", ref: entry.ref })
-          const base = await this.objectState(session, entry.ref)
-          objects.push({
-            ref: base.ref,
-            candidateSource: storedSourceObject(
-              input.source.projectionId,
-              replacement.candidate.materializationId,
-              replacement.candidate.rowsByEntity.get(key)
-            ),
-            override: base.override,
-            effective: base.effective,
-            latestTelemetry: base.latestTelemetry,
-          })
-        }
-        this.requireSession(input.session)
-        this.hooks.observeBuffer?.("replacement.object.page", objects.length)
-        yield { objects, links: [] }
-      }
-      this.requireSession(input.session)
-      replacement.objectStreamCompleted = true
-      return
-    }
-
-    if (replacement.candidate.projectionKind === "object" && !replacement.objectStreamCompleted) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Object projection replacement must fully stream object state before link state."
-      )
-    }
-    if (replacement.linkStreamStarted)
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Replacement link state may only be streamed once per session."
-      )
-    replacement.linkStreamStarted = true
-    this.hooks.beforeRead?.("source-replacement.link")
-    this.expandReplacementLinks(session, replacement)
-    replacement.orderedLinks ??= [...replacement.links.values()].sort((left, right) =>
-      left.sortKey.localeCompare(right.sortKey)
-    )
-    for (let offset = 0; offset < replacement.orderedLinks.length; offset += input.pageRows) {
-      this.requireSession(input.session)
-      const selected = replacement.orderedLinks.slice(offset, offset + input.pageRows)
-      const links: SourceReplacementLinkState[] = []
-      for (const entry of selected) {
-        const key = projectionEntityKey({ kind: "link", ref: entry.ref })
-        const base = await this.linkState(session, entry.ref)
-        const ownedByReplacement = replacement.owned.has(key)
-        links.push({
-          ref: base.ref,
-          candidateSource: ownedByReplacement
-            ? storedSourceLink(
-                input.source.projectionId,
-                replacement.candidate.materializationId,
-                replacement.candidate.rowsByEntity.get(key)
-              )
-            : base.source,
-          override: base.override,
-          slotOverride: base.slotOverride,
-          effective: base.effective,
-          diffRequired: entry.diffRequired,
-        })
-      }
-      this.requireSession(input.session)
-      this.hooks.observeBuffer?.("replacement.link.page", links.length)
-      yield { objects: [], links }
-    }
-    this.requireSession(input.session)
-    replacement.linkStreamCompleted = true
-  }
-
   async stageWork(input: StageMaterializationWorkInput): Promise<void> {
     const session = this.requireSession(input.session)
-    if (session.workSealed) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        "Materialization work cannot be staged after draining begins."
-      )
-    }
-    const batchKeys = new Set<string>()
-    const batchUniqueKeys = new Set<string>()
-    for (const record of input.records) {
-      assertWorkRecord(record, session.header)
-      const uniqueKey = workUniquenessKey(record)
-      if (
-        batchKeys.has(record.recordKey) ||
-        session.work.has(record.recordKey) ||
-        batchUniqueKeys.has(uniqueKey) ||
-        session.workUniqueKeys.has(uniqueKey)
-      ) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          `Duplicate materialization work key '${record.recordKey}'.`
-        )
+    for (const { record, uniqueKey } of prepareMaterializationWork(session, input)) {
+      if (session.work.has(record.recordKey) || session.workUniqueKeys.has(uniqueKey)) {
+        throw duplicateMaterializationWork(record.recordKey)
       }
-      if (
-        record.kind === "incident-object" &&
-        (!session.replacement || session.replacement.linkStreamStarted)
-      ) {
-        throw new MaterializationConflictError(
-          "effective-state",
-          "Incident replacement work must be staged before link state is streamed."
-        )
-      }
-      batchKeys.add(record.recordKey)
-      batchUniqueKeys.add(uniqueKey)
     }
     const cloned = input.records.map((record) => structuredClone(record))
     this.hooks.observeWork?.(cloned)
-    for (const record of cloned) {
-      session.work.set(record.recordKey, record)
-      session.workUniqueKeys.add(workUniquenessKey(record))
-      if (record.kind === "plan") session.applyWork.push(record)
-      if (record.kind === "cardinality") session.cardinalityWork.push(record)
-      if (record.kind === "event") session.eventWork.push(record)
-      if (record.kind === "object-existence") {
-        session.objectExistence.set(objectRefKey(record.ref), record)
-      }
-      if (record.kind === "incident-object") {
-        const replacement = session.replacement
-        if (replacement) {
-          replacement.incidentObjects.set(objectRefKey(record.ref), record.ref)
-          replacement.linksExpanded = false
-          replacement.orderedLinks = null
-        }
-      }
-    }
+    for (const record of cloned) this.addWork(session, record)
     this.hooks.observeBuffer?.("work.stage", cloned.length)
   }
 
-  async *streamWork(input: StreamMaterializationWorkInput): AsyncIterable<MaterializationWorkPage> {
+  private addWork(session: SessionState, record: MaterializationWorkRecord): void {
+    session.work.set(record.recordKey, record)
+    session.workUniqueKeys.add(workUniquenessKey(record))
+    if (record.kind === "plan") session.applyWork.push(record)
+    if (record.kind === "cardinality") session.cardinalityWork.push(record)
+    if (record.kind === "event") session.eventWork.push(record)
+  }
+
+  async *streamVectorChanges(
+    input: StreamMaterializationVectorChangesInput
+  ): AsyncIterable<MaterializationVectorChangePage> {
     const session = this.requireSession(input.session)
     assertPageRows(input.pageRows)
-    const stream = session.workStreams[input.order]
-    if (stream.started) {
-      throw new MaterializationConflictError(
-        "effective-state",
-        `Materialization ${input.order} work may only be streamed once per session.`
-      )
-    }
-    stream.started = true
-    if (!session.workSealed) {
-      session.applyWork.sort(comparePlanWork)
-      session.cardinalityWork.sort(compareCardinalityWork)
-      session.eventWork.sort(compareEventWork)
-      session.workSealed = true
-    }
-    const records =
-      input.order === "apply"
-        ? session.applyWork
-        : input.order === "cardinality"
-          ? session.cardinalityWork
-          : session.eventWork
-    for (let offset = 0; offset < records.length; offset += input.pageRows) {
+    this.sealWork(session, beginMaterializationVectorChanges)
+    const projectId = session.header.commit.projectId
+    const profiled = new Set(input.objectTypeIds)
+    const changes = session.applyWork.flatMap((record): MaterializationVectorChange[] => {
+      const item = record.item
+      if (item.kind !== "object-upsert" && item.kind !== "object-delete") return []
+      const ref = item.kind === "object-upsert" ? item.value.row.ref : item.value.ref
+      return profiled.has(ref.objectTypeId) ||
+        (this.state.vectors.get(vectorObjectKey(projectId, ref))?.size ?? 0) > 0
+        ? [item]
+        : []
+    })
+    for (let offset = 0; offset < changes.length; offset += input.pageRows) {
       this.requireSession(input.session)
-      const selected = records.slice(offset, offset + input.pageRows)
-      this.hooks.observeBuffer?.(`work.${input.order}.page`, selected.length)
-      stream.emittedCount = offset + selected.length
-      yield { records: structuredClone(selected) }
+      yield { items: structuredClone(changes.slice(offset, offset + input.pageRows)) }
     }
     this.requireSession(input.session)
-    stream.completed = true
   }
 
-  async readObjectExistence(
-    input: ReadMaterializationObjectExistenceInput
-  ): Promise<readonly MaterializationObjectExistence[]> {
+  async apply(input: ApplyMaterializationInput): Promise<AppliedMaterialization> {
     const session = this.requireSession(input.session)
-    const result: MaterializationObjectExistence[] = []
-    for (const ref of input.refs) {
-      const record = session.objectExistence.get(objectRefKey(ref))
-      if (record) {
-        result.push({ ref: structuredClone(record.ref), exists: record.exists })
-      }
+    this.sealWork(session, beginMaterializationApply)
+    const cardinality = createCardinalityValidator()
+    for (const record of session.cardinalityWork) cardinality.accept(record)
+    for (let start = 0; start < session.applyWork.length; ) {
+      const phase = session.applyWork[start]!.applyPhase
+      let end = start
+      while (session.applyWork[end]?.applyPhase === phase) end += 1
+      const items = session.applyWork.slice(start, end).map((record) => record.item)
+      this.writeChunk(session, materializationPlanChunk(items))
+      start = end
     }
-    return result
+    const outbox = session.eventWork.map((record, ordinal) =>
+      materializationOutboxWrite(record.draft, ordinal)
+    )
+    this.writeChunk(session, materializationPlanChunk([], outbox))
+    session.appliedEventCount = outbox.length
+    return { eventCount: outbox.length }
   }
 
-  async applyChunk(input: ApplyMaterializationChunkInput): Promise<void> {
-    const session = this.requireSession(input.session)
+  private writeChunk(session: SessionState, chunk: MaterializationPlanChunk): void {
     const projectId = session.header.commit.projectId
-    assertPlanChunkCorrelations(input.chunk, session.header.commit)
-    assertChunkSequence(session, input.chunk)
-    this.hooks.observeBuffer?.("apply.chunk", materializationChunkRows(input.chunk))
+    this.hooks.observeBuffer?.("apply.chunk", materializationChunkRows(chunk))
     const write = (boundary: string, apply: () => void): void => {
       this.hooks.beforeWrite?.(boundary, session.writeOrdinal++)
       apply()
     }
 
-    for (const item of input.chunk.overrides.objects.upserts)
+    for (const item of chunk.overrides.objects.upserts)
       write("override.object.upsert", () => {
         const key = projectEntityKey(projectId, objectRefKey(item.ref))
         assertLastCommit(
@@ -592,7 +397,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           })
         )
       })
-    for (const item of input.chunk.overrides.objects.deletes)
+    for (const item of chunk.overrides.objects.deletes)
       write("override.object.delete", () => {
         const key = projectEntityKey(projectId, objectRefKey(item.ref))
         assertLastCommit(
@@ -602,7 +407,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         )
         this.state.objectOverrides.delete(key)
       })
-    for (const item of input.chunk.overrides.links.edges.upserts)
+    for (const item of chunk.overrides.links.edges.upserts)
       write("override.link.upsert", () => {
         const key = projectEntityKey(projectId, linkRefKey(item.ref))
         assertLastCommit(
@@ -621,7 +426,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           })
         )
       })
-    for (const item of input.chunk.overrides.links.edges.deletes)
+    for (const item of chunk.overrides.links.edges.deletes)
       write("override.link.delete", () => {
         const key = projectEntityKey(projectId, linkRefKey(item.ref))
         assertLastCommit(
@@ -631,7 +436,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         )
         this.state.linkOverrides.delete(key)
       })
-    for (const item of input.chunk.overrides.links.slots.upserts)
+    for (const item of chunk.overrides.links.slots.upserts)
       write("override.link-slot.upsert", () => {
         const key = projectEntityKey(projectId, linkScopeKey(item.ref.source, item.ref.linkId))
         assertLastCommit(
@@ -650,7 +455,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           })
         )
       })
-    for (const item of input.chunk.overrides.links.slots.deletes)
+    for (const item of chunk.overrides.links.slots.deletes)
       write("override.link-slot.delete", () => {
         const key = projectEntityKey(projectId, linkScopeKey(item.ref.source, item.ref.linkId))
         assertLastCommit(
@@ -661,7 +466,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         this.state.linkSlotOverrides.delete(key)
       })
 
-    for (const item of input.chunk.effective.linkDeletes)
+    for (const item of chunk.effective.linkDeletes)
       write("effective.link.delete", () => {
         this.assertLinkSync(item.expected, projectId)
         getInMemoryObjectMaterializerAdapter(this.objects).deleteExactLink({
@@ -673,7 +478,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           targetId: item.ref.target.primaryId,
         })
       })
-    for (const item of input.chunk.effective.objectDeletes)
+    for (const item of chunk.effective.objectDeletes)
       write("effective.object.delete", () => {
         this.assertObjectSync(item.expected, projectId)
         getInMemoryObjectMaterializerAdapter(this.objects).deleteExactObject(
@@ -682,17 +487,17 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           item.ref.primaryId
         )
       })
-    for (const item of input.chunk.effective.objectUpserts)
+    for (const item of chunk.effective.objectUpserts)
       write("effective.object.upsert", () => {
         this.assertObjectSync(item.expected, projectId)
         getInMemoryObjectMaterializerAdapter(this.objects).applyExactObject(item.row, projectId)
       })
-    for (const item of input.chunk.effective.linkUpserts)
+    for (const item of chunk.effective.linkUpserts)
       write("effective.link.upsert", () => {
         this.assertLinkSync(item.expected, projectId)
         getInMemoryObjectMaterializerAdapter(this.objects).applyExactLink(item.row, projectId)
       })
-    for (const item of input.chunk.timeseries.pointUpserts)
+    for (const item of chunk.timeseries.pointUpserts)
       write("timeseries.point.upsert", () => {
         this.assertPoint(item.expected, projectId)
         getInMemoryTimeseriesMaterializerAdapter(this.timeseries).applyExactPoint(
@@ -700,7 +505,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           item.point
         )
       })
-    for (const item of input.chunk.outbox)
+    for (const item of chunk.outbox)
       write("outbox.insert", () => {
         const envelope = item.envelope
         if (envelope.projectId !== projectId || envelope.commitId !== session.header.commit.id) {
@@ -735,9 +540,6 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         })
         session.outboxEnvelopes.set(envelope.commitOrdinal, structuredClone(envelope))
       })
-    for (const item of materializationPlanItems(input.chunk)) {
-      session.appliedPlanItems.push(stableJsonStringify(item))
-    }
   }
 
   async finalize(input: FinalizeMaterializationInput): Promise<ApplyMaterializationResult> {
@@ -795,6 +597,15 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
         updatedAt: activation.updatedAt,
       })
     }
+    if (session.plan) {
+      this.state.replacementPlans.delete(
+        replacementPlanKey({
+          projectId: commit.projectId,
+          source: { projectionId: session.plan.sourceId },
+          materializationId: session.plan.materializationId,
+        })
+      )
+    }
     const record = {
       ...structuredClone(commit),
       result: structuredClone(input.finalization.result),
@@ -825,6 +636,40 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     }
   }
 
+  /** Begins a sealing step, and puts the work in canonical order the first time it seals. */
+  private sealWork(session: SessionState, begin: (state: SessionState) => void): void {
+    const sealed = session.workSealed
+    begin(session)
+    if (sealed) return
+    session.applyWork.sort(comparePlanWork)
+    session.cardinalityWork.sort(compareCardinalityWork)
+    session.eventWork.sort(compareEventWork)
+  }
+
+  /** The fresh, fully planned plan a projection commit applies, with exactly its commit. */
+  private requirePlan(header: MaterializationPlanHeader): InMemoryReplacementPlan {
+    const { commit, plan: ref } = header
+    const plan = ref
+      ? this.state.replacementPlans.get(replacementPlanKey({ projectId: commit.projectId, ...ref }))
+      : undefined
+    if (!plan || commit.intent.kind !== "projection") {
+      throw new MaterializationConflictError(
+        "source-materialization",
+        "A plan-bound session needs the open plan of a projection candidate."
+      )
+    }
+    if (plan.commitId !== commit.id || plan.committedAt !== commit.committedAt) {
+      invalidCorrelation("A plan-bound session must begin with the commit its plan carries.")
+    }
+    if (
+      plan.watermark !== this.state.commitsById.size ||
+      [...plan.identities.values()].some((identity) => identity.plannedRevision === null)
+    ) {
+      invalidCorrelation("A replacement plan applies only fully planned and just refreshed.")
+    }
+    return plan
+  }
+
   private requireSession(session: MaterializationSession): SessionState {
     const value = this.sessions.get(session.providerToken)
     if (
@@ -839,146 +684,6 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       )
     }
     return value
-  }
-
-  private requireReplacement(
-    session: SessionState,
-    input: StreamSourceReplacementStateInput
-  ): ReplacementSessionState {
-    if (session.replacement) {
-      if (
-        session.replacement.sourceId !== input.source.projectionId ||
-        session.replacement.candidateMaterializationId !== input.candidateMaterializationId
-      ) {
-        throw new MaterializationConflictError(
-          "source-materialization",
-          "Materialization session already owns another replacement union."
-        )
-      }
-      return session.replacement
-    }
-    const projectId = session.header.commit.projectId
-    const sourceId = input.source.projectionId
-    const candidate = this.state.sourceMaterializations.get(
-      sourceMaterializationKey(projectId, sourceId, input.candidateMaterializationId)
-    )
-    if (!candidate || candidate.status !== "ready") {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        `Candidate source materialization '${input.candidateMaterializationId}' is missing or is not ready.`
-      )
-    }
-    const previous = findActiveSourceMaterialization(this.state, projectId, sourceId)
-    if (
-      candidate.protocol !== "replacement" ||
-      (previous &&
-        (previous.protocol !== candidate.protocol ||
-          previous.projectionKind !== candidate.projectionKind))
-    ) {
-      throw new MaterializationConflictError(
-        "source-materialization",
-        "Source replacement kind or protocol does not match its active materialization."
-      )
-    }
-    const replacement: ReplacementSessionState = {
-      sourceId,
-      candidateMaterializationId: input.candidateMaterializationId,
-      owned: new Set(),
-      candidate,
-      objects: new Map(),
-      links: new Map(),
-      orderedObjects: [],
-      orderedLinks: null,
-      affectedScopes: new Set(),
-      incidentObjects: new Map(),
-      objectStreamStarted: false,
-      objectStreamCompleted: false,
-      linkStreamStarted: false,
-      linkStreamCompleted: false,
-      linksExpanded: false,
-    }
-    for (const rows of [
-      previousSourceRows(this.state, candidate),
-      candidate.rowsByEntity.values(),
-    ]) {
-      for (const row of rows) {
-        replacement.owned.add(projectionEntityKey(row.assertion))
-        if (row.assertion.kind === "object") {
-          const ref = row.assertion.ref
-          replacement.objects.set(objectRefKey(ref), { ref, sortKey: objectRefSortKey(ref) })
-        } else {
-          addReplacementLink(replacement, row.assertion.ref, true)
-        }
-      }
-    }
-    replacement.orderedObjects = [...replacement.objects.values()].sort((left, right) =>
-      left.sortKey.localeCompare(right.sortKey)
-    )
-    session.replacement = replacement
-    return replacement
-  }
-
-  private expandReplacementLinks(
-    session: SessionState,
-    replacement: ReplacementSessionState
-  ): void {
-    if (replacement.linksExpanded) return
-    const projectId = session.header.commit.projectId
-    const incident = replacement.incidentObjects
-    const touchesIncident = (ref: OntologyLinkRef): boolean =>
-      incident.has(objectRefKey(ref.source)) || incident.has(objectRefKey(ref.target))
-
-    const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
-    if (incident.size > 0) {
-      adapter.visitExactLinks(projectId, (row) => {
-        const ref = linkRef(row)
-        if (touchesIncident(ref)) addReplacementLink(replacement, ref, true)
-      })
-      for (const override of this.state.linkOverrides.values()) {
-        if (override.projectId !== projectId) continue
-        if (touchesIncident(override.ref)) addReplacementLink(replacement, override.ref, true)
-      }
-      for (const override of this.state.linkSlotOverrides.values()) {
-        if (override.projectId !== projectId) continue
-        const ref = {
-          source: override.ref.source,
-          linkId: override.ref.linkId,
-          target: override.value.target,
-        }
-        if (touchesIncident(ref)) addReplacementLink(replacement, ref, true)
-      }
-      for (const [scopeKey, rows] of this.state.activeSourceLinkScopes) {
-        if (JSON.parse(scopeKey)[0] !== projectId) continue
-        for (const row of rows.values()) {
-          if (row.assertion.kind === "link" && touchesIncident(row.assertion.ref)) {
-            addReplacementLink(replacement, row.assertion.ref, true)
-          }
-        }
-      }
-    }
-    const scopes = new Map<string, { source: OntologyObjectRef; linkId: string }>()
-    for (const { ref } of replacement.links.values()) {
-      const key = linkScopeSortKey(ref.source, ref.linkId)
-      if (replacement.affectedScopes.has(key)) scopes.set(key, ref)
-    }
-    for (const scope of scopes.values()) {
-      adapter.visitExactScopeLinks(
-        projectId,
-        scope.source.objectTypeId,
-        scope.source.primaryId,
-        scope.linkId,
-        (row) => {
-          addReplacementLink(replacement, linkRef(row), false)
-        }
-      )
-      const override = this.state.linkSlotOverrides.get(
-        projectEntityKey(projectId, linkScopeKey(scope.source, scope.linkId))
-      )
-      if (override)
-        addReplacementLink(replacement, { ...scope, target: override.value.target }, false)
-    }
-    replacement.linksExpanded = true
-    replacement.orderedLinks = null
   }
 
   private assertCommitAbsent(header: MaterializationPlanHeader): void {
@@ -1069,62 +774,6 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     }
   }
 
-  private async objectState(
-    session: SessionState,
-    ref: OntologyObjectRef
-  ): Promise<MaterializationObjectState> {
-    const projectId = session.header.commit.projectId
-    const row = await this.objects.getByPrimaryId({
-      projectId,
-      objectTypeId: ref.objectTypeId,
-      primaryId: ref.primaryId,
-    })
-    return {
-      ref: structuredClone(ref),
-      source: this.findActiveObjectSource(projectId, ref),
-      override: structuredClone(
-        publicObjectOverride(
-          this.state.objectOverrides.get(projectEntityKey(projectId, objectRefKey(ref)))
-        )
-      ),
-      effective: row ? objectSnapshot(row) : null,
-      latestTelemetry: getInMemoryTimeseriesMaterializerAdapter(this.timeseries)
-        .listLatestForObject(projectId, ref.objectTypeId, ref.primaryId)
-        .map(storedPoint),
-    }
-  }
-
-  private async linkState(
-    session: SessionState,
-    ref: OntologyLinkRef
-  ): Promise<MaterializationLinkState> {
-    const projectId = session.header.commit.projectId
-    const row = getInMemoryObjectMaterializerAdapter(this.objects).getExactLinkRow(projectId, {
-      sourceTypeId: ref.source.objectTypeId,
-      sourceId: ref.source.primaryId,
-      linkId: ref.linkId,
-      targetTypeId: ref.target.objectTypeId,
-      targetId: ref.target.primaryId,
-    })
-    return {
-      ref: structuredClone(ref),
-      source: this.findActiveLinkSource(projectId, ref),
-      override: structuredClone(
-        publicLinkOverride(
-          this.state.linkOverrides.get(projectEntityKey(projectId, linkRefKey(ref)))
-        )
-      ),
-      slotOverride: structuredClone(
-        publicLinkSlotOverride(
-          this.state.linkSlotOverrides.get(
-            projectEntityKey(projectId, linkScopeKey(ref.source, ref.linkId))
-          )
-        )
-      ),
-      effective: row ? linkSnapshot(row) : null,
-    }
-  }
-
   private linkSlotState(
     session: SessionState,
     source: OntologyObjectRef,
@@ -1134,101 +783,9 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     const key = linkScopeSortKey(source, linkId)
     const existing = session.linkSlotStates.get(key)
     if (existing) return structuredClone(existing)
-    const computed = this.computeLinkSlotState(session.header.commit.projectId, source, linkId)
+    const computed = this.reader.linkSlotState(session.header.commit.projectId, source, linkId)
     session.linkSlotStates.set(key, computed)
     return structuredClone(computed)
-  }
-
-  private computeLinkSlotState(
-    projectId: string,
-    source: OntologyObjectRef,
-    linkId: string
-  ): MaterializationLinkScopeState {
-    const value = this.computeEffectiveLinkScope(projectId, source, linkId)
-    return {
-      ...value,
-      sourceAssertion: this.findActiveLinkScopeSource(projectId, source, linkId),
-      override: structuredClone(
-        publicLinkSlotOverride(
-          this.state.linkSlotOverrides.get(
-            projectEntityKey(projectId, linkScopeKey(source, linkId))
-          )
-        )
-      ),
-    }
-  }
-
-  private computeEffectiveLinkScope(
-    projectId: string,
-    source: OntologyObjectRef,
-    linkId: string
-  ): MaterializationLinkScopeRevision & Pick<MaterializationLinkScopeState, "effective"> {
-    const rows: ObjectLinkRow[] = []
-    getInMemoryObjectMaterializerAdapter(this.objects).visitExactScopeLinks(
-      projectId,
-      source.objectTypeId,
-      source.primaryId,
-      linkId,
-      (row) => rows.push(row)
-    )
-    rows.sort((left, right) =>
-      linkRefSortKey(linkRef(left)).localeCompare(linkRefSortKey(linkRef(right)))
-    )
-    const accumulator = startScopeAccumulator(source, linkId)
-    for (let offset = 0; offset < rows.length; offset += 1_000) {
-      const page = rows.slice(offset, offset + 1_000)
-      this.hooks.observeBuffer?.("state.link-scope.page", page.length)
-      for (const row of page) {
-        appendScopeSnapshot(accumulator, linkSnapshot(row))
-      }
-    }
-    const effective = rows.length === 1 ? linkSnapshot(rows[0]!) : null
-    return {
-      ...finishScopeAccumulator(accumulator),
-      effective,
-    }
-  }
-
-  private findActiveLinkScopeSource(
-    projectId: string,
-    source: OntologyObjectRef,
-    linkId: string
-  ): StoredSourceLinkAssertion | null {
-    const rows = this.state.activeSourceLinkScopes.get(
-      projectEntityKey(projectId, linkScopeSortKey(source, linkId))
-    )
-    if (rows && rows.size > 1)
-      throw new MaterializationConflictError(
-        "source-materialization",
-        `Multiple active source links assert cardinality-one scope '${source.objectTypeId}.${linkId}'.`
-      )
-    return structuredClone(rows?.values().next().value ?? null)
-  }
-
-  private findActiveObjectSource(
-    projectId: string,
-    ref: OntologyObjectRef
-  ): StoredSourceObjectAssertion | null {
-    const found = this.findActiveSource(projectId, projectionEntityKey({ kind: "object", ref }))
-    return found?.assertion.kind === "object" ? (found as StoredSourceObjectAssertion) : null
-  }
-
-  private findActiveLinkSource(
-    projectId: string,
-    ref: OntologyLinkRef
-  ): StoredSourceLinkAssertion | null {
-    const found = this.findActiveSource(projectId, projectionEntityKey({ kind: "link", ref }))
-    return found?.assertion.kind === "link" ? (found as StoredSourceLinkAssertion) : null
-  }
-
-  private findActiveSource(projectId: string, entityKey: string): StoredSourceAssertion | null {
-    const rows = this.state.activeSourceRows.get(projectEntityKey(projectId, entityKey))
-    if (rows && rows.size > 1)
-      throw new MaterializationConflictError(
-        "source-materialization",
-        `Multiple active sources assert ${entityKey}.`
-      )
-    return structuredClone(rows?.values().next().value ?? null)
   }
 
   private incidentLinkRefs(
@@ -1236,7 +793,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     objects: readonly OntologyObjectRef[]
   ): readonly OntologyLinkRef[] {
     if (objects.length === 0) return []
-    session.incidentLinksByObject ??= this.buildIncidentLinkIndex(session.header.commit.projectId)
+    session.incidentLinksByObject ??= this.reader.incidentLinkIndex(session.header.commit.projectId)
     const selected = new Map<string, OntologyLinkRef>()
     for (const object of objects) {
       for (const ref of session.incidentLinksByObject.get(objectRefKey(object)) ?? []) {
@@ -1246,48 +803,5 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     return [...selected.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([, ref]) => ref)
-  }
-
-  private buildIncidentLinkIndex(projectId: string): Map<string, readonly OntologyLinkRef[]> {
-    const mutable = new Map<string, Map<string, OntologyLinkRef>>()
-    const consider = (ref: OntologyLinkRef): void => {
-      const sortKey = linkRefSortKey(ref)
-      for (const endpoint of [ref.source, ref.target]) {
-        const key = objectRefKey(endpoint)
-        const links = mutable.get(key) ?? new Map<string, OntologyLinkRef>()
-        links.set(sortKey, structuredClone(ref))
-        mutable.set(key, links)
-      }
-    }
-    getInMemoryObjectMaterializerAdapter(this.objects).visitExactLinks(projectId, (row) =>
-      consider(linkRef(row))
-    )
-    for (const override of this.state.linkOverrides.values()) {
-      if (override.projectId === projectId) consider(override.ref)
-    }
-    for (const override of this.state.linkSlotOverrides.values()) {
-      if (override.projectId !== projectId) continue
-      consider({
-        source: override.ref.source,
-        linkId: override.ref.linkId,
-        target: override.value.target,
-      })
-    }
-    for (const [scopeKey, rows] of this.state.activeSourceLinkScopes) {
-      if (JSON.parse(scopeKey)[0] !== projectId) continue
-      for (const row of rows.values()) {
-        if (row.assertion.kind === "link") consider(row.assertion.ref)
-      }
-    }
-    const index = new Map<string, readonly OntologyLinkRef[]>()
-    for (const [objectKey, refs] of mutable) {
-      index.set(
-        objectKey,
-        [...refs.entries()]
-          .sort(([left], [right]) => left.localeCompare(right))
-          .map(([, ref]) => ref)
-      )
-    }
-    return index
   }
 }

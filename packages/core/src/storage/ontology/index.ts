@@ -1,6 +1,7 @@
 import type { OntologyCommitStorage } from "./commits"
 import type { OntologyMaterializationStorage } from "./materializations"
 import type { OntologyOutboxStorage } from "./outbox"
+import type { OntologyReplacementPlanStorage } from "./replacement-plans"
 import type { OntologySourceStorage } from "./sources"
 import type { OntologyVectorIndexingStorage } from "./vector-indexing"
 import type { OntologyVectorStorage } from "./vectors"
@@ -22,22 +23,20 @@ export type {
   TelemetryOntologyCommitIntent,
 } from "./commits"
 export type {
-  ApplyMaterializationChunkInput,
+  AppliedMaterialization,
+  ApplyMaterializationInput,
   ApplyMaterializationResult,
   ExactEffectiveLinkDelete,
   ExactEffectiveLinkWrite,
   ExactEffectiveObjectDelete,
   ExactEffectiveObjectWrite,
-  ExactEffectiveWrites,
   ExactLinkOverrideDelete,
   ExactLinkOverrideWrite,
   ExactLinkSlotOverrideDelete,
   ExactLinkSlotOverrideWrite,
   ExactObjectOverrideDelete,
   ExactObjectOverrideWrite,
-  ExactOverrideWrites,
   ExactTimeseriesPointWrite,
-  ExactTimeseriesWrites,
   ExpectedSourceRevision,
   ExpectedTimeseriesPointRevision,
   FinalizeMaterializationInput,
@@ -53,7 +52,6 @@ export type {
   MaterializationObjectExistence,
   MaterializationObjectExistenceWorkRecord,
   MaterializationObjectState,
-  MaterializationPlanChunk,
   MaterializationPlanFinalization,
   MaterializationPlanHeader,
   MaterializationPlanWorkItem,
@@ -61,23 +59,21 @@ export type {
   MaterializationSession,
   MaterializationStatePage,
   MaterializationStateRequestChunk,
+  MaterializationVectorChange,
+  MaterializationVectorChangePage,
   MaterializationWorkEntityKind,
-  MaterializationWorkPage,
   MaterializationWorkRecord,
   OntologyMaterializationStorage,
-  ReadMaterializationObjectExistenceInput,
   SourceActivationWrite,
   SourceReplacementLinkState,
   SourceReplacementObjectState,
-  SourceReplacementStatePage,
   StageMaterializationWorkInput,
   StoredLinkOverride,
   StoredLinkSlotOverride,
   StoredObjectOverride,
   StoredTelemetryPoint,
   StreamMaterializationStateInput,
-  StreamMaterializationWorkInput,
-  StreamSourceReplacementStateInput,
+  StreamMaterializationVectorChangesInput,
 } from "./materializations"
 export type {
   ClaimedOntologyOutboxRow,
@@ -96,6 +92,18 @@ export type {
   SummarizeOntologyOutboxInput,
 } from "./outbox"
 export { ONTOLOGY_OUTBOX_FAILURE_CODES } from "./outbox"
+export type {
+  OntologyReplacementPlanStorage,
+  OpenedReplacementPlan,
+  OpenReplacementPlanInput,
+  PlannedReplacementIdentity,
+  PurgeReplacementPlansInput,
+  ReplacementPlanRef,
+  ReplacementPlanStatePage,
+  ReplacementPlanStatus,
+  StageReplacementPlanInput,
+  StreamReplacementPlanStateInput,
+} from "./replacement-plans"
 export type {
   AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,
@@ -132,6 +140,7 @@ export interface OntologyStorage {
   readonly commits: OntologyCommitStorage
   readonly sources: OntologySourceStorage
   readonly materializations: OntologyMaterializationStorage
+  readonly replacementPlans: OntologyReplacementPlanStorage
   readonly outbox: OntologyOutboxStorage
 }
 

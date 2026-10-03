@@ -159,7 +159,7 @@ describe("SQLite vector storage", () => {
     }
   })
   test("source edits invalidate only affected profiles; delete/restore cannot resurrect vectors", async () => {
-    // Regression proof: bypass invalidateVectorChanges in drainStagedWork; the source-edit assertion fails.
+    // Regression proof: bypass invalidateVectorChanges in applyStagedWork; the source-edit assertion fails.
     const f = await fixture()
     try {
       await f.seed()

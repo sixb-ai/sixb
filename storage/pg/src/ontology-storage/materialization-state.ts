@@ -50,12 +50,10 @@ import {
   activeSourceRows,
   liveSourceRowsJoin,
   replacementAssertionRows,
-  replacementSourceRows,
   sourceAssertionColumns,
 } from "./source-roots"
 
 export const PG_MATERIALIZATION_WORK_TABLE = "ontology_materialization_work"
-export const PG_REPLACEMENT_WORK_TABLE = "ontology_replacement_work"
 
 interface EffectiveObjectRow {
   readonly object_type_id: string
@@ -128,40 +126,16 @@ interface LinkSlotOverrideRow {
   readonly updated_at: Date | string
 }
 
-export type ReplacementIdentity =
-  | {
-      readonly kind: "object"
-      readonly ref: OntologyObjectRef
-      readonly sortKey: string
-      readonly diffRequired: true
-    }
-  | {
-      readonly kind: "link"
-      readonly ref: OntologyLinkRef
-      readonly sortKey: string
-      readonly diffRequired: boolean
-    }
+/** A link a replacement plan decides, and whether its plan needs a diff. */
+export interface ReplacementLinkIdentity {
+  readonly ref: OntologyLinkRef
+  readonly sortKey: string
+  readonly diffRequired: boolean
+}
 
 interface ReplacementSources {
   readonly owned: ReadonlySet<string>
   readonly byMaterialization: ReadonlyMap<string, ReadonlyMap<string, StoredSourceAssertion>>
-}
-
-interface ReplacementIdentityInput {
-  readonly incremental?: boolean
-  readonly sessionId: string
-  readonly sourceId: string
-  readonly candidateMaterializationId: string
-  readonly previousMaterializationId: string | null
-  readonly kind: "object" | "link"
-  readonly pageRows: number
-}
-
-interface ReplacementWorkRow {
-  readonly entity_kind: "object" | "link"
-  readonly identity_key: string
-  readonly sort_key: string
-  readonly diff_required: boolean
 }
 
 export class PgMaterializationStateReader {
@@ -612,32 +586,6 @@ export class PgMaterializationStateReader {
     }
   }
 
-  async *replacementIdentities(
-    input: ReplacementIdentityInput
-  ): AsyncIterable<ReplacementIdentity[]> {
-    await this.prepareReplacementIdentities(input)
-    // Temporary tables are not auto-analyzed. Refresh after each identity population is
-    // prepared so the planner can choose the ordered index for its bounded pages.
-    await this.sql`ANALYZE ${this.sql(PG_REPLACEMENT_WORK_TABLE)}`
-    let cursor: string | null = null
-    while (true) {
-      // Keep the next-page bound indexable in generic prepared plans. A nullable OR
-      // makes PostgreSQL revisit the preceding pages before applying the cursor filter.
-      const after = cursor === null ? this.sql`` : this.sql`AND sort_key > ${cursor}`
-      const rows: ReplacementWorkRow[] = await this.sql<ReplacementWorkRow[]>`
-        SELECT entity_kind, identity_key, sort_key, diff_required
-        FROM ${this.sql(PG_REPLACEMENT_WORK_TABLE)}
-        WHERE session_id = ${input.sessionId} AND entity_kind = ${input.kind}
-          ${after}
-        ORDER BY sort_key
-        LIMIT ${input.pageRows}
-      `
-      if (rows.length === 0) break
-      yield rows.map(replacementIdentity)
-      cursor = rows[rows.length - 1]?.sort_key ?? null
-    }
-  }
-
   async replacementObjectStates(
     sourceId: string,
     candidateMaterializationId: string,
@@ -666,7 +614,7 @@ export class PgMaterializationStateReader {
     sourceId: string,
     candidateMaterializationId: string,
     materializationIds: readonly string[],
-    identities: readonly Extract<ReplacementIdentity, { readonly kind: "link" }>[],
+    identities: readonly ReplacementLinkIdentity[],
     incremental = false
   ): Promise<readonly SourceReplacementLinkState[]> {
     const refs = identities.map((identity) => identity.ref)
@@ -807,175 +755,6 @@ export class PgMaterializationStateReader {
       byMaterialization.set(row.materialization_id, materialization)
     }
     return { owned, byMaterialization }
-  }
-
-  private async prepareReplacementIdentities(input: ReplacementIdentityInput): Promise<void> {
-    if (input.kind === "object") {
-      await this.prepareReplacementObjects(input)
-      return
-    }
-    await this.prepareReplacementLinks(input)
-  }
-
-  private async prepareReplacementObjects(input: ReplacementIdentityInput): Promise<void> {
-    const rows = replacementSourceRows(this.sql, {
-      projectId: this.projectId,
-      sourceId: input.sourceId,
-      materializationId: input.candidateMaterializationId,
-      incremental: input.incremental ?? false,
-    })
-    await this.sql`
-      WITH selected AS (
-        SELECT DISTINCT object_type_id, primary_id,
-          ${this.sql.unsafe(objectKeyExpression("rows"))} AS identity_key,
-          ${this.sql.unsafe(objectSortExpression("rows"))} AS sort_key
-        FROM (${rows}) AS rows
-        WHERE entity_kind = 'object'
-      )
-      INSERT INTO ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
-        session_id, entity_kind, identity_key, sort_key, diff_required
-      )
-      SELECT ${input.sessionId}, 'object', identity_key, sort_key, TRUE
-      FROM selected
-      ON CONFLICT (session_id, entity_kind, identity_key) DO UPDATE SET
-        diff_required = ${this.sql(PG_REPLACEMENT_WORK_TABLE)}.diff_required
-          OR EXCLUDED.diff_required
-    `
-  }
-
-  private async prepareReplacementLinks(input: ReplacementIdentityInput): Promise<void> {
-    await this.sql`ANALYZE ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}`
-    const rows = replacementSourceRows(this.sql, {
-      projectId: this.projectId,
-      sourceId: input.sourceId,
-      materializationId: input.candidateMaterializationId,
-      incremental: input.incremental ?? false,
-    })
-    await this.sql`
-      WITH incident_objects AS (
-        SELECT DISTINCT payload->'ref'->>'objectTypeId' AS object_type_id,
-          payload->'ref'->>'primaryId' AS primary_id
-        FROM ${this.sql(PG_MATERIALIZATION_WORK_TABLE)}
-        WHERE session_id = ${input.sessionId} AND kind = 'incident-object'
-      ), replacement_links AS (
-        SELECT source_type_id, source_primary_id AS source_id, link_id,
-          target_type_id, target_primary_id AS target_id
-        FROM (${rows}) AS rows
-        WHERE entity_kind = 'link'
-      ), incident_links AS (
-        SELECT links.source_type_id, links.source_id, links.link_id,
-          links.target_type_id, links.target_id
-        FROM links
-        JOIN incident_objects
-          ON incident_objects.object_type_id = links.source_type_id
-         AND incident_objects.primary_id = links.source_id
-        WHERE links.project_id = ${this.projectId}
-        UNION
-        SELECT links.source_type_id, links.source_id, links.link_id,
-          links.target_type_id, links.target_id
-        FROM links
-        JOIN incident_objects
-          ON incident_objects.object_type_id = links.target_type_id
-         AND incident_objects.primary_id = links.target_id
-        WHERE links.project_id = ${this.projectId}
-        UNION
-        SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
-          overrides.link_id, overrides.target_type_id,
-          overrides.target_primary_id AS target_id
-        FROM ontology_link_overrides AS overrides
-        JOIN incident_objects
-          ON incident_objects.object_type_id = overrides.source_type_id
-         AND incident_objects.primary_id = overrides.source_primary_id
-        WHERE overrides.project_id = ${this.projectId}
-        UNION
-        SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
-          overrides.link_id, overrides.target_type_id,
-          overrides.target_primary_id AS target_id
-        FROM ontology_link_overrides AS overrides
-        JOIN incident_objects
-          ON incident_objects.object_type_id = overrides.target_type_id
-         AND incident_objects.primary_id = overrides.target_primary_id
-        WHERE overrides.project_id = ${this.projectId}
-        UNION
-        SELECT rows.source_type_id, rows.source_primary_id AS source_id,
-          rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
-        FROM ontology_source_rows AS rows
-        ${liveSourceRowsJoin(this.sql, this.projectId)}
-        JOIN incident_objects
-          ON incident_objects.object_type_id = rows.source_type_id
-         AND incident_objects.primary_id = rows.source_primary_id
-        WHERE rows.entity_kind = 'link'
-        UNION
-        SELECT rows.source_type_id, rows.source_primary_id AS source_id,
-          rows.link_id, rows.target_type_id, rows.target_primary_id AS target_id
-        FROM ontology_source_rows AS rows
-        ${liveSourceRowsJoin(this.sql, this.projectId)}
-        JOIN incident_objects
-          ON incident_objects.object_type_id = rows.target_type_id
-         AND incident_objects.primary_id = rows.target_primary_id
-        WHERE rows.entity_kind = 'link'
-      ), diff_links AS (
-        SELECT * FROM replacement_links
-        UNION SELECT * FROM incident_links
-      ), affected_scopes AS (
-        SELECT DISTINCT source_type_id, source_id, link_id FROM diff_links
-      ), all_links AS (
-        SELECT diff_links.*, TRUE AS diff_required FROM diff_links
-        UNION ALL
-        SELECT links.source_type_id, links.source_id, links.link_id,
-          links.target_type_id, links.target_id, FALSE AS diff_required
-        FROM links
-        JOIN affected_scopes USING (source_type_id, source_id, link_id)
-        WHERE links.project_id = ${this.projectId}
-        UNION ALL
-        SELECT overrides.source_type_id, overrides.source_primary_id AS source_id,
-          overrides.link_id, overrides.target_type_id,
-          overrides.target_primary_id AS target_id, FALSE AS diff_required
-        FROM ontology_link_overrides AS overrides
-        JOIN affected_scopes
-          ON affected_scopes.source_type_id = overrides.source_type_id
-         AND affected_scopes.source_id = overrides.source_primary_id
-         AND affected_scopes.link_id = overrides.link_id
-        WHERE overrides.project_id = ${this.projectId} AND overrides.identity_kind = 'slot'
-      ), selected AS (
-        SELECT source_type_id, source_id, link_id, target_type_id, target_id,
-          ${this.sql.unsafe(linkKeyExpression("all_links"))} AS identity_key,
-          ${this.sql.unsafe(linkSortExpression("all_links"))} AS sort_key,
-          BOOL_OR(diff_required) AS diff_required
-        FROM all_links
-        GROUP BY source_type_id, source_id, link_id, target_type_id, target_id
-      )
-      INSERT INTO ${this.sql(PG_REPLACEMENT_WORK_TABLE)} (
-        session_id, entity_kind, identity_key, sort_key, diff_required
-      )
-      SELECT ${input.sessionId}, 'link', identity_key, sort_key, diff_required
-      FROM selected
-      ON CONFLICT (session_id, entity_kind, identity_key) DO UPDATE SET
-        diff_required = ${this.sql(PG_REPLACEMENT_WORK_TABLE)}.diff_required
-          OR EXCLUDED.diff_required
-    `
-  }
-}
-
-function replacementIdentity(row: ReplacementWorkRow): ReplacementIdentity {
-  const parts = JSON.parse(row.identity_key) as string[]
-  if (row.entity_kind === "object") {
-    return {
-      kind: "object",
-      ref: { objectTypeId: parts[0]!, primaryId: parts[1]! },
-      sortKey: row.sort_key,
-      diffRequired: true,
-    }
-  }
-  return {
-    kind: "link",
-    ref: {
-      source: { objectTypeId: parts[0]!, primaryId: parts[1]! },
-      linkId: parts[2]!,
-      target: { objectTypeId: parts[3]!, primaryId: parts[4]! },
-    },
-    sortKey: row.sort_key,
-    diffRequired: row.diff_required,
   }
 }
 
@@ -1149,36 +928,9 @@ function storedPoint(row: TelemetryRow): StoredTelemetryPoint {
   }
 }
 
-export function objectSortExpression(alias?: string): string {
-  const prefix = alias ? `${alias}.` : ""
-  return utf8SortExpression([
-    `to_jsonb(${prefix}object_type_id)::text`,
-    `to_jsonb(${prefix}primary_id)::text`,
-  ])
-}
-
-function objectKeyExpression(alias?: string): string {
-  const prefix = alias ? `${alias}.` : ""
-  return jsonTupleExpression([
-    `to_jsonb(${prefix}object_type_id)::text`,
-    `to_jsonb(${prefix}primary_id)::text`,
-  ])
-}
-
 export function linkSortExpression(alias?: string): string {
   const prefix = alias ? `${alias}.` : ""
   return utf8SortExpression([
-    `to_jsonb(${prefix}source_type_id)::text`,
-    `to_jsonb(${prefix}source_id)::text`,
-    `to_jsonb(${prefix}link_id)::text`,
-    `to_jsonb(${prefix}target_type_id)::text`,
-    `to_jsonb(${prefix}target_id)::text`,
-  ])
-}
-
-function linkKeyExpression(alias?: string): string {
-  const prefix = alias ? `${alias}.` : ""
-  return jsonTupleExpression([
     `to_jsonb(${prefix}source_type_id)::text`,
     `to_jsonb(${prefix}source_id)::text`,
     `to_jsonb(${prefix}link_id)::text`,
@@ -1191,6 +943,6 @@ function utf8SortExpression(parts: readonly string[]): string {
   return `encode(convert_to(${jsonTupleExpression(parts)}, 'UTF8'), 'hex')`
 }
 
-function jsonTupleExpression(parts: readonly string[]): string {
+export function jsonTupleExpression(parts: readonly string[]): string {
   return `concat('[', ${parts.join(", ',', ")}, ']')`
 }

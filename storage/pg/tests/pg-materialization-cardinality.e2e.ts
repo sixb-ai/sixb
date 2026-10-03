@@ -170,13 +170,7 @@ async function withFixture(
             records: records.slice(offset, offset + 1000),
           })
         }
-        for await (const _page of materializations.streamWork({
-          session,
-          order: "cardinality",
-          pageRows: 1000,
-        })) {
-          // Draining is required by the provider contract before finalization.
-        }
+        await materializations.apply({ session })
         await materializations.finalize({
           session,
           finalization: {
@@ -244,10 +238,10 @@ describe("PostgreSQL materialization final cardinality", () => {
           occupant(value),
           occupant(value, true, "candidate"),
           {
-            kind: "object-existence",
-            recordKey: `exists:${value.source.primaryId}`,
-            ref: value.source,
-            exists: true,
+            kind: "classification",
+            recordKey: `classification:${value.source.primaryId}`,
+            entityKind: "object",
+            identityKey: JSON.stringify([value.source.objectTypeId, value.source.primaryId]),
           },
         ])
         const seen = observation()
@@ -275,10 +269,10 @@ describe("PostgreSQL materialization final cardinality", () => {
         .map((value) => occupant(value))
       for (let index = 0; index < 100000; index += 1) {
         records.push({
-          kind: "object-existence",
+          kind: "classification",
           recordKey: `unrelated:${index}`,
-          ref: { objectTypeId: "Unrelated", primaryId: String(index) },
-          exists: true,
+          entityKind: "object",
+          identityKey: JSON.stringify(["Unrelated", String(index)]),
         })
       }
       const seen = observation()
@@ -333,7 +327,7 @@ describe("PostgreSQL materialization final cardinality", () => {
       name: "duplicate occupied scope",
       actual: [ref(1), ref(1, "extra")],
       records: [occupant(ref(1)), occupant(ref(1, "extra"))],
-      error: "violates cardinality-one",
+      error: "has cardinality one",
     },
     {
       name: "occupied link in an expected empty scope",
