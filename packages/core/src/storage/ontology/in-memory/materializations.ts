@@ -53,7 +53,6 @@ import type {
   StreamMaterializationStateInput,
   StreamMaterializationVectorChangesInput,
 } from "../materializations"
-import type { OntologyMaterializationEvent } from "../outbox"
 import {
   assertExpectedLinkRevision,
   assertExpectedLinkScopeRevision,
@@ -80,6 +79,7 @@ import {
   materializationChunkRows,
   materializationOutboxWrite,
   materializationPlanChunk,
+  type OntologyOutboxWrite,
   workUniquenessKey,
 } from "./materializations-work"
 import { type InMemoryReplacementPlan, replacementPlanKey } from "./replacement-plans"
@@ -87,6 +87,7 @@ import {
   assertTimestamp,
   commitKey,
   commitOriginKey,
+  type InMemoryExecutionReader,
   type InMemoryOntologyState,
   type InMemoryOntologyStorageTestHooks,
   idempotencyKey,
@@ -111,7 +112,7 @@ export interface SessionState {
   readonly applyWork: MaterializationPlanWorkRecord[]
   readonly cardinalityWork: MaterializationCardinalityOccupantWorkRecord[]
   readonly eventWork: MaterializationEventWorkRecord[]
-  readonly outboxEnvelopes: Map<number, OntologyMaterializationEvent>
+  readonly outboxWrites: Map<number, OntologyOutboxWrite>
   workSealed: boolean
   vectorChangesStreamed: boolean
   applied: boolean
@@ -133,7 +134,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     private readonly reader: InMemoryMaterializationStateReader,
     private readonly getTransactionToken: () => object | null,
     private readonly getMaterializationLifecycle: () => ProviderMaterializationTransactionLifecycle | null,
-    private readonly executionExists: (projectId: string, executionId: string) => Promise<boolean>,
+    private readonly readExecution: InMemoryExecutionReader,
     private readonly hooks: InMemoryOntologyStorageTestHooks = {}
   ) {}
 
@@ -146,7 +147,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       )
     }
     assertMaterializationHeader(input)
-    if (!(await this.executionExists(input.commit.projectId, input.commit.executionId))) {
+    if (!(await this.readExecution(input.commit.projectId, input.commit.executionId))) {
       throw new MaterializationValidationError(
         `Ontology commit execution '${input.commit.executionId}' does not exist in project '${input.commit.projectId}'.`
       )
@@ -183,7 +184,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       applyWork: [],
       cardinalityWork: [],
       eventWork: [],
-      outboxEnvelopes: new Map<number, OntologyMaterializationEvent>(),
+      outboxWrites: new Map<number, OntologyOutboxWrite>(),
       workSealed: false,
       vectorChangesStreamed: false,
       applied: false,
@@ -218,7 +219,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     session.applyWork.length = 0
     session.cardinalityWork.length = 0
     session.eventWork.length = 0
-    session.outboxEnvelopes.clear()
+    session.outboxWrites.clear()
     session.incidentLinksByObject = null
     session.linkSlotStates = null
     this.liveSessions.delete(session)
@@ -362,7 +363,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       start = end
     }
     const outbox = session.eventWork.map((record, ordinal) =>
-      materializationOutboxWrite(record.draft, ordinal)
+      materializationOutboxWrite(session.header.commit, record.draft, ordinal)
     )
     this.writeChunk(session, materializationPlanChunk([], outbox))
     session.appliedEventCount = outbox.length
@@ -507,30 +508,26 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       })
     for (const item of chunk.outbox)
       write("outbox.insert", () => {
-        const envelope = item.envelope
-        if (envelope.projectId !== projectId || envelope.commitId !== session.header.commit.id) {
-          throw new MaterializationValidationError(
-            "Outbox event does not correlate with its materialization commit."
-          )
-        }
-        assertTimestamp(item.availableAt, "Outbox availableAt")
         assertTimestamp(item.createdAt, "Outbox createdAt")
-        assertTimestamp(envelope.occurredAt, "Outbox event occurredAt")
-        const key = outboxKey(projectId, envelope.id)
+        const key = outboxKey(projectId, item.id)
         if (this.state.outbox.has(key)) {
           throw new MaterializationConflictError(
             "effective-state",
-            `Duplicate outbox event '${envelope.id}'.`
+            `Duplicate outbox event '${item.id}'.`
           )
         }
-        if (session.outboxEnvelopes.has(envelope.commitOrdinal))
+        if (session.outboxWrites.has(item.commitOrdinal))
           throw new MaterializationConflictError(
             "effective-state",
             "Duplicate outbox commit ordinal."
           )
         this.state.outbox.set(key, {
-          envelope: structuredClone(envelope),
-          availableAt: item.availableAt,
+          projectId,
+          id: item.id,
+          commitId: session.header.commit.id,
+          commitOrdinal: item.commitOrdinal,
+          event: structuredClone(item.event),
+          availableAt: item.createdAt,
           attempts: 0,
           leaseId: null,
           leaseExpiresAt: null,
@@ -538,7 +535,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           lastFailure: null,
           createdAt: item.createdAt,
         })
-        session.outboxEnvelopes.set(envelope.commitOrdinal, structuredClone(envelope))
+        session.outboxWrites.set(item.commitOrdinal, structuredClone(item))
       })
   }
 

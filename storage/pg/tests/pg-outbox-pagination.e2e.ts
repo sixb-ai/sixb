@@ -32,9 +32,18 @@ test("outbox selects a bounded candidate page from a large ready backlog", async
   const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
   const rollback = new Error("rollback synthetic claims")
   try {
+    await sql.unsafe(`INSERT INTO executions
+      (project_id,id,executor_kind,executor_id,source_kind,source_id,correlation_id,authority_kind,created_at)
+      VALUES ('test','execution','request','request','http','request','correlation','disabled','2026-09-18')`)
+    await sql.unsafe(`INSERT INTO ontology_commits
+      (project_id,id,idempotency_key,request_hash,execution_id,origin_kind,origin,
+        ontology_revision,intent,result,committed_at)
+      VALUES ('test','commit','runtime:commit','hash','execution','runtime',
+        '{"kind":"runtime","requestId":"request"}','revision','{}','{}','2026-09-18')`)
     await sql.unsafe(`INSERT INTO ontology_outbox
-      (project_id,id,commit_id,commit_ordinal,envelope,available_at,created_at,lease_id,lease_expires_at)
-      SELECT 'test',i::text,'commit',i,jsonb_build_object('id',i::text,'type','object.created'),
+      (project_id,id,commit_id,commit_ordinal,event,available_at,created_at,lease_id,lease_expires_at)
+      SELECT 'test',i::text,'commit',i,jsonb_build_object('type','object.created','payload',
+          jsonb_build_object('objectTypeId','Device','primaryId',i::text,'properties','{}'::jsonb)),
         CASE WHEN i=1 THEN '2026-09-20'::timestamptz ELSE '2026-09-18'::timestamptz END,
         '2026-09-18'::timestamptz,CASE WHEN i IN (2,3) THEN 'previous' END,
         CASE WHEN i=2 THEN '2026-09-20'::timestamptz WHEN i=3 THEN '2026-09-18'::timestamptz END

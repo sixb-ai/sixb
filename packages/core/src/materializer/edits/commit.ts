@@ -187,7 +187,7 @@ async function executeEditTransaction(
     storage.ontology.materializations,
     session,
     workingState,
-    editPlanContext(command)
+    command.identity
   )
   const eventCount = await applyStagedWork(context, storage, session)
   await commitVectorWrites(context, storage, command.input, command.identity.commitId, session)
@@ -231,7 +231,6 @@ function buildEditCommit(
     requestHash: command.identity.requestHash,
     executionId: command.execution.executionId,
     origin: command.origin,
-    ...command.execution.attribution,
     ontologyRevision: context.projectionRegistry.ontologyRevision,
     intent: {
       kind: "edit",
@@ -354,15 +353,6 @@ function isRecoverableEditValidation(
 ): error is MaterializationValidationError {
   if (input.mode === "atomic") return false
   return error instanceof MaterializationValidationError
-}
-
-function editPlanContext(command: PreparedEditCommit) {
-  return {
-    identity: command.identity,
-    origin: command.origin,
-    correlationId: command.execution.correlationId,
-    attribution: command.execution.attribution,
-  }
 }
 
 async function finalizeEditMaterialization(

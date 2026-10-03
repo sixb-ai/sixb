@@ -57,11 +57,7 @@ describe("ontology materializer edits", () => {
     })
     await expect(
       storage.ontology.commits.getById({ projectId: "project", id: result.commitId })
-    ).resolves.toMatchObject({
-      executionId: "principal-execution",
-      requestedBy: { type: "user", id: "user-1" },
-      executor: { type: "request", requestId: "principal-request" },
-    })
+    ).resolves.toMatchObject({ executionId: "principal-execution" })
     const [event] = await storage.ontology.outbox.claim({
       projectId: "project",
       now: "2027-01-01T00:00:00.000Z",
@@ -77,9 +73,9 @@ describe("ontology materializer edits", () => {
   })
 
   test("attributes an Action write to its requester and its exact run", async () => {
-    // The gap this closes: an Action runs with trusted-primitive authority, so before commits
-    // carried `requestedBy`, the user who asked for it was reachable only through the execution.
-    // Reproduce by dropping `requestedBy` from `executionAttribution` in `execution/scope.ts`.
+    // An Action runs with trusted-primitive authority: its events name the user who asked for it
+    // and the exact run, both read from the execution the commit references.
+    // Reproduce by dropping `requestedBy` from `eventAttribution` in `materialization/event-envelopes.ts`.
     const storage = new InMemoryStorage()
     await storage.auth.users.create({ projectId: "project", id: "alice", email: "a@example.com" })
     await queueTestActionRun(storage, {
@@ -113,8 +109,8 @@ describe("ontology materializer edits", () => {
       projectId: "project",
       id: result.commitId,
     })
-    expect(commit).toMatchObject(attribution)
-    expect(commit).not.toHaveProperty("actor")
+    expect(commit).not.toHaveProperty("requestedBy")
+    expect(commit).not.toHaveProperty("executor")
     const [event] = await storage.ontology.outbox.claim({
       projectId: "project",
       now: "2027-01-01T00:00:00.000Z",
@@ -128,17 +124,30 @@ describe("ontology materializer edits", () => {
   test("attributes an unrequested write to its executor alone", async () => {
     const { materializer, storage } = createMaterializerFixture()
 
-    const result = await materializer.edits.commit(atomic("unrequested", []))
+    const result = await materializer.edits.commit(
+      atomic("unrequested", [
+        {
+          id: "create",
+          kind: "object.create",
+          ref: ref("unrequested-object"),
+          properties: { name: "Unrequested object" },
+        },
+      ])
+    )
 
-    const commit = await storage.ontology.commits.getById({
+    const [event] = await storage.ontology.outbox.claim({
       projectId: "project",
-      id: result.commitId,
+      now: "2027-01-01T00:00:00.000Z",
+      limit: 10,
+      leaseId: "unrequested-events",
+      leaseExpiresAt: "2027-01-01T01:00:00.000Z",
     })
-    expect(commit?.executor).toEqual({
+    expect(event?.envelope.commitId).toBe(result.commitId)
+    expect(event?.envelope.executor).toEqual({
       type: "request",
       requestId: "materializer-fixture-runtime-request",
     })
-    expect(commit).not.toHaveProperty("requestedBy")
+    expect(event?.envelope).not.toHaveProperty("requestedBy")
   })
 
   test("rejects replaying one request id from a different execution", async () => {

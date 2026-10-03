@@ -4,6 +4,7 @@ import type {
   OntologyMaterializationOrigin,
   ProjectionEntityRef,
 } from "../../../materialization/model"
+import type { ExecutionRecord } from "../../executions/types"
 import type { OntologyCommitOriginSelector, OntologyCommitRecord } from "../commits"
 import type {
   MaterializationWorkRecord,
@@ -11,7 +12,7 @@ import type {
   StoredLinkSlotOverride,
   StoredObjectOverride,
 } from "../materializations"
-import type { OntologyOutboxRecord } from "../outbox"
+import type { OntologyMaterializationEventDraft, OntologyOutboxRecord } from "../outbox"
 import type {
   OntologySourceRecord,
   StageSourceAssertion,
@@ -68,8 +69,23 @@ export interface InMemoryOntologyState {
   readonly objectOverrides: Map<string, InMemoryStoredObjectOverride>
   readonly linkOverrides: Map<string, InMemoryStoredLinkOverride>
   readonly linkSlotOverrides: Map<string, InMemoryStoredLinkSlotOverride>
-  readonly outbox: Map<string, OntologyOutboxRecord>
+  readonly outbox: Map<string, InMemoryOutboxRow>
   readonly replacementPlans: Map<string, InMemoryReplacementPlan>
+}
+
+/** Reads one execution of the same storage, the record an ontology commit references. */
+export type InMemoryExecutionReader = (
+  projectId: string,
+  executionId: string
+) => Promise<ExecutionRecord | null>
+
+/** An outbox row as stored: the event's draft, rebuilt from its commit when claimed. */
+export interface InMemoryOutboxRow extends Omit<OntologyOutboxRecord, "envelope"> {
+  readonly projectId: string
+  readonly id: string
+  readonly commitId: string
+  readonly commitOrdinal: number
+  readonly event: OntologyMaterializationEventDraft
 }
 
 /** @internal Test-only failure injection for the in-memory ontology provider. */

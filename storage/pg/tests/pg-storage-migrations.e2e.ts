@@ -3,6 +3,13 @@ import { defineObjectType, migrateStorage, OntologyRegistry, prop } from "@sixb/
 import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
+  materializationEvent,
+  type OntologyMaterializationEvent,
+  type OntologyMaterializationEventAttribution,
+  type OntologyMaterializationEventCommit,
+  type OntologyMaterializationEventDraft,
+} from "@sixb/core/internal/materialization"
+import {
   ACTION_RUN_FAILURE_CODES,
   defineMigrations,
   ONTOLOGY_OUTBOX_FAILURE_CODES,
@@ -344,6 +351,7 @@ describe("Postgres storage migrations", () => {
             "051-projection-run-supersession",
             "052-compact-source-storage",
             "053-replacement-plans",
+            "054-slim-ontology-outbox",
           ],
         },
       ])
@@ -718,6 +726,13 @@ describe("Postgres storage migrations", () => {
           id: "053-replacement-plans",
           status: "applied",
           version: 53,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "054-slim-ontology-outbox",
+          status: "applied",
+          version: 54,
         },
       ])
     })
@@ -1231,7 +1246,7 @@ describe("Postgres storage migrations", () => {
   })
 
   test("ontology outbox failure migration replaces legacy diagnostics with a safe failure", async () => {
-    await withStorage(false, async (storage, schemaName) => {
+    await withStorage(false, async (_storage, schemaName) => {
       const failureMigrationIndex = postgresStorageMigrations.steps.findIndex(
         (migration) => migration.id === "018-ontology-outbox-failure-record"
       )
@@ -1270,7 +1285,15 @@ describe("Postgres storage migrations", () => {
             )
         `)
 
-        await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+        // Only through 018: its rows have no commit, so 054 would rightly refuse them.
+        await createPostgresMigrator({
+          sql,
+          schemaName,
+          migrations: defineMigrations({
+            adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+            steps: postgresStorageMigrations.steps.slice(0, failureMigrationIndex + 1),
+          }),
+        }).migrate()
 
         const rows = await sql.unsafe<
           Array<{ readonly id: string; readonly last_failure: unknown | null }>
@@ -1294,6 +1317,153 @@ describe("Postgres storage migrations", () => {
       } finally {
         await sql.end()
       }
+    })
+  })
+
+  describe("054 slim ontology outbox", () => {
+    const commit: OntologyMaterializationEventCommit = {
+      projectId: "p",
+      id: "c-1",
+      committedAt: "2026-10-01T08:00:00.000Z",
+      origin: { kind: "runtime", requestId: "req-1" },
+    }
+    /** What the execution below says, and what 053 copied onto the commit. */
+    const attribution: OntologyMaterializationEventAttribution = {
+      correlationId: "correlation-1",
+      executor: { type: "request", requestId: "req-1" },
+    }
+    const drafts: readonly OntologyMaterializationEventDraft[] = [
+      {
+        type: "object.created",
+        payload: { objectTypeId: "Room", primaryId: "r-1", properties: { b: 2, a: [1] } },
+      },
+      {
+        type: "link.updated",
+        payload: {
+          sourceTypeId: "Room",
+          sourceId: "r-1",
+          linkId: "site",
+          targetTypeId: "Site",
+          targetId: "s-1",
+          properties: { since: 2020 },
+          propertyChanges: { since: { operation: "updated", before: 2019, after: 2020 } },
+        },
+      },
+      {
+        type: "telemetry.appended",
+        payload: {
+          objectTypeId: "Room",
+          objectId: "r-1",
+          propertyId: "temperature",
+          value: 21.5,
+          at: "2026-10-01T07:59:00.000Z",
+          unit: "celsius",
+        },
+      },
+    ]
+    const envelopes = drafts.map((draft, ordinal) =>
+      materializationEvent(
+        draft,
+        { id: `e-${ordinal}`, commitOrdinal: ordinal },
+        commit,
+        attribution
+      )
+    )
+
+    /** Migrates `schemaName` to 053 and stores `commit` and its events as 053 stored them. */
+    async function seedAt053(
+      sql: ReturnType<typeof createPgClient>,
+      schemaName: string,
+      stored: readonly OntologyMaterializationEvent[]
+    ): Promise<void> {
+      const index = postgresStorageMigrations.steps.findIndex(
+        (migration) => migration.id === "054-slim-ontology-outbox"
+      )
+      await createPostgresMigrator({
+        sql,
+        schemaName,
+        migrations: defineMigrations({
+          adapterId: POSTGRES_STORAGE_ADAPTER_ID,
+          steps: postgresStorageMigrations.steps.slice(0, index),
+        }),
+      }).migrate()
+      await sql`
+        INSERT INTO executions (
+          project_id, id, executor_kind, executor_id, source_kind, source_id, correlation_id,
+          authority_kind, created_at
+        ) VALUES (
+          'p', 'x-1', 'request', 'req-1', 'http', 'req-1', 'correlation-1', 'disabled',
+          ${commit.committedAt}
+        )
+      `
+      await sql`
+        INSERT INTO ontology_commits (
+          project_id, id, idempotency_key, request_hash, execution_id, origin_kind, origin,
+          executor, ontology_revision, intent, result, committed_at
+        ) VALUES (
+          'p', 'c-1', 'runtime:c-1', 'hash', 'x-1', 'runtime',
+          ${jsonParameter(sql, commit.origin)}, ${jsonParameter(sql, attribution.executor)},
+          'revision', '{}'::jsonb, '{}'::jsonb, ${commit.committedAt}
+        )
+      `
+      for (const envelope of stored) {
+        await sql`
+          INSERT INTO ontology_outbox (
+            project_id, id, commit_id, commit_ordinal, envelope, available_at, created_at
+          ) VALUES (
+            'p', ${envelope.id}, 'c-1', ${envelope.commitOrdinal}, ${jsonParameter(sql, envelope)},
+            ${commit.committedAt}, ${commit.committedAt}
+          )
+        `
+      }
+    }
+
+    // Removal proof: keep `propertyChanges` in a created draft, or drop a context field from the
+    // rebuild; the claimed events no longer equal what 053 stored.
+    test("keeps every pending event exactly as consumers would have received it", async () => {
+      await withStorage(false, async (storage, schemaName) => {
+        const sql = createPgClient({ connectionString: databaseUrl(), schemaName, max: 1 })
+        try {
+          await seedAt053(sql, schemaName, envelopes)
+          await expect(migrateStorage(storage)).resolves.toMatchObject({ status: "migrated" })
+
+          expect(await readTableColumns(schemaName, "ontology_outbox")).not.toContain("envelope")
+          const commitColumns = await readTableColumns(schemaName, "ontology_commits")
+          expect(commitColumns).not.toContain("requested_by")
+          expect(commitColumns).not.toContain("executor")
+          expect([
+            ...(await sql`SELECT event FROM ontology_outbox ORDER BY commit_ordinal`),
+          ]).toEqual(drafts.map((event) => ({ event })))
+          const claimed = await storage.ontology.outbox.claim({
+            projectId: "p",
+            now: "2026-10-01T09:00:00.000Z",
+            limit: 10,
+            leaseId: "lease",
+            leaseExpiresAt: "2026-10-01T09:01:00.000Z",
+          })
+          expect(claimed.map((row) => row.envelope)).toStrictEqual(envelopes)
+        } finally {
+          await sql.end()
+        }
+      })
+    })
+
+    // Removal proof: drop the DO block from 054; the tampered event is converted and would reach
+    // consumers with its execution's correlation id instead of its own.
+    test("refuses to convert an event that would not rebuild from its commit", async () => {
+      await withStorage(false, async (storage, schemaName) => {
+        const sql = createPgClient({ connectionString: databaseUrl(), schemaName, max: 1 })
+        try {
+          const [first, ...rest] = envelopes
+          await seedAt053(sql, schemaName, [{ ...first!, correlationId: "elsewhere" }, ...rest])
+          await expect(migrateStorage(storage)).rejects.toThrow(
+            "1 outbox events would not rebuild from their commit"
+          )
+          expect(await readTableColumns(schemaName, "ontology_outbox")).toContain("envelope")
+        } finally {
+          await sql.end()
+        }
+      })
     })
   })
 
@@ -1426,10 +1596,11 @@ describe("Postgres storage migrations", () => {
         "ontology_source_rows",
         "ontology_sources",
       ])
-      expect(await readTableColumns(schemaName, "ontology_commits")).toEqual(
-        expect.arrayContaining(["execution_id", "requested_by", "executor"])
-      )
-      expect(await readTableColumns(schemaName, "ontology_commits")).not.toContain("actor")
+      // A commit references its execution; who asked and what wrote live only there.
+      const commitColumns = await readTableColumns(schemaName, "ontology_commits")
+      for (const copy of ["actor", "requested_by", "executor", "correlation_id"]) {
+        expect(commitColumns).not.toContain(copy)
+      }
       expect(await readTableColumns(schemaName, "objects")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "links")).toContain("last_commit_id")
       expect(await readTableColumns(schemaName, "timeseries")).toContain("last_commit_id")
@@ -2735,6 +2906,13 @@ describe("Postgres storage migrations", () => {
           status: "applied",
           version: 53,
         },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "054-slim-ontology-outbox",
+          status: "applied",
+          version: 54,
+        },
       ])
     } finally {
       await storages[0]?.dropSchema()
@@ -2742,6 +2920,12 @@ describe("Postgres storage migrations", () => {
     }
   })
 })
+
+function databaseUrl(): string {
+  const connectionString = process.env.DATABASE_URL
+  if (!connectionString) throw new Error("[SixbPg] DATABASE_URL is required.")
+  return connectionString
+}
 
 async function withStorage(
   migrate: boolean,

@@ -397,12 +397,7 @@ async function executeTelemetryTransaction(
     storage.ontology.materializations,
     session,
     command.input,
-    command.identity,
-    origin,
-    {
-      correlationId: command.execution.correlationId,
-      attribution: command.execution.attribution,
-    }
+    command.identity
   )
   const eventCount = await applyStagedWork(context, storage, session)
   const result: TelemetryCommitResult = {
@@ -469,7 +464,6 @@ function telemetryCommit(
     requestHash: command.identity.requestHash,
     executionId: command.execution.executionId,
     origin,
-    ...command.execution.attribution,
     ontologyRevision: command.ontologyRevision,
     intent: telemetryCommitIntent(command),
     committedAt: command.identity.committedAt,

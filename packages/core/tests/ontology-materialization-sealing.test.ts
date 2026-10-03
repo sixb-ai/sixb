@@ -141,12 +141,6 @@ function replacementHeader(
         datasetId: candidate.datasetVersion.datasetId,
         datasetVersionId: candidate.datasetVersion.versionId,
       },
-      executor: {
-        type: "primitive",
-        kind: "projection",
-        id: candidate.source.projectionId,
-        runId: candidate.execution.projectionRunId,
-      },
       ontologyRevision,
       projectionRevision,
       ownershipHash,
@@ -258,7 +252,6 @@ function emptyEditHeader(commitId: string): MaterializationPlanHeader {
       requestHash: commitId,
       executionId: `execution:${commitId}`,
       origin: { kind: "runtime", requestId: commitId },
-      executor: { type: "request", requestId: commitId },
       ontologyRevision,
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
       committedAt: "2026-01-01T00:00:00.000Z",
@@ -482,7 +475,6 @@ describe("in-memory ontology materialization finalization", () => {
           kind: "telemetry",
           source: { kind: "runtime", requestId: "telemetry-classification" },
         },
-        executor: { type: "request", requestId: "telemetry-classification" },
         ontologyRevision,
         intent: {
           kind: "telemetry",

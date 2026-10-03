@@ -1,29 +1,15 @@
 import { resolveExecutionScopeAuthorization } from "../../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../../execution/durable"
-import type {
-  AuthorizablePrincipal,
-  ExecutionScope,
-  TrustedPrimitiveKind,
-} from "../../execution/types"
+import type { ExecutionScope, TrustedPrimitiveKind } from "../../execution/types"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../materialization/errors"
-import type { EventExecutor } from "../../materialization/events"
 import type {
   CreateExecutionInput,
   ExecutionRecord,
   ExecutionStorage,
 } from "../../storage/executions"
-
-/**
- * Who and what a commit and its events are attributed to. Both are copied from the execution, so
- * they are a pure function of `executionId` and never an input the caller chooses.
- */
-export interface MaterializerAttribution {
-  readonly requestedBy?: AuthorizablePrincipal
-  readonly executor: EventExecutor
-}
 
 /** Immutable execution metadata attached to one prepared Materializer command. */
 export interface MaterializerExecution {
@@ -31,7 +17,6 @@ export interface MaterializerExecution {
   readonly record: CreateExecutionInput
   readonly executionId: string
   readonly correlationId: string
-  readonly attribution: MaterializerAttribution
 }
 
 /** Validate the process-local scope before any Materializer read or write is attempted. */
@@ -49,28 +34,6 @@ export function prepareMaterializerExecution(
     }),
     executionId: scope.execution.id,
     correlationId: scope.execution.correlationId,
-    attribution: executionAttribution(scope),
-  }
-}
-
-function executionAttribution(scope: ExecutionScope): MaterializerAttribution {
-  const { requestedBy, executor } = scope.execution
-  const attributed = { executor: eventExecutor(executor) }
-  if (requestedBy === undefined) return attributed
-  return { ...attributed, requestedBy: { type: requestedBy.type, id: requestedBy.id } }
-}
-
-/** Drop the process-local Agent actor id: the durable execution does not record it. */
-function eventExecutor(executor: ExecutionScope["execution"]["executor"]): EventExecutor {
-  switch (executor.type) {
-    case "request":
-      return { type: "request", requestId: executor.requestId }
-    case "primitive":
-      return { type: "primitive", kind: executor.kind, id: executor.id, runId: executor.runId }
-    case "agent":
-      return { type: "agent", runId: executor.runId }
-    case "kernel":
-      return { type: "kernel", operation: structuredClone(executor.operation) }
   }
 }
 

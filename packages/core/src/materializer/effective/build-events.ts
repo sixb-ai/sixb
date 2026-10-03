@@ -1,12 +1,10 @@
 import type {
   EffectiveLinkChange,
   EffectiveObjectChange,
-  OntologyMaterializationOrigin,
   TelemetryPointWrite,
 } from "../../materialization/model"
 import { linkRefSortKey, objectRefSortKey, telemetryPointSortKey } from "../../materialization/refs"
 import type { OntologyMaterializationEventDraft } from "../../storage/ontology"
-import type { MaterializerAttribution } from "../execution/scope"
 import { materializationEventKindOrdinal } from "../shared/identity"
 
 export interface OrderedMaterializationEventDraft {
@@ -15,159 +13,83 @@ export interface OrderedMaterializationEventDraft {
   readonly draft: OntologyMaterializationEventDraft
 }
 
-export interface MaterializationEventDraftContext {
-  readonly projectId: string
-  readonly commitId: string
-  readonly committedAt: string
-  readonly correlationId: string
-  readonly origin: OntologyMaterializationOrigin
-  readonly attribution: MaterializerAttribution
-}
-
 export function buildObjectMaterializationEventDraft(
-  input: MaterializationEventDraftContext & { readonly change: EffectiveObjectChange }
-): OrderedMaterializationEventDraft {
-  const draft = buildObjectEventDraft(input, input.change)
-  return orderedDraft(objectRefSortKey(input.change.ref), draft)
-}
-
-function buildObjectEventDraft(
-  context: MaterializationEventDraftContext,
   change: EffectiveObjectChange
-): OntologyMaterializationEventDraft {
-  const base = eventDraftBase(context)
-  const partitionKey = `${change.ref.objectTypeId}:${change.ref.primaryId}`
-
-  if (change.kind === "deleted") {
-    return {
-      ...base,
-      type: "object.deleted",
-      topic: "objects",
-      partitionKey,
-      payload: {
-        objectTypeId: change.ref.objectTypeId,
-        primaryId: change.ref.primaryId,
-        propertyChanges: change.propertyChanges,
-      },
-    }
-  }
-
-  const type = objectEventType(change)
-  return {
-    ...base,
-    type,
-    topic: "objects",
-    partitionKey,
-    payload: {
-      objectTypeId: change.ref.objectTypeId,
-      primaryId: change.ref.primaryId,
-      properties: change.after.properties,
-      propertyChanges: change.propertyChanges,
-    },
-  }
+): OrderedMaterializationEventDraft {
+  return orderedDraft(objectRefSortKey(change.ref), buildObjectEventDraft(change))
 }
 
-function objectEventType(
-  change: Exclude<EffectiveObjectChange, { readonly kind: "deleted" }>
-): "object.created" | "object.updated" {
-  if (change.kind === "created") return "object.created"
-  return "object.updated"
+function buildObjectEventDraft(change: EffectiveObjectChange): OntologyMaterializationEventDraft {
+  const identity = { objectTypeId: change.ref.objectTypeId, primaryId: change.ref.primaryId }
+  switch (change.kind) {
+    case "created":
+      return {
+        type: "object.created",
+        payload: { ...identity, properties: change.after.properties },
+      }
+    case "updated":
+      return {
+        type: "object.updated",
+        payload: {
+          ...identity,
+          properties: change.after.properties,
+          propertyChanges: change.propertyChanges,
+        },
+      }
+    case "deleted":
+      return {
+        type: "object.deleted",
+        payload: { ...identity, propertyChanges: change.propertyChanges },
+      }
+  }
 }
 
 export function buildLinkMaterializationEventDraft(
-  input: MaterializationEventDraftContext & { readonly change: EffectiveLinkChange }
+  change: EffectiveLinkChange
 ): OrderedMaterializationEventDraft {
-  const draft = buildLinkEventDraft(input, input.change)
-  return orderedDraft(linkRefSortKey(input.change.ref), draft)
+  return orderedDraft(linkRefSortKey(change.ref), buildLinkEventDraft(change))
 }
 
-function buildLinkEventDraft(
-  context: MaterializationEventDraftContext,
-  change: EffectiveLinkChange
-): OntologyMaterializationEventDraft {
-  const base = eventDraftBase(context)
-  const partitionKey = `${change.ref.source.objectTypeId}:${change.ref.source.primaryId}:${change.ref.linkId}`
-  const commonPayload = {
+function buildLinkEventDraft(change: EffectiveLinkChange): OntologyMaterializationEventDraft {
+  const identity = {
     sourceTypeId: change.ref.source.objectTypeId,
     sourceId: change.ref.source.primaryId,
     linkId: change.ref.linkId,
     targetTypeId: change.ref.target.objectTypeId,
     targetId: change.ref.target.primaryId,
-    propertyChanges: change.propertyChanges,
   }
-
   if (change.kind === "deleted") {
     return {
-      ...base,
       type: "link.deleted",
-      topic: "links",
-      partitionKey,
-      payload: commonPayload,
+      payload: { ...identity, propertyChanges: change.propertyChanges },
     }
   }
-
-  const type = linkEventType(change)
-  if (change.after.properties === undefined) {
-    return { ...base, type, topic: "links", partitionKey, payload: commonPayload }
+  const properties =
+    change.after.properties === undefined ? {} : { properties: change.after.properties }
+  if (change.kind === "created") {
+    return { type: "link.created", payload: { ...identity, ...properties } }
   }
   return {
-    ...base,
-    type,
-    topic: "links",
-    partitionKey,
-    payload: { ...commonPayload, properties: change.after.properties },
+    type: "link.updated",
+    payload: { ...identity, ...properties, propertyChanges: change.propertyChanges },
   }
-}
-
-function linkEventType(
-  change: Exclude<EffectiveLinkChange, { readonly kind: "deleted" }>
-): "link.created" | "link.updated" {
-  if (change.kind === "created") return "link.created"
-  return "link.updated"
 }
 
 export function buildTelemetryMaterializationEventDraft(
-  input: MaterializationEventDraftContext & { readonly point: TelemetryPointWrite }
-): OrderedMaterializationEventDraft {
-  const draft = buildTelemetryEventDraft(input, input.point)
-  return orderedDraft(telemetryPointSortKey(input.point.series, input.point.at), draft)
-}
-
-function buildTelemetryEventDraft(
-  context: MaterializationEventDraftContext,
   point: TelemetryPointWrite
-): OntologyMaterializationEventDraft {
-  const base = eventDraftBase(context)
-  const partitionKey = `${point.series.object.objectTypeId}:${point.series.object.primaryId}:${point.series.propertyId}`
+): OrderedMaterializationEventDraft {
   const payload = {
     objectTypeId: point.series.object.objectTypeId,
     objectId: point.series.object.primaryId,
     propertyId: point.series.propertyId,
     value: point.value,
     at: point.at,
+    ...(point.unit === undefined ? {} : { unit: point.unit }),
   }
-  if (point.unit === undefined) {
-    return { ...base, type: "telemetry.appended", topic: "telemetry", partitionKey, payload }
-  }
-  return {
-    ...base,
+  return orderedDraft(telemetryPointSortKey(point.series, point.at), {
     type: "telemetry.appended",
-    topic: "telemetry",
-    partitionKey,
-    payload: { ...payload, unit: point.unit },
-  }
-}
-
-function eventDraftBase(context: MaterializationEventDraftContext) {
-  return {
-    schemaVersion: 1 as const,
-    projectId: context.projectId,
-    occurredAt: context.committedAt,
-    correlationId: context.correlationId,
-    origin: context.origin,
-    ...context.attribution,
-    commitId: context.commitId,
-  }
+    payload,
+  })
 }
 
 function orderedDraft(

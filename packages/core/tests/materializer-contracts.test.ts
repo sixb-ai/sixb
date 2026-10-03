@@ -13,7 +13,6 @@ import type {
   OntologyCommitWrite,
   OntologyMaterializationEvent,
   OntologyMaterializationStorage,
-  OntologyOutboxWrite,
   OntologySourceStorage,
   StageMaterializationWorkInput,
   StageSourceAssertion,
@@ -399,7 +398,6 @@ describe("materializer canonical contracts", () => {
         requestHash: "request-hash",
         executionId: "execution-1",
         origin: { kind: "runtime", requestId: "request-1" },
-        executor: { type: "request", requestId: "request-1" },
         ontologyRevision: "ontology-revision",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
         committedAt: "2026-01-02T03:04:05.000Z",
@@ -431,7 +429,6 @@ describe("materializer canonical contracts", () => {
       requestHash: "request-hash",
       executionId: "execution-1",
       origin: { kind: "runtime", requestId: "request-1" },
-      executor: { type: "request", requestId: "request-1" },
       ontologyRevision: "ontology-revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
       committedAt: "2026-01-02T03:04:05.000Z",
@@ -468,38 +465,6 @@ describe("materializer canonical contracts", () => {
       },
     }
     expect(mismatched.result.kind).toBe("telemetry")
-  })
-
-  test("uses the outbox envelope as event identity authority", () => {
-    const envelope: OntologyMaterializationEvent = {
-      id: "event-1",
-      schemaVersion: 1,
-      projectId: "project",
-      occurredAt: "2026-01-02T03:04:05.000Z",
-      correlationId: "correlation-1",
-      origin: { kind: "runtime", requestId: "request-1" },
-      executor: { type: "request", requestId: "request-1" },
-      commitId: "commit-1",
-      commitOrdinal: 0,
-      type: "object.deleted",
-      topic: "objects",
-      partitionKey: "Entity:1",
-      payload: {
-        objectTypeId: "Entity",
-        primaryId: "1",
-        propertyChanges: {},
-      },
-    }
-    const write = {
-      envelope,
-      availableAt: "2026-01-02T03:04:05.000Z",
-      createdAt: "2026-01-02T03:04:05.000Z",
-    } satisfies OntologyOutboxWrite
-
-    expect(Object.keys(write)).toEqual(["envelope", "availableAt", "createdAt"])
-    expect(write.envelope.id).toBe("event-1")
-    expect(write.envelope.commitId).toBe("commit-1")
-    expect(write.envelope.commitOrdinal).toBe(0)
   })
 
   test("derives stable SHA-256 commit and event identities", () => {

@@ -4,6 +4,10 @@ import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "@sixb/core/internal/materialization"
+import {
+  claimedOutboxRows,
+  type OutboxEventContext,
+} from "@sixb/core/internal/ontology-storage-provider"
 import type {
   ClaimedOntologyOutboxRow,
   ClaimOntologyOutboxInput,
@@ -15,14 +19,23 @@ import type {
   SummarizeOntologyOutboxInput,
 } from "@sixb/core/storage"
 import { ONTOLOGY_OUTBOX_FAILURE_CODES } from "@sixb/core/storage"
+import { type SqliteExecutionRow, sqliteExecutionRecord } from "../execution-storage"
 import {
   assertNonblank,
   assertPositiveInteger,
   assertTimestamp,
-  outboxRecord,
+  claimedOutboxDraft,
+  parseJson,
   type SqliteOntologyOutboxRow,
   type SqliteRootOperation,
 } from "./shared"
+
+/** A commit's own fields, prefixed, beside every column of the execution it ran under. */
+interface SqliteOutboxContextRow extends SqliteExecutionRow {
+  readonly commit_id: string
+  readonly commit_committed_at: string
+  readonly commit_origin: string
+}
 
 export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
   constructor(
@@ -74,8 +87,8 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
             UPDATE ontology_outbox
             SET attempts = attempts + 1, lease_id = ?, lease_expires_at = ?
             WHERE rowid IN (SELECT CAST(value AS INTEGER) FROM json_each(?))
-            RETURNING envelope, available_at, attempts, lease_id, lease_expires_at,
-              published_at, last_failure, created_at
+            RETURNING id, commit_id, commit_ordinal, event, available_at, attempts, lease_id,
+              lease_expires_at, published_at, last_failure, created_at
           `
         )
         .all(
@@ -83,22 +96,31 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
           input.leaseExpiresAt,
           JSON.stringify(selected.map((row) => row.rowId))
         ) as SqliteOntologyOutboxRow[]
-      return rows
-        .map((row) => outboxRecord(row))
+      // Each commit and its execution are read once, however many of its events the batch holds.
+      const contexts = this.db
+        .query(
+          `SELECT commits.id AS commit_id, commits.committed_at AS commit_committed_at,
+             commits.origin AS commit_origin, executions.*
+           FROM json_each(?) AS requested
+           CROSS JOIN ontology_commits AS commits
+             ON commits.project_id = ? AND commits.id = requested.value
+           CROSS JOIN executions
+             ON executions.project_id = commits.project_id AND executions.id = commits.execution_id`
+        )
+        .all(
+          JSON.stringify([...new Set(rows.map((row) => row.commit_id))]),
+          input.projectId
+        ) as SqliteOutboxContextRow[]
+      const contextOf = new Map(
+        contexts.map((row) => [row.commit_id, outboxEventContext(input.projectId, row)])
+      )
+      const drafts = rows
+        .map(claimedOutboxDraft)
         .sort(
           (left, right) =>
-            left.createdAt.localeCompare(right.createdAt) ||
-            left.envelope.id.localeCompare(right.envelope.id)
+            left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id)
         )
-        .map((record) => {
-          if (record.leaseId === null || record.leaseExpiresAt === null) {
-            throw new MaterializationConflictError(
-              "outbox-lease",
-              "Ontology outbox claim returned an unpaired lease."
-            )
-          }
-          return { ...record, leaseId: record.leaseId, leaseExpiresAt: record.leaseExpiresAt }
-        })
+      return claimedOutboxRows(drafts, (commitId) => contextOf.get(commitId))
     })
   }
 
@@ -232,6 +254,18 @@ export class SqliteOntologyOutboxStorage implements OntologyOutboxStorage {
         maxAttempts: summary.max_attempts,
       }
     })
+  }
+}
+
+function outboxEventContext(projectId: string, row: SqliteOutboxContextRow): OutboxEventContext {
+  return {
+    commit: {
+      projectId,
+      id: row.commit_id,
+      committedAt: row.commit_committed_at,
+      origin: parseJson<OutboxEventContext["commit"]["origin"]>(row.commit_origin),
+    },
+    execution: sqliteExecutionRecord(row),
   }
 }
 

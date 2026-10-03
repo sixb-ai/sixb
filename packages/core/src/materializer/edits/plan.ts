@@ -1,8 +1,4 @@
-import type {
-  EffectiveLinkChange,
-  EffectiveObjectChange,
-  OntologyMaterializationOrigin,
-} from "../../materialization/model"
+import type { EffectiveLinkChange, EffectiveObjectChange } from "../../materialization/model"
 import {
   compareLinkRefs,
   compareObjectRefs,
@@ -26,7 +22,6 @@ import {
 } from "../effective/build-events"
 import { diffEffectiveLink, diffEffectiveLinkSlot, diffEffectiveObject } from "../effective/diff"
 import { validateEffectiveObject } from "../effective/validate"
-import type { MaterializerAttribution } from "../execution/scope"
 import { stageWorkBounded } from "../execution/work-executor"
 import {
   appendEffectiveLinkWork,
@@ -55,43 +50,29 @@ export interface EditPlanChanges {
   readonly links: readonly EffectiveLinkChange[]
 }
 
-interface EditPlanContext {
-  readonly identity: TimedCommitIdentity
-  readonly origin: OntologyMaterializationOrigin
-  readonly correlationId: string
-  readonly attribution: MaterializerAttribution
-}
-
 export async function stageEditPlan(
   context: MaterializerContext,
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
   state: EditWorkingState,
-  planContext: EditPlanContext
+  identity: TimedCommitIdentity
 ): Promise<EditPlanChanges> {
   validateWorkingCardinality(state.links.slots)
 
   const objectChanges: EffectiveObjectChange[] = []
   for (const working of sortedObjects(state.objects)) {
-    const change = await stageObject(context, storage, session, working, planContext)
+    const change = await stageObject(context, storage, session, working, identity)
     if (change) objectChanges.push(change)
   }
 
   const linkChanges: EffectiveLinkChange[] = []
   for (const working of sortedLinkEdges(state.links.edges)) {
-    const change = await stageLinkEdge(
-      context,
-      storage,
-      session,
-      state.objects,
-      working,
-      planContext
-    )
+    const change = await stageLinkEdge(context, storage, session, state.objects, working, identity)
     if (change) linkChanges.push(change)
   }
   for (const working of sortedLinkSlots(state.links.slots)) {
     linkChanges.push(
-      ...(await stageLinkSlot(context, storage, session, state.objects, working, planContext))
+      ...(await stageLinkSlot(context, storage, session, state.objects, working, identity))
     )
   }
 
@@ -109,16 +90,16 @@ async function stageLinkSlot(
   session: MaterializationSession,
   objects: EditWorkingState["objects"],
   working: WorkingLinkSlot,
-  planContext: EditPlanContext
+  identity: TimedCommitIdentity
 ): Promise<EffectiveLinkChange[]> {
   const overrideItems: MaterializationPlanWorkItem[] = []
-  appendLinkSlotOverrideWork(overrideItems, working, planContext.identity)
+  appendLinkSlotOverrideWork(overrideItems, working, identity)
   const resolved = resolveLinkSlot(context.ontology, working, objects)
   const changes = diffEffectiveLinkSlot({
     before: working.before,
     resolved,
-    commitId: planContext.identity.commitId,
-    committedAt: planContext.identity.committedAt,
+    commitId: identity.commitId,
+    committedAt: identity.committedAt,
   })
 
   const representative =
@@ -145,7 +126,7 @@ async function stageLinkSlot(
     appendEffectiveLinkWork(effectiveItems, change)
     const sortKey = linkRefSortKey(change.ref)
     work.push(...effectiveItems.map((item) => planWork(item, sortKey)))
-    work.push(eventWork(buildLinkEvent(context, planContext, change)))
+    work.push(eventWork(buildLinkMaterializationEventDraft(change)))
   }
   await stageWorkBounded(context, storage, session, work)
   return changes
@@ -156,18 +137,18 @@ async function stageObject(
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
   working: WorkingObject,
-  planContext: EditPlanContext
+  identity: TimedCommitIdentity
 ): Promise<EffectiveObjectChange | null> {
   const items: MaterializationPlanWorkItem[] = []
-  appendObjectOverrideWork(items, working, planContext.identity)
+  appendObjectOverrideWork(items, working, identity)
 
   const resolved = resolveObject(context.ontology, working)
   if (resolved) validateEffectiveObject(context.ontology, resolved.ref, resolved.properties)
   const change = diffEffectiveObject({
     before: working.before,
     resolved,
-    commitId: planContext.identity.commitId,
-    committedAt: planContext.identity.committedAt,
+    commitId: identity.commitId,
+    committedAt: identity.committedAt,
   })
   if (change) appendEffectiveObjectWork(items, change)
 
@@ -177,7 +158,7 @@ async function stageObject(
     ...items.map((item) => planWork(item, sortKey)),
   ]
   if (change) {
-    work.push(eventWork(buildObjectEvent(context, planContext, change)))
+    work.push(eventWork(buildObjectMaterializationEventDraft(change)))
   }
   await stageWorkBounded(context, storage, session, work)
   return change
@@ -189,17 +170,17 @@ async function stageLinkEdge(
   session: MaterializationSession,
   objects: EditWorkingState["objects"],
   working: WorkingLinkEdge,
-  planContext: EditPlanContext
+  identity: TimedCommitIdentity
 ): Promise<EffectiveLinkChange | null> {
   const items: MaterializationPlanWorkItem[] = []
-  appendLinkEdgeOverrideWork(items, working, planContext.identity)
+  appendLinkEdgeOverrideWork(items, working, identity)
 
   const resolved = resolveLinkEdge(context.ontology, working, objects)
   const change = diffEffectiveLink({
     before: working.before,
     resolved,
-    commitId: planContext.identity.commitId,
-    committedAt: planContext.identity.committedAt,
+    commitId: identity.commitId,
+    committedAt: identity.committedAt,
   })
   if (change) appendEffectiveLinkWork(items, change)
 
@@ -209,42 +190,10 @@ async function stageLinkEdge(
     ...items.map((item) => planWork(item, sortKey)),
   ]
   if (change) {
-    work.push(eventWork(buildLinkEvent(context, planContext, change)))
+    work.push(eventWork(buildLinkMaterializationEventDraft(change)))
   }
   await stageWorkBounded(context, storage, session, work)
   return change
-}
-
-function buildObjectEvent(
-  context: Pick<MaterializerContext, "projectId">,
-  planContext: EditPlanContext,
-  change: EffectiveObjectChange
-) {
-  const eventContext = materializationEventContext(context, planContext)
-  return buildObjectMaterializationEventDraft({ ...eventContext, change })
-}
-
-function buildLinkEvent(
-  context: Pick<MaterializerContext, "projectId">,
-  planContext: EditPlanContext,
-  change: EffectiveLinkChange
-) {
-  const eventContext = materializationEventContext(context, planContext)
-  return buildLinkMaterializationEventDraft({ ...eventContext, change })
-}
-
-function materializationEventContext(
-  context: Pick<MaterializerContext, "projectId">,
-  planContext: EditPlanContext
-) {
-  return {
-    projectId: context.projectId,
-    commitId: planContext.identity.commitId,
-    committedAt: planContext.identity.committedAt,
-    origin: planContext.origin,
-    correlationId: planContext.correlationId,
-    attribution: planContext.attribution,
-  }
 }
 
 function sortedObjects(objects: EditWorkingState["objects"]): WorkingObject[] {

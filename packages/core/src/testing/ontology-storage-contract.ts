@@ -149,7 +149,9 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
       })
     })
 
-    test("round-trips commit and event attribution exactly", async () => {
+    // Removal proof: rebuild an event's attribution from anything but its commit's execution; the
+    // requester and correlation id below no longer match.
+    test("attributes events to their commit's execution, which the commit does not copy", async () => {
       await withStorage(async (storage) => {
         // The requester is a real principal: SQL executions reference it by foreign key.
         if (!storage.auth) throw new Error("The attribution contract requires auth storage.")
@@ -166,15 +168,10 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           projectId: "contract-project",
           id: "attributed",
         })
-        expect(attributed?.requestedBy).toEqual(requestedBy)
-        expect(attributed?.executor).toEqual(contractExecutor("attributed"))
-        expect(attributed).not.toHaveProperty("actor")
-        const unattributed = await storage.ontology.commits.getById({
-          projectId: "contract-project",
-          id: "unattributed",
-        })
-        expect(unattributed).not.toHaveProperty("requestedBy")
-        expect(unattributed?.executor).toEqual(contractExecutor("unattributed"))
+        expect(attributed?.executionId).toBe("contract-execution:attributed")
+        for (const copy of ["requestedBy", "executor", "correlationId", "actor"]) {
+          expect(attributed).not.toHaveProperty(copy)
+        }
 
         const claimed = await storage.ontology.outbox.claim({
           projectId: "contract-project",
@@ -185,10 +182,12 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
         })
         const envelopes = new Map(claimed.map((record) => [record.envelope.commitId, record]))
         expect(envelopes.get("attributed")?.envelope).toMatchObject({
+          correlationId: "contract-correlation:attributed",
           requestedBy,
           executor: contractExecutor("attributed"),
         })
         const unattributedEnvelope = envelopes.get("unattributed")?.envelope
+        expect(unattributedEnvelope?.correlationId).toBe("contract-correlation:unattributed")
         expect(unattributedEnvelope?.executor).toEqual(contractExecutor("unattributed"))
         expect(unattributedEnvelope).not.toHaveProperty("requestedBy")
       })
@@ -1091,12 +1090,6 @@ async function activateEmptyCandidate(
         datasetId: candidate.identity.datasetVersion.datasetId,
         datasetVersionId: candidate.identity.datasetVersion.versionId,
       },
-      executor: {
-        type: "primitive",
-        kind: "projection",
-        id: candidate.source.projectionId,
-        runId: candidate.execution.projectionRunId,
-      },
       ontologyRevision: candidate.identity.ontologyRevision,
       projectionRevision: candidate.identity.projectionRevision,
       ownershipHash: candidate.identity.ownershipHash,
@@ -1195,12 +1188,6 @@ function telemetryHeader(
           datasetVersionId: identity.datasetVersion.versionId,
           batchOrdinal: 0,
         },
-      },
-      executor: {
-        type: "primitive",
-        kind: "projection",
-        id: identity.projectionId,
-        runId: projectionRunId,
       },
       ontologyRevision: identity.ontologyRevision,
       projectionRevision: identity.projectionRevision,
