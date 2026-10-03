@@ -342,9 +342,53 @@ export default {
         return [{ type: "ssh-ed25519", fingerprint: match, comment: "old@laptop", restricted: false }]
       },
     },
+    ci: {
+      async create(job, context) {
+        record({ ci: job, name: context.name })
+        return {
+          description: "SHA256:ci for sixb@test-server",
+          secrets: { SIXB_DEPLOY_SSH_KEY: "the private key", SIXB_DEPLOY_KNOWN_HOSTS: "test-server ssh-ed25519 AAAA" },
+          install: ["echo installing the key"],
+          async retireOthers() {
+            record({ retired: job })
+            return [{ type: "ssh-ed25519", fingerprint: "SHA256:old", comment: job, restricted: true }]
+          },
+          async revoke() {
+            record({ revoked: job })
+          },
+        }
+      },
+    },
   },
 }
 `
+
+  /** A \`gh\` that records each call, with what it read on stdin, and answers like GitHub. */
+  async function fakeGh(): Promise<{ path: string; calls: () => Promise<string[]> }> {
+    const bin = await tempDir()
+    const log = join(bin, "calls.log")
+    await writeFile(
+      join(bin, "gh"),
+      [
+        "#!/bin/sh",
+        'if [ "$1 $2" = "secret set" ]; then input="$(cat)"; else input=""; fi',
+        `printf '%s <%s>\\n' "$*" "$input" >> ${JSON.stringify(log)}`,
+        'case "$1 $2" in',
+        '  "repo view") echo \'{"nameWithOwner":"acme/shop","defaultBranchRef":{"name":"main"}}\' ;;',
+        '  "secret set") [ -z "$GH_FAIL_SECRETS" ] || { echo "HTTP 403: Resource not accessible" >&2; exit 1; } ;;',
+        '  "secret list") echo "[]" ;;',
+        '  "api repos/acme/shop/environments/production") [ -n "$GH_ENVIRONMENT_EXISTS" ] || exit 1 ;;',
+        "  api\\ repos/acme/*) echo true ;;",
+        "esac",
+      ].join("\n"),
+      { mode: 0o755 }
+    )
+    return {
+      path: `${bin}:${process.env.PATH}`,
+      calls: async () =>
+        (await readFile(log, "utf8").catch(() => "")).trim().split("\n").filter(Boolean),
+    }
+  }
 
   async function project(): Promise<{ root: string; recordPath: string }> {
     const root = await repository({
@@ -463,6 +507,90 @@ export default {
       admin: "ademattos",
       key: "~/.ssh/id.pub",
     })
+  })
+
+  test("sets up GitHub Actions, storing the new key before revoking the old", async () => {
+    const { root, recordPath } = await project()
+    await writeFile(
+      join(root, ".gitmodules"),
+      '[submodule "vendor/lib"]\n\tpath = vendor/lib\n\turl = ../lib.git\n'
+    )
+    const gh = await fakeGh()
+    const result = await runCliToCompletion({
+      cmd: ["bun", cliEntry, "deploy", "ci"],
+      cwd: root,
+      env: { DEPLOY_RECORD: recordPath, PATH: gh.path },
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("northline deploys from GitHub Actions on every push to main")
+    expect(result.stdout).toContain("revoked SHA256:old")
+    expect(result.stdout).toContain("vendor/lib is private")
+    expect(result.stdout).toContain("Contents: read on acme/lib")
+    expect(await gh.calls()).toEqual([
+      "repo view --json nameWithOwner,defaultBranchRef <>",
+      "api repos/acme/lib --jq .private <>",
+      "api repos/acme/shop/environments/production --silent <>",
+      "api --method PUT repos/acme/shop/environments/production --silent <>",
+      "secret set SIXB_DEPLOY_SSH_KEY_NORTHLINE --env production --repo acme/shop <the private key>",
+      "secret set SIXB_DEPLOY_KNOWN_HOSTS_NORTHLINE --env production --repo acme/shop <test-server ssh-ed25519 AAAA>",
+      "secret list --env production --repo acme/shop --json name <>",
+      "secret list --repo acme/shop --json name <>",
+    ])
+    expect(await records(recordPath)).toEqual([
+      { ci: "github:acme/shop", name: "northline" },
+      { retired: "github:acme/shop" },
+    ])
+
+    const workflow = await readFile(join(root, ".github/workflows/deploy-northline.yml"), "utf8")
+    expect(workflow).toContain("bun-version-file: package.json")
+    expect(workflow).toContain(`SIXB_DEPLOY_SSH_KEY: \${{ secrets.SIXB_DEPLOY_SSH_KEY_NORTHLINE }}`)
+    expect(workflow).toContain("          echo installing the key")
+    expect(workflow).toContain(`token: \${{ secrets.SIXB_GITHUB_TOKEN }}`)
+  })
+
+  test("rotates the key without undoing edits to the workflow", async () => {
+    const { root, recordPath } = await project()
+    const gh = await fakeGh()
+    const run = () =>
+      runCliToCompletion({
+        cmd: ["bun", cliEntry, "deploy", "ci"],
+        cwd: root,
+        env: { DEPLOY_RECORD: recordPath, PATH: gh.path },
+      })
+    await run()
+    const path = join(root, ".github/workflows/deploy-northline.yml")
+    const edited = `${await readFile(path, "utf8")}# edited\n`
+    await writeFile(path, edited)
+
+    const again = await run()
+    expect(again.exitCode).toBe(0)
+    expect(again.stdout).toContain("(yours, kept")
+    expect(await readFile(path, "utf8")).toBe(edited)
+  })
+
+  test("revokes the new CI key when GitHub does not take it", async () => {
+    const { root, recordPath } = await project()
+    const gh = await fakeGh()
+    const result = await runCliToCompletion({
+      cmd: ["bun", cliEntry, "deploy", "ci"],
+      cwd: root,
+      env: {
+        DEPLOY_RECORD: recordPath,
+        PATH: gh.path,
+        GH_FAIL_SECRETS: "1",
+        GH_ENVIRONMENT_EXISTS: "1",
+      },
+    })
+
+    expect(result.exitCode).toBe(1)
+    // An existing environment is left as it is: a PUT would reset its protection rules.
+    expect((await gh.calls()).some((call) => call.includes("--method PUT"))).toBe(false)
+    expect(result.stdout + result.stderr).toContain("Resource not accessible")
+    expect(await records(recordPath)).toEqual([
+      { ci: "github:acme/shop", name: "northline" },
+      { revoked: "github:acme/shop" },
+    ])
   })
 
   test("lists, adds, and revokes keys", async () => {

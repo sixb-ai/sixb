@@ -1,4 +1,5 @@
-import { relative } from "node:path"
+import { mkdir } from "node:fs/promises"
+import { dirname, join, relative } from "node:path"
 import { writeJson } from "@sixb/cli-core"
 import type {
   DeployAccessKey,
@@ -10,11 +11,32 @@ import type {
 } from "@sixb/core/deploy"
 import { loadDeployConfig } from "../lib/deploy-config"
 import { buildDeployRelease } from "../lib/deploy-release"
-import { deployer, packSource, projectPathOf, resolveBunVersion } from "../lib/deploy-source"
+import {
+  deployer,
+  packSource,
+  projectPathOf,
+  repoRootOf,
+  resolveBunVersion,
+} from "../lib/deploy-source"
 import { SixbCliError } from "../lib/errors"
+import {
+  bunVersionFile,
+  CI_ENVIRONMENT,
+  currentRepo,
+  ensureEnvironment,
+  hasSecret,
+  isPrivate,
+  readSubmodules,
+  renderWorkflow,
+  SUBMODULE_TOKEN_SECRET,
+  secretName,
+  setSecret,
+  workflowPath,
+} from "../lib/github-ci"
 import {
   DeployAccessView,
   DeployChecksView,
+  DeployCiView,
   DeployCompleteView,
   type DeployProgressState,
   DeployProgressView,
@@ -153,6 +175,86 @@ export async function runDeployAccess(options: {
   }
   const removed = await access.remove(options.value ?? "", context)
   return renderStatic(<DeployAccessView title="Revoked" keys={removed} />)
+}
+
+/**
+ * Sets up deploys from GitHub Actions: a key for the job, authorized on the target and stored as
+ * secrets of the repository's `production` environment, and the workflow that uses it. Running it
+ * again rotates the key: the new one is stored before the old one is revoked.
+ */
+export async function runDeployCi(options: { readonly branch?: string; readonly cwd?: string }) {
+  const cwd = options.cwd ?? process.cwd()
+  const { config } = await loadDeployConfig(cwd)
+  const ci = config.target.ci
+  if (!ci) {
+    throw new SixbCliError(`[SixbDeploy] A ${config.target.kind} target cannot deploy from CI.`)
+  }
+
+  const repo = await currentRepo(cwd)
+  const projectPath = await projectPathOf(cwd)
+  const repoRoot = await repoRootOf(cwd)
+  const submodules = await readSubmodules(repoRoot, repo)
+  const privateSubmodules = []
+  for (const submodule of submodules) {
+    if (!submodule.repo || (await isPrivate(submodule.repo))) privateSubmodules.push(submodule)
+  }
+
+  const credential = await ci.create(`github:${repo.name}`, { name: config.name })
+  const secrets = Object.fromEntries(
+    Object.keys(credential.secrets).map((variable) => [variable, secretName(config.name, variable)])
+  )
+  try {
+    await ensureEnvironment(repo)
+    for (const [variable, value] of Object.entries(credential.secrets)) {
+      await setSecret(repo, secrets[variable] ?? variable, value)
+    }
+  } catch (error) {
+    // CI never got the new key, so it must not stay authorized.
+    await credential.revoke()
+    throw error
+  }
+  const retired = await credential.retireOthers()
+
+  const branch = options.branch ?? repo.defaultBranch
+  const workflow = renderWorkflow({
+    name: config.name,
+    branch,
+    projectPath,
+    bunVersionFile: await bunVersionFile(join(repoRoot, projectPath), repoRoot),
+    secrets,
+    install: credential.install,
+    submodules:
+      privateSubmodules.length > 0 ? "private" : submodules.length > 0 ? "public" : "none",
+  })
+  const path = workflowPath(config.name)
+  const file = Bun.file(join(repoRoot, path))
+  // A workflow already there may have been edited, and rotating the key must not undo that.
+  const existing = (await file.exists()) ? await file.text() : null
+  if (existing === null) {
+    await mkdir(dirname(join(repoRoot, path)), { recursive: true })
+    await Bun.write(file, workflow)
+  }
+
+  await renderStatic(
+    <DeployCiView
+      name={config.name}
+      repo={repo.name}
+      environment={CI_ENVIRONMENT}
+      branch={branch}
+      credential={credential.description}
+      secrets={Object.values(secrets)}
+      retired={retired}
+      workflow={{
+        path,
+        state: existing === null ? "written" : existing === workflow ? "unchanged" : "kept",
+      }}
+      token={
+        privateSubmodules.length > 0 && !(await hasSecret(repo, SUBMODULE_TOKEN_SECRET))
+          ? { name: SUBMODULE_TOKEN_SECRET, submodules: privateSubmodules }
+          : null
+      }
+    />
+  )
 }
 
 /**
