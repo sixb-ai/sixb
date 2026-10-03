@@ -5,12 +5,9 @@ import type {
   TelemetryPointWrite,
 } from "../../materialization/model"
 import { linkRefSortKey, objectRefSortKey, telemetryPointSortKey } from "../../materialization/refs"
-import type {
-  OntologyMaterializationEvent,
-  OntologyMaterializationEventDraft,
-} from "../../storage/ontology"
+import type { OntologyMaterializationEventDraft } from "../../storage/ontology"
 import type { MaterializerAttribution } from "../execution/scope"
-import { createEventId, materializationEventKindOrdinal } from "../shared/identity"
+import { materializationEventKindOrdinal } from "../shared/identity"
 
 export interface OrderedMaterializationEventDraft {
   readonly kindRank: number
@@ -182,17 +179,4 @@ function orderedDraft(
     sortKey,
     draft,
   }
-}
-
-export function sequenceMaterializationEvent(
-  projectId: string,
-  commitId: string,
-  commitOrdinal: number,
-  draft: OntologyMaterializationEventDraft
-): OntologyMaterializationEvent {
-  const sequence = {
-    id: createEventId(projectId, commitId, commitOrdinal),
-    commitOrdinal,
-  }
-  return { ...draft, ...sequence }
 }

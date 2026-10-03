@@ -18,6 +18,7 @@ export {
   MaterializationValidationError,
 } from "./errors"
 export type { OntologyMaterializationEvent, OntologyMaterializationEventDraft } from "./events"
+export { createEventId } from "./identity"
 export type {
   BaseCommitResult,
   EditCommitResult,

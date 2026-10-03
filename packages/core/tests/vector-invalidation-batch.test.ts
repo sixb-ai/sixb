@@ -5,8 +5,9 @@ import { createTestSixb } from "../src/testing"
 import { createMaterializerFixture, Device, replacement, sourceEntry } from "./materializer-fixture"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
-test("one projection page reads vector metadata once, even without declared profiles", async () => {
-  // Removal proof: use vectors.list per item in invalidateVectorChanges; this counts 20 reads.
+test("a projection without vector profiles or stored vectors reads no vector metadata", async () => {
+  // Removal proof: stream every object change from the in-memory streamVectorChanges; this counts
+  // one read of the 20 refs.
   const f = createMaterializerFixture()
   const read = spyOn(InMemoryOntologyVectorStorage.prototype, "listBatch")
   try {
@@ -17,8 +18,7 @@ test("one projection page reads vector metadata once, even without declared prof
         Array.from({ length: 20 }, (_, i) => sourceEntry(String(i), String(i)))
       )
     )
-    expect(read).toHaveBeenCalledTimes(1)
-    expect(read.mock.calls[0]![0].refs).toHaveLength(20)
+    expect(read).not.toHaveBeenCalled()
   } finally {
     read.mockRestore()
   }

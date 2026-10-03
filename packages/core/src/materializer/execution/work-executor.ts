@@ -1,4 +1,3 @@
-import { MaterializationValidationError } from "../../materialization/errors"
 import { utf8JsonByteLength } from "../../materialization/refs"
 import type { Storage } from "../../storage"
 import type {
@@ -7,31 +6,12 @@ import type {
   OntologyMaterializationStorage,
 } from "../../storage/ontology"
 import type { MaterializerContext } from "../context"
-import { sequenceMaterializationEvent } from "../effective/build-events"
 import { scheduleVectorChanges } from "../effective/vector-indexing"
 import { invalidateVectorChanges } from "../effective/vectors"
 import { throwIfAborted } from "../shared/abort"
 import { chunkBySize } from "../shared/chunking"
-import type { TimedCommitIdentity } from "../shared/identity"
-import { type MaterializationPlanItem, planStream } from "./plan-stream"
-import { outboxItem } from "./work-records"
 
 type BatchingContext = Pick<MaterializerContext, "batching">
-
-type EventContext = Pick<MaterializerContext, "batching" | "projectId">
-
-export async function applyItems(
-  context: BatchingContext,
-  storage: OntologyMaterializationStorage,
-  session: MaterializationSession,
-  items: Iterable<MaterializationPlanItem>,
-  signal?: AbortSignal
-): Promise<void> {
-  for await (const chunk of planStream(items, context.batching)) {
-    throwIfAborted(signal)
-    await storage.applyChunk({ session, chunk })
-  }
-}
 
 export async function stageWorkBounded(
   context: BatchingContext,
@@ -48,108 +28,34 @@ export async function stageWorkBounded(
   }
 }
 
-export async function drainStagedWork(
+/**
+ * Hands the staged plan to storage, which applies it and writes its events. Vector profiles see
+ * the object changes first, while the objects still hold their previous values.
+ */
+export async function applyStagedWork(
   context: Pick<MaterializerContext, "batching" | "projectId" | "ontology" | "clock">,
   transactionStorage: Storage,
   session: MaterializationSession,
   signal?: AbortSignal,
   projection = false
-): Promise<void> {
+): Promise<number> {
   const ontologyStorage = transactionStorage.ontology
   const storage = ontologyStorage.materializations
-  let phase: number | null = null
-  let pending: MaterializationPlanItem[] = []
-  const flush = async () => {
-    if (pending.length === 0) return
-    await scheduleVectorChanges(context, transactionStorage, pending, session, projection)
-    await invalidateVectorChanges(context.projectId, ontologyStorage.vectors, pending, session)
-    await applyItems(context, storage, session, pending, signal)
-    pending = []
-  }
-  for await (const page of storage.streamWork({
-    session,
-    order: "apply",
-    pageRows: context.batching.planChunkRows,
-  })) {
-    for (const record of page.records) {
-      if (record.kind !== "plan") {
-        throw new MaterializationValidationError("Provider returned non-plan apply work.")
-      }
-      if (phase !== null && record.applyPhase !== phase) await flush()
-      phase = record.applyPhase
-      pending.push(record.item)
-      if (pending.length >= context.batching.planChunkRows) await flush()
+  if (ontologyStorage.vectorIndexing || ontologyStorage.vectors) {
+    for await (const page of storage.streamVectorChanges({
+      session,
+      objectTypeIds: context.ontology
+        .listObjectTypes()
+        .filter((type) => Object.keys(type.search?.vectors ?? {}).length > 0)
+        .map((type) => type.id),
+      pageRows: context.batching.planChunkRows,
+    })) {
+      throwIfAborted(signal)
+      await scheduleVectorChanges(context, transactionStorage, page.items, session, projection)
+      await invalidateVectorChanges(context.projectId, ontologyStorage.vectors, page.items, session)
     }
   }
-  await flush()
-}
-
-export async function validateStagedCardinality(
-  context: BatchingContext,
-  storage: OntologyMaterializationStorage,
-  session: MaterializationSession,
-  signal?: AbortSignal
-): Promise<void> {
-  let currentView: "candidate" | "effective" | null = null
-  let currentScope: string | null = null
-  let occupant: string | null = null
-  for await (const page of storage.streamWork({
-    session,
-    order: "cardinality",
-    pageRows: context.batching.statePageRows,
-  })) {
-    throwIfAborted(signal)
-    for (const record of page.records) {
-      if (record.kind !== "cardinality") {
-        throw new MaterializationValidationError(
-          "Provider returned non-cardinality cardinality work."
-        )
-      }
-      if (record.view !== currentView || record.scopeSortKey !== currentScope) {
-        currentView = record.view
-        currentScope = record.scopeSortKey
-        occupant = null
-      }
-      if (!record.occupied) continue
-      if (occupant && occupant !== record.linkSortKey) {
-        throw new MaterializationValidationError(
-          record.view === "candidate"
-            ? `Projection source scope '${record.ref.source.objectTypeId}.${record.ref.linkId}' has cardinality one.`
-            : `Link scope '${record.ref.source.objectTypeId}.${record.ref.linkId}' has cardinality one.`
-        )
-      }
-      occupant = record.linkSortKey
-    }
-  }
-}
-
-export async function drainStagedEvents(
-  context: EventContext,
-  storage: OntologyMaterializationStorage,
-  session: MaterializationSession,
-  identity: TimedCommitIdentity,
-  signal?: AbortSignal
-): Promise<number> {
-  let ordinal = 0
-  for await (const page of storage.streamWork({
-    session,
-    order: "event",
-    pageRows: context.batching.planChunkRows,
-  })) {
-    const items: MaterializationPlanItem[] = []
-    for (const record of page.records) {
-      if (record.kind !== "event") {
-        throw new MaterializationValidationError("Provider returned non-event event work.")
-      }
-      const event = sequenceMaterializationEvent(
-        context.projectId,
-        identity.commitId,
-        ordinal++,
-        record.draft
-      )
-      items.push(outboxItem(event, identity.committedAt))
-    }
-    await applyItems(context, storage, session, items, signal)
-  }
-  return ordinal
+  throwIfAborted(signal)
+  const { eventCount } = await storage.apply({ session })
+  return eventCount
 }

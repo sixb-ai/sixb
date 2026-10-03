@@ -43,6 +43,7 @@ export async function seedVectorBatch(storage: Storage, projectId = "batch-proje
         sourceCommitId: "batch-commit",
       })),
     })
+    await tx.ontology.materializations.apply({ session })
     await tx.ontology.materializations.finalize({
       session,
       finalization: {

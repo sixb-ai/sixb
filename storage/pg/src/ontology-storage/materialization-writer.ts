@@ -1,582 +1,649 @@
 import {
   linkRefKey,
   MaterializationConflictError,
+  type OntologyLinkRef,
+  type OntologyObjectRef,
   objectRefKey,
+  type TelemetrySeriesRef,
   telemetryPointKey,
 } from "@sixb/core/internal/materialization"
-import { effectiveConflict } from "@sixb/core/internal/ontology-storage-provider"
-import type { MaterializationPlanChunk } from "@sixb/core/storage"
-import type { SQLClient } from "../pg-client"
-import { assertTimestamp, jsonParameter } from "./shared"
+import {
+  canonicalJson,
+  effectiveConflict,
+  materializationApplyPhase,
+  materializationPlanKindRank,
+} from "@sixb/core/internal/ontology-storage-provider"
+import type { MaterializationPlanWorkItem } from "@sixb/core/storage"
+import type postgres from "postgres"
+import type { SQL, SQLClient } from "../pg-client"
 
-/** Applies one already-validated exact plan chunk in bounded PostgreSQL batches. */
+export interface PgStagedPlanTarget {
+  /** The work table and the id its rows carry: a session's temp table, or a durable plan. */
+  readonly workTable: string
+  readonly workId: string
+  readonly projectId: string
+  readonly commitId: string
+  readonly committedAt: string
+}
+
+export interface PgAppliedPlan {
+  readonly objectWrites: number
+  readonly linkWrites: number
+  readonly eventCount: number
+}
+
+interface WriteCounts {
+  readonly staged: number | string
+  readonly written: number | string
+}
+
+type Fragment = ReturnType<SQL["unsafe"]>
+type Query = postgres.PendingQuery<postgres.Row[]>
+
+/**
+ * Applies a session's staged plan where it is stored: each statement reads one item kind from the
+ * work table and writes it set-based, so planned rows never travel back through the client.
+ *
+ * Every write still checks the revision its plan expected. A statement that writes fewer rows than
+ * it staged is a conflict; only then does a second, indexed query find the entity to name, so the
+ * normal path never correlates the written rows back to the staged ones.
+ */
 export class PgMaterializationWriter {
   constructor(private readonly sql: SQLClient) {}
 
-  async apply(projectId: string, commitId: string, chunk: MaterializationPlanChunk): Promise<void> {
-    await this.applyOverrides(projectId, chunk)
-    await this.applyEffective(projectId, chunk)
-    await this.applyTimeseries(projectId, chunk)
-    await this.applyOutbox(projectId, commitId, chunk)
+  async applyStaged(target: PgStagedPlanTarget): Promise<PgAppliedPlan> {
+    await this.applyObjectOverrides(target)
+    await this.applyLinkOverrides(target)
+    await this.applyPoints(target)
+    let linkWrites = await this.deleteLinks(target)
+    let objectWrites = await this.deleteObjects(target)
+    objectWrites += await this.upsertObjects(target)
+    linkWrites += await this.upsertLinks(target)
+    const eventCount = await this.writeOutbox(target)
+    return { objectWrites, linkWrites, eventCount }
   }
 
-  private async applyOverrides(projectId: string, chunk: MaterializationPlanChunk): Promise<void> {
-    const objectUpserts = chunk.overrides.objects.upserts.map((item) => ({
-      objectTypeId: item.ref.objectTypeId,
-      primaryId: item.ref.primaryId,
-      value: item.value,
-      editedAt: item.editedAt,
-      lastCommitId: item.lastCommitId,
-      updatedAt: item.updatedAt,
-      expectedLastCommitId: item.expectedLastCommitId,
-    }))
-    const objectInserts = objectUpserts.filter((item) => item.expectedLastCommitId === null)
-    if (objectInserts.length > 0) {
-      const rows = await this.sql<{ readonly object_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectInserts)}::jsonb)
-        )
-        INSERT INTO ontology_object_overrides (
-          project_id, object_type_id, primary_id, value, edited_at, last_commit_id, updated_at
-        )
-        SELECT ${projectId}, value->>'objectTypeId', value->>'primaryId', value->'value',
-          value->'editedAt', value->>'lastCommitId',
-          (value->>'updatedAt')::timestamptz
-        FROM staged
-        ON CONFLICT DO NOTHING
-        RETURNING object_type_id
-      `
-      if (rows.length !== objectInserts.length) throw objectOverrideConflict()
-    }
-
-    const objectUpdates = objectUpserts.filter((item) => item.expectedLastCommitId !== null)
-    if (objectUpdates.length > 0) {
-      const rows = await this.sql<{ readonly object_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectUpdates)}::jsonb)
-        )
-        UPDATE ontology_object_overrides AS overrides
-        SET value = staged.value->'value', edited_at = staged.value->'editedAt',
-          last_commit_id = staged.value->>'lastCommitId',
-          updated_at = (staged.value->>'updatedAt')::timestamptz
-        FROM staged
-        WHERE overrides.project_id = ${projectId}
-          AND overrides.object_type_id = staged.value->>'objectTypeId'
-          AND overrides.primary_id = staged.value->>'primaryId'
-          AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING overrides.object_type_id
-      `
-      if (rows.length !== objectUpdates.length) throw objectOverrideConflict()
-    }
-
-    const objectDeletes = chunk.overrides.objects.deletes.map((item) => ({
-      objectTypeId: item.ref.objectTypeId,
-      primaryId: item.ref.primaryId,
-      expectedLastCommitId: item.expectedLastCommitId,
-    }))
-    if (objectDeletes.length > 0) {
-      const rows = await this.sql<{ readonly object_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectDeletes)}::jsonb)
-        )
-        DELETE FROM ontology_object_overrides AS overrides USING staged
-        WHERE overrides.project_id = ${projectId}
-          AND overrides.object_type_id = staged.value->>'objectTypeId'
-          AND overrides.primary_id = staged.value->>'primaryId'
-          AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING overrides.object_type_id
-      `
-      if (rows.length !== objectDeletes.length) throw objectOverrideConflict()
-    }
-
-    const linkUpserts = [
-      ...chunk.overrides.links.edges.upserts.map((item) => ({
-        identityKind: "edge" as const,
-        identityKey: JSON.parse(linkRefKey(item.ref)) as unknown,
-        sourceTypeId: item.ref.source.objectTypeId,
-        sourcePrimaryId: item.ref.source.primaryId,
-        linkId: item.ref.linkId,
-        targetTypeId: item.ref.target.objectTypeId,
-        targetPrimaryId: item.ref.target.primaryId,
-        value: item.value,
-        lastCommitId: item.lastCommitId,
-        updatedAt: item.updatedAt,
-        expectedLastCommitId: item.expectedLastCommitId,
-      })),
-      ...chunk.overrides.links.slots.upserts.map((item) => ({
-        identityKind: "slot" as const,
-        identityKey: [item.ref.source.objectTypeId, item.ref.source.primaryId, item.ref.linkId],
-        sourceTypeId: item.ref.source.objectTypeId,
-        sourcePrimaryId: item.ref.source.primaryId,
-        linkId: item.ref.linkId,
-        targetTypeId: item.value.target.objectTypeId,
-        targetPrimaryId: item.value.target.primaryId,
-        value: item.value,
-        lastCommitId: item.lastCommitId,
-        updatedAt: item.updatedAt,
-        expectedLastCommitId: item.expectedLastCommitId,
-      })),
-    ]
-    const linkInserts = linkUpserts.filter((item) => item.expectedLastCommitId === null)
-    if (linkInserts.length > 0) {
-      const rows = await this.sql<{ readonly identity_kind: "edge" | "slot" }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, linkInserts)}::jsonb)
-        )
-        INSERT INTO ontology_link_overrides (
-          project_id, identity_kind, identity_key, source_type_id, source_primary_id, link_id,
-          target_type_id, target_primary_id, value, last_commit_id, updated_at
-        )
-        SELECT ${projectId}, value->>'identityKind', value->'identityKey',
-          value->>'sourceTypeId', value->>'sourcePrimaryId', value->>'linkId',
-          value->>'targetTypeId', value->>'targetPrimaryId', value->'value',
-          value->>'lastCommitId', (value->>'updatedAt')::timestamptz
-        FROM staged
-        ON CONFLICT DO NOTHING
-        RETURNING identity_kind
-      `
-      if (rows.length !== linkInserts.length)
-        throw linkOverrideConflict(linkInserts[0]!.identityKind)
-    }
-
-    const linkUpdates = linkUpserts.filter((item) => item.expectedLastCommitId !== null)
-    if (linkUpdates.length > 0) {
-      const rows = await this.sql<{ readonly identity_kind: "edge" | "slot" }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, linkUpdates)}::jsonb)
-        )
-        UPDATE ontology_link_overrides AS overrides
-        SET target_type_id = staged.value->>'targetTypeId',
-          target_primary_id = staged.value->>'targetPrimaryId',
-          value = staged.value->'value',
-          last_commit_id = staged.value->>'lastCommitId',
-          updated_at = (staged.value->>'updatedAt')::timestamptz
-        FROM staged
-        WHERE overrides.project_id = ${projectId}
-          AND overrides.identity_kind = staged.value->>'identityKind'
-          AND overrides.identity_key = staged.value->'identityKey'
-          AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING overrides.identity_kind
-      `
-      if (rows.length !== linkUpdates.length)
-        throw linkOverrideConflict(linkUpdates[0]!.identityKind)
-    }
-
-    const linkDeletes = [
-      ...chunk.overrides.links.edges.deletes.map((item) => ({
-        identityKind: "edge" as const,
-        identityKey: JSON.parse(linkRefKey(item.ref)) as unknown,
-        expectedLastCommitId: item.expectedLastCommitId,
-      })),
-      ...chunk.overrides.links.slots.deletes.map((item) => ({
-        identityKind: "slot" as const,
-        identityKey: [item.ref.source.objectTypeId, item.ref.source.primaryId, item.ref.linkId],
-        expectedLastCommitId: item.expectedLastCommitId,
-      })),
-    ]
-    if (linkDeletes.length > 0) {
-      const rows = await this.sql<{ readonly identity_kind: "edge" | "slot" }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, linkDeletes)}::jsonb)
-        )
-        DELETE FROM ontology_link_overrides AS overrides USING staged
-        WHERE overrides.project_id = ${projectId}
-          AND overrides.identity_kind = staged.value->>'identityKind'
-          AND overrides.identity_key = staged.value->'identityKey'
-          AND overrides.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING overrides.identity_kind
-      `
-      if (rows.length !== linkDeletes.length)
-        throw linkOverrideConflict(linkDeletes[0]!.identityKind)
-    }
+  /** The staged values of one plan item kind, as `value`. */
+  private staged(target: PgStagedPlanTarget, kind: MaterializationPlanWorkItem["kind"]) {
+    return this.sql`
+      SELECT payload->'item'->'value' AS value
+      FROM ${this.sql(target.workTable)}
+      WHERE work_id = ${target.workId} AND lane = 'apply'
+        AND major_order = ${materializationApplyPhase(kind)}
+        AND minor_order = ${materializationPlanKindRank(kind)}
+    `
   }
 
-  private async applyEffective(projectId: string, chunk: MaterializationPlanChunk): Promise<void> {
-    const linkDeletes = chunk.effective.linkDeletes.map((item) => ({
-      sourceTypeId: item.ref.source.objectTypeId,
-      sourceId: item.ref.source.primaryId,
-      linkId: item.ref.linkId,
-      targetTypeId: item.ref.target.objectTypeId,
-      targetId: item.ref.target.primaryId,
-      expectedLastCommitId: item.expected.lastCommitId,
-    }))
-    if (linkDeletes.length > 0) {
-      const rows = await this.sql<{ readonly source_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, linkDeletes)}::jsonb)
-        )
-        DELETE FROM links AS effective USING staged
-        WHERE effective.project_id = ${projectId}
-          AND effective.source_type_id = staged.value->>'sourceTypeId'
-          AND effective.source_id = staged.value->>'sourceId'
-          AND effective.link_id = staged.value->>'linkId'
-          AND effective.target_type_id = staged.value->>'targetTypeId'
-          AND effective.target_id = staged.value->>'targetId'
-          AND effective.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING effective.source_type_id
-      `
-      if (rows.length !== linkDeletes.length) throw effectiveLinkConflict(linkDeletes[0]!)
-    }
-
-    const objectDeletes = chunk.effective.objectDeletes.map((item) => ({
-      objectTypeId: item.ref.objectTypeId,
-      primaryId: item.ref.primaryId,
-      expectedVersion: item.expected.version,
-      expectedLastCommitId: item.expected.lastCommitId,
-    }))
-    if (objectDeletes.length > 0) {
-      const rows = await this.sql<{ readonly object_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, objectDeletes)}::jsonb)
-        )
-        DELETE FROM objects AS effective USING staged
-        WHERE effective.project_id = ${projectId}
-          AND effective.object_type_id = staged.value->>'objectTypeId'
-          AND effective.primary_id = staged.value->>'primaryId'
-          AND effective.version = (staged.value->>'expectedVersion')::integer
-          AND effective.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING effective.object_type_id
-      `
-      if (rows.length !== objectDeletes.length) throw effectiveObjectConflict(objectDeletes[0]!)
-    }
-
-    await this.applyObjects(projectId, chunk.effective.objectUpserts)
-    await this.applyLinks(projectId, chunk.effective.linkUpserts)
-  }
-
-  private async applyObjects(
-    projectId: string,
-    items: MaterializationPlanChunk["effective"]["objectUpserts"]
-  ): Promise<void> {
-    const payload = items.map(({ row, expected }) => ({
-      objectTypeId: row.ref.objectTypeId,
-      primaryId: row.ref.primaryId,
-      properties: row.properties,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      version: row.version,
-      lastCommitId: row.lastCommitId,
-      expectedExists: expected.exists,
-      expectedVersion: expected.exists ? expected.version : null,
-      expectedLastCommitId: expected.exists ? expected.lastCommitId : null,
-    }))
-    const inserts = payload.filter((item) => !item.expectedExists)
-    if (inserts.length > 0) {
-      const rows = await this.sql<{ readonly object_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, inserts)}::jsonb)
-        )
-        INSERT INTO objects (
-          project_id, object_type_id, primary_id, properties, created_at,
-          updated_at, version, last_commit_id
-        )
-        SELECT ${projectId}, value->>'objectTypeId', value->>'primaryId',
-          value->'properties', (value->>'createdAt')::timestamptz,
-          (value->>'updatedAt')::timestamptz, (value->>'version')::integer,
-          value->>'lastCommitId'
-        FROM staged
-        ON CONFLICT DO NOTHING
-        RETURNING object_type_id
-      `
-      if (rows.length !== inserts.length) {
-        throw effectiveConflict(`Expected object ${objectIdentityKey(inserts[0]!)} to be absent.`)
-      }
-    }
-
-    const updates = payload.filter((item) => item.expectedExists)
-    if (updates.length > 0) {
-      const rows = await this.sql<{ readonly object_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, updates)}::jsonb)
-        )
-        UPDATE objects AS effective
-        SET properties = staged.value->'properties',
-          created_at = (staged.value->>'createdAt')::timestamptz,
-          updated_at = (staged.value->>'updatedAt')::timestamptz,
-          version = (staged.value->>'version')::integer,
-          last_commit_id = staged.value->>'lastCommitId'
-        FROM staged
-        WHERE effective.project_id = ${projectId}
-          AND effective.object_type_id = staged.value->>'objectTypeId'
-          AND effective.primary_id = staged.value->>'primaryId'
-          AND effective.version = (staged.value->>'expectedVersion')::integer
-          AND effective.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING effective.object_type_id
-      `
-      if (rows.length !== updates.length) throw effectiveObjectConflict(updates[0]!)
-    }
-  }
-
-  private async applyLinks(
-    projectId: string,
-    items: MaterializationPlanChunk["effective"]["linkUpserts"]
-  ): Promise<void> {
-    const payload = items.map(({ row, expected }) => ({
-      sourceTypeId: row.ref.source.objectTypeId,
-      sourceId: row.ref.source.primaryId,
-      linkId: row.ref.linkId,
-      targetTypeId: row.ref.target.objectTypeId,
-      targetId: row.ref.target.primaryId,
-      ...(row.properties === undefined ? {} : { properties: row.properties }),
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-      lastCommitId: row.lastCommitId,
-      expectedExists: expected.exists,
-      expectedLastCommitId: expected.exists ? expected.lastCommitId : null,
-    }))
-    const inserts = payload.filter((item) => !item.expectedExists)
-    if (inserts.length > 0) {
-      const rows = await this.sql<{ readonly source_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, inserts)}::jsonb)
-        )
-        INSERT INTO links (
-          project_id, source_type_id, source_id, link_id, target_type_id, target_id,
-          properties, created_at, updated_at, last_commit_id
-        )
-        SELECT ${projectId}, value->>'sourceTypeId', value->>'sourceId', value->>'linkId',
-          value->>'targetTypeId', value->>'targetId',
-          CASE WHEN value ? 'properties' THEN value->'properties' ELSE NULL END,
-          (value->>'createdAt')::timestamptz, (value->>'updatedAt')::timestamptz,
-          value->>'lastCommitId'
-        FROM staged
-        ON CONFLICT DO NOTHING
-        RETURNING source_type_id
-      `
-      if (rows.length !== inserts.length) {
-        throw effectiveConflict(`Expected link ${linkIdentityKey(inserts[0]!)} to be absent.`)
-      }
-    }
-
-    const updates = payload.filter((item) => item.expectedExists)
-    if (updates.length > 0) {
-      const rows = await this.sql<{ readonly source_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, updates)}::jsonb)
-        )
-        UPDATE links AS effective
-        SET properties = CASE
-            WHEN staged.value ? 'properties' THEN staged.value->'properties'
-            ELSE NULL
-          END,
-          created_at = (staged.value->>'createdAt')::timestamptz,
-          updated_at = (staged.value->>'updatedAt')::timestamptz,
-          last_commit_id = staged.value->>'lastCommitId'
-        FROM staged
-        WHERE effective.project_id = ${projectId}
-          AND effective.source_type_id = staged.value->>'sourceTypeId'
-          AND effective.source_id = staged.value->>'sourceId'
-          AND effective.link_id = staged.value->>'linkId'
-          AND effective.target_type_id = staged.value->>'targetTypeId'
-          AND effective.target_id = staged.value->>'targetId'
-          AND effective.last_commit_id = staged.value->>'expectedLastCommitId'
-        RETURNING effective.source_type_id
-      `
-      if (rows.length !== updates.length) throw effectiveLinkConflict(updates[0]!)
-    }
-  }
-
-  private async applyTimeseries(projectId: string, chunk: MaterializationPlanChunk): Promise<void> {
-    const payload = chunk.timeseries.pointUpserts.map(({ point, expected }) => ({
-      objectTypeId: point.series.object.objectTypeId,
-      objectId: point.series.object.primaryId,
-      propertyId: point.series.propertyId,
-      value: point.value,
-      unit: point.unit ?? null,
-      at: point.at,
-      lastCommitId: point.lastCommitId,
-      expectedLastCommitId: expected.lastCommitId,
-    }))
-    const inserts = payload.filter((item) => item.expectedLastCommitId === null)
-    if (inserts.length > 0) {
-      const rows = await this.sql<{ readonly object_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, inserts)}::jsonb)
-        ), written AS (
-          INSERT INTO timeseries (
-            project_id, object_type_id, object_id, property_id,
-            value, unit, at, last_commit_id
+  private async applyObjectOverrides(target: PgStagedPlanTarget): Promise<void> {
+    const { projectId } = target
+    const inserts = this.sql`
+      SELECT value FROM (${this.staged(target, "object-override-upsert")}) AS staged
+      WHERE value->>'expectedLastCommitId' IS NULL
+    `
+    await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${inserts}), written AS (
+          INSERT INTO ontology_object_overrides (
+            project_id, object_type_id, primary_id, value, edited_at, last_commit_id, updated_at
           )
-          SELECT ${projectId}, value->>'objectTypeId', value->>'objectId',
-            value->>'propertyId', value->'value', value->>'unit',
-            (value->>'at')::timestamptz, value->>'lastCommitId'
-          FROM staged
+          SELECT ${projectId}, value->'ref'->>'objectTypeId', value->'ref'->>'primaryId',
+            value->'value', value->'editedAt', value->>'lastCommitId',
+            (value->>'updatedAt')::timestamptz
+          FROM candidates
+          ON CONFLICT DO NOTHING
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        throw objectOverrideConflict()
+      }
+    )
+    const updates = this.sql`
+      SELECT value FROM (${this.staged(target, "object-override-upsert")}) AS staged
+      WHERE value->>'expectedLastCommitId' IS NOT NULL
+    `
+    await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${updates}), written AS (
+          UPDATE ontology_object_overrides AS stored
+          SET value = candidates.value->'value', edited_at = candidates.value->'editedAt',
+            last_commit_id = candidates.value->>'lastCommitId',
+            updated_at = (candidates.value->>'updatedAt')::timestamptz
+          FROM candidates
+          WHERE stored.project_id = ${projectId} AND ${this.matches("object", "value->'ref'")}
+            AND stored.last_commit_id = candidates.value->>'expectedLastCommitId'
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        throw objectOverrideConflict()
+      }
+    )
+    await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${this.staged(target, "object-override-delete")}), written AS (
+          DELETE FROM ontology_object_overrides AS stored USING candidates
+          WHERE stored.project_id = ${projectId} AND ${this.matches("object", "value->'ref'")}
+            AND stored.last_commit_id = candidates.value->>'expectedLastCommitId'
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        throw objectOverrideConflict()
+      }
+    )
+  }
+
+  private async applyLinkOverrides(target: PgStagedPlanTarget): Promise<void> {
+    const { projectId, commitId } = target
+    // An edge is keyed by its whole link ref and targets it; a slot is keyed by its scope and
+    // targets the member its value names.
+    const identified = (
+      edges: MaterializationPlanWorkItem["kind"],
+      slots: MaterializationPlanWorkItem["kind"]
+    ) => this.sql`
+      SELECT 'edge' AS identity_kind,
+        jsonb_build_array(
+          value->'ref'->'source'->>'objectTypeId', value->'ref'->'source'->>'primaryId',
+          value->'ref'->>'linkId',
+          value->'ref'->'target'->>'objectTypeId', value->'ref'->'target'->>'primaryId'
+        ) AS identity_key,
+        value->'ref'->'target' AS target, value
+      FROM (${this.staged(target, edges)}) AS edges
+      UNION ALL
+      SELECT 'slot',
+        jsonb_build_array(
+          value->'ref'->'source'->>'objectTypeId', value->'ref'->'source'->>'primaryId',
+          value->'ref'->>'linkId'
+        ),
+        value->'value'->'target', value
+      FROM (${this.staged(target, slots)}) AS slots
+    `
+    const upserts = identified("link-override-upsert", "link-slot-override-upsert")
+    const writes = (inserts: boolean) => this.sql`
+      SELECT * FROM (${upserts}) AS upserts
+      WHERE (value->>'expectedLastCommitId' IS NULL) = ${inserts}
+    `
+    const deletes = identified("link-override-delete", "link-slot-override-delete")
+    const stored = this.sql`
+      SELECT 1 FROM ontology_link_overrides AS stored
+      WHERE stored.project_id = ${projectId}
+        AND stored.identity_kind = candidates.identity_kind
+        AND stored.identity_key = candidates.identity_key
+    `
+    const firstUnwritten = (source: typeof upserts) => async () => {
+      const [row] = await this.sql<{ readonly identity_kind: string }[]>`
+        SELECT identity_kind FROM (${source}) AS candidates
+        WHERE NOT EXISTS (${stored} AND stored.last_commit_id = ${commitId})
+        LIMIT 1
+      `
+      throw linkOverrideConflict(row?.identity_kind)
+    }
+    await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${writes(true)}), written AS (
+          INSERT INTO ontology_link_overrides (
+            project_id, identity_kind, identity_key, source_type_id, source_primary_id, link_id,
+            target_type_id, target_primary_id, value, last_commit_id, updated_at
+          )
+          SELECT ${projectId}, identity_kind, identity_key,
+            value->'ref'->'source'->>'objectTypeId', value->'ref'->'source'->>'primaryId',
+            value->'ref'->>'linkId', target->>'objectTypeId', target->>'primaryId',
+            value->'value', value->>'lastCommitId', (value->>'updatedAt')::timestamptz
+          FROM candidates
+          ON CONFLICT DO NOTHING
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      firstUnwritten(writes(true))
+    )
+    await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${writes(false)}), written AS (
+          UPDATE ontology_link_overrides AS stored
+          SET target_type_id = candidates.target->>'objectTypeId',
+            target_primary_id = candidates.target->>'primaryId',
+            value = candidates.value->'value',
+            last_commit_id = candidates.value->>'lastCommitId',
+            updated_at = (candidates.value->>'updatedAt')::timestamptz
+          FROM candidates
+          WHERE stored.project_id = ${projectId}
+            AND stored.identity_kind = candidates.identity_kind
+            AND stored.identity_key = candidates.identity_key
+            AND stored.last_commit_id = candidates.value->>'expectedLastCommitId'
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      firstUnwritten(writes(false))
+    )
+    await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${deletes}), written AS (
+          DELETE FROM ontology_link_overrides AS stored USING candidates
+          WHERE stored.project_id = ${projectId}
+            AND stored.identity_kind = candidates.identity_kind
+            AND stored.identity_key = candidates.identity_key
+            AND stored.last_commit_id = candidates.value->>'expectedLastCommitId'
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        const [row] = await this.sql<{ readonly identity_kind: string }[]>`
+          SELECT identity_kind FROM (${deletes}) AS candidates WHERE EXISTS (${stored}) LIMIT 1
+        `
+        throw linkOverrideConflict(row?.identity_kind)
+      }
+    )
+  }
+
+  private async applyPoints(target: PgStagedPlanTarget): Promise<void> {
+    const { projectId, commitId } = target
+    const points = (inserts: boolean) => this.sql`
+      SELECT value->'point'->'series'->'object'->>'objectTypeId' AS object_type_id,
+        value->'point'->'series'->'object'->>'primaryId' AS object_id,
+        value->'point'->'series'->>'propertyId' AS property_id,
+        value->'point'->'value' AS value, value->'point'->>'unit' AS unit,
+        (value->'point'->>'at')::timestamptz AS at,
+        value->'point'->>'lastCommitId' AS last_commit_id,
+        value->'expected'->>'lastCommitId' AS expected_last_commit_id,
+        value->'point' AS point
+      FROM (${this.staged(target, "point-upsert")}) AS staged
+      WHERE (value->'expected'->>'lastCommitId' IS NULL) = ${inserts}
+    `
+    // Both statements keep `timeseries_latest` on the newest point of each series.
+    const latest = this.sql`
+      latest_candidates AS (
+        SELECT DISTINCT ON (project_id, object_type_id, object_id, property_id)
+          project_id, object_type_id, object_id, property_id, value, unit, at, last_commit_id
+        FROM written
+        ORDER BY project_id, object_type_id, object_id, property_id, at DESC
+      ), latest AS (
+        INSERT INTO timeseries_latest (
+          project_id, object_type_id, object_id, property_id, value, unit, at, last_commit_id
+        )
+        SELECT project_id, object_type_id, object_id, property_id, value, unit, at,
+          last_commit_id
+        FROM latest_candidates
+        ON CONFLICT (project_id, object_type_id, object_id, property_id)
+        DO UPDATE SET value = EXCLUDED.value, unit = EXCLUDED.unit, at = EXCLUDED.at,
+          last_commit_id = EXCLUDED.last_commit_id
+        WHERE EXCLUDED.at >= timeseries_latest.at
+      )
+    `
+    const firstUnwritten = (inserts: boolean) => async () => {
+      const [row] = await this.sql<{ readonly point: unknown }[]>`
+        SELECT point FROM (${points(inserts)}) AS candidates
+        WHERE NOT EXISTS (
+          SELECT 1 FROM timeseries AS stored
+          WHERE stored.project_id = ${projectId}
+            AND stored.object_type_id = candidates.object_type_id
+            AND stored.object_id = candidates.object_id
+            AND stored.property_id = candidates.property_id
+            AND stored.at = candidates.at
+            AND stored.last_commit_id = ${commitId}
+        )
+        LIMIT 1
+      `
+      throw pointConflict(row?.point)
+    }
+    await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${points(true)}), written AS (
+          INSERT INTO timeseries (
+            project_id, object_type_id, object_id, property_id, value, unit, at, last_commit_id
+          )
+          SELECT ${projectId}, object_type_id, object_id, property_id, value, unit, at,
+            last_commit_id
+          FROM candidates
           ON CONFLICT DO NOTHING
           RETURNING *
-        ), latest_candidates AS (
-          SELECT DISTINCT ON (project_id, object_type_id, object_id, property_id)
-            project_id, object_type_id, object_id, property_id,
-            value, unit, at, last_commit_id
-          FROM written
-          ORDER BY project_id, object_type_id, object_id, property_id, at DESC
-        ), latest AS (
-          INSERT INTO timeseries_latest (
-            project_id, object_type_id, object_id, property_id,
-            value, unit, at, last_commit_id
-          )
-          SELECT project_id, object_type_id, object_id, property_id,
-            value, unit, at, last_commit_id
-          FROM latest_candidates
-          ON CONFLICT (project_id, object_type_id, object_id, property_id)
-          DO UPDATE SET value = EXCLUDED.value, unit = EXCLUDED.unit, at = EXCLUDED.at,
-            last_commit_id = EXCLUDED.last_commit_id
-          WHERE EXCLUDED.at >= timeseries_latest.at
-          RETURNING object_type_id
-        )
-        SELECT object_type_id, (SELECT COUNT(*) FROM latest) AS latest_count FROM written
-      `
-      if (rows.length !== inserts.length) throw pointConflict(inserts[0]!)
-    }
-
-    const updates = payload.filter((item) => item.expectedLastCommitId !== null)
-    if (updates.length > 0) {
-      const rows = await this.sql<{ readonly object_type_id: string }[]>`
-        WITH staged AS (
-          SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, updates)}::jsonb)
-        ), written AS (
-          UPDATE timeseries AS points
-          SET value = staged.value->'value', unit = staged.value->>'unit',
-            last_commit_id = staged.value->>'lastCommitId'
-          FROM staged
-          WHERE points.project_id = ${projectId}
-            AND points.object_type_id = staged.value->>'objectTypeId'
-            AND points.object_id = staged.value->>'objectId'
-            AND points.property_id = staged.value->>'propertyId'
-            AND points.at = (staged.value->>'at')::timestamptz
-            AND points.last_commit_id = staged.value->>'expectedLastCommitId'
-          RETURNING points.*
-        ), latest_candidates AS (
-          SELECT DISTINCT ON (project_id, object_type_id, object_id, property_id)
-            project_id, object_type_id, object_id, property_id,
-            value, unit, at, last_commit_id
-          FROM written
-          ORDER BY project_id, object_type_id, object_id, property_id, at DESC
-        ), latest AS (
-          INSERT INTO timeseries_latest (
-            project_id, object_type_id, object_id, property_id,
-            value, unit, at, last_commit_id
-          )
-          SELECT project_id, object_type_id, object_id, property_id,
-            value, unit, at, last_commit_id
-          FROM latest_candidates
-          ON CONFLICT (project_id, object_type_id, object_id, property_id)
-          DO UPDATE SET value = EXCLUDED.value, unit = EXCLUDED.unit, at = EXCLUDED.at,
-            last_commit_id = EXCLUDED.last_commit_id
-          WHERE EXCLUDED.at >= timeseries_latest.at
-          RETURNING object_type_id
-        )
-        SELECT object_type_id, (SELECT COUNT(*) FROM latest) AS latest_count FROM written
-      `
-      if (rows.length !== updates.length) throw pointConflict(updates[0]!)
-    }
+        ), ${latest}
+        ${counts(this.sql)}
+      `,
+      firstUnwritten(true)
+    )
+    await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${points(false)}), written AS (
+          UPDATE timeseries AS stored
+          SET value = candidates.value, unit = candidates.unit,
+            last_commit_id = candidates.last_commit_id
+          FROM candidates
+          WHERE stored.project_id = ${projectId}
+            AND stored.object_type_id = candidates.object_type_id
+            AND stored.object_id = candidates.object_id
+            AND stored.property_id = candidates.property_id
+            AND stored.at = candidates.at
+            AND stored.last_commit_id = candidates.expected_last_commit_id
+          RETURNING stored.*
+        ), ${latest}
+        ${counts(this.sql)}
+      `,
+      firstUnwritten(false)
+    )
   }
 
-  private async applyOutbox(
-    projectId: string,
-    commitId: string,
-    chunk: MaterializationPlanChunk
-  ): Promise<void> {
-    if (chunk.outbox.length === 0) return
-    const payload = chunk.outbox.map((item) => {
-      assertTimestamp(item.availableAt, "Outbox availableAt")
-      assertTimestamp(item.createdAt, "Outbox createdAt")
-      return {
-        id: item.envelope.id,
-        commitOrdinal: item.envelope.commitOrdinal,
-        envelope: item.envelope,
-        availableAt: item.availableAt,
-        createdAt: item.createdAt,
+  private async deleteLinks(target: PgStagedPlanTarget): Promise<number> {
+    const candidates = this.staged(target, "link-delete")
+    return this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${candidates}), written AS (
+          DELETE FROM links AS stored USING candidates
+          WHERE stored.project_id = ${target.projectId} AND ${this.matches("link", "value->'ref'")}
+            AND stored.last_commit_id = candidates.value->'expected'->>'lastCommitId'
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        const ref = await this.firstConflict(target, candidates, "link", "value->'ref'", "delete")
+        throw effectiveLinkConflict(ref as OntologyLinkRef | undefined)
       }
-    })
-    const rows = await this.sql<{ readonly id: string }[]>`
-      WITH staged AS (
-        SELECT value FROM jsonb_array_elements(${jsonParameter(this.sql, payload)}::jsonb)
-      )
-      INSERT INTO ontology_outbox (
-        project_id, id, commit_id, commit_ordinal, envelope,
-        available_at, attempts, lease_id, lease_expires_at,
-        published_at, last_failure, created_at
-      )
-      SELECT ${projectId}, value->>'id', ${commitId},
-        (value->>'commitOrdinal')::bigint, value->'envelope',
-        (value->>'availableAt')::timestamptz, 0, NULL, NULL, NULL, NULL,
-        (value->>'createdAt')::timestamptz
-      FROM staged
-      ON CONFLICT DO NOTHING
-      RETURNING id
-    `
-    if (rows.length !== payload.length) {
-      const inserted = new Set(rows.map((row) => row.id))
-      const duplicate = payload.find((item) => !inserted.has(item.id)) ?? payload[0]!
-      throw effectiveConflict(`Duplicate outbox event '${duplicate.id}'.`)
-    }
+    )
   }
+
+  private async deleteObjects(target: PgStagedPlanTarget): Promise<number> {
+    const candidates = this.staged(target, "object-delete")
+    return this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${candidates}), written AS (
+          DELETE FROM objects AS stored USING candidates
+          WHERE stored.project_id = ${target.projectId} AND ${this.matches("object", "value->'ref'")}
+            AND stored.version = (candidates.value->'expected'->>'version')::integer
+            AND stored.last_commit_id = candidates.value->'expected'->>'lastCommitId'
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        const ref = await this.firstConflict(target, candidates, "object", "value->'ref'", "delete")
+        throw effectiveObjectConflict(ref as OntologyObjectRef | undefined)
+      }
+    )
+  }
+
+  private async upsertObjects(target: PgStagedPlanTarget): Promise<number> {
+    const { projectId } = target
+    const subset = (exists: boolean) => this.sql`
+      SELECT value FROM (${this.staged(target, "object-upsert")}) AS staged
+      WHERE ((value->'expected'->>'exists')::boolean IS TRUE) = ${exists}
+    `
+    const inserted = await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${subset(false)}), written AS (
+          INSERT INTO objects (
+            project_id, object_type_id, primary_id, properties, created_at, updated_at,
+            version, last_commit_id
+          )
+          SELECT ${projectId}, value->'row'->'ref'->>'objectTypeId',
+            value->'row'->'ref'->>'primaryId', value->'row'->'properties',
+            (value->'row'->>'createdAt')::timestamptz, (value->'row'->>'updatedAt')::timestamptz,
+            (value->'row'->>'version')::integer, value->'row'->>'lastCommitId'
+          FROM candidates
+          ON CONFLICT DO NOTHING
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        const ref = await this.firstConflict(
+          target,
+          subset(false),
+          "object",
+          "value->'row'->'ref'",
+          "insert"
+        )
+        throw effectiveConflict(
+          `Expected ${objectLabel(ref as OntologyObjectRef | undefined)} to be absent.`
+        )
+      }
+    )
+    const updated = await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${subset(true)}), written AS (
+          UPDATE objects AS stored
+          SET properties = candidates.value->'row'->'properties',
+            created_at = (candidates.value->'row'->>'createdAt')::timestamptz,
+            updated_at = (candidates.value->'row'->>'updatedAt')::timestamptz,
+            version = (candidates.value->'row'->>'version')::integer,
+            last_commit_id = candidates.value->'row'->>'lastCommitId'
+          FROM candidates
+          WHERE stored.project_id = ${projectId}
+            AND ${this.matches("object", "value->'row'->'ref'")}
+            AND stored.version = (candidates.value->'expected'->>'version')::integer
+            AND stored.last_commit_id = candidates.value->'expected'->>'lastCommitId'
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        const ref = await this.firstConflict(
+          target,
+          subset(true),
+          "object",
+          "value->'row'->'ref'",
+          "update"
+        )
+        throw effectiveObjectConflict(ref as OntologyObjectRef | undefined)
+      }
+    )
+    return inserted + updated
+  }
+
+  private async upsertLinks(target: PgStagedPlanTarget): Promise<number> {
+    const { projectId } = target
+    const subset = (exists: boolean) => this.sql`
+      SELECT value FROM (${this.staged(target, "link-upsert")}) AS staged
+      WHERE ((value->'expected'->>'exists')::boolean IS TRUE) = ${exists}
+    `
+    const inserted = await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${subset(false)}), written AS (
+          INSERT INTO links (
+            project_id, source_type_id, source_id, link_id, target_type_id, target_id,
+            properties, created_at, updated_at, last_commit_id
+          )
+          SELECT ${projectId}, value->'row'->'ref'->'source'->>'objectTypeId',
+            value->'row'->'ref'->'source'->>'primaryId', value->'row'->'ref'->>'linkId',
+            value->'row'->'ref'->'target'->>'objectTypeId',
+            value->'row'->'ref'->'target'->>'primaryId', value->'row'->'properties',
+            (value->'row'->>'createdAt')::timestamptz, (value->'row'->>'updatedAt')::timestamptz,
+            value->'row'->>'lastCommitId'
+          FROM candidates
+          ON CONFLICT DO NOTHING
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        const ref = await this.firstConflict(
+          target,
+          subset(false),
+          "link",
+          "value->'row'->'ref'",
+          "insert"
+        )
+        throw effectiveConflict(
+          `Expected ${linkLabel(ref as OntologyLinkRef | undefined)} to be absent.`
+        )
+      }
+    )
+    const updated = await this.write(
+      this.sql<WriteCounts[]>`
+        WITH candidates AS (${subset(true)}), written AS (
+          UPDATE links AS stored
+          SET properties = candidates.value->'row'->'properties',
+            created_at = (candidates.value->'row'->>'createdAt')::timestamptz,
+            updated_at = (candidates.value->'row'->>'updatedAt')::timestamptz,
+            last_commit_id = candidates.value->'row'->>'lastCommitId'
+          FROM candidates
+          WHERE stored.project_id = ${projectId}
+            AND ${this.matches("link", "value->'row'->'ref'")}
+            AND stored.last_commit_id = candidates.value->'expected'->>'lastCommitId'
+          RETURNING 1
+        )
+        ${counts(this.sql)}
+      `,
+      async () => {
+        const ref = await this.firstConflict(
+          target,
+          subset(true),
+          "link",
+          "value->'row'->'ref'",
+          "update"
+        )
+        throw effectiveLinkConflict(ref as OntologyLinkRef | undefined)
+      }
+    )
+    return inserted + updated
+  }
+
+  /**
+   * Writes the staged events in canonical order. Event ids hash the canonical JSON of
+   * `[projectId, commitId, ordinal]`; the provider-fixed prefix is rendered here, the ordinal by
+   * PostgreSQL, so the outbox matches `createEventId` without one id crossing the wire.
+   */
+  private async writeOutbox(target: PgStagedPlanTarget): Promise<number> {
+    const prefix = `${canonicalJson([target.projectId, target.commitId]).slice(0, -1)},`
+    const [row] = await this.sql<WriteCounts[]>`
+      WITH candidates AS (
+        SELECT payload->'draft' AS draft,
+          row_number() OVER (
+            ORDER BY major_order, minor_order, sort_one, sort_two, record_key
+          ) - 1 AS ordinal
+        FROM ${this.sql(target.workTable)}
+        WHERE work_id = ${target.workId} AND lane = 'event'
+      ), identified AS (
+        SELECT draft, ordinal,
+          encode(sha256(convert_to(${prefix}::text || ordinal::text || ']', 'UTF8')), 'hex') AS id
+        FROM candidates
+      ), written AS (
+        INSERT INTO ontology_outbox (
+          project_id, id, commit_id, commit_ordinal, envelope,
+          available_at, attempts, lease_id, lease_expires_at,
+          published_at, last_failure, created_at
+        )
+        SELECT ${target.projectId}, id, ${target.commitId}, ordinal,
+          draft || jsonb_build_object('id', id, 'commitOrdinal', ordinal),
+          ${target.committedAt}::timestamptz, 0, NULL, NULL, NULL, NULL,
+          ${target.committedAt}::timestamptz
+        FROM identified
+        ON CONFLICT DO NOTHING
+        RETURNING 1
+      )
+      ${counts(this.sql)}
+    `
+    const staged = Number(row?.staged ?? 0)
+    if (Number(row?.written ?? 0) !== staged) {
+      throw effectiveConflict(`Outbox events of commit '${target.commitId}' already exist.`)
+    }
+    return staged
+  }
+
+  private async write(
+    statement: Promise<readonly WriteCounts[]>,
+    conflict: () => Promise<never>
+  ): Promise<number> {
+    const [row] = await statement
+    const written = Number(row?.written ?? 0)
+    if (written !== Number(row?.staged ?? 0)) await conflict()
+    return written
+  }
+
+  /** Matches a staged ref, at a static JSON path of `candidates.value`, to `stored`. */
+  private matches(kind: "object" | "link", path: string): Fragment {
+    const ref = `(candidates.${path})`
+    return this.sql.unsafe(
+      kind === "object"
+        ? `stored.object_type_id = ${ref}->>'objectTypeId'
+          AND stored.primary_id = ${ref}->>'primaryId'`
+        : `stored.source_type_id = ${ref}->'source'->>'objectTypeId'
+          AND stored.source_id = ${ref}->'source'->>'primaryId'
+          AND stored.link_id = ${ref}->>'linkId'
+          AND stored.target_type_id = ${ref}->'target'->>'objectTypeId'
+          AND stored.target_id = ${ref}->'target'->>'primaryId'`
+    )
+  }
+
+  /**
+   * The ref of the first staged entity whose stored row tells why a write missed it: it still
+   * exists after a delete, another commit wrote it before an insert, or an update left it without
+   * this commit. None when no stored row tells, as for a delete whose row is already gone.
+   */
+  private async firstConflict(
+    target: PgStagedPlanTarget,
+    candidates: Query,
+    kind: "object" | "link",
+    path: string,
+    missed: "delete" | "insert" | "update"
+  ): Promise<unknown> {
+    const table = kind === "object" ? "objects" : "links"
+    const revision =
+      missed === "insert"
+        ? this.sql`AND stored.last_commit_id <> ${target.commitId}`
+        : missed === "update"
+          ? this.sql`AND stored.last_commit_id = ${target.commitId}`
+          : this.sql``
+    const stored = this.sql`
+      EXISTS (
+        SELECT 1 FROM ${this.sql(table)} AS stored
+        WHERE stored.project_id = ${target.projectId} AND ${this.matches(kind, path)} ${revision}
+      )
+    `
+    const [row] = await this.sql<{ readonly ref: unknown }[]>`
+      SELECT ${this.sql.unsafe(`candidates.${path}`)} AS ref FROM (${candidates}) AS candidates
+      WHERE ${missed === "update" ? this.sql`NOT` : this.sql``} ${stored}
+      LIMIT 1
+    `
+    return row?.ref
+  }
+}
+
+function counts(sql: SQLClient) {
+  return sql`SELECT (SELECT COUNT(*) FROM candidates) AS staged,
+    (SELECT COUNT(*) FROM written) AS written`
 }
 
 function objectOverrideConflict(): MaterializationConflictError {
   return effectiveConflict("Expected object override changed.")
 }
 
-function linkOverrideConflict(identityKind: "edge" | "slot"): MaterializationConflictError {
+function linkOverrideConflict(identityKind: string | undefined): MaterializationConflictError {
   return effectiveConflict(
-    identityKind === "edge"
-      ? "Expected link edge override changed."
-      : "Expected link slot override changed."
+    identityKind === "slot"
+      ? "Expected link slot override changed."
+      : "Expected link edge override changed."
   )
 }
 
-function objectIdentityKey(item: {
-  readonly objectTypeId: string
-  readonly primaryId: string
-}): string {
-  return objectRefKey({ objectTypeId: item.objectTypeId, primaryId: item.primaryId })
+function effectiveObjectConflict(ref: OntologyObjectRef | undefined): MaterializationConflictError {
+  return effectiveConflict(`Expected ${objectLabel(ref)} changed.`)
 }
 
-function linkIdentityKey(item: {
-  readonly sourceTypeId: string
-  readonly sourceId: string
-  readonly linkId: string
-  readonly targetTypeId: string
-  readonly targetId: string
-}): string {
-  return linkRefKey({
-    source: { objectTypeId: item.sourceTypeId, primaryId: item.sourceId },
-    linkId: item.linkId,
-    target: { objectTypeId: item.targetTypeId, primaryId: item.targetId },
-  })
+function effectiveLinkConflict(ref: OntologyLinkRef | undefined): MaterializationConflictError {
+  return effectiveConflict(`Expected ${linkLabel(ref)} changed.`)
 }
 
-function effectiveObjectConflict(item: {
-  readonly objectTypeId: string
-  readonly primaryId: string
-}): MaterializationConflictError {
-  return effectiveConflict(`Expected object ${objectIdentityKey(item)} changed.`)
+function objectLabel(ref: OntologyObjectRef | undefined): string {
+  return ref ? `object ${objectRefKey(ref)}` : "object"
 }
 
-function effectiveLinkConflict(item: {
-  readonly sourceTypeId: string
-  readonly sourceId: string
-  readonly linkId: string
-  readonly targetTypeId: string
-  readonly targetId: string
-}): MaterializationConflictError {
-  return effectiveConflict(`Expected link ${linkIdentityKey(item)} changed.`)
+function linkLabel(ref: OntologyLinkRef | undefined): string {
+  return ref ? `link ${linkRefKey(ref)}` : "link"
 }
 
-function pointConflict(item: {
-  readonly objectTypeId: string
-  readonly objectId: string
-  readonly propertyId: string
-  readonly at: string
-}): MaterializationConflictError {
+function pointConflict(point: unknown): MaterializationConflictError {
+  const found = point as { readonly series: TelemetrySeriesRef; readonly at: string } | undefined
   return new MaterializationConflictError(
     "timeseries-point",
-    `Telemetry point ${telemetryPointKey(
-      {
-        object: { objectTypeId: item.objectTypeId, primaryId: item.objectId },
-        propertyId: item.propertyId,
-      },
-      item.at
-    )} changed.`
+    found
+      ? `Telemetry point ${telemetryPointKey(found.series, found.at)} changed.`
+      : "Telemetry point changed."
   )
 }

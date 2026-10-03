@@ -2,11 +2,8 @@ import { Database, type SQLQueryBindings } from "bun:sqlite"
 import { describe, expect, test } from "bun:test"
 import type { OntologyLinkRef, OntologyObjectRef } from "@sixb/core/internal/materialization"
 import { installFreshSqliteSchema } from "../src/migrations"
-import {
-  SQLITE_MATERIALIZATION_WORK_TABLE,
-  SQLITE_REPLACEMENT_WORK_TABLE,
-  SqliteMaterializationStateReader,
-} from "../src/ontology-storage/materialization-state"
+import { SqliteMaterializationStateReader } from "../src/ontology-storage/materialization-state"
+import { EXPAND_LINK_STATEMENTS, identityRevision } from "../src/ontology-storage/replacement-plans"
 
 interface RecordedQuery {
   readonly sql: string
@@ -151,37 +148,84 @@ describe("SQLite materialization query plans", () => {
       expectRequestedFirstLookup(db, sourceRead, "SEARCH rows", ["root_id=?"])
     })
   })
+})
 
-  test("prepares a linked replacement union once before paging it", () => {
-    // Regression proof: restore per-page replacementLinkRows() construction and this records four
-    // executions of the incident/replacement union (three one-row pages plus the terminal read).
-    // The prepared implementation executes that union once, then keyset-pages its temp table.
-    withRecordedReader(({ db, reader, recorded }) => {
-      installReplacementWorkTables(db)
-      insertReadyLinkCandidate(db, 3)
+describe("SQLite replacement plan query plans", () => {
+  // Removal proof: compare a link's edge override by a bare `identity_key`, which resolves to the
+  // override's own column and stops correlating; drop the `+` from the root's row lookup; or read
+  // the latest points as the series' rows at their property's `MAX(at)`, which walks the history.
+  test("identity revisions look every input up by the identity's own key", () => {
+    const db = new Database(":memory:")
+    installFreshSqliteSchema(db)
+    try {
+      for (const kind of ["object", "link"] as const) {
+        const plan = db
+          .query<QueryPlanRow, SQLQueryBindings[]>(
+            `EXPLAIN QUERY PLAN SELECT identities.identity_key
+             FROM ontology_replacement_plan_identities AS identities
+             WHERE identities.version_id = $versionId AND identities.entity_kind = $entityKind
+               AND identities.planned_revision IS NOT ${identityRevision(kind)}`
+          )
+          .all({ $projectId: projectId, $versionId: 1, $entityKind: kind })
+          .map(({ detail }) => detail)
 
-      const pages = [
-        ...reader.replacementIdentities({
-          sessionId: "session-1",
-          sourceId: "employees",
-          candidateMaterializationId: "candidate-1",
-          previousMaterializationId: null,
-          kind: "link",
-          pageRows: 1,
-        }),
-      ]
-
-      expect(pages).toHaveLength(3)
-      expect(pages.flat()).toHaveLength(3)
-      expect(recorded.filter(({ sql }) => sql.includes("WITH incident_objects AS")).length).toBe(1)
-      expect(
-        recorded.filter(
-          ({ sql }) =>
-            sql.includes(`FROM ${SQLITE_REPLACEMENT_WORK_TABLE}`) &&
-            sql.includes("ORDER BY sort_key")
-        ).length
-      ).toBe(4)
-    })
+        // The only scan walks one object's telemetry property names, never a table.
+        expect(
+          plan.filter((detail) => detail.startsWith("SCAN") && detail !== "SCAN properties"),
+          kind
+        ).toEqual([])
+        // A latest point is one seek in its own property's series.
+        const points = plan.filter((detail) => detail.startsWith("SEARCH points"))
+        expect(points.length, kind).toBeGreaterThan(0)
+        expect(
+          points.filter((detail) => !detail.includes("property_id=?")),
+          kind
+        ).toEqual([])
+        expect(
+          plan.filter(
+            (detail) => detail.includes("SCALAR SUBQUERY") && !detail.startsWith("CORRELATED")
+          ),
+          kind
+        ).toEqual([])
+        if (kind === "link") {
+          expect(plan).toContainEqual(expect.stringMatching(/^SEARCH overrides .*identity_key=\?/))
+          expect(plan).toContainEqual(expect.stringMatching(/^SEARCH roots .*root_key=\?/))
+          expect(plan).toContainEqual(expect.stringMatching(/^SEARCH rows .*\(root_id=\?\)/))
+        }
+      }
+    } finally {
+      db.close()
+    }
+  })
+  // Removal proof: drop `INDEXED BY idx_links_target` or `idx_ontology_link_overrides_target`
+  // from the incident statement; without statistics SQLite then searches the project's links or
+  // overrides by `project_id` alone, once per incident object.
+  test("link expansion seeks each incident object's links by its own key", () => {
+    const db = new Database(":memory:")
+    installFreshSqliteSchema(db)
+    try {
+      for (const [name, statement] of Object.entries(EXPAND_LINK_STATEMENTS)) {
+        const plan = db
+          .query<QueryPlanRow, SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${statement}`)
+          .all({ $projectId: projectId, $versionId: 1 })
+          .map(({ detail }) => detail)
+        const ctes = ["incident_objects", "incident_links", "scopes", "members"]
+        expect(
+          plan.filter(
+            (detail) => detail.startsWith("SCAN") && !ctes.includes(detail.slice("SCAN ".length))
+          ),
+          name
+        ).toEqual([])
+        const seeks = plan.filter((detail) => /^SEARCH (links|overrides) /.test(detail))
+        expect(seeks.length, name).toBeGreaterThan(0)
+        expect(
+          seeks.filter((detail) => !/(source|target)_(type_)?id=\?/.test(detail)),
+          name
+        ).toEqual([])
+      }
+    } finally {
+      db.close()
+    }
   })
 })
 
@@ -239,64 +283,6 @@ function recordingDatabase(db: Database, recorded: RecordedQuery[]): Database {
       return typeof value === "function" ? value.bind(target) : value
     },
   })
-}
-
-function installReplacementWorkTables(db: Database): void {
-  db.run(`
-    CREATE TEMP TABLE ${SQLITE_MATERIALIZATION_WORK_TABLE} (
-      session_id TEXT NOT NULL,
-      kind TEXT NOT NULL,
-      payload TEXT NOT NULL CHECK (json_valid(payload))
-    );
-    CREATE TEMP TABLE ${SQLITE_REPLACEMENT_WORK_TABLE} (
-      session_id TEXT NOT NULL,
-      entity_kind TEXT NOT NULL,
-      identity_key TEXT NOT NULL,
-      sort_key TEXT NOT NULL,
-      diff_required INTEGER NOT NULL CHECK (diff_required IN (0, 1)),
-      PRIMARY KEY (session_id, entity_kind, identity_key)
-    );
-    CREATE INDEX ontology_replacement_work_order
-      ON ${SQLITE_REPLACEMENT_WORK_TABLE}(
-        session_id, entity_kind, sort_key, identity_key
-      );
-  `)
-}
-
-function insertReadyLinkCandidate(db: Database, count: number): void {
-  const timestamp = "2026-01-01T00:00:00.000Z"
-  db.query(
-    `INSERT INTO ontology_sources (
-      project_id, source_id, materialization_id, projection_run_id,
-      projection_kind, protocol, status, execution_token,
-      dataset_id, dataset_version_id, dataset_version_created_at,
-      projection_revision, ownership_hash, ontology_revision,
-      root_count, assertion_count, created_at, ready_at, activated_at,
-      terminal_at, last_commit_id, updated_at
-    ) VALUES (?, 'employees', 'candidate-1', 'run-1',
-      'object', 'replacement', 'ready', 'execution-1',
-      'employees', 'version-1', ?, 'projection-revision', 'ownership-hash',
-      'ontology-revision', ?, ?, ?, ?, NULL, NULL, NULL, ?)`
-  ).run(projectId, timestamp, count, count, timestamp, timestamp, timestamp)
-
-  const insertRoot = db.query(
-    `INSERT INTO ontology_source_roots (version_id, project_id, root_key, staging_ordinal)
-    SELECT version_id, project_id, ?, ? FROM ontology_sources WHERE materialization_id = 'candidate-1'
-    RETURNING id`
-  )
-  const insertRow = db.query(
-    `INSERT INTO ontology_source_rows (
-      root_id, entity_kind, source_type_id, source_primary_id, link_id, target_type_id,
-      target_primary_id
-    ) VALUES (?, 'link', 'Employee', ?, 'timecards', 'Timecard', ?)`
-  )
-  for (let index = 0; index < count; index += 1) {
-    const employeeId = `employee-${index}`
-    const root = insertRoot.get(JSON.stringify(["object", "Employee", employeeId]), index) as {
-      readonly id: number
-    }
-    insertRow.run(root.id, employeeId, `timecard-${index}`)
-  }
 }
 
 function findRecorded(

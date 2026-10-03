@@ -22,7 +22,7 @@ import { jsonParameter, type PgOntologySourceRow } from "./shared"
  * version; the candidate's own roots are never rewritten. One live root per source and key holds
  * because activation, under the source fence, retires every root the candidate replaces.
  */
-const PUBLISHED = "('active', 'superseded')"
+export const PUBLISHED = "('active', 'superseded')"
 
 /** The columns `sourceAssertion` reads, over `versions`, `roots` and `rows`. */
 export function sourceAssertionColumns(sql: SQLClient) {

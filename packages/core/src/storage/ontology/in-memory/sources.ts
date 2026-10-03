@@ -446,14 +446,14 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
       terminalAt: abandonedAt,
       updatedAt: abandonedAt,
     }
-    this.state.sourceMaterializations.set(
-      sourceMaterializationKey(
-        materialization.projectId,
-        materialization.source.projectionId,
-        materialization.materializationId
-      ),
-      abandoned
+    const key = sourceMaterializationKey(
+      materialization.projectId,
+      materialization.source.projectionId,
+      materialization.materializationId
     )
+    this.state.sourceMaterializations.set(key, abandoned)
+    // Nothing applies an abandoned candidate's plan.
+    this.state.replacementPlans.delete(key)
     return sourceMaterializationRecord(abandoned)
   }
 

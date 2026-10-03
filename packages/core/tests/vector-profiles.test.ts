@@ -258,7 +258,7 @@ describe("named vector profiles", () => {
   })
 
   test("invalidates only changed sources; deletion/recreation never resurrects a vector", async () => {
-    // Regression guard: remove invalidateVectorChanges from drainStagedWork to reproduce.
+    // Regression guard: remove invalidateVectorChanges from applyStagedWork to reproduce.
     const f = fixture()
     await seed(f)
     await index(f)
