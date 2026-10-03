@@ -53,6 +53,28 @@ export async function runCheck(options: CheckOptions = {}) {
   } finally {
     // Tear down runtime providers (broker, queues, storage, connectors) so the
     // process can exit instead of hanging on open connections. Mirrors lake-check.
-    await stopSixbProviders(sixb)
+    // A provider that cannot reach its server may never finish closing; the report is already
+    // out, so a deploy gated on this command gets its answer instead of waiting forever.
+    if (!(await settlesWithin(stopSixbProviders(sixb), CLOSE_TIMEOUT_MS))) {
+      console.error(`[SixbCLI] Providers did not close within ${CLOSE_TIMEOUT_MS / 1000}s.`)
+      process.exit(process.exitCode ?? 1)
+    }
+  }
+  // A client can report itself closed and still hold the process open — one retrying a server it
+  // never reached does. The report is out and teardown ran, so finish.
+  process.exit(process.exitCode ?? 0)
+}
+
+const CLOSE_TIMEOUT_MS = 10_000
+
+async function settlesWithin(work: Promise<void>, timeoutMs: number): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timedOut = new Promise<false>((resolveTimeout) => {
+    timer = setTimeout(() => resolveTimeout(false), timeoutMs)
+  })
+  try {
+    return await Promise.race([work.then(() => true as const), timedOut])
+  } finally {
+    clearTimeout(timer)
   }
 }

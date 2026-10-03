@@ -95,6 +95,17 @@ export const CLI_OPTION_DEFINITIONS = {
   group: { syntax: "--group <id>", summary: "Assignable token group; may repeat", kind: "string" },
   json: { syntax: "--json", summary: "Print JSON instead of formatted output", kind: "boolean" },
   outdir: { syntax: "--outdir <path>", summary: "Build output directory", kind: "string" },
+  ref: {
+    syntax: "--ref <ref>",
+    summary: "Branch, tag, or commit to deploy (default: HEAD)",
+    kind: "string",
+  },
+  follow: { syntax: "--follow", summary: "Keep printing new log lines", kind: "boolean" },
+  tail: {
+    syntax: "--tail <lines>",
+    summary: "Recent log lines to print (default: 100)",
+    kind: "string",
+  },
   "dry-run": {
     syntax: "--dry-run",
     summary: "Show what would change without changing it",
@@ -145,6 +156,11 @@ export type LocalCommandId =
   | "lake:check"
   | "lake:cleanup"
   | "deploy"
+  | "deploy:status"
+  | "deploy:logs"
+  | "deploy:restart"
+  | "deploy:start"
+  | "deploy:stop"
   | "init"
 
 interface CommandNode {
@@ -426,10 +442,32 @@ const commandTree: readonly CommandNode[] = [
       }),
     ],
   },
-  command("deploy", "Deploy the project described in sixb.deploy.ts", {
-    usage: "sixb deploy --dry-run [--json]",
-    options: ["dry-run", "json"],
-  }),
+  {
+    ...command("deploy", "Deploy the project described in sixb.deploy.ts", {
+      usage: "sixb deploy [--dry-run] [--ref <ref>] [--json]",
+      options: ["dry-run", "ref", "json"],
+      rootHelpLabel: "deploy ...",
+    }),
+    children: [
+      command("deploy:status", "Show what the deployment runs, and which commit", {
+        path: ["deploy", "status"],
+        options: ["json"],
+      }),
+      command("deploy:logs", "Print the deployment's logs", {
+        path: ["deploy", "logs"],
+        usage: "sixb deploy logs [service] [--follow] [--tail <lines>]",
+        options: ["follow", "tail"],
+        maximumPositionals: 1,
+      }),
+      ...(["restart", "start", "stop"] as const).map((action) =>
+        command(`deploy:${action}`, `${capitalize(action)} one service, or every service`, {
+          path: ["deploy", action],
+          usage: `sixb deploy ${action} [service]`,
+          maximumPositionals: 1,
+        })
+      ),
+    ],
+  },
   command("init", "Initialize sixb project in a directory", {
     usage: "sixb init [dir]",
     maximumPositionals: 1,
@@ -518,6 +556,8 @@ export const CLI_EXAMPLES = [
   "sixb lake check",
   "sixb lake cleanup --dry-run",
   "sixb deploy --dry-run",
+  "sixb deploy",
+  "sixb deploy logs api --follow",
 ] as const
 
 export function parseCliArgs(args: readonly string[]): ParsedCli {
@@ -616,13 +656,15 @@ function parseLocalCommand(root: CommandNode, args: readonly string[]): ParsedCl
 
   while (node.children) {
     const next = args[index]
+    const child = node.children.find((candidate) => candidate.name === next)
+    // A command that also has subcommands runs itself when no subcommand follows.
+    if (!child && node.id && (next === undefined || next.startsWith("-"))) break
     if (!next || next === "--help" || next === "-h") {
       return { kind: "help", help: helpFor(node, path) }
     }
     if (next.startsWith("-")) {
       throw new CliUsageError(`'${path.join(" ")}' requires a subcommand.`, helpFor(node, path))
     }
-    const child = node.children.find((candidate) => candidate.name === next)
     if (!child) {
       throw new CliUsageError(`Unknown ${path.join(" ")} command '${next}'.`, helpFor(node, path))
     }
@@ -722,6 +764,10 @@ function parseOptions(
     throw new CliUsageError("--api-url and --profile cannot be used together.", helpFor(node, path))
   }
   return { options, positionals }
+}
+
+function capitalize(value: string): string {
+  return `${value.charAt(0).toUpperCase()}${value.slice(1)}`
 }
 
 function helpFor(node: CommandNode, path: readonly string[]): CliHelp {

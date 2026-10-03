@@ -1,65 +1,25 @@
 import type {
+  DeployCommand,
   DeployConfig,
   DeployEnv,
   DeployHttpServiceName,
-  DeployListenAddress,
   DeployProcessDefinition,
+  DeployRelease,
+  DeployReleaseHttp,
+  DeployReleaseProcess,
+  DeployReleaseService,
   DeployScalableProcessOptions,
   DeployServiceName,
   DeployWorkersConfig,
 } from "@sixb/core/deploy"
-import { DEPLOY_SERVICES, isDeployHttpService } from "@sixb/core/internal/deploy"
+import {
+  DEPLOY_SERVICES,
+  isDeployHttpService,
+  isDeploySingletonService,
+} from "@sixb/core/internal/deploy"
 import { parseAgentTurnTimeoutMs } from "./agent-turn-timeout"
 import { SixbCliError } from "./errors"
 import { type ProductionRole, productionRoleFacts } from "./production-roles"
-
-/**
- * Everything a deployment runs, resolved from `sixb.deploy.ts` against the CLI's own roles and
- * flags. A target only decides where and how it runs: which processes exist, and the exact
- * command each one starts with, are the framework's answer.
- */
-export interface DeployRelease {
-  readonly name: string
-  readonly target: { readonly kind: string; readonly location: string }
-  /** The environment every step and service starts from. */
-  readonly env: DeployEnv
-  readonly steps: {
-    /** Runs while the previous release still serves. */
-    readonly build: readonly DeployCommand[]
-    /** Runs after the services stop and before they start again. */
-    readonly beforeStart: readonly DeployCommand[]
-  }
-  readonly services: readonly DeployReleaseService[]
-}
-
-export interface DeployCommand {
-  /** `sixb` is the CLI the project installs; `bun` runs a project script. */
-  readonly program: "sixb" | "bun"
-  readonly args: readonly string[]
-}
-
-export interface DeployReleaseService {
-  readonly name: string
-  /** The production role the service runs, or `custom` for a project process. */
-  readonly role: ProductionRole | "custom"
-  readonly command: DeployCommand
-  /** The complete environment: the release's, then the service's own additions. */
-  readonly env: DeployEnv
-  readonly instances: number
-  readonly http?: DeployReleaseHttp
-  readonly process: DeployReleaseProcess
-}
-
-export interface DeployReleaseHttp extends DeployListenAddress {
-  readonly domain: string
-  readonly publicOrigin: string
-}
-
-export interface DeployReleaseProcess {
-  readonly killTimeoutMs: number
-  readonly restartDelayMs: number
-  readonly maxMemory?: string
-}
 
 /**
  * The service that deploys each production role. Total over the role union: a new role does not
@@ -99,10 +59,21 @@ const PUBLIC_ORIGIN_ENV = {
   app: "SIXB_APP_PUBLIC_ORIGIN",
 } as const satisfies Record<DeployHttpServiceName, string>
 
+/** Answers 200 once storage is reachable and its schema current; see `server/src/routes/status.ts`. */
+const API_READINESS_PATH = "/ready"
+
 const DEFAULT_KILL_TIMEOUT_MS = 10_000
 const DEFAULT_RESTART_DELAY_MS = 1_000
 
-export function buildDeployRelease(config: DeployConfig): DeployRelease {
+export interface DeployReleaseOptions {
+  /** The Bun version the project runs on, from its `packageManager` or the running Bun. */
+  readonly bunVersion: string
+}
+
+export function buildDeployRelease(
+  config: DeployConfig,
+  options: DeployReleaseOptions
+): DeployRelease {
   const enabled = DEPLOY_SERVICES.filter((service) => config.services?.[service] !== false)
   const http = resolveHttpServices(config, enabled)
 
@@ -118,10 +89,14 @@ export function buildDeployRelease(config: DeployConfig): DeployRelease {
   return {
     name: config.name,
     target: { kind: config.target.kind, location: config.target.location },
+    bunVersion: options.bunVersion,
     env,
     steps: {
       build: [sixb("build")],
-      beforeStart: [sixb("db", "migrate"), sixb("lake", "check")],
+      // The order `docs/deployment` gives. `check` probes every provider, so a broker or queue
+      // the services cannot reach fails the deploy instead of passing for healthy; it needs the
+      // schema migrated first.
+      beforeStart: [sixb("db", "migrate"), sixb("check"), sixb("lake", "check")],
     },
     services: [
       ...enabled.map((service) => sixbService(config, service, env, http)),
@@ -155,7 +130,7 @@ function sixbService(
   const processOptions: DeployScalableProcessOptions = options.process ?? {}
   return {
     name: service,
-    role,
+    kind: address ? "http" : isDeploySingletonService(service) ? "singleton" : "workers",
     command: { program: "sixb", args: [...args, ...noMigrate] },
     env: { ...env, ...options.env },
     instances: processOptions.instances ?? 1,
@@ -192,7 +167,7 @@ function projectProcess(
   const processOptions = definition.process ?? {}
   return {
     name,
-    role: "custom",
+    kind: "script",
     command: { program: "bun", args: [definition.entrypoint, ...(definition.args ?? [])] },
     env: { ...env, ...definition.env },
     instances: processOptions.instances ?? 1,
@@ -230,7 +205,12 @@ function resolveHttpServices(
     }
     domains.set(domain.toLowerCase(), service)
     ports.set(address.port, service)
-    resolved.set(service, { ...address, domain, publicOrigin: `https://${domain}` })
+    resolved.set(service, {
+      ...address,
+      domain,
+      publicOrigin: `https://${domain}`,
+      ...(service === "api" ? { readinessPath: API_READINESS_PATH } : {}),
+    })
   }
 
   return resolved
