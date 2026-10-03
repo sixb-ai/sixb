@@ -83,7 +83,6 @@ function header(id: string): MaterializationPlanHeader {
       requestHash: id,
       executionId: `execution:${id}`,
       origin: { kind: "runtime", requestId: id },
-      executor: { type: "request", requestId: id },
       ontologyRevision: "revision",
       intent: { kind: "edit", mode: "atomic", operationCount: 0 },
       committedAt,
@@ -303,17 +302,8 @@ describe("PostgreSQL set-based plan writes", () => {
         eventKindRank: 0,
         sortKey: `6${index}`,
         draft: {
-          schemaVersion: 1,
-          projectId,
-          occurredAt: committedAt,
-          correlationId: `correlation:${id}`,
-          origin: { kind: "runtime", requestId: id },
-          executor: { type: "request", requestId: id },
-          commitId: id,
           type: "object.created",
-          topic: "objects",
-          partitionKey: `Device:${primaryId}`,
-          payload: { objectTypeId: "Device", primaryId, properties: {}, propertyChanges: {} },
+          payload: { objectTypeId: "Device", primaryId, properties: {} },
         },
       })
     )
@@ -361,17 +351,17 @@ describe("PostgreSQL set-based plan writes", () => {
     const eventId = (ordinal: number) => createEventId(projectId, id, ordinal)
     expect([
       ...(await sql`
-        SELECT id, commit_ordinal::integer AS ordinal, envelope->>'id' AS envelope_id,
-          (envelope->>'commitOrdinal')::integer AS envelope_ordinal, envelope->>'partitionKey' AS key
+        SELECT id, commit_ordinal::integer AS ordinal, event
         FROM ontology_outbox WHERE commit_id = ${id} ORDER BY commit_ordinal
       `),
     ]).toEqual(
       [0, 1].map((ordinal) => ({
         id: eventId(ordinal),
         ordinal,
-        envelope_id: eventId(ordinal),
-        envelope_ordinal: ordinal,
-        key: `Device:${["d", "e"][ordinal]}`,
+        event: {
+          type: "object.created",
+          payload: { objectTypeId: "Device", primaryId: ["d", "e"][ordinal], properties: {} },
+        },
       }))
     )
     expect([

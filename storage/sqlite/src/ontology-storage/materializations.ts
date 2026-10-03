@@ -228,7 +228,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       }
       for (const records of this.sessions.lanePages(session, "event", APPLY_PAGE_ROWS)) {
         const outbox = records.map((record) =>
-          materializationOutboxWrite(record.draft, eventCount++)
+          materializationOutboxWrite(commit, record.draft, eventCount++)
         )
         this.writer.apply(commit.projectId, commit.id, materializationPlanChunk([], outbox))
         await yieldSqliteEventLoop()
@@ -540,12 +540,10 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
           `
             INSERT INTO ontology_commits (
               project_id, id, idempotency_key, request_hash, execution_id,
-              origin_kind, origin_run_id, origin_batch_ordinal, origin, requested_by, executor,
+              origin_kind, origin_run_id, origin_batch_ordinal, origin,
               ontology_revision, projection_revision, ownership_hash,
               intent, result, committed_at
-            ) VALUES (
-              ?, ?, ?, ?, ?, ?, ?, ?, json(?), json(?), json(?), ?, ?, ?, json(?), json(?), ?
-            )
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, json(?), ?, ?, ?, json(?), json(?), ?)
           `
         )
         .run(
@@ -558,8 +556,6 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
           origin.runId,
           origin.batchOrdinal,
           canonicalJson(commit.origin),
-          commit.requestedBy === undefined ? null : canonicalJson(commit.requestedBy),
-          canonicalJson(commit.executor),
           commit.ontologyRevision,
           commit.projectionRevision ?? null,
           commit.ownershipHash ?? null,

@@ -2,6 +2,7 @@ import type { Database } from "bun:sqlite"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import {
+  type ClaimedOutboxDraft,
   sourceAssertionFromColumns,
   sourceEntityFromKey,
 } from "@sixb/core/internal/ontology-storage-provider"
@@ -9,7 +10,6 @@ import type {
   AssertSourceMaterializationExecutionInput,
   OntologyCommitRecord,
   OntologyCommitWrite,
-  OntologyOutboxRecord,
   OntologySourceRecord,
   StageSourceAssertion,
 } from "@sixb/core/storage"
@@ -40,8 +40,6 @@ export interface SqliteOntologyCommitRow {
   readonly origin_run_id: string | null
   readonly origin_batch_ordinal: number | null
   readonly origin: string
-  readonly requested_by: string | null
-  readonly executor: string
   readonly ontology_revision: string
   readonly projection_revision: string | null
   readonly ownership_hash: string | null
@@ -102,7 +100,10 @@ export interface SqliteStoredOverrideRow {
 }
 
 export interface SqliteOntologyOutboxRow {
-  readonly envelope: string
+  readonly id: string
+  readonly commit_id: string
+  readonly commit_ordinal: number
+  readonly event: string
   readonly available_at: string
   readonly attempts: number
   readonly lease_id: string | null
@@ -172,12 +173,6 @@ export function commitRecord(row: SqliteOntologyCommitRow): OntologyCommitRecord
     requestHash: row.request_hash,
     executionId: row.execution_id,
     origin: parseJson<OntologyCommitWrite["origin"]>(row.origin),
-    ...(row.requested_by === null
-      ? {}
-      : {
-          requestedBy: parseJson<NonNullable<OntologyCommitWrite["requestedBy"]>>(row.requested_by),
-        }),
-    executor: parseJson<OntologyCommitWrite["executor"]>(row.executor),
     ontologyRevision: row.ontology_revision,
     ...(row.projection_revision === null ? {} : { projectionRevision: row.projection_revision }),
     ...(row.ownership_hash === null ? {} : { ownershipHash: row.ownership_hash }),
@@ -188,9 +183,19 @@ export function commitRecord(row: SqliteOntologyCommitRow): OntologyCommitRecord
   return { ...base, intent, result } as OntologyCommitRecord
 }
 
-export function outboxRecord(row: SqliteOntologyOutboxRow): OntologyOutboxRecord {
+/** A claimed row as stored: its draft, to rebuild from its commit. */
+export function claimedOutboxDraft(row: SqliteOntologyOutboxRow): ClaimedOutboxDraft {
+  if (row.lease_id === null || row.lease_expires_at === null) {
+    throw new MaterializationConflictError(
+      "outbox-lease",
+      "Ontology outbox claim returned an unpaired lease."
+    )
+  }
   return {
-    envelope: parseJson<OntologyOutboxRecord["envelope"]>(row.envelope),
+    id: row.id,
+    commitId: row.commit_id,
+    commitOrdinal: row.commit_ordinal,
+    event: parseJson<ClaimedOutboxDraft["event"]>(row.event),
     availableAt: row.available_at,
     attempts: row.attempts,
     leaseId: row.lease_id,

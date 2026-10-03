@@ -32,7 +32,6 @@ import {
   usableLinkSlotOverride,
 } from "../effective/resolve"
 import { validateEffectiveObject } from "../effective/validate"
-import type { MaterializerAttribution } from "../execution/scope"
 import {
   appendEffectiveLinkWork,
   appendEffectiveObjectWork,
@@ -47,8 +46,6 @@ export interface ProjectionReplacementPlanInput {
   readonly projectionKind: "object" | "link"
   /** The commit the plan carries, timed as the plan was opened. */
   readonly commit: OntologyCommitWrite
-  readonly correlationId: string
-  readonly attribution: MaterializerAttribution
   readonly signal?: AbortSignal
 }
 
@@ -146,33 +143,19 @@ function planReplacementObject(
   }
 
   if (!change) return work
-  appendObjectChangeWork(work, sortKey, context, input, change)
+  appendObjectChangeWork(work, sortKey, change)
   return work
 }
 
 function appendObjectChangeWork(
   work: MaterializationWorkRecord[],
   sortKey: string,
-  context: Pick<MaterializerContext, "projectId">,
-  input: ProjectionReplacementPlanInput,
   change: EffectiveObjectChange
 ): void {
   const items: MaterializationPlanWorkItem[] = []
   appendEffectiveObjectWork(items, change)
   for (const item of items) work.push(planWork(item, sortKey))
-  work.push(
-    eventWork(
-      buildObjectMaterializationEventDraft({
-        projectId: context.projectId,
-        commitId: input.commit.id,
-        committedAt: input.commit.committedAt,
-        origin: input.commit.origin,
-        correlationId: input.correlationId,
-        attribution: input.attribution,
-        change,
-      })
-    )
-  )
+  work.push(eventWork(buildObjectMaterializationEventDraft(change)))
 }
 
 function planReplacementLink(
@@ -194,7 +177,7 @@ function planReplacementLink(
   const sortKey = linkRefSortKey(state.ref)
   work.push(classificationWork("link", linkRefKey(state.ref), sortKey))
   if (!change) return work
-  appendLinkChangeWork(work, sortKey, context, input, change)
+  appendLinkChangeWork(work, sortKey, change)
   return work
 }
 
@@ -261,26 +244,12 @@ function cardinalityWork(
 function appendLinkChangeWork(
   work: MaterializationWorkRecord[],
   sortKey: string,
-  context: Pick<MaterializerContext, "projectId">,
-  input: ProjectionReplacementPlanInput,
   change: EffectiveLinkChange
 ): void {
   const items: MaterializationPlanWorkItem[] = []
   appendEffectiveLinkWork(items, change)
   for (const item of items) work.push(planWork(item, sortKey))
-  work.push(
-    eventWork(
-      buildLinkMaterializationEventDraft({
-        projectId: context.projectId,
-        commitId: input.commit.id,
-        committedAt: input.commit.committedAt,
-        origin: input.commit.origin,
-        correlationId: input.correlationId,
-        attribution: input.attribution,
-        change,
-      })
-    )
-  )
+  work.push(eventWork(buildLinkMaterializationEventDraft(change)))
 }
 
 function resolveReplacementObject(

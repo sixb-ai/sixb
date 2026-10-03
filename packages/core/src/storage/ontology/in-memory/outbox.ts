@@ -6,17 +6,20 @@ import type {
   ClaimedOntologyOutboxRow,
   ClaimOntologyOutboxInput,
   CompleteOntologyOutboxLeaseInput,
-  OntologyOutboxRecord,
   OntologyOutboxStorage,
   OntologyOutboxSummary,
   PurgePublishedOntologyOutboxInput,
   RescheduleOntologyOutboxLeaseInput,
   SummarizeOntologyOutboxInput,
 } from "../outbox"
+import { claimedOutboxRows, type OutboxEventContext } from "../provider-work"
 import {
   assertNonblank,
   assertTimestamp,
+  commitKey,
+  type InMemoryExecutionReader,
   type InMemoryOntologyState,
+  type InMemoryOutboxRow,
   insertBounded,
   outboxKey,
 } from "./shared-state"
@@ -24,14 +27,17 @@ import {
 export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
   constructor(
     private readonly state: InMemoryOntologyState,
-    private readonly runRootOperation: <T>(run: () => Promise<T> | T) => Promise<T>
+    private readonly runRootOperation: <T>(run: () => Promise<T> | T) => Promise<T>,
+    private readonly readExecution: InMemoryExecutionReader
   ) {}
 
   async claim(input: ClaimOntologyOutboxInput): Promise<readonly ClaimedOntologyOutboxRow[]> {
     return this.runRootOperation(() => this.claimUnlocked(input))
   }
 
-  private claimUnlocked(input: ClaimOntologyOutboxInput): readonly ClaimedOntologyOutboxRow[] {
+  private async claimUnlocked(
+    input: ClaimOntologyOutboxInput
+  ): Promise<readonly ClaimedOntologyOutboxRow[]> {
     assertNonblank(input.projectId, "Ontology outbox project id")
     assertPositiveLimit(input.limit)
     const now = assertTimestamp(input.now, "Ontology outbox claim time")
@@ -42,24 +48,32 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
         "Ontology outbox lease expiry must be later than the claim time."
       )
     }
-    const rows: OntologyOutboxRecord[] = []
+    const rows: InMemoryOutboxRow[] = []
     for (const row of this.state.outbox.values()) {
-      if (row.envelope.projectId !== input.projectId) continue
+      if (row.projectId !== input.projectId) continue
       assertPairedLease(row)
       if (row.publishedAt !== null || Date.parse(row.availableAt) > now) continue
       if (row.leaseExpiresAt !== null && Date.parse(row.leaseExpiresAt) > now) continue
       insertBounded(rows, row, input.limit, compareClaimRows)
     }
-    return rows.map((row) => {
-      const claimed: ClaimedOntologyOutboxRow = {
-        ...row,
-        attempts: row.attempts + 1,
-        leaseId: input.leaseId,
-        leaseExpiresAt: input.leaseExpiresAt,
-      }
-      this.state.outbox.set(outboxKey(input.projectId, row.envelope.id), structuredClone(claimed))
-      return structuredClone(claimed)
-    })
+    const claimed = rows.map((row) => ({
+      ...row,
+      attempts: row.attempts + 1,
+      leaseId: input.leaseId,
+      leaseExpiresAt: input.leaseExpiresAt,
+    }))
+    // Rebuilt before any lease is taken: a row that cannot be rebuilt leaves the outbox untouched.
+    const contexts = new Map<string, OutboxEventContext>()
+    for (const commitId of new Set(claimed.map((row) => row.commitId))) {
+      const commit = this.state.commitsById.get(commitKey(input.projectId, commitId))
+      const execution = commit && (await this.readExecution(input.projectId, commit.executionId))
+      if (commit && execution) contexts.set(commitId, { commit, execution })
+    }
+    const records = claimedOutboxRows(structuredClone(claimed), (commitId) =>
+      contexts.get(commitId)
+    )
+    for (const row of claimed) this.state.outbox.set(outboxKey(input.projectId, row.id), row)
+    return records
   }
 
   async markPublished(input: CompleteOntologyOutboxLeaseInput): Promise<void> {
@@ -114,7 +128,7 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
       let maxAttempts = 0
 
       for (const row of this.state.outbox.values()) {
-        if (row.envelope.projectId !== input.projectId || row.publishedAt !== null) continue
+        if (row.projectId !== input.projectId || row.publishedAt !== null) continue
         pendingCount += 1
         if (row.attempts > 0) retryingCount += 1
         maxAttempts = Math.max(maxAttempts, row.attempts)
@@ -131,11 +145,11 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
     assertNonblank(input.projectId, "Ontology outbox project id")
     assertPositiveLimit(input.limit)
     const cutoff = assertTimestamp(input.publishedBefore, "Ontology outbox purge cutoff")
-    const rows: [string, OntologyOutboxRecord][] = []
+    const rows: [string, InMemoryOutboxRow][] = []
     for (const entry of this.state.outbox.entries()) {
       const [, row] = entry
       if (
-        row.envelope.projectId !== input.projectId ||
+        row.projectId !== input.projectId ||
         row.publishedAt === null ||
         Date.parse(row.publishedAt) >= cutoff
       ) {
@@ -187,24 +201,18 @@ export class InMemoryOntologyOutboxStorage implements OntologyOutboxStorage {
  * order. It correlates facts but does not promise broker delivery order: concurrent leases and
  * retries may publish later rows first.
  */
-function compareClaimRows(
-  left: import("../outbox").OntologyOutboxRecord,
-  right: import("../outbox").OntologyOutboxRecord
-): number {
+function compareClaimRows(left: InMemoryOutboxRow, right: InMemoryOutboxRow): number {
   return (
     left.createdAt.localeCompare(right.createdAt) ||
-    left.envelope.commitId.localeCompare(right.envelope.commitId) ||
-    left.envelope.commitOrdinal - right.envelope.commitOrdinal
+    left.commitId.localeCompare(right.commitId) ||
+    left.commitOrdinal - right.commitOrdinal
   )
 }
 
-function comparePublishedRows(
-  left: import("../outbox").OntologyOutboxRecord,
-  right: import("../outbox").OntologyOutboxRecord
-): number {
+function comparePublishedRows(left: InMemoryOutboxRow, right: InMemoryOutboxRow): number {
   return (
     (left.publishedAt ?? "").localeCompare(right.publishedAt ?? "") ||
-    left.envelope.id.localeCompare(right.envelope.id)
+    left.id.localeCompare(right.id)
   )
 }
 

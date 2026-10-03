@@ -480,7 +480,6 @@ function projectionCommit(
     requestHash: identity.requestHash,
     executionId: command.scopeExecution.executionId,
     origin: projectionOrigin(command),
-    ...command.scopeExecution.attribution,
     ontologyRevision: command.runIdentity.ontologyRevision,
     projectionRevision: command.runIdentity.projectionRevision,
     ownershipHash: command.runIdentity.ownershipHash,
@@ -493,12 +492,7 @@ function planInput(
   command: PreparedProjectionReplacement,
   commit: OntologyCommitWrite
 ): ProjectionReplacementPlanInput {
-  const input = {
-    projectionKind: command.projectionKind,
-    commit,
-    correlationId: command.scopeExecution.correlationId,
-    attribution: command.scopeExecution.attribution,
-  }
+  const input = { projectionKind: command.projectionKind, commit }
   return command.signal === undefined ? input : { ...input, signal: command.signal }
 }
 

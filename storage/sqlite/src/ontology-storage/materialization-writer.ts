@@ -441,28 +441,27 @@ export class SqliteMaterializationWriter {
     const insert = this.db.query(
       `
         INSERT INTO ontology_outbox (
-          project_id, id, commit_id, commit_ordinal, envelope,
+          project_id, id, commit_id, commit_ordinal, event,
           available_at, attempts, lease_id, lease_expires_at,
           published_at, last_failure, created_at
         ) VALUES (?, ?, ?, ?, json(?), ?, 0, NULL, NULL, NULL, NULL, ?)
       `
     )
     for (const item of chunk.outbox) {
-      assertTimestamp(item.availableAt, "Outbox availableAt")
       assertTimestamp(item.createdAt, "Outbox createdAt")
       try {
         insert.run(
           projectId,
-          item.envelope.id,
+          item.id,
           commitId,
-          item.envelope.commitOrdinal,
-          canonicalJson(item.envelope),
-          item.availableAt,
+          item.commitOrdinal,
+          canonicalJson(item.event),
+          item.createdAt,
           item.createdAt
         )
       } catch (error) {
         if (isSqliteConstraintError(error)) {
-          throw effectiveConflict(`Duplicate outbox event '${item.envelope.id}'.`)
+          throw effectiveConflict(`Duplicate outbox event '${item.id}'.`)
         }
         throw error
       }

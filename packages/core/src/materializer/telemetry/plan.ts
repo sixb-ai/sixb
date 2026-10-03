@@ -1,7 +1,6 @@
 import { stableJsonStringify } from "../../json"
 import { MaterializationObjectNotFoundError } from "../../materialization/errors"
 import type {
-  OntologyMaterializationOrigin,
   OntologyObjectRef,
   TelemetryAppend,
   TelemetryPointWrite,
@@ -29,7 +28,6 @@ import {
 import { diffEffectiveObject } from "../effective/diff"
 import { loadState, oneStateRequest } from "../effective/load-state"
 import { validateEffectiveObject } from "../effective/validate"
-import type { MaterializerAttribution } from "../execution/scope"
 import { stageWorkBounded } from "../execution/work-executor"
 import {
   appendEffectiveObjectWork,
@@ -62,13 +60,6 @@ interface TelemetryObjectGroup {
 interface TelemetryPlanContext {
   readonly input: TelemetryAppend
   readonly identity: TimedCommitIdentity
-  readonly origin: OntologyMaterializationOrigin
-  readonly event: TelemetryEventContext
-}
-
-interface TelemetryEventContext {
-  readonly correlationId: string
-  readonly attribution: MaterializerAttribution
 }
 
 export async function planTelemetryAppend(
@@ -76,12 +67,10 @@ export async function planTelemetryAppend(
   storage: OntologyMaterializationStorage,
   session: MaterializationSession,
   input: TelemetryAppend,
-  identity: TimedCommitIdentity,
-  origin: OntologyMaterializationOrigin,
-  event: TelemetryEventContext
+  identity: TimedCommitIdentity
 ): Promise<TelemetryPlanCounts> {
   const counts = emptyTelemetryCounts()
-  const planContext = { input, identity, origin, event }
+  const planContext = { input, identity }
   const objects = await loadTelemetryObjects(context, storage, session, input.points)
   const existingPoints = await loadExistingPoints(context, storage, session, input.points)
   for (const group of telemetryObjectGroups(input.points)) {
@@ -137,7 +126,7 @@ async function planTelemetryObject(
   for (let start = group.start; start < group.end; start += context.batching.statePageRows) {
     const end = Math.min(group.end, start + context.batching.statePageRows)
     const points = planContext.input.points.slice(start, end)
-    const work = planTelemetryChunk(context, planContext, points, existingPoints, latest, counts)
+    const work = planTelemetryChunk(planContext, points, existingPoints, latest, counts)
     await stageWorkBounded(context, storage, session, work)
   }
 
@@ -164,7 +153,6 @@ async function loadTelemetryObjects(
 }
 
 function planTelemetryChunk(
-  context: Pick<MaterializerContext, "projectId">,
   planContext: TelemetryPlanContext,
   points: readonly TelemetryPointWrite[],
   existingPoints: ReadonlyMap<string, StoredTelemetryPoint>,
@@ -173,7 +161,7 @@ function planTelemetryChunk(
 ): MaterializationWorkRecord[] {
   const work: MaterializationWorkRecord[] = []
   for (const point of points) {
-    work.push(...planTelemetryPoint(context, planContext, point, existingPoints, latest, counts))
+    work.push(...planTelemetryPoint(planContext, point, existingPoints, latest, counts))
   }
   return work
 }
@@ -205,7 +193,6 @@ async function loadExistingPoints(
 }
 
 function planTelemetryPoint(
-  context: Pick<MaterializerContext, "projectId">,
   planContext: TelemetryPlanContext,
   point: TelemetryPointWrite,
   existingPoints: ReadonlyMap<string, StoredTelemetryPoint>,
@@ -223,7 +210,7 @@ function planTelemetryPoint(
   } else {
     countTelemetryPointChange(counts, existing)
     work.push(planWork(telemetryPointUpsert(point, existing, planContext.identity), sortKey))
-    work.push(eventWork(buildTelemetryEvent(context, planContext, point)))
+    work.push(eventWork(buildTelemetryMaterializationEventDraft(point)))
   }
 
   updateLatestPoint(latest, point, existing, unchanged, planContext.identity)
@@ -282,15 +269,6 @@ function storedTelemetryPointWithUnit<T extends object>(
   return { ...point, unit }
 }
 
-function buildTelemetryEvent(
-  context: Pick<MaterializerContext, "projectId">,
-  planContext: TelemetryPlanContext,
-  point: TelemetryPointWrite
-) {
-  const eventContext = telemetryEventContext(context, planContext)
-  return buildTelemetryMaterializationEventDraft({ ...eventContext, point })
-}
-
 function updateLatestPoint(
   latest: Map<string, StoredTelemetryPoint>,
   point: TelemetryPointWrite,
@@ -341,24 +319,9 @@ async function stageTelemetryObjectPlan(
     const items: MaterializationPlanWorkItem[] = []
     appendEffectiveObjectWork(items, change)
     work.push(...items.map((item) => planWork(item, sortKey)))
-    const eventContext = telemetryEventContext(context, planContext)
-    work.push(eventWork(buildObjectMaterializationEventDraft({ ...eventContext, change })))
+    work.push(eventWork(buildObjectMaterializationEventDraft(change)))
   }
   await stageWorkBounded(context, storage, session, work)
-}
-
-function telemetryEventContext(
-  context: Pick<MaterializerContext, "projectId">,
-  planContext: TelemetryPlanContext
-) {
-  return {
-    projectId: context.projectId,
-    commitId: planContext.identity.commitId,
-    committedAt: planContext.identity.committedAt,
-    origin: planContext.origin,
-    correlationId: planContext.event.correlationId,
-    attribution: planContext.event.attribution,
-  }
 }
 
 function emptyTelemetryCounts(): MutableTelemetryPlanCounts {
