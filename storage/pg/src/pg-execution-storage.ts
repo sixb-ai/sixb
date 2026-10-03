@@ -87,7 +87,7 @@ export class PgExecutionStorage implements ExecutionStorage {
       if (!created) {
         throw new Error("[SixbPg] Execution insert returned no row.")
       }
-      return executionRecordFromStorageRow(toStorageRow(created))
+      return pgExecutionRecord(created)
     } catch (error) {
       if (isUniqueViolation(error)) {
         throw new ExecutionStorageError(
@@ -109,8 +109,13 @@ export class PgExecutionStorage implements ExecutionStorage {
       FROM executions
       WHERE project_id = ${params.projectId} AND id = ${params.id}
     `
-    return row ? executionRecordFromStorageRow(toStorageRow(row)) : null
+    return row ? pgExecutionRecord(row) : null
   }
+}
+
+/** An `executions` row as its record, for any store that reads executions alongside its own rows. */
+export function pgExecutionRecord(row: PgExecutionRow): ExecutionRecord {
+  return executionRecordFromStorageRow(toStorageRow(row))
 }
 
 function toStorageRow(row: PgExecutionRow): ExecutionStorageRow {
@@ -141,7 +146,7 @@ function toStorageRow(row: PgExecutionRow): ExecutionStorageRow {
   }
 }
 
-interface PgExecutionRow {
+export interface PgExecutionRow {
   readonly project_id: string
   readonly id: string
   readonly executor_kind: ExecutionStorageRow["executorKind"]

@@ -62,7 +62,7 @@ describe("OntologyOutboxDispatcher", () => {
     await dispatcher.drain()
     await dispatcher.stop()
 
-    expect((await events.read()).map((event) => event.id)).toEqual([outboxRow?.envelope.id])
+    expect((await events.read()).map((event) => event.id)).toEqual([outboxRow?.id])
     expect(broker.publicationTransactionDepths).toEqual([0])
     // Regression proof: wrap outbox operations in storage.transaction again; this count increases.
     expect(storage.transactionCount).toBe(transactionsBefore)
@@ -80,7 +80,7 @@ describe("OntologyOutboxDispatcher", () => {
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-batch-1", "batch-one")
     await seedObjectCreated(materializer, "request-batch-2", "batch-two")
-    const expectedIds = outboxRows(storage).map((row) => row.envelope.id)
+    const expectedIds = outboxRows(storage).map((row) => row.id)
 
     const dispatcher = new OntologyOutboxDispatcher({
       projectId: "project",
@@ -172,7 +172,7 @@ describe("OntologyOutboxDispatcher", () => {
     const events = new DomainEventService({ projectId: "project", broker })
     const { materializer } = createMaterializerFixture({ storage })
     await seedObjectCreated(materializer, "request-older", "older")
-    const olderId = outboxRows(storage)[0]!.envelope.id
+    const olderId = outboxRows(storage)[0]!.id
     const [olderClaim] = await storage.ontology.outbox.claim({
       projectId: "project",
       now: NOW.toISOString(),
@@ -188,7 +188,7 @@ describe("OntologyOutboxDispatcher", () => {
       failure: outboxFailure("seed retry"),
     })
     await seedObjectCreated(materializer, "request-newer", "newer")
-    const newerId = outboxRows(storage).find((row) => row.envelope.id !== olderId)!.envelope.id
+    const newerId = outboxRows(storage).find((row) => row.id !== olderId)!.id
     const failures: {
       readonly failure: OntologyOutboxFailure
       readonly attempts: number
@@ -212,11 +212,11 @@ describe("OntologyOutboxDispatcher", () => {
 
     const rows = outboxRows(storage)
     expect(broker.attempts).toBe(3)
-    expect(rows.find((row) => row.envelope.id === olderId)).toMatchObject({
+    expect(rows.find((row) => row.id === olderId)).toMatchObject({
       attempts: 2,
       availableAt: "2026-01-02T03:04:05.200Z",
     })
-    expect(rows.find((row) => row.envelope.id === newerId)).toMatchObject({
+    expect(rows.find((row) => row.id === newerId)).toMatchObject({
       attempts: 1,
       availableAt: "2026-01-02T03:04:05.100Z",
     })
@@ -316,8 +316,8 @@ describe("OntologyOutboxDispatcher", () => {
     await seedObjectCreated(materializer, "request-poison", "poison")
     await seedObjectCreated(materializer, "request-valid-2", "valid-2")
     const poisonId = outboxRows(storage).find(
-      (row) => row.envelope.partitionKey === "Device:poison"
-    )!.envelope.id
+      (row) => row.event.type === "object.created" && row.event.payload.primaryId === "poison"
+    )!.id
     const broker = new PoisonEnvelopeBroker(poisonId)
     const events = new DomainEventService({ projectId: "project", broker })
     const failures: { readonly attempts: number; readonly eventIds: readonly string[] }[] = []
@@ -334,7 +334,7 @@ describe("OntologyOutboxDispatcher", () => {
 
     const rows = outboxRows(storage)
     expect(rows.filter((row) => row.publishedAt !== null)).toHaveLength(2)
-    expect(rows.find((row) => row.envelope.id === poisonId)).toMatchObject({
+    expect(rows.find((row) => row.id === poisonId)).toMatchObject({
       publishedAt: null,
       leaseId: null,
       lastFailure: {
@@ -367,7 +367,7 @@ describe("OntologyOutboxDispatcher", () => {
       expectedLinks: [],
       expectedLinkScopes: [],
     })
-    const poisonId = outboxRows(storage)[731]!.envelope.id
+    const poisonId = outboxRows(storage)[731]!.id
     const broker = new PoisonEnvelopeBroker(poisonId)
     const events = new DomainEventService({ projectId: "project", broker })
     const dispatcher = new OntologyOutboxDispatcher({
@@ -382,7 +382,7 @@ describe("OntologyOutboxDispatcher", () => {
 
     const rows = outboxRows(storage)
     expect(rows.filter((row) => row.publishedAt !== null)).toHaveLength(999)
-    expect(rows.find((row) => row.envelope.id === poisonId)).toMatchObject({
+    expect(rows.find((row) => row.id === poisonId)).toMatchObject({
       publishedAt: null,
       leaseId: null,
       lastFailure: {

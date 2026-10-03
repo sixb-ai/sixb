@@ -122,6 +122,7 @@ import compactSourceStorageSql from "./migrations/052-compact-source-storage.sql
   type: "text",
 }
 import replacementPlansSql from "./migrations/053-replacement-plans.sql" with { type: "text" }
+import slimOntologyOutboxSql from "./migrations/054-slim-ontology-outbox.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -248,6 +249,20 @@ export const sqliteStorageMigrations = defineMigrations({
       { checksum: checksum(compactSourceStorageSql) }
     ),
     sqliteSql("053-replacement-plans", replacementPlansSql),
+    sqliteStep(
+      "054-slim-ontology-outbox",
+      (db) => {
+        // SQLite has no procedural block to refuse the conversion in SQL: check before it.
+        const mismatched = unrebuildableOutboxEvents(db)
+        if (mismatched > 0) {
+          throw new Error(
+            `[SixbSqliteStorage] ${mismatched} outbox events would not rebuild from their commit.`
+          )
+        }
+        db.run(slimOntologyOutboxSql)
+      },
+      { checksum: checksum(slimOntologyOutboxSql) }
+    ),
   ],
 })
 
@@ -416,6 +431,92 @@ function sourceStorageCounts(db: Database): {
       (SELECT count(*) FROM ontology_source_roots) AS roots,
       (SELECT count(*) FROM ontology_source_rows) AS rows`)
     .get() as { readonly versions: number; readonly roots: number; readonly rows: number }
+}
+
+/**
+ * Stored events that would not rebuild exactly from their commit and execution. Who asked and what
+ * wrote are derived from the execution exactly as 047 derived the commit's copies; both sides were
+ * written as canonical JSON, so equal JSON compares as equal text.
+ */
+function unrebuildableOutboxEvents(db: Database): number {
+  const row = db
+    .query(
+      `SELECT COUNT(*) AS mismatched
+       FROM ontology_outbox AS outbox
+       LEFT JOIN ontology_commits AS commits
+         ON commits.project_id = outbox.project_id AND commits.id = outbox.commit_id
+       LEFT JOIN executions
+         ON executions.project_id = commits.project_id AND executions.id = commits.execution_id
+       WHERE executions.id IS NULL
+         OR outbox.envelope ->> '$.id' IS NOT outbox.id
+         OR outbox.envelope ->> '$.commitOrdinal' IS NOT outbox.commit_ordinal
+         OR outbox.envelope ->> '$.commitId' IS NOT commits.id
+         OR outbox.envelope ->> '$.projectId' IS NOT commits.project_id
+         OR outbox.envelope ->> '$.schemaVersion' IS NOT 1
+         OR outbox.envelope ->> '$.occurredAt' IS NOT commits.committed_at
+         OR outbox.envelope -> '$.origin' IS NOT json(commits.origin)
+         OR outbox.envelope ->> '$.correlationId' IS NOT executions.correlation_id
+         OR outbox.envelope -> '$.requestedBy' IS NOT CASE
+           WHEN executions.requested_by_user_id IS NOT NULL
+             THEN json_object('id', executions.requested_by_user_id, 'type', 'user')
+           WHEN executions.requested_by_service_account_id IS NOT NULL
+             THEN json_object('id', executions.requested_by_service_account_id, 'type', 'serviceAccount')
+         END
+         OR outbox.envelope -> '$.executor' IS NOT CASE executions.executor_kind
+           WHEN 'request' THEN json_object('requestId', executions.executor_id, 'type', 'request')
+           WHEN 'agent' THEN json_object('runId', executions.executor_id, 'type', 'agent')
+           WHEN 'kernel' THEN json_object(
+             'operation',
+             CASE executions.authority_kernel_operation
+               WHEN 'ontology.recover'
+                 THEN json_object('recoveryId', executions.executor_id, 'type', 'ontology.recover')
+               ELSE json_object('indexingId', executions.executor_id, 'type', 'ontology.indexVectors')
+             END,
+             'type', 'kernel'
+           )
+           ELSE json_object(
+             'id', executions.authority_primitive_id,
+             'kind', executions.executor_kind,
+             'runId', executions.executor_id,
+             'type', 'primitive'
+           )
+         END
+         OR outbox.envelope ->> '$.topic' IS NOT CASE substr(outbox.envelope ->> '$.type', 1, 4)
+           WHEN 'obje' THEN 'objects'
+           WHEN 'link' THEN 'links'
+           WHEN 'tele' THEN 'telemetry'
+         END
+         OR outbox.envelope ->> '$.partitionKey' IS NOT CASE outbox.envelope ->> '$.topic'
+           WHEN 'objects' THEN (outbox.envelope ->> '$.payload.objectTypeId') || ':' ||
+             (outbox.envelope ->> '$.payload.primaryId')
+           WHEN 'links' THEN (outbox.envelope ->> '$.payload.sourceTypeId') || ':' ||
+             (outbox.envelope ->> '$.payload.sourceId') || ':' ||
+             (outbox.envelope ->> '$.payload.linkId')
+           WHEN 'telemetry' THEN (outbox.envelope ->> '$.payload.objectTypeId') || ':' ||
+             (outbox.envelope ->> '$.payload.objectId') || ':' ||
+             (outbox.envelope ->> '$.payload.propertyId')
+         END
+         OR (
+           outbox.envelope ->> '$.type' IN ('object.created', 'link.created')
+           AND (
+             (SELECT COUNT(*) FROM json_each(outbox.envelope, '$.payload.propertyChanges'))
+               IS NOT (SELECT COUNT(*) FROM json_each(outbox.envelope, '$.payload.properties'))
+             OR EXISTS (
+               SELECT 1
+               FROM json_each(outbox.envelope, '$.payload.propertyChanges') AS change
+               LEFT JOIN json_each(outbox.envelope, '$.payload.properties') AS property
+                 ON property.key = change.key
+               WHERE property.key IS NULL
+                 OR change.value ->> '$.operation' IS NOT 'created'
+                 OR json_type(change.value, '$.after') IS NOT property.type
+                 OR change.value ->> '$.after' IS NOT property.value
+                 OR (SELECT COUNT(*) FROM json_each(change.value)) IS NOT 2
+             )
+           )
+         )`
+    )
+    .get() as { readonly mismatched: number }
+  return row.mismatched
 }
 
 function checksum(value: string): string {

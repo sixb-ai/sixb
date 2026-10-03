@@ -6,13 +6,6 @@ export type {
   OntologyMaterializationEventDraft,
 } from "../../materialization/events"
 
-export interface OntologyOutboxWrite {
-  /** Providers may index envelope identity fields, but the envelope remains authoritative. */
-  readonly envelope: OntologyMaterializationEvent
-  readonly availableAt: string
-  readonly createdAt: string
-}
-
 /** Error codes a durable ontology outbox delivery can persist. */
 export const ONTOLOGY_OUTBOX_FAILURE_CODES = ["event.delivery_failed"] as const satisfies readonly [
   SixbErrorCode,
@@ -23,6 +16,10 @@ export type OntologyOutboxFailureCode = (typeof ONTOLOGY_OUTBOX_FAILURE_CODES)[n
 export type OntologyOutboxFailure = SixbFailure<OntologyOutboxFailureCode>
 
 export interface OntologyOutboxRecord {
+  /**
+   * The event as consumers receive it. Providers store only its draft and rebuild the rest from
+   * its commit.
+   */
   readonly envelope: OntologyMaterializationEvent
   readonly availableAt: string
   readonly attempts: number

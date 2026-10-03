@@ -1,8 +1,12 @@
-import { stableJsonStringify } from "../../json"
 import {
   MaterializationConflictError,
   MaterializationValidationError,
 } from "../../materialization/errors"
+import { eventAttribution, materializationEvent } from "../../materialization/event-envelopes"
+import type {
+  OntologyMaterializationEventAttribution,
+  OntologyMaterializationEventCommit,
+} from "../../materialization/events"
 import { createEventId, materializationEventKindOrdinal } from "../../materialization/identity"
 import type {
   EffectiveChangeCounts,
@@ -38,7 +42,7 @@ import {
   type MaterializationWorkRecord,
   materializationApplyPhase,
 } from "./materializations"
-import type { OntologyMaterializationEventDraft, OntologyOutboxWrite } from "./outbox"
+import type { ClaimedOntologyOutboxRow, OntologyMaterializationEventDraft } from "./outbox"
 import { assertMaterializationHeader } from "./provider-header-validation"
 import { assertTimestamp, invalidCorrelation } from "./provider-validation"
 import type { PlannedReplacementIdentity, StageReplacementPlanInput } from "./replacement-plans"
@@ -174,20 +178,70 @@ export function materializationPlanChunk(
   return chunk
 }
 
+/**
+ * One outbox row: a staged event draft at its commit ordinal. The draft is all a provider stores
+ * of the event; the commit's own row holds the context every event of that commit shares.
+ */
+export interface OntologyOutboxWrite {
+  readonly id: string
+  readonly commitOrdinal: number
+  readonly event: OntologyMaterializationEventDraft
+  /** The commit time: an event is due, and ordered, from the moment its commit is. */
+  readonly createdAt: string
+}
+
 /** The outbox write of a staged event draft at its commit ordinal. */
 export function materializationOutboxWrite(
-  draft: OntologyMaterializationEventDraft,
+  commit: Pick<OntologyCommitWrite, "projectId" | "id" | "committedAt">,
+  event: OntologyMaterializationEventDraft,
   commitOrdinal: number
 ): OntologyOutboxWrite {
   return {
-    envelope: {
-      ...draft,
-      id: createEventId(draft.projectId, draft.commitId, commitOrdinal),
-      commitOrdinal,
-    },
-    availableAt: draft.occurredAt,
-    createdAt: draft.occurredAt,
+    id: createEventId(commit.projectId, commit.id, commitOrdinal),
+    commitOrdinal,
+    event,
+    createdAt: commit.committedAt,
   }
+}
+
+/** A claimed outbox row as a provider reads it back: its draft and its commit's id. */
+export interface ClaimedOutboxDraft extends Omit<ClaimedOntologyOutboxRow, "envelope"> {
+  readonly id: string
+  readonly commitId: string
+  readonly commitOrdinal: number
+  readonly event: OntologyMaterializationEventDraft
+}
+
+/** The commit an event belongs to and the execution that commit ran under. */
+export interface OutboxEventContext {
+  readonly commit: OntologyMaterializationEventCommit
+  readonly execution: Parameters<typeof eventAttribution>[0]
+}
+
+/**
+ * Claimed rows with their events rebuilt from their commits and executions. Both outlive their
+ * events, so a missing one is corrupt storage, not a retryable state.
+ */
+export function claimedOutboxRows(
+  rows: readonly ClaimedOutboxDraft[],
+  contextOf: (commitId: string) => OutboxEventContext | undefined
+): ClaimedOntologyOutboxRow[] {
+  const attributions = new Map<string, OntologyMaterializationEventAttribution>()
+  return rows.map(({ id, commitId, commitOrdinal, event, ...row }) => {
+    const context = contextOf(commitId)
+    if (!context) {
+      throw new Error(`[Sixb] Ontology outbox event '${id}' has no commit '${commitId}'.`)
+    }
+    let attribution = attributions.get(commitId)
+    if (!attribution) {
+      attribution = eventAttribution(context.execution)
+      attributions.set(commitId, attribution)
+    }
+    return {
+      ...row,
+      envelope: materializationEvent(event, { id, commitOrdinal }, context.commit, attribution),
+    }
+  })
 }
 
 /** One planned replacement identity, checked and summarized for a provider to store. */
@@ -387,12 +441,7 @@ export function assertWorkRecord(
       !/^[0-9a-f]+$/.test(record.sortKey) ||
       !Number.isSafeInteger(record.eventKindRank) ||
       record.eventKindRank < 0 ||
-      record.eventKindRank !== materializationEventKindOrdinal(record.draft.type) ||
-      record.draft.projectId !== header.commit.projectId ||
-      record.draft.commitId !== header.commit.id ||
-      record.draft.occurredAt !== header.commit.committedAt ||
-      stableJsonStringify(record.draft.origin) !== stableJsonStringify(header.commit.origin) ||
-      !sameAttribution(record.draft, header.commit)
+      record.eventKindRank !== materializationEventKindOrdinal(record.draft.type)
     ) {
       throw new MaterializationValidationError("Materialization event work is invalid.")
     }
@@ -600,16 +649,4 @@ function assertLinkRefEqual(left: OntologyLinkRef, right: OntologyLinkRef, label
   if (linkRefKey(left) !== linkRefKey(right)) {
     invalidCorrelation(`${label} row and expected references differ.`)
   }
-}
-
-/** Events carry exactly the attribution of the commit that produced them. */
-function sameAttribution(
-  event: Pick<OntologyCommitWrite, "requestedBy" | "executor">,
-  commit: Pick<OntologyCommitWrite, "requestedBy" | "executor">
-): boolean {
-  return (
-    stableJsonStringify(event.requestedBy ?? null) ===
-      stableJsonStringify(commit.requestedBy ?? null) &&
-    stableJsonStringify(event.executor) === stableJsonStringify(commit.executor)
-  )
 }

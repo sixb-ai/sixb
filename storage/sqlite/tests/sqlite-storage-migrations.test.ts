@@ -8,6 +8,13 @@ import { migrateStorage } from "@sixb/core"
 import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import {
+  materializationEvent,
+  type OntologyMaterializationEventAttribution,
+  type OntologyMaterializationEventCommit,
+  type OntologyMaterializationEventDraft,
+} from "@sixb/core/internal/materialization"
+import { canonicalJson } from "@sixb/core/internal/ontology-storage-provider"
+import {
   AGENT_RUN_FAILURE_CODES,
   ONTOLOGY_OUTBOX_FAILURE_CODES,
   PIPELINE_RUN_FAILURE_CODES,
@@ -24,6 +31,7 @@ import {
   sqliteStoragePath,
 } from "../src/migrations"
 import { SqliteMaterializationStateReader } from "../src/ontology-storage/materialization-state"
+import { SqliteOntologyOutboxStorage } from "../src/ontology-storage/outbox"
 
 const tempDirs: string[] = []
 
@@ -490,6 +498,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 53,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "054-slim-ontology-outbox",
+    status: "applied",
+    version: 54,
+  },
 ]
 
 afterEach(async () => {
@@ -760,6 +775,154 @@ describe("SQLite storage migrations", () => {
     } finally {
       db.close()
     }
+  })
+
+  describe("054 slim ontology outbox", () => {
+    const commit: OntologyMaterializationEventCommit = {
+      projectId: "p",
+      id: "c-1",
+      committedAt: "2026-10-01T08:00:00.000Z",
+      origin: { kind: "runtime", requestId: "req-1" },
+    }
+    /** What the execution below says, and what 053 copied onto the commit. */
+    const attribution: OntologyMaterializationEventAttribution = {
+      correlationId: "correlation-1",
+      requestedBy: { type: "user", id: "alice" },
+      executor: { type: "request", requestId: "req-1" },
+    }
+    const drafts: readonly OntologyMaterializationEventDraft[] = [
+      {
+        type: "object.created",
+        payload: { objectTypeId: "Device", primaryId: "d-1", properties: { b: 2, a: [1] } },
+      },
+      {
+        type: "object.updated",
+        payload: {
+          objectTypeId: "Device",
+          primaryId: "d-1",
+          properties: { a: true },
+          propertyChanges: { a: { operation: "updated", before: [1], after: true } },
+        },
+      },
+      {
+        type: "link.created",
+        payload: {
+          sourceTypeId: "Device",
+          sourceId: "d-1",
+          linkId: "owner",
+          targetTypeId: "User",
+          targetId: "u-1",
+        },
+      },
+      {
+        type: "telemetry.appended",
+        payload: {
+          objectTypeId: "Device",
+          objectId: "d-1",
+          propertyId: "temperature",
+          value: 21.5,
+          at: "2026-10-01T07:59:00.000Z",
+        },
+      },
+    ]
+    const envelopes = drafts.map((draft, ordinal) =>
+      materializationEvent(
+        draft,
+        { id: `e-${ordinal}`, commitOrdinal: ordinal },
+        commit,
+        attribution
+      )
+    )
+
+    /** A database at 053 holding `commit` and its events as 053 stored them. */
+    async function databaseAt053(stored = envelopes): Promise<Database> {
+      const db = new Database(":memory:")
+      for (const migration of sqliteStorageMigrations.steps) {
+        if (migration.id === "054-slim-ontology-outbox") break
+        await migration.up(db)
+      }
+      db.run(
+        `INSERT INTO executions (
+           project_id, id, executor_kind, executor_id, source_kind, source_id,
+           requested_by_user_id, correlation_id, authority_kind, authority_user_id, created_at
+         ) VALUES ('p', 'x-1', 'request', 'req-1', 'http', 'req-1', 'alice', 'correlation-1',
+           'principal', 'alice', '2026-10-01T08:00:00.000Z')`
+      )
+      db.run(
+        `INSERT INTO ontology_commits (
+           project_id, id, idempotency_key, request_hash, execution_id, origin_kind, origin,
+           requested_by, executor, ontology_revision, intent, result, committed_at
+         ) VALUES ('p', 'c-1', 'runtime:c-1', 'hash', 'x-1', 'runtime', json(?), json(?), json(?),
+           'revision', json('{}'), json('{}'), '2026-10-01T08:00:00.000Z')`,
+        [
+          canonicalJson(commit.origin),
+          canonicalJson(attribution.requestedBy),
+          canonicalJson(attribution.executor),
+        ]
+      )
+      for (const envelope of stored) {
+        db.run(
+          `INSERT INTO ontology_outbox (
+             project_id, id, commit_id, commit_ordinal, envelope, available_at, created_at
+           ) VALUES ('p', ?, 'c-1', ?, json(?), ?, ?)`,
+          [
+            envelope.id,
+            envelope.commitOrdinal,
+            canonicalJson(envelope),
+            commit.committedAt,
+            commit.committedAt,
+          ]
+        )
+      }
+      return db
+    }
+
+    function migration054() {
+      return sqliteStorageMigrations.steps.find((step) => step.id === "054-slim-ontology-outbox")!
+    }
+
+    // Removal proof: keep `propertyChanges` in a created draft, or drop a context field from the
+    // rebuild; the claimed events no longer equal what 053 stored.
+    test("keeps every pending event exactly as consumers would have received it", async () => {
+      const db = await databaseAt053()
+      try {
+        await migration054().up(db)
+
+        expect(readMemoryTableColumns(db, "ontology_outbox")).not.toContain("envelope")
+        expect(db.query("SELECT event FROM ontology_outbox ORDER BY commit_ordinal").all()).toEqual(
+          drafts.map((draft) => ({ event: canonicalJson(draft) }))
+        )
+        const commitColumns = readMemoryTableColumns(db, "ontology_commits")
+        expect(commitColumns).not.toContain("requested_by")
+        expect(commitColumns).not.toContain("executor")
+        const outbox = new SqliteOntologyOutboxStorage(db, async (run) => run())
+        const claimed = await outbox.claim({
+          projectId: "p",
+          now: "2026-10-01T09:00:00.000Z",
+          limit: 10,
+          leaseId: "lease",
+          leaseExpiresAt: "2026-10-01T09:01:00.000Z",
+        })
+        expect(claimed.map((row) => row.envelope)).toStrictEqual(envelopes)
+      } finally {
+        db.close()
+      }
+    })
+
+    // Removal proof: skip the check in 054's step; the tampered event is converted and would
+    // reach consumers with its execution's correlation id instead of its own.
+    test("refuses to convert an event that would not rebuild from its commit", async () => {
+      const [first, ...rest] = envelopes
+      const db = await databaseAt053([{ ...first!, correlationId: "elsewhere" }, ...rest])
+      try {
+        await expect(Promise.resolve().then(() => migration054().up(db))).rejects.toThrow(
+          "1 outbox events would not rebuild from their commit"
+        )
+        expect(readMemoryTableColumns(db, "ontology_outbox")).toContain("envelope")
+      } finally {
+        db.close()
+      }
+    })
   })
 
   test("upgrades model accounting in one step without losing historical evidence or constraints", () => {
@@ -1893,11 +2056,12 @@ describe("SQLite storage migrations", () => {
         "ontology_source_rows",
         "ontology_sources",
       ])
-      expect(readMemoryTableColumns(db, "ontology_commits")).toEqual(
-        expect.arrayContaining(["execution_id", "requested_by", "executor"])
-      )
-      expect(readMemoryTableColumns(db, "ontology_commits")).not.toContain("actor")
-      expect(readMemoryColumn(db, "ontology_commits", "executor")?.notnull).toBe(1)
+      // A commit references its execution; who asked and what wrote live only there.
+      expect(readMemoryTableColumns(db, "ontology_commits")).toContain("execution_id")
+      for (const copy of ["actor", "requested_by", "executor", "correlation_id"]) {
+        expect(readMemoryTableColumns(db, "ontology_commits")).not.toContain(copy)
+      }
+      expect(readMemoryColumn(db, "ontology_commits", "execution_id")?.notnull).toBe(1)
       expect(readMemoryTableColumns(db, "objects")).toContain("last_commit_id")
       expect(readMemoryTableColumns(db, "links")).toContain("last_commit_id")
       expect(readMemoryTableColumns(db, "timeseries")).toContain("last_commit_id")

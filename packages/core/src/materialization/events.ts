@@ -110,9 +110,45 @@ export type OntologyMaterializationEvent =
   | OntologyLinkMaterializationEvent
   | OntologyTelemetryMaterializationEvent
 
-type WithoutEventSequence<T> = T extends OntologyMaterializationEvent
-  ? Omit<T, "id" | "commitOrdinal">
+type OntologyMaterializationEventKind = OntologyMaterializationEvent["type"]
+
+type EventPayload<K extends OntologyMaterializationEventKind> =
+  OntologyMaterializationEvent extends infer E
+    ? E extends { readonly type: infer T; readonly payload: infer P }
+      ? K extends T
+        ? P
+        : never
+      : never
+    : never
+
+type EventDraftOf<K> = K extends OntologyMaterializationEventKind
+  ? {
+      readonly type: K
+      readonly payload: K extends "object.created" | "link.created"
+        ? Readonly<Omit<EventPayload<K>, "propertyChanges">>
+        : EventPayload<K>
+    }
   : never
 
-/** Complete core-authored event fact before contiguous commit sequencing is assigned. */
-export type OntologyMaterializationEventDraft = WithoutEventSequence<OntologyMaterializationEvent>
+/**
+ * An event as core stages it and storage keeps it: what changed, and nothing it can be rebuilt
+ * from. `materializationEvent` adds back the context its commit and execution share with every
+ * other event of that commit, the partition key and topic its type and payload fix, and the
+ * property changes of a creation, which only restate its properties.
+ */
+export type OntologyMaterializationEventDraft = EventDraftOf<OntologyMaterializationEventKind>
+
+/** The commit fields every event of that commit carries. */
+export interface OntologyMaterializationEventCommit {
+  readonly projectId: string
+  readonly id: string
+  readonly committedAt: string
+  readonly origin: OntologyMaterializationOrigin
+}
+
+/** Who asked for a commit and what wrote it, as its events carry them: read from its execution. */
+export interface OntologyMaterializationEventAttribution {
+  readonly correlationId: string
+  readonly requestedBy?: AuthorizablePrincipal
+  readonly executor: EventExecutor
+}

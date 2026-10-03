@@ -435,7 +435,6 @@ describe("in-memory ontology storage", () => {
         requestHash: "hash",
         executionId: "execution:empty",
         origin: { kind: "runtime", requestId: "empty" },
-        executor: { type: "request", requestId: "empty" },
         ontologyRevision: "revision",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
         committedAt: "2026-01-01T00:00:00.000Z",
@@ -533,7 +532,6 @@ describe("in-memory ontology storage", () => {
         requestHash: "hash",
         executionId: "execution:session-lifecycle",
         origin: { kind: "runtime", requestId: "session-lifecycle" },
-        executor: { type: "request", requestId: "session-lifecycle" },
         ontologyRevision: "revision",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
         committedAt: "2026-01-01T00:00:00.000Z",
@@ -657,7 +655,6 @@ describe("in-memory ontology storage", () => {
         requestHash: "work-hash",
         executionId: "execution:work",
         origin: { kind: "runtime", requestId: "work" },
-        executor: { type: "request", requestId: "work" },
         ontologyRevision: "revision",
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
         committedAt: "2026-01-01T00:00:00.000Z",
@@ -759,16 +756,7 @@ describe("in-memory ontology storage", () => {
             eventKindRank: 1,
             sortKey: "62",
             draft: {
-              schemaVersion: 1,
-              projectId: "project",
-              occurredAt: "2026-01-01T00:00:00.000Z",
-              correlationId: "correlation:work",
-              origin: { kind: "runtime", requestId: "work" },
-              executor: { type: "request", requestId: "work" },
-              commitId: "work-commit",
               type: "object.updated",
-              topic: "objects",
-              partitionKey: "Device:b",
               payload: {
                 objectTypeId: "Device",
                 primaryId: "b",
@@ -783,21 +771,11 @@ describe("in-memory ontology storage", () => {
             eventKindRank: 0,
             sortKey: "61",
             draft: {
-              schemaVersion: 1,
-              projectId: "project",
-              occurredAt: "2026-01-01T00:00:00.000Z",
-              correlationId: "correlation:work",
-              origin: { kind: "runtime", requestId: "work" },
-              executor: { type: "request", requestId: "work" },
-              commitId: "work-commit",
               type: "object.created",
-              topic: "objects",
-              partitionKey: "Device:a",
               payload: {
                 objectTypeId: "Device",
                 primaryId: "a",
                 properties: { name: "a" },
-                propertyChanges: {},
               },
             },
           },
@@ -870,7 +848,6 @@ describe("in-memory ontology storage", () => {
             requestHash: "hash",
             executionId: "execution:rolled-back-session",
             origin: { kind: "runtime", requestId: "rolled-back-session" },
-            executor: { type: "request", requestId: "rolled-back-session" },
             ontologyRevision: "revision",
             intent: { kind: "edit", mode: "atomic", operationCount: 0 },
             committedAt: "2026-01-01T00:00:00.000Z",
@@ -1198,7 +1175,6 @@ describe("in-memory ontology storage", () => {
         requestHash: id,
         executionId: `execution:${id}`,
         origin: { kind: "runtime", requestId: id },
-        executor: { type: "request", requestId: id },
         ontologyRevision: projections.ontologyRevision,
         intent: { kind: "edit", mode: "atomic", operationCount: 0 },
         committedAt: "2026-01-04T00:00:00.000Z",
@@ -1473,7 +1449,6 @@ describe("in-memory ontology storage", () => {
           requestHash: "unicode-cas",
           executionId: "execution:unicode-cas",
           origin: { kind: "runtime", requestId: "unicode-cas" },
-          executor: { type: "request", requestId: "unicode-cas" },
           ontologyRevision: projections.ontologyRevision,
           intent: { kind: "edit", mode: "atomic", operationCount: 0 },
           committedAt: "2026-01-02T00:00:00.000Z",
@@ -1757,36 +1732,6 @@ describe("in-memory ontology storage", () => {
         },
         message: "last commit id",
       },
-      {
-        name: "outbox correlation",
-        mutate(value: ReturnType<typeof chunk>, commitId: string) {
-          value.outbox.push({
-            envelope: {
-              id: createEventId("other-project", commitId, 0),
-              schemaVersion: 1,
-              projectId: "other-project",
-              occurredAt: committedAt,
-              correlationId: `correlation:${commitId}`,
-              origin: { kind: "runtime", requestId: commitId },
-              executor: { type: "request", requestId: commitId },
-              commitId,
-              commitOrdinal: 0,
-              partitionKey: "Device:a",
-              type: "object.created",
-              topic: "objects",
-              payload: {
-                objectTypeId: "Device",
-                primaryId: "a",
-                properties: { name: "a" },
-                propertyChanges: {},
-              },
-            },
-            availableAt: committedAt,
-            createdAt: committedAt,
-          })
-        },
-        message: "event work is invalid",
-      },
     ]
     for (const testCase of cases) {
       const commitId = `exact-${testCase.name}`
@@ -1804,7 +1749,6 @@ describe("in-memory ontology storage", () => {
               requestHash: commitId,
               executionId: `execution:${commitId}`,
               origin: { kind: "runtime", requestId: commitId },
-              executor: { type: "request", requestId: commitId },
               ontologyRevision: "revision",
               intent: { kind: "edit", mode: "atomic", operationCount: 0 },
               committedAt,
@@ -1822,15 +1766,6 @@ describe("in-memory ontology storage", () => {
             await tx.ontology.materializations.stageWork({
               session,
               records: [planWork(stagedItem, "61")],
-            })
-          }
-          for (const { envelope } of plan.outbox) {
-            const { id: _id, commitOrdinal: _ordinal, ...draft } = envelope
-            await tx.ontology.materializations.stageWork({
-              session,
-              records: [
-                { kind: "event", recordKey: "event:0:61", eventKindRank: 0, sortKey: "61", draft },
-              ],
             })
           }
           await tx.ontology.materializations.apply({ session })
@@ -1860,7 +1795,6 @@ describe("in-memory ontology storage", () => {
         requestHash: id,
         executionId: `execution:${id}`,
         origin: { kind: "action", actionId: "action", runId: "run" },
-        executor: { type: "primitive", kind: "action", id: "action", runId: "run" },
         ontologyRevision: "revision",
         intent: { kind: "edit", mode: "atomic", operationCount },
         committedAt,
@@ -1887,21 +1821,11 @@ describe("in-memory ontology storage", () => {
               eventKindRank: 0,
               sortKey: "61",
               draft: {
-                schemaVersion: 1,
-                projectId: "project",
-                occurredAt: committedAt,
-                correlationId: "correlation:ordinal-gap",
-                origin: { kind: "action", actionId: "action", runId: "run" },
-                executor: { type: "primitive", kind: "action", id: "action", runId: "run" },
-                commitId: "ordinal-gap",
-                partitionKey: "Device:one",
                 type: "object.created",
-                topic: "objects",
                 payload: {
                   objectTypeId: "Device",
                   primaryId: "one",
                   properties: { name: "one" },
-                  propertyChanges: {},
                 },
               },
             },
@@ -2008,7 +1932,6 @@ describe("in-memory ontology storage", () => {
           datasetId: datasetVersion.datasetId,
           datasetVersionId: datasetVersion.versionId,
         },
-        executor: { type: "primitive", kind: "projection", id: "devices", runId: run.run.id },
         ontologyRevision: identity.ontologyRevision,
         projectionRevision: identity.projectionRevision,
         ownershipHash: identity.ownershipHash,
@@ -2239,7 +2162,6 @@ describe("in-memory ontology storage", () => {
             datasetId: "devices",
             datasetVersionId: "v1",
           },
-          executor: { type: "primitive", kind: "projection", id: "devices", runId: "run" },
           ontologyRevision: "ontology-revision",
           projectionRevision: "projection-revision",
           ownershipHash: "ownership-hash",

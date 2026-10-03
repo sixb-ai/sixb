@@ -34,12 +34,12 @@ export function assertFinalizationCorrelations(
     result.created !== true ||
     !Number.isSafeInteger(result.eventCount) ||
     result.eventCount < 0 ||
-    result.eventCount !== session.outboxEnvelopes.size
+    result.eventCount !== session.outboxWrites.size
   ) {
     invalidCorrelation("Materialization result does not correlate with its commit intent.")
   }
   for (let ordinal = 0; ordinal < result.eventCount; ordinal += 1) {
-    if (!session.outboxEnvelopes.has(ordinal)) {
+    if (!session.outboxWrites.has(ordinal)) {
       invalidCorrelation("Outbox event ordinals must be contiguous from zero.")
     }
   }
@@ -331,25 +331,25 @@ function assertFinalizedWork(
   }
 
   const expectedEvents = [...session.eventWork].sort(compareEventWork)
-  if (session.outboxEnvelopes.size !== expectedEvents.length) {
+  if (session.outboxWrites.size !== expectedEvents.length) {
     invalidCorrelation("Materialization event work was not fully written to the outbox.")
   }
   for (let ordinal = 0; ordinal < expectedEvents.length; ordinal += 1) {
     const expected = expectedEvents[ordinal]
-    const actual = session.outboxEnvelopes.get(ordinal)
+    const actual = session.outboxWrites.get(ordinal)
     if (!expected || !actual) {
       invalidCorrelation("Materialization event work was not fully written to the outbox.")
     }
-    const { id, commitOrdinal, ...actualDraft } = actual
     if (
-      commitOrdinal !== ordinal ||
-      id !== createEventId(session.header.commit.projectId, session.header.commit.id, ordinal) ||
-      stableJsonStringify(actualDraft) !== stableJsonStringify(expected.draft)
+      actual.commitOrdinal !== ordinal ||
+      actual.id !==
+        createEventId(session.header.commit.projectId, session.header.commit.id, ordinal) ||
+      stableJsonStringify(actual.event) !== stableJsonStringify(expected.draft)
     ) {
       invalidCorrelation("Materialization outbox event does not match its staged event work.")
     }
     const persisted = state.outbox.get(outboxKey(session.header.commit.projectId, actual.id))
-    if (!persisted || stableJsonStringify(persisted.envelope) !== stableJsonStringify(actual)) {
+    if (!persisted || stableJsonStringify(persisted.event) !== stableJsonStringify(actual.event)) {
       invalidCorrelation("Materialization outbox event was not persisted.")
     }
   }

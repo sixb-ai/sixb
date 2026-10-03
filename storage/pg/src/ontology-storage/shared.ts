@@ -1,6 +1,7 @@
 import { parseSixbFailure } from "@sixb/core/internal/errors"
 import { MaterializationConflictError } from "@sixb/core/internal/materialization"
 import {
+  type ClaimedOutboxDraft,
   sourceAssertionFromColumns,
   sourceEntityFromKey,
 } from "@sixb/core/internal/ontology-storage-provider"
@@ -8,7 +9,6 @@ import type {
   AssertSourceMaterializationExecutionInput,
   OntologyCommitRecord,
   OntologyCommitWrite,
-  OntologyOutboxRecord,
   OntologySourceRecord,
   StageSourceAssertion,
 } from "@sixb/core/storage"
@@ -42,8 +42,6 @@ export interface PgOntologyCommitRow {
   readonly origin_run_id: string | null
   readonly origin_batch_ordinal: number | string | null
   readonly origin: unknown
-  readonly requested_by: unknown | null
-  readonly executor: unknown
   readonly ontology_revision: string
   readonly projection_revision: string | null
   readonly ownership_hash: string | null
@@ -104,7 +102,10 @@ export interface PgStoredOverrideRow {
 }
 
 export interface PgOntologyOutboxRow {
-  readonly envelope: unknown
+  readonly id: string
+  readonly commit_id: string
+  readonly commit_ordinal: number | string
+  readonly event: unknown
   readonly available_at: Date | string
   readonly attempts: number | string
   readonly lease_id: string | null
@@ -194,14 +195,6 @@ export function commitRecord(row: PgOntologyCommitRow): OntologyCommitRecord {
     requestHash: row.request_hash,
     executionId: row.execution_id,
     origin: structuredClone(row.origin) as OntologyCommitWrite["origin"],
-    ...(row.requested_by === null
-      ? {}
-      : {
-          requestedBy: structuredClone(row.requested_by) as NonNullable<
-            OntologyCommitWrite["requestedBy"]
-          >,
-        }),
-    executor: structuredClone(row.executor) as OntologyCommitWrite["executor"],
     ontologyRevision: row.ontology_revision,
     ...(row.projection_revision === null ? {} : { projectionRevision: row.projection_revision }),
     ...(row.ownership_hash === null ? {} : { ownershipHash: row.ownership_hash }),
@@ -212,13 +205,23 @@ export function commitRecord(row: PgOntologyCommitRow): OntologyCommitRecord {
   return { ...base, intent, result } as OntologyCommitRecord
 }
 
-export function outboxRecord(row: PgOntologyOutboxRow): OntologyOutboxRecord {
+/** A claimed row as stored: its draft, to rebuild from its commit. */
+export function claimedOutboxDraft(row: PgOntologyOutboxRow): ClaimedOutboxDraft {
+  if (row.lease_id === null || row.lease_expires_at === null) {
+    throw new MaterializationConflictError(
+      "outbox-lease",
+      "Ontology outbox claim returned an unpaired lease."
+    )
+  }
   return {
-    envelope: structuredClone(row.envelope) as OntologyOutboxRecord["envelope"],
+    id: row.id,
+    commitId: row.commit_id,
+    commitOrdinal: databaseSafeInteger(row.commit_ordinal, "Ontology outbox commit ordinal"),
+    event: structuredClone(row.event) as ClaimedOutboxDraft["event"],
     availableAt: toIsoString(row.available_at),
     attempts: databaseSafeInteger(row.attempts, "Ontology outbox attempts"),
     leaseId: row.lease_id,
-    leaseExpiresAt: optionalIsoString(row.lease_expires_at),
+    leaseExpiresAt: toIsoString(row.lease_expires_at),
     publishedAt: optionalIsoString(row.published_at),
     lastFailure:
       row.last_failure === null

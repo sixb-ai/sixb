@@ -113,8 +113,13 @@ export class SqliteExecutionStorage implements ExecutionStorage {
       )
       .get(params.projectId, params.id) as SqliteExecutionRow | null
 
-    return row ? executionRecordFromStorageRow(toStorageRow(row)) : null
+    return row ? sqliteExecutionRecord(row) : null
   }
+}
+
+/** An `executions` row as its record, for any store that reads executions alongside its own rows. */
+export function sqliteExecutionRecord(row: SqliteExecutionRow): ExecutionRecord {
+  return executionRecordFromStorageRow(toStorageRow(row))
 }
 
 function toStorageRow(row: SqliteExecutionRow): ExecutionStorageRow {
@@ -152,7 +157,7 @@ function isDuplicateExecutionError(error: unknown): boolean {
   )
 }
 
-interface SqliteExecutionRow {
+export interface SqliteExecutionRow {
   readonly project_id: string
   readonly id: string
   readonly executor_kind: ExecutionStorageRow["executorKind"]

@@ -29,6 +29,7 @@ import {
 } from "../materializer"
 import type {
   ActionRunStorage,
+  OntologyCommitWrite,
   OntologyReplacementPlanStorage,
   PlannedReplacementIdentity,
   ProjectionExecution,
@@ -1352,11 +1353,9 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
     let plannedAt: string | undefined
     const observed = observePlanning(
       storage,
-      async (planned) => {
+      async (planned, commit) => {
         stagedIdentities += planned.length
-        for (const record of planned.flatMap(({ records }) => records)) {
-          if (record.kind === "event") plannedAt ??= record.draft.occurredAt
-        }
+        plannedAt ??= commit.committedAt
       },
       async () => {
         // Admission opens a transaction before anything is planned: fail the commit's.
@@ -1698,7 +1697,10 @@ function plannedId({ identity }: PlannedReplacementIdentity): string {
  */
 function observePlanning(
   storage: ContractStorage,
-  afterStage: (planned: readonly PlannedReplacementIdentity[]) => Promise<void>,
+  afterStage: (
+    planned: readonly PlannedReplacementIdentity[],
+    commit: OntologyCommitWrite
+  ) => Promise<void>,
   beforeTransaction?: () => Promise<void>
 ): ContractStorage {
   const plans = storage.ontology.replacementPlans
@@ -1707,7 +1709,7 @@ function observePlanning(
     streamState: (input) => plans.streamState(input),
     async stage(input) {
       await plans.stage(input)
-      await afterStage(input.planned)
+      await afterStage(input.planned, input.commit)
     },
     refresh: (input) => plans.refresh(input),
     purge: (input) => plans.purge(input),
