@@ -1,6 +1,7 @@
 import type { AuthSessionAudience, FileRef } from "@sixb/core"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BYTES } from "@sixb/core/blob-storage"
 import { isSixbApiError, type SixbClient } from "./api"
+import { getClientSharedGrantId } from "./client-authority"
 import { client as sharedClient } from "./generated/client.gen"
 import {
   abortFileUpload,
@@ -24,7 +25,13 @@ export interface ObjectFileContentUrlInput {
   readonly client?: SixbClient
 }
 
-/** Build a rendering/download URL that changes with the file's content or metadata. */
+/**
+ * Build a rendering/download URL that changes with the file's content or metadata.
+ *
+ * The URL works as a plain `src`/`href`: elements such as `<img>` and `<video>` cannot send the
+ * Share selector header, so a shared client names its grant in the query instead. The grant's
+ * HttpOnly session cookie remains the credential.
+ */
 export function objectFileContentUrl(input: ObjectFileContentUrlInput): string {
   if (!input.objectTypeId || !input.objectId || input.pathSegments.length === 0) {
     throw new Error("[SixbClient] File content URLs require an object type, ID, and property path.")
@@ -41,6 +48,7 @@ export function objectFileContentUrl(input: ObjectFileContentUrlInput): string {
         .join("/")}`,
       disposition: input.disposition,
       audience: input.audience,
+      shareGrant: getClientSharedGrantId(client) ?? undefined,
       // Opaque cache key, not a historical-file selector. Include per-reference metadata.
       // Encode each field so Elysia won't interpret commas in filenames as an array.
       v: [digest, fileName ?? "", mediaType ?? "", logicalPath ?? ""]

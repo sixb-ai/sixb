@@ -6,7 +6,7 @@ import {
 } from "./api"
 import {
   assertSharedAccessGrantId,
-  hasClientSharedAuthority,
+  getClientSharedGrantId,
   markClientSharedAuthority,
 } from "./client-authority"
 import { client } from "./generated/client.gen"
@@ -206,7 +206,7 @@ export function configureSixbSharedBrowserClient(
   assertSharedAccessGrantId(options.grantId)
 
   const previousConfig = client.getConfig()
-  const previousSharedAuthority = hasClientSharedAuthority(client)
+  const previousSharedAuthority = getClientSharedGrantId(client)
   let csrfToken: string | null = null
   let disposed = false
   configureGeneratedSixbClient(client, {

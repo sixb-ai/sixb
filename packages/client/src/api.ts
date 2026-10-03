@@ -108,7 +108,7 @@ export function isSixbApiError(value: unknown): value is SixbApiError {
 
 export function createSixbClient(options: SixbClientOptions = {}): SixbClient {
   const client = createClient(createSixbClientConfig(options))
-  markClientSharedAuthority(client, options.auth?.kind === "shared")
+  markClientSharedAuthority(client, sharedGrantId(options))
   markClientSessionAuthority(client, sixbSessionOptions(options))
   installSixbErrorInterceptor(client)
   return client
@@ -119,7 +119,7 @@ export function configureSixbClient(
   options: SixbClientOptions = {}
 ): SixbClient {
   client.setConfig(createSixbClientConfig(options))
-  markClientSharedAuthority(client, options.auth?.kind === "shared")
+  markClientSharedAuthority(client, sharedGrantId(options))
   markClientSessionAuthority(client, sixbSessionOptions(options))
   installSixbErrorInterceptor(client)
   return client
@@ -158,6 +158,10 @@ export function createSixbClientConfig(options: SixbClientOptions = {}): Config 
     auth:
       auth.kind === "none" || auth.kind === "session" ? undefined : createSixbAuthResolver(auth),
   })
+}
+
+function sharedGrantId(options: SixbClientOptions): string | null {
+  return options.auth?.kind === "shared" ? options.auth.grantId : null
 }
 
 function sixbSessionOptions(options: SixbClientOptions): SixbSessionOptions | null {
