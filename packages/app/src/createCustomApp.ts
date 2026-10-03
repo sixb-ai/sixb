@@ -978,7 +978,11 @@ function secureSharedHtml(
     // The browser client reports an invalid runtime URL. Keep the document policy fail-closed.
   }
 
-  const connectSources = ["'self'", ...(apiOrigin === requestOrigin ? [] : [apiOrigin])]
+  const apiSources = apiOrigin === requestOrigin ? [] : [apiOrigin]
+  const connectSources = ["'self'", ...apiSources]
+  // Files are fetched or embedded from the API, which a split deployment serves from its own
+  // origin; `https:` alone misses it in plain-HTTP development.
+  const fileSources = ["'self'", ...apiSources, "data:", "blob:", "https:"]
   const scriptSources = [`'nonce-${nonce}'`, "'strict-dynamic'", "'self'"]
   const contentSecurityPolicy = [
     "default-src 'none'",
@@ -988,7 +992,8 @@ function secureSharedHtml(
     "form-action 'none'",
     `script-src ${scriptSources.join(" ")}`,
     "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data: blob: https:",
+    `img-src ${fileSources.join(" ")}`,
+    `media-src ${fileSources.join(" ")}`,
     "font-src 'self' data: https:",
     `connect-src ${connectSources.join(" ")}`,
     "manifest-src 'none'",

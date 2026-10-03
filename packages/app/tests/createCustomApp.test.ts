@@ -341,6 +341,11 @@ describe("createCustomApp.start", () => {
       const csp = shared.headers.get("content-security-policy") ?? ""
       expect(csp).toContain(`script-src 'nonce-${nonces[0]}'`)
       expect(csp).toContain("connect-src 'self' https://api.example.test")
+      // Without media-src, <video> and <audio> fall back to default-src 'none' and stay blank,
+      // even for a blob: URL built from a successful fetch.
+      for (const directive of ["img-src", "media-src"]) {
+        expect(csp).toContain(`${directive} 'self' https://api.example.test data: blob: https:`)
+      }
       expect(csp).toContain("frame-ancestors 'none'")
       expect(csp).toContain("form-action 'none'")
       expect(csp).toContain("manifest-src 'none'")

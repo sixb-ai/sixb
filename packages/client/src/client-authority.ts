@@ -1,7 +1,7 @@
 import type { Client } from "./generated/client"
 import type { SixbSessionOptions } from "./session"
 
-const sharedAuthorityClients = new WeakSet<Client>()
+const sharedAuthorityClients = new WeakMap<Client, string>()
 const sessionAuthorityClients = new WeakMap<Client, SixbSessionOptions>()
 
 export const SHARED_ACCESS_REALTIME_UNAVAILABLE =
@@ -19,9 +19,10 @@ export function assertSharedAccessGrantId(grantId: unknown): asserts grantId is 
   }
 }
 
-export function markClientSharedAuthority(client: Client, shared: boolean): void {
-  if (shared) {
-    sharedAuthorityClients.add(client)
+/** Record the Share a client speaks for, or `null` when it carries no shared authority. */
+export function markClientSharedAuthority(client: Client, grantId: string | null): void {
+  if (grantId !== null) {
+    sharedAuthorityClients.set(client, grantId)
     return
   }
 
@@ -30,6 +31,10 @@ export function markClientSharedAuthority(client: Client, shared: boolean): void
 
 export function hasClientSharedAuthority(client: Client): boolean {
   return sharedAuthorityClients.has(client)
+}
+
+export function getClientSharedGrantId(client: Client): string | null {
+  return sharedAuthorityClients.get(client) ?? null
 }
 
 /** Record the native session a client signs in with, so its WebSockets can present it too. */
