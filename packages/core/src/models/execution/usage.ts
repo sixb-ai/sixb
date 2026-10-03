@@ -4,6 +4,7 @@ import type { ModelUsage } from "../events"
 /** Map one provider-neutral model call into Sixb's durable accounting vocabulary. */
 export function aiModelCallUsageFromModel(usage: ModelUsage): AiModelCallUsageInput {
   return {
+    ...(usage.audioDurationMs === undefined ? {} : { audioDurationMs: usage.audioDurationMs }),
     ...(usage.inputTokens === undefined ? {} : { inputTokens: usage.inputTokens }),
     ...(usage.outputTokens === undefined ? {} : { outputTokens: usage.outputTokens }),
     ...(usage.uncachedInputTokens === undefined

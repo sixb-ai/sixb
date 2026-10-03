@@ -1,11 +1,13 @@
 import type { ReadonlyJsonObject } from "../../json"
 import type { ModelReasoning } from "../../models/language-model"
 
-/** How much normalized token usage a provider reported for one model call. */
+/** Coverage of normalized usage. Complete means both token totals are known; duration alone is partial. */
 export type AiUsageReportingStatus = "complete" | "partial" | "unavailable"
 
-/** Provider-neutral token counts accepted at the model-call boundary. */
+/** Provider-neutral usage accepted at the model-call boundary. */
 export interface AiModelCallUsageInput {
+  /** Audio content duration in milliseconds, rounded to the nearest millisecond. Not billed duration. */
+  readonly audioDurationMs?: number
   readonly inputTokens?: number
   readonly outputTokens?: number
   readonly uncachedInputTokens?: number
@@ -15,7 +17,7 @@ export interface AiModelCallUsageInput {
   readonly reasoningOutputTokens?: number
 }
 
-/** Normalized token counts for one completed model call. Details overlap their input/output totals. */
+/** Normalized usage for one completed model call. Token details overlap their input/output totals. */
 export interface AiModelCallUsage extends AiModelCallUsageInput {
   /** Present only when both input and output totals are known. */
   readonly totalTokens?: number
@@ -32,6 +34,8 @@ export interface AiUsageExecutionSummary {
 
 /** Input for an idempotent model-call ledger append. */
 export interface RecordAiModelCallInput {
+  /** Absent for historical calls whose kind was not captured. */
+  readonly modelKind?: import("../../models/definitions").ModelKind
   readonly providerIds?: import("../../models/events").ModelProviderIds
   readonly id: string
   readonly projectId: string
@@ -89,7 +93,7 @@ export interface GetLatestAiModelCallForExecutionInput {
   readonly executionId: string
 }
 
-/** Durable, provider-neutral accounting for completed language-model calls. */
+/** Durable, provider-neutral accounting for completed model calls. */
 export interface AiUsageStorage {
   /**
    * Append one model-call record idempotently. The identity is project, execution ID, attempt, call

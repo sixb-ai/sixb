@@ -3,7 +3,7 @@ import type { LanguageModelRateCard, ModelTokenPrice } from "./rate-card"
 
 /** Optional local financial enrichment cannot discard a completed, billable call. */
 export function estimateModelCall(
-  model: { readonly costEstimator?: ModelCostEstimator },
+  model: { readonly costEstimator?: Pick<ModelCostEstimator, "estimate"> },
   input: Parameters<ModelCostEstimator["estimate"]>[0]
 ): ModelCostEstimate {
   try {
@@ -46,6 +46,7 @@ export interface ModelCostEstimator {
 }
 
 export type ModelCostMeter =
+  | "audio.input.milliseconds"
   | "tokens.input.total"
   | "tokens.input.uncached"
   | "tokens.input.cacheRead"

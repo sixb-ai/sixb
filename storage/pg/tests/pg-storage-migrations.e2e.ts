@@ -354,6 +354,7 @@ describe("Postgres storage migrations", () => {
             "054-slim-ontology-outbox",
             "055-object-query-preparation",
             "056-commit-touches",
+            "057-audio-transcription",
           ],
         },
       ])
@@ -749,6 +750,13 @@ describe("Postgres storage migrations", () => {
           id: "056-commit-touches",
           status: "applied",
           version: 56,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "057-audio-transcription",
+          status: "applied",
+          version: 57,
         },
       ])
     })
@@ -2360,6 +2368,8 @@ describe("Postgres storage migrations", () => {
             ...row,
             requested_reasoning: null,
             provider_ids: null,
+            audio_duration_ms: null,
+            model_kind: null,
           }))
         )
         await expect(
@@ -2944,6 +2954,13 @@ describe("Postgres storage migrations", () => {
           id: "056-commit-touches",
           status: "applied",
           version: 56,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "057-audio-transcription",
+          status: "applied",
+          version: 57,
         },
       ])
     } finally {

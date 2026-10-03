@@ -1,5 +1,25 @@
+export type { FileRef } from "../blob-storage/types"
 export type { JsonObject, JsonPrimitive, JsonValue } from "../json"
 export { assertJsonObject, assertJsonValue, isJsonObject, isJsonValue } from "../json"
+export type {
+  AudioModelCatalog,
+  AudioModelCatalogInput,
+  TranscriptionModelCatalog,
+  TranscriptionModelEntry,
+} from "./audio/catalog"
+export { TranscriptionModelResponseError } from "./audio/errors"
+export type {
+  AudioModelsRuntime,
+  AudioTranscribeInput,
+  AudioTranscribeResult,
+  TranscriptionCostEstimator,
+  TranscriptionModel,
+  TranscriptionModelDefinition,
+  TranscriptionModelRequest,
+  TranscriptionModelResponseMetadata,
+  TranscriptionModelResult,
+  TranscriptionOutput,
+} from "./audio/types"
 export type {
   EmbeddingModelCatalog,
   EmbeddingModelEntry,

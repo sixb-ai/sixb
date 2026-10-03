@@ -46,6 +46,8 @@ export type ModelFinishReason =
   | "unknown"
 
 export interface ModelUsage {
+  /** Audio content duration in milliseconds, rounded to the nearest millisecond. Not billed duration. */
+  readonly audioDurationMs?: number
   readonly inputTokens?: number
   readonly outputTokens?: number
   readonly uncachedInputTokens?: number
@@ -168,6 +170,7 @@ export type ModelUiChunk =
   | { readonly type: "error"; readonly errorText: string }
 
 export interface ModelCallEndEvent {
+  readonly modelKind?: import("./definitions").ModelKind
   readonly providerIds?: ModelProviderIds
   /** Retained independently when the selected display cost is provider-reported. */
   readonly estimate?: ModelCostEstimate

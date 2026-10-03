@@ -48,6 +48,59 @@ function accounting(usage: RecordAiModelCallInput): RecoverAiModelCallInput {
 }
 
 describe("AI usage recovery", () => {
+  // Removal proof: omit modelKind or audioDurationMs from the recovery codecs.
+  test("replays audio accounting idempotently with independent reported cost and duration estimate", async () => {
+    const queues = new InMemoryQueues()
+    const storage = new InMemoryStorage()
+    await createTestAgentExecution(storage, {
+      projectId,
+      actorId: "assistant",
+      runId: "run_1",
+      executionId,
+    })
+    const usage = {
+      ...modelCall(),
+      modelKind: "transcription" as const,
+      usage: { audioDurationMs: 1250 },
+    }
+    const estimate = {
+      status: "rated" as const,
+      money: { currency: "USD" as const, amountNanos: "125000" },
+      components: [
+        {
+          meter: "audio.input.milliseconds" as const,
+          quantity: "1250",
+          rateAmountNanosPerMillion: "100000000",
+          chargeAmountNanos: "125000",
+        },
+      ],
+    }
+    await enqueueAiModelCallRecovery(queues.agents, {
+      usage,
+      estimate,
+      cost: { status: "reported", money: { currency: "USD", amountNanos: "200000" } },
+      ratedAt: usage.occurredAt,
+    })
+    const [claim] = await queues.agents.claim({ projectId, workerId: "test", limit: 1 })
+    if (claim?.job.type !== "agent.ai-usage.record.requested")
+      throw new Error("Expected recovery job")
+    await recordRecoveredAiModelCall(storage, claim.job)
+    await recordRecoveredAiModelCall(storage, claim.job)
+    const page = await storage.aiCosts.listModelCalls({
+      projectId,
+      from: new Date("2026-07-01"),
+      to: new Date("2026-07-02"),
+    })
+    expect(page.total).toBe(1)
+    expect(page.items[0]).toMatchObject({
+      usage: { modelKind: "transcription", usage: { audioDurationMs: 1250 } },
+      cost: { money: { amountNanos: "200000" }, estimate },
+    })
+    expect(
+      (await storage.aiCosts.summarizeExecutions({ projectId, executionIds: [executionId] }))[0]
+        ?.amounts
+    ).toEqual([{ currency: "USD", amountNanos: "200000" }])
+  })
   test("retains the estimate and inline cost through queue serialization and replay", async () => {
     // Regression proof: drop estimate from either recovery codec; only the report will survive.
     const queues = new InMemoryQueues()

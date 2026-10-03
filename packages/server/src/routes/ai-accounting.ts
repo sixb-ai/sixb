@@ -109,6 +109,7 @@ function serializeModelCall(item: AiModelCallAccountingItem) {
       callId: item.usage.callId,
       providerId: item.usage.providerId,
       requestedModelId: item.usage.requestedModelId,
+      modelKind: item.usage.modelKind,
       providerIds: item.usage.providerIds ?? null,
       requestedReasoning: item.usage.requestedReasoning,
       responseModelId: item.usage.responseModelId,

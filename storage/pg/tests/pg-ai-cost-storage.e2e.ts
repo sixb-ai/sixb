@@ -219,3 +219,76 @@ runAiCostStorageContractSuite("PgAiCostStorage", {
     await storage.close()
   },
 })
+
+// Removal proof: omit audio_duration_ms/model_kind from SQL reads, or the audio meter from cost validation.
+test("round-trips audio duration, valuation and analytics without treating missing duration as zero", async () => {
+  const { storage } = await createTestStorage()
+  try {
+    const projectId = "audio-accounting"
+    const executionId = await createTestAgentExecution(storage, {
+      projectId,
+      actorId: "assistant",
+      runId: "audio",
+    })
+    const occurredAt = new Date("2026-08-01T12:00:00Z")
+    for (const [id, duration] of [
+      ["audio-known", 1250],
+      ["audio-unknown", undefined],
+    ] as const) {
+      await storage.aiUsage.recordModelCall({
+        id,
+        projectId,
+        executionId,
+        attempt: 1,
+        callId: id,
+        requesterGroupIds: [],
+        providerId: "test",
+        requestedModelId: "transcribe",
+        modelKind: "transcription",
+        responseId: id,
+        usage: duration === undefined ? {} : { audioDurationMs: duration },
+        occurredAt,
+      })
+    }
+    const component = {
+      meter: "audio.input.milliseconds" as const,
+      quantity: "1250",
+      rateAmountNanosPerMillion: "100000000",
+      chargeAmountNanos: "125000",
+    }
+    const cost = {
+      projectId,
+      usageRecordId: "audio-known",
+      status: "rated" as const,
+      billingIdentity: { providerId: "test", modelId: "transcribe" },
+      pricingContext: {},
+      priceSource: {
+        sourceId: "test",
+        sourceEntryId: "audio",
+        sourceVersion: "1",
+        observedAt: occurredAt,
+      },
+      money: { currency: "USD", amountNanos: "125000" },
+      components: [component],
+      ratedAt: occurredAt,
+    }
+    await storage.aiCosts.recordModelCallCost(cost)
+    const range = { projectId, from: new Date("2026-08-01"), to: new Date("2026-08-02") }
+    const page = await storage.aiCosts.listModelCalls(range)
+    expect(page.items.find((item) => item.usage.id === "audio-known")).toMatchObject({
+      usage: { modelKind: "transcription", usage: { audioDurationMs: 1250 } },
+      cost: { money: cost.money, components: [component] },
+    })
+    const overview = await storage.aiCosts.queryProjectOverview({ ...range, bucket: "day" })
+    expect(overview.totals.usage).toEqual({ audioDurationMs: 1250, reportingStatus: "partial" })
+    expect(overview.totals.usageCoverage.fieldCallCounts.audioDurationMs).toBe(1)
+    expect(overview.models[0]?.usage.audioDurationMs).toBe(1250)
+    expect(overview.series[0]?.usage.audioDurationMs).toBe(1250)
+    await expect(
+      storage.aiCosts.recordModelCallCost({ ...cost, usageRecordId: "audio-unknown" })
+    ).rejects.toThrow()
+  } finally {
+    await storage.dropSchema()
+    await storage.close()
+  }
+})

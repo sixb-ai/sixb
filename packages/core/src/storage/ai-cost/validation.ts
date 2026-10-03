@@ -15,8 +15,8 @@ import type {
 } from "./types"
 
 const SIGNED_INT64_MAX = 9_223_372_036_854_775_807n
-const TOKENS_PER_MILLION = 1_000_000n
-const HALF_MILLION = TOKENS_PER_MILLION / 2n
+const UNITS_PER_MILLION = 1_000_000n
+const HALF_MILLION = UNITS_PER_MILLION / 2n
 const MAX_NUMERIC_TEXT_LENGTH = 128
 const METER_ORDER: Readonly<Record<AiBillableMeter, number>> = {
   "tokens.input.total": 0,
@@ -28,6 +28,7 @@ const METER_ORDER: Readonly<Record<AiBillableMeter, number>> = {
   "tokens.output.total": 6,
   "tokens.output.text": 7,
   "tokens.output.reasoning": 8,
+  "audio.input.milliseconds": 9,
 }
 const METERS = new Set(Object.keys(METER_ORDER) as AiBillableMeter[])
 const UNPRICEABLE_REASONS = new Set<AiUnpriceableReason>([
@@ -120,11 +121,7 @@ export function aiModelCallCostMatchesUsage(
     const components = new Map(
       record.estimate.components.map((component) => [component.meter, component])
     )
-    if (
-      !inputComponentsMatchUsage(components, usage) ||
-      !outputComponentsMatchUsage(components, usage)
-    )
-      return false
+    if (!componentsMatchUsage(components, usage)) return false
   }
   if (record.status === "unpriceable") return true
   if (record.components.length === 0 && isExternalValuationSource(record.priceSource.sourceId)) {
@@ -133,6 +130,22 @@ export function aiModelCallCostMatchesUsage(
 
   const usage = normalizeAiModelCallUsage(usageRecord.usage)
   const components = new Map(record.components.map((component) => [component.meter, component]))
+  return componentsMatchUsage(components, usage)
+}
+
+function componentsMatchUsage(
+  components: ReadonlyMap<AiBillableMeter, AiCostComponent>,
+  usage: AiModelCallUsage
+): boolean {
+  const audio = components.get("audio.input.milliseconds")
+  if (audio) {
+    return (
+      components.size === 1 &&
+      usage.audioDurationMs !== undefined &&
+      BigInt(audio.quantity) === BigInt(usage.audioDurationMs)
+    )
+  }
+
   return (
     inputComponentsMatchUsage(components, usage) && outputComponentsMatchUsage(components, usage)
   )
@@ -362,7 +375,7 @@ function calculateComponent(
 ): AiCostComponent {
   const normalizedQuantity = parseQuantity(quantity, `${meter} quantity`)
   const rate = parseNonnegativeInt64(rateAmountNanosPerMillion, `${meter} rate`)
-  const charge = (normalizedQuantity * rate + HALF_MILLION) / TOKENS_PER_MILLION
+  const charge = (normalizedQuantity * rate + HALF_MILLION) / UNITS_PER_MILLION
   assertSignedInt64(charge, `${meter} charge`)
   return {
     meter,

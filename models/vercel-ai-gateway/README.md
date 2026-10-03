@@ -161,3 +161,44 @@ request through Sixb with a $0.01 catalog-estimated budget:
 ```sh
 SIXB_VERCEL_GATEWAY_DECISION_E2E=1 bun --env-file=.env.test test ./models/vercel-ai-gateway/tests/decision.e2e.ts
 ```
+
+## Audio transcription
+
+```ts
+const transcriber = vercelGateway.transcription("microsoft/mai-transcribe-2")
+const models = { audio: { transcription: [transcriber] } }
+
+// Inside an action writeback/effects handler or a workflow step:
+const { output, usage, cost, callId } = await sixb.models.audio.transcribe({ audio: fileRef })
+```
+
+Set `AI_GATEWAY_API_KEY` or `VERCEL_OIDC_TOKEN` as for language models. Gateway speech-to-text
+is a beta feature with team-dependent availability. It uses the dedicated
+`/v4/ai/transcription-model` endpoint and JSON/base64 transport. No inference retries are made.
+With a custom `baseUrl` ending in `/v1`, the same URL prefix is used for `/v4`; other proxies
+must set the full `transcriptionUrl` in `createVercelGateway()`.
+
+The binding accepts `providerOptions`, `timeoutMs` (default 120,000), `maxInputBytes` (default
+25 MiB), and an optional `mediaTypes` allowlist. The byte limit bounds client memory; it does
+not replace upstream file-size, duration, or encoding limits. MP3, WAV, M4A, WebM, Ogg, and
+FLAC support varies by model. For example, Microsoft models do not accept WebM or MP4.
+Use the [Gateway speech-to-text documentation](https://vercel.com/docs/ai-gateway/modalities/speech-to-text)
+to select a compatible model and format.
+
+Gateway-provided cost is retained separately from a local estimate based on its published
+per-second tariff and reported content duration. Models with token-based audio pricing remain
+unpriceable locally until their usage can be mapped reliably. Provider-specific usage stays
+available in raw accounting data; unknown counts are never filled with zero.
+
+The file reference does not provide a reliable pre-inference duration or token estimate.
+Applicable Sixb token/cost limits therefore fail closed for this binding. Files are not
+automatically split, transcoded, or retried.
+
+A live test is opt-in and sends the audio file you explicitly select:
+
+```bash
+SIXB_VERCEL_GATEWAY_TRANSCRIPTION_E2E_MODEL=microsoft/mai-transcribe-2 \
+SIXB_VERCEL_GATEWAY_TRANSCRIPTION_E2E_FILE=/path/to/sample.wav \
+SIXB_VERCEL_GATEWAY_TRANSCRIPTION_E2E_MEDIA_TYPE=audio/wav \
+bun --env-file=.env.test test ./models/vercel-ai-gateway/tests/transcription.e2e.ts
+```
