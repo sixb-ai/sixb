@@ -22,6 +22,7 @@ const target: DeployTarget = {
   status: async () => ({ release: null, running: false, processes: [] }),
   logs: async () => {},
   control: async () => {},
+  check: async () => [],
 }
 
 const tempDirs: string[] = []
@@ -315,6 +316,32 @@ export default {
     async control(action, service, context) {
       record({ action, service, name: context.name })
     },
+    async check(release, context) {
+      record({ check: context.name, projectPath: context.projectPath })
+      return [
+        { id: "ssh", label: "SSH", status: "ok", detail: "sixb@test-server" },
+        ...(process.env.DEPLOY_BLOCK
+          ? [{ id: "project.env", label: ".env", status: "manual", detail: ".env does not exist", remedy: "Create it." }]
+          : []),
+      ]
+    },
+    async setup(release, context) {
+      record({ setup: context.name, admin: context.admin ?? null, key: context.key ?? null })
+      context.write("setting up the test server")
+    },
+    access: {
+      async list() {
+        return [{ type: "ssh-ed25519", fingerprint: "SHA256:abc", comment: "dev@laptop", restricted: false }]
+      },
+      async add(key) {
+        record({ add: key })
+        return { type: "ssh-ed25519", fingerprint: "SHA256:new", comment: key.split(" ")[2] ?? "", restricted: false }
+      },
+      async remove(match) {
+        record({ remove: match })
+        return [{ type: "ssh-ed25519", fingerprint: match, comment: "old@laptop", restricted: false }]
+      },
+    },
   },
 }
 `
@@ -345,7 +372,8 @@ export default {
     expect(result.exitCode).toBe(0)
     expect(result.stdout).toContain("✓ Upload source")
     expect(result.stdout).toContain("northline deployed")
-    const [deployed] = await records(recordPath)
+    const [checked, deployed] = await records(recordPath)
+    expect(checked).toEqual({ check: "northline", projectPath: "." })
     expect(deployed).toMatchObject({
       name: "northline",
       bunVersion: "1.4.2",
@@ -395,6 +423,65 @@ export default {
     expect(restart.stdout).toContain("northline is running")
     expect(await records(recordPath)).toEqual([
       { action: "restart", service: "workers", name: "northline" },
+    ])
+  })
+
+  test("checks the target, and stops a deploy the checks say cannot work", async () => {
+    const { root, recordPath } = await project()
+    const run = (...args: string[]) =>
+      runCliToCompletion({
+        cmd: ["bun", cliEntry, "deploy", ...args],
+        cwd: root,
+        env: { DEPLOY_RECORD: recordPath, DEPLOY_BLOCK: "1" },
+      })
+
+    const check = await run("check")
+    expect(check.exitCode).toBe(1)
+    expect(check.stdout).toContain("northline · 1 to fix before deploying")
+    expect(check.stdout).toContain("Create it.")
+
+    const deploy = await run()
+    expect(deploy.exitCode).toBe(1)
+    expect(deploy.stdout).toContain(".env does not exist")
+    // Only the checks ran: nothing was uploaded.
+    expect((await records(recordPath)).every((entry) => "check" in entry)).toBe(true)
+  })
+
+  test("sets the target up, then shows what is left", async () => {
+    const { root, recordPath } = await project()
+    const result = await runCliToCompletion({
+      cmd: ["bun", cliEntry, "deploy", "setup", "--admin", "ademattos", "--key", "~/.ssh/id.pub"],
+      cwd: root,
+      env: { DEPLOY_RECORD: recordPath },
+    })
+
+    expect(result.exitCode).toBe(0)
+    expect(result.stdout).toContain("setting up the test server")
+    expect(result.stdout).toContain("northline is ready to deploy")
+    expect((await records(recordPath))[0]).toEqual({
+      setup: "northline",
+      admin: "ademattos",
+      key: "~/.ssh/id.pub",
+    })
+  })
+
+  test("lists, adds, and revokes keys", async () => {
+    const { root, recordPath } = await project()
+    const keyFile = join(root, "..", "teammate.pub")
+    await writeFile(keyFile, "ssh-ed25519 AAAAteammate quentin@mbp\n")
+    const run = (...args: string[]) =>
+      runCliToCompletion({
+        cmd: ["bun", cliEntry, "deploy", "access", ...args],
+        cwd: root,
+        env: { DEPLOY_RECORD: recordPath },
+      })
+
+    expect((await run("list")).stdout).toContain("dev@laptop")
+    expect((await run("add", keyFile)).stdout).toContain("quentin@mbp")
+    expect((await run("remove", "SHA256:old")).stdout).toContain("old@laptop")
+    expect(await records(recordPath)).toEqual([
+      { add: "ssh-ed25519 AAAAteammate quentin@mbp" },
+      { remove: "SHA256:old" },
     ])
   })
 
@@ -455,6 +542,14 @@ describe("deploy command line", () => {
       id: "deploy:logs",
       positionals: ["api"],
       options: { follow: true },
+    })
+    expect(parseCliArgs(["deploy", "setup", "--admin", "root"])).toMatchObject({
+      id: "deploy:setup",
+      options: { admin: "root" },
+    })
+    expect(parseCliArgs(["deploy", "access", "add", "github:quentin"])).toMatchObject({
+      id: "deploy:access:add",
+      positionals: ["github:quentin"],
     })
     expect(parseCliArgs(["deploy", "--help"]).kind).toBe("help")
     expect(() => parseCliArgs(["deploy", "statsu"])).toThrow("Unknown deploy command 'statsu'")

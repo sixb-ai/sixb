@@ -12,6 +12,9 @@ export function renderPrepareScript(name: string, commit: string): string {
     `root="$HOME"/${shellQuote(name)}`,
     'mkdir -p "$root/deploy/incoming"',
     `incoming="$(mktemp -d "$root/deploy/incoming/${commit.slice(0, 12)}.XXXXXX")"`,
+    // `mktemp` makes it 0700, and GNU tar passes the mode of the upload's `.` on to `code/`, which
+    // would lock out the admin, who reads the code through the deploy user's group.
+    'chmod 755 "$incoming"',
     `printf '%s\\n%s\\n' "$HOME" "$incoming"`,
   ].join("\n")
 }

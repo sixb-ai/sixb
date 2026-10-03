@@ -1,5 +1,9 @@
 import { isIPv6 } from "node:net"
 import type {
+  DeployAccess,
+  DeployAccessKey,
+  DeployCheck,
+  DeployCheckContext,
   DeployContext,
   DeployControlAction,
   DeployHttpServiceName,
@@ -7,12 +11,18 @@ import type {
   DeployLogsOptions,
   DeployOperationContext,
   DeployRelease,
+  DeploySetupContext,
   DeploySource,
   DeployStatus,
   DeployTarget,
 } from "@sixb/core/deploy"
+import { addKey, listKeys, removeKeys } from "./access"
+import { checkDns, runChecks } from "./check"
 import { controlServices, deployRelease, readStatus, streamLogs } from "./operations"
-import { type RemoteShell, SshShell } from "./transport"
+import { pickPublicKey, renderAdminScript } from "./setup"
+import { shellQuote } from "./shell"
+import { resolveSshConfig } from "./ssh-config"
+import { RemoteScriptError, type RemoteShell, SshShell } from "./transport"
 
 export interface SshTargetOptions {
   /** The server: a hostname, an IP address, or a `Host` alias from your SSH config. */
@@ -98,6 +108,77 @@ export class SshTarget implements DeployTarget {
     return this.#connected((shell) => controlServices(shell, context.name, action, service))
   }
 
+  async check(release: DeployRelease, context: DeployCheckContext): Promise<DeployCheck[]> {
+    const { hostname } = await resolveSshConfig(this.location)
+    const dns = checkDns(release, hostname)
+    let server: DeployCheck[]
+    try {
+      server = await this.#connected(async (shell) => [
+        { id: "ssh", label: "SSH", status: "ok" as const, detail: this.location },
+        ...(await runChecks(shell, {
+          name: context.name,
+          projectPath: context.projectPath,
+          ports: release.services.flatMap((service) =>
+            service.http ? [{ service: service.name, port: service.http.port }] : []
+          ),
+          location: this.location,
+        })),
+      ])
+    } catch (error) {
+      server = [sshCheck(this.location, error)]
+    }
+    return [...server, ...(await dns)]
+  }
+
+  /**
+   * Prepares the server as the admin login when the deploy user or the server is not set up
+   * yet, then the project as the deploy user. Running it again changes nothing that is right.
+   */
+  async setup(release: DeployRelease, context: DeploySetupContext): Promise<void> {
+    const before = await this.check(release, context)
+    const serverFixes = before.filter(
+      (check) =>
+        (check.status === "fixable" && check.id !== "project.env") ||
+        (check.id === "ssh" && check.status !== "ok")
+    )
+    const unreachable = before.find((check) => check.id === "ssh" && check.status === "manual")
+    if (unreachable) {
+      throw new Error(`[SshTarget] ${unreachable.detail}`)
+    }
+
+    if (serverFixes.length > 0) {
+      const admin = context.admin ?? "root"
+      const { identityFiles } = await resolveSshConfig(this.location)
+      const key = await pickPublicKey({ key: context.key, identityFiles })
+      context.write(
+        `Setting up ${this.host} as ${admin}, authorizing ${key.source} for ${this.user}.`
+      )
+      await runAsAdmin(
+        `${admin}@${this.host}`,
+        admin === "root",
+        renderAdminScript({ user: this.user, publicKey: key.text, admin })
+      )
+    }
+
+    context.write(`Preparing ${context.name} as ${this.user}.`)
+    await this.#connected((shell) =>
+      shell.run(
+        [
+          `project="$HOME"/${shellQuote(`${context.name}/code/${context.projectPath}`)}`,
+          'mkdir -p "$project"',
+          'if [ -f "$project/.env" ]; then chmod 600 "$project/.env"; fi',
+        ].join("\n")
+      )
+    )
+  }
+
+  readonly access: DeployAccess = {
+    list: () => this.#connected(async (shell) => (await listKeys(shell)).map(withoutLine)),
+    add: (key) => this.#connected((shell) => addKey(shell, key)).then(withoutLine),
+    remove: (match) =>
+      this.#connected(async (shell) => (await removeKeys(shell, match)).map(withoutLine)),
+  }
+
   async #connected<T>(work: (shell: RemoteShell) => Promise<T>): Promise<T> {
     const shell = await SshShell.open(this.location)
     try {
@@ -167,4 +248,50 @@ function validatePorts(value: unknown): Partial<Record<DeployHttpServiceName, nu
     ports[service as DeployHttpServiceName] = port
   }
   return ports
+}
+
+/** What a failed connection means for a deploy, and whether setup can fix it. */
+function sshCheck(location: string, error: unknown): DeployCheck {
+  const message =
+    (error instanceof Error ? error.message : String(error))
+      .split("\n")[0]
+      ?.replace(/^\[SshTarget\] /, "") ?? ""
+  if (error instanceof RemoteScriptError && /refused your SSH key/.test(message)) {
+    return {
+      id: "ssh",
+      label: "SSH",
+      status: "fixable",
+      detail: message,
+      remedy: `Run \`sixb deploy setup --admin <login>\` with a login that has sudo: it creates the deploy user and authorizes your key. Or have someone with access run \`sixb deploy access add\` with your key.`,
+    }
+  }
+  return {
+    id: "ssh",
+    label: "SSH",
+    status: "manual",
+    detail: message || `Cannot reach ${location}.`,
+  }
+}
+
+function withoutLine({ type, fingerprint, comment, restricted }: DeployAccessKey): DeployAccessKey {
+  return { type, fingerprint, comment, restricted }
+}
+
+/**
+ * Runs the setup script as the admin login with the terminal attached, so sudo can ask for its
+ * password and the person running setup sees each step.
+ */
+async function runAsAdmin(destination: string, root: boolean, script: string): Promise<void> {
+  const command = `${root ? "" : "sudo "}bash -c ${shellQuote(script)}`
+  // LogLevel=ERROR drops the "Connection closed" line a terminal session ends with, not errors.
+  const ssh = ["ssh", "-tt", "-o", "ConnectTimeout=15", "-o", "LogLevel=ERROR"]
+  const child = Bun.spawn([...ssh, destination, command], {
+    stdio: ["inherit", "inherit", "inherit"],
+  })
+  const exitCode = await child.exited
+  if (exitCode !== 0) {
+    throw new Error(
+      `[SshTarget] Setting up the server as ${destination} failed (exit code ${exitCode}).`
+    )
+  }
 }
