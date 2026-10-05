@@ -355,6 +355,13 @@ export type {
 } from "./executions"
 export { ExecutionStorageError } from "./executions"
 export type {
+  DeleteExpiredFileDownloadGrantsInput,
+  FileDownloadGrantRecord,
+  FileDownloadGrantStorage,
+  FindFileDownloadGrantInput,
+  RevokeFileDownloadGrantInput,
+} from "./file-download-grants"
+export type {
   CreateFileUploadSessionInput,
   FileUploadSession,
   FileUploadSessionErrorReason,

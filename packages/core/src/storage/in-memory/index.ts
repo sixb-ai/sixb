@@ -13,6 +13,10 @@ import {
 import { StorageTransactionError } from "../errors"
 import { InMemoryExecutionStorage } from "../executions/in-memory"
 import type { ExecutionStorage } from "../executions/types"
+import {
+  type FileDownloadGrantStorage,
+  InMemoryFileDownloadGrantStorage,
+} from "../file-download-grants"
 import { type FileUploadSessionStore, InMemoryFileUploadSessions } from "../file-upload-sessions"
 import type { ObjectStorage } from "../objects"
 import { InMemoryObjectStorage } from "../objects/in-memory"
@@ -116,6 +120,7 @@ export class InMemoryStorage implements Storage {
   private readonly webhookRunStorage = new InMemoryWebhookRunStorage(this.executionStorage)
   private readonly rulesStorage = new InMemoryRulesStorage()
   private readonly fileUploadSessionStorage = new InMemoryFileUploadSessions()
+  private readonly fileDownloadGrantStorage = new InMemoryFileDownloadGrantStorage()
   private readonly connectorConnectionStorage: InMemoryConnectorConnectionStorage
   readonly auth: AuthStorage
   readonly executions: ExecutionStorage
@@ -134,6 +139,7 @@ export class InMemoryStorage implements Storage {
   readonly shareGrants: ShareGrantStorage
   readonly shareSessions: ShareSessionStorage
   readonly fileUploadSessions: FileUploadSessionStore
+  readonly fileDownloadGrants: FileDownloadGrantStorage
   readonly connectorConnections: ConnectorConnectionStorage
 
   constructor(options: InMemoryStorageOptions = {}) {
@@ -166,6 +172,7 @@ export class InMemoryStorage implements Storage {
     this.shareGrants = createOperationScopedFacade(this.shareGrantStorage, scope)
     this.shareSessions = createOperationScopedFacade(this.shareSessionStorage, scope)
     this.fileUploadSessions = createOperationScopedFacade(this.fileUploadSessionStorage, scope)
+    this.fileDownloadGrants = createOperationScopedFacade(this.fileDownloadGrantStorage, scope)
     this.connectorConnections = createOperationScopedFacade(this.connectorConnectionStorage, scope)
     this.ontologyStorage = new InMemoryOntologyStorage(this.objectStorage, this.timeseriesStorage, {
       runRootOperation: async (run) => run(),
@@ -375,6 +382,7 @@ export class InMemoryStorage implements Storage {
       shareGrants: this.shareGrantStorage,
       shareSessions: this.shareSessionStorage,
       fileUploadSessions: this.fileUploadSessionStorage,
+      fileDownloadGrants: this.fileDownloadGrantStorage,
       connectorConnections: this.connectorConnectionStorage,
       ping: async () => undefined,
       transaction: async <T>(): Promise<T> => {
@@ -405,6 +413,7 @@ export class InMemoryStorage implements Storage {
       shareGrants: this.shareGrantStorage.snapshot(),
       shareSessions: this.shareSessionStorage.snapshot(),
       fileUploadSessions: this.fileUploadSessionStorage.snapshot(),
+      fileDownloadGrants: this.fileDownloadGrantStorage.snapshot(),
       connectorConnections: this.connectorConnectionStorage.snapshot(),
     }
   }
@@ -430,6 +439,7 @@ export class InMemoryStorage implements Storage {
     this.shareGrantStorage.restore(snapshot.shareGrants)
     this.shareSessionStorage.restore(snapshot.shareSessions)
     this.fileUploadSessionStorage.restore(snapshot.fileUploadSessions)
+    this.fileDownloadGrantStorage.restore(snapshot.fileDownloadGrants)
     this.connectorConnectionStorage.restore(snapshot.connectorConnections)
   }
 }
@@ -455,5 +465,6 @@ export interface InMemoryStorageSnapshot {
   readonly shareGrants: ReturnType<InMemoryShareGrantStorage["snapshot"]>
   readonly shareSessions: ReturnType<InMemoryShareSessionStorage["snapshot"]>
   readonly fileUploadSessions: ReturnType<InMemoryFileUploadSessions["snapshot"]>
+  readonly fileDownloadGrants: ReturnType<InMemoryFileDownloadGrantStorage["snapshot"]>
   readonly connectorConnections: ReturnType<InMemoryConnectorConnectionStorage["snapshot"]>
 }

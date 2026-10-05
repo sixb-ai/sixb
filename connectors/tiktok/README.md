@@ -149,6 +149,9 @@ const task = await businessOrganic.publishing.publishPhotos({
 const status = await businessOrganic.publishing.getStatus(task.share_id)
 ```
 
+TikTok downloads media from the URLs you pass. To publish a file stored in Sixb, pass a URL from
+[`sixb.blobs.createDownloadUrl()`](../../docs/server/overview.md#share-a-file-with-an-external-service).
+
 Video input uses `video_url`, optional `custom_thumbnail_url`, and `post_info` containing explicit
 `is_brand_organic` / `is_branded_content` booleans, plus optional `caption`, `disable_comment`,
 `disable_duet`, `disable_stitch`, `thumbnail_offset` (milliseconds), and `is_ai_generated`.

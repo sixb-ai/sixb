@@ -60,6 +60,10 @@ export {
   runExecutionStorageContractSuite,
 } from "./execution-storage-contract"
 export {
+  type FileDownloadGrantStorageContractSuiteOptions,
+  runFileDownloadGrantStorageContractSuite,
+} from "./file-download-grant-storage-contract"
+export {
   type FileUploadSessionStorageContractSuiteOptions,
   runFileUploadSessionStorageContractSuite,
 } from "./file-upload-session-storage-contract"

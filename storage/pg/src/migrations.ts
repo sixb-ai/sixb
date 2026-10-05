@@ -429,6 +429,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("056-commit-touches", commitTouchesSql),
     pgSql("057-audio-transcription", audioTranscriptionSql),
     pgSql("058-reranking-model-kind", rerankingModelKindSql),
+    pgSql("059-file-download-grants", fileDownloadGrantsSql),
   ],
 })
 
@@ -453,3 +454,4 @@ import connectorOptionalPkceSql from "./migrations/040-connector-optional-pkce.s
   type: "text",
 }
 import fileUploadSessionsSql from "./migrations/048-file-upload-sessions.sql" with { type: "text" }
+import fileDownloadGrantsSql from "./migrations/059-file-download-grants.sql" with { type: "text" }

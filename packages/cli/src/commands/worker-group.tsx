@@ -1,6 +1,7 @@
 import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
+import { recordApiPublicOrigin } from "../lib/public-origin"
 import {
   runUntilSignal,
   stopQuietly,
@@ -55,6 +56,7 @@ export async function runWorkerGroup(options: WorkerGroupOptions = {}) {
 
   try {
     sixb = await loadSixbFromEntry(entry)
+    recordApiPublicOrigin(sixb, options.apiPublicOrigin)
 
     assertShareableProviders(sixb, "worker-group")
 

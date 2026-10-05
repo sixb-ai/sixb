@@ -28,6 +28,12 @@ export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): Ac
       stat(blobId) {
         return runtime.sixb.blobs.stat(blobId)
       },
+      createDownloadUrl(file, options) {
+        return runtime.sixb.blobs.createDownloadUrl(file, options)
+      },
+      revokeDownloadUrl(id) {
+        return runtime.sixb.blobs.revokeDownloadUrl(id)
+      },
     },
     connector: runtime.sixb.connector,
     models: runtime.sixb.models,

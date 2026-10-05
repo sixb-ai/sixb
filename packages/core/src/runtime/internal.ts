@@ -20,4 +20,5 @@ export {
   registerOntologyMutationRuntime,
   shareOntologyMutationRuntime,
 } from "./ontology-mutations"
+export { setApiPublicOrigin } from "./public-origin"
 export type { SixbHostContext, SixbRuntimeContext } from "./types"

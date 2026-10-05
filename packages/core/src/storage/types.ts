@@ -6,6 +6,7 @@ import type { AiUsageStorage } from "./ai-usage"
 import type { AuthStorage } from "./auth"
 import type { ConnectorConnectionStorage } from "./connector-connections"
 import type { ExecutionStorage } from "./executions"
+import type { FileDownloadGrantStorage } from "./file-download-grants"
 import type { FileUploadSessionStore } from "./file-upload-sessions"
 import type { ObjectStorage } from "./objects/types"
 import type { OntologyStorage } from "./ontology"
@@ -370,6 +371,7 @@ export interface Storage {
   shareGrants?: ShareGrantStorage
   shareSessions?: ShareSessionStorage
   fileUploadSessions?: FileUploadSessionStore
+  fileDownloadGrants?: FileDownloadGrantStorage
   connectorConnections?: ConnectorConnectionStorage
 
   /** Lightweight reachability probe. It must not open a write transaction or run migrations. */

@@ -269,6 +269,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("055-commit-touches", commitTouchesSql),
     sqliteSql("056-audio-transcription", audioTranscriptionSql),
     sqliteSql("057-reranking-model-kind", rerankingModelKindSql),
+    sqliteSql("058-file-download-grants", fileDownloadGrantsSql),
   ],
 })
 
@@ -591,3 +592,4 @@ import connectorOptionalPkceSql from "./migrations/039-connector-optional-pkce.s
   type: "text",
 }
 import fileUploadSessionsSql from "./migrations/048-file-upload-sessions.sql" with { type: "text" }
+import fileDownloadGrantsSql from "./migrations/058-file-download-grants.sql" with { type: "text" }

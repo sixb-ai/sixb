@@ -3,6 +3,7 @@ import { openapi } from "@elysiajs/openapi"
 import type { OntologyMaintenanceHandle, SixbHostView } from "@sixb/core"
 import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/auth"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
+import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import type { Server } from "bun"
 import { Elysia } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
@@ -102,6 +103,10 @@ export class SixbServer {
     this.hostname = options.hostname ?? "0.0.0.0"
     this.quiet = options.quiet ?? false
     this.apiBrowserPolicy = resolveApiBrowserPolicy(options.browser)
+    // URLs the API hands to third parties, such as file download URLs, name this origin.
+    if (this.apiBrowserPolicy.publicOrigin) {
+      setApiPublicOrigin(this.hostRuntime, this.apiBrowserPolicy.publicOrigin)
+    }
     this.authContextResolver = createApiBrowserAuthContextResolver(this.apiBrowserPolicy)
     this.authRedirectContextResolver = createApiBrowserAuthRedirectContextResolver(
       this.apiBrowserPolicy

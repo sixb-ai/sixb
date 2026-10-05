@@ -72,6 +72,20 @@ curl 'https://api.example.com/api/objects/Invoice/inv-1/files/content?path=/prop
 
 The API checks access to the owning resource before returning the bytes. For browser images and download links, use [`objectFileContentUrl`](../client/overview.md#display-files).
 
+### Share a file with an external service
+
+Some services fetch media from a URL instead of accepting an upload, such as Instagram images and TikTok posts. Give them a download URL: anyone holding it can read that one file until it expires, without a Sixb session.
+
+Create the URL where you call the service, and pass it instead of the file:
+
+```ts
+const { url } = await sixb.blobs.createDownloadUrl(fileRef)
+```
+
+The URL points at your API's public origin, so set `SIXB_API_PUBLIC_ORIGIN` for the API and every worker that creates URLs. External services cannot reach local addresses such as `localhost`.
+
+A URL is valid for one hour by default; pass `{ expiresInMs }` to choose another lifetime. Anyone who obtains the URL can read the file until then, so keep it as short as the service allows. Each call creates its own URL; pass its `id` to `sixb.blobs.revokeDownloadUrl()` to stop it early.
+
 ## Errors
 
 Check the HTTP status and structured error code instead of parsing message text. See [Errors](../errors/overview.md) for the response format and code reference.

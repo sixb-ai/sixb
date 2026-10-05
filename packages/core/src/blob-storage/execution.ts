@@ -1,6 +1,13 @@
 import { assertProviderAccess } from "../authorization"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
+import {
+  type CreateFileDownloadUrlOptions,
+  createFileDownloadUrl,
+  type FileDownloadUrl,
+  type FileDownloadUrlContext,
+  revokeFileDownloadUrl,
+} from "./download-urls"
 import type {
   AbortBlobUploadInput,
   BlobByteRange,
@@ -21,6 +28,13 @@ export interface BlobsRuntime {
   put(input: PutBlobInput): Promise<FileRef>
   open(blobId: string): Promise<ReadableStream<Uint8Array>>
   stat(blobId: string): Promise<BlobInfo | null>
+  /**
+   * A URL anyone can use to read this file until it expires or is revoked, for services that
+   * fetch media themselves. Requires the API's public origin (`SIXB_API_PUBLIC_ORIGIN`).
+   */
+  createDownloadUrl(file: FileRef, options?: CreateFileDownloadUrlOptions): Promise<FileDownloadUrl>
+  /** Stop a URL from `createDownloadUrl()` before it expires. */
+  revokeDownloadUrl(id: string): Promise<void>
   openRange?(blobId: string, range: BlobByteRange): Promise<ReadableStream<Uint8Array>>
   createUpload?(input: CreateBlobUploadInput): Promise<BlobUploadSession>
   signUploadPart?(input: SignBlobUploadPartInput): Promise<SignedBlobUploadPart>
@@ -31,9 +45,18 @@ export interface BlobsRuntime {
 export function createBlobsRuntime(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
-  blobStorage: BlobStorage
+  blobStorage: BlobStorage,
+  apiPublicOrigin: () => string | undefined
 ): BlobsRuntime {
   const assertAccess = () => assertProviderAccess(runtime, execution, "blobs.access")
+  // Read the origin per call: the server or CLI may record it after this SDK was bound.
+  const downloadUrlContext = (): FileDownloadUrlContext => ({
+    projectId: runtime.projectId,
+    storage: runtime.storage,
+    blobStorage,
+    executionId: execution.id,
+    apiPublicOrigin: apiPublicOrigin(),
+  })
   const executionBlobs: BlobsRuntime = {
     put: (input) => {
       assertAccess()
@@ -46,6 +69,14 @@ export function createBlobsRuntime(
     stat: (blobId) => {
       assertAccess()
       return blobStorage.stat(blobId)
+    },
+    createDownloadUrl: async (file, options) => {
+      assertAccess()
+      return createFileDownloadUrl(downloadUrlContext(), file, options)
+    },
+    revokeDownloadUrl: async (id) => {
+      assertAccess()
+      return revokeFileDownloadUrl(downloadUrlContext(), id)
     },
   }
 

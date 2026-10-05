@@ -9,6 +9,7 @@ export {
 } from "./action-runs/idempotency"
 export { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./ai-usage/record"
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
+export { parseFileDownloadGrantRow } from "./file-download-grants/record"
 export { createFileUploadId, createUploadExpiresAt } from "./file-upload-sessions/utils"
 export { canRequeuePipelineRunAfterEnqueueFailure } from "./pipeline-runs/idempotency"
 export { projectionRunObjectTypesVisible, zeroProjectionRunProgress } from "./projection-runs/types"

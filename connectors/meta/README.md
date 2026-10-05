@@ -207,6 +207,10 @@ if (status.status_code === "FINISHED") {
 }
 ```
 
+To publish a file stored in Sixb, pass a URL from
+[`sixb.blobs.createDownloadUrl()`](../../docs/server/overview.md#share-a-file-with-an-external-service)
+as `image_url` or `video_url`.
+
 - **Reel:** `media.create({ media_type: "REELS", video_url, caption, share_to_feed })`.
 - **Carousel:** create image/video containers with `is_carousel_item: true` (video children use
   `media_type: "VIDEO"`), then create `{ media_type: "CAROUSEL", children: [id1, id2], caption }`.
