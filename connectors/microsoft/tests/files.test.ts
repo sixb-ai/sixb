@@ -192,7 +192,7 @@ describe("sites and drive items", () => {
         { getUrl, postUrl, postParameters: null },
         { getUrl, postUrl },
       ],
-    ]) {
+    ] as const) {
       mockFetch(() => json(response))
       expect(await client.drives.items.preview("d", "f")).toStrictEqual(expected)
     }
