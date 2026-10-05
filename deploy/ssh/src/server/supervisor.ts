@@ -249,6 +249,9 @@ class Supervisor {
       managed.child.kill("SIGTERM")
     })
     this.managed.delete(managed.key)
+    // The exit listener queues its state write asynchronously. Publish the final state before
+    // the control request can acknowledge the stop, including when the exit event never arrives.
+    await this.writeState()
   }
 
   private async handleControlRequests(): Promise<void> {
