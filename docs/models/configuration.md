@@ -290,6 +290,24 @@ Sixb uses it to index the object's text and embed search queries. Both operation
 
 An embeddings-only project needs neither a language model nor a sandbox.
 
+## Reranking models
+
+Reranking models compare a search query with candidate documents. Register a binding to make it
+available to [explicit query reranking](../objects/querying.md#rerank-search-results):
+
+```ts
+// lib/models.ts
+export const relevanceModel = vercelGateway.reranking("voyage/rerank-2.5-lite")
+
+// sixb.config.ts — alongside your other model bindings
+models: {
+  embedding: [productEmbedding],
+  reranking: [relevanceModel],
+}
+```
+
+Registration does not change search behavior. Each query must choose its reranking model.
+
 ## Providers
 
 Each provider card opens its package README for installation, credentials, supported models,

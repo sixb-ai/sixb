@@ -2,7 +2,7 @@ import { assertNever } from "../assert-never"
 import { assertAuthorized, isAllowed } from "../authorization"
 import { AuthorizationError } from "../authorization/errors"
 import type { AuthorizationContext } from "../authorization/types"
-import type { EmbeddingModelCatalog } from "../models/catalog"
+import type { EmbeddingModelCatalog, RerankingModelCatalog } from "../models/catalog"
 import {
   type AuthorizedOntologySelection,
   type AuthorizedOntologyView,
@@ -87,6 +87,7 @@ class AuthorizedObjectReaderImpl {
   readonly #runtime: RuntimeReadAuthorization
   readonly #ontology: OntologyRegistry
   readonly #embeddingModels?: EmbeddingModelCatalog
+  readonly #rerankingModels?: RerankingModelCatalog
   #ontologyView?: AuthorizedOntologyView
   readonly #storage: ObjectReadStorage
   readonly #delegatedObjectTypeIds?: ReadonlySet<string>
@@ -99,6 +100,7 @@ class AuthorizedObjectReaderImpl {
       readonly scope: ExecutionScope
       readonly ontology: OntologyRegistry
       readonly embeddingModels?: EmbeddingModelCatalog
+      readonly rerankingModels?: RerankingModelCatalog
       readonly storage: ObjectReadStorage
       readonly authority: ResolvedExecutionAuthority
     }
@@ -111,6 +113,7 @@ class AuthorizedObjectReaderImpl {
     this.#authority = input.authority
     this.#ontology = input.ontology
     this.#embeddingModels = input.embeddingModels
+    this.#rerankingModels = input.rerankingModels
     this.#storage = input.storage
     this.#delegatedObjectTypeIds =
       input.authority.type === "delegated"
@@ -469,11 +472,13 @@ class AuthorizedObjectReaderImpl {
         ontology: this.#ontology,
         storage: this.#storage,
         embeddingModels: this.#embeddingModels,
+        rerankingModels: this.#rerankingModels,
       }
     }
     return {
       ontology: this.#ontology,
       embeddingModels: this.#embeddingModels,
+      rerankingModels: this.#rerankingModels,
       storage: this.#storage,
       runtimeAuthorization: this.#runtime.runtimeAuthorization,
       ...(this.#runtime.authorization === undefined
@@ -558,6 +563,7 @@ export function createAuthorizedObjectReader(input: {
   readonly scope: ExecutionScope
   readonly ontology: OntologyRegistry
   readonly embeddingModels?: EmbeddingModelCatalog
+  readonly rerankingModels?: RerankingModelCatalog
   readonly objectStorage: ObjectStorage
 }): AuthorizedObjectReader {
   const scope = captureExecutionScope(input.scope)
@@ -568,6 +574,7 @@ export function createAuthorizedObjectReader(input: {
     scope,
     ontology: input.ontology,
     embeddingModels: input.embeddingModels,
+    rerankingModels: input.rerankingModels,
     storage,
     authority,
   })

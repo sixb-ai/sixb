@@ -14,6 +14,7 @@ import {
 } from "./definitions"
 import { assertEmbeddingModel, type EmbeddingModel } from "./embedding-model"
 import type { LanguageModel } from "./language-model"
+import { assertRerankingModel, type RerankingModel } from "./reranking-model"
 
 /** Stable identity of a configured provider binding. */
 export interface ModelRef {
@@ -30,6 +31,15 @@ export interface EmbeddingModelEntry extends ModelRef {
 export interface EmbeddingModelCatalog {
   list(): readonly EmbeddingModelEntry[]
   getByRef(ref: ModelRef): EmbeddingModelEntry | null
+}
+
+export interface RerankingModelEntry extends ModelRef {
+  readonly model: RerankingModel
+}
+
+export interface RerankingModelCatalog {
+  list(): readonly RerankingModelEntry[]
+  getByRef(ref: ModelRef): RerankingModelEntry | null
 }
 
 /** The configured language models, with the project default. */
@@ -56,6 +66,7 @@ export interface ModelCatalog {
   readonly language?: LanguageModelCatalog
   readonly decision?: DecisionModelCatalog
   readonly embedding: EmbeddingModelCatalog
+  readonly reranking?: RerankingModelCatalog
 }
 
 export interface ModelCatalogInput {
@@ -65,6 +76,8 @@ export interface ModelCatalogInput {
   /** Ordered; the first entry is the project default decision model. */
   readonly decision?: readonly DecisionModel[]
   readonly embedding?: readonly EmbeddingModel[]
+  /** Available rerankers; no default model and no automatic activation. */
+  readonly reranking?: readonly RerankingModel[]
 }
 
 // Only statically required inputs make their corresponding catalogs required.
@@ -95,14 +108,31 @@ export function createModelCatalog(input: ModelCatalogInput): ModelCatalog {
   const embedding = createEmbeddingCatalog(input.embedding)
   const decision = createDecisionCatalog(input.decision)
   const audio = createAudioCatalog(input.audio)
+  const reranking = createRerankingCatalog(input.reranking)
 
-  if (!language && !decision && !audio && embedding.list().length === 0) {
+  if (
+    !language &&
+    !decision &&
+    !audio &&
+    embedding.list().length === 0 &&
+    !reranking?.list().length
+  ) {
     throw new RuntimeError(
-      "[Sixb] Configure at least one language, embedding, decision or audio model."
+      "[Sixb] Configure at least one language, embedding, decision, audio or reranking model."
     )
   }
 
-  return Object.freeze({ language, embedding, decision, audio })
+  return Object.freeze({ language, embedding, decision, audio, reranking })
+}
+
+function createRerankingCatalog(
+  models: readonly RerankingModel[] | undefined
+): RerankingModelCatalog | undefined {
+  if (models === undefined) return undefined
+  if (!Array.isArray(models)) {
+    throw new RuntimeError("[Sixb] models.reranking must be an array of reranking models.")
+  }
+  return indexModelBindings(models, "reranking", assertRerankingModel)
 }
 
 function createLanguageCatalog(

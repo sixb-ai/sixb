@@ -31,6 +31,7 @@ import type {
   QueryScalarKind,
 } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
+import { MAX_RERANK_CANDIDATES } from "./reranking-limits"
 
 export interface ObjectQueryValidationIssue {
   path: string
@@ -223,7 +224,7 @@ function validateVectorComposition(query: ObjectQuery, ctx: QueryValidationConte
       path: "$",
       code: "vector.composition",
       message:
-        "Vector profiles support one top-k over one concrete type, with filters, traversals or sets before ranking and optional limit/project after it.",
+        "Vector profiles support one top-k over one concrete type, with filters, traversals or sets before ranking, optional reranking, then limit/project.",
     })
 }
 
@@ -372,6 +373,37 @@ function dispatchQueryNode(
           })
         ),
       }
+    }
+    case "rerank": {
+      const input = validateQueryNode(query.input, `${path}.input`, ctx)
+      if (
+        input.query.kind !== "vector" ||
+        typeof input.query.vector !== "string" ||
+        input.query.k > MAX_RERANK_CANDIDATES
+      ) {
+        addIssue(
+          ctx,
+          path,
+          "invalid_rerank_input",
+          `Reranking requires a text vector query with k at most ${MAX_RERANK_CANDIDATES}, before limit or project.`
+        )
+      }
+      if (
+        typeof query.model?.provider !== "string" ||
+        !query.model.provider.trim() ||
+        query.model.provider.trim() !== query.model.provider ||
+        typeof query.model.modelId !== "string" ||
+        !query.model.modelId.trim() ||
+        query.model.modelId.trim() !== query.model.modelId
+      ) {
+        addIssue(
+          ctx,
+          path,
+          "invalid_rerank_model",
+          "Reranking requires an explicit provider and model ID."
+        )
+      }
+      return { ...input, query: { ...query, model: { ...query.model }, input: input.query } }
     }
     case "set":
       return validateSet(query.inputs, query.op, path, ctx)

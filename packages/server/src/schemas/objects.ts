@@ -241,6 +241,13 @@ export const ObjectQuerySchema: z.ZodType<unknown> = z.lazy(() =>
       .strict(),
     z
       .object({
+        kind: z.literal("rerank"),
+        input: ObjectQuerySchema,
+        model: z.object({ provider: z.string().min(1), modelId: z.string().min(1) }).strict(),
+      })
+      .strict(),
+    z
+      .object({
         kind: z.literal("traverse"),
         input: ObjectQuerySchema,
         linkId: z.string().min(1),
@@ -424,7 +431,7 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
     required: ["mode", "providerIssues", "fallbackIssues", "issues"],
     additionalProperties: false,
     properties: {
-      mode: { type: "string", enum: ["pushdown", "fallback", "rejected"] },
+      mode: { type: "string", enum: ["pushdown", "fallback", "pipeline", "rejected"] },
       providerIssues: {
         type: "array",
         items: { $ref: "#/components/schemas/ObjectQueryIssue" },
@@ -701,6 +708,24 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
           vector: { type: "string", minLength: 1, maxLength: 8000 },
           profile: { type: "string", minLength: 1 },
           k: { type: "integer", minimum: 1 },
+        },
+      },
+      {
+        type: "object",
+        required: ["kind", "input", "model"],
+        additionalProperties: false,
+        properties: {
+          kind: { type: "string", enum: ["rerank"] },
+          input: objectQueryRef,
+          model: {
+            type: "object",
+            required: ["provider", "modelId"],
+            additionalProperties: false,
+            properties: {
+              provider: { type: "string", minLength: 1 },
+              modelId: { type: "string", minLength: 1 },
+            },
+          },
         },
       },
       {

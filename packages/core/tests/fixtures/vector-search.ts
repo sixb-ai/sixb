@@ -6,6 +6,7 @@ import {
   type ObjectQuery,
   OntologyRegistry,
   prop,
+  type RerankingModel,
   SixbHost,
 } from "../../src"
 import { executeObjectQuery } from "../../src/objects/query"
@@ -52,11 +53,25 @@ export async function verifyVectorSearch(
     search: { vectors: { content: { source: ["title"], model } } },
     links: [link("category", Category, { cardinality: "one" })],
   })
+  const relevance: RerankingModel = {
+    providerId: "test",
+    modelId: "relevance",
+    definition: { kind: "reranking", providerId: "test", modelId: "relevance" },
+    async rerank({ documents }) {
+      assert.deepEqual(documents, ['[["title","East"]]', '[["title","South"]]'])
+      return {
+        results: [
+          { index: 1, score: 0.9 },
+          { index: 0, score: 0.1 },
+        ],
+      }
+    },
+  }
   const host = new SixbHost({
     ...createTestRuntimeDeps(),
     id: "vector-search",
     ontology: [Product, Category],
-    models: { embedding: [model] },
+    models: { embedding: [model], reranking: [relevance] },
     storage,
   })
   await host.closeBroker()
@@ -99,6 +114,21 @@ export async function verifyVectorSearch(
     linked.objects.map((object) => object.primaryId),
     ["b"]
   )
+  // Removal proof: push the outer limit into candidate SQL; the reranker receives only East.
+  const reranked = await categories
+    .query()
+    .where((category) => category.p.id.eq("linked"))
+    .traverse(Product.l.category, { direction: "incoming" })
+    .vector("content", "North", { k: 2 })
+    .rerank({ model: relevance })
+    .limit(1)
+    .list()
+  assert.deepEqual(
+    reranked.objects.map((object) => object.primaryId),
+    ["c"]
+  )
+  assert.equal(reranked.objects[0]?.score, 0.9)
+  assert.equal(reranked.total, 2)
   const filtered = await objects
     .query()
     .where((p) => p.p.status.eq("visible"))

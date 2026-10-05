@@ -146,6 +146,11 @@ function compileObjectQueryInternal(
   ctx: CompileContext
 ): CompiledObjectQuery {
   switch (query.kind) {
+    case "rerank":
+      throw new ObjectQueryExecutionError(
+        "reranking_requires_runtime",
+        "Reranking must execute in the model runtime, not storage."
+      )
     case "start":
       return compileStart(projectId, query, ctx)
     case "refs":

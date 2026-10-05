@@ -25,6 +25,7 @@ import {
   type ModelResponseFormat,
   type ModelUsage,
   modelReasoningSupportIssue,
+  type RerankingModel,
   rateModelCall,
   type TranscriptionCostEstimator,
   type TranscriptionModel,
@@ -40,6 +41,7 @@ import {
 } from "./decision"
 import { createGatewayEmbedding, type VercelGatewayEmbeddingOptions } from "./embedding"
 import { withAutomaticPromptCaching } from "./provider-caching"
+import { createGatewayReranking } from "./reranking"
 import { isStrictGatewaySchema } from "./structured-output"
 import { createGatewayTranscription, type VercelGatewayTranscriptionOptions } from "./transcription"
 import { transcriptionDurationEstimator } from "./transcription-pricing"
@@ -87,6 +89,7 @@ export interface VercelGateway extends LanguageModelProvider {
   readonly providerId: typeof PROVIDER_ID
   readonly catalog: VercelGatewayCatalog
   embedding(modelId: string, options: VercelGatewayEmbeddingOptions): EmbeddingModel
+  reranking(modelId: string): RerankingModel
   decision(modelId: string, options?: VercelGatewayDecisionOptions): DecisionModel
   transcription(modelId: string, options?: VercelGatewayTranscriptionOptions): TranscriptionModel
 }
@@ -154,6 +157,65 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
         },
       })
     },
+    reranking: (modelId: string) =>
+      createGatewayReranking(
+        modelId,
+        async (input) => {
+          // The SDK protocol carries Gateway billing metadata absent from the compatibility API.
+          // Preserve proxy prefixes when switching from the configured v1 API to its v4 sibling.
+          const url = `${transport.baseUrl.replace(/\/v1$/, "/v4/ai")}/reranking-model`
+          const response = await (transport.fetch ?? fetch)(url, {
+            method: "POST",
+            headers: {
+              ...gatewayHeaders(transport, "application/json"),
+              "content-type": "application/json",
+              "ai-model-id": modelId,
+              "ai-reranking-model-specification-version": "4",
+              "ai-gateway-protocol-version": "0.0.1",
+            },
+            body: JSON.stringify({
+              query: input.query,
+              documents: { type: "text", values: input.documents },
+              topN: input.documents.length,
+            }),
+            signal: input.signal,
+          })
+          const errorMetadata = requestErrorMetadata(response)
+          if (!response.ok) {
+            await response.body?.cancel().catch(() => undefined)
+            throw new ModelProviderError(
+              `[SixbVercelGateway] Reranking returned HTTP ${response.status}.`,
+              PROVIDER_ID,
+              modelId,
+              { status: response.status, code: "provider_rejection", ...errorMetadata }
+            )
+          }
+          let body: unknown
+          try {
+            body = await response.json()
+          } catch (cause) {
+            throw new ModelProviderError(
+              "[SixbVercelGateway] Reranking returned invalid JSON.",
+              PROVIDER_ID,
+              modelId,
+              { code: "invalid_json", requestId: errorMetadata.requestId, cause }
+            )
+          }
+          const payload = object(body)
+          const metadata = payload && gatewayMetadata(payload)
+          return {
+            body,
+            metadata: {
+              // The protocol has no normalized token meter. Missing usage stays unknown.
+              providerIds: gatewayProviderIds(payload, errorMetadata.requestId),
+              responseModelId: string(payload?.model),
+              reportedCost: gatewayReportedCost(metadata),
+              route: gatewayRoute(metadata),
+            },
+          }
+        },
+        { resolve: () => catalog.inputOnlyEstimator(modelId, "Reranking") }
+      ),
     decision: (modelId: string, decisionOptions: VercelGatewayDecisionOptions = {}) => {
       const timeoutMs = decisionOptions.timeoutMs ?? 30_000
       assertPositiveIntegerOption(timeoutMs, "decision.timeoutMs")
@@ -271,7 +333,7 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
             },
           }
         },
-        { resolve: () => catalog.embeddingEstimator(modelId) }
+        { resolve: () => catalog.inputOnlyEstimator(modelId, "Embedding") }
       ),
   })
 }
@@ -370,21 +432,30 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
     const card = this.rateCards.get(modelId)
     return rateModelCall({ usage, rateCard: card && defineModelRateCard(card) })
   }
-  async embeddingEstimator(modelId: string): Promise<ModelCostEstimator> {
+  async inputOnlyEstimator(
+    modelId: string,
+    kind: "Embedding" | "Reranking"
+  ): Promise<ModelCostEstimator> {
     let card: LanguageModelRateCard | undefined
     try {
       await this.load()
       const available = this.rateCards.get(modelId)
       card = available && defineModelRateCard(available)
     } catch {
-      console.warn(
-        "[SixbVercelGateway] Embedding pricing unavailable; cost limits will fail closed."
-      )
+      console.warn(`[SixbVercelGateway] ${kind} pricing unavailable; cost limits will fail closed.`)
     }
     // Pin the catalog snapshot for both reservation and final valuation of this call.
     return {
       estimateReservation: (tokens) => estimateModelReservation({ ...tokens, rateCard: card }),
-      estimate: ({ usage }) => rateModelCall({ usage, rateCard: card }),
+      estimate: ({ usage, responseModelId, route }) =>
+        rateModelCall({
+          usage,
+          rateCard:
+            (!responseModelId || responseModelId === modelId) &&
+            (!route?.modelId || route.modelId === modelId)
+              ? card
+              : undefined,
+        }),
     }
   }
   private loadPromise: Promise<readonly LanguageModelDefinition[]> | undefined
@@ -483,9 +554,9 @@ class RemoteVercelGatewayCatalog implements VercelGatewayCatalog {
           })
         )
       }
-      // Embeddings have no generated output tokens; only their input tariff applies.
+      // Embeddings and rerankers have no generated output tokens.
       const card = modelRateCard(
-        model?.type === "embedding" && pricing
+        (model?.type === "embedding" || model?.type === "reranking") && pricing
           ? { ...pricing, output: "0", output_tiers: [] }
           : pricing
       )

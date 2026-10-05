@@ -54,6 +54,7 @@ import {
 import { createOntologyMaterializer, type OntologyMaterializerContract } from "../materializer"
 import type { ModelCatalogInput } from "../models"
 import { bindEmbeddingModels } from "../models/execution/embedding"
+import { bindRerankingModels } from "../models/execution/reranking"
 import { ModelExecutionSession } from "../models/execution/session"
 import { createVectorIndexingRuntime } from "../objects/vectors/indexing"
 import { registerVectorIndexingRuntime } from "../objects/vectors/indexing-runtime"
@@ -244,6 +245,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
 
     this.hostContext = {
       embeddingModels: definitions.models?.embedding,
+      rerankingModels: definitions.models?.reranking,
       projectId: this.projectId,
       broker: this.broker,
       ontology: definitions.ontology,
@@ -277,16 +279,19 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       capturedScope.execution
     )
     const embeddingModels = bindEmbeddingModels(this.hostContext.embeddingModels, modelExecution)
+    const rerankingModels = bindRerankingModels(this.hostContext.rerankingModels, modelExecution)
     const objectReader = createAuthorizedObjectReader({
       scope: capturedScope,
       ontology: this.hostContext.ontology,
       objectStorage: this.storage.objects,
       embeddingModels,
+      rerankingModels,
     })
 
     const runtime: SixbRuntimeContext = {
       ...this.hostContext,
       embeddingModels,
+      rerankingModels,
       modelExecution,
       runtimeAuthorization: capturedScope.authorization,
       objectReader,

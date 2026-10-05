@@ -145,6 +145,14 @@ function buildExplainNode(query: ObjectQuery, path: string): ObjectQueryExplainN
         },
         children: [buildExplainNode(query.input, `${path}.input`)],
       }
+    case "rerank":
+      return {
+        path,
+        kind: query.kind,
+        summary: `rerank ${query.model.provider}/${query.model.modelId}`,
+        details: { model: query.model },
+        children: [buildExplainNode(query.input, `${path}.input`)],
+      }
     case "set":
       return {
         path,

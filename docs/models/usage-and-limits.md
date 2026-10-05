@@ -1,6 +1,6 @@
 # Usage and limits
 
-Sixb records model usage across generation, conversations, AI workflow steps, embeddings, decisions, and transcription.
+Sixb records model usage across generation, conversations, AI workflow steps, embeddings, decisions, transcription, and reranking.
 View consumption in Atlas and set monthly limits for your project or specific users and groups.
 
 ## View usage
@@ -48,6 +48,15 @@ when available.
 
 Vercel Gateway transcription is currently blocked when a token or cost limit applies,
 because Sixb cannot estimate its usage before the call.
+
+## Reranking
+
+Queries using `.rerank()` add one accounted model call for their candidates. Direct provider
+`rerank()` calls bypass Sixb's usage and limit controls.
+
+Gateway rerankers may report a cost without token usage. Prefer cost limits when a model has a
+known catalog tariff. Missing pricing prevents admission under a cost limit; missing actual
+tokens makes token-limit accounting unavailable and blocks subsequent calls under that limit.
 
 ## Permissions
 

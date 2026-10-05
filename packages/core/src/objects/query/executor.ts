@@ -1,6 +1,6 @@
 import { type AuthorizationContext, assertAuthorized } from "../../authorization"
 import type { RuntimeAuthorization } from "../../execution/types"
-import type { EmbeddingModelCatalog } from "../../models/catalog"
+import type { EmbeddingModelCatalog, RerankingModelCatalog } from "../../models/catalog"
 import type { OntologyRegistry } from "../../ontology"
 import type {
   CountObjectsResult,
@@ -35,6 +35,8 @@ import type {
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
 import { usePrimaryIdLookups } from "./primary-id"
+import { rerankObjectCandidates } from "./reranking-executor"
+import { findQueryReranking } from "./reranking-query"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "./scalar-values"
 import {
   type ObjectQueryValidationIssue,
@@ -55,6 +57,7 @@ export interface QueryExecutorOptions
   > {
   ontology: OntologyRegistry
   embeddingModels?: EmbeddingModelCatalog
+  rerankingModels?: RerankingModelCatalog
   storage: ObjectReadStorage
   maxLimit?: number
   maxPageSize?: number
@@ -177,6 +180,37 @@ export async function executeObjectQuery(
 
   if (plan.mode === "rejected") {
     throw new ObjectQueryPlanningError(plan.issues)
+  }
+
+  if (plan.mode === "pipeline") {
+    const reranking = findQueryReranking(validated.query)
+    if (!reranking || reranking.input.kind !== "vector") {
+      throw new ObjectQueryExecutionError(
+        "invalid_rerank_input",
+        "Reranking requires vector candidates."
+      )
+    }
+    // Resolve the allowlisted server binding before paying for query embedding.
+    const model = options.rerankingModels?.getByRef(reranking.model)?.model
+    if (!model) {
+      throw new ObjectQueryExecutionError(
+        "reranking_model_unavailable",
+        `Reranking model '${reranking.model.provider}/${reranking.model.modelId}' is not configured in models.reranking.`
+      )
+    }
+    const candidates = await executeObjectQuery(
+      { ...input, query: reranking.input, includeTotal: false },
+      options
+    )
+    const result = await rerankObjectCandidates({
+      query: validated.query,
+      vector: reranking.input,
+      candidates: candidates.objects,
+      model,
+      signal: input.signal,
+      includeTotal: input.includeTotal,
+    })
+    return { ...result, plan }
   }
 
   if (plan.mode === "pushdown") {
@@ -467,6 +501,7 @@ function resolveExpansions(query: ObjectQuery, ctx: ExpansionResolutionContext):
     case "filter":
     case "text":
     case "vector":
+    case "rerank":
     case "traverse":
     case "sort":
     case "limit":
@@ -583,6 +618,7 @@ function expandIncludeSubtypes(query: ObjectQuery, ontology: OntologyRegistry): 
     case "filter":
     case "text":
     case "vector":
+    case "rerank":
     case "traverse":
     case "sort":
     case "limit":
@@ -690,6 +726,7 @@ async function evaluateFallbackQuery(
     }
     case "text":
     case "vector":
+    case "rerank":
     case "traverse":
     case "set":
       throw new ObjectQueryExecutionError(
@@ -1188,6 +1225,7 @@ function stripOuterRowShape(query: ObjectQuery): ObjectQuery {
     case "page":
     case "project":
     case "sort":
+    case "rerank":
     // `expand` is output-shaping: it attaches links but does not change which
     // objects match, so aggregates (count/exists/facets) ignore it.
     case "expand":

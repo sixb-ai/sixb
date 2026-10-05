@@ -16,7 +16,7 @@ import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events"
 import type { RuntimeAuthorization } from "../execution"
 import type { AuthorizedObjectReader } from "../execution/authorized-object-reader"
-import type { EmbeddingModelCatalog } from "../models"
+import type { EmbeddingModelCatalog, RerankingModelCatalog, RerankingModelRef } from "../models"
 import type { ModelExecutionSession } from "../models/execution/session"
 import type {
   ObjectQuery,
@@ -58,6 +58,7 @@ import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
  */
 export interface SixbHostContext {
   readonly embeddingModels?: EmbeddingModelCatalog
+  readonly rerankingModels?: RerankingModelCatalog
   readonly projectId: string
   readonly broker: Broker
   readonly ontology: OntologyRegistry
@@ -674,6 +675,9 @@ export interface ObjectQueryBuilder<
     vector: string,
     options: { k: number }
   ): ObjectQueryBuilder<TObjectType, TRow>
+
+  /** Reorder up to 100 vector candidates with an explicitly registered server-side model. */
+  rerank(options: { model: RerankingModelRef }): ObjectQueryBuilder<TObjectType, TRow>
 
   /** Follow an outgoing link and make the linked object type the current result type. */
   traverse<TLinkToken extends LinkToken<TObjectType["id"], string, LinkTargetObjectTypeIdValue>>(

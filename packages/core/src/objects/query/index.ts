@@ -47,6 +47,7 @@ export type {
   ObjectQueryPredicateNot,
   ObjectQueryProject,
   ObjectQueryRefs,
+  ObjectQueryRerank,
   ObjectQueryResultShape,
   ObjectQuerySet,
   ObjectQuerySetOperation,

@@ -1124,6 +1124,15 @@ export type {
   ModelReportedCost,
   ModelRoute,
   ModelUsage,
+  RerankingModel,
+  RerankingModelCatalog,
+  RerankingModelDefinition,
+  RerankingModelEntry,
+  RerankingModelRef,
+  RerankingModelRequest,
+  RerankingModelResponseMetadata,
+  RerankingModelResult,
+  RerankingResult,
 } from "./models"
 export type {
   InferLanguageModelOutput,

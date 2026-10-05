@@ -34,7 +34,7 @@ export type ObjectQueryIssue = {
 }
 
 export type ObjectQueryPlanSummary = {
-  mode: "pushdown" | "fallback" | "rejected"
+  mode: "pushdown" | "fallback" | "pipeline" | "rejected"
   providerIssues: Array<ObjectQueryIssue>
   fallbackIssues: Array<ObjectQueryIssue>
   issues: Array<ObjectQueryIssue>
@@ -200,6 +200,14 @@ export type ObjectQuery =
       vector: string
       profile: string
       k: number
+    }
+  | {
+      kind: "rerank"
+      input: ObjectQuery
+      model: {
+        provider: string
+        modelId: string
+      }
     }
   | {
       kind: "traverse"

@@ -9,6 +9,9 @@ export function hasVectorProfile(query: ObjectQuery): boolean {
 /** Rank one eligible object set; validation resolves its type and admits every traversed edge. */
 export function isVectorProfileQuery(query: ObjectQuery): boolean {
   if (query.kind === "limit" || query.kind === "project") return isVectorProfileQuery(query.input)
+  if (query.kind === "rerank") {
+    return query.input.kind === "vector" && isVectorProfileQuery(query.input)
+  }
   if (query.kind !== "vector" || !query.profile) return false
   return isVectorCandidateQuery(query.input)
 }
