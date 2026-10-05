@@ -117,6 +117,9 @@ import compactSourceStorageSql from "./migrations/052-compact-source-storage.sql
 }
 import replacementPlansSql from "./migrations/053-replacement-plans.sql" with { type: "text" }
 import slimOntologyOutboxSql from "./migrations/054-slim-ontology-outbox.sql" with { type: "text" }
+import objectQueryPreparationSql from "./migrations/055-object-query-preparation.sql" with {
+  type: "text",
+}
 import type { ReservedSQL, SQL, SQLClient } from "./pg-client"
 import { runPgTransactionOn, undoOnFailure, withReservedPgConnection } from "./transactions"
 
@@ -419,6 +422,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("052-compact-source-storage", compactSourceStorageSql),
     pgSql("053-replacement-plans", replacementPlansSql),
     pgSql("054-slim-ontology-outbox", slimOntologyOutboxSql),
+    pgSql("055-object-query-preparation", objectQueryPreparationSql),
   ],
 })
 

@@ -40,6 +40,7 @@ export type {
   ObjectQueryFacetBucket,
   ObjectQueryFacetInput,
   ObjectQueryFacetResult,
+  ObjectQueryFacetsResult,
   ObjectQueryListOptions,
   ObjectQueryRow,
   ObjectReadByIdHandle,

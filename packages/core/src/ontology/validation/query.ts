@@ -7,6 +7,8 @@ import {
   isFilterableSchema,
   isSortableSchema,
   isTextSchema,
+  queryScalarKindForSchema,
+  resolveQuerySchema,
 } from "../query-capabilities"
 
 type QueryFeature = "filterable" | "sortable" | "text" | "exact" | "facet"
@@ -27,6 +29,7 @@ export function validateQueryMetadata(
     }
 
     validateObjectSearchMetadata(typeId, objectType, valueTypesById)
+    validateQueryIndexes(typeId, objectType, valueTypesById)
   }
 }
 
@@ -249,4 +252,58 @@ function resolveSchema(
 
   seenValueTypeIds.add(schema.valueTypeId)
   return resolveSchema(resolved, valueTypesById, path, seenValueTypeIds)
+}
+
+function validateQueryIndexes(
+  typeId: string,
+  objectType: ObjectType,
+  valueTypes: ReadonlyMap<string, ValueType>
+): void {
+  for (const index of objectType.query?.indexes ?? []) {
+    const fields =
+      index.kind === "sort" ? index.fields.map((field) => field.propertyId) : [index.propertyId]
+    const filters = index.filters ?? []
+    if (
+      !fields.length ||
+      fields.length + filters.length > 8 ||
+      new Set([...fields, ...filters]).size !== fields.length + filters.length
+    )
+      throw new OntologyValidationError(
+        `[Sixb] Query index on '${typeId}' requires one to eight distinct properties`
+      )
+    if (index.kind === "text" && filters.length > 4)
+      throw new OntologyValidationError(
+        `[Sixb] Text query index on '${typeId}' accepts at most four filters`
+      )
+    for (const id of [...fields, ...filters]) {
+      const property = objectType.properties.find((property) => property.id === id)
+      if (!property)
+        throw new OntologyValidationError(
+          `[Sixb] Query index on '${typeId}' references unknown property '${id}'`
+        )
+      if (property.mode === "telemetry")
+        throw new OntologyValidationError(
+          `[Sixb] Query indexes cannot include telemetry property '${typeId}.${id}'`
+        )
+      const flag = filters.includes(id) ? "filterable" : index.kind === "sort" ? "sortable" : "text"
+      assertPropertyQueryFlag(typeId, property, flag, "query.indexes")
+      if (filters.includes(id)) {
+        const schema = resolveQuerySchema(property.schema, valueTypes)
+        if (!schema || queryScalarKindForSchema(schema) !== "string")
+          throw new OntologyValidationError(
+            `[Sixb] Query index filters must be strings: '${typeId}.${id}'`
+          )
+      }
+    }
+    if (
+      index.kind === "sort" &&
+      index.fields.some(
+        (field) =>
+          field.direction !== undefined && field.direction !== "asc" && field.direction !== "desc"
+      )
+    )
+      throw new OntologyValidationError(
+        `[Sixb] Query index direction must be asc or desc on '${typeId}'`
+      )
+  }
 }

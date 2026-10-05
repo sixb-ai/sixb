@@ -105,6 +105,7 @@ export function createInMemorySelectedReader(
       const result = evaluateObjectQuery(stripOuterRowShape(input.query), universe)
       return visible(
         structuredClone({
+          total: result.entries.length,
           facets: buildFacetResults(
             result.entries.map((entry) => entry.row),
             input.facets

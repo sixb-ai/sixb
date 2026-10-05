@@ -414,6 +414,12 @@ export type ObjectQueryFacetBucket = {
   count: number
 }
 
+/** Total and facet buckets are calculated from the same matching set. */
+export type ObjectQueryFacetsResult = {
+  total: number
+  facets: ObjectQueryFacetResult[]
+}
+
 export type ObjectQueryFacetResult = {
   propertyId: string
   buckets: ObjectQueryFacetBucket[]
@@ -750,7 +756,7 @@ export interface ObjectQueryBuilder<
   exists(): Promise<boolean>
 
   /** Count matching objects by configured facetable properties. */
-  facets(input: readonly ObjectQueryFacetInput<TObjectType>[]): Promise<ObjectQueryFacetResult[]>
+  facets(input: readonly ObjectQueryFacetInput<TObjectType>[]): Promise<ObjectQueryFacetsResult>
 
   /** Execute this query with an outer limit of one and return the first object. */
   first(): Promise<Simplify<TRow> | null>

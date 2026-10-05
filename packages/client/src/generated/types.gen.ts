@@ -73,6 +73,7 @@ export type ObjectQueryFacetResult = {
 }
 
 export type ObjectQueryFacetsResponse = {
+  total: number
   facets: Array<ObjectQueryFacetResult>
   plan: ObjectQueryPlanSummary
 }

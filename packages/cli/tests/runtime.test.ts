@@ -202,6 +202,7 @@ describe("startSixbRuntime", () => {
     })
   }
 
+  // Guard removal: omit the ontology context in migrateRuntimeStorage; query preparation is skipped.
   test("runs adapter migrations before starting background runtimes", async () => {
     const calls: string[] = []
     const migrator: StorageMigrator = {
@@ -226,7 +227,13 @@ describe("startSixbRuntime", () => {
         }
       },
     }
-    const storage = Object.assign(new InMemoryStorage(), { migrators: [migrator] })
+    const storage = Object.assign(new InMemoryStorage(), {
+      migrators: [migrator],
+      async prepareObjectQueries() {
+        calls.push("queries")
+        return { status: "prepared" as const, objectTypes: 1, indexes: 0, warnings: [] }
+      },
+    })
 
     const sixb = new SixbHost({
       id: "cli-with-migrations",
@@ -240,7 +247,7 @@ describe("startSixbRuntime", () => {
 
     const runtime = await startSixbRuntime(sixb)
 
-    expect(calls).toEqual(["storage"])
+    expect(calls).toEqual(["storage", "queries"])
 
     await runtime.stop()
   })

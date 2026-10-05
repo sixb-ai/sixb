@@ -22,7 +22,8 @@ Run these from your project root:
 | `sixb build` | Build the runtime and browser assets into `.sixb/dist`. |
 | `sixb typegen` | Generate ontology types for typed queries. |
 | `sixb check` | Validate the project and check provider health. |
-| `sixb db migrate` | Apply storage migrations. |
+| `sixb db migrate` | Apply storage migrations and prepare declared query indexes on supported providers. |
+| `sixb db prepare` | Prepare declared query indexes; schedule initial PostgreSQL backfills as maintenance. |
 | `sixb lake check` | Validate dataset definitions against the lake catalog. |
 | `sixb lake cleanup --dry-run` | Preview supported lake maintenance. |
 
@@ -68,7 +69,7 @@ Public-origin flags have matching environment variables:
 
 The API requires API and Atlas origins, plus the app origin when serving a built custom app. Atlas, the app server, and agent workers need the API origin. Flags override environment variables.
 
-Schema-using services migrate storage at startup. Use `--no-migrate` or `SIXB_SKIP_MIGRATION=1` when migrations ran in a separate release step.
+Schema-using services migrate storage and prepare declared query structures at startup. Unchanged query declarations are checked without rebuilding. Use `--no-migrate` or `SIXB_SKIP_MIGRATION=1` when `sixb db migrate` ran both steps in a separate release step. Initial PostgreSQL text backfills can block writes; allow maintenance time or prepare before starting the release.
 
 ## Worker options
 

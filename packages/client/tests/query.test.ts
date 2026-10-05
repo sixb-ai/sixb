@@ -218,6 +218,7 @@ describe("objects().query()", () => {
   test("facets() posts facet requests and returns buckets", async () => {
     const { client, calls } = createTestClient(() =>
       Response.json({
+        total: 15,
         facets: [
           {
             propertyId: "status",
@@ -240,7 +241,8 @@ describe("objects().query()", () => {
       query: { kind: "start", objectTypeId: "Project" },
       facets: [{ propertyId: "status", limit: 10 }],
     })
-    expect(facets[0]?.buckets).toEqual([
+    expect(facets.total).toBe(15)
+    expect(facets.facets[0]?.buckets).toEqual([
       { value: "active", count: 12 },
       { value: "paused", count: 3 },
     ])

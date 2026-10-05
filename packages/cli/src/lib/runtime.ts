@@ -78,7 +78,10 @@ export interface RunningOrchestratorRuntime {
 }
 
 export async function migrateRuntimeStorage(sixb: LoadedSixbHost): Promise<void> {
-  await migrateStorage(sixb.storage)
+  await migrateStorage(sixb.storage, {
+    projectId: sixb.id,
+    ontology: sixb.definitions.ontology,
+  })
 }
 
 export async function checkRuntimeLakeDefinitions(sixb: LoadedSixbHost): Promise<void> {

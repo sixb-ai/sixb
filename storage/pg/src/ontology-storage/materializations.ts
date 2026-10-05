@@ -254,8 +254,8 @@ export class PgOntologyMaterializationStorage implements OntologyMaterialization
     }
     // The next sparse projection must see the distribution of a newly published bulk load.
     // With empty/stale statistics, a link lookup can scan every edge sharing its target.
-    if (session.changedObjects >= 1_000) await this.sql`ANALYZE objects`
-    if (session.changedLinks >= 1_000) await this.sql`ANALYZE links`
+    await refreshMaterializedStatistics(this.sql, "objects", session.changedObjects)
+    await refreshMaterializedStatistics(this.sql, "links", session.changedLinks)
     const record = await this.insertCommit(session.header, input)
     await this.sessions.release(session)
     return { commit: record }
@@ -735,4 +735,20 @@ function materializationLockKeys(header: MaterializationPlanHeader): string[] {
 
 function databaseCount(value: number | string | undefined): number {
   return Number(value ?? 0)
+}
+
+/** Keep the first bulk publication queryable without analyzing every small subsequent delta.
+ * Expression indexes make full ANALYZE expensive. Only a substantial current publication
+ * forces synchronous work. Autovacuum accumulates smaller writes separately; its modification
+ * count can still include a previous transaction's manually analyzed writes at this point. */
+async function refreshMaterializedStatistics(
+  sql: SQLClient,
+  table: "objects" | "links",
+  changed: number
+): Promise<void> {
+  if (changed < 1_000) return
+  const [state] = await sql<{ rows: number }[]>`
+    SELECT reltuples AS rows FROM pg_class WHERE oid=${table}::regclass`
+  if (!state || state.rows <= 0 || changed >= Math.max(10_000, state.rows * 0.1))
+    await sql.unsafe(`ANALYZE ${table}`)
 }

@@ -261,6 +261,8 @@ export interface FacetObjectsInput {
 }
 
 export interface FacetObjectsResult {
+  /** Exact matching rows, including absent facet values and buckets beyond the limit. */
+  total: number
   facets: readonly ObjectFacetResult[]
 }
 

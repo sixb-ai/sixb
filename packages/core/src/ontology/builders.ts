@@ -232,6 +232,7 @@ export function defineObjectType(input: DefineObjectTypeInput): ObjectTypeWithTo
     properties,
     links,
     search: input.search,
+    query: input.query,
   }
 
   return {

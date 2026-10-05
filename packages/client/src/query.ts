@@ -109,10 +109,13 @@ export function createHttpQueryExecutor(client?: Client): ObjectQueryExecutor {
         body: { query: toWireQuery(query), facets: [...facets] },
       })
       if (error || !data) throw toSixbQueryError(error)
-      return data.facets.map((facet) => ({
-        propertyId: facet.propertyId,
-        buckets: [...facet.buckets],
-      }))
+      return {
+        total: data.total,
+        facets: data.facets.map((facet) => ({
+          propertyId: facet.propertyId,
+          buckets: [...facet.buckets],
+        })),
+      }
     },
   }
 }

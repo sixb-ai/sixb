@@ -34,6 +34,7 @@ import type {
 } from "./ir"
 import { normalizeObjectQuery } from "./normalize"
 import { type ObjectQueryPlan, type ObjectQueryPlanningOptions, planObjectQuery } from "./planner"
+import { usePrimaryIdLookups } from "./primary-id"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "./scalar-values"
 import {
   type ObjectQueryValidationIssue,
@@ -386,6 +387,7 @@ export async function facetObjects(
   const maxRows = options.maxFallbackRows ?? DEFAULT_MAX_FALLBACK_ROWS
   const evaluation = await evaluateFallbackQuery(input.projectId, aggregateQuery, options, maxRows)
   return {
+    total: evaluation.entries.length,
     facets: buildFacetResults(
       evaluation.entries.map((entry) => entry.row),
       facets
@@ -432,7 +434,7 @@ function expandPushdownQuery(
   // disagree) cleanly stays on the fallback.
   const ctx: ExpansionResolutionContext = { ontology, maxExpansionFanout }
   const annotated = resolveExpansions(query, ctx)
-  const expanded = expandIncludeSubtypes(annotated, ontology)
+  const expanded = usePrimaryIdLookups(expandIncludeSubtypes(annotated, ontology), ontology)
   if (expanded === annotated) return annotated
 
   const plan = planObjectQuery(expanded, { ...planning, capabilities, allowFallback: false })

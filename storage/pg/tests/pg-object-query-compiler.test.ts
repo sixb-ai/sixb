@@ -103,7 +103,15 @@ test("count aggregate SQL omits inherited row ordering", () => {
   expect(compiled.sql).not.toContain("ORDER BY")
   expect(compiled.sql).not.toContain("_cursor_properties")
   expect(compiled.sql).toContain("properties ->>")
-  expect(compiled.args).toEqual(["project-a", "BacnetPoint", "siteId", "siteId", "site-1"])
+  expect(compiled.args).toEqual([
+    "project-a",
+    "BacnetPoint",
+    "siteId",
+    "siteId",
+    "site-1",
+    "siteId",
+    "site-1",
+  ])
 })
 
 test("count aggregate SQL supports scoped text defaults", () => {
@@ -118,20 +126,20 @@ test("count aggregate SQL supports scoped text defaults", () => {
 
   expect(compiled.sql).toContain("COUNT(*)::bigint AS count")
   expect(compiled.sql).toContain("object_type_id = $3")
-  expect(compiled.sql).toContain("position($4::text in lower(coalesce")
+  expect(compiled.sql).toContain("lower(coalesce(properties ->> ($4::text), '')) LIKE $5::text")
   expect(compiled.sql).not.toContain("ORDER BY")
   expect(compiled.args).toEqual([
     "project-a",
     "Room",
     "Room",
-    "alpha",
     "name",
-    "alpha",
+    "%alpha%",
     "description",
-    "collaboration",
+    "%alpha%",
     "name",
-    "collaboration",
+    "%collaboration%",
     "description",
+    "%collaboration%",
   ])
 })
 
@@ -152,6 +160,8 @@ test("facet aggregate SQL projects scalar values without sorting object rows", (
     "siteId",
     "siteId",
     "site-1",
+    "siteId",
+    "site-1",
     "objectType",
     100,
   ])
@@ -166,22 +176,30 @@ test("incoming traversal SQL filters by source object type when constrained", ()
   }
 
   const unconstrained = compilePgObjectQuery("project-a", incoming)
-  expect(unconstrained.sql).not.toContain("AND edge.source_type_id =")
-  expect(unconstrained.args).toEqual(["project-a", "Customer", "customer"])
+  expect(unconstrained.sql).not.toContain("AND selected.object_type_id =")
+  expect(unconstrained.args).toEqual(["project-a", "project-a", "Customer", "customer"])
 
   const constrained = compilePgObjectQuery("project-a", {
     ...incoming,
     sourceObjectTypeId: "Project",
   })
-  expect(constrained.sql).toContain("AND edge.source_type_id = $4")
-  expect(constrained.args).toEqual(["project-a", "Customer", "customer", "Project"])
+  expect(constrained.sql).toContain("AND selected.object_type_id = $2")
+  expect(constrained.args).toEqual(["project-a", "Project", "project-a", "Customer", "customer"])
 
   const constrainedCount = compilePgObjectCountQuery("project-a", {
     ...incoming,
     sourceObjectTypeId: "Project",
   })
   expect(constrainedCount.sql).toContain("AND edge.source_type_id = $4")
-  expect(constrainedCount.args).toEqual(["project-a", "Customer", "customer", "Project"])
+  expect(constrainedCount.sql).toContain("AND selected.object_type_id = $6")
+  expect(constrainedCount.args).toEqual([
+    "project-a",
+    "Customer",
+    "customer",
+    "Project",
+    "project-a",
+    "Project",
+  ])
 })
 
 test("expand SQL hydrates an outgoing many link as an ordered jsonb array", () => {
@@ -264,7 +282,7 @@ test("expand SQL orders a bounded many link by target properties, nulls last", (
   // Null-rank first (always ASC so nulls sort last), then the value descending,
   // against the neighbour's JSONB properties — mirroring the fallback comparator.
   expect(compiled.sql).toContain("jsonb_typeof(tgt_0.properties -> ($2::text))")
-  expect(compiled.sql).toContain("tgt_0.properties -> ($4::text) DESC")
+  expect(compiled.sql).toContain("NULLIF(tgt_0.properties -> ($4::text), 'null'::jsonb) DESC")
   expect(compiled.args).toEqual([
     "hasDevice",
     "name",

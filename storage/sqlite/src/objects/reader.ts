@@ -136,6 +136,7 @@ export class SqliteObjectReader {
       source,
     })
     return {
+      total: readTotal(this.db, compiled),
       facets: params.facets.map((facet) => ({
         propertyId: facet.propertyId,
         buckets: readFacetBuckets(this.db, compiled, facet),

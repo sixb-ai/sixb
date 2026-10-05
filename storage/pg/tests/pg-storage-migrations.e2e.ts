@@ -352,6 +352,7 @@ describe("Postgres storage migrations", () => {
             "052-compact-source-storage",
             "053-replacement-plans",
             "054-slim-ontology-outbox",
+            "055-object-query-preparation",
           ],
         },
       ])
@@ -733,6 +734,13 @@ describe("Postgres storage migrations", () => {
           id: "054-slim-ontology-outbox",
           status: "applied",
           version: 54,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "055-object-query-preparation",
+          status: "applied",
+          version: 55,
         },
       ])
     })
@@ -2912,6 +2920,13 @@ describe("Postgres storage migrations", () => {
           id: "054-slim-ontology-outbox",
           status: "applied",
           version: 54,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "055-object-query-preparation",
+          status: "applied",
+          version: 55,
         },
       ])
     } finally {

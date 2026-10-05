@@ -504,9 +504,10 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
   },
   ObjectQueryFacetsResponse: {
     type: "object",
-    required: ["facets", "plan"],
+    required: ["total", "facets", "plan"],
     additionalProperties: false,
     properties: {
+      total: { type: "number" },
       facets: {
         type: "array",
         items: { $ref: "#/components/schemas/ObjectQueryFacetResult" },

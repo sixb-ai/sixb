@@ -1,3 +1,5 @@
+import type { OntologyDefinitionCatalog } from "../../ontology/registry"
+import type { ObjectQueryPreparationResult } from "../objects/query-preparation"
 import type { Storage } from "../types"
 
 export interface MigrationStepInfo {
@@ -123,7 +125,13 @@ export interface MigrationCapableStorage extends Storage {
   readonly migrators: readonly StorageMigrator[]
 }
 
+export interface StorageMigrationOptions {
+  readonly projectId: string
+  readonly ontology: OntologyDefinitionCatalog
+}
+
 export interface StorageMigrationResult {
+  readonly queries?: ObjectQueryPreparationResult
   readonly status: "migrated" | "current" | "skipped"
   readonly reports: readonly MigrationReport[]
 }

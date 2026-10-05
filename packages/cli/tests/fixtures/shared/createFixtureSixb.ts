@@ -6,6 +6,7 @@ import {
   InMemoryLakeStorage,
   InMemoryQueues,
   InMemoryStorage,
+  type ObjectQueryPreparationPlan,
   prop,
   SixbHost,
   type StorageMigrator,
@@ -24,6 +25,7 @@ const Room = defineObjectType({
 interface FixtureSixbOptions {
   projectId: string
   logStorageMigrate?: boolean
+  logStoragePrepare?: boolean
 }
 
 function logFixtureEvent(entry: Record<string, unknown>): void {
@@ -32,7 +34,7 @@ function logFixtureEvent(entry: Record<string, unknown>): void {
   appendFileSync(logPath, `${JSON.stringify(entry)}\n`, "utf-8")
 }
 
-function createFixtureStorage(logStorageMigrate: boolean) {
+function createFixtureStorage(logStorageMigrate: boolean, logStoragePrepare: boolean) {
   if (!logStorageMigrate) {
     return new InMemoryStorage()
   }
@@ -60,7 +62,26 @@ function createFixtureStorage(logStorageMigrate: boolean) {
     },
   }
 
-  return Object.assign(new InMemoryStorage(), { migrators: [migrator] })
+  return Object.assign(new InMemoryStorage(), {
+    migrators: [migrator],
+    ...(logStoragePrepare
+      ? {
+          prepareObjectQueries: async (plan: ObjectQueryPreparationPlan) => {
+            logFixtureEvent({
+              type: "storage.prepare",
+              projectId: plan.projectId,
+              objectTypes: plan.objectTypes.length,
+            })
+            return {
+              status: "prepared" as const,
+              objectTypes: plan.objectTypes.length,
+              indexes: 0,
+              warnings: [],
+            }
+          },
+        }
+      : {}),
+  })
 }
 
 export function createFixtureSixb(options: FixtureSixbOptions) {
@@ -68,7 +89,10 @@ export function createFixtureSixb(options: FixtureSixbOptions) {
     id: options.projectId,
     ontology: [Room],
     broker: new InMemoryBroker(),
-    storage: createFixtureStorage(options.logStorageMigrate ?? false),
+    storage: createFixtureStorage(
+      options.logStorageMigrate ?? false,
+      options.logStoragePrepare ?? false
+    ),
     lakeStorage: new InMemoryLakeStorage(),
     blobStorage: new InMemoryBlobStorage(),
     queues: new InMemoryQueues(),

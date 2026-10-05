@@ -13,7 +13,10 @@ export async function runDbMigrate(options: DbMigrateOptions = {}) {
   const sixb = await loadSixbFromEntry(entry)
 
   try {
-    const result = await migrateStorage(sixb.storage)
+    const result = await migrateStorage(sixb.storage, {
+      projectId: sixb.id,
+      ontology: sixb.definitions.ontology,
+    })
     await renderStatic(
       <DbMigrateView
         projectId={sixb.id}

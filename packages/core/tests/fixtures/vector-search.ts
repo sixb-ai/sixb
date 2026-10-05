@@ -214,7 +214,7 @@ export async function verifyVectorSearch(
     .vector("content", "North", { k: 2 })
     .facets([{ property: Product.p.status, limit: 10 }])
   assert.equal(
-    facets[0]!.buckets.reduce((sum, bucket) => sum + bucket.count, 0),
+    facets.facets[0]!.buckets.reduce((sum, bucket) => sum + bucket.count, 0),
     2
   )
   await assert.rejects(() =>

@@ -1,10 +1,35 @@
 import { describe, expect, test } from "bun:test"
-import { InMemoryStorage, type MigrationReport, type StorageMigrator } from "@sixb/core"
+import {
+  InMemoryStorage,
+  type MigrationReport,
+  type ObjectQueryPreparationPlan,
+  OntologyRegistry,
+  type StorageMigrator,
+} from "@sixb/core"
 import { errorRemediation } from "../src/lib/errors"
 import type { LoadedSixbHost } from "../src/lib/loadSixb"
 import { migrateStorageForRole } from "../src/lib/storage-migration"
 
 describe("migrateStorageForRole", () => {
+  // Guard removal: omit the ontology context passed to migrateStorage in runMigration.
+  test("prepares queries even on a current schema, and honours both startup opt-outs", async () => {
+    const sixb = runtimeWithMigrators([migrator("Pg", [])])
+    const plans: ObjectQueryPreparationPlan[] = []
+    Object.assign(sixb.storage, {
+      async prepareObjectQueries(plan: ObjectQueryPreparationPlan) {
+        plans.push(plan)
+        return { status: "prepared", objectTypes: 0, indexes: 0, warnings: [] }
+      },
+    })
+    const result = await migrateStorageForRole(sixb, { role: "api", env: {} })
+    expect(result.outcome).toBe("migrated")
+    expect(result.summary).toContain("query indexes")
+    expect(plans).toEqual([{ projectId: "migration-test", objectTypes: [] }])
+    await migrateStorageForRole(sixb, { role: "api", noMigrate: true, env: {} })
+    await migrateStorageForRole(sixb, { role: "api", env: { SIXB_SKIP_MIGRATION: "1" } })
+    expect(plans).toHaveLength(1)
+  })
+
   test("names every applied step instead of reporting a bare status", async () => {
     const sixb = runtimeWithMigrators([
       migrator("Sqlite", ["0001_objects", "0002_links"]),
@@ -159,7 +184,11 @@ async function captureError(run: () => Promise<unknown>): Promise<Error> {
 
 function runtimeWithMigrators(migrators: readonly StorageMigrator[]): LoadedSixbHost {
   const storage = Object.assign(new InMemoryStorage(), { migrators })
-  return { storage } as unknown as LoadedSixbHost
+  return {
+    id: "migration-test",
+    definitions: { ontology: new OntologyRegistry({ sources: [] }) },
+    storage,
+  } as unknown as LoadedSixbHost
 }
 
 function report(adapterId: string, applied: readonly string[]): MigrationReport {

@@ -75,7 +75,7 @@ function fullReader(): ObjectReadStorage {
     queryObjects: async () => ({ objects: [], hasMore: false, total: 0 }),
     countObjects: async () => ({ count: 0 }),
     existsObjects: async () => ({ exists: false }),
-    facetObjects: async () => ({ facets: [] }),
+    facetObjects: async () => ({ total: 0, facets: [] }),
   })
 }
 

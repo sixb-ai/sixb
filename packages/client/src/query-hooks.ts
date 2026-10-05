@@ -13,7 +13,7 @@ import type {
   ObjectQuery,
   ObjectQueryExecutor,
   ObjectQueryExecutorFacetRequest,
-  ObjectQueryFacetResult,
+  ObjectQueryFacetsResult,
   ObjectQueryListOptions,
   ObjectTypeWithPropertyTokens,
 } from "@sixb/core/query"
@@ -250,7 +250,7 @@ export function objectQueryExistsOptions(query: {
 export function objectQueryFacetsOptions<TFacetInput>(
   query: {
     readonly ir: ObjectQuery
-    facets(input: readonly TFacetInput[]): Promise<ObjectQueryFacetResult[]>
+    facets(input: readonly TFacetInput[]): Promise<ObjectQueryFacetsResult>
   },
   facets: readonly TFacetInput[]
 ) {
@@ -953,7 +953,7 @@ export function useObjectsFacets(
   // server-side anyway.
   facets: readonly { property: { id: string }; limit: number }[],
   options?: QueryHookExtras
-): UseQueryResult<ObjectQueryFacetResult[], Error> {
+): UseQueryResult<ObjectQueryFacetsResult, Error> {
   const executor = useClientQueryExecutor()
   const ir = query.ir
   const facetRequests = facets.map((facet) => ({

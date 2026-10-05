@@ -1,6 +1,6 @@
+/// <reference path="./sql.d.ts" />
 // Keep SQL module declarations visible to downstream workspaces that typecheck this package from
 // source.
-/// <reference path="./sql.d.ts" />
 
 import { AsyncLocalStorage } from "node:async_hooks"
 import type {
@@ -27,7 +27,10 @@ import {
   type AiCostStorage,
   type AiLimitStorage,
   type AiUsageStorage,
+  type ObjectQueryPreparationPlan,
+  type ObjectQueryPreparationResult,
   type ObjectStorage,
+  type QueryPreparationCapableStorage,
   StorageTransactionError,
 } from "@sixb/core/storage"
 import { PgAgentStorage } from "./agents"
@@ -35,6 +38,15 @@ import { PgAuthStorage } from "./auth-storage"
 import { PgConnectorConnectionStorage } from "./connector-connection-storage"
 import { createPostgresStorageMigrators, dropSchema } from "./migrations"
 import { PgObjectStorage } from "./objects"
+import { preparePgObjectQueries } from "./objects/prepare-queries"
+import { ensurePgObjectQueryIndexes, type PgObjectQueryIndex } from "./objects/query-indexes"
+
+export type { PgObjectQueryIndex, PgObjectQueryIndexScope } from "./objects/query-indexes"
+
+import { type PgObjectTextCountIndex, preparePgObjectTextCounts } from "./objects/text-count-index"
+
+export type { PgObjectTextCountIndex } from "./objects/text-count-index"
+
 import { PgOntologyStorage, type PgOntologyTransactionContext } from "./ontology-storage"
 import { PgActionRunStorage } from "./pg-action-run-storage"
 import { PgAiCostStorage } from "./pg-ai-cost-storage"
@@ -81,6 +93,8 @@ export interface PostgresStorageOptions {
 
   /** Maximum number of connections in the pool. Defaults to 10. */
   max?: number
+  /** Concurrent root count/facet calculations per instance; defaults to 1. */
+  maxConcurrentAggregates?: number
   /** Idle connection timeout in milliseconds. Defaults to 30000. */
   idleTimeoutMillis?: number
 
@@ -145,7 +159,7 @@ export interface PostgresStorageOptions {
  * })
  * ```
  */
-export class PostgresStorage implements MigrationCapableStorage {
+export class PostgresStorage implements MigrationCapableStorage, QueryPreparationCapableStorage {
   readonly objects: ObjectStorage
   readonly ontology: PgOntologyStorage
   readonly auth: PgAuthStorage
@@ -175,6 +189,12 @@ export class PostgresStorage implements MigrationCapableStorage {
   private readonly transactionScope = new AsyncLocalStorage<boolean>()
 
   constructor(options: PostgresStorageOptions) {
+    if (
+      options.maxConcurrentAggregates !== undefined &&
+      (!Number.isSafeInteger(options.maxConcurrentAggregates) ||
+        options.maxConcurrentAggregates < 1)
+    )
+      throw new Error("[SixbPg] maxConcurrentAggregates must be a positive integer")
     this.schemaName = options.schemaName ?? "sixb"
     this.shutdownTimeoutSeconds = Math.max(
       1,
@@ -214,6 +234,7 @@ export class PostgresStorage implements MigrationCapableStorage {
 
     this.migrators = createPostgresStorageMigrators(this.sql, this.schemaName)
     const stores = createPostgresStores(this.sql, {
+      maxConcurrentAggregates: options.maxConcurrentAggregates,
       runOntologyOperation: (run) => runPgTransaction(this.sql, run),
       transactionContext: null,
     })
@@ -301,6 +322,29 @@ export class PostgresStorage implements MigrationCapableStorage {
     }
   }
 
+  async prepareObjectQueries(
+    plan: ObjectQueryPreparationPlan
+  ): Promise<ObjectQueryPreparationResult> {
+    this.assertRootOperationAvailable()
+    return preparePgObjectQueries(this.sql, this.schemaName, plan)
+  }
+
+  /** Build workload-specific indexes concurrently, after migrations, outside transactions. */
+  async ensureObjectQueryIndexes(
+    indexes: readonly PgObjectQueryIndex[]
+  ): Promise<readonly string[]> {
+    this.assertRootOperationAvailable()
+    return ensurePgObjectQueryIndexes(this.sql, this.schemaName, indexes)
+  }
+
+  /** Offline maintenance: STORED columns rewrite the objects table before concurrent index builds. */
+  async prepareObjectTextCounts(
+    indexes: readonly PgObjectTextCountIndex[]
+  ): Promise<readonly string[]> {
+    this.assertRootOperationAvailable()
+    return preparePgObjectTextCounts(this.sql, this.schemaName, indexes)
+  }
+
   private assertRootOperationAvailable(): void {
     if (!this.transactionScope.getStore()) return
     throw new StorageTransactionError(
@@ -350,6 +394,7 @@ function createPostgresStores(
   options: {
     readonly runOntologyOperation: <T>(run: (sql: SQLClient) => Promise<T>) => Promise<T>
     readonly transactionContext: PgOntologyTransactionContext | null
+    readonly maxConcurrentAggregates?: number
   }
 ): PostgresStoreSet {
   const auth = new PgAuthStorage({ sql })
@@ -357,7 +402,7 @@ function createPostgresStores(
   const shareSessions = new PgShareSessionStorage(sql)
   const executions = new PgExecutionStorage(sql, auth, shareSessions)
   return {
-    objects: new PgObjectStorage(sql),
+    objects: new PgObjectStorage(sql, options.maxConcurrentAggregates),
     ontology: new PgOntologyStorage({
       sql,
       runRootOperation: options.runOntologyOperation,
