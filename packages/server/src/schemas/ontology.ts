@@ -87,6 +87,7 @@ export const ObjectTypeSchema = z.object({
               providerId: z.string(),
               modelId: z.string(),
               dimensions: z.number().int().positive(),
+              inputMode: z.enum(["symmetric", "asymmetric"]).optional(),
               representation: z
                 .object({ name: z.string(), version: z.string().optional() })
                 .optional(),

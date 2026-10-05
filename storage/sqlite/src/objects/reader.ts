@@ -54,23 +54,23 @@ export class SqliteObjectReader {
     ensureSqliteVectorSearch(this.db)
     const probe = compiled.vectorProbe
     const row = this.db.query<{ total: number }, SqliteValue[]>(probe.sql).get(...probe.args)
-    if (Number(row?.total ?? 0) > probe.limit) {
-      throw new ObjectQueryExecutionError(
-        "vector_work_limit_exceeded",
-        `Exact vector search supports at most ${probe.limit} eligible vectors at this dimension. Narrow the query filters.`
-      )
-    }
+    assertVectorCandidateCount(row?.total, probe.limit)
   }
 
   queryObjects(params: QueryObjectsInput): QueryObjectsResult {
-    this.assertVectorSearch(params)
     const source = this.source
     const compiled = compileObjectQuery(params.projectId, params.query, {
       includeTotal: params.includeTotal,
       source,
     })
-    const total = params.includeTotal === false ? undefined : readTotal(this.db, compiled)
+    if (compiled.vectorProbe) ensureSqliteVectorSearch(this.db)
+    const ordinaryTotal =
+      params.includeTotal === false || compiled.vectorProbe
+        ? undefined
+        : readTotal(this.db, compiled)
     const rawRows = this.db.query(compiled.sql).all(...compiled.args) as ObjectQueryDatabaseRow[]
+    const vectorTotal = this.vectorResultTotal(compiled, rawRows)
+    const total = params.includeTotal === false ? undefined : (vectorTotal ?? ordinaryTotal)
     const rows = compiled.trimRows(rawRows) as readonly ObjectQueryDatabaseRow[]
     const hasMore =
       total === undefined && compiled.hasMoreProbe
@@ -85,6 +85,26 @@ export class SqliteObjectReader {
       nextPageToken: compiled.nextPageToken(rows, rawRows.length),
       ...(total === undefined ? {} : { total }),
     }
+  }
+
+  private vectorResultTotal(
+    compiled: CompiledObjectQuery,
+    rows: readonly ObjectQueryDatabaseRow[]
+  ): number | undefined {
+    const probe = compiled.vectorProbe
+    if (!probe) return undefined
+
+    // A zero outer limit can hide the count row. Keep admission and total semantics for that
+    // uncommon case, without rescanning candidates for ordinary vector queries.
+    let count = rows[0]?._vector_candidate_count
+    if (rows.length === 0) {
+      count =
+        probe.rowLimit === 0
+          ? this.db.query<{ total: number }, SqliteValue[]>(probe.sql).get(...probe.args)?.total
+          : 0
+    }
+    assertVectorCandidateCount(count, probe.limit)
+    return Math.min(count, probe.totalLimit)
   }
 
   countObjects(params: CountObjectsInput): CountObjectsResult {
@@ -517,6 +537,21 @@ function sqliteFacetValue(valueType: string | null, value: unknown): unknown {
     return JSON.parse(value)
   }
   return value
+}
+
+function assertVectorCandidateCount(count: unknown, limit: number): asserts count is number {
+  if (typeof count !== "number" || !Number.isSafeInteger(count) || count < 0) {
+    throw new ObjectQueryExecutionError(
+      "invalid_vector_candidate_count",
+      "Storage did not return a valid vector candidate count."
+    )
+  }
+  if (count > limit) {
+    throw new ObjectQueryExecutionError(
+      "vector_work_limit_exceeded",
+      `Exact vector search supports at most ${limit} eligible vectors at this dimension. Narrow the query filters.`
+    )
+  }
 }
 
 function existsProbeQuery(query: ObjectQuery): ObjectQuery {

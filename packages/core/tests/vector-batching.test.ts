@@ -135,6 +135,8 @@ describe("durable projection embedding batches", () => {
     await f.process(batchId)
     expect(f.embed).toHaveBeenCalledTimes(1)
     expect(f.embed.mock.calls[0]![0].texts).toHaveLength(3)
+    // Removal proof: omit purpose in generateVectors; automatic indexing loses its document role.
+    expect(f.embed.mock.calls[0]![0].purpose).toBe("document")
     for (const [i, name] of names.entries()) {
       const text = vectorSources(["name"], { name }).text
       expect(

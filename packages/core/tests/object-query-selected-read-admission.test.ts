@@ -345,6 +345,26 @@ describe("selected object query admission", () => {
     })
   })
 
+  test("vector ranking retains traversed provenance and requires every source property", () => {
+    // Removal proof: skip admitProperty for vector sources or lose the traversal state.
+    const input: ObjectQuery = {
+      kind: "traverse",
+      linkId: "items",
+      direction: "incoming",
+      sourceObjectTypeId: Proposal.id,
+      input: traverse("items", start(Proposal.id)),
+    }
+    expectAuthorized({ kind: "vector", input, profile: "content", vector: [1], k: 1 })
+    expectDenied({ kind: "vector", input, profile: "private", vector: [1], k: 1 })
+    expectDenied({
+      kind: "vector",
+      input: { ...input, input: traverse("reviewers", start(Proposal.id)) },
+      profile: "content",
+      vector: [1],
+      k: 1,
+    })
+  })
+
   test("fails closed when a compiled step disagrees with the ontology-resolved target", () => {
     const staleAdmission = createSelectedObjectQueryAdmission(
       compileSelectedObjectReadScope({

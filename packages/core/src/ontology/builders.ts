@@ -35,6 +35,7 @@ import type {
   ObjectLink,
   ObjectLinkTargetMetadata,
   ObjectType,
+  ObjectVectorSearchProfile,
   Ontology,
   Property,
   PropertyMode,
@@ -446,19 +447,32 @@ export type DirectLinkResult<
 > = LinkResult<TId, TTargetObjectTypeId, TOptions> & ObjectLinkTargetMetadata<TTarget>
 
 type ObjectTypeIdArray<TTargets extends readonly ObjectType[]> = Array<TTargets[number]["id"]>
+/** Keep profile names without carrying provider types through every linked declaration. */
 export type DirectLinkTarget<
   TId extends string,
   TName extends string,
   TProperties extends Property[],
-> = ObjectTypeWithPropertyTokens<{
-  id: TId
-  name: TName
-  properties: TProperties
-  links: ObjectLink[]
-}>
+  TVectorProfiles extends string = never,
+> = ObjectTypeWithPropertyTokens<
+  {
+    id: TId
+    name: TName
+    properties: TProperties
+    links: ObjectLink[]
+  } & ([TVectorProfiles] extends [never]
+    ? unknown
+    : { search: { vectors: Record<TVectorProfiles, ObjectVectorSearchProfile> } })
+>
 
 type DirectLinkTargetFor<TTarget extends ObjectType> = TTarget extends ObjectTypeWithPropertyTokens
-  ? DirectLinkTarget<TTarget["id"], TTarget["name"], TTarget["properties"]>
+  ? DirectLinkTarget<
+      TTarget["id"],
+      TTarget["name"],
+      TTarget["properties"],
+      TTarget extends { search: { vectors: infer TProfiles } }
+        ? Extract<keyof TProfiles, string>
+        : never
+    >
   : TTarget
 
 /**

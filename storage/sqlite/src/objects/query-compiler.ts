@@ -24,7 +24,14 @@ export interface SqliteObjectQueryPageRow {
 }
 
 export interface CompiledObjectQuery {
-  vectorProbe?: { sql: string; args: SqliteValue[]; limit: number }
+  vectorProbe?: {
+    sql: string
+    args: SqliteValue[]
+    limit: number
+    /** Maximum returned rows and total before the outermost limit, respectively. */
+    rowLimit: number
+    totalLimit: number
+  }
   sql: string
   args: SqliteValue[]
   totalSql: string
@@ -98,7 +105,7 @@ export function compileObjectQuery(
   if (hasVectorProfile(query) && !isVectorProfileQuery(query)) {
     throw new ObjectQueryExecutionError(
       "unsupported_vector_composition",
-      "Vector search supports one profile with filters before ranking and limit/project after."
+      "Vector search supports one profile with filters, traversals or sets before ranking and limit/project after."
     )
   }
   const source = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
@@ -231,9 +238,31 @@ function compileVector(
     { kind: "column", column: "_vector_score", direction: "desc" },
     ...identityOrderFields().map((field) => ({ ...field, binary: true })),
   ])
-  const sql = `SELECT * FROM (SELECT input.*, max(-1, min(1, 1 - vec_distance_cosine(vectors.embedding, ?))) AS _vector_score
-    ${candidates}) AS ranked ORDER BY ${order.sql} LIMIT ?`
-  const args = [encodeSqliteVector(values), ...candidateArgs, query.k]
+  const rankedOrder = compileOrder(order.fields, "ranked")
+  // Materialize only bounded, authorized candidates once. CASE prevents distance evaluation
+  // above the envelope; the reader rejects the count before exposing any rows or scores.
+  const sql = `SELECT stored.project_id, stored.object_type_id, stored.primary_id,
+    stored.properties, stored.properties AS _cursor_properties,
+    stored.created_at, stored.updated_at, stored.version, stored.last_commit_id,
+    ranked._vector_candidate_count, ranked._vector_score
+    FROM (
+    WITH _sixb_vector_candidates AS MATERIALIZED (
+      SELECT input.project_id, input.object_type_id, input.primary_id,
+        vectors.embedding AS _vector_embedding ${candidates} LIMIT ?
+    ), _sixb_vector_budget AS (
+      SELECT COUNT(*) AS _vector_candidate_count FROM _sixb_vector_candidates
+    )
+    SELECT input.project_id, input.object_type_id, input.primary_id, budget._vector_candidate_count,
+      CASE WHEN budget._vector_candidate_count <= ?
+        THEN max(-1, min(1, 1 - vec_distance_cosine(input._vector_embedding, ?)))
+      END AS _vector_score
+    FROM _sixb_vector_candidates AS input CROSS JOIN _sixb_vector_budget AS budget
+    ORDER BY ${order.sql} LIMIT ?
+  ) AS ranked CROSS JOIN ${ctx.source.objectsTable} AS stored
+    ON stored.project_id = ranked.project_id AND stored.object_type_id = ranked.object_type_id
+      AND stored.primary_id = ranked.primary_id
+  ORDER BY ${rankedOrder.sql}`
+  const args = [...candidateArgs, limit + 1, limit, encodeSqliteVector(values), query.k]
   return {
     sql,
     args,
@@ -245,6 +274,8 @@ function compileVector(
       sql: `SELECT COUNT(*) AS total FROM (SELECT 1 ${candidates} LIMIT ?) AS candidates`,
       args: [...candidateArgs, limit + 1],
       limit,
+      rowLimit: query.k,
+      totalLimit: query.k,
     },
     hasMore: () => false,
     trimRows: identityRows,
@@ -451,7 +482,13 @@ function compileLimit(
       FROM (${input.sql}) AS input
     `,
     totalArgs: input.args,
-    vectorProbe: input.vectorProbe,
+    vectorProbe: input.vectorProbe
+      ? {
+          ...input.vectorProbe,
+          rowLimit: Math.min(input.vectorProbe.rowLimit, rowLimit),
+          totalLimit: input.vectorProbe.rowLimit,
+        }
+      : undefined,
     order: input.order,
     hasMore: (rowCount, total) =>
       total === undefined ? ctx.probeLimit && rowCount > limit : limit < total,
@@ -852,7 +889,7 @@ function compileProject(
         input.created_at,
         input.updated_at,
         input.version,
-        input.last_commit_id${input.vectorProbe ? ", input._vector_score" : ""}
+        input.last_commit_id${input.vectorProbe ? ", input._vector_score, input._vector_candidate_count" : ""}
       FROM (${input.sql}) AS input
       ORDER BY ${inputOrder.sql}
     `,

@@ -110,3 +110,28 @@ test("text search refuses a different representation before inference", async ()
   ).rejects.toThrow("registered for its profile")
   expect(calls).toBe(0)
 })
+
+test("retrieval input mode belongs to the captured vector identity", () => {
+  // Removal proof: omit inputMode from snapshots, compatibility or configuration hashing.
+  const original = binding()
+  const asymmetric: EmbeddingModel = {
+    ...original,
+    definition: { ...original.definition, inputMode: "asymmetric" },
+  }
+  const type = product(asymmetric)
+  const profile = new OntologyRegistry({ sources: [type] }).resolveObjectType(type.id).search!
+    .vectors!.content!
+  expect(profile.model.definition.inputMode).toBe("asymmetric")
+  expect(sameEmbeddingModel(original, asymmetric)).toBe(false)
+  expect(vectorConfiguration(profile)).not.toBe(
+    vectorConfiguration({ source: ["text"], model: original })
+  )
+  const symmetric: EmbeddingModel = {
+    ...original,
+    definition: { ...original.definition, inputMode: "symmetric" },
+  }
+  expect(sameEmbeddingModel(original, symmetric)).toBe(true)
+  expect(vectorConfiguration({ source: ["text"], model: original })).toBe(
+    vectorConfiguration({ source: ["text"], model: symmetric })
+  )
+})

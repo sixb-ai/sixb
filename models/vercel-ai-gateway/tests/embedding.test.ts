@@ -138,20 +138,105 @@ test("embedding pins input pricing without requiring a language model or output 
 
 test("embedding resolution preserves captured dimensions when caller options change", async () => {
   // Removal proof: pass the original options object to createGatewayEmbedding in resolve().
-  const options = { dimensions: 2 }
   const gateway = createVercelGateway({ fetch: async () => Response.json({ data: [] }) })
-  const binding = gateway.embedding("test/model", options)
-  options.dimensions = 3
-  const model = await binding.resolve!()
-  expect(model.definition.dimensions).toBe(2)
+  for (const modelId of ["test/model", "voyage/voyage-4-large", "cohere/embed-v4.0"]) {
+    const options = { dimensions: 2 }
+    const binding = gateway.embedding(modelId, options)
+    options.dimensions = 3
+    const model = await binding.resolve!()
+    expect(model.definition.dimensions).toBe(2)
+    expect(model.definition).toEqual(binding.definition)
+    expect(model.batching).toEqual(binding.batching)
+  }
 })
 
-test("only known OpenAI routes advertise safe automatic batching bounds", () => {
+test("only known embedding routes advertise safe automatic batching bounds", () => {
+  // Removal proof: restore OpenAI-only bounds; Voyage/Cohere assertions fail.
   const gateway = createVercelGateway()
   for (const name of ["3-small", "3-large", "ada-002"]) {
     expect(
       gateway.embedding(`openai/text-embedding-${name}`, { dimensions: 1536 }).batching
     ).toEqual({ maxInputs: 2048, maxInputBytes: 8191, maxTotalInputBytes: 300000 })
   }
+  for (const modelId of ["voyage-4", "voyage-4-lite", "voyage-4-large"]) {
+    expect(gateway.embedding(`voyage/${modelId}`, { dimensions: 512 }).batching).toEqual({
+      maxInputs: 1000,
+      maxInputBytes: 31000,
+      maxTotalInputBytes: 64000,
+    })
+  }
+  expect(gateway.embedding("cohere/embed-v4.0", { dimensions: 512 }).batching).toEqual({
+    maxInputs: 96,
+    maxInputBytes: 127000,
+    maxTotalInputBytes: 127000,
+  })
+  expect(gateway.embedding("voyage/future-model", { dimensions: 512 }).batching).toBeUndefined()
   expect(gateway.embedding("other/embedding", { dimensions: 1536 }).batching).toBeUndefined()
+})
+
+test("verified retrieval routes require a purpose and send only their supported options", async () => {
+  // Removal proof: omit purpose/options handling; this admits an ambiguous call or loses inputType.
+  // Restore the shared outputDimension option to reproduce the redundant Cohere override.
+  for (const [modelId, provider, document, query] of [
+    ["voyage/voyage-4", "voyage", "document", "query"],
+    ["voyage/voyage-4-lite", "voyage", "document", "query"],
+    ["voyage/voyage-4-large", "voyage", "document", "query"],
+    ["cohere/embed-v4.0", "cohere", "search_document", "search_query"],
+  ] as const) {
+    let calls = 0
+    const gateway = createVercelGateway({
+      fetch: async (_url, init) => {
+        calls++
+        const body = JSON.parse(String(init?.body))
+        expect(body.dimensions).toBe(2)
+        expect(body.providerOptions).toEqual({
+          [provider]: {
+            inputType: calls === 1 ? document : query,
+            ...(provider === "voyage"
+              ? { outputDimension: 2, truncation: false }
+              : { truncate: "NONE" }),
+          },
+        })
+        return Response.json({ data: [{ index: 0, embedding: [1, 0] }] })
+      },
+    })
+    const model = gateway.embedding(modelId, { dimensions: 2 })
+    expect(model.definition.inputMode).toBe("asymmetric")
+    await expect(model.embed({ texts: ["ambiguous"] })).rejects.toThrow("purpose")
+    expect(calls).toBe(0)
+    await model.embed({ texts: ["document"], purpose: "document" })
+    await model.embed({ texts: ["question"], purpose: "query" })
+    expect(calls).toBe(2)
+  }
+})
+
+test("unknown routes keep generic requests without inferred retrieval settings or batching", async () => {
+  // Removal proof: restore startsWith("voyage/") / startsWith("cohere/") dispatch; this fails.
+  for (const modelId of [
+    "voyage/future-model",
+    "voyage/voyage-4-large-preview",
+    "cohere/embed-v4.0-preview",
+    "cohere/embed-multilingual-v3.0",
+    "other/embedding",
+  ]) {
+    let calls = 0
+    const gateway = createVercelGateway({
+      fetch: async (_url, init) => {
+        calls++
+        expect(JSON.parse(String(init?.body))).toEqual({
+          model: modelId,
+          input: ["text"],
+          dimensions: 2,
+          encoding_format: "float",
+        })
+        return Response.json({ data: [{ index: 0, embedding: [1, 0] }] })
+      },
+    })
+    const model = gateway.embedding(modelId, { dimensions: 2 })
+    expect(model.definition.inputMode).toBeUndefined()
+    expect(model.batching).toBeUndefined()
+    await model.embed({ texts: ["text"] })
+    await model.embed({ texts: ["text"], purpose: "query" })
+    expect(calls).toBe(2)
+  }
 })

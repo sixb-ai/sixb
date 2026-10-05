@@ -1,4 +1,4 @@
-import { defineObjectType, type EmbeddingModel, type ObjectVectorHandle, prop } from "../src"
+import { defineObjectType, type EmbeddingModel, link, type ObjectVectorHandle, prop } from "../src"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
@@ -9,13 +9,31 @@ const Product = defineObjectType({
   properties: [prop("id", "string", { primary: true }), prop("title", "string")],
   search: { vectors: { content: { source: ["title"], model } } },
 })
+const Collection = defineObjectType({
+  id: "VectorCollection",
+  name: "Collection",
+  properties: [prop("id", "string", { primary: true })],
+  links: [link("products", Product)],
+})
 const sixb = createTestSixb({
-  ontology: [Product],
+  ontology: [Product, Collection],
   models: { embedding: [model] },
   ...createTestRuntimeDeps(),
 })
 const profile: ObjectVectorHandle = sixb.objects(Product).byId("one").vector("content")
 sixb.objects(Product).query().vector("content", "search", { k: 1 })
+const linkedProducts = sixb.objects(Collection).query().traverse(Collection.l.products)
+linkedProducts.vector("content", "search", { k: 1 })
+// @ts-expect-error an outgoing direct target retains its known profiles
+linkedProducts.vector("missing", "search", { k: 1 })
+// @ts-expect-error a concrete type with no vector profiles still rejects all names
+sixb.objects(Collection).query().vector("content", "search", { k: 1 })
+// Without a generated registry, an incoming target uses the loose type; names resolve at runtime.
+sixb
+  .objects(Product)
+  .query()
+  .traverse(Collection.l.products, { direction: "incoming" })
+  .vector("runtime-profile", "search", { k: 1 })
 // @ts-expect-error profiles are inferred from this object type's definition
 sixb.objects(Product).byId("one").vector("missing")
 // @ts-expect-error query profiles are inferred too

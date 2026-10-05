@@ -190,7 +190,7 @@ export function createFoundryEmbedding(
           throw error
         })
         const resolved = await abortable(() => pending!, signal)
-        return resolved.embed({ texts, signal })
+        return resolved.embed({ texts, purpose: input.purpose, signal })
       }
       const response = await transport.post(
         JSON.stringify({

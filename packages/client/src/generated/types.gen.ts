@@ -8373,6 +8373,7 @@ export type ListObjectTypesResponses = {
             providerId: string
             modelId: string
             dimensions: number
+            inputMode?: "symmetric" | "asymmetric"
             representation?: {
               name: string
               version?: string
@@ -8497,6 +8498,7 @@ export type GetObjectTypeResponses = {
             providerId: string
             modelId: string
             dimensions: number
+            inputMode?: "symmetric" | "asymmetric"
             representation?: {
               name: string
               version?: string

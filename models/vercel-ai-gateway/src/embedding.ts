@@ -3,8 +3,10 @@ import {
   type EmbeddingModelRequest,
   EmbeddingModelResponseError,
   type EmbeddingModelResponseMetadata,
+  type JsonObject,
   type ModelCostEstimator,
 } from "@sixb/core/models"
+import { gatewayEmbeddingProviderOptions, gatewayEmbeddingSettings } from "./embedding-settings"
 
 export interface VercelGatewayEmbeddingOptions {
   /** Requested output dimension; part of the model identity used by vector profiles. */
@@ -17,7 +19,8 @@ export function createGatewayEmbedding(
   options: VercelGatewayEmbeddingOptions,
   request: (
     input: EmbeddingModelRequest,
-    dimensions: number
+    dimensions: number,
+    providerOptions: JsonObject | undefined
   ) => Promise<{ body: unknown; metadata: EmbeddingModelResponseMetadata }>,
   pricing?: { resolve?: () => Promise<ModelCostEstimator>; estimator?: ModelCostEstimator }
 ): EmbeddingModel {
@@ -34,21 +37,13 @@ export function createGatewayEmbedding(
     )
   }
   const providerId = "vercel-ai-gateway"
+  const { retrieval, batching } = gatewayEmbeddingSettings(modelId)
   const resolvePricing = pricing?.resolve
   return Object.freeze({
     providerId,
     modelId,
     costEstimator: pricing?.estimator,
-    // Only advertise bounds for known OpenAI models; other gateway routes stay individual.
-    ...(/^openai\/text-embedding-(3-small|3-large|ada-002)$/.test(modelId)
-      ? {
-          batching: Object.freeze({
-            maxInputs: 2048,
-            maxInputBytes: 8191,
-            maxTotalInputBytes: 300000,
-          }),
-        }
-      : {}),
+    ...(batching ? { batching: Object.freeze(batching) } : {}),
     ...(resolvePricing
       ? {
           resolve: async () =>
@@ -62,6 +57,7 @@ export function createGatewayEmbedding(
       providerId,
       modelId,
       dimensions,
+      ...(retrieval ? { inputMode: "asymmetric" as const } : {}),
       representation: Object.freeze({ name: modelId }),
     }),
     async embed(input: EmbeddingModelRequest) {
@@ -74,7 +70,12 @@ export function createGatewayEmbedding(
       }
       const texts = [...input.texts]
       if (!texts.length) return { vectors: [] }
-      const { body: result, metadata } = await request({ ...input, texts }, dimensions)
+      const providerOptions = gatewayEmbeddingProviderOptions(retrieval, input.purpose, dimensions)
+      const { body: result, metadata } = await request(
+        { ...input, texts },
+        dimensions,
+        providerOptions
+      )
       if (!isRecord(result) || !Array.isArray(result.data) || result.data.length !== texts.length) {
         throw invalidResponse(modelId, metadata)
       }

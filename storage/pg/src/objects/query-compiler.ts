@@ -110,7 +110,7 @@ export function compilePgObjectQuery(
   if (hasVectorProfile(query) && !isVectorProfileQuery(query)) {
     throw new ObjectQueryExecutionError(
       "unsupported_vector_composition",
-      "Vector search supports one profile with filters before ranking and limit/project after."
+      "Vector search supports one profile with filters, traversals or sets before ranking and limit/project after."
     )
   }
   const source = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE

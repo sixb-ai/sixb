@@ -1,5 +1,13 @@
 import assert from "node:assert/strict"
-import { defineObjectType, type EmbeddingModel, OntologyRegistry, prop, SixbHost } from "../../src"
+import {
+  defineObjectType,
+  type EmbeddingModel,
+  link,
+  type ObjectQuery,
+  OntologyRegistry,
+  prop,
+  SixbHost,
+} from "../../src"
 import { executeObjectQuery } from "../../src/objects/query"
 import { compileSelectedObjectReadScope, type Storage } from "../../src/storage"
 import { createTestSixb } from "../../src/testing"
@@ -28,6 +36,11 @@ export async function verifyVectorSearch(
       }
     },
   }
+  const Category = defineObjectType({
+    id: "SearchCategory",
+    name: "Category",
+    properties: [prop("id", "string", { primary: true, required: true })],
+  })
   const Product = defineObjectType({
     id: "SearchProduct",
     name: "Product",
@@ -37,11 +50,12 @@ export async function verifyVectorSearch(
       prop("status", "string", { query: { searchable: true, filterable: true, facet: true } }),
     ],
     search: { vectors: { content: { source: ["title"], model } } },
+    links: [link("category", Category, { cardinality: "one" })],
   })
   const host = new SixbHost({
     ...createTestRuntimeDeps(),
     id: "vector-search",
-    ontology: [Product],
+    ontology: [Product, Category],
     models: { embedding: [model] },
     storage,
   })
@@ -65,6 +79,26 @@ export async function verifyVectorSearch(
     assert.ok(Math.abs(result.objects[i]!.score! - score) < 1e-5)
   assert.equal(result.total, 4)
   assert.equal(result.hasMore, false)
+  // Regression proof: restore the start-only vector composition check; this query is rejected.
+  // The globally best North vectors must not crowd out the linked East/South candidates.
+  const categories = createTestSixb(host).objects(Category)
+  await categories.upsert({ properties: { id: "linked" } })
+  for (const id of ["b", "c"]) {
+    await objects.byId(id).link(Product.l.category, {
+      objectTypeId: Category.id,
+      primaryId: "linked",
+    })
+  }
+  const linked = await categories
+    .query()
+    .where((category) => category.p.id.eq("linked"))
+    .traverse(Product.l.category, { direction: "incoming" })
+    .vector("content", "North", { k: 1 })
+    .list()
+  assert.deepEqual(
+    linked.objects.map((object) => object.primaryId),
+    ["b"]
+  )
   const filtered = await objects
     .query()
     .where((p) => p.p.status.eq("visible"))
@@ -96,7 +130,29 @@ export async function verifyVectorSearch(
     vector: [1, 0, 0],
     k: 1,
   }
+  const refs = (ids: string[]): ObjectQuery => ({
+    kind: "refs",
+    refs: ids.map((primaryId) => ({ objectTypeId: Product.id, primaryId })),
+  })
+  // Each candidate source must narrow before ranking, including duplicate identities in a set.
+  const candidates: ObjectQuery[] = [
+    refs(["b", "c"]),
+    { kind: "set", op: "union", inputs: [refs(["b"]), refs(["b", "c"])] },
+    { kind: "set", op: "intersect", inputs: [refs(["a", "b", "c"]), refs(["b", "c"])] },
+    { kind: "set", op: "subtract", inputs: [refs(["a", "b", "c"]), refs(["a"])] },
+  ]
   const ontology = new OntologyRegistry({ sources: [Product] })
+  for (const input of candidates) {
+    const selected = await executeObjectQuery(
+      { projectId: "vector-search", query: { ...query, input, k: 2 } },
+      { storage: storage.objects, ontology }
+    )
+    assert.deepEqual(
+      selected.objects.map((object) => object.primaryId),
+      ["b", "c"]
+    )
+    assert.equal(selected.total, 2)
+  }
   const projected = await executeObjectQuery(
     { projectId: "vector-search", query: { kind: "project", input: query, properties: ["id"] } },
     { storage: storage.objects, ontology }

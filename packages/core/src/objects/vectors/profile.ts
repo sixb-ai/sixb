@@ -13,6 +13,8 @@ export function vectorConfiguration(profile: ObjectVectorSearchProfile): string 
     model: profile.model.modelId,
     representation: profile.model.definition.representation ?? { name: profile.model.modelId },
     dimensions: profile.model.definition.dimensions,
+    // Include retrieval preparation without changing existing symmetric identities.
+    ...(profile.model.definition.inputMode === "asymmetric" ? { inputMode: "asymmetric" } : {}),
     metric: "cosine",
     precision: "float32",
     normalization: "l2-v1",

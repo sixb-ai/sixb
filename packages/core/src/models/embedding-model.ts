@@ -7,12 +7,16 @@ import type { ModelCostEstimator, ModelReportedCost } from "./pricing"
 export interface EmbeddingModelDefinition extends ModelDefinition {
   readonly kind: "embedding"
   readonly dimensions: number
+  /** Asymmetric models use distinct document/query modes. Omission means symmetric. */
+  readonly inputMode?: "symmetric" | "asymmetric"
   /** Actual representation behind a routing alias. Omit only when modelId identifies it directly. */
   readonly representation?: { readonly name: string; readonly version?: string }
 }
 
 export interface EmbeddingModelRequest {
   readonly texts: readonly string[]
+  /** Retrieval role. Sixb sets this for indexing and search; symmetric models may ignore it. */
+  readonly purpose?: "document" | "query"
   /** Providers must honor cancellation and propagate this signal to their transport. */
   readonly signal?: AbortSignal
 }
@@ -74,6 +78,13 @@ export function assertEmbeddingModelRef(model: EmbeddingModelRef): void {
   const definition = model?.definition
   const representation = definition?.representation
   if (
+    definition?.inputMode !== undefined &&
+    definition.inputMode !== "symmetric" &&
+    definition.inputMode !== "asymmetric"
+  ) {
+    throw new TypeError("[Sixb] Invalid embedding input mode.")
+  }
+  if (
     representation !== undefined &&
     (!representation ||
       typeof representation !== "object" ||
@@ -106,6 +117,7 @@ export function sameEmbeddingModel(left: EmbeddingModelRef, right: EmbeddingMode
     left.providerId === right.providerId &&
     left.modelId === right.modelId &&
     left.definition.dimensions === right.definition.dimensions &&
+    (left.definition.inputMode ?? "symmetric") === (right.definition.inputMode ?? "symmetric") &&
     (left.definition.representation?.name ?? left.modelId) ===
       (right.definition.representation?.name ?? right.modelId) &&
     left.definition.representation?.version === right.definition.representation?.version

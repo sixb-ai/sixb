@@ -3,6 +3,7 @@ import { type EmbeddingModel, sameEmbeddingModel } from "../../models/embedding-
 import type { OntologyRegistry } from "../../ontology"
 import { ObjectQueryExecutionError } from "../query/errors"
 import type { ObjectQuery, ObjectQueryVector } from "../query/ir"
+import { resolveObjectQueryResultShape } from "../query/validate"
 import { normalizeVector } from "./profile"
 
 const QUERY_EMBEDDING_TIMEOUT_MS = 30_000
@@ -30,16 +31,19 @@ function resolveProfileEmbeddingModel(
   ontology: OntologyRegistry,
   models: EmbeddingModelCatalog | undefined
 ): EmbeddingModel {
-  let input = query.input
-  while (input.kind === "filter") input = input.input
-  if (input.kind !== "start" || !query.profile) {
+  const { objectTypeIds } = resolveObjectQueryResultShape(query.input, {
+    ontology,
+    normalize: false,
+  })
+  const objectTypeId = objectTypeIds.length === 1 ? objectTypeIds[0] : undefined
+  if (!objectTypeId || !query.profile) {
     throw new ObjectQueryExecutionError(
       "embedding_model_unavailable",
       "Vector search requires the embedding model registered for its profile."
     )
   }
 
-  const profile = ontology.resolveObjectType(input.objectTypeId).search?.vectors?.[query.profile]
+  const profile = ontology.resolveObjectType(objectTypeId).search?.vectors?.[query.profile]
   if (!profile) {
     throw new ObjectQueryExecutionError(
       "embedding_model_unavailable",
@@ -69,7 +73,7 @@ async function embedSearchText(
   const timeout = AbortSignal.timeout(QUERY_EMBEDDING_TIMEOUT_MS)
   const requestSignal = signal ? AbortSignal.any([signal, timeout]) : timeout
   requestSignal.throwIfAborted()
-  const result = await model.embed({ texts: [text], signal: requestSignal })
+  const result = await model.embed({ texts: [text], purpose: "query", signal: requestSignal })
   requestSignal.throwIfAborted()
 
   if (!Array.isArray(result?.vectors) || result.vectors.length !== 1) {

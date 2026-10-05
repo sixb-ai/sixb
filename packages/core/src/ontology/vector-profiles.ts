@@ -17,6 +17,7 @@ export function snapshotVectorProfiles(
           providerId,
           modelId,
           dimensions: definition.dimensions,
+          ...(definition.inputMode ? { inputMode: definition.inputMode } : {}),
           ...(definition.representation
             ? {
                 representation: Object.freeze({

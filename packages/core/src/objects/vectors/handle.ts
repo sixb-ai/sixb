@@ -65,7 +65,7 @@ export function createObjectVectorHandle(
       }
 
       // Network work never holds a storage transaction or retries an obsolete computation.
-      const result = await model.embed({ texts: [input.text] })
+      const result = await model.embed({ texts: [input.text], purpose: "document" })
       if (!Array.isArray(result?.vectors) || result.vectors.length !== 1) {
         throw new MaterializationValidationError(
           "Embedding model must return exactly one vector for one input text."

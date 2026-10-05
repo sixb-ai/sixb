@@ -54,6 +54,10 @@ async function executeEmbedding(
     throw new TypeError("[SixbModels] Embedding inputs must be nonempty strings.")
   }
   const texts = [...input.texts]
+  const purpose = input.purpose
+  if (purpose !== undefined && purpose !== "document" && purpose !== "query") {
+    throw new TypeError("[SixbModels] Embedding purpose must be 'document' or 'query'.")
+  }
   const signal = session.signal(input.signal)
   const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
   requestSignal.throwIfAborted()
@@ -89,7 +93,7 @@ async function executeEmbedding(
   let result: EmbeddingModelResult
   try {
     requestSignal.throwIfAborted()
-    result = await model.embed({ texts, signal: requestSignal })
+    result = await model.embed({ texts, purpose, signal: requestSignal })
   } catch (error) {
     if (error instanceof EmbeddingModelResponseError) {
       await recordEmbedding(accounting, model, callId, error.metadata)
