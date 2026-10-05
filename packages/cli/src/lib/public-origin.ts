@@ -8,6 +8,9 @@
  * worth removing — a bad origin should be refused once, by the first role that reads it.
  */
 
+import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
+import type { LoadedSixbHost } from "./loadSixb"
+
 /** An origin is scheme, host, and port, and nothing after them. */
 export function normalizeOrigin(value: string, label: string): string {
   let url: URL
@@ -39,6 +42,16 @@ export function configuredOrigin(
 ): string | null {
   const configured = nonblank(value) ?? nonblank(process.env[envName])
   return configured === undefined ? null : normalizeOrigin(configured, label)
+}
+
+/**
+ * Tell a worker process's host where the API is reachable, so the code it runs can hand out URLs
+ * a third party will fetch (`blobs.createDownloadUrl()`). The API process needs no call: the
+ * server records the origin it serves. Without one, those calls fail and name the variable.
+ */
+export function recordApiPublicOrigin(sixb: LoadedSixbHost, value: string | undefined): void {
+  const origin = configuredOrigin(value, "SIXB_API_PUBLIC_ORIGIN", "API public origin")
+  if (origin) setApiPublicOrigin(sixb, origin)
 }
 
 function nonblank(value: string | undefined): string | undefined {

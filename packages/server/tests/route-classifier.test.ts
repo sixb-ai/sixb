@@ -18,6 +18,8 @@ const PUBLIC: ReadonlyArray<readonly [string, string, string]> = [
   ["GET", "/ready", "readiness probe"],
   ["POST", "/__sixb/agent-api/objects", "gateway authenticates with the run's own token"],
   ["POST", "/api/webhooks/github/events", "third-party callers sign their payloads"],
+  ["GET", "/api/files/downloads/payload.signature", "the signed token is the credential"],
+  ["HEAD", "/api/files/downloads/payload.signature", "media fetchers probe before reading"],
   ["GET", "/api/auth/session", "answers whether a session exists"],
   ["POST", "/api/auth/sign-out", "must work with an expired session"],
   ["POST", "/api/auth/device-authorizations", "starts a device authorization"],
@@ -67,6 +69,15 @@ describe("classifyRoute", () => {
       expect(
         classifyRoute(request(method, "/api/webhooks/github/events")).kind,
         `${method} /api/webhooks/github/events`
+      ).toBe("api")
+    }
+  })
+
+  test("a signed download path is public for reads alone", () => {
+    for (const method of ["POST", "PUT", "PATCH", "DELETE"]) {
+      expect(
+        classifyRoute(request(method, "/api/files/downloads/payload.signature")).kind,
+        `${method} /api/files/downloads/payload.signature`
       ).toBe("api")
     }
   })

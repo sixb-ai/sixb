@@ -54,6 +54,7 @@ import { PgAiLimitStorage } from "./pg-ai-limit-storage"
 import { PgAiUsageStorage } from "./pg-ai-usage-storage"
 import { createPgClient, type SQL, type SQLClient } from "./pg-client"
 import { PgExecutionStorage } from "./pg-execution-storage"
+import { PgFileDownloadGrantStorage } from "./pg-file-download-grant-storage"
 import { PgFileUploadSessionStorage } from "./pg-file-upload-session-storage"
 import { PgPipelineRunStorage } from "./pg-pipeline-run-storage"
 import { PgProjectionRunStorage } from "./pg-projection-run-storage"
@@ -181,6 +182,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
   readonly shareGrants: PgShareGrantStorage
   readonly shareSessions: PgShareSessionStorage
   readonly fileUploadSessions: PgFileUploadSessionStorage
+  readonly fileDownloadGrants: PgFileDownloadGrantStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly sql: SQL
@@ -266,6 +268,7 @@ export class PostgresStorage implements MigrationCapableStorage, QueryPreparatio
     this.shareGrants = createOperationScopedFacade(stores.shareGrants, scope)
     this.shareSessions = createOperationScopedFacade(stores.shareSessions, scope)
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
+    this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
     registerPostgresStorageTestingAdapter(this, (durationMs) =>
       stores.connectorConnections.advanceTimeForTesting(durationMs)
     )
@@ -427,6 +430,7 @@ function createPostgresStores(
     shareGrants,
     shareSessions,
     fileUploadSessions: new PgFileUploadSessionStorage(sql),
+    fileDownloadGrants: new PgFileDownloadGrantStorage(sql),
   }
 }
 
@@ -452,6 +456,7 @@ interface PostgresStoreSet {
   readonly shareGrants: PgShareGrantStorage
   readonly shareSessions: PgShareSessionStorage
   readonly fileUploadSessions: PgFileUploadSessionStorage
+  readonly fileDownloadGrants: PgFileDownloadGrantStorage
 }
 
 function resolveTimeoutMillis(value: number | undefined, label: string): number | undefined {

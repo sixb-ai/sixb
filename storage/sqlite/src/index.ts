@@ -39,6 +39,7 @@ import { SqliteAiUsageStorage } from "./ai-usage-storage"
 import { SqliteAuthStorage } from "./auth-storage"
 import { SqliteConnectorConnectionStorage } from "./connector-connection-storage"
 import { SqliteExecutionStorage } from "./execution-storage"
+import { SqliteFileDownloadGrantStorage } from "./file-download-grant-storage"
 import { SqliteFileUploadSessionStorage } from "./file-upload-session-storage"
 import {
   createSqliteStorageMigrators,
@@ -108,6 +109,7 @@ export class SqliteStorage implements MigrationCapableStorage {
   readonly shareSessions: ShareSessionStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly fileUploadSessions: SqliteFileUploadSessionStorage
+  readonly fileDownloadGrants: SqliteFileDownloadGrantStorage
   readonly migrators: readonly StorageMigrator[]
 
   private readonly connection: SqliteStoreConnection
@@ -175,6 +177,7 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.shareSessions = createOperationScopedFacade(stores.shareSessions, scope)
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
+    this.fileDownloadGrants = createOperationScopedFacade(stores.fileDownloadGrants, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
     registerSqliteStorageTestingAdapter(this, {
       advanceConnectorConnectionTime: (durationMs) =>
@@ -339,6 +342,7 @@ function createSqliteStores(
     shareSessions,
     connectorConnections: new SqliteConnectorConnectionStorage(connection),
     fileUploadSessions: new SqliteFileUploadSessionStorage(connection),
+    fileDownloadGrants: new SqliteFileDownloadGrantStorage(connection),
   }
 }
 
@@ -364,6 +368,7 @@ interface SqliteStoreSet {
   readonly shareSessions: SqliteShareSessionStorage
   readonly connectorConnections: SqliteConnectorConnectionStorage
   readonly fileUploadSessions: SqliteFileUploadSessionStorage
+  readonly fileDownloadGrants: SqliteFileDownloadGrantStorage
 }
 
 export { migrateSqliteStorage } from "./migrations"

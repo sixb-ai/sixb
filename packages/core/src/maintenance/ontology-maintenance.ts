@@ -27,6 +27,9 @@ const ABANDONED_UPLOAD_ABORT_GRACE_MS = 15 * 60_000
 // One abandoned candidate of a large projection holds hundreds of thousands of rows. Batches this
 // size keep each delete short while clearing such a candidate within a pass.
 const ABANDONED_SOURCE_PURGE_BATCH = 50_000
+// An expired download URL serves nothing, but its grant records which execution exposed which
+// file. It stays this long for that audit trail.
+const EXPIRED_FILE_DOWNLOAD_RETENTION_MS = 7 * 24 * 60 * 60_000
 
 interface OntologyMaintenanceDependencies {
   readonly projectId: string
@@ -203,6 +206,19 @@ export class OntologyMaintenance {
       // Retire abandoned uploads first: the store never reaps one that is still pending.
       await captureFailure(() => this.retireAbandonedUploads(uploads, started, failures), failures)
       await captureFailure(() => uploads.cleanupExpired(started), failures, 0)
+    }
+    const downloads = this.storage.fileDownloadGrants
+    if (downloads) {
+      await captureFailure(
+        () =>
+          downloads.deleteExpired({
+            projectId: this.projectId,
+            expiredBefore: new Date(started.getTime() - EXPIRED_FILE_DOWNLOAD_RETENTION_MS),
+            limit: this.cleanupLimit,
+          }),
+        failures,
+        0
+      )
     }
 
     return {

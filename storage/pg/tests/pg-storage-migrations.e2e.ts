@@ -356,6 +356,7 @@ describe("Postgres storage migrations", () => {
             "056-commit-touches",
             "057-audio-transcription",
             "058-reranking-model-kind",
+            "059-file-download-grants",
           ],
         },
       ])
@@ -765,6 +766,13 @@ describe("Postgres storage migrations", () => {
           id: "058-reranking-model-kind",
           status: "applied",
           version: 58,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "059-file-download-grants",
+          status: "applied",
+          version: 59,
         },
       ])
     })
@@ -2976,6 +2984,13 @@ describe("Postgres storage migrations", () => {
           id: "058-reranking-model-kind",
           status: "applied",
           version: 58,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "059-file-download-grants",
+          status: "applied",
+          version: 59,
         },
       ])
     } finally {

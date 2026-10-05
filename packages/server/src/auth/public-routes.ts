@@ -1,5 +1,6 @@
 import { AGENT_API_GATEWAY_PREFIX } from "@sixb/core/internal/agents"
 import { isCsrfExemptMethod } from "@sixb/core/internal/auth"
+import { FILE_DOWNLOAD_ROUTE_PREFIX } from "@sixb/core/internal/blob-storage"
 import { isSharedAccessPublicPath } from "./shared-access"
 
 const CONNECTOR_OAUTH_CALLBACK_PATH = "/auth/connectors/callback"
@@ -67,6 +68,15 @@ export function isPublicRoute(pathname: string, method: string): boolean {
 
   // The gateway authenticates each request with the run's own execution token.
   if (pathname.startsWith(`${AGENT_API_GATEWAY_PREFIX}/`)) {
+    return true
+  }
+
+  // A signed download URL is read by services that cannot hold a session, such as a social network
+  // fetching media to publish. The signed token in the path is the credential.
+  if (
+    pathname.startsWith(FILE_DOWNLOAD_ROUTE_PREFIX) &&
+    (normalizedMethod === "GET" || normalizedMethod === "HEAD")
+  ) {
     return true
   }
 

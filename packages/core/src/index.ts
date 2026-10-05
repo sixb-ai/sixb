@@ -889,6 +889,7 @@ export type {
   AgentThreadsRuntime,
   ExecutionAgentRunResult,
 } from "./agents/execution"
+export type { CreateFileDownloadUrlOptions, FileDownloadUrl } from "./blob-storage/download-urls"
 export type { BlobsRuntime } from "./blob-storage/execution"
 export type { ConnectorRuntime } from "./connectors/execution"
 export type { DatasetIngestInput, DatasetIngestResult, DatasetsRuntime } from "./datasets/execution"

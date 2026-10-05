@@ -1,4 +1,4 @@
-import type { BlobStorage } from "../../blob-storage"
+import type { BlobsRuntime } from "../../blob-storage/execution"
 import type { ConnectorRuntime } from "../../connectors"
 import type { RecordEditsContext } from "../../edits"
 import type { Logger } from "../../logging"
@@ -145,7 +145,10 @@ export interface ActionTelemetryObjectSet<_TObjectType extends ObjectTypeWithPro
 }
 
 /** Immutable blob operations available to action writeback and effects handlers. */
-export type ActionBlobContext = Pick<BlobStorage, "put" | "open" | "stat">
+export type ActionBlobContext = Pick<
+  BlobsRuntime,
+  "put" | "open" | "stat" | "createDownloadUrl" | "revokeDownloadUrl"
+>
 
 export interface ActionRuntimeFacade {
   readonly blobs: ActionBlobContext

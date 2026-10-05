@@ -65,6 +65,7 @@ export interface SixbDependencies {
   readonly connectorService: ConnectorService
   readonly connectorConnections?: ConnectorConnectionProcess
   readonly blobStorage: BlobStorage
+  readonly apiPublicOrigin: () => string | undefined
   readonly lakeStorage: LakeStorage
 }
 
@@ -141,6 +142,11 @@ function createExecutionFacades<TParams extends Record<string, unknown>>(
     schedules: createSchedulesRuntime(runtime, dependencies.definitions.schedules),
     shares: createSharesRuntime(runtime, execution, dependencies.definitions.shares),
     connector: createConnectorRuntime(runtime, execution, dependencies.connectorService),
-    blobs: createBlobsRuntime(runtime, execution, dependencies.blobStorage),
+    blobs: createBlobsRuntime(
+      runtime,
+      execution,
+      dependencies.blobStorage,
+      dependencies.apiPublicOrigin
+    ),
   }
 }

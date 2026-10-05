@@ -173,6 +173,12 @@
       "import": "./dist/bootstrap/index.js",
       "default": "./dist/bootstrap/index.js"
     },
+    "./internal/blob-storage": {
+      "types": "./dist/blob-storage/internal.d.ts",
+      "bun": "./src/blob-storage/internal.ts",
+      "import": "./dist/blob-storage/internal.js",
+      "default": "./dist/blob-storage/internal.js"
+    },
     "./internal/connector-connections": {
       "types": "./dist/connectors/connections/internal.d.ts",
       "bun": "./src/connectors/connections/internal.ts",

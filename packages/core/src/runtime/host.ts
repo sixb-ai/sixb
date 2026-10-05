@@ -89,6 +89,7 @@ import {
   createOntologyMutationRuntime,
   registerOntologyMutationRuntime,
 } from "./ontology-mutations"
+import { getApiPublicOrigin } from "./public-origin"
 import { resolveDefinitions } from "./resolve-definitions"
 import { createBoundSixb, type Sixb, type SixbDependencies } from "./sixb"
 import { StorageReadiness } from "./storage-readiness"
@@ -374,6 +375,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
         ? {}
         : { connectorConnections: this.connectorService.connectionProcess }),
       blobStorage: this.blobStorage,
+      apiPublicOrigin: () => getApiPublicOrigin(this),
       lakeStorage: this.lakeStorage,
     }
   }

@@ -88,6 +88,7 @@
       "@sixb/core/internal/auth": ["./packages/core/src/auth/index.ts"],
       "@sixb/core/internal/authorization": ["./packages/core/src/authorization/index.ts"],
       "@sixb/core/internal/bootstrap": ["./packages/core/src/bootstrap/index.ts"],
+      "@sixb/core/internal/blob-storage": ["./packages/core/src/blob-storage/internal.ts"],
       "@sixb/core/internal/connector-connections": [
         "./packages/core/src/connectors/connections/internal.ts"
       ],
