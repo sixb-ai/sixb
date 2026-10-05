@@ -1,20 +1,18 @@
-export { PlaudApiError, PlaudAuthError } from "./errors"
+export { PlaudApiError } from "./errors"
 export { plaud } from "./plaud"
 export type {
   PlaudClient,
-  PlaudConnectionOptions,
+  PlaudClientRegistration,
+  PlaudClientRegistrationOptions,
   PlaudConnector,
   PlaudConnectorOptions,
   PlaudContentBlock,
   PlaudIterateOptions,
   PlaudListOptions,
-  PlaudLoginOptions,
   PlaudRecording,
   PlaudRecordingDetails,
   PlaudRecordingPage,
   PlaudRequestOptions,
-  PlaudTokenStore,
-  PlaudTokens,
   PlaudTranscript,
   PlaudTranscriptSegment,
   PlaudUser,

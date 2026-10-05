@@ -1,16 +1,9 @@
-import type { PlaudTokenStore } from "./auth"
-
-export interface PlaudConnectionOptions {
-  /** Defaults to ~/.plaud/tokens-sixb.json. Explicitly opt into tokens-mcp.json to reuse MCP login. */
-  tokenFile?: string
-  /** Alternative to tokenFile, for an application-owned secret store. */
-  tokenStore?: PlaudTokenStore
+export interface PlaudConnectorOptions {
+  /** Public client ID obtained from registerPlaudClient(), not the native MCP client ID. */
+  clientId: string
   timeoutMs?: number
-  /** Optional routing header used by the official Plaud client. */
+  /** Optional routing header for direct Plaud API requests. */
   region?: string
-}
-
-export interface PlaudConnectorOptions extends PlaudConnectionOptions {
   /** Delay between API requests. Defaults to 0. */
   minDelayMs?: number
   /** Safe GET retries for network errors, 429 and 5xx. Defaults to 2. */
@@ -19,17 +12,4 @@ export interface PlaudConnectorOptions extends PlaudConnectionOptions {
   downloadHosts?: readonly string[]
   /** Maximum transcript/note body size, in bytes. Defaults to 20 MiB. */
   maxContentBytes?: number
-}
-
-export interface PlaudLoginOptions extends PlaudConnectionOptions {
-  /** Defaults to the public native client shipped in @plaud-ai/mcp 0.3.13. */
-  clientId?: string
-  clientSecret?: string
-  /** Must be registered with Plaud. Default: http://localhost:8199/auth/callback. */
-  redirectUri?: string
-  /** Open or display this URL to the user. Called after the loopback listener is ready. */
-  onAuthorizationUrl(url: string): void | Promise<void>
-  signal?: AbortSignal
-  /** Total interactive login deadline. Defaults to 120 seconds. */
-  loginTimeoutMs?: number
 }

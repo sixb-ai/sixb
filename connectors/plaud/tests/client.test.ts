@@ -1,18 +1,9 @@
 import { afterEach, describe, expect, test } from "bun:test"
 import { PlaudApiError, plaud } from "../src"
-import {
-  block,
-  contentHost,
-  context,
-  details,
-  json,
-  memoryStore,
-  mockFetch,
-  recording,
-} from "./helpers"
+import { block, contentHost, context, details, json, mockFetch, recording } from "./helpers"
 
 const originalFetch = globalThis.fetch
-const client = () => plaud({ tokenStore: memoryStore(), maxRetries: 0 }).connect(context)
+const client = () => plaud({ clientId: "client", maxRetries: 0 }).connect(context)
 afterEach(() => {
   globalThis.fetch = originalFetch
 })
@@ -174,7 +165,7 @@ describe("Plaud data access", () => {
     mockFetch((url) =>
       url.host === contentHost ? new Response("123456") : json(details({ source_list: [block()] }))
     )
-    const c = await plaud({ tokenStore: memoryStore(), maxContentBytes: 5 }).connect(context)
+    const c = await plaud({ clientId: "client", maxContentBytes: 5 }).connect(context)
     await expect(c.transcripts.get("r1")).rejects.toThrow("maxContentBytes")
   })
   test("downloads audio as a stream, with a fresh signed URL and no bearer", async () => {

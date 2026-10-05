@@ -1,16 +1,17 @@
 import { type RestRequestContext, rest } from "@sixb/connector-rest"
 import type { ConnectorAccessToken, ConnectorContext, ConnectorTokenSource } from "@sixb/core"
 import { PlaudApiError } from "./errors"
-import { API_BASE, routingHeaders } from "./oauth"
 import type { PlaudConnectorOptions } from "./types"
 import { signalFor } from "./validation"
 
+const API_BASE = "https://platform.plaud.ai/developer/api/"
 const DEFAULT_DOWNLOAD_HOSTS = ["prod-plaud-content-storage.s3-accelerate.amazonaws.com"]
 
 export async function createHttp(
   context: ConnectorContext,
   tokens: ConnectorTokenSource,
-  options: PlaudConnectorOptions
+  options: PlaudConnectorOptions,
+  allowRefresh = true
 ) {
   const handles = new WeakMap<RestRequestContext, ConnectorAccessToken>()
   const api = await rest({
@@ -25,10 +26,10 @@ export async function createHttp(
       return {
         Accept: "application/json",
         Authorization: `Bearer ${token.accessToken}`,
-        ...routingHeaders(options),
+        ...(options.region ? { "x-pld-region": options.region } : {}),
       }
     },
-    onUnauthorized: (request) => handles.get(request)?.invalidate(),
+    onUnauthorized: allowRefresh ? (request) => handles.get(request)?.invalidate() : undefined,
   }).connect(context)
   const downloads = await rest({
     baseUrl: API_BASE,

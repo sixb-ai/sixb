@@ -1,112 +1,70 @@
-import { createHash, randomBytes, timingSafeEqual } from "node:crypto"
-import { PlaudAuthError } from "./errors"
-import { NATIVE_CLIENT_ID, NATIVE_REDIRECT_URI, tokenRequest } from "./oauth"
-import { resolveTokenStore } from "./token-store"
-import type { PlaudLoginOptions } from "./types"
-import { integer, nonEmpty } from "./validation"
+import { ConnectorOAuthError } from "@sixb/core"
+import { oauthRequest } from "./oauth"
+import type { PlaudClientRegistration, PlaudClientRegistrationOptions } from "./types"
+import { integer, isRecord, nonEmpty } from "./validation"
 
-export { plaudFileTokenStore } from "./token-store"
-export type { PlaudLoginOptions, PlaudTokenStore, PlaudTokens } from "./types"
+export type { PlaudClientRegistration, PlaudClientRegistrationOptions } from "./types"
 
-/** Interactive native OAuth login. No password handling and no browser launched implicitly. */
-export async function loginPlaud(options: PlaudLoginOptions): Promise<void> {
-  const redirect = new URL(options.redirectUri ?? NATIVE_REDIRECT_URI)
+/** Register once per deployment, then pass the returned clientId to plaud(). No user tokens. */
+export async function registerPlaudClient(
+  options: PlaudClientRegistrationOptions
+): Promise<PlaudClientRegistration> {
+  const timeoutMs = integer(options.timeoutMs ?? 30_000, 1, "timeoutMs")
+  const clientName = nonEmpty(options.clientName ?? "Sixb", "clientName")
+  if (clientName.length > 64)
+    throw new Error("[SixbPlaud] clientName must be at most 64 characters.")
+  // Plaud's signed registration binds at most four hosts, each at most 64 characters.
   if (
-    redirect.protocol !== "http:" ||
-    !["localhost", "127.0.0.1", "[::1]"].includes(redirect.hostname) ||
-    !redirect.port ||
-    redirect.username ||
-    redirect.password ||
-    redirect.search ||
-    redirect.hash
+    !Array.isArray(options.redirectUris) ||
+    options.redirectUris.length < 1 ||
+    options.redirectUris.length > 4
   )
-    throw new Error(
-      "[SixbPlaud] redirectUri must be an HTTP loopback URL with an explicit port and no query."
+    throw new Error("[SixbPlaud] Supply between one and four redirectUris.")
+  const redirectUris = options.redirectUris.map((value) => {
+    let url: URL
+    try {
+      url = new URL(value)
+    } catch {
+      throw new Error("[SixbPlaud] Invalid redirect URI.")
+    }
+    if (
+      (url.protocol !== "https:" &&
+        !(
+          url.protocol === "http:" && ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)
+        )) ||
+      url.username ||
+      url.password ||
+      url.hash ||
+      url.host.length > 64
     )
-  const clientId = nonEmpty(options.clientId ?? NATIVE_CLIENT_ID, "clientId")
-  integer(options.timeoutMs ?? 30_000, 1, "timeoutMs")
-  const signal = AbortSignal.any([
-    ...(options.signal ? [options.signal] : []),
-    AbortSignal.timeout(integer(options.loginTimeoutMs ?? 120_000, 1, "loginTimeoutMs")),
-  ])
-  signal.throwIfAborted()
-  const store = resolveTokenStore(options)
-  const verifier = randomBytes(32).toString("base64url")
-  const state = randomBytes(32).toString("base64url")
-  const authorizationUrl = new URL("https://web.plaud.ai/platform/oauth")
-  authorizationUrl.search = new URLSearchParams({
-    client_id: clientId,
-    redirect_uri: redirect.href,
-    response_type: "code",
-    code_challenge: createHash("sha256").update(verifier).digest("base64url"),
-    code_challenge_method: "S256",
-    state,
-  }).toString()
-  let finish!: () => void
-  let fail!: (error: unknown) => void
-  const done = new Promise<void>((resolve, reject) => {
-    finish = resolve
-    fail = reject
-  })
-  // Attach immediately: a callback or abort can arrive while the URL handler is running.
-  void done.catch(() => {})
-  let started = false
-  const server = Bun.serve({
-    hostname: redirect.hostname === "[::1]" ? "::1" : "127.0.0.1",
-    port: Number(redirect.port),
-    async fetch(request) {
-      const url = new URL(request.url)
-      if (request.method !== "GET" || url.pathname !== redirect.pathname)
-        return new Response(null, { status: 404 })
-      const provided = url.searchParams.get("state") ?? ""
-      if (
-        Buffer.byteLength(provided) !== Buffer.byteLength(state) ||
-        !timingSafeEqual(Buffer.from(provided), Buffer.from(state))
+      throw new Error(
+        "[SixbPlaud] Redirect URIs require HTTPS (HTTP loopback is allowed), a host of at most 64 characters, and no credentials or fragment."
       )
-        return new Response("Invalid OAuth state.", { status: 400 })
-      if (started) return new Response("Authorization already in progress.", { status: 409 })
-      if (url.searchParams.has("error")) {
-        fail(new PlaudAuthError("rejected", "Plaud authorization was denied."))
-        return new Response("Authorization denied.", { status: 400 })
-      }
-      const code = url.searchParams.get("code")
-      if (!code) return new Response("Missing authorization code.", { status: 400 })
-      started = true
-      try {
-        const tokens = await tokenRequest(
-          "oauth/third-party/access-token",
-          {
-            code,
-            redirect_uri: redirect.href,
-            code_verifier: verifier,
-            state,
-          },
-          options,
-          signal,
-          Buffer.from(`${clientId}:${options.clientSecret ?? ""}`).toString("base64")
-        )
-        await store.withLock(() => store.save(tokens), signal)
-        finish()
-        return new Response("Plaud authorization successful. You can close this tab.")
-      } catch {
-        fail(
-          new PlaudAuthError("rejected", "Authorization could not be saved. Run loginPlaud again.")
-        )
-        return new Response("Authorization failed. Return to your terminal.", { status: 500 })
-      }
-    },
+    return url.href
   })
-  const aborted = () => fail(signal.reason)
-  signal.addEventListener("abort", aborted, { once: true })
-  try {
-    if (signal.aborted) aborted()
-    await Promise.race([
-      Promise.resolve().then(() => options.onAuthorizationUrl(authorizationUrl.href)),
-      done,
-    ])
-    await done
-  } finally {
-    signal.removeEventListener("abort", aborted)
-    await server.stop(true)
-  }
+  const response = await oauthRequest(
+    "register",
+    JSON.stringify({
+      client_name: clientName,
+      redirect_uris: redirectUris,
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    }),
+    "application/json",
+    timeoutMs,
+    options.signal ?? new AbortController().signal
+  )
+  const registeredUris = isRecord(response) ? response.redirect_uris : undefined
+  if (
+    !isRecord(response) ||
+    typeof response.client_id !== "string" ||
+    !response.client_id.trim() ||
+    response.token_endpoint_auth_method !== "none" ||
+    !Array.isArray(registeredUris) ||
+    registeredUris.length !== redirectUris.length ||
+    !redirectUris.every((uri) => registeredUris.includes(uri))
+  )
+    throw new ConnectorOAuthError("ambiguous", "[SixbPlaud] Invalid client registration response.")
+  return { clientId: response.client_id, redirectUris }
 }
