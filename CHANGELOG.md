@@ -2,6 +2,51 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-05 — Framework 0.1.16
+
+### Highlights
+
+- Scope vector searches with traversals, explicit object references, or set operations before
+  ranking. Resolve the vector profile on the resulting concrete object type and apply object,
+  link, and source-property authorization before selecting the nearest results.
+- Send separate document and query purposes through embedding execution. Vercel AI Gateway
+  translates them for Voyage 4, Voyage 4 Lite, Voyage 4 Large, and Cohere Embed v4.0, with
+  retrieval-aware model identity, disabled truncation, and conservative batching bounds.
+- Preserve embedding purpose through Azure AI Foundry model resolution and expose optional
+  `inputMode` in ontology API responses and generated client types.
+- Reduce SQLite vector-list work to one bounded candidate scan for admission, ranking, and
+  totals, hydrate results after top-k selection, and improve authorized traversal query plans.
+
+### Upgrade notes
+
+- Upgrade core, exact worker/storage consumers, server, client, and CLI together to `0.1.16`.
+  Upgrade Vercel AI Gateway to `0.1.5` and Azure AI Foundry to `0.1.3` when used. No new SQL
+  migration is introduced after `0.1.15`; deployments upgrading from older releases must still
+  apply their intervening migrations and upgrade notes.
+- Existing Voyage/Cohere vector profiles now use asymmetric document/query preparation. This
+  changes their vector configuration identity: old vectors no longer match searches with the
+  new configuration. Explicitly reindex existing objects; a configuration change alone does not
+  trigger a historical backfill. Plan provider costs and reduced search coverage until indexing
+  completes. Unchanged symmetric profiles retain their previous configuration identity.
+- Direct embedding calls to the supported Voyage/Cohere bindings must supply
+  `purpose: "document"` or `purpose: "query"`. Sixb indexing and text search supply it automatically.
+  Custom embedding adapters and wrappers should preserve the optional purpose field and declare
+  asymmetric input mode when preparation differs. Byte batching bounds are not token guarantees.
+- Vector ranking still requires one concrete result type. Pagination, expansion, traversal after
+  ranking, and combined keyword/vector search remain unsupported. SQLite rejects candidate-budget
+  overflow instead of silently ranking a truncated set; narrow the candidate scope when needed.
+- The Gateway adapter retains a route-specific Voyage output-dimension override because the
+  common dimensions field was observed to be ignored on that route. Validate actual dimensions
+  and retrieval quality against the configured live provider before reindexing production data.
+
+### Package versions
+
+- `0.1.16`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.5`: `@sixb/vercel-ai-gateway`.
+- `0.1.3`: `@sixb/azure-ai-foundry`.
+
 ## 2026-10-05 — Framework 0.1.15
 
 ### Highlights
