@@ -9,6 +9,13 @@ export interface ConnectorEntry {
 
 export const connectorCatalog: readonly ConnectorEntry[] = [
   {
+    id: "plaud",
+    name: "Plaud",
+    description: "Recordings, transcripts, notes, and audio exports",
+    category: "Productivity",
+    package: "plaud",
+  },
+  {
     id: "google-ads",
     name: "Google Ads",
     description: "Manager accounts and campaign reporting",

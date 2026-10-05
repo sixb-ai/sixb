@@ -334,6 +334,21 @@
         "@sixb/core": "workspace:^",
       },
     },
+    "connectors/plaud": {
+      "name": "@sixb/connector-plaud",
+      "version": "0.0.1",
+      "dependencies": {
+        "@sixb/connector-rest": "workspace:^",
+      },
+      "devDependencies": {
+        "@sixb/core": "workspace:*",
+        "@types/bun": "latest",
+        "typescript": "^5.7.0",
+      },
+      "peerDependencies": {
+        "@sixb/core": "workspace:^",
+      },
+    },
     "connectors/quickbooks": {
       "name": "@sixb/connector-quickbooks",
       "version": "0.1.1",
@@ -1680,6 +1695,8 @@
     "@sixb/connector-pennylane": ["@sixb/connector-pennylane@workspace:connectors/pennylane"],
 
     "@sixb/connector-pipedrive": ["@sixb/connector-pipedrive@workspace:connectors/pipedrive"],
+
+    "@sixb/connector-plaud": ["@sixb/connector-plaud@workspace:connectors/plaud"],
 
     "@sixb/connector-quickbooks": ["@sixb/connector-quickbooks@workspace:connectors/quickbooks"],
 
