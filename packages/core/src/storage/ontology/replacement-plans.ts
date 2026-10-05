@@ -77,6 +77,12 @@ export type ReplacementPlanStatus =
  * redelivery resumes it, and the candidate's end removes it. Every identity keeps the revision of
  * the inputs its plan was read from. `refresh`, inside the commit transaction, plans again what
  * changed since, so a commit only ever applies a plan that is still exact.
+ *
+ * Every commit records which entities' plan inputs it changed: the objects whose row, override or
+ * telemetry it wrote, the links whose row or edge override it wrote or whose live source assertion
+ * it activated or retired, and the link scopes whose slot override it wrote. `refresh` reads only
+ * what the commits since the plan was last fresh recorded, so its cost follows those commits, not
+ * the size of the plan.
  */
 export interface OntologyReplacementPlanStorage {
   /**
@@ -86,22 +92,26 @@ export interface OntologyReplacementPlanStorage {
   open(input: OpenReplacementPlanInput): Promise<OpenedReplacementPlan>
   /**
    * State of the identities still to plan, in canonical order; each page reads one snapshot. The
-   * link stream first adds the links the planned objects reach: those incident to an object whose
-   * existence flips, and the members of every scope a planned link changes.
+   * link stream first adds the links that identities planned since the previous link stream reach:
+   * those incident to an object whose existence flips, and the members of every scope a planned
+   * link changes.
    */
   streamState(input: StreamReplacementPlanStateInput): AsyncIterable<ReplacementPlanStatePage>
   /** Plans identities streamed since they were last unplanned; each is planned once. */
   stage(input: StageReplacementPlanInput): Promise<void>
   /**
    * Within the commit transaction, before the plan-bound session begins: unplans every planned
-   * identity whose inputs changed, with every identity planned from it. A fresh plan returns the
+   * identity whose inputs a commit changed since the plan was last fresh, with every identity
+   * planned from it, and adds the links such a commit brought within the plan's reach. A plan
+   * older than the changes storage still records is checked whole. A fresh plan returns the
    * change counts its commit reports.
    */
   refresh(input: ReplacementPlanRef): Promise<ReplacementPlanStatus>
   /**
-   * Deletes what is left of plans whose candidate is no longer ready, a bounded number of rows at
-   * a time, and returns how many it deleted. A commit or an abandon may leave its plan behind: the
-   * rows are a cache nothing reads once the candidate moved on.
+   * Deletes what is left of plans whose candidate is no longer ready, and the changes commits
+   * recorded that no ready plan still needs, a bounded number of rows at a time, and returns how
+   * many it deleted. A commit or an abandon may leave its plan behind: the rows are a cache
+   * nothing reads once the candidate moved on.
    */
   purge(input: PurgeReplacementPlansInput): Promise<number>
 }

@@ -14,6 +14,9 @@ runOntologyStorageContractSuite("in-memory ontology storage contract", {
 
 runMaterializerStorageContractSuite("in-memory materializer storage contract", {
   createStorage: () => new InMemoryStorage(),
+  async countCommitTouches(storage) {
+    return getInMemoryOntologyStorageTestingAdapter(storage.ontology).snapshot().commitTouches.size
+  },
 })
 
 runProjectionRunStorageContractSuite("in-memory projection-run storage contract", {

@@ -1,8 +1,9 @@
 import { MaterializationConflictError } from "../../../materialization/errors"
-import { linkScopeSortKey, projectionEntityKey } from "../../../materialization/refs"
+import { linkRefKey, linkScopeSortKey, projectionEntityKey } from "../../../materialization/refs"
 import type { SourceActivationWrite } from "../materializations"
 import type { StoredSourceAssertion, StoredSourceLinkAssertion } from "../sources"
 import { storedSource } from "./materializations-state"
+import type { InMemoryCommitTouches } from "./replacement-plans"
 import {
   type InMemoryOntologyState,
   type InMemorySourceMaterialization,
@@ -37,10 +38,12 @@ export function* previousSourceRows(
   }
 }
 
+/** Activates the candidate's roots, touching each link a root it retires or activates asserts. */
 export function activateSourceRoots(
   state: InMemoryOntologyState,
   candidate: InMemorySourceMaterialization,
-  activation: SourceActivationWrite
+  activation: SourceActivationWrite,
+  touches: InMemoryCommitTouches
 ): void {
   if (
     candidate.base &&
@@ -75,6 +78,7 @@ export function activateSourceRoots(
       sources.delete(candidate.source.projectionId)
       if (sources.size === 0) state.activeSourceRows.delete(indexKey)
       if (row.assertion.kind === "link") {
+        touches.links.add(linkRefKey(row.assertion.ref))
         const scopeKey = projectEntityKey(
           candidate.projectId,
           linkScopeSortKey(row.assertion.ref.source, row.assertion.ref.linkId)
@@ -104,6 +108,7 @@ export function activateSourceRoots(
       sources.set(candidate.source.projectionId, row)
       state.activeSourceRows.set(indexKey, sources)
       if (row.assertion.kind === "link") {
+        touches.links.add(linkRefKey(row.assertion.ref))
         const scopeKey = projectEntityKey(
           candidate.projectId,
           linkScopeSortKey(row.assertion.ref.source, row.assertion.ref.linkId)

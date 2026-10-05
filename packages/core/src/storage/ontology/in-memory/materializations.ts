@@ -82,7 +82,12 @@ import {
   type OntologyOutboxWrite,
   workUniquenessKey,
 } from "./materializations-work"
-import { type InMemoryReplacementPlan, replacementPlanKey } from "./replacement-plans"
+import {
+  emptyCommitTouches,
+  type InMemoryReplacementPlan,
+  replacementPlanKey,
+  touchPlanItem,
+} from "./replacement-plans"
 import {
   assertTimestamp,
   commitKey,
@@ -547,6 +552,8 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
     this.assertCommitAbsent(session.header)
     assertFinalizationCorrelations(session, input.finalization, this.state, this.objects)
     this.hooks.beforeWrite?.("finalize", session.writeOrdinal++)
+    const touches = emptyCommitTouches(commit.projectId)
+    for (const record of session.applyWork) touchPlanItem(touches, record.item)
     for (const activation of input.finalization.sourceActivations) {
       this.hooks.beforeWrite?.("source.activate", session.writeOrdinal++)
       assertTimestamp(activation.datasetVersion.createdAt, "Source dataset version createdAt")
@@ -584,7 +591,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
           }
         )
       }
-      activateSourceRoots(this.state, candidate, activation)
+      activateSourceRoots(this.state, candidate, activation, touches)
       this.state.sourceMaterializations.set(candidateKey, {
         ...candidate,
         status: "active",
@@ -608,6 +615,7 @@ export class InMemoryOntologyMaterializationStorage implements OntologyMateriali
       result: structuredClone(input.finalization.result),
     } as OntologyCommitRecord
     this.state.commitsById.set(commitKey(commit.projectId, commit.id), record)
+    this.state.commitTouches.set(this.state.commitsById.size, touches)
     this.state.commitIdByIdempotency.set(
       idempotencyKey(commit.projectId, commit.idempotencyKey),
       commit.id

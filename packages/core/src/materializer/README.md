@@ -76,28 +76,41 @@ dataset entries
 Source ingress is sealed before commit time is assigned. Activation and ontology commit
 finalization are atomic; the projection run stores no separate commit pointer.
 
-The plan is built outside the commit transaction, which never plans: it refreshes the plan, then
-applies it. The plan is durable and belongs to the candidate:
+The plan is built outside the commit transaction, which refreshes it, then applies it. The plan is
+durable and belongs to the candidate:
 
 ```text
 open      -> the candidate's identities: its entities and those of the roots it replaces
 plan      -> each page reads its state in one snapshot, records the revision of what it read,
              and stages the resulting work; links are planned after objects, then extended to
-             the links of objects whose existence flips and to the members of changed scopes
-refresh   -> in the commit transaction: a planned identity whose inputs moved since is planned
-             again, with the links that now belong to the plan
+             the links of newly planned objects whose existence flips and to the members of
+             newly changed scopes
+refresh   -> in the commit transaction: a planned identity whose inputs a commit touched since
+             is planned again, with the links that commit brought into the plan; a few are
+             planned right there, more are given back to a round outside the transaction
 apply     -> only a plan that refresh found fresh; the commit reports its planned counts
 ```
 
 An identity's revision covers everything its plan read: an object's effective row, override and
 latest telemetry; a link's effective row, edge and slot overrides, live source, and the existence
 of both endpoints (the whole revision of an endpoint the plan decides, whose planned existence
-follows it). When no commit of the project landed since the plan last proved fresh, refresh checks
-nothing; otherwise it reads every planned identity's revision again, in the commit transaction. A
-commit that keeps finding stale identities gives the delivery back after three rounds; the next
-delivery resumes the same plan, as does any redelivery of the run, unless the active source the
-plan replaces moved meanwhile: the plan then starts over. Storage keeps a plan while its candidate
-is ready and maintenance deletes it afterwards, before the candidate itself.
+follows it).
+
+Every commit records the entities whose plan inputs it changed, its touches: the objects whose row,
+override or telemetry it wrote, the links whose row or edge override it wrote or whose live source
+assertion its activation moved, and the scopes whose slot override it wrote. When no commit of the
+project landed since the plan last proved fresh, refresh checks nothing; otherwise it reads again
+only the revisions of identities those commits touched (a link also through its scope and both
+endpoints), so its cost follows the commits, not the plan. A plan older than the touches storage
+still keeps (PostgreSQL purge can race a plan's opening) is checked whole.
+
+A refresh that finds no more stale identities than `transactionReplanRows` (one state page) plans
+them inside the commit transaction, where nothing changes them again, and commits. More are given
+back to another round outside it. A commit that keeps finding many stale identities gives the
+delivery back after three rounds; the next delivery resumes the same plan, as does any redelivery
+of the run, unless the active source the plan replaces moved meanwhile: the plan then starts over.
+Storage keeps a plan while its candidate is ready and maintenance deletes it afterwards, before the
+candidate itself, along with the touches no ready plan still needs.
 
 The commit time is fixed when the plan opens: every planned row carries it as `updatedAt`, every
 planned event as `occurredAt`. A resumed plan keeps it, so a publication that commits later than

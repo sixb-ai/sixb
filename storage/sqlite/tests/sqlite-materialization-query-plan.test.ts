@@ -3,7 +3,12 @@ import { describe, expect, test } from "bun:test"
 import type { OntologyLinkRef, OntologyObjectRef } from "@sixb/core/internal/materialization"
 import { installFreshSqliteSchema } from "../src/migrations"
 import { SqliteMaterializationStateReader } from "../src/ontology-storage/materialization-state"
-import { EXPAND_LINK_STATEMENTS, identityRevision } from "../src/ontology-storage/replacement-plans"
+import {
+  EXPAND_LINK_STATEMENTS,
+  EXPAND_TOUCHED_STATEMENTS,
+  identityRevision,
+  TOUCHED_REFRESH_STATEMENTS,
+} from "../src/ontology-storage/replacement-plans"
 
 interface RecordedQuery {
   readonly sql: string
@@ -220,6 +225,53 @@ describe("SQLite replacement plan query plans", () => {
         expect(seeks.length, name).toBeGreaterThan(0)
         expect(
           seeks.filter((detail) => !/(source|target)_(type_)?id=\?/.test(detail)),
+          name
+        ).toEqual([])
+      }
+    } finally {
+      db.close()
+    }
+  })
+  // Removal proof: drop the `touched` filter from a refresh statement, or the bound on
+  // `expand_at` from link expansion; the statement then walks the plan's identities by version.
+  test("refresh and link expansion seek only what changed, never the whole plan", () => {
+    const db = new Database(":memory:")
+    installFreshSqliteSchema(db)
+    try {
+      const statements = {
+        "refresh.object": TOUCHED_REFRESH_STATEMENTS.object,
+        "refresh.link": TOUCHED_REFRESH_STATEMENTS.link,
+        "touched.incident": EXPAND_TOUCHED_STATEMENTS.incident,
+        "touched.members": EXPAND_TOUCHED_STATEMENTS.members,
+        "expand.incident": EXPAND_LINK_STATEMENTS.incident,
+        "expand.members": EXPAND_LINK_STATEMENTS.members,
+      }
+      const ctes = [
+        "touched",
+        "candidates",
+        "incident_objects",
+        "incident_links",
+        "scopes",
+        "members",
+      ]
+      for (const [name, statement] of Object.entries(statements)) {
+        const plan = db
+          .query<QueryPlanRow, SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${statement}`)
+          .all({ $projectId: projectId, $versionId: 1 })
+          .map(({ detail }) => detail)
+        expect(
+          plan.filter(
+            (detail) =>
+              detail.startsWith("SCAN") &&
+              ![...ctes, "properties"].includes(detail.slice("SCAN ".length))
+          ),
+          name
+        ).toEqual([])
+        // A plan's identities are sought by key, by endpoint or by the expansion they wait for.
+        const identityIndex = /USING (COVERING )?INDEX \w*ontology_replacement_plan_identities/
+        const byKey = /(identity_key|source_key|target_key|expand_at)[=>]\?/
+        expect(
+          plan.filter((detail) => identityIndex.test(detail) && !byKey.test(detail)),
           name
         ).toEqual([])
       }

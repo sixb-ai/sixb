@@ -123,6 +123,7 @@ import compactSourceStorageSql from "./migrations/052-compact-source-storage.sql
 }
 import replacementPlansSql from "./migrations/053-replacement-plans.sql" with { type: "text" }
 import slimOntologyOutboxSql from "./migrations/054-slim-ontology-outbox.sql" with { type: "text" }
+import commitTouchesSql from "./migrations/055-commit-touches.sql" with { type: "text" }
 
 const MIGRATIONS_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS sixb_migrations (
@@ -263,6 +264,7 @@ export const sqliteStorageMigrations = defineMigrations({
       },
       { checksum: checksum(slimOntologyOutboxSql) }
     ),
+    sqliteSql("055-commit-touches", commitTouchesSql),
   ],
 })
 

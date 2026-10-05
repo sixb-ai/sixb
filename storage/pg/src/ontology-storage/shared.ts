@@ -304,3 +304,12 @@ export async function assertProjectionExecution(
 export function ontologyLockKey(kind: string, ...parts: readonly string[]): string {
   return `ontology:${kind}:${JSON.stringify(parts)}`
 }
+
+export function jsonTupleExpression(parts: readonly string[]): string {
+  return `concat('[', ${parts.join(", ',', ")}, ']')`
+}
+
+/** The canonical JSON key of a row's identity columns, as `objectRefKey`/`linkRefKey` render it. */
+export function columnKeyExpression(columns: readonly string[]): string {
+  return jsonTupleExpression(columns.map((column) => `to_jsonb(${column})::text`))
+}
