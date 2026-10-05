@@ -15,6 +15,7 @@ import notion from "../connector-icons/notion.svg"
 import pandadoc from "../connector-icons/pandadoc.png"
 import pennylane from "../connector-icons/pennylane.ico"
 import pipedrive from "../connector-icons/pipedrive.png"
+import plaud from "../connector-icons/plaud.png"
 import quickbooks from "../connector-icons/quickbooks.svg"
 import stripe from "../connector-icons/stripe.svg"
 import teamleader from "../connector-icons/teamleader.ico"
@@ -38,6 +39,7 @@ const connectorIcons: Readonly<Record<string, string>> = {
   pandadoc,
   pennylane,
   pipedrive,
+  plaud,
   quickbooks,
   stripe,
   teamleader,

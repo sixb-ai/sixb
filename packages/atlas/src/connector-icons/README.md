@@ -22,6 +22,7 @@ The following assets were retrieved from icons linked by the services' official 
 - `google.ico`: https://www.google.com/favicon.ico
 - `pandadoc.png`: https://files.readme.io/6ffa2ec-small-icon-192-e5478bae7f.png
 - `microsoft.ico`: https://learn.microsoft.com/favicon.ico
+- `plaud.png`: https://web-static.plaud.ai/plaud-web3/prod-261001-083619-main-7575c8ce1f/favicon-light.png
 
 Adding an icon: drop the file here, then key it by the connector's adapter `type` in
 `../components/ConnectorIcon.tsx` and set `icon` in `apps/docs/src/docs/connectorCatalog.ts`.

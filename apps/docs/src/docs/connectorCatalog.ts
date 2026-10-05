@@ -14,6 +14,7 @@ export const connectorCatalog: readonly ConnectorEntry[] = [
     description: "Recordings, transcripts, notes, and audio exports",
     category: "Productivity",
     package: "plaud",
+    icon: "plaud.png",
   },
   {
     id: "google-ads",
