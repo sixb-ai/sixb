@@ -13,7 +13,9 @@ afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) await cleanup()
 })
 
-async function startSupervisor(): Promise<{ manifestPath: string; root: string }> {
+async function startSupervisor(
+  holdStoppedState = false
+): Promise<{ manifestPath: string; root: string }> {
   const root = await mkdtemp(join(tmpdir(), "sixb-supervisor-"))
   const manifest: ProcessManifest = {
     version: 1,
@@ -59,7 +61,16 @@ async function startSupervisor(): Promise<{ manifestPath: string; root: string }
   )
 
   const supervisor = Bun.spawn(
-    [process.execPath, helper, "supervise", "--manifest", manifestPath],
+    [
+      process.execPath,
+      ...(holdStoppedState
+        ? ["--preload", resolve(import.meta.dir, "fixtures/hold-stopped-state.ts")]
+        : []),
+      helper,
+      "supervise",
+      "--manifest",
+      manifestPath,
+    ],
     {
       stdout: "ignore",
       stderr: "ignore",
@@ -147,6 +158,35 @@ describe("supervisor", () => {
       (value) => value.stdout.includes("listening")
     )
     expect(logs.stdout).toMatch(/^\d\d:\d\d:\d\d api {1}listening$/m)
+  }, 10_000)
+
+  // Reproduce: remove the final awaited writeState() in stopManaged(). The stop response then
+  // overtakes the held state write, leaving status at "stopping" after a successful command.
+  test("publishes the stopped state before acknowledging stop", async () => {
+    const { manifestPath, root } = await startSupervisor(true)
+    await until(
+      () => status(manifestPath),
+      (value) => value.processes[0]?.status === "running"
+    )
+
+    let answered = false
+    const stopped = ctl(manifestPath, "stop", "api").then((result) => {
+      answered = true
+      return result
+    })
+    try {
+      await until(() => Bun.file(join(root, "run", "state-write-held")).exists(), Boolean)
+      expect((await status(manifestPath)).processes[0]?.status).toBe("stopping")
+      // Leave the control client's 100ms response poll time to observe an early acknowledgment.
+      await Bun.sleep(300)
+      expect(answered).toBe(false)
+    } finally {
+      await writeFile(join(root, "run", "release-state-write"), "")
+      await stopped
+    }
+
+    expect((await stopped).exitCode).toBe(0)
+    expect((await status(manifestPath)).processes[0]?.status).toBe("stopped")
   }, 10_000)
 })
 
