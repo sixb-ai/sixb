@@ -2,6 +2,65 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-05 — Framework 0.1.15
+
+### Highlights
+
+- Deploy committed projects over SSH with `sixb deploy`, `defineDeploy` from `@sixb/core/deploy`,
+  and the new `@sixb/deploy-ssh` target. Set up servers, supervise services, configure HTTPS,
+  manage deploy access, and generate a GitHub Actions deployment workflow.
+- Resume projection candidates across retries, supersede stale object/link projection runs, and
+  show the last attempt's failure while a run is retrying. Rebind a projection to another dataset
+  without changing its ID, withdrawing obsolete source values while preserving application edits.
+- Compact PostgreSQL and SQLite source storage and reclaim abandoned projection candidates sooner.
+- Improve PostgreSQL connection-loss handling, explain exhausted lock-table errors, and support
+  explicit direct TLS connections with `sslnegotiation=direct`.
+- Add the FullEnrich connector for enrichment, reverse email lookup, search, signed webhooks, and
+  agent tools. Add Microsoft drive-item previews and connector icons and sync filtering in Atlas.
+- Make `sixb check` exit after printing its report even when provider handles remain open.
+- Add the Plaud connector for recordings, transcripts, notes, and audio downloads, with
+  Sixb-managed OAuth connections and token refresh.
+
+### Upgrade notes
+
+- Upgrade core, exact worker/storage consumers, server, client, and CLI together to `0.1.15`,
+  Atlas to `0.1.13`, and the Microsoft connector to `0.1.2`. Rebuild application assets.
+- Apply PostgreSQL and SQLite migrations 051–052 with old runtime roles stopped. Migration 051
+  admits the terminal projection status `superseded` and errors on retrying runs; SQLite rebuilds
+  `projection_runs`. Migration 052 rewrites source roots and rows with compact numeric references;
+  SQLite also rebuilds the source-version table. Rehearse on a representative `0.1.14` database
+  backup, measure downtime and disk/WAL requirements, and verify projections after migration.
+  Rollback requires a database backup and matching binaries, not just an older application commit.
+  With SQLite, migrate once before starting additional roles with `--no-migrate`.
+- Handle `superseded` in projection status consumers. A `running` run may now have an `error`
+  describing its last failed attempt; it is not necessarily terminal. Telemetry runs are not
+  superseded. Abandoned source candidates no longer wait for `terminalSourceRetentionMs` and
+  are cleaned in larger batches independently of `cleanupLimit`.
+- Direct PostgreSQL TLS requires one TCP endpoint supporting PostgreSQL ALPN (PostgreSQL 17+
+  without an incompatible proxy/pooler) and an explicit TLS mode. Prefer `verify-full` for
+  certificate and hostname verification; `require` does not verify the certificate. Existing
+  TLS negotiation remains the default. The installed postgres.js 3.4.9 still has a known crash
+  window when a connection disappears between statements; retain process supervision.
+- SSH deployment initially targets Ubuntu/Debian with systemd and Caddy. Only committed source
+  is uploaded; keep secrets in the server's `.env`. Setup requires an administrator, and generated
+  CI setup changes repository secrets and authorizes a deploy key. Deployment includes downtime;
+  a failure after stopping services leaves them stopped. Deploying an older ref does not undo
+  migrations. Separate deploy accounts are not isolation from the shared network or Caddy.
+- Authorize Microsoft file access before returning a preview: anyone holding its URL can use it.
+  FullEnrich search/enrichment spends provider credits; expose only the intended agent tools.
+- Plaud requires registering an OAuth client for your deployment and enabling cloud sync.
+  It follows the official Plaud MCP protocol rather than a guaranteed public account API;
+  provider endpoints may change independently. Validate authorization and real account access.
+
+### Package versions
+
+- `0.1.15`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.13`: `@sixb/atlas`.
+- `0.1.2`: `@sixb/connector-microsoft`.
+- Initial `0.1.0`: `@sixb/connector-fullenrich`, `@sixb/connector-plaud`, `@sixb/deploy-ssh`.
+
 ## 2026-09-29 — Framework 0.1.14
 
 ### Highlights

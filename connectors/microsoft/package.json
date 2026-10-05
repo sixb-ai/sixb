@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-microsoft",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Typed Microsoft Graph connector for Sixb (SharePoint, Outlook mail and calendars)",
   "keywords": [
     "sixb",

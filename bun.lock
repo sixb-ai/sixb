@@ -244,7 +244,7 @@
     },
     "connectors/microsoft": {
       "name": "@sixb/connector-microsoft",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "dependencies": {
         "@azure/msal-node": "^6.0.0",
         "@sixb/connector-rest": "workspace:^",
@@ -336,7 +336,7 @@
     },
     "connectors/plaud": {
       "name": "@sixb/connector-plaud",
-      "version": "0.0.1",
+      "version": "0.1.0",
       "dependencies": {
         "@sixb/connector-rest": "workspace:^",
       },
@@ -656,7 +656,7 @@
     },
     "packages/action-worker": {
       "name": "@sixb/action-worker",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -697,7 +697,7 @@
     },
     "packages/agent-worker": {
       "name": "@sixb/agent-worker",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "dependencies": {
         "@sixb/cli-core": "workspace:^",
       },
@@ -739,7 +739,7 @@
     },
     "packages/atlas": {
       "name": "@sixb/atlas",
-      "version": "0.1.12",
+      "version": "0.1.13",
       "dependencies": {
         "@sixb/agent-ui": "workspace:^",
         "@sixb/app": "workspace:^",
@@ -765,7 +765,7 @@
     },
     "packages/cli": {
       "name": "@sixb/cli",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "bin": {
         "sixb": "./src/index.tsx",
       },
@@ -806,7 +806,7 @@
     },
     "packages/client": {
       "name": "@sixb/client",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "dependencies": {
         "@sixb/core": "workspace:^",
       },
@@ -833,7 +833,7 @@
     },
     "packages/core": {
       "name": "@sixb/core",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "devDependencies": {
         "@types/bun": "latest",
         "typescript": "^5.7.0",
@@ -857,7 +857,7 @@
     },
     "packages/orchestrator": {
       "name": "@sixb/orchestrator",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -869,7 +869,7 @@
     },
     "packages/pipeline-worker": {
       "name": "@sixb/pipeline-worker",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -881,7 +881,7 @@
     },
     "packages/projection-worker": {
       "name": "@sixb/projection-worker",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -893,7 +893,7 @@
     },
     "packages/rules-worker": {
       "name": "@sixb/rules-worker",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -905,7 +905,7 @@
     },
     "packages/server": {
       "name": "@sixb/server",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "dependencies": {
         "@elysiajs/cors": "^1.2.0",
         "@elysiajs/openapi": "^1.4.16",
@@ -927,7 +927,7 @@
     },
     "packages/sync-worker": {
       "name": "@sixb/sync-worker",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@sixb/lake-local": "workspace:*",
@@ -985,7 +985,7 @@
     },
     "packages/workflow-worker": {
       "name": "@sixb/workflow-worker",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "devDependencies": {
         "@sixb/core": "workspace:*",
         "@types/bun": "latest",
@@ -1154,7 +1154,7 @@
     },
     "storage/pg": {
       "name": "@sixb/pg",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "dependencies": {
         "postgres": "^3.4.5",
       },
@@ -1169,7 +1169,7 @@
     },
     "storage/sqlite": {
       "name": "@sixb/sqlite",
-      "version": "0.1.14",
+      "version": "0.1.15",
       "dependencies": {
         "sqlite-vec": "0.1.9",
       },

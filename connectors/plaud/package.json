@@ -1,6 +1,6 @@
 {
   "name": "@sixb/connector-plaud",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Plaud recordings, transcripts, notes and audio connector for Sixb",
   "keywords": [
     "sixb",
