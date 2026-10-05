@@ -5,6 +5,8 @@
  * storage backend. Providers can push down the subset they support, while the
  * core planner decides whether a bounded fallback is acceptable.
  */
+
+import type { ModelRef } from "../../models/catalog"
 import type { ObjectRef } from "../../ontology/refs"
 
 export type ObjectQueryDirection = "outgoing" | "incoming"
@@ -29,6 +31,7 @@ export type ObjectQuery =
   | ObjectQueryFilter
   | ObjectQueryText
   | ObjectQueryVector
+  | ObjectQueryRerank
   | ObjectQueryTraverse
   | ObjectQuerySet
   | ObjectQuerySort
@@ -100,6 +103,13 @@ export interface ObjectQueryTraverse {
    * from the link token's owner type.
    */
   sourceObjectTypeId?: string
+}
+
+/** Explicit server-side reordering of a bounded vector candidate set. */
+export interface ObjectQueryRerank {
+  kind: "rerank"
+  input: ObjectQuery
+  model: ModelRef
 }
 
 export interface ObjectQuerySet {

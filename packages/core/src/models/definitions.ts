@@ -5,7 +5,14 @@ import {
   type ModelReasoningCapabilities,
 } from "./language-model"
 
-export type ModelKind = "language" | "image" | "video" | "embedding" | "decision" | "transcription"
+export type ModelKind =
+  | "language"
+  | "image"
+  | "video"
+  | "embedding"
+  | "decision"
+  | "transcription"
+  | "reranking"
 
 /** Common catalog identity shared by every present and future model runtime. */
 export interface ModelDefinition {

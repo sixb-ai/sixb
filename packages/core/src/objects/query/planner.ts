@@ -1,8 +1,9 @@
 import type { ObjectQueryCapabilities, ObjectQueryScalarOperation } from "../../storage"
 import type { ObjectQueryPlanningIssue } from "./errors"
 import type { ObjectExpansion, ObjectQuery, ObjectQueryPredicate, ObjectQuerySortField } from "./ir"
+import { findQueryReranking } from "./reranking-query"
 
-export type ObjectQueryPlanMode = "pushdown" | "fallback" | "rejected"
+export type ObjectQueryPlanMode = "pushdown" | "fallback" | "pipeline" | "rejected"
 export type ObjectQueryProviderOperation =
   | "queryObjects"
   | "countObjects"
@@ -54,6 +55,15 @@ export function planObjectQuery(
   options: ObjectQueryPlanningOptions
 ): ObjectQueryPlan {
   const operation = options.operation ?? "queryObjects"
+  const reranking = findQueryReranking(query)
+  if (reranking) {
+    const candidatePlan = planObjectQuery(reranking.input, options)
+    return {
+      ...candidatePlan,
+      query,
+      mode: candidatePlan.mode === "rejected" ? "rejected" : "pipeline",
+    }
+  }
   // Providers get first refusal. Fallback is considered only after the provider
   // declares that pushdown is unavailable or incomplete for this query.
   const providerIssues = collectProviderIssues(query, options.capabilities, {
@@ -204,6 +214,7 @@ function collectNodeProviderIssues(
       return
     case "text":
     case "vector":
+    case "rerank":
     case "project":
       collectNodeProviderIssues(query.input, `${path}.input`, capabilities, issues)
       return

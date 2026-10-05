@@ -8,6 +8,7 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   prop,
+  type RerankingModel,
   SixbHost,
 } from "@sixb/core"
 import { createTestSixb } from "@sixb/core/testing"
@@ -32,10 +33,21 @@ const Product = defineObjectType({
 })
 
 test("HTTP publishes named profile metadata and preserves cosine scores", async () => {
+  let rerankingCalls = 0
+  const relevance: RerankingModel = {
+    providerId: "test",
+    modelId: "relevance",
+    definition: { kind: "reranking", providerId: "test", modelId: "relevance" },
+    async rerank({ documents }) {
+      rerankingCalls++
+      expect(documents).toEqual(['[["title","Product"]]'])
+      return { results: [{ index: 0, score: 0.85 }], usage: { inputTokens: 5 } }
+    },
+  }
   const host = new SixbHost({
     id: "vector-http",
     ontology: [Product],
-    models: { embedding: [model] },
+    models: { embedding: [model], reranking: [relevance] },
     storage: new InMemoryStorage(),
     broker: new InMemoryBroker(),
     blobStorage: new InMemoryBlobStorage(),
@@ -69,6 +81,23 @@ test("HTTP publishes named profile metadata and preserves cosine scores", async 
     total: 1,
     hasMore: false,
   })
+  expect(rerankingCalls).toBe(0)
+  const reranked = await app.fetch(
+    new Request("http://localhost/api/objects/query", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        query: { kind: "rerank", input: query, model: { provider: "test", modelId: "relevance" } },
+      }),
+    })
+  )
+  expect(reranked.status).toBe(200)
+  expect(await reranked.json()).toMatchObject({
+    objects: [{ primaryId: "one", score: 0.85 }],
+    total: 1,
+    plan: { mode: "pipeline" },
+  })
+  expect(rerankingCalls).toBe(1)
   const metadata = await app.fetch(new Request("http://localhost/api/object-types"))
   expect(metadata.status).toBe(200)
   const text = await metadata.text()
@@ -89,6 +118,12 @@ test("wire vector queries require text and a profile and reject internal stamps"
     k: 1,
   }
   expect(ObjectQuerySchema.safeParse(query).success).toBe(true)
+  const rerank = { kind: "rerank", input: query, model: { provider: "test", modelId: "relevance" } }
+  expect(ObjectQuerySchema.safeParse(rerank).success).toBe(true)
+  expect(
+    ObjectQuerySchema.safeParse({ ...rerank, model: { ...rerank.model, apiKey: "injected" } })
+      .success
+  ).toBe(false)
   expect(ObjectQuerySchema.safeParse({ ...query, vector: [1, 0] }).success).toBe(false)
   expect(ObjectQuerySchema.safeParse({ ...query, propertyId: "raw" }).success).toBe(false)
   expect(ObjectQuerySchema.safeParse({ ...query, configuration: "forged" }).success).toBe(false)

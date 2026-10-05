@@ -119,6 +119,26 @@ limited by the indexer's materialization page. Byte ceilings are scheduling boun
 limits. Other routes use generic requests and provider defaults, without retrieval tuning or
 automatic batching guarantees.
 
+## Reranking models
+
+```ts
+const relevanceModel = vercelGateway.reranking("voyage/rerank-2.5-lite")
+```
+
+Register in `models.reranking` and opt in with `.vector(...).rerank({ model: relevanceModel })`.
+The adapter uses Gateway's [versioned reranking protocol](https://github.com/vercel/ai/blob/main/packages/gateway/src/gateway-reranking-model.ts)
+at `/v4/ai/reranking-model` for text documents and
+retains Gateway charges, routing and request IDs. A configured `baseUrl` ending in `/v1` maps to
+the sibling `/v4/ai` path, preserving any proxy prefix; credentials, headers and fetch are shared.
+Custom proxies must expose that route. Language retry options do not apply.
+
+Each response must rank every document with unique indices and finite scores. Invalid responses
+retain billing metadata. The protocol does not guarantee token usage: Sixb preserves unknown
+tokens instead of inferring them from charges. Known input tariffs support cost reservations;
+missing tariffs block calls under cost limits. Token limits become unavailable after an unmetered
+call. The adapter does not truncate documents; providers may apply their own context limits.
+Direct `.rerank()` calls bypass Sixb accounting; query reranking uses the bound execution.
+
 ## Decision models
 
 ```ts

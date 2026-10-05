@@ -32,6 +32,8 @@ export type {
   ModelCatalogInput,
   ModelDefinitionCatalog,
   ModelRef,
+  RerankingModelCatalog,
+  RerankingModelEntry,
 } from "./catalog"
 export { createModelCatalog } from "./catalog"
 export type { DecisionModelCatalog, DecisionModelEntry } from "./decision/catalog"
@@ -151,4 +153,14 @@ export type {
   ModelUnitPrice,
 } from "./rate-card"
 export { defineModelRateCard } from "./rate-card"
+export type {
+  RerankingModel,
+  RerankingModelDefinition,
+  RerankingModelRef,
+  RerankingModelRequest,
+  RerankingModelResponseMetadata,
+  RerankingModelResult,
+  RerankingResult,
+} from "./reranking-model"
+export { RerankingModelResponseError } from "./reranking-model"
 export type { ModelOutput, ModelTool, ModelToolExecutionContext } from "./tools"

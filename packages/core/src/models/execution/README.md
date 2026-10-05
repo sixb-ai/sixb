@@ -1,6 +1,6 @@
 # Model execution accounting
 
-Internal execution and accounting shared by language, embedding and decision calls. Application usage is
+Internal execution and accounting shared by language, embedding, decision and reranking calls. Application usage is
 documented in [Usage and limits](../../../../../docs/models/usage-and-limits.md).
 
 ## Execution boundary
@@ -46,6 +46,24 @@ replays accounting only, never inference; see the
 Direct provider calls bypass this session. Webhook handlers have no bound model execution attempt;
 they must dispatch an action for accounted calls. A process crash before accounting is captured
 can still leave provider billing outside the ledger.
+
+## Reranking flow
+
+`reranking.ts` binds the registered catalog to the same session. Object queries resolve only that
+catalog, after semantic authorization and before query embedding. The query executor retrieves
+authorized vector candidates first and sends only profile source text; inference holds no storage
+transaction. Outer limits and property selection apply after ranking.
+
+Admission estimates the UTF-8 bytes of each query/document pair divided by four, rounded up, with
+zero output allowance. Actual provider meters are preserved. This is a heuristic, not a tokenizer or provider context guarantee. Calls have
+the shared 30-second cancellation bound, with no inference retry. Accounting precedes cancellation
+and ranking validation. A complete permutation with finite scores is required; ties preserve the
+candidate order. `RerankingModelResponseError` carries metadata from malformed billable responses.
+
+Provider charges remain distinct from token usage: absent tokens stay unknown. Reported costs
+can reconcile monetary reservations; missing token usage cannot reconcile a token limit and makes
+that meter unavailable. Missing tariffs fail admission under cost limits. Recovery remains the
+existing accounting-only replay.
 
 ## Decision flow
 

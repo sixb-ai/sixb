@@ -6,6 +6,8 @@
  * top of this module.
  */
 
+export type { ModelRef } from "./models/catalog"
+export type { RerankingModelDefinition, RerankingModelRef } from "./models/reranking-model"
 export type { ObjectQueryPlanningIssue } from "./objects/query/errors"
 export {
   ObjectQueryExecutionError,
@@ -29,6 +31,7 @@ export type {
   ObjectQueryPredicateNot,
   ObjectQueryProject,
   ObjectQueryRefs,
+  ObjectQueryRerank,
   ObjectQueryResultShape,
   ObjectQuerySet,
   ObjectQuerySetOperation,

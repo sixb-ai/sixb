@@ -117,6 +117,8 @@ export function evaluateObjectQuery(
   source: InMemoryReadSource
 ): QueryEvaluation {
   switch (query.kind) {
+    case "rerank":
+      throw new Error("[Sixb] Reranking must execute in the model runtime, not storage.")
     case "start":
       return evaluateStart(query.objectTypeId, source)
     case "refs":

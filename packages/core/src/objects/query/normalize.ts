@@ -46,6 +46,8 @@ function normalizeNode(query: ObjectQuery): ObjectQuery {
       }
     case "traverse":
       return { ...query, input: normalizeObjectQuery(query.input) }
+    case "rerank":
+      return { ...query, model: { ...query.model }, input: normalizeObjectQuery(query.input) }
     case "set":
       return normalizeSet(query)
     case "sort":

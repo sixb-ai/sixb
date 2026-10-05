@@ -6,6 +6,8 @@
  * `ObjectQueryExecutor` — the server runtime executor or the HTTP client
  * executor — so the same builder serves both sides.
  */
+
+import type { RerankingModelRef } from "../../models/reranking-model"
 import { OntologyValidationError } from "../../ontology/errors"
 import type { LinkToken, ObjectTypeWithPropertyTokens, PropertyToken } from "../../ontology/tokens"
 import { RuntimeError } from "../../runtime/errors"
@@ -115,6 +117,17 @@ class ObjectQueryBuilderImpl<TObjectType extends ObjectTypeWithPropertyTokens> {
       profile,
       vector,
       k: options.k,
+    })
+  }
+
+  rerank(options: { model: RerankingModelRef }): ObjectQueryBuilder<TObjectType> {
+    if (options.model?.definition?.kind !== "reranking") {
+      throw new TypeError("[Sixb] rerank() requires an explicit reranking model.")
+    }
+    return this.withQuery({
+      kind: "rerank",
+      input: this.ir,
+      model: { provider: options.model.providerId, modelId: options.model.modelId },
     })
   }
 

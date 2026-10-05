@@ -137,6 +137,29 @@ or [SQLite setup](https://github.com/sixb-ai/sixb/tree/main/storage/sqlite#vecto
 SQLite's macOS requirements. SQL search has candidate limits; narrow filters if you reach them.
 Indexing and each search call count toward [AI usage and limits](../models/usage-and-limits.md#embeddings).
 
+### Rerank search results
+
+To refine the order of vector results, explicitly select a [registered reranking model](../models/configuration.md#reranking-models):
+
+```ts
+import { relevanceModel } from "./lib/models"
+
+const { objects: products } = await sixb.objects(Product).query()
+  .vector("content", "lightweight running shoes", { k: 50 })
+  .rerank({ model: relevanceModel })
+  .limit(10)
+  .list()
+```
+
+Sixb retrieves up to 50 authorized candidates, sends their profile source text and the query to
+the chosen model, then returns the best 10. `score` is now the model's relevance score, not cosine
+similarity. Reranking cannot recover a relevant object missing from those candidates.
+
+Reranking adds a model call, latency and [AI usage](../models/usage-and-limits.md#reranking).
+Without `.rerank()`, no reranking call occurs. Place it immediately after `vector()`; use at most
+100 candidates and 1 MiB of combined query/document text. Model-specific context limits still apply.
+Counts and facets describe the vector candidates and do not call the reranker.
+
 ## Sort and paginate
 
 Use `orderBy()` to sort and `limit()` to cap the result count. Sorted properties need

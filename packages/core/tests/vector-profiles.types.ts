@@ -1,8 +1,16 @@
-import { defineObjectType, type EmbeddingModel, link, type ObjectVectorHandle, prop } from "../src"
+import {
+  defineObjectType,
+  type EmbeddingModel,
+  link,
+  type ObjectVectorHandle,
+  prop,
+  type RerankingModel,
+} from "../src"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 declare const model: EmbeddingModel
+declare const relevance: RerankingModel
 const Product = defineObjectType({
   id: "VectorProduct",
   name: "Product",
@@ -22,6 +30,14 @@ const sixb = createTestSixb({
 })
 const profile: ObjectVectorHandle = sixb.objects(Product).byId("one").vector("content")
 sixb.objects(Product).query().vector("content", "search", { k: 1 })
+sixb
+  .objects(Product)
+  .query()
+  .vector("content", "search", { k: 50 })
+  .rerank({ model: relevance })
+  .limit(10)
+// @ts-expect-error an embedding model cannot serve as a reranker
+sixb.objects(Product).query().vector("content", "search", { k: 50 }).rerank({ model })
 const linkedProducts = sixb.objects(Collection).query().traverse(Collection.l.products)
 linkedProducts.vector("content", "search", { k: 1 })
 // @ts-expect-error an outgoing direct target retains its known profiles

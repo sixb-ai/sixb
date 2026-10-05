@@ -109,6 +109,31 @@ describe("objects().query()", () => {
     expect(calls[1]?.body).toMatchObject({
       query: { profile: "content", vector: "find a dashboard" },
     })
+    const reranker = {
+      providerId: "test",
+      modelId: "relevance",
+      definition: { kind: "reranking" as const, providerId: "test", modelId: "relevance" },
+      apiKey: "server-only",
+    }
+    await objects(VectorProject, { client })
+      .query()
+      .vector("content", "find", { k: 50 })
+      .rerank({ model: reranker })
+      .limit(10)
+      .list()
+    expect(calls[2]?.body).toMatchObject({
+      query: {
+        kind: "limit",
+        limit: 10,
+        input: {
+          kind: "rerank",
+          model: { provider: "test", modelId: "relevance" },
+          input: { kind: "vector", vector: "find", k: 50 },
+        },
+      },
+    })
+    expect(JSON.stringify(calls[2]?.body)).not.toContain("server-only")
+    expect(JSON.stringify(calls[2]?.body)).not.toContain("definition")
   })
 
   test("list() posts the normalized IR and revives row dates", async () => {

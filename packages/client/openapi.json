@@ -115,7 +115,7 @@
         "properties": {
           "mode": {
             "type": "string",
-            "enum": ["pushdown", "fallback", "rejected"]
+            "enum": ["pushdown", "fallback", "pipeline", "rejected"]
           },
           "providerIssues": {
             "type": "array",
@@ -573,6 +573,35 @@
               "k": {
                 "type": "integer",
                 "minimum": 1
+              }
+            }
+          },
+          {
+            "type": "object",
+            "required": ["kind", "input", "model"],
+            "additionalProperties": false,
+            "properties": {
+              "kind": {
+                "type": "string",
+                "enum": ["rerank"]
+              },
+              "input": {
+                "$ref": "#/components/schemas/ObjectQuery"
+              },
+              "model": {
+                "type": "object",
+                "required": ["provider", "modelId"],
+                "additionalProperties": false,
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "modelId": {
+                    "type": "string",
+                    "minLength": 1
+                  }
+                }
               }
             }
           },
