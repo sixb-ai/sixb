@@ -1,194 +1,338 @@
 import { afterEach, expect, test } from "bun:test"
-import { mkdtemp, readdir, readFile, rm, stat } from "node:fs/promises"
-import { tmpdir } from "node:os"
-import { join } from "node:path"
-import { PlaudAuthError, plaud } from "../src"
-import { plaudFileTokenStore } from "../src/auth"
-import { createTokenSource } from "../src/oauth"
-import { context, details, json, memoryStore, mockFetch } from "./helpers"
+import { ConnectorOAuthError } from "@sixb/core"
+import { plaud } from "../src"
+import { registerPlaudClient } from "../src/auth"
+import { context, details, json, mockFetch } from "./helpers"
 
 const originalFetch = globalThis.fetch
-const directories: string[] = []
-afterEach(async () => {
+afterEach(() => {
   globalThis.fetch = originalFetch
-  for (const dir of directories.splice(0)) await rm(dir, { recursive: true, force: true })
 })
-const expired = () => ({
-  access_token: "old",
-  refresh_token: "refresh-1",
-  expires_at: Date.now() - 1_000,
+const oauthContext = { ...context, redirectUri: "http://localhost:8200/auth/connectors/callback" }
+const credentials = { accessToken: "access", refreshToken: "refresh" }
+const tokenResponse = {
+  access_token: "new-access",
+  refresh_token: "new-refresh",
+  token_type: "bearer",
+  expires_in: 3600,
+}
+const auth = () => plaud({ clientId: "client" }).authentication
+
+test("public registration binds the deployment callbacks without a client secret", async () => {
+  const redirectUris = [oauthContext.redirectUri, "https://example.test/auth/connectors/callback"]
+  let calls = 0
+  mockFetch((url, init) => {
+    calls++
+    expect(url.href).toBe("https://mcp.plaud.ai/register")
+    expect(init.method).toBe("POST")
+    expect(init.redirect).toBe("error")
+    expect(new Headers(init.headers).has("authorization")).toBe(false)
+    expect(JSON.parse(String(init.body))).toEqual({
+      client_name: "Sixb",
+      redirect_uris: redirectUris,
+      grant_types: ["authorization_code", "refresh_token"],
+      response_types: ["code"],
+      token_endpoint_auth_method: "none",
+    })
+    return json(
+      { client_id: "registered", redirect_uris: redirectUris, token_endpoint_auth_method: "none" },
+      201
+    )
+  })
+  expect(await registerPlaudClient({ redirectUris })).toEqual({
+    clientId: "registered",
+    redirectUris,
+  })
+  plaud({ clientId: "registered" })
+  expect(calls).toBe(1)
 })
 
-test("missing tokens explain how to authorize", async () => {
-  await expect(
-    createTokenSource({ tokenStore: memoryStore(null) }, context.signal).get()
-  ).rejects.toThrow("loginPlaud")
-})
-test("refreshes once for concurrent clients, persists rotated credentials before use", async () => {
-  const store = memoryStore(expired())
-  let calls = 0
-  mockFetch(async (url, init) => {
-    calls++
-    expect(url.pathname).toBe("/developer/api/oauth/third-party/access-token/refresh")
-    expect(new URLSearchParams(String(init.body)).get("refresh_token")).toBe("refresh-1")
-    expect(new Headers(init.headers).has("authorization")).toBe(false)
-    expect((await store.load())?.refresh_pending).toBe(true)
-    return json({
-      access_token: "new",
-      refresh_token: "refresh-2",
-      token_type: "Bearer",
-      expires_in: 3600,
-    })
-  })
-  const a = createTokenSource({ tokenStore: store }, context.signal)
-  const b = createTokenSource({ tokenStore: store }, context.signal)
-  const values = await Promise.all(Array.from({ length: 12 }, (_, i) => (i % 2 ? a : b).get()))
-  expect(values.every((v) => v.accessToken === "new")).toBe(true)
-  expect(calls).toBe(1)
-  expect(await store.load()).toMatchObject({ access_token: "new", refresh_token: "refresh-2" })
-  expect((await store.load())?.refresh_pending).toBeUndefined()
-})
-test("401 refresh retries only once and invalidates the rejected token", async () => {
-  // Guard check: remove onUnauthorized in src/http.ts; this test must fail on the first 401.
-  const store = memoryStore({ access_token: "old", refresh_token: "refresh-1" })
-  let api = 0
-  let refresh = 0
-  mockFetch((url, init) => {
-    if (url.pathname.endsWith("/refresh")) {
-      refresh++
-      return json({ access_token: "new", expires_in: 3600 })
-    }
-    api++
-    return new Headers(init.headers).get("authorization") === "Bearer old"
-      ? json({}, 401)
-      : json(details())
-  })
-  const client = await plaud({ tokenStore: store }).connect(context)
-  await client.recordings.get("r1")
-  expect(api).toBe(2)
-  expect(refresh).toBe(1)
-  expect((await store.load())?.refresh_token).toBe("refresh-1")
-})
-test("late rejection of an old access token cannot rotate the new token again", async () => {
-  const store = memoryStore({ access_token: "old", refresh_token: "refresh-1" })
-  let count = 0
-  mockFetch(() => {
-    count++
-    return json({ access_token: "new", refresh_token: "refresh-2", expires_in: 3600 })
-  })
-  const source = createTokenSource({ tokenStore: store }, context.signal)
-  const [a, b] = await Promise.all([source.get(), source.get()])
-  a.invalidate()
-  await source.get()
-  b.invalidate()
-  expect((await source.get()).accessToken).toBe("new")
-  expect(count).toBe(1)
-})
-test("a second 401 is surfaced, with no refresh loop", async () => {
-  let count = 0
-  mockFetch((url) => {
-    count++
-    return url.pathname.endsWith("/refresh")
-      ? json({ access_token: "new", expires_in: 3600 })
-      : json({}, 401)
-  })
-  const client = await plaud({ tokenStore: memoryStore() }).connect(context)
-  await expect(client.recordings.get("r1")).rejects.toThrow("HTTP 401")
-  expect(count).toBe(3)
-})
-test("uncertain refresh is durably fenced, even for a new client", async () => {
-  const store = memoryStore(expired())
+test("invalid registration input is rejected before network access", async () => {
   let calls = 0
   mockFetch(() => {
     calls++
-    throw new Error("network includes a secret URL")
+    return json({})
   })
-  const client = await plaud({ tokenStore: store }).connect(context)
-  await expect(client.recordings.get("r1")).rejects.toBeInstanceOf(PlaudAuthError)
-  expect((await store.load())?.refresh_pending).toBe(true)
-  await expect(createTokenSource({ tokenStore: store }, context.signal).get()).rejects.toThrow(
-    "uncertain"
-  )
-  expect(calls).toBe(1)
-})
-test("failed persistence after rotation never returns an undurable token", async () => {
-  const store = memoryStore(expired())
-  const save = store.save
-  store.save = async (tokens) => {
-    if (tokens.access_token === "new") throw new Error("disk full")
-    await save(tokens)
-  }
-  mockFetch(() => json({ access_token: "new", refresh_token: "refresh-2", expires_in: 3600 }))
-  await expect(createTokenSource({ tokenStore: store }, context.signal).get()).rejects.toThrow(
-    "safely"
-  )
-  expect((await store.load())?.refresh_pending).toBe(true)
-})
-test("rate limiting preserves credentials and allows a later refresh", async () => {
-  const store = memoryStore(expired())
-  mockFetch(() => json({}, 429))
-  const source = createTokenSource({ tokenStore: store }, context.signal)
-  await expect(source.get()).rejects.toThrow("HTTP 429")
-  expect((await store.load())?.refresh_pending).toBeUndefined()
-  mockFetch(() => json({ access_token: "new", expires_in: 3600 }))
-  expect((await source.get()).accessToken).toBe("new")
-})
-test("rejected and malformed refreshes require reauthorization without secret leakage", async () => {
-  for (const response of [
-    () => json({ message: "secret" }, 401),
-    () => json({ access_token: "secret", expires_in: -5 }),
-    () => json({ access_token: "secret", token_type: "Basic" }),
+  for (const redirectUris of [
+    [],
+    ["invalid"],
+    ["http://example.test/callback"],
+    ["https://a.test/#fragment"],
+    ["https://user:secret@a.test/"],
+    Array(5).fill(oauthContext.redirectUri),
   ]) {
-    mockFetch(response)
-    const source = createTokenSource({ tokenStore: memoryStore(expired()) }, context.signal)
+    await expect(registerPlaudClient({ redirectUris })).rejects.toThrow("[SixbPlaud]")
+  }
+  await expect(
+    registerPlaudClient({ redirectUris: [oauthContext.redirectUri], clientName: "x".repeat(65) })
+  ).rejects.toThrow("clientName")
+  expect(calls).toBe(0)
+})
+
+test("registration validates the returned client and callbacks", async () => {
+  for (const response of [
+    {
+      client_id: "",
+      token_endpoint_auth_method: "none",
+      redirect_uris: [oauthContext.redirectUri],
+    },
+    {
+      client_id: "client",
+      token_endpoint_auth_method: "client_secret_basic",
+      redirect_uris: [oauthContext.redirectUri],
+    },
+    {
+      client_id: "client",
+      token_endpoint_auth_method: "none",
+      redirect_uris: ["https://unexpected.test/"],
+    },
+  ]) {
+    mockFetch(() => json(response))
+    await expect(registerPlaudClient({ redirectUris: [oauthContext.redirectUri] })).rejects.toThrow(
+      "Invalid client registration"
+    )
+  }
+})
+
+test("authorization forwards Sixb state, callback and S256 challenge to the official OAuth server", async () => {
+  const authentication = auth()
+  expect(authentication.pkce).toBe("S256")
+  const url = new URL(
+    await authentication.authorizationUrl(oauthContext, {
+      state: "sixb-state",
+      codeChallenge: "challenge",
+      codeChallengeMethod: "S256",
+    })
+  )
+  expect(url.origin + url.pathname).toBe("https://mcp.plaud.ai/authorize")
+  expect(Object.fromEntries(url.searchParams)).toEqual({
+    client_id: "client",
+    response_type: "code",
+    redirect_uri: oauthContext.redirectUri,
+    state: "sixb-state",
+    code_challenge: "challenge",
+    code_challenge_method: "S256",
+  })
+  expect(() => authentication.authorizationUrl(oauthContext, { state: "state" })).toThrow(
+    "PKCE S256"
+  )
+})
+
+test("code exchange uses a public client and the Sixb PKCE verifier without callback state", async () => {
+  mockFetch((url, init) => {
+    expect(url.href).toBe("https://mcp.plaud.ai/token")
+    expect(new Headers(init.headers).has("authorization")).toBe(false)
+    expect(new Headers(init.headers).get("content-type")).toBe("application/x-www-form-urlencoded")
+    expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({
+      client_id: "client",
+      grant_type: "authorization_code",
+      code: "code",
+      redirect_uri: oauthContext.redirectUri,
+      code_verifier: "verifier",
+    })
+    return json(tokenResponse)
+  })
+  const result = await auth().exchangeCode(oauthContext, { code: "code", codeVerifier: "verifier" })
+  expect(result).toMatchObject({
+    accessToken: "new-access",
+    refreshToken: "new-refresh",
+    tokenType: "Bearer",
+  })
+  expect(result.expiresAt?.getTime()).toBeGreaterThan(Date.now())
+})
+
+test("refresh uses the same public endpoint and lets Sixb retain an omitted refresh token", async () => {
+  mockFetch((url, init) => {
+    expect(url.href).toBe("https://mcp.plaud.ai/token")
+    expect(Object.fromEntries(new URLSearchParams(String(init.body)))).toEqual({
+      client_id: "client",
+      grant_type: "refresh_token",
+      refresh_token: "refresh",
+    })
+    expect(new Headers(init.headers).has("authorization")).toBe(false)
+    return json({ access_token: "new", token_type: "Bearer" })
+  })
+  expect(await auth().refresh(context, credentials)).toEqual({
+    accessToken: "new",
+    tokenType: "Bearer",
+  })
+  expect(() => auth().refresh(context, { accessToken: "access" })).toThrow("Missing refresh token")
+})
+
+test("JWT expiry is a scheduling hint when expires_in is absent; opaque tokens remain valid", async () => {
+  const access = `header.${Buffer.from(JSON.stringify({ exp: 2_000_000_000 })).toString("base64url")}.signature`
+  mockFetch(() => json({ access_token: access }))
+  expect((await auth().refresh(context, credentials)).expiresAt?.getTime()).toBe(2_000_000_000_000)
+  mockFetch(() => json({ access_token: "opaque" }))
+  expect((await auth().refresh(context, credentials)).expiresAt).toBeUndefined()
+})
+
+test("OAuth errors are classified without exposing response bodies or replaying mutations", async () => {
+  for (const [status, kind] of [
+    [400, "terminal"],
+    [401, "terminal"],
+    [403, "terminal"],
+    [429, "retryable"],
+    [503, "ambiguous"],
+  ] as const) {
+    let calls = 0
+    mockFetch(() => {
+      calls++
+      return json({ error: "secret" }, status)
+    })
     try {
-      await source.get()
-      throw new Error("expected failure")
+      await auth().refresh(context, credentials)
+      throw new Error("expected rejection")
     } catch (error) {
-      expect(error).toBeInstanceOf(PlaudAuthError)
+      expect(error).toBeInstanceOf(ConnectorOAuthError)
+      expect(error).toHaveProperty("kind", kind)
+      expect(String(error)).not.toContain("secret")
+    }
+    expect(calls).toBe(1)
+  }
+  let calls = 0
+  mockFetch(() => {
+    calls++
+    throw new Error("secret network details")
+  })
+  await expect(auth().refresh(context, credentials)).rejects.toThrow("outcome is unknown")
+  expect(calls).toBe(1)
+})
+
+test("malformed successful token responses have an ambiguous outcome", async () => {
+  for (const response of [
+    {},
+    { access_token: "" },
+    { access_token: "secret", refresh_token: "" },
+    { access_token: "secret", token_type: "Basic" },
+    { access_token: "secret", expires_in: -1 },
+    { access_token: "secret", expires_in: 1e30 },
+  ]) {
+    mockFetch(() => json(response))
+    try {
+      await auth().refresh(context, credentials)
+      throw new Error("expected rejection")
+    } catch (error) {
+      expect(error).toHaveProperty("kind", "ambiguous")
       expect(String(error)).not.toContain("secret")
     }
   }
+  mockFetch(() => new Response("invalid JSON"))
+  await expect(auth().refresh(context, credentials)).rejects.toThrow("Invalid OAuth JSON")
 })
-test("JWT expiry is used when expires_at is absent", async () => {
-  const access = `header.${Buffer.from(JSON.stringify({ exp: 1 })).toString("base64url")}.signature`
-  mockFetch(() => json({ access_token: "new", expires_in: 3600 }))
-  expect(
-    (
-      await createTokenSource(
-        { tokenStore: memoryStore({ access_token: access, refresh_token: "r" }) },
-        context.signal
-      ).get()
-    ).accessToken
-  ).toBe("new")
-})
-test("file store writes atomically with restricted permissions and coordinates separate instances", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sixb-plaud-"))
-  directories.push(dir)
-  const path = join(dir, "tokens.json")
-  const a = plaudFileTokenStore(path)
-  const b = plaudFileTokenStore(path)
-  expect(await a.load()).toBeNull()
-  await a.save(expired())
-  let refreshes = 0
-  mockFetch(() => {
-    refreshes++
-    return json({ access_token: "new", refresh_token: "rotated", expires_in: 3600 })
+
+test("account discovery maps the authenticated profile and does not replay a rejected fixed token", async () => {
+  const user = { id: "user", email: "user@example.test", nickname: "Example", avatar: null }
+  mockFetch((url, init) => {
+    expect(url.pathname).toBe("/developer/api/open/third-party/users/current")
+    expect(new Headers(init.headers).get("authorization")).toBe("Bearer access")
+    return json(user)
   })
-  await Promise.all(
-    [a, b].map((tokenStore) => createTokenSource({ tokenStore }, context.signal).get())
-  )
-  expect(refreshes).toBe(1)
-  expect((await stat(path)).mode & 0o777).toBe(0o600)
-  expect(JSON.parse(await readFile(path, "utf8")).refresh_token).toBe("rotated")
-  expect(await readdir(dir)).toEqual(["tokens.json"])
+  expect(await plaud({ clientId: "client" }).discoverAccounts(context, credentials)).toEqual([
+    { id: "user", label: "Example", description: "user@example.test" },
+  ])
+  let calls = 0
+  mockFetch(() => {
+    calls++
+    return json({}, 401)
+  })
+  await expect(
+    plaud({ clientId: "client" }).discoverAccounts(context, credentials)
+  ).rejects.toThrow("HTTP 401")
+  expect(calls).toBe(1)
 })
-test("abort releases file locks without touching credentials", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "sixb-plaud-"))
-  directories.push(dir)
-  const store = plaudFileTokenStore(join(dir, "tokens.json"))
-  await store.save({ access_token: "saved" })
-  await expect(store.withLock(async () => {}, AbortSignal.abort())).rejects.toThrow()
-  expect((await store.load())?.access_token).toBe("saved")
-  expect(await readdir(dir)).toEqual(["tokens.json"])
+
+test("401 invalidates the exact rejected Sixb token and reacquires credentials for replay", async () => {
+  // Removal proof: remove onUnauthorized in src/http.ts; this test fails on the first 401.
+  let gets = 0
+  const invalidated: number[] = []
+  const client = await plaud({ clientId: "client" }).connect({
+    ...context,
+    tokenSource: {
+      async get() {
+        const revision = ++gets
+        return {
+          accessToken: `token-${revision}`,
+          invalidate() {
+            invalidated.push(revision)
+          },
+        }
+      },
+    },
+  })
+  let calls = 0
+  mockFetch((_url, init) => {
+    calls++
+    expect(new Headers(init.headers).get("authorization")).toBe(`Bearer token-${calls}`)
+    return calls === 1 ? json({}, 401) : json(details())
+  })
+  await client.recordings.get("r1")
+  expect(calls).toBe(2)
+  expect(gets).toBe(2)
+  expect(invalidated).toEqual([1])
+})
+
+test("a second 401 is surfaced without a refresh loop", async () => {
+  let calls = 0
+  mockFetch(() => {
+    calls++
+    return json({}, 401)
+  })
+  const client = await plaud({ clientId: "client" }).connect(context)
+  await expect(client.recordings.get("r1")).rejects.toThrow("HTTP 401")
+  expect(calls).toBe(2)
+})
+
+test("concurrent requests invalidate their own token handles", async () => {
+  // Removal proof: replace the WeakMap lookup with a shared latest token in src/http.ts.
+  let gets = 0
+  const invalidated: number[] = []
+  let release!: () => void
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  const client = await plaud({ clientId: "client" }).connect({
+    ...context,
+    tokenSource: {
+      async get() {
+        const revision = ++gets
+        return {
+          accessToken: `t${revision}`,
+          invalidate() {
+            invalidated.push(revision)
+          },
+        }
+      },
+    },
+  })
+  mockFetch(async (_url, init) => {
+    const token = new Headers(init.headers).get("authorization")
+    if (token === "Bearer t1") {
+      await gate
+      return json({}, 401)
+    }
+    if (token === "Bearer t2") release()
+    return json(details())
+  })
+  await Promise.all([client.recordings.get("r1"), client.recordings.get("r1")])
+  expect(invalidated).toEqual([1])
+  expect(gets).toBe(3)
+})
+
+test("cancellation stops OAuth before fetch, and timeouts are ambiguous without replay", async () => {
+  let calls = 0
+  mockFetch((_url, init) => {
+    calls++
+    return new Promise((_resolve, reject) => {
+      init.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true })
+    })
+  })
+  await expect(
+    auth().refresh({ ...context, signal: AbortSignal.abort(new Error("stop")) }, credentials)
+  ).rejects.toThrow("stop")
+  expect(calls).toBe(0)
+  await expect(
+    plaud({ clientId: "client", timeoutMs: 5 }).authentication.refresh(context, credentials)
+  ).rejects.toThrow("outcome is unknown")
+  expect(calls).toBe(1)
 })

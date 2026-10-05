@@ -1,21 +1,20 @@
 import { createPlaudClient } from "./client"
 import { createHttp } from "./http"
-import { createTokenSource } from "./oauth"
+import { createPlaudOAuth } from "./oauth"
 import type { PlaudConnector, PlaudConnectorOptions } from "./types"
-import { integer } from "./validation"
+import { integer, nonEmpty } from "./validation"
 
-/** Personal Plaud account access using the HTTP endpoints behind Plaud's official MCP/CLI. */
-export function plaud(input: PlaudConnectorOptions = {}): PlaudConnector {
+/** Plaud data access with the authorization lifecycle owned by Sixb. */
+export function plaud(input: PlaudConnectorOptions): PlaudConnector {
   const options = {
     ...input,
     downloadHosts: input.downloadHosts ? [...input.downloadHosts] : undefined,
   }
+  nonEmpty(options.clientId, "clientId")
   integer(options.timeoutMs ?? 30_000, 1, "timeoutMs")
   integer(options.maxRetries ?? 2, 0, "maxRetries")
   integer(options.minDelayMs ?? 0, 0, "minDelayMs")
   integer(options.maxContentBytes ?? 20 * 1024 * 1024, 1, "maxContentBytes")
-  if (options.tokenFile && options.tokenStore)
-    throw new Error("[SixbPlaud] Supply tokenFile or tokenStore, not both.")
   for (const host of options.downloadHosts ?? []) {
     if (
       !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/i.test(host) ||
@@ -28,11 +27,28 @@ export function plaud(input: PlaudConnectorOptions = {}): PlaudConnector {
   }
   return {
     type: "plaud",
+    authentication: createPlaudOAuth(options),
+    async discoverAccounts(context, credentials) {
+      const client = createPlaudClient(
+        await createHttp(
+          context,
+          {
+            async get() {
+              return { accessToken: credentials.accessToken, invalidate() {} }
+            },
+          },
+          options,
+          false
+        )
+      )
+      const user = await client.users.current()
+      return [
+        { id: user.id, label: user.nickname || user.email || user.id, description: user.email },
+      ]
+    },
     async connect(context) {
       context.signal.throwIfAborted()
-      return createPlaudClient(
-        await createHttp(context, createTokenSource(options, context.signal), options)
-      )
+      return createPlaudClient(await createHttp(context, context.tokenSource, options))
     },
   }
 }

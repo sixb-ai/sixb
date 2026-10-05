@@ -1,9 +1,14 @@
-import type { PlaudTokenStore, PlaudTokens } from "../src"
-
 export const context = {
   projectId: "test",
   connectorId: "plaud",
   signal: new AbortController().signal,
+  connectionId: "connection",
+  account: { id: "user", label: "Example" },
+  tokenSource: {
+    async get() {
+      return { accessToken: "access", invalidate() {} }
+    },
+  },
 }
 export const contentHost = "prod-plaud-content-storage.s3-accelerate.amazonaws.com"
 export const recording = (id = "r1") => ({
@@ -34,29 +39,4 @@ export function json(value: unknown, status = 200) {
 export function mockFetch(fn: (url: URL, init: RequestInit) => Promise<Response> | Response) {
   globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) =>
     Promise.resolve(fn(new URL(String(input)), init ?? {}))) as typeof fetch
-}
-export function memoryStore(
-  initial: PlaudTokens | null = { access_token: "access", refresh_token: "refresh" }
-): PlaudTokenStore {
-  let tokens = initial
-  let queue = Promise.resolve()
-  return {
-    async load() {
-      return tokens ? { ...tokens } : null
-    },
-    async save(value) {
-      tokens = { ...value }
-    },
-    async withLock(operation, signal) {
-      const next = queue.then(() => {
-        signal.throwIfAborted()
-        return operation()
-      })
-      queue = next.then(
-        () => undefined,
-        () => undefined
-      )
-      return next
-    },
-  }
 }

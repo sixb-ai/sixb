@@ -1,4 +1,4 @@
-import type { ConnectorAdapter } from "@sixb/core"
+import type { OAuthConnectorAdapter } from "@sixb/core"
 import type { PlaudContentBlock, PlaudRequestOptions } from "./common"
 import type {
   PlaudIterateOptions,
@@ -31,4 +31,4 @@ export interface PlaudClient {
   notes: { list(id: string, options?: PlaudRequestOptions): Promise<PlaudContentBlock[]> }
 }
 
-export type PlaudConnector = ConnectorAdapter<"plaud", PlaudClient>
+export type PlaudConnector = OAuthConnectorAdapter<"plaud", PlaudClient>

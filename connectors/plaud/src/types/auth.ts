@@ -1,17 +1,14 @@
-/** Compatible with the official Plaud MCP/CLI token files. Never log this object. */
-export interface PlaudTokens {
-  access_token: string
-  refresh_token?: string
-  token_type?: string
-  /** Unix milliseconds. */
-  expires_at?: number
-  /** A refresh may have rotated the token without a durable response. Reauthorize to recover. */
-  refresh_pending?: boolean
+export interface PlaudClientRegistrationOptions {
+  /** Exact Sixb API callback URLs. HTTPS, or HTTP on loopback for local development. */
+  redirectUris: readonly string[]
+  /** Display name registered with Plaud. Defaults to Sixb. */
+  clientName?: string
+  timeoutMs?: number
+  signal?: AbortSignal
 }
 
-/** Implement withLock across all processes sharing this store. */
-export interface PlaudTokenStore {
-  load(): Promise<PlaudTokens | null>
-  save(tokens: PlaudTokens): Promise<void>
-  withLock<T>(operation: () => Promise<T>, signal: AbortSignal): Promise<T>
+export interface PlaudClientRegistration {
+  /** Public OAuth client identifier. Save it as deployment configuration. */
+  clientId: string
+  redirectUris: readonly string[]
 }
