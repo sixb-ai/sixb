@@ -103,6 +103,7 @@ export type RemoteItem = Partial<
 /**
  * Short-lived embeddable URLs, minted with the connector's identity. Treat them as credentials:
  * never persist or log them. Graph returns getUrl, or postUrl with postParameters, or both.
+ * Null fields returned by Graph are omitted from the result.
  */
 export interface DriveItemPreview {
   readonly getUrl?: string

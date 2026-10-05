@@ -107,7 +107,12 @@ function previewBody(options?: PreviewOptions): Record<string, unknown> {
 
 function previewInfo(value: unknown): DriveItemPreview {
   if (!isRecord(value)) throw new MicrosoftProtocolError("Graph returned an invalid preview.")
-  const { getUrl, postUrl, postParameters } = value
+  const preview = { ...value }
+  // Graph can return null for unused preview fields; expose them as absent optional strings.
+  for (const key of ["getUrl", "postUrl", "postParameters"]) {
+    if (preview[key] === null) delete preview[key]
+  }
+  const { getUrl, postUrl, postParameters } = preview
   // The caller embeds these in a page: anything but an HTTPS URL could run script there.
   for (const url of [getUrl, postUrl]) {
     if (
@@ -121,7 +126,7 @@ function previewInfo(value: unknown): DriveItemPreview {
   if (getUrl === undefined && postUrl === undefined)
     throw new MicrosoftProtocolError("Graph returned a preview without a URL.")
   // Provider wire boundary, checked field by field above.
-  return value as DriveItemPreview
+  return preview as DriveItemPreview
 }
 
 export function itemsResource(http: MicrosoftHttp): DriveItemsResource {

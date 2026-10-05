@@ -175,6 +175,29 @@ describe("sites and drive items", () => {
     })
   })
 
+  // Countercheck: remove null normalization in previewInfo; these valid Graph responses must fail.
+  test("preview treats nullable Graph fields as absent while preserving the available URLs", async () => {
+    const getUrl = "https://contoso.sharepoint.com/embed?token=opaque%2Bvalue"
+    const postUrl = "https://contoso.sharepoint.com/frame"
+    const postParameters = "access_token=signed&access_token_ttl=1"
+    const client = await connect()
+    for (const [response, expected] of [
+      [{ getUrl, postUrl: null }, { getUrl }],
+      [{ getUrl, postUrl: null, postParameters: null }, { getUrl }],
+      [
+        { getUrl: null, postUrl, postParameters },
+        { postUrl, postParameters },
+      ],
+      [
+        { getUrl, postUrl, postParameters: null },
+        { getUrl, postUrl },
+      ],
+    ]) {
+      mockFetch(() => json(response))
+      expect(await client.drives.items.preview("d", "f")).toStrictEqual(expected)
+    }
+  })
+
   // Countercheck: drop { replayable: true } from preview in src/surfaces/drives/items.ts; this must fail.
   test("preview changes nothing, so a transient failure is retried like a read", async () => {
     let calls = 0
@@ -211,6 +234,11 @@ describe("sites and drive items", () => {
     expect(requests).toHaveLength(0)
     for (const bad of [
       {},
+      { getUrl: null },
+      { postUrl: null },
+      { getUrl: null, postUrl: null, postParameters: null },
+      { getUrl: "https://contoso.sharepoint.com/embed", postUrl: "javascript:alert(1)" },
+      { getUrl: null, postUrl: "http://contoso.sharepoint.com/frame" },
       { getUrl: "javascript:alert(1)" },
       { getUrl: "http://contoso.sharepoint.com/embed" },
       { postUrl: "https://contoso.sharepoint.com/frame", postParameters: 1 },
