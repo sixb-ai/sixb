@@ -505,6 +505,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 54,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "055-commit-touches",
+    status: "applied",
+    version: 55,
+  },
 ]
 
 afterEach(async () => {
@@ -2045,6 +2052,7 @@ describe("SQLite storage migrations", () => {
       for (const migration of sqliteStorageMigrations.steps) migration.up(db)
       const ontologyTables = readMemoryTableNames(db).filter((name) => name.startsWith("ontology_"))
       expect(ontologyTables).toEqual([
+        "ontology_commit_touches",
         "ontology_commits",
         "ontology_link_overrides",
         "ontology_object_overrides",

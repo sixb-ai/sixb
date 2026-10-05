@@ -60,6 +60,7 @@ export class PgMaterializationWriter {
     objectWrites += await this.upsertObjects(target)
     linkWrites += await this.upsertLinks(target)
     const eventCount = await this.writeOutbox(target)
+    await this.writeTouches(target)
     return { objectWrites, linkWrites, eventCount }
   }
 
@@ -543,6 +544,49 @@ export class PgMaterializationWriter {
       throw effectiveConflict(`Outbox events of commit '${target.commitId}' already exist.`)
     }
     return staged
+  }
+
+  /**
+   * Records the entities whose plan inputs this commit changed, once each, as the in-memory
+   * `touchPlanItem` does: a replacement plan's refresh rechecks only those.
+   */
+  private async writeTouches(target: PgStagedPlanTarget): Promise<void> {
+    await this.sql`
+      INSERT INTO ontology_commit_touches (project_id, entity_kind, identity_key)
+      SELECT DISTINCT ${target.projectId}, entity.kind,
+        CASE entity.kind
+          WHEN 'object' THEN
+            concat('[', entity.ref->'objectTypeId', ',', entity.ref->'primaryId', ']')
+          WHEN 'scope' THEN concat('[', entity.ref->'source'->'objectTypeId', ',',
+            entity.ref->'source'->'primaryId', ',', entity.ref->'linkId', ']')
+          ELSE concat('[', entity.ref->'source'->'objectTypeId', ',',
+            entity.ref->'source'->'primaryId', ',', entity.ref->'linkId', ',',
+            entity.ref->'target'->'objectTypeId', ',', entity.ref->'target'->'primaryId', ']')
+        END
+      FROM ${this.sql(target.workTable)} AS work
+      CROSS JOIN LATERAL (
+        SELECT CASE work.payload->'item'->>'kind'
+            WHEN 'object-upsert' THEN 'object'
+            WHEN 'object-delete' THEN 'object'
+            WHEN 'object-override-upsert' THEN 'object'
+            WHEN 'object-override-delete' THEN 'object'
+            WHEN 'point-upsert' THEN 'object'
+            WHEN 'link-upsert' THEN 'link'
+            WHEN 'link-delete' THEN 'link'
+            WHEN 'link-override-upsert' THEN 'link'
+            WHEN 'link-override-delete' THEN 'link'
+            WHEN 'link-slot-override-upsert' THEN 'scope'
+            WHEN 'link-slot-override-delete' THEN 'scope'
+          END AS kind,
+          CASE work.payload->'item'->>'kind'
+            WHEN 'object-upsert' THEN work.payload->'item'->'value'->'row'->'ref'
+            WHEN 'link-upsert' THEN work.payload->'item'->'value'->'row'->'ref'
+            WHEN 'point-upsert' THEN work.payload->'item'->'value'->'point'->'series'->'object'
+            ELSE work.payload->'item'->'value'->'ref'
+          END AS ref
+      ) AS entity
+      WHERE work.work_id = ${target.workId} AND work.lane = 'apply'
+    `
   }
 
   private async write(

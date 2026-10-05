@@ -41,6 +41,26 @@ runMaterializerStorageContractSuite("PostgreSQL materializer storage contract", 
       `)
     })
   },
+  countCommitTouches(storage) {
+    return withDatabase(storage.testSchemaName, async (sql, schema) => {
+      const [row] = await sql.unsafe(
+        `SELECT COUNT(*)::int AS count FROM ${schema}.ontology_commit_touches`
+      )
+      return row!.count as number
+    })
+  },
+  losePlanTouchesToPurge(storage) {
+    // A purge that does not see the plan yet takes every touch up to its own snapshot.
+    return withDatabase(storage.testSchemaName, async (sql, schema) => {
+      await sql.unsafe(`
+        INSERT INTO ${schema}.ontology_commit_touch_horizons (project_id, xact_id)
+        SELECT DISTINCT project_id, pg_snapshot_xmin(pg_current_snapshot())
+        FROM ${schema}.ontology_commit_touches
+        ON CONFLICT (project_id) DO UPDATE SET xact_id = EXCLUDED.xact_id;
+        DELETE FROM ${schema}.ontology_commit_touches;
+      `)
+    })
+  },
 })
 
 runMaterializationFailureContractSuite("PostgreSQL materialization failure contract", {

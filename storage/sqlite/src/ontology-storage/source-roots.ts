@@ -162,10 +162,14 @@ export function stageSourceRoots(
   }
 }
 
-/** Retires what the candidate replaces; its own roots go live when its version turns active. */
+/**
+ * Retires what the candidate replaces; its own roots go live when its version turns active. Every
+ * link those roots assert changes its live source, which commit `commitId` records as touched.
+ */
 export function activateSourceRoots(
   db: Database,
   projectId: string,
+  commitId: string,
   candidate: SqliteOntologySourceRow,
   activation: SourceActivationWrite
 ): void {
@@ -180,20 +184,40 @@ export function activateSourceRoots(
     )
   if (candidate.base_materialization_id !== null && candidate.root_count === 0) return
   const delta = candidate.base_materialization_id !== null
-  db.query(`UPDATE ontology_source_roots SET retired_at = ?
-    WHERE retired_at IS NULL AND deleted = 0
-      AND version_id IN (SELECT version_id FROM ontology_sources
-        WHERE project_id = ? AND source_id = ? AND status IN ${PUBLISHED})
-      ${
-        delta
-          ? `AND project_id = ? AND root_key IN (
-        SELECT root_key FROM ontology_source_roots WHERE version_id = ?)`
-          : ""
-      }`).run(
-    activation.updatedAt,
+  const replaced = `retired_at IS NULL AND deleted = 0
+    AND version_id IN (SELECT version_id FROM ontology_sources
+      WHERE project_id = ? AND source_id = ? AND status IN ${PUBLISHED})
+    ${
+      delta
+        ? `AND project_id = ? AND root_key IN (
+      SELECT root_key FROM ontology_source_roots WHERE version_id = ?)`
+        : ""
+    }`
+  const replacedParams = [
     projectId,
     activation.source.projectionId,
-    ...(delta ? [projectId, candidate.version_id] : [])
+    ...(delta ? [projectId, candidate.version_id] : []),
+  ]
+  db.query(`INSERT INTO ontology_commit_touches (project_id, commit_id, entity_kind, identity_key)
+    SELECT DISTINCT ?, ?, 'link', json_array(
+      rows.source_type_id, rows.source_primary_id, rows.link_id, rows.target_type_id,
+      rows.target_primary_id
+    )
+    FROM (
+      SELECT id FROM ontology_source_roots WHERE ${replaced}
+      UNION ALL
+      SELECT id FROM ontology_source_roots WHERE version_id = ?
+    ) AS changed
+    CROSS JOIN ontology_source_rows AS rows ON rows.root_id = changed.id
+    WHERE rows.entity_kind = 'link'`).run(
+    projectId,
+    commitId,
+    ...replacedParams,
+    candidate.version_id
+  )
+  db.query(`UPDATE ontology_source_roots SET retired_at = ? WHERE ${replaced}`).run(
+    activation.updatedAt,
+    ...replacedParams
   )
   // Deletions are never live; retiring them lets cleanup remove them with their version.
   db.query(`UPDATE ontology_source_roots SET retired_at = ?

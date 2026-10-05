@@ -39,6 +39,7 @@ import type {
 import type { SQLClient } from "../pg-client"
 import {
   jsonParameter,
+  jsonTupleExpression,
   linkRefFromColumns,
   objectRefFromColumns,
   type PgOntologySourceAssertionRow,
@@ -941,8 +942,4 @@ export function linkSortExpression(alias?: string): string {
 
 function utf8SortExpression(parts: readonly string[]): string {
   return `encode(convert_to(${jsonTupleExpression(parts)}, 'UTF8'), 'hex')`
-}
-
-export function jsonTupleExpression(parts: readonly string[]): string {
-  return `concat('[', ${parts.join(", ',', ")}, ']')`
 }

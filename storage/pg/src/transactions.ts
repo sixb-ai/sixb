@@ -186,6 +186,11 @@ function advisoryLockParts(key: string): readonly [number, number] {
   return [hash.readInt32BE(0), hash.readInt32BE(4)]
 }
 
+/** Whether `sql` already runs within a transaction, provider-owned or external. */
+export function isWithinPgTransaction(sql: PgStoreClient): boolean {
+  return !canStartPgTransaction(sql)
+}
+
 export function canStartPgTransaction(sql: PgStoreClient): sql is SQL {
   return (
     !pgTransactionClients.has(sql) &&

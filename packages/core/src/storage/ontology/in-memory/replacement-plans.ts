@@ -23,6 +23,7 @@ import {
 } from "../../objects/in-memory"
 import type {
   MaterializationObjectExistence,
+  MaterializationPlanWorkItem,
   MaterializationWorkRecord,
   SourceReplacementLinkState,
   SourceReplacementObjectState,
@@ -67,6 +68,8 @@ export interface InMemoryPlanIdentity {
   readonly entity: ProjectionEntityRef
   readonly sortKey: string
   diffRequired: boolean
+  /** Whether link expansion already started from this identity since it was last planned. */
+  expanded: boolean
   /** Revision of the inputs the identity's state was last read at. */
   readRevision: string | null
   /** Revision its records were planned from; null while it is still to plan. */
@@ -93,6 +96,51 @@ export interface InMemoryReplacementPlan {
   readonly identities: Map<string, InMemoryPlanIdentity>
   /** Record and uniqueness keys of the planned work, each unique within the plan. */
   readonly workKeys: Set<string>
+}
+
+/** The entities whose plan inputs one commit changed, by key. */
+export interface InMemoryCommitTouches {
+  readonly projectId: string
+  /** `objectRefKey`s, `linkRefKey`s and `linkScopeKey`s. */
+  readonly objects: Set<string>
+  readonly links: Set<string>
+  readonly scopes: Set<string>
+}
+
+export function emptyCommitTouches(projectId: string): InMemoryCommitTouches {
+  return { projectId, objects: new Set(), links: new Set(), scopes: new Set() }
+}
+
+/**
+ * Records what applying `item` changes among the inputs a plan reads. The SQL providers derive the
+ * same keys from their work tables.
+ */
+export function touchPlanItem(touches: InMemoryCommitTouches, item: MaterializationPlanWorkItem) {
+  switch (item.kind) {
+    case "object-override-upsert":
+    case "object-override-delete":
+    case "object-delete":
+      touches.objects.add(objectRefKey(item.value.ref))
+      return
+    case "object-upsert":
+      touches.objects.add(objectRefKey(item.value.row.ref))
+      return
+    case "point-upsert":
+      touches.objects.add(objectRefKey(item.value.point.series.object))
+      return
+    case "link-override-upsert":
+    case "link-override-delete":
+    case "link-delete":
+      touches.links.add(linkRefKey(item.value.ref))
+      return
+    case "link-upsert":
+      touches.links.add(linkRefKey(item.value.row.ref))
+      return
+    case "link-slot-override-upsert":
+    case "link-slot-override-delete":
+      touches.scopes.add(linkScopeKey(item.value.ref.source, item.value.ref.linkId))
+      return
+  }
 }
 
 export function replacementPlanKey(input: {
@@ -258,12 +306,22 @@ export class InMemoryOntologyReplacementPlanStorage implements OntologyReplaceme
     if (pending.length > 0) return { fresh: false, unplanned: pending.length }
     let unplannedCount = 0
     if (this.state.commitsById.size !== plan.watermark) {
+      // Purge keeps every commit's touches past the watermark of a ready plan.
+      const touched = emptyCommitTouches(plan.projectId)
+      for (let ordinal = plan.watermark + 1; ordinal <= this.state.commitsById.size; ordinal += 1) {
+        const touches = this.state.commitTouches.get(ordinal)
+        if (touches?.projectId !== plan.projectId) continue
+        for (const kind of ["objects", "links", "scopes"] as const) {
+          for (const key of touches[kind]) touched[kind].add(key)
+        }
+      }
       for (const identity of plan.identities.values()) {
+        if (!touchesIdentity(touched, identity.entity)) continue
         if (this.revision(plan, identity) === identity.plannedRevision) continue
         unplan(plan, identity)
         unplannedCount += 1
       }
-      unplannedCount += this.expandLinks(plan)
+      unplannedCount += this.expandTouched(plan, touched)
       plan.watermark = this.state.commitsById.size
     }
     if (unplannedCount > 0) return { fresh: false, unplanned: unplannedCount }
@@ -278,8 +336,21 @@ export class InMemoryOntologyReplacementPlanStorage implements OntologyReplaceme
   async purge(input: PurgeReplacementPlansInput): Promise<number> {
     assertNonblank(input.projectId, "Replacement plan purge project id")
     assertPositiveInteger(input.limit, "Replacement plan purge limit")
-    // Commits and abandons delete their plan at once: in memory there is nothing to batch.
-    return 0
+    return this.runRootOperation(() => {
+      // Commits and abandons delete their plan at once: only touches outlive what reads them.
+      let horizon = this.state.commitsById.size
+      for (const plan of this.state.replacementPlans.values()) {
+        if (plan.projectId === input.projectId) horizon = Math.min(horizon, plan.watermark)
+      }
+      let deleted = 0
+      for (const [ordinal, touches] of this.state.commitTouches) {
+        if (deleted === input.limit) break
+        if (ordinal > horizon || touches.projectId !== input.projectId) continue
+        this.state.commitTouches.delete(ordinal)
+        deleted += 1
+      }
+      return deleted
+    })
   }
 
   private async objectPage(
@@ -417,14 +488,18 @@ export class InMemoryOntologyReplacementPlanStorage implements OntologyReplaceme
   }
 
   /**
-   * Adds the links a plan must decide besides its own: those incident to an object whose
-   * existence it flips, and every member of a scope it changes. Returns how many identities this
-   * left to plan, counting an existing one that now needs a diff.
+   * Adds the links a plan must decide besides its own, from the identities planned since they were
+   * last expanded: those incident to an object whose existence it flips, and every member of a
+   * scope it changes. Returns how many identities this left to plan, counting an existing one that
+   * now needs a diff. What commits add later is found from their touches by `expandTouched`.
    */
   private expandLinks(plan: InMemoryReplacementPlan): number {
     const projectId = plan.projectId
     const incident = new Set<string>()
     for (const identity of plan.identities.values()) {
+      if (identity.entity.kind !== "object" || identity.expanded) continue
+      if (identity.plannedRevision === null) continue
+      identity.expanded = true
       for (const record of identity.records) {
         if (record.kind === "incident-object") incident.add(objectRefKey(record.ref))
       }
@@ -442,7 +517,8 @@ export class InMemoryOntologyReplacementPlanStorage implements OntologyReplaceme
     const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
     const scopes = new Map<string, Pick<OntologyLinkRef, "source" | "linkId">>()
     for (const identity of plan.identities.values()) {
-      if (identity.entity.kind !== "link" || !identity.diffRequired) continue
+      if (identity.entity.kind !== "link" || !identity.diffRequired || identity.expanded) continue
+      identity.expanded = true
       const ref = identity.entity.ref
       scopes.set(linkScopeSortKey(ref.source, ref.linkId), ref)
     }
@@ -458,6 +534,59 @@ export class InMemoryOntologyReplacementPlanStorage implements OntologyReplaceme
         projectEntityKey(projectId, linkScopeKey(scope.source, scope.linkId))
       )
       if (override) consider({ ...scope, target: override.value.target }, false)
+    }
+    return added
+  }
+
+  /**
+   * Adds the links commits brought within the plan's reach, from what they touched: a link that
+   * now exists incident to an object the plan flips, or in a scope a planned link changes. It
+   * considers the links `expandLinks` would find, among those the commits touched.
+   */
+  private expandTouched(plan: InMemoryReplacementPlan, touched: InMemoryCommitTouches): number {
+    const projectId = plan.projectId
+    const incident = new Set<string>()
+    const scopes = new Set<string>()
+    for (const identity of plan.identities.values()) {
+      for (const record of identity.records) {
+        if (record.kind === "incident-object") incident.add(objectRefKey(record.ref))
+      }
+      if (identity.entity.kind === "link" && identity.diffRequired) {
+        scopes.add(linkScopeKey(identity.entity.ref.source, identity.entity.ref.linkId))
+      }
+    }
+    let added = 0
+    const consider = (ref: OntologyLinkRef, member: boolean): void => {
+      if (incident.has(objectRefKey(ref.source)) || incident.has(objectRefKey(ref.target))) {
+        if (addIdentity(plan, { kind: "link", ref }, true)) added += 1
+      } else if (member && scopes.has(linkScopeKey(ref.source, ref.linkId))) {
+        if (addIdentity(plan, { kind: "link", ref }, false)) added += 1
+      }
+    }
+    const adapter = getInMemoryObjectMaterializerAdapter(this.objects)
+    for (const key of touched.links) {
+      const ref = parseLinkKey(key)
+      const effective =
+        adapter.getExactLinkRow(projectId, {
+          sourceTypeId: ref.source.objectTypeId,
+          sourceId: ref.source.primaryId,
+          linkId: ref.linkId,
+          targetTypeId: ref.target.objectTypeId,
+          targetId: ref.target.primaryId,
+        }) !== null
+      if (
+        effective ||
+        this.state.linkOverrides.has(projectEntityKey(projectId, key)) ||
+        this.state.activeSourceRows.has(
+          projectEntityKey(projectId, projectionEntityKey({ kind: "link", ref }))
+        )
+      ) {
+        consider(ref, effective)
+      }
+    }
+    for (const key of touched.scopes) {
+      const override = this.state.linkSlotOverrides.get(projectEntityKey(projectId, key))
+      if (override) consider({ ...override.ref, target: override.value.target }, true)
     }
     return added
   }
@@ -518,6 +647,7 @@ function addIdentity(
     entity: structuredClone({ kind: entity.kind, ref: entity.ref } as ProjectionEntityRef),
     sortKey: entity.kind === "object" ? objectRefSortKey(entity.ref) : linkRefSortKey(entity.ref),
     diffRequired,
+    expanded: false,
     readRevision: null,
     plannedRevision: null,
     records: [],
@@ -531,7 +661,29 @@ function unplan(plan: InMemoryReplacementPlan, identity: InMemoryPlanIdentity): 
   }
   identity.readRevision = null
   identity.plannedRevision = null
+  identity.expanded = false
   identity.records = []
+}
+
+/** Whether a commit that touched `touched` may have changed an identity's revision. */
+function touchesIdentity(touched: InMemoryCommitTouches, entity: ProjectionEntityRef): boolean {
+  if (entity.kind === "object") return touched.objects.has(objectRefKey(entity.ref))
+  const { ref } = entity
+  return (
+    touched.links.has(linkRefKey(ref)) ||
+    touched.scopes.has(linkScopeKey(ref.source, ref.linkId)) ||
+    touched.objects.has(objectRefKey(ref.source)) ||
+    touched.objects.has(objectRefKey(ref.target))
+  )
+}
+
+function parseLinkKey(key: string): OntologyLinkRef {
+  const [sourceTypeId, sourceId, linkId, targetTypeId, targetId] = JSON.parse(key) as string[]
+  return {
+    source: { objectTypeId: sourceTypeId!, primaryId: sourceId! },
+    linkId: linkId!,
+    target: { objectTypeId: targetTypeId!, primaryId: targetId! },
+  }
 }
 
 function workKeys(record: MaterializationWorkRecord): readonly string[] {

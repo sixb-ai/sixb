@@ -21,7 +21,7 @@ import type {
 } from "../sources"
 import type { VectorIndexingWork } from "../vector-indexing"
 import type { StoredObjectVector } from "../vectors"
-import type { InMemoryReplacementPlan } from "./replacement-plans"
+import type { InMemoryCommitTouches, InMemoryReplacementPlan } from "./replacement-plans"
 
 export interface InMemorySourceRoot {
   readonly root: ProjectionEntityRef
@@ -71,6 +71,8 @@ export interface InMemoryOntologyState {
   readonly linkSlotOverrides: Map<string, InMemoryStoredLinkSlotOverride>
   readonly outbox: Map<string, InMemoryOutboxRow>
   readonly replacementPlans: Map<string, InMemoryReplacementPlan>
+  /** What each commit touched among the inputs plans read, keyed by its `commitsById` ordinal. */
+  readonly commitTouches: Map<number, InMemoryCommitTouches>
 }
 
 /** Reads one execution of the same storage, the record an ontology commit references. */
@@ -113,6 +115,7 @@ export function createInMemoryOntologyState(): InMemoryOntologyState {
     linkSlotOverrides: new Map(),
     outbox: new Map(),
     replacementPlans: new Map(),
+    commitTouches: new Map(),
   }
 }
 

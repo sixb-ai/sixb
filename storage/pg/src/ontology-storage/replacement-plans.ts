@@ -32,15 +32,17 @@ import type {
 } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import { isUniqueViolation } from "../storage-errors"
-import { runPgTransaction } from "../transactions"
-import { jsonTupleExpression, PgMaterializationStateReader } from "./materialization-state"
+import { isWithinPgTransaction, runPgTransaction } from "../transactions"
+import { PgMaterializationStateReader } from "./materialization-state"
 import {
   assertProjectionExecution,
+  columnKeyExpression,
   jsonParameter,
+  jsonTupleExpression,
   type PgOntologySourceRow,
   toIsoString,
 } from "./shared"
-import { liveSourceRowsJoin, PUBLISHED, replacementSourceRows } from "./source-roots"
+import { PUBLISHED, replacementSourceRows } from "./source-roots"
 
 export const PG_PLAN_WORK_TABLE = "ontology_replacement_plan_work"
 const IDENTITIES = "ontology_replacement_plan_identities"
@@ -196,12 +198,14 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
         incremental: candidate.base_materialization_id !== null,
       })
       // Every entity of the candidate and of the roots it replaces needs a diff.
+      const sourceKey = columnKeyExpression(["source_type_id", "source_primary_id"])
+      const targetKey = columnKeyExpression(["target_type_id", "target_primary_id"])
       const opened = await sql`
         WITH keyed AS (
           SELECT DISTINCT entity_kind, CASE entity_kind
-            WHEN 'object' THEN ${sql.unsafe(keyExpression(["object_type_id", "primary_id"]))}
+            WHEN 'object' THEN ${sql.unsafe(columnKeyExpression(["object_type_id", "primary_id"]))}
             ELSE ${sql.unsafe(
-              keyExpression([
+              columnKeyExpression([
                 "source_type_id",
                 "source_primary_id",
                 "link_id",
@@ -209,12 +213,22 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
                 "target_primary_id",
               ])
             )}
-          END AS identity_key
+          END AS identity_key,
+          CASE entity_kind
+            WHEN 'link' THEN ${sql.unsafe(sourceKey)}
+          END AS source_key,
+          CASE entity_kind
+            WHEN 'link' THEN ${sql.unsafe(targetKey)}
+          END AS target_key
           FROM (${rows}) AS rows
         )
-        INSERT INTO ${sql(IDENTITIES)} (version_id, entity_kind, identity_key, sort_key, diff_required)
+        INSERT INTO ${sql(IDENTITIES)} (
+          version_id, entity_kind, identity_key, sort_key, diff_required, expand_at, source_key,
+          target_key
+        )
         SELECT ${candidate.version_id}, entity_kind, identity_key,
-          ${sql.unsafe(SORT_KEY)}, TRUE
+          ${sql.unsafe(SORT_KEY)}, TRUE, CASE entity_kind WHEN 'link' THEN 0 END, source_key,
+          target_key
         FROM keyed
       `
       if (opened.count >= ANALYZE_ROWS) await analyzePlans(sql)
@@ -241,9 +255,8 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
             "Object projection replacement must plan every object before its links."
           )
         }
-        if ((await expandLinks(sql, candidate.version_id, input.projectId)) >= ANALYZE_ROWS) {
-          await analyzePlans(sql)
-        }
+        const expanded = await expandLinks(sql, candidate.version_id, input.projectId, "pending")
+        if (expanded >= ANALYZE_ROWS && !isWithinPgTransaction(this.sql)) await analyzePlans(sql)
       }
     })
     let after = ""
@@ -283,7 +296,9 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
       if (!page) {
         // Every page is staged by now: later lookups and the commit join this work. Never in the
         // commit transaction, where ANALYZE would hold a lock other commits queue behind.
-        if (streamed >= ANALYZE_ROWS) await analyzePlans(this.sql)
+        if (streamed >= ANALYZE_ROWS && !isWithinPgTransaction(this.sql)) {
+          await analyzePlans(this.sql)
+        }
         return
       }
       yield page
@@ -310,7 +325,14 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
         UPDATE ${sql(IDENTITIES)} AS identities
         SET planned_revision = identities.read_revision,
           classified = (planned.value->>'classified')::boolean,
-          change = planned.value->>'change'
+          change = planned.value->>'change',
+          -- A planned object may flip its existence: the next link expansion starts from it.
+          expand_at = CASE identities.entity_kind
+            WHEN 'object' THEN (
+              SELECT expansions FROM ontology_replacement_plans WHERE version_id = ${versionId}
+            )
+            ELSE identities.expand_at
+          END
         FROM planned
         WHERE identities.version_id = ${versionId}
           AND identities.entity_kind = planned.value->>'entityKind'
@@ -381,6 +403,7 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
       if (!(await committedSince(sql, versionId, input.projectId))) {
         return { fresh: true, counts: await replacementPlanCounts(sql, versionId) }
       }
+      const whole = await touchesIncomplete(sql, versionId, input.projectId)
       // Taken before the revisions are read, so a commit they might miss stays past the watermark.
       const [seen] = await sql<{ readonly snapshot: string }[]>`
         SELECT pg_current_snapshot()::text AS snapshot
@@ -388,17 +411,21 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
       let unplanned = 0
       for (const kind of ["object", "link"] as const) {
         const stale = await sql.unsafe(
-          `UPDATE ${IDENTITIES} AS identities
+          `${whole ? "" : `WITH ${TOUCHED}`}
+           UPDATE ${IDENTITIES} AS identities
            SET read_revision = NULL, planned_revision = NULL, classified = FALSE, change = NULL
-           WHERE version_id = $2 AND entity_kind = $3
-             AND planned_revision IS DISTINCT FROM ${revision(kind)}`,
-          [input.projectId, versionId, kind]
+           WHERE identities.version_id = $2 AND identities.entity_kind = '${kind}'
+             ${whole ? "" : `AND identities.identity_key = ANY(ARRAY(${touchedIdentities(kind)}))`}
+             AND identities.planned_revision IS DISTINCT FROM ${revision(kind)}`,
+          [input.projectId, versionId]
         )
         if (stale.count === 0) continue
         await dropUnplannedWork(sql, versionId, kind)
         unplanned += stale.count
       }
-      unplanned += await expandLinks(sql, versionId, input.projectId)
+      unplanned += whole
+        ? await expandLinks(sql, versionId, input.projectId, "all")
+        : await expandTouched(sql, versionId, input.projectId)
       await sql`
         UPDATE ontology_replacement_plans SET watermark = ${seen!.snapshot}::pg_snapshot
         WHERE version_id = ${versionId}
@@ -422,7 +449,7 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
           ORDER BY plans.version_id
           LIMIT 1
         `
-        if (!spent) return deleted
+        if (!spent) break
         for (const [table, column] of [
           [PG_PLAN_WORK_TABLE, "work_id"],
           [IDENTITIES, "version_id"],
@@ -439,7 +466,7 @@ export class PgOntologyReplacementPlanStorage implements OntologyReplacementPlan
         await sql`DELETE FROM ontology_replacement_plans WHERE version_id = ${spent.version_id}`
         deleted += 1
       }
-      return deleted
+      return deleted + (await purgeTouches(sql, input.projectId, input.limit - deleted))
     })
   }
 }
@@ -634,50 +661,104 @@ async function endpoints(
   return unique.map((ref) => ({ ref, exists: existence.get(objectRefKey(ref)) ?? false }))
 }
 
+/** The keys of the links of `relation` (columns as `links`), and of both their endpoints. */
+function linkKeys(relation: string): string {
+  const key = columnKeyExpression(LINK_COLUMNS.split(", "))
+  return `SELECT ${key} AS identity_key,
+      ${columnKeyExpression(["source_type_id", "source_id"])} AS source_key,
+      ${columnKeyExpression(["target_type_id", "target_id"])} AS target_key
+    FROM ${relation}`
+}
+
+const LINK_COLUMNS = "source_type_id, source_id, link_id, target_type_id, target_id"
+
+/** The run of link expansion an identity added now waits for: the next one. */
+const NEXT_EXPANSION = `(SELECT expansions FROM ontology_replacement_plans WHERE version_id = $2)`
+
+/**
+ * Inserts the links of `incident_links` (columns as `links`) as identities that need a diff, or
+ * makes an existing member need one; the next expansion starts from each of them.
+ */
+const INSERT_INCIDENT_LINKS = `
+  INSERT INTO ${IDENTITIES} AS identities (
+    version_id, entity_kind, identity_key, sort_key, diff_required, expand_at, source_key,
+    target_key
+  )
+  SELECT $2, 'link', identity_key, ${SORT_KEY}, TRUE, ${NEXT_EXPANSION}, source_key, target_key
+  FROM (${linkKeys("incident_links")}) AS keyed
+  ON CONFLICT (version_id, entity_kind, identity_key) DO UPDATE
+  SET diff_required = TRUE, read_revision = NULL, planned_revision = NULL, classified = FALSE,
+    change = NULL, expand_at = EXCLUDED.expand_at
+  WHERE NOT identities.diff_required`
+
+/** Inserts the links of `members` (columns as `links`) as identities planned without a diff. */
+const INSERT_MEMBER_LINKS = `
+  INSERT INTO ${IDENTITIES} (
+    version_id, entity_kind, identity_key, sort_key, diff_required, source_key, target_key
+  )
+  SELECT $2, 'link', identity_key, ${SORT_KEY}, FALSE, source_key, target_key
+  FROM (${linkKeys("members")}) AS keyed
+  ON CONFLICT (version_id, entity_kind, identity_key) DO NOTHING`
+
 /**
  * Adds the links the plan must decide besides its own: those incident to an object it flips,
- * and every member of a scope it changes. Returns how many identities this left to plan,
- * counting an existing member that now needs a diff.
+ * and every member of a scope it changes. `pending` starts only from the identities planned or
+ * added since the previous expansion, `all` from every identity. Returns how many identities this
+ * left to plan, counting an existing member that now needs a diff. What commits add later is
+ * found from their touches by `expandTouched`.
  */
-async function expandLinks(sql: SQLClient, versionId: string, projectId: string): Promise<number> {
-  const live = liveSourceRowsJoin(sql, projectId)
-  const linkKey = sql.unsafe(
-    keyExpression(["source_type_id", "source_id", "link_id", "target_type_id", "target_id"])
-  )
-  const incident = await sql`
-    WITH incident_objects AS (
-      SELECT DISTINCT payload->'ref'->>'objectTypeId' AS object_type_id,
+async function expandLinks(
+  sql: SQLClient,
+  versionId: string,
+  projectId: string,
+  from: "pending" | "all"
+): Promise<number> {
+  const pending = from === "pending"
+  const incidentObjects = pending
+    ? `SELECT work.payload->'ref'->>'objectTypeId' AS object_type_id,
+        work.payload->'ref'->>'primaryId' AS primary_id
+      FROM ${IDENTITIES} AS objects
+      JOIN ${PG_PLAN_WORK_TABLE} AS work ON work.work_id = $2
+        AND work.unique_key = 'incident-object:' || objects.identity_key
+      WHERE objects.version_id = $2 AND objects.entity_kind = 'object'
+        AND objects.expand_at = ${NEXT_EXPANSION}`
+    : `SELECT DISTINCT payload->'ref'->>'objectTypeId' AS object_type_id,
         payload->'ref'->>'primaryId' AS primary_id
-      FROM ${sql(PG_PLAN_WORK_TABLE)}
-      WHERE work_id = ${versionId} AND kind = 'incident-object'
-    ), incident_links AS (
+      FROM ${PG_PLAN_WORK_TABLE}
+      WHERE work_id = $2 AND kind = 'incident-object'`
+  const live = `JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
+      AND roots.project_id = $1 AND roots.retired_at IS NULL AND NOT roots.deleted
+    JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
+      AND versions.status IN ${PUBLISHED}`
+  const incident = await sql.unsafe(
+    `WITH incident_objects AS (${incidentObjects}), incident_links AS (
       SELECT links.source_type_id, links.source_id, links.link_id,
         links.target_type_id, links.target_id
       FROM links JOIN incident_objects
         ON incident_objects.object_type_id = links.source_type_id
        AND incident_objects.primary_id = links.source_id
-      WHERE links.project_id = ${projectId}
+      WHERE links.project_id = $1
       UNION
       SELECT links.source_type_id, links.source_id, links.link_id,
         links.target_type_id, links.target_id
       FROM links JOIN incident_objects
         ON incident_objects.object_type_id = links.target_type_id
        AND incident_objects.primary_id = links.target_id
-      WHERE links.project_id = ${projectId}
+      WHERE links.project_id = $1
       UNION
       SELECT overrides.source_type_id, overrides.source_primary_id, overrides.link_id,
         overrides.target_type_id, overrides.target_primary_id
       FROM ontology_link_overrides AS overrides JOIN incident_objects
         ON incident_objects.object_type_id = overrides.source_type_id
        AND incident_objects.primary_id = overrides.source_primary_id
-      WHERE overrides.project_id = ${projectId}
+      WHERE overrides.project_id = $1
       UNION
       SELECT overrides.source_type_id, overrides.source_primary_id, overrides.link_id,
         overrides.target_type_id, overrides.target_primary_id
       FROM ontology_link_overrides AS overrides JOIN incident_objects
         ON incident_objects.object_type_id = overrides.target_type_id
        AND incident_objects.primary_id = overrides.target_primary_id
-      WHERE overrides.project_id = ${projectId}
+      WHERE overrides.project_id = $1
       UNION
       SELECT rows.source_type_id, rows.source_primary_id, rows.link_id,
         rows.target_type_id, rows.target_primary_id
@@ -694,32 +775,24 @@ async function expandLinks(sql: SQLClient, versionId: string, projectId: string)
         ON incident_objects.object_type_id = rows.target_type_id
        AND incident_objects.primary_id = rows.target_primary_id
       WHERE rows.entity_kind = 'link'
-    ), keyed AS (
-      SELECT ${linkKey} AS identity_key FROM incident_links
     )
-    INSERT INTO ${sql(IDENTITIES)} AS identities (
-      version_id, entity_kind, identity_key, sort_key, diff_required
-    )
-    SELECT ${versionId}, 'link', identity_key, ${sql.unsafe(SORT_KEY)}, TRUE
-    FROM keyed
-    ON CONFLICT (version_id, entity_kind, identity_key) DO UPDATE
-    SET diff_required = TRUE, read_revision = NULL, planned_revision = NULL, classified = FALSE,
-      change = NULL
-    WHERE NOT identities.diff_required
-  `
+    ${INSERT_INCIDENT_LINKS}`,
+    [projectId, versionId]
+  )
   // An upgraded member planned without a diff keeps no work from before.
   if (incident.count > 0) await dropUnplannedWork(sql, versionId, "link")
-  const members = await sql`
-    WITH scopes AS (
+  const members = await sql.unsafe(
+    `WITH scopes AS (
       SELECT DISTINCT identity_key::jsonb->>0 AS source_type_id,
         identity_key::jsonb->>1 AS source_id, identity_key::jsonb->>2 AS link_id
-      FROM ${sql(IDENTITIES)}
-      WHERE version_id = ${versionId} AND entity_kind = 'link' AND diff_required
+      FROM ${IDENTITIES}
+      WHERE version_id = $2 AND entity_kind = 'link' AND diff_required
+        ${pending ? `AND expand_at = ${NEXT_EXPANSION}` : ""}
     ), members AS (
       SELECT links.source_type_id, links.source_id, links.link_id,
         links.target_type_id, links.target_id
       FROM links JOIN scopes USING (source_type_id, source_id, link_id)
-      WHERE links.project_id = ${projectId}
+      WHERE links.project_id = $1
       UNION
       SELECT overrides.source_type_id, overrides.source_primary_id, overrides.link_id,
         overrides.target_type_id, overrides.target_primary_id
@@ -727,33 +800,215 @@ async function expandLinks(sql: SQLClient, versionId: string, projectId: string)
         ON scopes.source_type_id = overrides.source_type_id
        AND scopes.source_id = overrides.source_primary_id
        AND scopes.link_id = overrides.link_id
-      WHERE overrides.project_id = ${projectId} AND overrides.identity_kind = 'slot'
-    ), keyed AS (
-      SELECT ${linkKey} AS identity_key FROM members
+      WHERE overrides.project_id = $1 AND overrides.identity_kind = 'slot'
     )
-    INSERT INTO ${sql(IDENTITIES)} (version_id, entity_kind, identity_key, sort_key, diff_required)
-    SELECT ${versionId}, 'link', identity_key, ${sql.unsafe(SORT_KEY)}, FALSE
-    FROM keyed
-    ON CONFLICT (version_id, entity_kind, identity_key) DO NOTHING
+    ${INSERT_MEMBER_LINKS}`,
+    [projectId, versionId]
+  )
+  await sql`
+    UPDATE ontology_replacement_plans SET expansions = expansions + 1
+    WHERE version_id = ${versionId}
   `
   return incident.count + members.count
+}
+
+/**
+ * What the commits since the watermark of plan `$2` touched in project `$1`: those its snapshot
+ * did not see and this one does.
+ */
+const TOUCHED = `touched AS MATERIALIZED (
+  SELECT DISTINCT touches.entity_kind, touches.identity_key
+  FROM ontology_replacement_plans AS plans
+  JOIN ontology_commit_touches AS touches ON touches.project_id = $1
+    AND touches.xact_id >= pg_snapshot_xmin(plans.watermark)
+    AND NOT pg_visible_in_snapshot(touches.xact_id, plans.watermark)
+    AND pg_visible_in_snapshot(touches.xact_id, pg_current_snapshot())
+  WHERE plans.version_id = $2
+)`
+
+/**
+ * The keys of the identities of `kind` of plan `$2` whose revision reads something `touched`
+ * holds: an object its own row, override and telemetry; a link its row and edge override, its
+ * scope's slot override, its live source assertion and its endpoints. A scope's links are found
+ * from its source object. Each lookup is an indexed `= ANY`, whatever the plan tables' statistics.
+ */
+function touchedIdentities(kind: "object" | "link"): string {
+  if (kind === "object") {
+    return `SELECT identity_key FROM touched WHERE entity_kind = 'object'`
+  }
+  const sourceKey = columnKeyExpression(["(identity_key::jsonb->>0)", "(identity_key::jsonb->>1)"])
+  return `SELECT identity_key FROM touched WHERE entity_kind = 'link'
+    UNION ALL
+    SELECT links.identity_key FROM ${IDENTITIES} AS links
+    WHERE links.version_id = $2 AND links.source_key = ANY(ARRAY(
+      SELECT ${sourceKey} FROM touched WHERE entity_kind IN ('object', 'scope')
+    ))
+    UNION ALL
+    SELECT links.identity_key FROM ${IDENTITIES} AS links
+    WHERE links.version_id = $2 AND links.target_key = ANY(ARRAY(
+      SELECT identity_key FROM touched WHERE entity_kind = 'object'
+    ))`
+}
+
+/**
+ * Adds the links commits brought within the plan's reach, from what they touched: a link that
+ * now exists incident to an object the plan flips, or in a scope a planned link changes. It
+ * considers the links `expandLinks` would find, among those the commits touched.
+ */
+async function expandTouched(
+  sql: SQLClient,
+  versionId: string,
+  projectId: string
+): Promise<number> {
+  const touchedLinks = `touched_links AS (
+    SELECT identity_key, identity_key::jsonb->>0 AS source_type_id,
+      identity_key::jsonb->>1 AS source_id, identity_key::jsonb->>2 AS link_id,
+      identity_key::jsonb->>3 AS target_type_id, identity_key::jsonb->>4 AS target_id
+    FROM touched WHERE entity_kind = 'link'
+  ), slot_targets AS (
+    SELECT overrides.source_type_id, overrides.source_primary_id AS source_id, overrides.link_id,
+      overrides.target_type_id, overrides.target_primary_id AS target_id
+    FROM touched JOIN ontology_link_overrides AS overrides ON overrides.project_id = $1
+      AND overrides.identity_kind = 'slot' AND overrides.identity_key = touched.identity_key::jsonb
+    WHERE touched.entity_kind = 'scope'
+  )`
+  const columns = LINK_COLUMNS
+  const sourceKey = columnKeyExpression(["candidates.source_type_id", "candidates.source_id"])
+  const targetKey = columnKeyExpression(["candidates.target_type_id", "candidates.target_id"])
+  const effective = `EXISTS (
+    SELECT 1 FROM links AS stored
+    WHERE stored.project_id = $1 AND stored.source_type_id = touched_links.source_type_id
+      AND stored.source_id = touched_links.source_id AND stored.link_id = touched_links.link_id
+      AND stored.target_type_id = touched_links.target_type_id
+      AND stored.target_id = touched_links.target_id
+  )`
+  const incident = await sql.unsafe(
+    `WITH ${TOUCHED}, ${touchedLinks}, incident_links AS (
+      SELECT candidates.* FROM (
+        SELECT ${columns} FROM touched_links
+        WHERE ${effective} OR EXISTS (
+          SELECT 1 FROM ontology_link_overrides AS overrides
+          WHERE overrides.project_id = $1 AND overrides.identity_kind = 'edge'
+            AND overrides.identity_key = touched_links.identity_key::jsonb
+        ) OR EXISTS (
+          SELECT 1 FROM ontology_source_rows AS rows
+          JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
+            AND roots.project_id = $1 AND roots.retired_at IS NULL AND NOT roots.deleted
+          JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
+            AND versions.status IN ${PUBLISHED}
+          WHERE rows.entity_kind = 'link' AND rows.source_type_id = touched_links.source_type_id
+            AND rows.source_primary_id = touched_links.source_id
+            AND rows.link_id = touched_links.link_id
+            AND rows.target_type_id = touched_links.target_type_id
+            AND rows.target_primary_id = touched_links.target_id
+        )
+        UNION
+        SELECT ${columns} FROM slot_targets
+      ) AS candidates
+      WHERE EXISTS (
+        SELECT 1 FROM ${PG_PLAN_WORK_TABLE} AS work
+        WHERE work.work_id = $2 AND work.unique_key IN (
+          'incident-object:' || ${sourceKey}, 'incident-object:' || ${targetKey}
+        )
+      )
+    )
+    ${INSERT_INCIDENT_LINKS}`,
+    [projectId, versionId]
+  )
+  if (incident.count > 0) await dropUnplannedWork(sql, versionId, "link")
+  const members = await sql.unsafe(
+    `WITH ${TOUCHED}, ${touchedLinks}, members AS (
+      SELECT candidates.* FROM (
+        SELECT ${columns} FROM touched_links WHERE ${effective}
+        UNION
+        SELECT ${columns} FROM slot_targets
+      ) AS candidates
+      WHERE EXISTS (
+        SELECT 1 FROM ${IDENTITIES} AS changed
+        WHERE changed.version_id = $2 AND changed.source_key = ${sourceKey}
+          AND changed.diff_required AND changed.identity_key::jsonb->>2 = candidates.link_id
+      )
+    )
+    ${INSERT_MEMBER_LINKS}`,
+    [projectId, versionId]
+  )
+  return incident.count + members.count
+}
+
+/**
+ * Whether the touches since the plan's watermark may be incomplete, so that `refresh` checks every
+ * identity: purge deleted touches the watermark did not see, or the watermark comes from a cluster
+ * further along (see `committedSince`).
+ */
+async function touchesIncomplete(
+  sql: SQLClient,
+  versionId: string,
+  projectId: string
+): Promise<boolean> {
+  const [row] = await sql<{ readonly incomplete: boolean }[]>`
+    SELECT pg_snapshot_xmax(plans.watermark) > pg_snapshot_xmax(pg_current_snapshot())
+      OR COALESCE(pg_snapshot_xmin(plans.watermark) < (
+        SELECT xact_id FROM ontology_commit_touch_horizons WHERE project_id = ${projectId}
+      ), FALSE) AS incomplete
+    FROM ontology_replacement_plans AS plans
+    WHERE plans.version_id = ${versionId}
+  `
+  return row?.incomplete ?? true
+}
+
+/**
+ * Deletes touches no ready plan of the project needs, up to `limit`: those of commits every ready
+ * plan's watermark sees. A plan opening meanwhile may not be visible yet, so the horizon records
+ * how far touches are gone, and a plan watermarked before it checks every identity.
+ */
+async function purgeTouches(sql: SQLClient, projectId: string, limit: number): Promise<number> {
+  if (limit <= 0) return 0
+  const [horizon] = await sql<{ readonly xact_id: string }[]>`
+    SELECT LEAST(
+      pg_snapshot_xmin(pg_current_snapshot()),
+      (SELECT pg_snapshot_xmin(plans.watermark) FROM ontology_replacement_plans AS plans
+        JOIN ontology_sources AS versions USING (version_id)
+        WHERE plans.project_id = ${projectId} AND versions.status = 'ready'
+        ORDER BY 1 LIMIT 1)
+    )::text AS xact_id
+  `
+  const deleted = await sql`
+    DELETE FROM ontology_commit_touches WHERE ctid = ANY(ARRAY(
+      SELECT ctid FROM ontology_commit_touches
+      WHERE project_id = ${projectId} AND xact_id < ${horizon!.xact_id}::xid8
+      LIMIT ${limit}
+    ))
+  `
+  if (deleted.count > 0) {
+    await sql`
+      INSERT INTO ontology_commit_touch_horizons AS horizons (project_id, xact_id)
+      VALUES (${projectId}, ${horizon!.xact_id}::xid8)
+      ON CONFLICT (project_id) DO UPDATE
+      SET xact_id = GREATEST(horizons.xact_id, EXCLUDED.xact_id)
+    `
+  }
+  return deleted.count
 }
 
 async function analyzePlans(sql: SQLClient): Promise<void> {
   await sql`ANALYZE ${sql(IDENTITIES)}, ${sql(PG_PLAN_WORK_TABLE)}`
 }
 
-/** Deletes the work of the identities of `kind` left to plan: an identity to plan holds none. */
+/**
+ * Deletes the work of the identities of `kind` left to plan: an identity to plan holds none. The
+ * keys come first, so the work is sought by key whatever the plan tables' statistics.
+ */
 async function dropUnplannedWork(
   sql: SQLClient,
   versionId: string,
   kind: "object" | "link"
 ): Promise<void> {
   await sql`
-    DELETE FROM ${sql(PG_PLAN_WORK_TABLE)} AS work USING ${sql(IDENTITIES)} AS identities
-    WHERE work.work_id = ${versionId} AND work.entity_kind = ${kind}
-      AND identities.version_id = ${versionId} AND identities.entity_kind = ${kind}
-      AND identities.planned_revision IS NULL AND identities.identity_key = work.identity_key
+    DELETE FROM ${sql(PG_PLAN_WORK_TABLE)}
+    WHERE work_id = ${versionId} AND entity_kind = ${kind} AND identity_key = ANY(ARRAY(
+      SELECT identity_key FROM ${sql(IDENTITIES)}
+      WHERE version_id = ${versionId} AND entity_kind = ${kind} AND planned_revision IS NULL
+    ))
   `
 }
 
@@ -852,9 +1107,4 @@ async function sourceRow(
     ${lock ? sql`FOR UPDATE` : sql``}
   `
   return row ?? null
-}
-
-/** The canonical JSON key of a row's identity columns, as `objectRefKey`/`linkRefKey` render it. */
-function keyExpression(columns: readonly string[]): string {
-  return jsonTupleExpression(columns.map((column) => `to_jsonb(${column})::text`))
 }

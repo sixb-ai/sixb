@@ -162,17 +162,67 @@ export function identityRevision(kind: "object" | "link"): string {
     : linkRevision(key)
 }
 
+/** The keys of the links of `relation` (columns as `links`), and of both their endpoints. */
+function linkKeys(relation: string): string {
+  return `SELECT json_array(source_type_id, source_id, link_id, target_type_id, target_id)
+      AS identity_key, json_array(source_type_id, source_id) AS source_key,
+      json_array(target_type_id, target_id) AS target_key
+    FROM ${relation}`
+}
+
+/** The run of link expansion an identity added now waits for: the next one. */
+const NEXT_EXPANSION = `(
+  SELECT expansions FROM ontology_replacement_plans WHERE version_id = $versionId
+)`
+
 /**
- * The statements of `expandLinks`, `$versionId` and `$projectId` bound. Incident objects drive the
+ * Inserts the links of `incident_links` as identities that need a diff, or makes an existing
+ * member need one; the next expansion starts from each of them.
+ */
+const INSERT_INCIDENT_LINKS = `
+  INSERT INTO ${IDENTITIES} (
+    version_id, entity_kind, identity_key, sort_key, diff_required, expand_at, source_key,
+    target_key
+  )
+  SELECT $versionId, 'link', identity_key, ${SORT_KEY}, 1, ${NEXT_EXPANSION}, source_key,
+    target_key
+  FROM (${linkKeys("incident_links")}) WHERE true
+  ON CONFLICT (version_id, entity_kind, identity_key) DO UPDATE
+  SET diff_required = 1, read_revision = NULL, planned_revision = NULL, classified = 0,
+    change = NULL, expand_at = excluded.expand_at
+  WHERE ${IDENTITIES}.diff_required = 0`
+
+/** Inserts the links of `members` as identities planned without a diff. */
+const INSERT_MEMBER_LINKS = `
+  INSERT INTO ${IDENTITIES} (
+    version_id, entity_kind, identity_key, sort_key, diff_required, source_key, target_key
+  )
+  SELECT $versionId, 'link', identity_key, ${SORT_KEY}, 0, source_key, target_key
+  FROM (${linkKeys("members")}) WHERE true
+  ON CONFLICT (version_id, entity_kind, identity_key) DO NOTHING`
+
+/** Live source rows of `$projectId`, as `rows`, joined from `rows` to their root and version. */
+const LIVE_ROWS = `CROSS JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
+      AND roots.project_id = $projectId AND roots.retired_at IS NULL AND roots.deleted = 0
+    CROSS JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
+      AND versions.status IN ${PUBLISHED}`
+
+/**
+ * The statements of `expandLinks`, `$versionId` and `$projectId` bound. They start from the
+ * identities planned or added since the previous expansion: purge keeps every touch a ready plan
+ * needs, so what commits add later always comes from their touches. Incident objects drive the
  * loop and each side seeks its own index: without statistics, SQLite would search every link and
  * override of the project once per object.
  */
 export const EXPAND_LINK_STATEMENTS = {
-  incident: `WITH incident_objects AS (
-    SELECT DISTINCT json_extract(payload, '$.ref.objectTypeId') AS object_type_id,
-      json_extract(payload, '$.ref.primaryId') AS primary_id
-    FROM ${SQLITE_PLAN_WORK_TABLE}
-    WHERE work_id = $versionId AND kind = 'incident-object'
+  incident: `WITH incident_objects AS MATERIALIZED (
+    SELECT json_extract(work.payload, '$.ref.objectTypeId') AS object_type_id,
+      json_extract(work.payload, '$.ref.primaryId') AS primary_id
+    FROM ${IDENTITIES} AS objects
+    CROSS JOIN ${SQLITE_PLAN_WORK_TABLE} AS work ON work.work_id = $versionId
+      AND work.unique_key = 'incident-object:' || objects.identity_key
+    WHERE objects.version_id = $versionId AND objects.entity_kind = 'object'
+      AND objects.expand_at = ${NEXT_EXPANSION}
   ), incident_links AS (
     SELECT links.source_type_id, links.source_id, links.link_id,
       links.target_type_id, links.target_id
@@ -209,10 +259,7 @@ export const EXPAND_LINK_STATEMENTS = {
       ON rows.entity_kind = 'link'
      AND rows.source_type_id = incident_objects.object_type_id
      AND rows.source_primary_id = incident_objects.primary_id
-    CROSS JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
-      AND roots.project_id = $projectId AND roots.retired_at IS NULL AND roots.deleted = 0
-    CROSS JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
-      AND versions.status IN ${PUBLISHED}
+    ${LIVE_ROWS}
     UNION
     SELECT rows.source_type_id, rows.source_primary_id, rows.link_id,
       rows.target_type_id, rows.target_primary_id
@@ -220,28 +267,16 @@ export const EXPAND_LINK_STATEMENTS = {
       ON rows.entity_kind = 'link'
      AND rows.target_type_id = incident_objects.object_type_id
      AND rows.target_primary_id = incident_objects.primary_id
-    CROSS JOIN ontology_source_roots AS roots ON roots.id = rows.root_id
-      AND roots.project_id = $projectId AND roots.retired_at IS NULL AND roots.deleted = 0
-    CROSS JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
-      AND versions.status IN ${PUBLISHED}
+    ${LIVE_ROWS}
   )
-  INSERT INTO ${IDENTITIES} (version_id, entity_kind, identity_key, sort_key, diff_required)
-  SELECT $versionId, 'link', identity_key, ${SORT_KEY}, 1
-  FROM (
-    SELECT json_array(source_type_id, source_id, link_id, target_type_id, target_id)
-      AS identity_key
-    FROM incident_links
-  ) WHERE true
-  ON CONFLICT (version_id, entity_kind, identity_key) DO UPDATE
-  SET diff_required = 1, read_revision = NULL, planned_revision = NULL, classified = 0,
-    change = NULL
-  WHERE ${IDENTITIES}.diff_required = 0`,
+  ${INSERT_INCIDENT_LINKS}`,
   members: `WITH scopes AS (
     SELECT DISTINCT json_extract(identity_key, '$[0]') AS source_type_id,
       json_extract(identity_key, '$[1]') AS source_id,
       json_extract(identity_key, '$[2]') AS link_id
     FROM ${IDENTITIES}
     WHERE version_id = $versionId AND entity_kind = 'link' AND diff_required = 1
+      AND expand_at = ${NEXT_EXPANSION}
   ), members AS (
     SELECT links.source_type_id, links.source_id, links.link_id,
       links.target_type_id, links.target_id
@@ -258,15 +293,148 @@ export const EXPAND_LINK_STATEMENTS = {
      AND overrides.source_primary_id = scopes.source_id
      AND overrides.link_id = scopes.link_id
   )
-  INSERT INTO ${IDENTITIES} (version_id, entity_kind, identity_key, sort_key, diff_required)
-  SELECT $versionId, 'link', identity_key, ${SORT_KEY}, 0
-  FROM (
-    SELECT json_array(source_type_id, source_id, link_id, target_type_id, target_id)
-      AS identity_key
-    FROM members
-  ) WHERE true
-  ON CONFLICT (version_id, entity_kind, identity_key) DO NOTHING`,
+  ${INSERT_MEMBER_LINKS}`,
 }
+
+/**
+ * What the commits since the watermark of plan `$versionId` touched in project `$projectId`.
+ * `+project_id` keeps the lookup on the rowid range instead of the project's whole history.
+ */
+const TOUCHED = `touched AS MATERIALIZED (
+  SELECT DISTINCT touches.entity_kind, touches.identity_key
+  FROM ontology_commits AS commits
+  CROSS JOIN ontology_commit_touches AS touches
+    ON touches.project_id = commits.project_id AND touches.commit_id = commits.id
+  WHERE commits.rowid > (
+      SELECT watermark FROM ontology_replacement_plans WHERE version_id = $versionId
+    ) AND +commits.project_id = $projectId
+)`
+
+/**
+ * The statements of `refresh`, `$versionId` and `$projectId` bound: each unplans the identities of
+ * one kind whose revision reads something the commits since the watermark touched, and changed.
+ * An object reads its own row, override and telemetry; a link its row and edge override, its
+ * scope's slot override, its live source assertion and its endpoints. A scope's links are found
+ * from its source object.
+ */
+export const TOUCHED_REFRESH_STATEMENTS = {
+  object: `WITH ${TOUCHED}
+  UPDATE ${IDENTITIES} AS identities
+  SET read_revision = NULL, planned_revision = NULL, classified = 0, change = NULL
+  WHERE identities.version_id = $versionId AND identities.entity_kind = 'object'
+    AND identities.identity_key IN (SELECT identity_key FROM touched WHERE entity_kind = 'object')
+    AND identities.planned_revision IS NOT ${identityRevision("object")}`,
+  link: `WITH ${TOUCHED}, candidates AS (
+    SELECT identity_key FROM touched WHERE entity_kind = 'link'
+    UNION
+    SELECT links.identity_key FROM touched CROSS JOIN ${IDENTITIES} AS links
+      ON links.version_id = $versionId
+     AND links.source_key = json_array(
+       json_extract(touched.identity_key, '$[0]'), json_extract(touched.identity_key, '$[1]')
+     )
+    WHERE touched.entity_kind IN ('object', 'scope')
+    UNION
+    SELECT links.identity_key FROM touched CROSS JOIN ${IDENTITIES} AS links
+      ON links.version_id = $versionId AND links.target_key = touched.identity_key
+    WHERE touched.entity_kind = 'object'
+  )
+  UPDATE ${IDENTITIES} AS identities
+  SET read_revision = NULL, planned_revision = NULL, classified = 0, change = NULL
+  WHERE identities.version_id = $versionId AND identities.entity_kind = 'link'
+    AND identities.identity_key IN (SELECT identity_key FROM candidates)
+    AND identities.planned_revision IS NOT ${identityRevision("link")}`,
+}
+
+const TOUCHED_LINKS = `touched_links AS (
+  SELECT identity_key, json_extract(identity_key, '$[0]') AS source_type_id,
+    json_extract(identity_key, '$[1]') AS source_id, json_extract(identity_key, '$[2]') AS link_id,
+    json_extract(identity_key, '$[3]') AS target_type_id,
+    json_extract(identity_key, '$[4]') AS target_id
+  FROM touched WHERE entity_kind = 'link'
+), slot_targets AS (
+  SELECT overrides.source_type_id, overrides.source_primary_id AS source_id, overrides.link_id,
+    overrides.target_type_id, overrides.target_primary_id AS target_id
+  FROM touched CROSS JOIN ontology_link_overrides AS overrides
+    ON overrides.project_id = $projectId AND overrides.identity_kind = 'slot'
+   AND overrides.identity_key = touched.identity_key
+  WHERE touched.entity_kind = 'scope'
+)`
+
+const LINK_COLUMNS = "source_type_id, source_id, link_id, target_type_id, target_id"
+
+const EFFECTIVE_TOUCHED_LINK = `EXISTS (
+  SELECT 1 FROM links AS stored
+  WHERE stored.project_id = $projectId AND stored.source_type_id = touched_links.source_type_id
+    AND stored.source_id = touched_links.source_id AND stored.link_id = touched_links.link_id
+    AND stored.target_type_id = touched_links.target_type_id
+    AND stored.target_id = touched_links.target_id
+)`
+
+/**
+ * The statements of `expandTouched`, `$versionId` and `$projectId` bound: the links `expandLinks`
+ * would find, among those the commits since the watermark touched.
+ */
+export const EXPAND_TOUCHED_STATEMENTS = {
+  incident: `WITH ${TOUCHED}, ${TOUCHED_LINKS}, incident_links AS (
+    SELECT candidates.* FROM (
+      SELECT ${LINK_COLUMNS} FROM touched_links
+      WHERE ${EFFECTIVE_TOUCHED_LINK} OR EXISTS (
+        SELECT 1 FROM ontology_link_overrides AS overrides
+        WHERE overrides.project_id = $projectId AND overrides.identity_kind = 'edge'
+          AND overrides.identity_key = touched_links.identity_key
+      ) OR EXISTS (
+        SELECT 1 FROM ontology_source_rows AS rows ${LIVE_ROWS}
+        WHERE rows.entity_kind = 'link' AND rows.source_type_id = touched_links.source_type_id
+          AND rows.source_primary_id = touched_links.source_id
+          AND rows.link_id = touched_links.link_id
+          AND rows.target_type_id = touched_links.target_type_id
+          AND rows.target_primary_id = touched_links.target_id
+      )
+      UNION
+      SELECT ${LINK_COLUMNS} FROM slot_targets
+    ) AS candidates
+    WHERE EXISTS (
+      SELECT 1 FROM ${SQLITE_PLAN_WORK_TABLE} AS work
+      WHERE work.work_id = $versionId AND work.unique_key IN (
+        'incident-object:' || json_array(candidates.source_type_id, candidates.source_id),
+        'incident-object:' || json_array(candidates.target_type_id, candidates.target_id)
+      )
+    )
+  )
+  ${INSERT_INCIDENT_LINKS}`,
+  members: `WITH ${TOUCHED}, ${TOUCHED_LINKS}, members AS (
+    SELECT candidates.* FROM (
+      SELECT ${LINK_COLUMNS} FROM touched_links WHERE ${EFFECTIVE_TOUCHED_LINK}
+      UNION
+      SELECT ${LINK_COLUMNS} FROM slot_targets
+    ) AS candidates
+    WHERE EXISTS (
+      SELECT 1 FROM ${IDENTITIES} AS changed
+      WHERE changed.version_id = $versionId
+        AND changed.source_key = json_array(candidates.source_type_id, candidates.source_id)
+        AND changed.diff_required = 1
+        AND json_extract(changed.identity_key, '$[2]') = candidates.link_id
+    )
+  )
+  ${INSERT_MEMBER_LINKS}`,
+}
+
+/**
+ * Deletes up to `$limit` touches of `$projectId` that every ready plan's watermark has seen, or
+ * all its touches when no plan is ready.
+ */
+const PURGE_TOUCHES_STATEMENT = `DELETE FROM ontology_commit_touches WHERE rowid IN (
+  SELECT touches.rowid FROM ontology_commit_touches AS touches
+  CROSS JOIN ontology_commits AS commits
+    ON commits.project_id = touches.project_id AND commits.id = touches.commit_id
+  WHERE touches.project_id = $projectId AND commits.rowid <= COALESCE(
+    (SELECT MIN(plans.watermark) FROM ontology_replacement_plans AS plans
+      JOIN ontology_sources AS versions USING (version_id)
+      WHERE plans.project_id = $projectId AND versions.status = 'ready'),
+    (SELECT COALESCE(MAX(rowid), 0) FROM ontology_commits)
+  )
+  LIMIT $limit
+)`
 
 export class SqliteOntologyReplacementPlanStorage implements OntologyReplacementPlanStorage {
   constructor(
@@ -323,15 +491,25 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
       // Every entity of the candidate and of the roots it replaces needs a diff.
       this.db
         .query(
-          `INSERT INTO ${IDENTITIES} (version_id, entity_kind, identity_key, sort_key, diff_required)
-           SELECT ?, entity_kind, identity_key, ${SORT_KEY}, 1
+          `INSERT INTO ${IDENTITIES} (
+             version_id, entity_kind, identity_key, sort_key, diff_required, expand_at,
+             source_key, target_key
+           )
+           SELECT ?, entity_kind, identity_key, ${SORT_KEY}, 1,
+             CASE entity_kind WHEN 'link' THEN 0 END, source_key, target_key
            FROM (
              SELECT entity_kind, CASE entity_kind
                WHEN 'object' THEN json_array(object_type_id, primary_id)
                ELSE json_array(
                  source_type_id, source_primary_id, link_id, target_type_id, target_primary_id
                )
-             END AS identity_key
+             END AS identity_key,
+             CASE entity_kind
+               WHEN 'link' THEN json_array(source_type_id, source_primary_id)
+             END AS source_key,
+             CASE entity_kind
+               WHEN 'link' THEN json_array(target_type_id, target_primary_id)
+             END AS target_key
              FROM (${rows.sql}) AS rows
            )
            GROUP BY entity_kind, identity_key`
@@ -424,9 +602,16 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
              cardinality_target_type_id, cardinality_target_primary_id, payload
            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, json(?))`
         )
+        // A planned object may flip its existence: the next link expansion starts from it.
         const planned = this.db.query(
           `UPDATE ${IDENTITIES}
-           SET planned_revision = read_revision, classified = ?, change = ?
+           SET planned_revision = read_revision, classified = ?, change = ?,
+             expand_at = CASE entity_kind
+               WHEN 'object' THEN (
+                 SELECT expansions FROM ontology_replacement_plans WHERE version_id = ?
+               )
+               ELSE expand_at
+             END
            WHERE version_id = ? AND entity_kind = ? AND identity_key = ?`
         )
         for (const identity of identities) {
@@ -472,6 +657,7 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
             Number(identity.classified),
             identity.change,
             versionId,
+            versionId,
             identity.kind,
             identity.key
           )
@@ -495,21 +681,17 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
       if (!committedSince(this.db, plan, input.projectId)) {
         return { fresh: true, counts: replacementPlanCounts(this.db, versionId) }
       }
+      // Purge keeps every touch past the watermark of a ready plan: only touched identities can
+      // have changed.
+      const params = { $projectId: input.projectId, $versionId: versionId }
       let unplanned = 0
       for (const kind of ["object", "link"] as const) {
-        const stale = this.db
-          .query(
-            `UPDATE ${IDENTITIES} AS identities
-             SET read_revision = NULL, planned_revision = NULL, classified = 0, change = NULL
-             WHERE identities.version_id = $versionId AND identities.entity_kind = $entityKind
-               AND identities.planned_revision IS NOT ${identityRevision(kind)}`
-          )
-          .run({ $projectId: input.projectId, $versionId: versionId, $entityKind: kind }).changes
+        const stale = this.db.query(TOUCHED_REFRESH_STATEMENTS[kind]).run(params).changes
         if (stale === 0) continue
         dropUnplannedWork(this.db, versionId, kind)
         unplanned += stale
       }
-      unplanned += this.expandLinks(versionId, input.projectId)
+      unplanned += this.expandTouched(versionId, input.projectId)
       this.db
         .query(
           `UPDATE ontology_replacement_plans
@@ -537,7 +719,7 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
       // A plan's row goes last, so a plan whose rows outlast the budget is found again next time.
       while (deleted < input.limit) {
         const spent = spentPlan.get(input.projectId) as { readonly version_id: number } | null
-        if (!spent) return deleted
+        if (!spent) break
         for (const [table, column] of [
           [SQLITE_PLAN_WORK_TABLE, "work_id"],
           [IDENTITIES, "version_id"],
@@ -556,7 +738,14 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
           .run(spent.version_id)
         deleted += 1
       }
-      return deleted
+      if (deleted >= input.limit) return deleted
+      // Every write holds the store's lock: a plan that opens later has seen all these commits.
+      return (
+        deleted +
+        this.db
+          .query(PURGE_TOUCHES_STATEMENT)
+          .run({ $projectId: input.projectId, $limit: input.limit - deleted }).changes
+      )
     })
   }
 
@@ -652,17 +841,39 @@ export class SqliteOntologyReplacementPlanStorage implements OntologyReplacement
 
   /**
    * Adds the links the plan must decide besides its own: those incident to an object it flips,
-   * and every member of a scope it changes. Returns how many identities this left to plan,
-   * counting an existing member that now needs a diff.
+   * and every member of a scope it changes, from the identities planned or added since the
+   * previous expansion. Returns how many identities this left to plan, counting an existing member
+   * that now needs a diff. What commits add later is found from their touches by `expandTouched`.
    */
   private expandLinks(versionId: number, projectId: string): number {
+    const added = this.expand(versionId, projectId, EXPAND_LINK_STATEMENTS)
+    this.db
+      .query(
+        `UPDATE ontology_replacement_plans SET expansions = expansions + 1 WHERE version_id = ?`
+      )
+      .run(versionId)
+    return added
+  }
+
+  /**
+   * Adds the links commits brought within the plan's reach, from what they touched: a link that
+   * now exists incident to an object the plan flips, or in a scope a planned link changes.
+   */
+  private expandTouched(versionId: number, projectId: string): number {
+    return this.expand(versionId, projectId, EXPAND_TOUCHED_STATEMENTS)
+  }
+
+  private expand(
+    versionId: number,
+    projectId: string,
+    statements: { readonly incident: string; readonly members: string }
+  ): number {
     const run = (statement: string) =>
       this.db.query(statement).run({ $projectId: projectId, $versionId: versionId }).changes
-    const diffLinks = run(EXPAND_LINK_STATEMENTS.incident)
-    const members = run(EXPAND_LINK_STATEMENTS.members)
+    const diffLinks = run(statements.incident)
     // An upgraded member planned without a diff keeps no work from before.
     if (diffLinks > 0) dropUnplannedWork(this.db, versionId, "link")
-    return diffLinks + members
+    return diffLinks + run(statements.members)
   }
 
   private requireCandidate(input: ReplacementPlanRef): SqliteOntologySourceRow {

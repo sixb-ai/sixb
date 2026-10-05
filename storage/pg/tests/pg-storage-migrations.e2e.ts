@@ -353,6 +353,7 @@ describe("Postgres storage migrations", () => {
             "053-replacement-plans",
             "054-slim-ontology-outbox",
             "055-object-query-preparation",
+            "056-commit-touches",
           ],
         },
       ])
@@ -741,6 +742,13 @@ describe("Postgres storage migrations", () => {
           id: "055-object-query-preparation",
           status: "applied",
           version: 55,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "056-commit-touches",
+          status: "applied",
+          version: 56,
         },
       ])
     })
@@ -1593,6 +1601,8 @@ describe("Postgres storage migrations", () => {
       expect(
         (await readTableNames(schemaName)).filter((name) => name.startsWith("ontology_"))
       ).toEqual([
+        "ontology_commit_touch_horizons",
+        "ontology_commit_touches",
         "ontology_commits",
         "ontology_link_overrides",
         "ontology_object_overrides",
@@ -2927,6 +2937,13 @@ describe("Postgres storage migrations", () => {
           id: "055-object-query-preparation",
           status: "applied",
           version: 55,
+        },
+        {
+          adapter_id: POSTGRES_STORAGE_ADAPTER_ID,
+          checksum_length: 64,
+          id: "056-commit-touches",
+          status: "applied",
+          version: 56,
         },
       ])
     } finally {

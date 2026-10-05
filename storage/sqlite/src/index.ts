@@ -176,9 +176,11 @@ export class SqliteStorage implements MigrationCapableStorage {
     this.connectorConnections = createOperationScopedFacade(stores.connectorConnections, scope)
     this.fileUploadSessions = createOperationScopedFacade(stores.fileUploadSessions, scope)
     this.migrators = options.path ? createSqliteStorageMigrators(options.path) : []
-    registerSqliteStorageTestingAdapter(this, (durationMs) =>
-      stores.connectorConnections.advanceTimeForTesting(durationMs)
-    )
+    registerSqliteStorageTestingAdapter(this, {
+      advanceConnectorConnectionTime: (durationMs) =>
+        stores.connectorConnections.advanceTimeForTesting(durationMs),
+      db: this.connection.db,
+    })
   }
 
   async ping(): Promise<void> {

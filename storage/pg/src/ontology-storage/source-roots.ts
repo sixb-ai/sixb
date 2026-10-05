@@ -11,7 +11,7 @@ import {
 import type { SourceActivationWrite, StageSourceRowsInput } from "@sixb/core/storage"
 import type { SQLClient } from "../pg-client"
 import type { PgOntologySourceAssertionRow } from "./shared"
-import { jsonParameter, type PgOntologySourceRow } from "./shared"
+import { columnKeyExpression, jsonParameter, type PgOntologySourceRow } from "./shared"
 
 /**
  * Source storage in three levels: a version (`ontology_sources`, one per run), its roots (one per
@@ -178,7 +178,10 @@ export async function stageSourceRoots(
     )
 }
 
-/** Retires what the candidate replaces; its own roots go live when its version turns active. */
+/**
+ * Retires what the candidate replaces; its own roots go live when its version turns active. Every
+ * link those roots assert changes its live source, which the commit records as touched.
+ */
 export async function activateSourceRoots(
   sql: SQLClient,
   projectId: string,
@@ -199,19 +202,43 @@ export async function activateSourceRoots(
     AND versions.version_id = roots.version_id AND versions.project_id = ${projectId}
     AND versions.source_id = ${activation.source.projectionId}
     AND versions.status IN ${sql.unsafe(PUBLISHED)}`
-  if (candidate.base_materialization_id === null) {
-    await sql`
+  const retired =
+    candidate.base_materialization_id === null
+      ? sql`
       UPDATE ontology_source_roots AS roots SET retired_at = ${activation.updatedAt}
       FROM ontology_sources AS versions WHERE ${live}
+      RETURNING roots.id
     `
-  } else {
-    await sql`
+      : sql`
       UPDATE ontology_source_roots AS roots SET retired_at = ${activation.updatedAt}
       FROM ontology_source_roots AS changed, ontology_sources AS versions
       WHERE changed.version_id = ${candidate.version_id} AND roots.project_id = ${projectId}
         AND roots.root_key = changed.root_key AND ${live}
+      RETURNING roots.id
     `
-  }
+  await sql`
+    WITH retired AS (${retired}), changed AS (
+      SELECT id FROM retired
+      UNION ALL
+      SELECT id FROM ontology_source_roots WHERE version_id = ${candidate.version_id}
+    )
+    INSERT INTO ontology_commit_touches (project_id, entity_kind, identity_key)
+    SELECT DISTINCT ${projectId}, 'link', ${sql.unsafe(
+      columnKeyExpression([
+        "rows.source_type_id",
+        "rows.source_primary_id",
+        "rows.link_id",
+        "rows.target_type_id",
+        "rows.target_primary_id",
+      ])
+    )}
+    FROM changed
+    CROSS JOIN LATERAL (
+      SELECT * FROM ontology_source_rows AS rows
+      WHERE rows.root_id = changed.id AND rows.entity_kind = 'link'
+      OFFSET 0
+    ) AS rows
+  `
   // Deletions are never live; retiring them lets cleanup remove them with their version.
   await sql`
     UPDATE ontology_source_roots SET retired_at = ${activation.updatedAt}

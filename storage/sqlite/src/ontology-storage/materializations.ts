@@ -69,6 +69,51 @@ import { activateSourceRoots } from "./source-roots"
 /** Rows the provider reads and writes at once while it applies a staged plan. */
 const APPLY_PAGE_ROWS = 1_000
 
+/**
+ * Records the entities whose plan inputs a commit's applied work changed, once each, as the
+ * in-memory `touchPlanItem` does: a replacement plan's refresh rechecks only those.
+ */
+function touchAppliedWorkStatement(workTable: string): string {
+  return `
+  INSERT INTO ontology_commit_touches (project_id, commit_id, entity_kind, identity_key)
+  SELECT DISTINCT $projectId, $commitId, kind, CASE kind
+    WHEN 'object' THEN
+      json_array(json_extract(ref, '$.objectTypeId'), json_extract(ref, '$.primaryId'))
+    WHEN 'scope' THEN json_array(
+      json_extract(ref, '$.source.objectTypeId'), json_extract(ref, '$.source.primaryId'),
+      json_extract(ref, '$.linkId')
+    )
+    ELSE json_array(
+      json_extract(ref, '$.source.objectTypeId'), json_extract(ref, '$.source.primaryId'),
+      json_extract(ref, '$.linkId'), json_extract(ref, '$.target.objectTypeId'),
+      json_extract(ref, '$.target.primaryId')
+    )
+  END
+  FROM (
+    SELECT CASE json_extract(payload, '$.item.kind')
+        WHEN 'object-upsert' THEN 'object'
+        WHEN 'object-delete' THEN 'object'
+        WHEN 'object-override-upsert' THEN 'object'
+        WHEN 'object-override-delete' THEN 'object'
+        WHEN 'point-upsert' THEN 'object'
+        WHEN 'link-upsert' THEN 'link'
+        WHEN 'link-delete' THEN 'link'
+        WHEN 'link-override-upsert' THEN 'link'
+        WHEN 'link-override-delete' THEN 'link'
+        WHEN 'link-slot-override-upsert' THEN 'scope'
+        WHEN 'link-slot-override-delete' THEN 'scope'
+      END AS kind,
+      CASE json_extract(payload, '$.item.kind')
+        WHEN 'object-upsert' THEN json_extract(payload, '$.item.value.row.ref')
+        WHEN 'link-upsert' THEN json_extract(payload, '$.item.value.row.ref')
+        WHEN 'point-upsert' THEN json_extract(payload, '$.item.value.point.series.object')
+        ELSE json_extract(payload, '$.item.value.ref')
+      END AS ref
+    FROM ${workTable}
+    WHERE work_id = $workId AND lane = 'apply'
+  )`
+}
+
 export class SqliteOntologyMaterializationStorage implements OntologyMaterializationStorage {
   private readonly sessions: SqliteMaterializationSessions
   private readonly writer: SqliteMaterializationWriter
@@ -233,6 +278,9 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
         this.writer.apply(commit.projectId, commit.id, materializationPlanChunk([], outbox))
         await yieldSqliteEventLoop()
       }
+      this.db
+        .query(touchAppliedWorkStatement(session.workTable))
+        .run({ $projectId: commit.projectId, $commitId: commit.id, $workId: session.workId })
       this.db.run("RELEASE SAVEPOINT sixb_ontology_apply")
     } catch (error) {
       this.db.run("ROLLBACK TO SAVEPOINT sixb_ontology_apply")
@@ -466,7 +514,7 @@ export class SqliteOntologyMaterializationStorage implements OntologyMaterializa
       invalidCorrelation("Source activation does not match its ready candidate identity.")
     }
     this.assertSource(activation.expected, commit.projectId)
-    activateSourceRoots(this.db, commit.projectId, candidate, activation)
+    activateSourceRoots(this.db, commit.projectId, commit.id, candidate, activation)
     const previous = this.getActiveSource(commit.projectId, activation.source.projectionId)
     if (previous) {
       assertPinnedDatasetWatermark(

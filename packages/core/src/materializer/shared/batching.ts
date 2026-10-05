@@ -6,6 +6,11 @@ export interface MaterializationBatching {
   readonly statePageRows: number
   readonly planChunkRows: number
   readonly planChunkBytes: number
+  /**
+   * Stale identities a projection commit plans again inside its own transaction. A refresh that
+   * finds more gives them back to a round outside it.
+   */
+  readonly transactionReplanRows: number
 }
 
 export const DEFAULT_MATERIALIZATION_BATCHING: MaterializationBatching = Object.freeze({
@@ -17,6 +22,8 @@ export const DEFAULT_MATERIALIZATION_BATCHING: MaterializationBatching = Object.
   statePageRows: 1_000,
   planChunkRows: 1_000,
   planChunkBytes: 4 * 1024 * 1024,
+  // One state page: a few hundred milliseconds of planning while the commit holds its locks.
+  transactionReplanRows: 1_000,
 })
 
 /** Internal test/provider override. Application configuration never exposes these chunk targets. */

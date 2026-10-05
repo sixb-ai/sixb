@@ -24,6 +24,7 @@ import type {
   OntologySourceRecord,
   OntologyStorage,
   ReplacementPlanRef,
+  ReplacementPlanStatus,
 } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { replayCommitRecord, withSerializationRetry } from "../execution/commit-lifecycle"
@@ -327,7 +328,9 @@ async function stageCandidateEntries(
 
 /**
  * Rounds of planning a commit tolerates before it gives the delivery back: each round plans again
- * only what changed under the previous one, and the next delivery resumes the same plan.
+ * only what changed under the previous one, and the next delivery resumes the same plan. A commit
+ * whose refresh finds few stale identities plans them in its own transaction instead, so a round
+ * ends with a commit unless writes keep changing many of the plan's inputs.
  */
 const MAX_PLAN_ROUNDS = 3
 
@@ -404,7 +407,7 @@ async function executeProjectionTransaction(
     assertDeltaBase(active, command)
   }
   throwIfAborted(command.signal)
-  const status = await storage.ontology.replacementPlans.refresh(plan)
+  const status = await refreshProjectionPlan(context, storage, command, commit, plan)
   if (!status.fresh) return { kind: "stale", unplanned: status.unplanned }
   const session = await storage.ontology.materializations.begin({
     commit,
@@ -438,6 +441,25 @@ async function executeProjectionTransaction(
       result
     ),
   }
+}
+
+/**
+ * Refreshes the plan within the commit transaction. When it finds no more stale identities than
+ * the transaction may plan itself, they are planned here: nothing can change them again before the
+ * commit, so the second refresh finds the plan fresh.
+ */
+async function refreshProjectionPlan(
+  context: MaterializerContext,
+  storage: MaterializerStorage,
+  command: PreparedProjectionReplacement,
+  commit: OntologyCommitWrite,
+  plan: ReplacementPlanRef
+): Promise<ReplacementPlanStatus> {
+  const plans = storage.ontology.replacementPlans
+  const status = await plans.refresh(plan)
+  if (status.fresh || status.unplanned > context.batching.transactionReplanRows) return status
+  await planProjectionReplacement(context, plans, plan, planInput(command, commit))
+  return plans.refresh(plan)
 }
 
 async function finalizeProjectionMaterialization(
