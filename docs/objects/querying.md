@@ -113,9 +113,24 @@ Changing a profile does not automatically reindex existing objects. Source chang
 stale embeddings so searches do not use out-of-date content. Indexing requires edit access to
 the object. Both indexing and search require read access to every source property in the profile.
 
-Vector queries use one profile and one concrete object type. Apply `where()` before `vector()`
-to narrow candidates. Pagination, traversal, expansion, and combining keyword and vector search
-are not supported. Counts and facets describe the selected top `k` results.
+Vector queries use one profile and one concrete result type. Apply `where()` or `traverse()` before
+`vector()` to narrow candidates, for example to search messages linked to a project. Pagination,
+traversal after ranking, expansion, and combining keyword and vector search are not supported.
+Counts and facets describe the selected top `k` results.
+
+```ts
+import { Collection } from "./ontology/collection"
+
+const { objects: products } = await sixb.objects(Collection).query()
+  .where((collection) => collection.p.id.eq(collectionId))
+  .traverse(Collection.l.products)
+  .vector("content", "lightweight running shoes", { k: 10 })
+  .list()
+```
+
+Choose source fields containing useful search content; avoid mixing unrelated material into one
+profile. Sixb sends the document/query role to models that distinguish them. Similarity scores
+are relative rankings, not probabilities that a result answers the question.
 
 Storage must support vector search. See [PostgreSQL setup](https://github.com/sixb-ai/sixb/tree/main/storage/pg#vector-profiles)
 or [SQLite setup](https://github.com/sixb-ai/sixb/tree/main/storage/sqlite#vector-profiles), including

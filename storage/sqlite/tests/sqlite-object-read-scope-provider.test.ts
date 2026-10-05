@@ -15,6 +15,7 @@ import {
 import { SqliteStorage } from "../src"
 import { installFreshSqliteSchema, sqliteStoragePath } from "../src/migrations"
 import { SqliteObjectStorage } from "../src/objects"
+import { compileObjectQuery } from "../src/objects/query-compiler"
 import { compileSqliteSelectedObjectReadSource } from "../src/objects/read-scope"
 import { runImmediateTransactionAsync } from "../src/transactions"
 
@@ -26,6 +27,56 @@ const generousLimits: ObjectReadExecutionLimits = {
   maxTraversalFacts: 100,
   maxOutputJsonBytes: 1_000_000,
 }
+
+test("selected traversals seek authorized identities instead of rescanning grants per edge", () => {
+  // Removal proof (Bun 1.4.2): select stored identities instead of grants in _sixb_scope_objects.
+  // SQLite flattens that CTE and rescans all target grants for each traversed edge.
+  const storage = new SqliteObjectStorage()
+  try {
+    const db = databaseOf(storage)
+    insertObject(db, RootType, "root-1", { id: "root-1" })
+    insertObject(db, TargetType, "target-1", { id: "target-1", label: "visible", hidden: "secret" })
+    insertLink(db, "root-1", "items", "target-1")
+    const root = rootSelection("root-1")
+    const source = compileSqliteSelectedObjectReadSource(
+      projectId,
+      compileSelectedObjectReadScope({
+        kind: "selected",
+        roots: [{ ...root, node: { ...root.node, links: [targetPath()] } }],
+      }),
+      100
+    )
+    const compiled = compileObjectQuery(
+      projectId,
+      {
+        kind: "traverse",
+        input: { kind: "refs", refs: [root.anchor] },
+        linkId: "items",
+        direction: "outgoing",
+      },
+      { source }
+    )
+    const plan = db
+      .query<{ detail: string }, SQLQueryBindings[]>(`EXPLAIN QUERY PLAN ${compiled.sql}`)
+      .all(...compiled.args)
+    expect(plan.some((row) => row.detail === "SCAN grants")).toBe(false)
+    const grantLookups = plan.filter((row) => row.detail.startsWith("SEARCH grants "))
+    expect(grantLookups.length).toBeGreaterThanOrEqual(2)
+    for (const row of grantLookups) {
+      for (const key of ["project_id=?", "object_type_id=?", "primary_id=?"]) {
+        expect(row.detail).toContain(key)
+      }
+    }
+    const rows = db
+      .query<{ properties: string }, SQLQueryBindings[]>(compiled.sql)
+      .all(...compiled.args)
+    expect(rows.map((row) => JSON.parse(row.properties))).toEqual([
+      { id: "target-1", label: "visible" },
+    ])
+  } finally {
+    storage.close()
+  }
+})
 
 describe("SqliteObjectStorage selected reader invariants", () => {
   test("counts live path facts exactly and preserves redacted JSON values", async () => {

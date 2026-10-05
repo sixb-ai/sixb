@@ -107,6 +107,7 @@ export interface DatabaseRow {
 }
 
 export interface ObjectQueryDatabaseRow extends DatabaseRow {
+  _vector_candidate_count?: number
   _vector_score?: number
   _cursor_properties?: string
   /** `json_object(linkId, value, ...)` serialized text from an `expand` pushdown; absent otherwise. */

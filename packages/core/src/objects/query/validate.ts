@@ -223,7 +223,7 @@ function validateVectorComposition(query: ObjectQuery, ctx: QueryValidationConte
       path: "$",
       code: "vector.composition",
       message:
-        "Vector profiles support one top-k over one concrete type, with filters before ranking and optional limit/project after it.",
+        "Vector profiles support one top-k over one concrete type, with filters, traversals or sets before ranking and optional limit/project after it.",
     })
 }
 
@@ -923,15 +923,6 @@ function validateVectorProfileQuery(
     )
     return query
   }
-  let input = query.input
-  while (input.kind === "filter") input = input.input
-  if (input.kind !== "start" || input.includeSubtypes)
-    addIssue(
-      ctx,
-      path,
-      "unsupported_vector_composition",
-      "Vector profile input must be a type with optional filters."
-    )
   const objectType = types[0]!
   const profile =
     query.profile === undefined ? undefined : objectType.search?.vectors?.[query.profile]

@@ -2,6 +2,14 @@
 
 A named profile identifies a derived representation, separate from object properties.
 
+Indexing sends embedding purpose `document`; search sends `query`. The execution wrapper preserves
+that role through model resolution, admission and accounting. Symmetric providers may ignore it.
+
+Vector candidates may come from filters, traversals, explicit refs or set operations. Canonical
+validation requires one concrete result type and admits every intermediate type, edge and source
+property. Model lookup uses that resolved result type, not the query's initial type. SQL ranks the
+eligible set after link and property authorization; it never filters a global top-k afterward.
+
 ```text
 Effective object change → invalidate stale vector + persist latest intent (one transaction)
 ProjectionWorker → durable queue → project AI admission → provider → save result → fenced commit

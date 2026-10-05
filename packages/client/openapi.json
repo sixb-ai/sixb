@@ -25242,6 +25242,10 @@
                                       "exclusiveMinimum": true,
                                       "minimum": 0
                                     },
+                                    "inputMode": {
+                                      "type": "string",
+                                      "enum": ["symmetric", "asymmetric"]
+                                    },
                                     "representation": {
                                       "type": "object",
                                       "properties": {
@@ -25617,6 +25621,10 @@
                                     "type": "integer",
                                     "exclusiveMinimum": true,
                                     "minimum": 0
+                                  },
+                                  "inputMode": {
+                                    "type": "string",
+                                    "enum": ["symmetric", "asymmetric"]
                                   },
                                   "representation": {
                                     "type": "object",

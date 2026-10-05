@@ -4,6 +4,7 @@ import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
 import { bindRequestExecution } from "../src/execution/request"
 import {
   type EmbeddingModel,
+  type EmbeddingModelRequest,
   EmbeddingModelResponseError,
   type EmbeddingModelResult,
 } from "../src/models"
@@ -14,7 +15,7 @@ function setup() {
   const deps = createTestRuntimeDeps()
   const controller = new AbortController()
   const embed = mock(
-    async (): Promise<EmbeddingModelResult> => ({
+    async (_input: EmbeddingModelRequest): Promise<EmbeddingModelResult> => ({
       vectors: [[1, 0]],
       usage: { inputTokens: 12 },
       providerIds: { requestId: "provider-request" },
@@ -66,6 +67,8 @@ describe("embedding execution accounting", () => {
     await f.objects.byId("p").vector("content").index()
     await f.search()
     expect(f.embed).toHaveBeenCalledTimes(2)
+    // Removal proof: drop purpose in executeEmbedding; provider calls lose their retrieval role.
+    expect(f.embed.mock.calls.map(([input]) => input.purpose)).toEqual(["document", "query"])
     expect(await f.storage.aiUsage.summarizeExecution(f.identity)).toMatchObject({
       modelCallCount: 2,
       usage: { inputTokens: 24, outputTokens: 0, totalTokens: 24 },

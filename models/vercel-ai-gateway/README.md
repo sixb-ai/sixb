@@ -88,7 +88,10 @@ const contentEmbedding = vercelGateway.embedding("openai/text-embedding-3-small"
 })
 
 // Register in models.embedding and reference the same model in search.vectors.
-const { vectors } = await contentEmbedding.embed({ texts: ["A search phrase"] })
+const { vectors } = await contentEmbedding.embed({
+  texts: ["A search phrase"],
+  purpose: "query",
+})
 ```
 
 Embedding calls reuse the gateway's base URL, credentials, headers and fetch implementation.
@@ -99,10 +102,22 @@ cancel a call. Embedding calls do not retry implicitly; the language-model retry
 apply. Models must support the requested dimensions. Direct provider calls bypass Sixb accounting;
 object indexing and text search use the shared usage, cost and limit controls.
 
-Automatic projection batching is enabled for known OpenAI embedding models only. Their adapter
-advertises conservative bounds of 2048 texts, 8191 UTF-8 bytes per text and 300,000 bytes total;
-the indexer also applies smaller local page bounds. Other routes remain individual until their
-limits are known. Inputs are never truncated.
+The adapter supports retrieval modes for `voyage/voyage-4`, `voyage/voyage-4-lite`,
+`voyage/voyage-4-large` and `cohere/embed-v4.0`. These bindings require `purpose: "document"`
+for indexed content and `"query"` for searches. Sixb sets this automatically for vector profiles.
+The adapter translates the role and disables truncation. Preparation is part of vector identity;
+changing it requires reindexing existing objects.
+
+`src/embedding-settings.ts` keeps verified model capabilities and parameter translation separate
+from transport, pricing and response validation. It also isolates the Voyage dimension override
+needed while Gateway ignores the common `dimensions` field on that route. Cohere uses the common
+field. New model IDs do not inherit settings from their publisher prefix.
+
+Automatic projection batching uses conservative count and UTF-8 byte bounds for those models and
+OpenAI `text-embedding-3-small`, `text-embedding-3-large` and `text-embedding-ada-002`, further
+limited by the indexer's materialization page. Byte ceilings are scheduling bounds, not token
+limits. Other routes use generic requests and provider defaults, without retrieval tuning or
+automatic batching guarantees.
 
 ## Decision models
 

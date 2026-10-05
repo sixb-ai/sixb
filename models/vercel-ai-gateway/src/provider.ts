@@ -190,7 +190,7 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
       createGatewayEmbedding(
         modelId,
         embeddingOptions,
-        async (input, dimensions) => {
+        async (input, dimensions, providerOptions) => {
           const response = await (transport.fetch ?? fetch)(`${transport.baseUrl}/embeddings`, {
             method: "POST",
             headers: {
@@ -202,6 +202,7 @@ export function createVercelGateway(options: VercelGatewayOptions = {}): VercelG
               input: input.texts,
               dimensions,
               encoding_format: "float",
+              providerOptions,
             }),
             signal: input.signal,
           })

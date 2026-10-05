@@ -22,6 +22,8 @@ export interface SqliteSelectedObjectReadSource extends SqliteObjectQuerySource 
  * CROSS JOIN keeps authorized parents/grants before indexed edge/object lookups, even when
  * statistics would otherwise make SQLite rescan all grants for every stored object.
  * Property grants are grouped only after path-sensitive reachability has been resolved.
+ * Expose identities from grants/visible, so flattened joins can seek those relations by key
+ * before loading stored values. Exposing stored identities makes traversal rescan grants per edge.
  */
 export function compileSqliteSelectedObjectReadSource(
   projectId: string,
@@ -105,7 +107,7 @@ function compileSelectedReadScopeCte(scopeJson: string, projectId: string): Comp
       _sixb_scope_root_facts(project_id, root_id, node_id, object_type_id, primary_id) AS (
         SELECT anchor.project_id, root.root_id, root.node_id, root.object_type_id, root.primary_id
         FROM _sixb_scope_roots AS root
-        JOIN objects AS anchor
+        CROSS JOIN objects AS anchor
           ON anchor.project_id = ?
          AND anchor.object_type_id = root.object_type_id
          AND anchor.primary_id = root.primary_id
@@ -187,7 +189,7 @@ function compileSelectedReadScopeCte(scopeJson: string, projectId: string): Comp
         GROUP BY reachable.project_id, reachable.object_type_id, reachable.primary_id
       ),
       _sixb_scope_objects AS (
-        SELECT stored.project_id, stored.object_type_id, stored.primary_id,
+        SELECT grants.project_id, grants.object_type_id, grants.primary_id,
           COALESCE((
             SELECT json_group_object(property.key, ${sqliteJsonEachValue("property")})
             FROM json_each(stored.properties) AS property
@@ -277,12 +279,12 @@ function compileSelectedReadScopeCte(scopeJson: string, projectId: string): Comp
       ),
       _sixb_scope_links AS (
         SELECT
-          stored.project_id,
-          stored.source_type_id,
-          stored.source_id,
-          stored.link_id,
-          stored.target_type_id,
-          stored.target_id,
+          visible.project_id,
+          visible.source_type_id,
+          visible.source_id,
+          visible.link_id,
+          visible.target_type_id,
+          visible.target_id,
           CASE
             WHEN stored.properties IS NULL THEN NULL
             ELSE NULLIF(

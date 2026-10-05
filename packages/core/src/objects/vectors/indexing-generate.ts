@@ -63,7 +63,11 @@ export async function generateVectors(
       )
     }
 
-    const result = await model.embed({ texts: entries.map((entry) => entry.input.text), signal })
+    const result = await model.embed({
+      texts: entries.map((entry) => entry.input.text),
+      purpose: "document",
+      signal,
+    })
     const values = normalizeEmbeddingResult(
       result,
       entries.length,
