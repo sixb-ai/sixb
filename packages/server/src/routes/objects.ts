@@ -745,6 +745,7 @@ export function registerObjectRoutes(app: Elysia, host: SixbHostView) {
           })
 
           return {
+            total: result.total,
             facets: result.facets,
             plan: serializePlan(result.plan),
           }

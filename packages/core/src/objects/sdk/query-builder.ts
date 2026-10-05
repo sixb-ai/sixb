@@ -16,7 +16,7 @@ import type {
   ObjectExpandOptions,
   ObjectQueryBuilder,
   ObjectQueryFacetInput,
-  ObjectQueryFacetResult,
+  ObjectQueryFacetsResult,
   ObjectQueryListOptions,
   ObjectWhereBuilder,
   ObjectWhereClause,
@@ -269,7 +269,7 @@ class ObjectQueryBuilderImpl<TObjectType extends ObjectTypeWithPropertyTokens> {
 
   async facets(
     input: readonly ObjectQueryFacetInput<TObjectType>[]
-  ): Promise<ObjectQueryFacetResult[]> {
+  ): Promise<ObjectQueryFacetsResult> {
     return this.params.executor.facets(
       this.ir,
       input.map((facet) => ({

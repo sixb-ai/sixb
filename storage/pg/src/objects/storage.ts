@@ -22,7 +22,12 @@ import type {
   QueryObjectsResult,
 } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
-import { type PgStoreClient, runPgRepeatableReadTransaction } from "../transactions"
+import {
+  canStartPgTransaction,
+  type PgStoreClient,
+  runPgRepeatableReadTransaction,
+} from "../transactions"
+import { PgAggregateAdmission } from "./aggregate-admission"
 import { DEFAULT_OBJECT_QUERY_SOURCE } from "./query-compiler"
 import { assertLinkQueryLimit, PgObjectReader } from "./reader"
 import {
@@ -107,8 +112,15 @@ const PG_OBJECT_QUERY_CAPABILITIES: ObjectQueryCapabilities = {
 export class PgObjectStorage implements ObjectStorage {
   private readonly reader: PgObjectReader
 
-  constructor(private readonly sql: PgStoreClient) {
-    this.reader = new PgObjectReader(sql, DEFAULT_OBJECT_QUERY_SOURCE)
+  constructor(
+    private readonly sql: PgStoreClient,
+    maxConcurrentAggregates = 1
+  ) {
+    this.reader = new PgObjectReader(
+      sql,
+      DEFAULT_OBJECT_QUERY_SOURCE,
+      canStartPgTransaction(sql) ? new PgAggregateAdmission(maxConcurrentAggregates) : undefined
+    )
   }
 
   queryCapabilities(): ObjectQueryCapabilities {

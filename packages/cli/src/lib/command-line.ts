@@ -168,6 +168,7 @@ export type LocalCommandId =
   | "typegen"
   | "build"
   | "db:migrate"
+  | "db:prepare"
   | "lake:check"
   | "lake:cleanup"
   | "deploy"
@@ -437,8 +438,17 @@ const commandTree: readonly CommandNode[] = [
   {
     name: "db",
     summary: "Manage runtime storage",
-    usage: "sixb db <migrate>",
+    usage: "sixb db <migrate|prepare>",
     children: [
+      command(
+        "db:prepare",
+        "Prepare ontology query indexes and exact aggregates (may block writes)",
+        {
+          path: ["db", "prepare"],
+          options: ["entry"],
+          rootHelpLabel: "db prepare",
+        }
+      ),
       command("db:migrate", "Run adapter-owned database migrations ahead of a role", {
         path: ["db", "migrate"],
         options: ["entry"],

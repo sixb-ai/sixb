@@ -298,6 +298,12 @@ async function main(): Promise<void> {
       break
     }
 
+    case "db:prepare": {
+      const { runDbPrepare } = await import("./commands/db-prepare")
+      await runDbPrepare({ entry: getFlag("entry") })
+      break
+    }
+
     case "db:migrate": {
       const { runDbMigrate } = await import("./commands/db-migrate")
       await runDbMigrate({ entry: getFlag("entry") })

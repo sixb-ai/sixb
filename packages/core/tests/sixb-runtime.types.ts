@@ -123,8 +123,8 @@ async function contract(): Promise<void> {
     .objects(Room)
     .query()
     .facets([{ property: Room.p.externalId, limit: 10 }])
-  const _facetValue: unknown = roomFacets[0]?.buckets[0]?.value
-  const _facetCount: number | undefined = roomFacets[0]?.buckets[0]?.count
+  const _facetValue: unknown = roomFacets.facets[0]?.buckets[0]?.value
+  const _facetCount: number | undefined = roomFacets.facets[0]?.buckets[0]?.count
   void _facetValue
   void _facetCount
 

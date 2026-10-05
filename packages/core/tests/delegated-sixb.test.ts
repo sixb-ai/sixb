@@ -59,9 +59,10 @@ const rejectProposal: ActionDefinition = defineAction("reject-proposal")
 interface TestProposalQuery {
   list(): Promise<{ objects: readonly { primaryId: string }[] }>
   count(): Promise<number>
-  facets(
-    input: readonly { property: { readonly id: string }; limit: number }[]
-  ): Promise<readonly { propertyId: string; buckets: readonly unknown[] }[]>
+  facets(input: readonly { property: { readonly id: string }; limit: number }[]): Promise<{
+    total: number
+    facets: readonly { propertyId: string; buckets: readonly unknown[] }[]
+  }>
   traverse(link: unknown): TestProposalQuery
 }
 
@@ -186,7 +187,10 @@ describe("delegated Sixb runtime", () => {
     ])
     expect(
       await sharedProposals.query().facets([{ property: Proposal.p.status, limit: 10 }])
-    ).toEqual([{ propertyId: "status", buckets: [{ value: "shared", count: 1 }] }])
+    ).toEqual({
+      total: 1,
+      facets: [{ propertyId: "status", buckets: [{ value: "shared", count: 1 }] }],
+    })
 
     const linkQuery = { kind: "start" as const, objectTypeId: Proposal.id, includeSubtypes: false }
     expect(

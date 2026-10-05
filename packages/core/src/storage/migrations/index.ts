@@ -18,6 +18,7 @@ export type {
   MigrationStep,
   MigrationStepInfo,
   MigrationStepOptions,
+  StorageMigrationOptions,
   StorageMigrationResult,
   StorageMigrator,
 } from "./types"

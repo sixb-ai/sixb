@@ -305,6 +305,7 @@ export class InMemoryObjectStorage implements ObjectStorage {
       this.readSource(params.projectId)
     )
     return {
+      total: result.entries.length,
       facets: buildFacetResults(
         result.entries.map((entry) => entry.row),
         params.facets

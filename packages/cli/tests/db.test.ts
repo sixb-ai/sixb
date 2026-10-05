@@ -16,7 +16,7 @@ afterEach(async () => {
 })
 
 async function runDbCommand(
-  subcommand: "migrate",
+  subcommand: "migrate" | "prepare",
   options: { cwd?: string; entry?: string | null } = {}
 ): Promise<{
   exitCode: number
@@ -78,6 +78,16 @@ async function createProjectWithDefaultBuiltEntry(): Promise<string> {
 }
 
 describe("sixb db", () => {
+  test("prepares the loaded ontology only after adapter migrations", async () => {
+    const result = await runDbCommand("prepare")
+    expect(result.exitCode).toBe(0)
+    expect(result.logEntries).toEqual([
+      { type: "storage.migrate" },
+      { type: "storage.prepare", projectId: "cli-db-project", objectTypes: 1 },
+    ])
+    expect(result.stdout).toContain("Prepared 1 object types")
+  })
+  // Guard removal: omit the ontology context in runDbMigrate; storage.prepare is missing.
   test("runs adapter migrations for the configured runtime", async () => {
     const result = await runDbCommand("migrate")
 
@@ -86,7 +96,10 @@ describe("sixb db", () => {
     expect(result.stdout).toContain("Database migrations complete")
     expect(result.stdout).toContain("Storage")
     expect(result.stdout).toContain("migrated")
-    expect(result.logEntries).toEqual([{ type: "storage.migrate" }])
+    expect(result.logEntries).toEqual([
+      { type: "storage.migrate" },
+      { type: "storage.prepare", projectId: "cli-db-project", objectTypes: 1 },
+    ])
   })
 
   test("uses the default built runtime when present and closes providers", async () => {

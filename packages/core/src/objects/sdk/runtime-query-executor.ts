@@ -46,10 +46,13 @@ export function createRuntimeQueryExecutor(params: {
 
     async facets(query: ObjectQuery, facets: readonly ObjectQueryExecutorFacetRequest[]) {
       const result = await objectReader.facet({ query, facets })
-      return result.facets.map((facet) => ({
-        propertyId: facet.propertyId,
-        buckets: [...facet.buckets],
-      }))
+      return {
+        total: result.total,
+        facets: result.facets.map((facet) => ({
+          propertyId: facet.propertyId,
+          buckets: [...facet.buckets],
+        })),
+      }
     },
 
     validate(query: ObjectQuery) {

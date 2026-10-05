@@ -21,10 +21,12 @@ export type {
   ObjectLinkTargetMetadata,
   ObjectLinkTargetType,
   ObjectPropertiesMetadata,
+  ObjectQueryIndexDefinition,
   ObjectRef,
   ObjectRefSchema,
   ObjectSchema,
   ObjectType,
+  ObjectTypeQueryMetadata,
   ObjectTypeSearchMetadata,
   ObjectTypeWithPropertyTokens,
   ObjectTypeWithTokens,
@@ -536,6 +538,7 @@ export type {
   MigrationState,
   MigrationStatus,
   Storage,
+  StorageMigrationOptions,
   StorageMigrationResult,
   StorageMigrator,
   StorageSchemaCheck,
@@ -949,6 +952,7 @@ export type {
   ObjectQueryFacetBucket,
   ObjectQueryFacetInput,
   ObjectQueryFacetResult,
+  ObjectQueryFacetsResult,
   ObjectQueryListOptions,
   ObjectQueryRow,
   ObjectReadByIdHandle,
@@ -1183,3 +1187,8 @@ export {
   isProjectionDefinition,
   isTelemetryProjectionDefinition,
 } from "./projections"
+export type {
+  ObjectQueryPreparationPlan,
+  ObjectQueryPreparationResult,
+} from "./storage/objects/query-preparation"
+export { prepareObjectQueries } from "./storage/objects/query-preparation"

@@ -278,14 +278,57 @@ const hasOverdueInvoices = await overdue.exists()
 `query: { searchable: true, facet: true }`, and each facet requires a bucket limit:
 
 ```ts
-const facets = await sixb
+const result = await sixb
   .objects(Invoice)
   .query()
   .facets([{ property: Invoice.p.status, limit: 10 }])
 
-console.log(facets[0]?.buckets)
+console.log(result.total) // 51, including any values beyond the bucket limit
+console.log(result.facets[0]?.buckets)
 // [{ value: "paid", count: 42 }, { value: "overdue", count: 9 }]
 ```
 
 Facets count the whole matching set. Row limits and pagination do not restrict their counts;
 vector queries count only their selected top `k` results.
+
+## PostgreSQL indexes
+
+Declare `query.indexes` inside `defineObjectType`, alongside `properties` and `links`.
+Property capabilities cover ordinary queries; these optional declarations optimize recurring
+combinations of filters, sorting and text counts:
+
+```ts
+import { defineObjectType, prop } from "@sixb/core"
+
+export const Customer = defineObjectType({
+  id: "Customer",
+  name: "Customer",
+  properties: [
+    prop("id", "string", { primary: true, required: true }),
+    prop("status", "string", { query: { searchable: true, filterable: true } }),
+    prop("createdAt", "timestamp", { query: { searchable: true, sortable: true } }),
+    prop("searchText", "string", { query: { searchable: true, text: true } }),
+  ],
+  query: {
+    indexes: [
+      { kind: "sort", fields: [{ propertyId: "createdAt", direction: "desc" }] },
+      {
+        kind: "sort",
+        fields: [{ propertyId: "createdAt", direction: "desc" }],
+        filters: ["status"],
+      },
+      { kind: "text", propertyId: "searchText", filters: ["status"] },
+    ],
+  },
+})
+```
+
+The two sort indexes serve all customers and customers filtered by status, respectively.
+`filters` accepts string equality filters. The text declaration accelerates exact counts and
+facets; ordinary substring search only needs the property's `text` capability.
+
+Sixb prepares indexes automatically after startup migrations, never during requests.
+Initial text preparation rewrites the objects table and blocks writes: run `bun sixb db migrate`
+ahead of deployment when needed. `--no-migrate` / `SIXB_SKIP_MIGRATION=1` skips preparation too.
+Removed declarations do not automatically drop indexes. Physical preparation currently applies
+to PostgreSQL only. See the [PostgreSQL storage guide](https://github.com/sixb-ai/sixb/tree/main/storage/pg#preparing-queries) for maintenance details.

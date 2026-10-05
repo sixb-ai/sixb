@@ -912,6 +912,7 @@ function createReadStorage(options?: {
     async facetObjects(input) {
       record("facetObjects", input)
       return {
+        total: 1,
         facets: input.facets.map((facet) => ({
           propertyId: facet.propertyId,
           buckets: [{ value: "Proposal", count: 1 }],
@@ -1042,6 +1043,7 @@ function createSelectedReader(
       record("facetObjects", input)
       const objects = selectedQueryRows(rows, input.query)
       return {
+        total: objects.length,
         facets: input.facets.map((facet) => ({
           propertyId: facet.propertyId,
           buckets: facetBuckets(objects, facet.propertyId, facet.limit),

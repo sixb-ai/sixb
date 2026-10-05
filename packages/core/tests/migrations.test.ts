@@ -4,6 +4,7 @@ import {
   InMemoryStorage,
   type MigrationState,
   migrateStorage,
+  OntologyRegistry,
   type StorageMigrator,
 } from "../src"
 import {
@@ -286,6 +287,49 @@ describe("migrateStorage", () => {
           skipped: [],
         },
       ],
+    })
+  })
+
+  // Guard removal: omit preparation, move it before migrators, or swallow its failure.
+  test("prepares only after successful schema migrations and propagates preparation failures", async () => {
+    const calls: string[] = []
+    const options = { projectId: "p", ontology: new OntologyRegistry({ sources: [] }) }
+    const storage = Object.assign(new InMemoryStorage(), {
+      migrators: [
+        {
+          adapterId: "test",
+          latestVersion: 1,
+          async status() {
+            throw new Error("unused")
+          },
+          async migrate() {
+            calls.push("schema")
+            return {
+              adapterId: "test",
+              latestVersion: 1,
+              status: "current" as const,
+              applied: [],
+              skipped: [],
+            }
+          },
+        },
+      ],
+      async prepareObjectQueries() {
+        calls.push("queries")
+        throw new Error("query preparation failed")
+      },
+    })
+    await expect(migrateStorage(storage, options)).rejects.toThrow("query preparation failed")
+    expect(calls).toEqual(["schema", "queries"])
+    calls.length = 0
+    storage.migrators[0]!.migrate = async () => {
+      throw new Error("schema failed")
+    }
+    await expect(migrateStorage(storage, options)).rejects.toThrow("schema failed")
+    expect(calls).toEqual([])
+    await expect(migrateStorage(new InMemoryStorage(), options)).resolves.toEqual({
+      status: "skipped",
+      reports: [],
     })
   })
 

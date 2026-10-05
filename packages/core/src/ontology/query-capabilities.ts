@@ -123,7 +123,7 @@ export function resolvePropertyQueryCapabilities(
   }
 }
 
-function resolveQuerySchema(
+export function resolveQuerySchema(
   schema: Schema,
   valueTypesById: ReadonlyMap<string, ValueType>,
   seen = new Set<string>()

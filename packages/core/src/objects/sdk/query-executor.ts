@@ -5,7 +5,7 @@
  * runtime implements this against storage, and `@sixb/client` implements it
  * against the HTTP query routes, so both share one builder.
  */
-import type { ObjectQueryFacetResult } from "../../runtime/types"
+import type { ObjectQueryFacetsResult } from "../../runtime/types"
 import type { ObjectQueryExplanation } from "../query/explain"
 import type { ObjectQuery } from "../query/ir"
 import type { ValidatedObjectQuery } from "../query/validate"
@@ -55,7 +55,7 @@ export interface ObjectQueryExecutor {
   facets(
     query: ObjectQuery,
     facets: readonly ObjectQueryExecutorFacetRequest[]
-  ): Promise<ObjectQueryFacetResult[]>
+  ): Promise<ObjectQueryFacetsResult>
   /** Validation requires ontology access and is unavailable on remote executors. */
   validate?(query: ObjectQuery): ValidatedObjectQuery
   /** Explanation requires ontology access and is unavailable on remote executors. */

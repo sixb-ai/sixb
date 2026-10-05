@@ -73,6 +73,14 @@ export async function migrateStorageForRole(
 
   const applied = result.reports.flatMap((report) => report.applied)
 
+  if (result.queries?.status === "prepared") {
+    return {
+      outcome: "migrated",
+      applied,
+      summary: `${applied.length ? `migrated: ${applied.join(", ")}; ` : ""}query indexes prepared`,
+    }
+  }
+
   if (applied.length === 0) {
     return { outcome: "current", applied, summary: "schema up to date" }
   }
@@ -86,7 +94,10 @@ export async function migrateStorageForRole(
 
 async function runMigration(sixb: LoadedSixbHost, role: StorageSchemaRole) {
   try {
-    return await migrateStorage(sixb.storage)
+    return await migrateStorage(sixb.storage, {
+      projectId: sixb.id,
+      ontology: sixb.definitions.ontology,
+    })
   } catch (error) {
     throw isBusyDatabaseError(error) ? concurrentMigrationError(error, role) : error
   }

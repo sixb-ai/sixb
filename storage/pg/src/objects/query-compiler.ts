@@ -22,6 +22,7 @@ export interface PgObjectQueryPageRow {
 }
 
 export interface CompiledPgObjectQuery {
+  traversalProbe?: { sql: string; args: unknown[]; limit: number }
   vectorProbe?: { sql: string; args: unknown[]; limit: number }
   sql: string
   args: unknown[]
@@ -52,6 +53,11 @@ interface CompiledHasMoreProbe {
 
 interface CompileContext {
   probeLimit: boolean
+  startPredicate?: string
+  isolateSortOverflow?: boolean
+  /** A consuming operator supplies ordering; bounded inputs still keep their own order. */
+  unordered?: boolean
+  correlatedTraversal?: boolean
   source: PgObjectQuerySource
 }
 
@@ -105,7 +111,12 @@ const DEFAULT_EXPANSION_FANOUT = 1_000
 export function compilePgObjectQuery(
   projectId: string,
   query: ObjectQuery,
-  options: { includeTotal?: boolean; source?: PgObjectQuerySource } = {}
+  options: {
+    includeTotal?: boolean
+    source?: PgObjectQuerySource
+    correlatedTraversal?: boolean
+    sortIndexBound?: string
+  } = {}
 ): CompiledPgObjectQuery {
   if (hasVectorProfile(query) && !isVectorProfileQuery(query)) {
     throw new ObjectQueryExecutionError(
@@ -114,14 +125,43 @@ export function compilePgObjectQuery(
     )
   }
   const source = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
-  const compiled = source.wrapQuery(
+  let compiled = source.wrapQuery(
     compileObjectQueryInternal(projectId, query, {
       probeLimit: options.includeTotal === false,
+      correlatedTraversal: options.correlatedTraversal,
       source,
     })
   )
+  if (options.sortIndexBound && source === DEFAULT_OBJECT_QUERY_SOURCE) {
+    let bounded = query
+    while (bounded.kind === "expand") bounded = bounded.input
+    if (bounded.kind === "page" || bounded.kind === "limit") {
+      const branches = [options.sortIndexBound, `NOT (${options.sortIndexBound})`].map(
+        (startPredicate, branch) =>
+          compileObjectQueryInternal(projectId, query, {
+            probeLimit: options.includeTotal === false,
+            source,
+            startPredicate,
+            isolateSortOverflow: branch === 1,
+            correlatedTraversal: options.correlatedTraversal,
+          })
+      )
+      const limit =
+        bounded.kind === "page"
+          ? bounded.pageSize + 1
+          : bounded.limit + (options.includeTotal === false ? 1 : 0)
+      compiled = {
+        ...compiled,
+        sql: `SELECT * FROM ((${branches[0]!.sql}) UNION ALL (${branches[1]!.sql})) AS input ORDER BY ${compiled.order.sql} LIMIT ?`,
+        args: [...branches[0]!.args, ...branches[1]!.args, ...compiled.order.args, limit],
+      }
+    }
+  }
+  const traversal = !options.correlatedTraversal && boundedTraversal(query)
+  const traversalProbe = traversal ? compileTraversalProbe(projectId, traversal, source) : undefined
   return {
     ...compiled,
+    ...(traversalProbe ? { traversalProbe } : {}),
     sql: numberPlaceholders(compiled.sql),
     totalSql: numberPlaceholders(compiled.totalSql),
     vectorProbe: compiled.vectorProbe
@@ -236,6 +276,61 @@ export function compilePgObjectFacetQuery(
       [propertyId, propertyId, ...source.args, propertyId, limit]
     )
   )
+}
+
+/** A single aggregate computes every facet and its exact total under one SQL snapshot. */
+export function compilePgObjectFacetsQuery(
+  projectId: string,
+  query: ObjectQuery,
+  facets: readonly { propertyId: string; limit: number }[],
+  options: { source?: PgObjectQuerySource } = {}
+): CompiledPgFacetQuery {
+  const querySource = options.source ?? DEFAULT_OBJECT_QUERY_SOURCE
+  const source = compileAggregateSource(projectId, query, querySource)
+  return compilePgFacetSummary(
+    numberCompiledQuery(querySource.wrapStatement(source.sql, source.args)),
+    facets
+  )
+}
+
+/** Input is a numbered statement returning properties; compact read paths can supply it too. */
+export function compilePgFacetSummary(
+  source: CompiledPgFacetQuery,
+  facets: readonly { propertyId: string; limit: number }[],
+  nativeValues = false
+): CompiledPgFacetQuery {
+  const args = [...source.args]
+  const bind = (value: unknown) => {
+    args.push(value)
+    return `$${args.length}`
+  }
+  const fields = facets.map((facet, i) => {
+    if (nativeValues) return `f${i}_type, f${i}_value`
+    const property = bind(facet.propertyId)
+    // Group JSONB before rendering: text would split equal numeric values such as 1.0 / 1.00.
+    return `jsonb_typeof(input.properties -> ${property}::text) AS f${i}_type, input.properties -> ${property}::text AS f${i}_value`
+  })
+  if (!fields.length)
+    return {
+      sql: `SELECT -1 AS facet_index, NULL::text AS value_type, NULL::text AS value_text, count(*) AS count FROM (${source.sql}) AS input`,
+      args,
+    }
+  const columns = facets.map((_, i) => `f${i}_type, f${i}_value`)
+  const groups = facets.map((_, i) => `WHEN GROUPING(f${i}_type) = 0 THEN ${i}`).join(" ")
+  const buckets = facets.map(
+    (facet, i) =>
+      `(SELECT ${i} AS facet_index, f${i}_type AS value_type, ${nativeValues ? `f${i}_value` : `(f${i}_value #>> '{}')`} AS value_text, count FROM _sixb_facet_groups WHERE facet_index = ${i} AND f${i}_type IS NOT NULL ORDER BY count DESC, value_text ASC LIMIT ${bind(facet.limit)})`
+  )
+  return {
+    sql: `WITH _sixb_facet_groups AS MATERIALIZED (
+      SELECT CASE ${groups} ELSE -1 END AS facet_index, ${columns.join(", ")}, count(*) AS count
+      FROM (SELECT ${fields.join(", ")} FROM (${source.sql}) AS input) AS _sixb_values
+      GROUP BY GROUPING SETS ((), ${columns.map((column) => `(${column})`).join(", ")})
+    )
+    SELECT -1 AS facet_index, NULL::text AS value_type, NULL::text AS value_text, count FROM _sixb_facet_groups WHERE facet_index = -1
+    UNION ALL ${buckets.join(" UNION ALL ")}`,
+    args,
+  }
 }
 
 function compileObjectQueryInternal(
@@ -366,12 +461,14 @@ function compileStart(
     SELECT *, properties AS _cursor_properties
     FROM ${ctx.source.objectsTable}
     WHERE project_id = ? AND object_type_id = ?
-    ORDER BY ${order.sql}
+    ${ctx.startPredicate ? `AND (${ctx.startPredicate})` : ""}
+    ${ctx.unordered ? "" : `ORDER BY ${order.sql}`}
+    ${ctx.isolateSortOverflow ? "OFFSET 0" : ""}
   `
 
   return {
     sql,
-    args: [projectId, query.objectTypeId, ...order.args],
+    args: [projectId, query.objectTypeId, ...(ctx.unordered ? [] : order.args)],
     totalSql: `SELECT COUNT(*)::bigint AS total FROM ${ctx.source.objectsTable} WHERE project_id = ? AND object_type_id = ?`,
     totalArgs: [projectId, query.objectTypeId],
     order,
@@ -390,6 +487,13 @@ function compileRefs(
     throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
   }
 
+  // Keep a concrete type visible to PostgreSQL even when identities arrive as JSON.
+  // Relationship joins can then use partial incoming-link indexes for that type.
+  const objectTypeId = query.refs[0]!.objectTypeId
+  const uniformType = query.refs.every((ref) => ref.objectTypeId === objectTypeId)
+  const typePredicate = uniformType ? "AND selected.object_type_id = ?" : ""
+  const typeArgs = uniformType ? [objectTypeId] : []
+
   const order = compileOrder(identityOrderFields())
   const selectedOrder = compileOrder(identityOrderFields(), "selected")
   const refsJson = JSON.stringify(query.refs)
@@ -406,12 +510,13 @@ function compileRefs(
       ON selected.project_id = ?
      AND selected.object_type_id = requested.object_type_id
      AND selected.primary_id = requested.primary_id
-    ORDER BY ${selectedOrder.sql}
+    ${typePredicate}
+    ${ctx.unordered ? "" : `ORDER BY ${selectedOrder.sql}`}
   `
 
   return {
     sql,
-    args: [refsJson, projectId, ...selectedOrder.args],
+    args: [refsJson, projectId, ...typeArgs, ...(ctx.unordered ? [] : selectedOrder.args)],
     totalSql: `
       SELECT COUNT(*)::bigint AS total
       FROM (${requested}) AS requested
@@ -419,8 +524,9 @@ function compileRefs(
         ON selected.project_id = ?
        AND selected.object_type_id = requested.object_type_id
        AND selected.primary_id = requested.primary_id
+    ${typePredicate}
     `,
-    totalArgs: [refsJson, projectId],
+    totalArgs: [refsJson, projectId, ...typeArgs],
     order,
     hasMore: () => false,
     trimRows: identityRows,
@@ -443,17 +549,20 @@ function compileWhere(
   predicate: CompiledPredicate,
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
+  const input = compileObjectQueryInternal(projectId, inputQuery, {
+    ...exactContext(ctx),
+    unordered: true,
+  })
   const sql = `
     SELECT *
     FROM (${input.sql}) AS input
     WHERE ${predicate.sql}
-    ORDER BY ${input.order.sql}
+    ${ctx.unordered ? "" : `ORDER BY ${input.order.sql}`}
   `
 
   return {
     sql,
-    args: [...input.args, ...predicate.args, ...input.order.args],
+    args: [...input.args, ...predicate.args, ...(ctx.unordered ? [] : input.order.args)],
     totalSql: `
       SELECT COUNT(*)::bigint AS total
       FROM (${input.sql}) AS input
@@ -490,7 +599,10 @@ function compileSort(
   fields: readonly ObjectQuerySortField[],
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
+  const input = compileObjectQueryInternal(projectId, inputQuery, {
+    ...exactContext(ctx),
+    unordered: true,
+  })
   const probeInput =
     ctx.probeLimit && needsLimitProbe(inputQuery)
       ? compileObjectQueryInternal(projectId, inputQuery, ctx)
@@ -510,9 +622,9 @@ function compileSort(
         input.version,
         input.last_commit_id${input.vectorProbe ? ", input._vector_score" : ""}
       FROM (${input.sql}) AS input
-      ORDER BY ${order.sql}
+      ${ctx.unordered ? "" : `ORDER BY ${order.sql}`}
     `,
-    args: [...input.args, ...order.args],
+    args: [...input.args, ...(ctx.unordered ? [] : order.args)],
     totalSql: input.totalSql,
     totalArgs: input.totalArgs,
     order,
@@ -529,9 +641,17 @@ function compileLimit(
   rawLimit: number,
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
+  const input = compileObjectQueryInternal(projectId, inputQuery, {
+    ...exactContext(ctx),
+    unordered: true,
+  })
   const limit = Math.max(0, rawLimit)
   const rowLimit = ctx.probeLimit ? limit + 1 : limit
+
+  // A plan bounded for the page must not force correlated probes over the full total.
+  const totalInput = ctx.correlatedTraversal
+    ? compileAggregateSource(projectId, inputQuery, ctx.source)
+    : input
 
   return {
     sql: `
@@ -543,9 +663,9 @@ function compileLimit(
     args: [...input.args, ...input.order.args, rowLimit],
     totalSql: `
       SELECT COUNT(*)::bigint AS total
-      FROM (${input.sql}) AS input
+      FROM (${totalInput.sql}) AS input
     `,
-    totalArgs: input.args,
+    totalArgs: totalInput.args,
     vectorProbe: input.vectorProbe,
     order: input.order,
     hasMore: (rowCount, total) =>
@@ -562,7 +682,10 @@ function compilePage(
   pageToken: string | undefined,
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
+  const input = compileObjectQueryInternal(projectId, inputQuery, {
+    ...exactContext(ctx),
+    unordered: true,
+  })
   const pageSize = Math.max(0, rawPageSize)
   const cursor = pageToken ? decodePageToken(pageToken, input.order.fields) : undefined
   const cursorPredicate = cursor
@@ -570,20 +693,50 @@ function compilePage(
     : undefined
   const whereSql = cursorPredicate ? `WHERE ${cursorPredicate.sql}` : ""
 
+  const ranges =
+    cursor && isIndexPageInput(inputQuery)
+      ? compileKeysetRanges(input.order.fields, cursor, input.order.propertyColumn)
+      : undefined
+  const rangeSql = ranges
+    ?.map(
+      (range) =>
+        `(SELECT * FROM (${input.sql}) AS input WHERE ${range.sql} ORDER BY ${input.order.sql} LIMIT ?)`
+    )
+    .join(" UNION ALL ")
+
+  // A plan bounded for the page must not force correlated probes over the full total.
+  const totalInput = ctx.correlatedTraversal
+    ? compileAggregateSource(projectId, inputQuery, ctx.source)
+    : input
+
   return {
-    sql: `
+    sql: rangeSql
+      ? `SELECT * FROM (${rangeSql}) AS input ORDER BY ${input.order.sql} LIMIT ?`
+      : `
       SELECT *
       FROM (${input.sql}) AS input
       ${whereSql}
       ORDER BY ${input.order.sql}
       LIMIT ?
     `,
-    args: [...input.args, ...(cursorPredicate?.args ?? []), ...input.order.args, pageSize + 1],
+    args:
+      rangeSql && ranges
+        ? [
+            ...ranges.flatMap((range) => [
+              ...input.args,
+              ...range.args,
+              ...input.order.args,
+              pageSize + 1,
+            ]),
+            ...input.order.args,
+            pageSize + 1,
+          ]
+        : [...input.args, ...(cursorPredicate?.args ?? []), ...input.order.args, pageSize + 1],
     totalSql: `
       SELECT COUNT(*)::bigint AS total
-      FROM (${input.sql}) AS input
+      FROM (${totalInput.sql}) AS input
     `,
-    totalArgs: input.args,
+    totalArgs: totalInput.args,
     vectorProbe: input.vectorProbe,
     order: input.order,
     hasMore: (rowCount) => rowCount > pageSize,
@@ -603,57 +756,123 @@ function compileTraversal(
   sourceObjectTypeId: string | undefined,
   ctx: CompileContext
 ): CompiledPgObjectQuery {
-  const input = compileObjectQueryInternal(projectId, inputQuery, exactContext(ctx))
-  const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
-  const joinSql =
-    direction === "outgoing"
-      ? `
-        JOIN ${ctx.source.linksTable} AS edge
-          ON edge.project_id = input.project_id
-         AND edge.source_type_id = input.object_type_id
-         AND edge.source_id = input.primary_id
-         AND edge.link_id = ?
-        JOIN ${ctx.source.objectsTable} AS target_object
-          ON target_object.project_id = edge.project_id
-         AND target_object.object_type_id = edge.target_type_id
-         AND target_object.primary_id = edge.target_id
-      `
-      : `
-        JOIN ${ctx.source.linksTable} AS edge
-          ON edge.project_id = input.project_id
-         AND edge.target_type_id = input.object_type_id
-         AND edge.target_id = input.primary_id
-         AND edge.link_id = ?${sourceObjectTypeId === undefined ? "" : "\n         AND edge.source_type_id = ?"}
-        JOIN ${ctx.source.objectsTable} AS source_object
-          ON source_object.project_id = edge.project_id
-         AND source_object.object_type_id = edge.source_type_id
-         AND source_object.primary_id = edge.source_id
-      `
-  const order = compileOrder(identityOrderFields())
-  const qualifiedOrder = compileOrder(identityOrderFields(), outputAlias)
-  const sql = `
-    SELECT DISTINCT ${outputAlias}.*, ${outputAlias}.properties AS _cursor_properties
-    FROM (${input.sql}) AS input
-    ${joinSql}
-    ORDER BY ${qualifiedOrder.sql}
-  `
-  const args = [
-    ...input.args,
+  const input = compileObjectQueryInternal(projectId, inputQuery, {
+    ...exactContext(ctx),
+    unordered: true,
+    startPredicate: undefined,
+    isolateSortOverflow: false,
+  })
+  const relation = compileTraversalRelation(
+    projectId,
+    input,
     linkId,
-    ...(sourceObjectTypeId === undefined ? [] : [sourceObjectTypeId]),
-    ...qualifiedOrder.args,
-  ]
-
+    direction,
+    sourceObjectTypeId,
+    ctx.source,
+    ctx.correlatedTraversal,
+    ctx.startPredicate
+  )
+  const order = compileOrder(identityOrderFields())
   return {
-    sql,
-    args,
-    totalSql: `SELECT COUNT(*)::bigint AS total FROM (${sql}) AS traversed`,
-    totalArgs: args,
+    sql: `SELECT selected.*, selected.properties AS _cursor_properties ${relation.sql} ${ctx.unordered ? "" : `ORDER BY ${order.sql}`} ${ctx.isolateSortOverflow ? "OFFSET 0" : ""}`,
+    args: [...relation.args, ...(ctx.unordered ? [] : order.args)],
+    totalSql: `SELECT COUNT(*)::bigint AS total ${relation.sql}`,
+    totalArgs: relation.args,
     order,
     hasMore: () => false,
     trimRows: identityRows,
     nextPageToken: () => undefined,
   }
+}
+
+/** A traversal is a set of endpoints. EXISTS avoids sorting/deduplicating full JSON objects. */
+function compileTraversalRelation(
+  projectId: string,
+  input: CompiledAggregateSource,
+  linkId: string,
+  direction: "outgoing" | "incoming",
+  sourceObjectTypeId: string | undefined,
+  source: PgObjectQuerySource,
+  correlated = false,
+  endpointPredicate?: string
+): CompiledAggregateSource {
+  const incoming = direction === "incoming"
+  const parent = incoming ? "target" : "source"
+  const endpoint = incoming ? "source" : "target"
+  const constrainedType = incoming ? sourceObjectTypeId : undefined
+  return {
+    sql: `FROM ${source.objectsTable} AS selected
+      WHERE selected.project_id = ?
+      ${constrainedType === undefined ? "" : "AND selected.object_type_id = ?"}
+      ${endpointPredicate ? `AND (${endpointPredicate})` : ""}
+      AND EXISTS (
+        SELECT 1 FROM (${input.sql}) AS input
+        JOIN ${source.linksTable} AS edge
+          ON edge.project_id = input.project_id
+          AND edge.${parent}_type_id = input.object_type_id
+          AND edge.${parent}_id = input.primary_id
+        WHERE edge.project_id = selected.project_id
+          AND edge.${endpoint}_type_id = selected.object_type_id
+          AND edge.${endpoint}_id = selected.primary_id
+          AND edge.link_id = ?
+          ${correlated ? "OFFSET 0" : ""}
+      )`,
+    args: [
+      projectId,
+      ...(constrainedType === undefined ? [] : [constrainedType]),
+      ...input.args,
+      linkId,
+    ],
+  }
+}
+
+/** Only a bounded page benefits from choosing an ordered, correlated endpoint scan. */
+function boundedTraversal(
+  query: ObjectQuery,
+  bounded = false
+): Extract<ObjectQuery, { kind: "traverse" }> | undefined {
+  switch (query.kind) {
+    case "page":
+    case "limit":
+      return boundedTraversal(query.input, true)
+    case "sort":
+    case "filter":
+    case "text":
+    case "project":
+    case "expand":
+      return boundedTraversal(query.input, bounded)
+    case "traverse":
+      return bounded ? query : undefined
+    default:
+      return undefined
+  }
+}
+
+function compileTraversalProbe(
+  projectId: string,
+  traversal: Extract<ObjectQuery, { kind: "traverse" }>,
+  source: PgObjectQuerySource
+): { sql: string; args: unknown[]; limit: number } {
+  const input = compileAggregateSource(projectId, traversal.input, source)
+  const parent = traversal.direction === "incoming" ? "target" : "source"
+  const limit = 1000
+  const statement = compilePgObjectStatement(
+    `SELECT 1 FROM (${input.sql}) AS input
+    JOIN ${source.linksTable} AS edge ON edge.project_id = input.project_id
+      AND edge.${parent}_type_id = input.object_type_id AND edge.${parent}_id = input.primary_id
+    WHERE edge.link_id = ? ${traversal.direction === "incoming" && traversal.sourceObjectTypeId ? "AND edge.source_type_id = ?" : ""}
+    LIMIT ?`,
+    [
+      ...input.args,
+      traversal.linkId,
+      ...(traversal.direction === "incoming" && traversal.sourceObjectTypeId
+        ? [traversal.sourceObjectTypeId]
+        : []),
+      limit + 1,
+    ],
+    source
+  )
+  return { ...statement, limit }
 }
 
 /** Correlation handle for an expansion: the parent row's identity columns. */
@@ -849,7 +1068,7 @@ function compileExpansionOrder(
       `${
         field.scalarKind === "decimal"
           ? `(${jsonTextExpression(propertyColumn)})::numeric`
-          : jsonValueExpression(propertyColumn)
+          : `NULLIF(${jsonValueExpression(propertyColumn)}, 'null'::jsonb)`
       } ${direction}`
     )
     args.push(field.propertyId, field.propertyId, field.propertyId)
@@ -1029,6 +1248,13 @@ function compileAggregateRefs(
     throw new Error("[SixbPg] PostgreSQL object storage requires at least one ref")
   }
 
+  // Keep a concrete type visible to PostgreSQL even when identities arrive as JSON.
+  // Relationship joins can then use partial incoming-link indexes for that type.
+  const objectTypeId = query.refs[0]!.objectTypeId
+  const uniformType = query.refs.every((ref) => ref.objectTypeId === objectTypeId)
+  const typePredicate = uniformType ? "AND selected.object_type_id = ?" : ""
+  const typeArgs = uniformType ? [objectTypeId] : []
+
   return {
     sql: `
       SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties
@@ -1042,8 +1268,9 @@ function compileAggregateRefs(
         ON selected.project_id = ?
        AND selected.object_type_id = requested.object_type_id
        AND selected.primary_id = requested.primary_id
+    ${typePredicate}
     `,
-    args: [JSON.stringify(query.refs), projectId],
+    args: [JSON.stringify(query.refs), projectId, ...typeArgs],
   }
 }
 
@@ -1073,47 +1300,40 @@ function compileAggregateTraversal(
   source: PgObjectQuerySource
 ): CompiledAggregateSource {
   const input = compileAggregateSource(projectId, inputQuery, source)
-  const outputAlias = direction === "outgoing" ? "target_object" : "source_object"
-  const joinSql =
-    direction === "outgoing"
-      ? `
-        JOIN ${source.linksTable} AS edge
-          ON edge.project_id = input.project_id
-         AND edge.source_type_id = input.object_type_id
-         AND edge.source_id = input.primary_id
-         AND edge.link_id = ?
-        JOIN ${source.objectsTable} AS target_object
-          ON target_object.project_id = edge.project_id
-         AND target_object.object_type_id = edge.target_type_id
-         AND target_object.primary_id = edge.target_id
-      `
-      : `
-        JOIN ${source.linksTable} AS edge
-          ON edge.project_id = input.project_id
-         AND edge.target_type_id = input.object_type_id
-         AND edge.target_id = input.primary_id
-         AND edge.link_id = ?${sourceObjectTypeId === undefined ? "" : "\n         AND edge.source_type_id = ?"}
-        JOIN ${source.objectsTable} AS source_object
-          ON source_object.project_id = edge.project_id
-         AND source_object.object_type_id = edge.source_type_id
-         AND source_object.primary_id = edge.source_id
-      `
-
+  if (direction === "incoming" && sourceObjectTypeId !== undefined) {
+    // Deduplicate endpoint identities before fetching objects. Bounded arrays let PostgreSQL
+    // visit primary keys in groups instead of doing one random B-tree descent per edge.
+    // Each array contains at most 1024 IDs; larger traversals can spill their sort/group work.
+    return {
+      sql: `SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties
+        FROM (
+          SELECT array_agg(primary_id) AS ids FROM (
+            SELECT primary_id, (row_number() OVER (ORDER BY primary_id) - 1) / 1024 AS batch
+            FROM (
+              SELECT DISTINCT edge.source_id AS primary_id
+              FROM (${input.sql}) AS input
+              JOIN ${source.linksTable} AS edge ON edge.project_id = input.project_id
+                AND edge.target_type_id = input.object_type_id AND edge.target_id = input.primary_id
+              WHERE edge.link_id = ? AND edge.source_type_id = ?
+            ) AS endpoints
+          ) AS numbered GROUP BY batch
+        ) AS batches
+        JOIN ${source.objectsTable} AS selected ON selected.project_id = ?
+          AND selected.object_type_id = ? AND selected.primary_id = ANY(batches.ids)`,
+      args: [...input.args, linkId, sourceObjectTypeId, projectId, sourceObjectTypeId],
+    }
+  }
+  const relation = compileTraversalRelation(
+    projectId,
+    input,
+    linkId,
+    direction,
+    sourceObjectTypeId,
+    source
+  )
   return {
-    sql: `
-      SELECT DISTINCT
-        ${outputAlias}.project_id,
-        ${outputAlias}.object_type_id,
-        ${outputAlias}.primary_id,
-        ${outputAlias}.properties
-      FROM (${input.sql}) AS input
-      ${joinSql}
-    `,
-    args: [
-      ...input.args,
-      linkId,
-      ...(sourceObjectTypeId === undefined ? [] : [sourceObjectTypeId]),
-    ],
+    sql: `SELECT selected.project_id, selected.object_type_id, selected.primary_id, selected.properties ${relation.sql}`,
+    args: relation.args,
   }
 }
 
@@ -1349,8 +1569,8 @@ function compileEqualityPredicate(
   if (typeof value === "string") {
     if (op === "eq") {
       return {
-        sql: `(${jsonTypeExpression()} = 'string' AND ${jsonTextExpression()} = ?::text)`,
-        args: [propertyId, propertyId, value],
+        sql: `(${jsonTypeExpression()} = 'string' AND ${jsonTextExpression()} = ?::text AND md5(${jsonTextExpression()}) = md5(?::text))`,
+        args: [propertyId, propertyId, value, propertyId, value],
       }
     }
 
@@ -1391,9 +1611,11 @@ function compileInPredicate(propertyId: string, values: readonly unknown[]): Com
     clauses.push(
       `(${jsonTypeExpression()} = 'string' AND ${jsonTextExpression()} IN (${stringValues
         .map(() => "?::text")
-        .join(", ")}))`
+        .join(
+          ", "
+        )}) AND md5(${jsonTextExpression()}) IN (${stringValues.map(() => "md5(?::text)").join(", ")}))`
     )
-    args.push(propertyId, propertyId, ...stringValues)
+    args.push(propertyId, propertyId, ...stringValues, propertyId, ...stringValues)
   }
 
   if (jsonbValues.length > 0) {
@@ -1441,11 +1663,13 @@ function compileTextPredicate(query: string, fields: readonly string[]): Compile
 
   const clauses = terms.map(() => {
     const fieldClauses = fields.map(
-      () => `position(?::text in lower(coalesce(${jsonTextExpression()}, ''))) > 0`
+      () => `lower(coalesce(${jsonTextExpression()}, '')) LIKE ?::text`
     )
     return `(${fieldClauses.join(" OR ")})`
   })
-  const args = terms.flatMap((term) => fields.flatMap((field) => [term, field]))
+  const args = terms.flatMap((term) =>
+    fields.flatMap((field) => [field, `%${term.replace(/[\\%_]/g, "\\$&")}%`])
+  )
 
   return { sql: `(${clauses.join(" AND ")})`, args }
 }
@@ -1542,6 +1766,62 @@ function identityOrderFields(): readonly CompiledOrderField[] {
     { kind: "column", column: "object_type_id", direction: "asc" },
     { kind: "column", column: "primary_id", direction: "asc" },
   ]
+}
+
+/** Bound each disjoint cursor range before merging: OR would scan all preceding index entries. */
+function compileKeysetRanges(
+  fields: readonly CompiledOrderField[],
+  cursor: readonly EncodedCursorValue[],
+  propertyColumn: string
+): CompiledPredicate[] {
+  const ranges: CompiledPredicate[] = []
+  const prefix: CompiledPredicate[] = []
+  const addRange = (advance: CompiledPredicate) => {
+    const parts = [...prefix, advance]
+    ranges.push({
+      sql: parts.map((part) => `(${part.sql})`).join(" AND "),
+      args: parts.flatMap((part) => part.args),
+    })
+  }
+  fields.forEach((field, index) => {
+    const value = cursor[index]
+    if (field.kind === "column") {
+      const after = compileFieldAfter(field, value, propertyColumn)
+      if (after) addRange(after)
+      prefix.push(compileFieldEquality(field, value, propertyColumn))
+      return
+    }
+    const rank = `CASE WHEN ${jsonTypeExpression(propertyColumn)} IS NULL OR ${jsonTypeExpression(propertyColumn)} = 'null' THEN 1 ELSE 0 END`
+    if (!value.nullish) addRange({ sql: `${rank} = 1`, args: [field.propertyId, field.propertyId] })
+    prefix.push({
+      sql: `${rank} = ${value.nullish ? 1 : 0}`,
+      args: [field.propertyId, field.propertyId],
+    })
+    if (value.nullish) return
+    const expression = compiledPropertyValueExpression(field, propertyColumn)
+    const parameter = field.scalarKind === "decimal" ? "?::numeric" : "?::text::jsonb"
+    const args = [
+      field.propertyId,
+      field.scalarKind === "decimal" ? value.value : jsonbValue(value.value),
+    ]
+    addRange({ sql: `${expression} ${field.direction === "desc" ? "<" : ">"} ${parameter}`, args })
+    prefix.push({ sql: `${expression} = ${parameter}`, args })
+  })
+  return ranges
+}
+
+function isIndexPageInput(query: ObjectQuery): boolean {
+  switch (query.kind) {
+    case "start":
+      return true
+    case "filter":
+    case "text":
+    case "sort":
+    case "traverse":
+      return isIndexPageInput(query.input)
+    default:
+      return false
+  }
 }
 
 function compileKeysetPredicate(
@@ -1722,7 +2002,7 @@ function compiledPropertyValueExpression(
 ): string {
   return field.scalarKind === "decimal"
     ? `(${jsonTextExpression(propertyColumn)})::numeric`
-    : jsonValueExpression(propertyColumn)
+    : `NULLIF(${jsonValueExpression(propertyColumn)}, 'null'::jsonb)`
 }
 
 function columnExpression(

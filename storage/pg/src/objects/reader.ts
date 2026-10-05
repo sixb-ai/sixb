@@ -10,7 +10,6 @@ import type {
   LinkBatchKey,
   LinkDirection,
   ObjectBatchKey,
-  ObjectFacetResult,
   ObjectLinkRow,
   ObjectReadStorage,
   ObjectRow,
@@ -21,17 +20,19 @@ import type {
 } from "@sixb/core/storage"
 import { linkBatchKey, objectBatchKey } from "@sixb/core/storage"
 import type { SQLClient, SqlParameter } from "../pg-client"
+import type { PgAggregateAdmission } from "./aggregate-admission"
 import {
   type CompiledPgObjectQuery,
   compilePgObjectCountQuery,
   compilePgObjectExistsQuery,
-  compilePgObjectFacetQuery,
+  compilePgObjectFacetsQuery,
   compilePgObjectQuery,
   compilePgObjectStatement,
+  DEFAULT_OBJECT_QUERY_SOURCE,
   type PgObjectQuerySource,
 } from "./query-compiler"
+import { findPgSortIndexBound } from "./query-indexes"
 import type { PgSelectedObjectReadSource } from "./read-scope"
-
 import {
   type FacetDatabaseRow,
   type LinkBatchDatabaseRow,
@@ -45,11 +46,14 @@ import {
   rowToLink,
   rowToObject,
 } from "./rows"
+import { compilePgIndexedTextCount, compilePgIndexedTextFacets } from "./text-count-index"
 
+/** Execute object and link reads, using prepared access paths when the query shape allows it. */
 export class PgObjectReader {
   constructor(
     private readonly sql: SQLClient,
-    private readonly source: PgObjectQuerySource | PgSelectedObjectReadSource
+    private readonly source: PgObjectQuerySource | PgSelectedObjectReadSource,
+    private readonly aggregateAdmission?: PgAggregateAdmission
   ) {}
 
   private async assertVectorSearch(
@@ -82,28 +86,20 @@ export class PgObjectReader {
   async queryObjects(params: QueryObjectsInput): Promise<QueryObjectsResult> {
     await this.assertVectorSearch(params)
     const sql = this.sql
-    const source = this.source
-    const compiled = compilePgObjectQuery(params.projectId, params.query, {
-      includeTotal: params.includeTotal,
-      source,
-    })
-    const total = params.includeTotal === false ? undefined : await readTotal(sql, compiled)
+    const compiled = await this.compilePageQuery(params)
+    const total = await this.readQueryTotal(params, compiled)
+
     const rawRows = await sql.unsafe<ObjectQueryDatabaseRow[]>(
       compiled.sql,
       compiled.args as SqlParameter[]
     )
     const rows = compiled.trimRows(rawRows) as readonly ObjectQueryDatabaseRow[]
-    const hasMore =
-      total === undefined && compiled.hasMoreProbe
-        ? compiled.hasMoreProbe.hasMore(
-            (
-              await sql.unsafe(
-                compiled.hasMoreProbe.sql,
-                compiled.hasMoreProbe.args as SqlParameter[]
-              )
-            ).length
-          )
-        : compiled.hasMore(rawRows.length, total)
+    let hasMore = compiled.hasMore(rawRows.length, total)
+    if (total === undefined && compiled.hasMoreProbe) {
+      const probe = compiled.hasMoreProbe
+      const candidates = await sql.unsafe(probe.sql, probe.args as SqlParameter[])
+      hasMore = probe.hasMore(candidates.length)
+    }
 
     return {
       objects: rows.map((row) => queryRowToObject(row)),
@@ -113,13 +109,78 @@ export class PgObjectReader {
     }
   }
 
+  /** Use the ordered traversal path only when its bounded probe finds a broad fanout. */
+  private async compilePageQuery(params: QueryObjectsInput): Promise<CompiledPgObjectQuery> {
+    const sql = this.sql
+    const source = this.source
+    const sortIndexBound =
+      source === DEFAULT_OBJECT_QUERY_SOURCE
+        ? await findPgSortIndexBound(sql, params.projectId, params.query)
+        : undefined
+    let compiled = compilePgObjectQuery(params.projectId, params.query, {
+      sortIndexBound,
+      includeTotal: params.includeTotal,
+      source,
+    })
+    if (compiled.traversalProbe) {
+      const probe = compiled.traversalProbe
+      const candidates = await sql.unsafe(probe.sql, probe.args as SqlParameter[])
+      if (candidates.length > probe.limit) {
+        compiled = compilePgObjectQuery(params.projectId, params.query, {
+          includeTotal: params.includeTotal,
+          source,
+          correlatedTraversal: true,
+          sortIndexBound,
+        })
+      }
+    }
+    return compiled
+  }
+
+  private async readQueryTotal(
+    params: QueryObjectsInput,
+    compiled: CompiledPgObjectQuery
+  ): Promise<number | undefined> {
+    if (params.includeTotal === false) return undefined
+
+    const computeTotal = async () => {
+      if (this.source === DEFAULT_OBJECT_QUERY_SOURCE) {
+        const indexed = await compilePgIndexedTextCount(
+          this.sql,
+          params.projectId,
+          totalCountInput(params.query)
+        )
+        if (indexed) {
+          const [row] = await this.sql.unsafe(indexed.sql, indexed.args as SqlParameter[])
+          return Number(row?.count ?? 0)
+        }
+      }
+      return readTotal(this.sql, compiled)
+    }
+
+    if (this.aggregateAdmission) return this.aggregateAdmission.run(computeTotal)
+    return computeTotal()
+  }
+
   async countObjects(params: CountObjectsInput): Promise<CountObjectsResult> {
+    if (this.aggregateAdmission) {
+      return this.aggregateAdmission.run(() =>
+        new PgObjectReader(this.sql, this.source).countObjects(params)
+      )
+    }
+
     await this.assertVectorSearch(params)
     const sql = this.sql
     const source = this.source
-    const compiled = compilePgObjectCountQuery(params.projectId, stripOuterRowShape(params.query), {
-      source,
-    })
+    const indexed =
+      source === DEFAULT_OBJECT_QUERY_SOURCE
+        ? await compilePgIndexedTextCount(sql, params.projectId, stripOuterRowShape(params.query))
+        : undefined
+    const compiled =
+      indexed ??
+      compilePgObjectCountQuery(params.projectId, stripOuterRowShape(params.query), {
+        source,
+      })
     const [row] = await sql.unsafe<{ count: string | number | bigint }[]>(
       compiled.sql,
       compiled.args as SqlParameter[]
@@ -141,26 +202,53 @@ export class PgObjectReader {
   }
 
   async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
+    if (this.aggregateAdmission) {
+      return this.aggregateAdmission.run(() =>
+        new PgObjectReader(this.sql, this.source).facetObjects(params)
+      )
+    }
+
     await this.assertVectorSearch(params)
     const sql = this.sql
     const source = this.source
-    const facets: ObjectFacetResult[] = []
-    for (const facet of params.facets) {
-      facets.push({
-        propertyId: facet.propertyId,
-        buckets: await readFacetBuckets(
-          sql,
-          compilePgObjectFacetQuery(
+    const indexed =
+      source === DEFAULT_OBJECT_QUERY_SOURCE
+        ? await compilePgIndexedTextFacets(
+            sql,
             params.projectId,
             stripOuterRowShape(params.query),
-            facet.propertyId,
-            facet.limit,
-            { source }
+            params.facets
           )
-        ),
-      })
+        : undefined
+    const compiled =
+      indexed ??
+      compilePgObjectFacetsQuery(
+        params.projectId,
+        stripOuterRowShape(params.query),
+        params.facets,
+        { source }
+      )
+    const rows = await sql.unsafe<(FacetDatabaseRow & { facet_index: number })[]>(
+      compiled.sql,
+      compiled.args as SqlParameter[]
+    )
+    const facets = params.facets.map((facet) => ({
+      propertyId: facet.propertyId,
+      buckets: [] as { value: unknown; count: number }[],
+    }))
+    let total = 0
+    for (const row of rows) {
+      if (row.facet_index === -1) {
+        total = Number(row.count)
+      } else {
+        facets[row.facet_index]?.buckets.push({
+          value: pgFacetValue(row.value_type, row.value_text),
+          count: Number(row.count),
+        })
+      }
     }
-    return { facets }
+
+    return { total, facets }
   }
 
   async getByPrimaryId(params: {
@@ -585,20 +673,6 @@ async function readTotal(sql: SQLClient, compiled: CompiledPgObjectQuery): Promi
   return Number(row?.total ?? 0)
 }
 
-async function readFacetBuckets(
-  sql: SQLClient,
-  compiled: { sql: string; args: readonly unknown[] }
-): Promise<{ value: unknown; count: number }[]> {
-  const rows = await sql.unsafe<FacetDatabaseRow[]>(compiled.sql, [
-    ...compiled.args,
-  ] as SqlParameter[])
-
-  return rows.map((row) => ({
-    value: pgFacetValue(row.value_type, row.value_text),
-    count: Number(row.count),
-  }))
-}
-
 function pgFacetValue(valueType: string | null, valueText: string | null): unknown {
   switch (valueType) {
     case "string":
@@ -614,6 +688,21 @@ function pgFacetValue(valueType: string | null, valueText: string | null): unkno
       return valueText === null ? null : JSON.parse(valueText)
     default:
       return valueText
+  }
+}
+
+// A page's total counts its input, including any inner limit/page. Do not strip those bounds.
+function totalCountInput(query: ObjectQuery): ObjectQuery {
+  switch (query.kind) {
+    case "sort":
+    case "project":
+    case "expand":
+      return totalCountInput(query.input)
+    case "limit":
+    case "page":
+      return query.input
+    default:
+      return query
   }
 }
 

@@ -360,6 +360,25 @@ export interface Interface {
   links: ObjectLink[]
 }
 
+/** Compound query shapes prepared by the storage provider, in addition to property flags. */
+export type ObjectQueryIndexDefinition =
+  | {
+      kind: "sort"
+      fields: readonly { propertyId: string; direction?: "asc" | "desc" }[]
+      /** String equality filters preceding the ordered fields. */
+      filters?: readonly string[]
+    }
+  | {
+      kind: "text"
+      propertyId: string
+      /** String filters/facets commonly combined with this substring search. */
+      filters?: readonly string[]
+    }
+
+export interface ObjectTypeQueryMetadata {
+  indexes?: readonly ObjectQueryIndexDefinition[]
+}
+
 /**
  * Canonical ontology node for a real-world asset, system, concept, or process.
  *
@@ -413,6 +432,8 @@ export interface ObjectType {
 
   properties: Property[]
   links: ObjectLink[]
+  /** Query index declarations, prepared automatically after storage migrations. */
+  query?: ObjectTypeQueryMetadata
   /** Search profile for this object type. */
   search?: ObjectTypeSearchMetadata
 }

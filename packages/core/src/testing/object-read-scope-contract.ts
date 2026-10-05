@@ -579,6 +579,7 @@ export function runObjectReadScopeContractSuite<TStorage extends Storage>(
             ],
           })
         ).toEqual({
+          total: 1,
           facets: [
             { propertyId: "category", buckets: [{ value: "visible", count: 1 }] },
             { propertyId: "secret", buckets: [] },

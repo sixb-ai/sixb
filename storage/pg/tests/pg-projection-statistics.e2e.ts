@@ -109,7 +109,9 @@ test("a published bulk load leaves selective statistics for the next sparse proj
   const { storage, schemaName } = await createTestStorage()
   const sql = createPgClient({ connectionString: process.env.DATABASE_URL!, schemaName, max: 1 })
   try {
-    await sql.unsafe("ALTER TABLE links SET (autovacuum_enabled=false); ANALYZE links")
+    await sql.unsafe(
+      "ALTER TABLE links SET (autovacuum_enabled=false); ALTER TABLE objects SET (autovacuum_enabled=false); ANALYZE links"
+    )
     const Device = defineObjectType({
       id: "Device",
       name: "Device",
@@ -153,6 +155,18 @@ test("a published bulk load leaves selective statistics for the next sparse proj
     expect(states.every((state) => state.effective !== null)).toBe(true)
     expect(seen).toHaveLength(1)
     expect(seen[0]).toBeLessThan(500)
+    // Guard removal: restore unconditional ANALYZE for every >=1000-object publication.
+    // The added small batch then changes reltuples, proving it repeated full statistics work.
+    const [before] = await sql`SELECT reltuples FROM pg_class WHERE oid='objects'::regclass`
+    await fixture.seed({
+      objects: Array.from({ length: 1000 }, (_, i) => ({
+        ref: { objectTypeId: "Device", primaryId: `additional-${i}` },
+        properties: { id: `additional-${i}` },
+      })),
+    })
+    const [after] = await sql`SELECT reltuples FROM pg_class WHERE oid='objects'::regclass`
+    expect(Number(before!.reltuples)).toBeGreaterThan(0)
+    expect(after!.reltuples).toBe(before!.reltuples)
   } finally {
     await sql.end()
     await storage.dropSchema()

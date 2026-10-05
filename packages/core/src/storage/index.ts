@@ -383,6 +383,7 @@ export type {
   MigrationStep,
   MigrationStepInfo,
   MigrationStepOptions,
+  StorageMigrationOptions,
   StorageMigrationResult,
   StorageMigrator,
   StorageSchemaCheck,
@@ -451,6 +452,11 @@ export {
   objectLinkCursor,
   snapshotObjectReadExecutionLimits,
 } from "./objects"
+export type {
+  ObjectQueryPreparationPlan,
+  ObjectQueryPreparationResult,
+  QueryPreparationCapableStorage,
+} from "./objects/query-preparation"
 export type {
   AbandonRunSourceMaterializationInput,
   AbandonSourceMaterializationCandidateInput,

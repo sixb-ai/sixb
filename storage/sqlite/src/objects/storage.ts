@@ -161,9 +161,7 @@ export class SqliteObjectStorage implements ObjectStorage {
   }
 
   async facetObjects(params: FacetObjectsInput): Promise<FacetObjectsResult> {
-    if (hasVectorProfile(params.query))
-      return runDeferredReadTransaction(this.db, () => this.reader.facetObjects(params))
-    return this.reader.facetObjects(params)
+    return runDeferredReadTransaction(this.db, () => this.reader.facetObjects(params))
   }
 
   async getByPrimaryId(params: {

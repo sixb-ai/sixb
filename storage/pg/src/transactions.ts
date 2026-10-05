@@ -71,13 +71,15 @@ export async function runPgTransaction<T>(
 }
 
 /**
- * Hold one pool connection for `run`, and hand it back to the pool only while it is still usable.
+ * Hold one pool connection for `run`, or reuse a caller-owned reserved connection.
+ * Hand an owned connection back to the pool only while it is still usable.
  * A connection whose session is gone stays out of the pool, which replaces it on its own.
  */
 export async function withReservedPgConnection<T>(
-  sql: SQL,
+  sql: SQL | ReservedSQL,
   run: (connection: ReservedSQL) => Promise<T>
 ): Promise<T> {
+  if (!("reserve" in sql)) return run(sql)
   const connection = await sql.reserve()
   let usable = true
   try {
@@ -184,7 +186,7 @@ function advisoryLockParts(key: string): readonly [number, number] {
   return [hash.readInt32BE(0), hash.readInt32BE(4)]
 }
 
-function canStartPgTransaction(sql: PgStoreClient): sql is SQL {
+export function canStartPgTransaction(sql: PgStoreClient): sql is SQL {
   return (
     !pgTransactionClients.has(sql) &&
     typeof (sql as { readonly reserve?: unknown }).reserve === "function"
