@@ -89,6 +89,17 @@ export function runAiUsageStorageContractSuite<TStorage extends AiUsageStorage>(
         ).toMatchObject({ modelCallCount: 1, usage: { audioDurationMs: 1250 } })
       })
     })
+    // Removal proof: omit 'reranking' from a storage migration's model_kind check; the write fails.
+    test("persists reranking usage kind", async () => {
+      await withStorage(async (storage) => {
+        await storage.recordModelCall(modelCallInput({ modelKind: "reranking", usage: {} }))
+        const latest = await storage.getLatestForExecution({
+          projectId,
+          executionId: agentExecutionId,
+        })
+        expect(latest?.modelKind).toBe("reranking")
+      })
+    })
     test("retains native provider IDs across reads and replay", async () => {
       // Regression proof: omit providerIds in normalization or a storage row codec.
       await withStorage(async (storage) => {

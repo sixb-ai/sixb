@@ -2185,7 +2185,14 @@ export type ListAiModelCallsResponses = {
         callId: string
         providerId: string
         requestedModelId: string
-        modelKind?: "language" | "image" | "video" | "embedding" | "decision" | "transcription"
+        modelKind?:
+          | "language"
+          | "image"
+          | "video"
+          | "embedding"
+          | "decision"
+          | "transcription"
+          | "reranking"
         requestedReasoning?:
           | "provider-default"
           | "none"

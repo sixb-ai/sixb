@@ -519,6 +519,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 56,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "057-reranking-model-kind",
+    status: "applied",
+    version: 57,
+  },
 ]
 
 afterEach(async () => {
@@ -564,6 +571,39 @@ describe("SQLite storage migrations", () => {
         { project_id: "p", id: "root", requester_group_ids: "[]" },
         { project_id: "p", id: "task", requester_group_ids: '["finance"]' },
         { project_id: "p", id: "workflow", requester_group_ids: '["finance"]' },
+      ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("keeps recorded model kinds and admits reranking", async () => {
+    // Removal proof: omit 057's UPDATE; the transcription kind below is lost in the swap.
+    const db = new Database(":memory:")
+    try {
+      const steps = sqliteStorageMigrations.steps
+      const index = steps.findIndex((step) => step.id === "057-reranking-model-kind")
+      for (const step of steps.slice(0, index)) await step.up(db)
+      const insertUsage = (id: string, modelKind: string | null) =>
+        db.run(
+          `INSERT INTO ai_model_call_usage (
+            project_id, id, execution_id, attempt, call_id, provider_id, requested_model_id,
+            response_id, reporting_status, occurred_at, recorded_at, model_kind
+          ) VALUES ('p', ?, 'execution', 1, ?, 'provider', 'model', ?, 'unavailable',
+            '2026-10-01T12:00:00.000Z', '2026-10-01T12:00:00.000Z', ?)`,
+          [id, id, id, modelKind]
+        )
+      insertUsage("transcription", "transcription")
+      insertUsage("unclassified", null)
+      expect(() => insertUsage("early-reranking", "reranking")).toThrow()
+
+      await steps[index]!.up(db)
+      insertUsage("reranking", "reranking")
+      expect(() => insertUsage("unknown", "unknown")).toThrow()
+      expect(db.query("SELECT id, model_kind FROM ai_model_call_usage ORDER BY id").all()).toEqual([
+        { id: "reranking", model_kind: "reranking" },
+        { id: "transcription", model_kind: "transcription" },
+        { id: "unclassified", model_kind: null },
       ])
     } finally {
       db.close()
