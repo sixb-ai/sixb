@@ -1,3 +1,4 @@
+import type { ModelKind } from "../../models/definitions"
 import type { AiMoney } from "../ai-cost"
 
 /** A project-wide, group, or durable requester identity charged for AI model calls. */
@@ -129,6 +130,8 @@ export interface ReserveAiModelCallInput extends AiModelCallReservationIdentity 
   /** The project subject is always added, even when omitted here. */
   readonly subjects: readonly AiLimitSubject[]
   readonly estimates: readonly AiLimitQuantity[]
+  /** Transcription and reranking calls are outside token limits; see `aiLimitMeterApplies`. */
+  readonly modelKind?: ModelKind
   readonly reservedAt?: Date
 }
 

@@ -135,8 +135,7 @@ Custom proxies must expose that route. Language retry options do not apply.
 Each response must rank every document with unique indices and finite scores. Invalid responses
 retain billing metadata. The protocol does not guarantee token usage: Sixb preserves unknown
 tokens instead of inferring them from charges. Known input tariffs support cost reservations;
-missing tariffs block calls under cost limits. Token limits become unavailable after an unmetered
-call. The adapter does not truncate documents; providers may apply their own context limits.
+missing tariffs block calls under cost limits. Token limits do not apply to reranking. The adapter does not truncate documents; providers may apply their own context limits.
 Direct `.rerank()` calls bypass Sixb accounting; query reranking uses the bound execution.
 
 ## Decision models
