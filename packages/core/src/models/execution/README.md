@@ -60,10 +60,11 @@ the shared 30-second cancellation bound, with no inference retry. Accounting pre
 and ranking validation. A complete permutation with finite scores is required; ties preserve the
 candidate order. `RerankingModelResponseError` carries metadata from malformed billable responses.
 
-Provider charges remain distinct from token usage: absent tokens stay unknown. Reported costs
-can reconcile monetary reservations; missing token usage cannot reconcile a token limit and makes
-that meter unavailable. Missing tariffs fail admission under cost limits. Recovery remains the
-existing accounting-only replay.
+Provider charges remain distinct from token usage: absent tokens stay unknown. Token limits
+neither admit nor count reranking or transcription calls (`aiLimitMeterApplies` in the limit
+storage helpers), so their unmetered records cannot make a token meter unavailable. Reported
+costs reconcile monetary reservations; missing tariffs fail admission under cost limits. Recovery
+remains the existing accounting-only replay.
 
 ## Decision flow
 

@@ -63,6 +63,7 @@ export function createAudioRuntime(
         callId,
         providerId: model.providerId,
         modelId: model.modelId,
+        modelKind: "transcription",
         inputTokens: { status: "unavailable", reason: "nonTextInput" },
         outputTokenAllowance: 0,
         reservationCost,

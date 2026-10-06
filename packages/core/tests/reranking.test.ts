@@ -289,13 +289,19 @@ test("embedding and reranking share execution attribution and accounting", async
 
 test("budget denial prevents reranking inference after candidate retrieval", async () => {
   const f = await setup()
+  Object.assign(f.model, {
+    costEstimator: {
+      ...f.model.costEstimator,
+      estimateReservation: () => ({ currency: "USD", amountNanos: "1000000" }),
+    },
+  })
   await f.storage.aiLimits.createPolicy({
-    id: "tokens",
+    id: "money",
     projectId: f.host.id,
     subject: { type: "project" },
-    limit: { meter: "tokens.total", amount: 11 },
+    limit: { meter: "cost.catalogEstimated", amount: { currency: "USD", amountNanos: "100000" } },
   })
-  // The two indexed documents used 6 tokens; query embedding uses 3, leaving too little to rerank.
+  // Query embedding fits the limit; the reranker's reservation does not.
   await expect(f.query().list()).rejects.toMatchObject({ code: "ai.usage_limit_exceeded" })
   expect(f.embed).toHaveBeenCalledTimes(1)
   expect(f.rerank).not.toHaveBeenCalled()
@@ -355,36 +361,45 @@ test("reported charges reconcile cost limits without inventing token usage", asy
   expect(usage.usage.totalTokens).toBeUndefined()
 })
 
-test("missing tariffs fail cost admission; unknown actual tokens block subsequent token-budget calls", async () => {
-  const noPrice = await setup()
-  Object.assign(noPrice.model, { costEstimator: undefined })
-  await noPrice.storage.aiLimits.createPolicy({
+test("missing tariffs fail cost admission", async () => {
+  const f = await setup()
+  Object.assign(f.model, { costEstimator: undefined })
+  await f.storage.aiLimits.createPolicy({
     id: "money",
-    projectId: noPrice.host.id,
+    projectId: f.host.id,
     subject: { type: "project" },
     limit: { meter: "cost.catalogEstimated", amount: { currency: "USD", amountNanos: "100000" } },
   })
-  await expect(noPrice.query().list()).rejects.toMatchObject({ code: "ai.usage_limit_unavailable" })
-  expect(noPrice.rerank).not.toHaveBeenCalled()
+  await expect(f.query().list()).rejects.toMatchObject({ code: "ai.usage_limit_unavailable" })
+  expect(f.rerank).not.toHaveBeenCalled()
+})
 
-  const unmetered = await setup()
-  await unmetered.storage.aiLimits.createPolicy({
+test("token limits neither admit nor count reranking", async () => {
+  // Removal proof: drop the aiLimitMeterApplies check in resolveAiLimitActual; the unmetered
+  // rerank makes the token meter unavailable and the second query's embedding is refused.
+  const f = await setup()
+  await f.storage.aiLimits.createPolicy({
     id: "tokens",
-    projectId: unmetered.host.id,
+    projectId: f.host.id,
     subject: { type: "project" },
     limit: { meter: "tokens.total", amount: 1000 },
   })
-  unmetered.rerank.mockResolvedValue({
+  f.rerank.mockResolvedValue({
     results: [
       { index: 0, score: 1 },
       { index: 1, score: 2 },
     ],
   })
-  await unmetered.query().list()
-  await expect(unmetered.query().list()).rejects.toMatchObject({
-    code: "ai.usage_limit_unavailable",
-  })
-  expect(unmetered.rerank).toHaveBeenCalledTimes(1)
+  await f.query().list()
+  await f.query().list()
+  expect(f.rerank).toHaveBeenCalledTimes(2)
+  // Indexing (6) and two query embeddings (3 each) count; reranking does not.
+  expect(await f.storage.aiLimits.listPolicyStatuses({ projectId: f.host.id })).toMatchObject([
+    {
+      accountingStatus: "complete",
+      consumption: { actual: { amount: 12 }, reserved: { amount: 0 }, unknown: { amount: 0 } },
+    },
+  ])
 })
 
 test("cancellation after inference preserves its accounting", async () => {

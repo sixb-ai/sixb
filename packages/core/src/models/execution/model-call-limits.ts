@@ -12,6 +12,7 @@ import {
   aiUsageLimitUnavailableError,
   applicableAiLimitPolicies,
 } from "../../storage/ai-limits/enforcement"
+import { aiLimitMeterApplies } from "../../storage/ai-limits/provider"
 import type {
   AiModelCallAdmissionDecision,
   AiModelCallAdmissionInput,
@@ -41,7 +42,9 @@ export function createAiModelCallLimitController(input: {
         const policies = await input.storage.aiLimits.listPolicies({
           projectId: input.projectId,
         })
-        applicable = applicableAiLimitPolicies(policies, subjects)
+        applicable = applicableAiLimitPolicies(policies, subjects).filter((policy) =>
+          aiLimitMeterApplies(policy.limit.meter, admission.modelKind)
+        )
       } catch (error) {
         throw limitStorageUnavailable(error)
       }
@@ -63,6 +66,7 @@ export function createAiModelCallLimitController(input: {
           ...reservationIdentity(admission),
           subjects,
           estimates,
+          ...(admission.modelKind === undefined ? {} : { modelKind: admission.modelKind }),
         })
       } catch (error) {
         throw limitStorageUnavailable(error)

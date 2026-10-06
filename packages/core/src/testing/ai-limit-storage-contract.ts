@@ -9,6 +9,7 @@ import type {
   AiUsageStorage,
   AuthStorage,
   ExecutionStorage,
+  RecordAiModelCallInput,
   ReserveAiModelCallInput,
   Storage,
 } from "../storage"
@@ -532,6 +533,65 @@ export function runAiLimitStorageContractSuite<TStorage extends AiLimitStorageCo
         ).resolves.toMatchObject({
           status: "unavailable",
           reasons: ["incompleteAccounting"],
+        })
+      })
+    })
+
+    // Removal proof: drop aiLimitMeterApplies from a provider's reserve loop (admission reports
+    // missingEstimate) or from resolveAiLimitActual (the meter becomes unavailable).
+    test("token limits neither admit nor count transcription and reranking", async () => {
+      await withStorage(async (storage) => {
+        const status = async () =>
+          (
+            await storage.aiLimits.listPolicyStatuses({
+              projectId,
+              at: at("2026-08-15T12:00:01.000Z"),
+            })
+          )[0]
+        await recordUsageInput(storage.aiUsage, {
+          id: "usage-transcription",
+          callId: "transcription",
+          modelKind: "transcription",
+          usage: { audioDurationMs: 1250 },
+        })
+        await recordUsage(storage.aiUsage, "usage-language", "language", 4)
+        await storage.aiLimits.createPolicy({
+          id: "tokens",
+          projectId,
+          subject: project,
+          limit: { meter: "tokens.total", amount: 10 },
+        })
+        expect(await status()).toMatchObject({
+          accountingStatus: "complete",
+          consumption: { actual: { amount: 4 } },
+        })
+
+        const cost: AiLimitQuantity = {
+          meter: "cost.catalogEstimated",
+          amount: { currency: "USD", amountNanos: "100" },
+        }
+        await expect(
+          storage.aiLimits.reserveModelCall(
+            reservation("reranking", 0, { estimates: [cost], modelKind: "reranking" })
+          )
+        ).resolves.toEqual({ status: "notRequired" })
+        await expect(
+          storage.aiLimits.reserveModelCall(reservation("language", 0, { estimates: [cost] }))
+        ).resolves.toMatchObject({ status: "unavailable", reasons: ["missingEstimate"] })
+
+        await recordUsageInput(storage.aiUsage, {
+          id: "usage-reranking",
+          callId: "reranking",
+          modelKind: "reranking",
+          usage: {},
+        })
+        await storage.aiLimits.recordModelCallActuals({
+          projectId,
+          usageRecordId: "usage-reranking",
+        })
+        expect(await status()).toMatchObject({
+          accountingStatus: "complete",
+          consumption: { actual: { amount: 4 } },
         })
       })
     })
@@ -1062,6 +1122,7 @@ async function recordUsageInput(
     readonly executionId?: string
     readonly requesterGroupIds?: readonly string[]
     readonly occurredAt?: Date
+    readonly modelKind?: RecordAiModelCallInput["modelKind"]
     readonly usage: AiModelCallUsageInput
   }
 ): Promise<void> {
@@ -1074,6 +1135,7 @@ async function recordUsageInput(
     requesterGroupIds: input.requesterGroupIds ?? ["support"],
     providerId: "test",
     requestedModelId: "test/model",
+    ...(input.modelKind === undefined ? {} : { modelKind: input.modelKind }),
     responseId: `response:${input.callId}`,
     usage: input.usage,
     occurredAt: input.occurredAt ?? at("2026-08-15T12:00:00.500Z"),
