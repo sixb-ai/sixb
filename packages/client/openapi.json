@@ -6604,7 +6604,8 @@
                                   "video",
                                   "embedding",
                                   "decision",
-                                  "transcription"
+                                  "transcription",
+                                  "reranking"
                                 ]
                               },
                               "requestedReasoning": {

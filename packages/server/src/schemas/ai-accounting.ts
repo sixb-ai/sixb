@@ -195,7 +195,7 @@ const AiModelCallUsageRecordSchema = z.object({
   providerId: z.string(),
   requestedModelId: z.string(),
   modelKind: z
-    .enum(["language", "image", "video", "embedding", "decision", "transcription"])
+    .enum(["language", "image", "video", "embedding", "decision", "transcription", "reranking"])
     .optional(),
   requestedReasoning: ModelReasoningSchema.optional(),
   responseModelId: z.string().optional(),

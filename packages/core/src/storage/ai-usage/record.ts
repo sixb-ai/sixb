@@ -21,7 +21,7 @@ export function normalizeAiModelCallRecord(input: RecordAiModelCallInput): AiMod
 
   if (
     input.modelKind !== undefined &&
-    !["language", "image", "video", "embedding", "decision", "transcription"].includes(
+    !["language", "image", "video", "embedding", "decision", "transcription", "reranking"].includes(
       input.modelKind
     )
   ) {

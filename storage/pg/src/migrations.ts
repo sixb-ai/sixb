@@ -122,6 +122,7 @@ import objectQueryPreparationSql from "./migrations/055-object-query-preparation
 }
 import commitTouchesSql from "./migrations/056-commit-touches.sql" with { type: "text" }
 import audioTranscriptionSql from "./migrations/057-audio-transcription.sql" with { type: "text" }
+import rerankingModelKindSql from "./migrations/058-reranking-model-kind.sql" with { type: "text" }
 import type { ReservedSQL, SQL, SQLClient } from "./pg-client"
 import { runPgTransactionOn, undoOnFailure, withReservedPgConnection } from "./transactions"
 
@@ -427,6 +428,7 @@ export const postgresStorageMigrations = defineMigrations<PostgresMigrationConte
     pgSql("055-object-query-preparation", objectQueryPreparationSql),
     pgSql("056-commit-touches", commitTouchesSql),
     pgSql("057-audio-transcription", audioTranscriptionSql),
+    pgSql("058-reranking-model-kind", rerankingModelKindSql),
   ],
 })
 

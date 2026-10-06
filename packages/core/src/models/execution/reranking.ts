@@ -122,6 +122,7 @@ async function recordReranking(
   })
   await accounting.onModelCallEnd({
     callId,
+    modelKind: "reranking",
     providerId: model.providerId,
     modelId: model.modelId,
     responseId: metadata.providerIds?.responseId ?? callId,

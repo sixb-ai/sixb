@@ -278,12 +278,13 @@ test("embedding and reranking share execution attribution and accounting", async
     from: new Date("2000-01-01"),
     to: new Date("2100-01-01"),
   })
-  expect(
-    costs.items.find((call) => call.usage.requestedModelId === "reranker")?.cost
-  ).toMatchObject({
+  const reranking = costs.items.find((call) => call.usage.requestedModelId === "reranker")
+  expect(reranking?.cost).toMatchObject({
     status: "rated",
     money: { amountNanos: "50" },
   })
+  // Removal proof: drop modelKind from recordReranking; the call is no longer distinguishable.
+  expect(reranking?.usage.modelKind).toBe("reranking")
 })
 
 test("budget denial prevents reranking inference after candidate retrieval", async () => {
