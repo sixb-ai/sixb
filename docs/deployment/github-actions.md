@@ -6,6 +6,8 @@ Deploy on every push to a branch. Once the server is [set up](servers.md#set-up-
 bun sixb deploy ci
 ```
 
+It uses that login even when the project's `.env` sets `GITHUB_TOKEN`, for example for a connector. To run it with another token, set `GH_TOKEN`.
+
 It:
 
 1. Creates an SSH key for the repository's deploys and authorizes it on the server. The key can run commands and nothing else: no port forwarding and no terminal. Its private half goes straight to GitHub and is never saved on your machine.

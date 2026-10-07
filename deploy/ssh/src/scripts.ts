@@ -183,6 +183,8 @@ function renderInstallBun(version: string): string {
     '  mv "$download/$asset/bun" "$BUN"',
     '  rm -rf "$download"',
     "fi",
+    // Dependency lifecycle scripts call `node`; with none installed, Bun runs them.
+    'command -v node > /dev/null || ln -s "$BUN" "$BUN_DIR/node"',
     '"$BUN" --version',
   ].join("\n")
 }
