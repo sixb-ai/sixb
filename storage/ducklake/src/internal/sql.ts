@@ -60,19 +60,48 @@ export function buildSetPostgresPoolSql(
  * Render a fully-qualified DuckLake metadata table path.
  *
  * PostgreSQL catalogs expose DuckLake metadata tables under the configured
- * metadata schema inside the attached metadata catalog. Local catalogs use
- * DuckDB's default `main` schema.
+ * metadata schema (PostgreSQL's `public` by default) inside the attached
+ * metadata catalog. Local catalogs use DuckDB's default `main` schema.
  */
 export function duckLakeMetadataTableName(
   options: Pick<DuckLakeStorageOptions, "alias" | "catalog">,
   tableName: string
 ): string {
-  const schemaName =
-    options.catalog.type === "postgres" ? (options.catalog.metadataSchema ?? "main") : "main"
-
   return `${quoteIdentifier(duckLakeMetadataCatalog(options))}.${quoteIdentifier(
-    schemaName
+    duckLakeMetadataSchema(options)
   )}.${quoteIdentifier(tableName)}`
+}
+
+/**
+ * Render a metadata query that runs where the catalog lives.
+ *
+ * DuckDB's PostgreSQL scanner pushes comparisons and constant IN lists down to PostgreSQL, but not
+ * string matching, so a query that filters on text would copy the whole column into DuckDB. On a
+ * PostgreSQL catalog the query therefore runs server-side through `postgres_query`; elsewhere the
+ * catalog is local and DuckDB runs it. `build` must produce SQL that both dialects accept.
+ */
+export function buildDuckLakeMetadataQuery(
+  options: Pick<DuckLakeStorageOptions, "alias" | "catalog">,
+  build: (table: (tableName: string) => string) => string
+): string {
+  if (options.catalog.type !== "postgres") {
+    return build((tableName) => duckLakeMetadataTableName(options, tableName))
+  }
+
+  // Unqualified names follow the connection's search path, as DuckLake's own writes do.
+  const schema = options.catalog.metadataSchema
+  const sql = build((tableName) =>
+    schema === undefined
+      ? quoteIdentifier(tableName)
+      : `${quoteIdentifier(schema)}.${quoteIdentifier(tableName)}`
+  )
+  return `SELECT * FROM postgres_query(${quoteSqlString(duckLakeMetadataCatalog(options))}, ${quoteSqlString(sql)})`
+}
+
+function duckLakeMetadataSchema(options: Pick<DuckLakeStorageOptions, "catalog">): string {
+  if (options.catalog.type !== "postgres") return "main"
+  // Without a metadata schema DuckLake writes to PostgreSQL's default schema.
+  return options.catalog.metadataSchema ?? "public"
 }
 
 /**

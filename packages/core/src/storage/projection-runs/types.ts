@@ -241,6 +241,8 @@ export interface ListProjectionRunsInput {
    */
   readonly objectTypeIds?: readonly string[]
   readonly statuses?: readonly ProjectionRunStatus[]
+  /** Runs whose recorded `error` has one of these codes; an empty set matches no runs. */
+  readonly errorCodes?: readonly ProjectionRunFailureCode[]
   readonly startedAfter?: Date
   readonly startedBefore?: Date
   readonly limit?: number

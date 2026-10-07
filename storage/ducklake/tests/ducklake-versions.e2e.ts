@@ -42,7 +42,7 @@ describe("DuckLakeStorage versions and time travel", () => {
 
   for (const catalog of ["duckdb", "sqlite"] as const) {
     test(`${catalog}: stops version searches at table creation and preserves history across renames`, async () => {
-      // Red check: remove the table-creation lower bound from querySnapshotCandidates.
+      // Red check: walk every catalog snapshot in querySnapshotCandidates instead of this table's.
       // Resolving a new dataset then reads three pages of unrelated history instead of one.
       // Creating 260 committed snapshots can exceed Bun's 5s default on CI runners.
       // Allow 30s for setup; the query-count assertion enforces the performance bound.
@@ -60,9 +60,9 @@ describe("DuckLakeStorage versions and time travel", () => {
       const query = spyOn(runtime, "query")
       try {
         expect(await storage.getLatestVersion(fresh.id)).toBeNull()
-        expect(
-          query.mock.calls.filter(([sql]) => sql.includes("WITH candidate_snapshots"))
-        ).toHaveLength(1)
+        expect(query.mock.calls.filter(([sql]) => sql.includes("WITH candidate_ids"))).toHaveLength(
+          1
+        )
       } finally {
         query.mockRestore()
       }

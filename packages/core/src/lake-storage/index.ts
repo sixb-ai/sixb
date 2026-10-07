@@ -69,6 +69,8 @@ export type {
   LakeStandardId,
   LakeStorage,
   LakeWriteSession,
+  LatestVersionsSince,
+  ListLatestVersionsSinceInput,
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "./types"

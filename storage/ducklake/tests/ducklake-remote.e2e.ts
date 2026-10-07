@@ -1,11 +1,13 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
 import { randomUUID } from "node:crypto"
 import { mkdtemp, rm } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { change, col, defineDataset } from "@sixb/core"
+import { change, col, type DatasetDefinition, defineDataset } from "@sixb/core"
 import { SQL } from "bun"
 import { type DuckDbSecretOptions, DuckLakeStorage, type DuckLakeStorageOptions } from "../src"
+import type { DuckDbRuntime } from "../src/internal/duckdb-runtime"
+import { encodeDatasetTableName } from "../src/internal/names"
 import { collectRows } from "./test-utils"
 
 describe("DuckLakeStorage remote catalogs", () => {
@@ -168,6 +170,120 @@ describe("DuckLakeStorage remote catalogs", () => {
       ])
     } finally {
       await storage.close()
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  })
+
+  test("reads versions and changes over a long PostgreSQL catalog history", async () => {
+    // Red check: restore the catalog-wide snapshot walk in querySnapshotCandidates. The stale read
+    // then pages through 30k snapshots, about 235 queries, each copying catalog text out of
+    // PostgreSQL. Production catalogs reach this length because snapshots are never expired.
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-history-"))
+    const catalog = postgresCatalog()
+    const storage = new DuckLakeStorage({ catalog, dataPath: join(rootDir, "data") })
+    const datasetFor = (name: string) =>
+      defineDataset(`raw.pg.history.${name}_${randomId()}`, { schema: [col("id", "string")] })
+    const busy = datasetFor("busy")
+    const stale = datasetFor("stale")
+    const empty = datasetFor("empty")
+    const commit = async (dataset: DatasetDefinition, ids: readonly string[]) => {
+      const write = await storage.beginWrite({ dataset, mode: "snapshot" })
+      await write.writeRows(ids.map((id) => ({ id })))
+      return write.commit()
+    }
+    const adminSql = createAdminSql()
+
+    try {
+      for (const dataset of [busy, stale, empty]) await storage.createDataset(dataset)
+      const original = await commit(stale, ["original"])
+      await commit(busy, ["first"])
+      await appendPostgresHistory(adminSql, catalog.metadataSchema ?? "main", busy.id, 30_000)
+      const busyLatest = await commit(busy, ["after history"])
+      // A first empty write is a metadata-only snapshot, found through its Sixb commit metadata.
+      const emptyVersion = await commit(empty, [])
+      const cursor = (await storage.listLatestVersionsSince({ cursor: null }))?.cursor ?? null
+
+      const runtime = await (
+        storage as unknown as { connections: { attachedRuntime(): Promise<DuckDbRuntime> } }
+      ).connections.attachedRuntime()
+      const query = spyOn(runtime, "query")
+      const counted = async <T>(read: () => Promise<T>) => {
+        query.mockClear()
+        const result = await read()
+        return { result, queries: query.mock.calls.length }
+      }
+      try {
+        const latest = await counted(() => storage.getLatestVersion(stale.id))
+        expect(latest.result?.versionId).toBe(original.versionId)
+        expect(latest.queries).toBeLessThanOrEqual(4)
+        await expect(storage.getLatestVersion(busy.id)).resolves.toMatchObject({
+          versionId: busyLatest.versionId,
+        })
+        await expect(storage.getLatestVersion(empty.id)).resolves.toMatchObject({
+          versionId: emptyVersion.versionId,
+          mode: "snapshot",
+        })
+
+        const append = await storage.beginWrite({ dataset: stale, mode: "append" })
+        await append.writeRows([{ id: "appended" }])
+        const appended = await append.commit()
+        await expect(storage.getVersion(stale.id, appended.versionId)).resolves.toMatchObject({
+          parentVersionId: original.versionId,
+        })
+
+        const changed = await counted(() => storage.listLatestVersionsSince({ cursor }))
+        expect(changed.result?.versions).toMatchObject([
+          { datasetId: stale.id, versionId: appended.versionId, mode: "append" },
+        ])
+        const idle = await counted(() =>
+          storage.listLatestVersionsSince({ cursor: changed.result?.cursor ?? null })
+        )
+        expect(idle.result?.versions).toEqual([])
+        expect(idle.queries).toBe(1)
+      } finally {
+        query.mockRestore()
+      }
+    } finally {
+      await storage.close()
+      await adminSql.unsafe(
+        `DROP SCHEMA IF EXISTS ${quotePgIdent(catalog.metadataSchema ?? "main")} CASCADE`
+      )
+      await adminSql.close()
+      await rm(rootDir, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  test("reads versions from a PostgreSQL catalog without a metadata schema", async () => {
+    // Red check: name the default metadata schema `main`; the first version lookup then fails
+    // because DuckLake wrote its tables to PostgreSQL's `public` schema.
+    const rootDir = await mkdtemp(join(tmpdir(), "sixb-ducklake-pg-default-schema-"))
+    const database = `sixb_${randomId()}`
+    const adminSql = createAdminSql()
+    await adminSql.unsafe(`CREATE DATABASE ${quotePgIdent(database)}`)
+    const { metadataSchema: _metadataSchema, ...catalog } = postgresCatalog()
+    const storage = new DuckLakeStorage({
+      catalog: { ...catalog, database },
+      dataPath: join(rootDir, "data"),
+    })
+    const dataset = defineDataset("raw.pg.default_schema", { schema: [col("id", "string")] })
+
+    try {
+      await storage.createDataset(dataset)
+      const head = await storage.listLatestVersionsSince({ cursor: null })
+      const write = await storage.beginWrite({ dataset, mode: "snapshot" })
+      await write.writeRows([{ id: "a" }])
+      const version = await write.commit()
+
+      await expect(storage.getLatestVersion(dataset.id)).resolves.toMatchObject({
+        versionId: version.versionId,
+      })
+      await expect(
+        storage.listLatestVersionsSince({ cursor: head?.cursor ?? null })
+      ).resolves.toMatchObject({ versions: [{ versionId: version.versionId }] })
+    } finally {
+      await storage.close()
+      await adminSql.unsafe(`DROP DATABASE IF EXISTS ${quotePgIdent(database)} WITH (FORCE)`)
+      await adminSql.close()
       await rm(rootDir, { recursive: true, force: true })
     }
   })
@@ -596,6 +712,46 @@ async function runBudgetStep<T>(step: string, run: () => Promise<T>): Promise<T>
       `[SixbDuckLake] Constrained connection budget test failed during ${step}: ${message}`
     )
   }
+}
+
+/** Appends Sixb commits to one dataset, as inline DuckLake inserts, after the latest snapshot. */
+async function appendPostgresHistory(
+  sql: SQL,
+  metadataSchema: string,
+  datasetId: string,
+  length: number
+): Promise<void> {
+  const table = (name: string) => `${quotePgIdent(metadataSchema)}.${quotePgIdent(name)}`
+  const [busyTable] = await sql.unsafe(
+    `SELECT table_id FROM ${table("ducklake_table")}
+     WHERE table_name = ${quotePgLiteral(encodeDatasetTableName(datasetId))} AND end_snapshot IS NULL`
+  )
+  await sql.unsafe(`
+    INSERT INTO ${table("ducklake_snapshot")}
+      (snapshot_id, snapshot_time, schema_version, next_catalog_id, next_file_id)
+    SELECT
+      latest.snapshot_id + offsets.n,
+      latest.snapshot_time + offsets.n * interval '1 second',
+      latest.schema_version,
+      latest.next_catalog_id,
+      latest.next_file_id
+    FROM (SELECT * FROM ${table("ducklake_snapshot")} ORDER BY snapshot_id DESC LIMIT 1) latest,
+      generate_series(1, ${length}) AS offsets(n)
+  `)
+  await sql.unsafe(`
+    INSERT INTO ${table("ducklake_snapshot_changes")}
+      (snapshot_id, changes_made, author, commit_message, commit_extra_info)
+    SELECT
+      snapshot.snapshot_id,
+      ${quotePgLiteral(`inlined_insert:${busyTable?.table_id}`)},
+      'Sixb',
+      'history',
+      ${quotePgLiteral(`{"sixb":{"kind":"datasetVersion","datasetId":${JSON.stringify(datasetId)},"mode":"append","commitId":"history-`)}
+        || snapshot.snapshot_id || '"}}'
+    FROM ${table("ducklake_snapshot")} snapshot
+    LEFT JOIN ${table("ducklake_snapshot_changes")} changes USING (snapshot_id)
+    WHERE changes.snapshot_id IS NULL
+  `)
 }
 
 function quotePgIdent(value: string): string {

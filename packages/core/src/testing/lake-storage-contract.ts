@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { FileRef } from "../blob-storage"
-import { col, defineDataset } from "../datasets"
+import { col, type DatasetDefinition, defineDataset } from "../datasets"
 import { LakeStorageError } from "../lake-storage/errors"
 import type { DatasetRow, LakeStorage } from "../lake-storage/types"
 
@@ -280,6 +280,92 @@ export function runLakeStorageContractSuite<TStorage extends LakeStorage>(
       test("returns an empty result for an empty request", async () => {
         await withStorage(async (storage) => {
           expect(await storage.listDatasetCatalogState([])).toEqual([])
+        })
+      })
+    })
+
+    describe("change feed", () => {
+      const commitSnapshot = async (
+        storage: TStorage,
+        dataset: DatasetDefinition,
+        rows: readonly DatasetRow[]
+      ) => {
+        const write = await storage.beginWrite({ dataset, mode: "snapshot" })
+        await write.writeRows(rows)
+        return write.commit()
+      }
+      const byDatasetId = <T extends { readonly datasetId: string }>(versions: readonly T[]) =>
+        [...versions].sort((left, right) => left.datasetId.localeCompare(right.datasetId))
+
+      test("reports the newest data version of each dataset changed after a cursor", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(writeDataset)
+          await storage.createDataset(nullableWriteDataset)
+          const start = await storage.listLatestVersionsSince({ cursor: null })
+          expect(start?.versions).toEqual([])
+
+          await commitSnapshot(storage, writeDataset, [{ orderId: "ord_1", customerName: "Ada" }])
+          const orders = await commitSnapshot(storage, writeDataset, [
+            { orderId: "ord_2", customerName: "Grace" },
+          ])
+          const notes = await commitSnapshot(storage, nullableWriteDataset, [
+            { orderId: "ord_1", note: null },
+          ])
+
+          const changed = await storage.listLatestVersionsSince({ cursor: start!.cursor })
+          expect(byDatasetId(changed?.versions ?? [])).toEqual([
+            {
+              datasetId: nullableWriteDataset.id,
+              versionId: notes.versionId,
+              mode: "snapshot",
+              createdAt: notes.createdAt,
+              rowCount: 1,
+            },
+            {
+              datasetId: writeDataset.id,
+              versionId: orders.versionId,
+              mode: "snapshot",
+              createdAt: orders.createdAt,
+              rowCount: 1,
+            },
+          ])
+          await expect(
+            storage.listLatestVersionsSince({
+              cursor: start!.cursor,
+              datasetIds: [nullableWriteDataset.id],
+            })
+          ).resolves.toMatchObject({ versions: [{ versionId: notes.versionId }] })
+          await expect(
+            storage.listLatestVersionsSince({ cursor: changed!.cursor })
+          ).resolves.toEqual({ cursor: changed!.cursor, versions: [] })
+        })
+      })
+
+      test("skips unchanged writes and schema-only versions", async () => {
+        await withStorage(async (storage) => {
+          await storage.createDataset(nullableWriteDataset)
+          const rows = [{ orderId: "ord_1", note: null }]
+          await commitSnapshot(storage, nullableWriteDataset, rows)
+          const start = await storage.listLatestVersionsSince({ cursor: null })
+
+          const unchanged = await commitSnapshot(storage, nullableWriteDataset, rows)
+          expect(unchanged.outcome).toBe("unchanged")
+          if (schemaEvolution === "addNullableColumns") {
+            await storage.createDataset(
+              defineDataset(nullableWriteDataset.id, {
+                schema: [
+                  col("orderId", "string"),
+                  col("note", "string", { nullable: true }),
+                  col("added", "string", { nullable: true }),
+                ],
+              })
+            )
+            expect((await storage.getLatestVersion(nullableWriteDataset.id))?.mode).toBe("schema")
+          }
+
+          await expect(
+            storage.listLatestVersionsSince({ cursor: start!.cursor })
+          ).resolves.toMatchObject({ versions: [] })
         })
       })
     })
