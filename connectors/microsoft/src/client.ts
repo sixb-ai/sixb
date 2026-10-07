@@ -1,5 +1,7 @@
 import type { MicrosoftHttp } from "./http"
 import { type CalendarSurface, calendarSurface } from "./surfaces/calendar"
+import { type ContactsSurface, contactsSurface } from "./surfaces/contacts"
+import { type DirectorySurface, directorySurface } from "./surfaces/directory"
 import { type DrivesSurface, drivesSurface } from "./surfaces/drives"
 import { type MailSurface, mailSurface } from "./surfaces/mail"
 import { type SitesResource, sitesResource } from "./surfaces/sites"
@@ -10,6 +12,8 @@ import {
 
 export interface MicrosoftClient {
   readonly calendar: CalendarSurface
+  readonly contacts: ContactsSurface
+  readonly directory: DirectorySurface
   readonly mail: MailSurface
   readonly sites: SitesResource
   readonly drives: DrivesSurface
@@ -22,6 +26,8 @@ export function createMicrosoftClient(
 ): MicrosoftClient {
   return {
     calendar: calendarSurface(http),
+    contacts: contactsSurface(http, webhookSecret),
+    directory: directorySurface(http),
     sites: sitesResource(http),
     drives: drivesSurface(http),
     mail: mailSurface(http, webhookSecret),

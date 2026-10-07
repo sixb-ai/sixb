@@ -20,6 +20,23 @@ export { MicrosoftCalendarMutationError } from "./surfaces/calendar/common"
 export type { CalendarDeltaResource } from "./surfaces/calendar/delta"
 export type { CalendarEventsResource } from "./surfaces/calendar/events"
 export type { CalendarViewResource } from "./surfaces/calendar/view"
+export type { ContactsSurface } from "./surfaces/contacts"
+export { MicrosoftContactMutationError } from "./surfaces/contacts/common"
+export type {
+  ContactDeltaResource,
+  ContactFolderDeltaResource,
+} from "./surfaces/contacts/delta"
+export type { ContactExtensionsResource } from "./surfaces/contacts/extensions"
+export type { ContactFoldersResource } from "./surfaces/contacts/folders"
+export type { ContactItemsResource } from "./surfaces/contacts/items"
+export type { ContactPhotoResource } from "./surfaces/contacts/photo"
+export type { DirectorySurface } from "./surfaces/directory"
+export type {
+  DirectoryMembershipOptions,
+  DirectorySelectOptions,
+  OrgContactsResource,
+} from "./surfaces/directory/contacts"
+export type { OrgContactDeltaResource } from "./surfaces/directory/delta"
 export type { DrivesSurface } from "./surfaces/drives"
 export type { DriveDeltaResource } from "./surfaces/drives/delta"
 export type {
@@ -47,6 +64,8 @@ export type { MicrosoftSubscriptionsResource } from "./surfaces/subscriptions"
 export { MicrosoftSubscriptionMutationError } from "./surfaces/subscriptions"
 export type * from "./types/calendar"
 export type * from "./types/common"
+export type * from "./types/contacts"
+export type * from "./types/directory"
 export type * from "./types/files"
 export type * from "./types/mail"
 export type * from "./types/subscriptions"
