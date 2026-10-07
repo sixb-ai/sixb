@@ -26,6 +26,7 @@ import {
   type CommitDatasetWriteInput,
   cloneDatasetMergeChange,
   type DatasetCatalogState,
+  type DatasetLatestVersionSummary,
   type DatasetMergeCommitResult,
   type DatasetVersion,
   type DatasetWriteCommitResult,
@@ -40,6 +41,8 @@ import {
   type LakeStorage,
   LakeStorageError,
   type LakeWriteSession,
+  type LatestVersionsSince,
+  type ListLatestVersionsSinceInput,
   mergeStrictDatasetDefinition,
   type ReadDatasetRowsInput,
   reconcileDatasetSequences,
@@ -412,6 +415,48 @@ export class LocalLakeStorage implements LakeStorage {
     }
 
     return this.getVersion(datasetId, state.latestVersionId)
+  }
+
+  /**
+   * The cursor records each dataset's latest version id, and a read compares it with the state
+   * files: one small read per dataset, whatever the history length. A dataset missing from the
+   * cursor counts as changed.
+   */
+  async listLatestVersionsSince(
+    input: ListLatestVersionsSinceInput
+  ): Promise<LatestVersionsSince | null> {
+    const previous = input.cursor === null ? null : parseLatestVersionCursor(input.cursor)
+    if (input.cursor !== null && previous === null) {
+      return null
+    }
+
+    const datasetIds =
+      input.datasetIds ?? (await this.listDatasets()).map((definition) => definition.id)
+    const latestVersionIds: Record<string, string> = {}
+    const versions: DatasetLatestVersionSummary[] = []
+    for (const datasetId of [...new Set(datasetIds)].sort()) {
+      const state = await readJsonFile<DatasetState>(this.statePath(datasetId))
+      if (!state?.latestVersionId) {
+        continue
+      }
+      latestVersionIds[datasetId] = state.latestVersionId
+      if (previous === null || previous[datasetId] === state.latestVersionId) {
+        continue
+      }
+      // This provider never commits schema-only versions, so the latest version carries data.
+      const latest = await this.getVersion(datasetId, state.latestVersionId)
+      if (latest) {
+        versions.push({
+          datasetId,
+          versionId: latest.versionId,
+          mode: latest.mode,
+          createdAt: latest.createdAt,
+          ...(latest.rowCount !== undefined ? { rowCount: latest.rowCount } : {}),
+        })
+      }
+    }
+
+    return { cursor: JSON.stringify(latestVersionIds), versions }
   }
 
   async getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null> {
@@ -917,4 +962,19 @@ async function withLocalDatasetCommitLock<T>(key: string, run: () => Promise<T>)
       localDatasetCommitLocks.delete(key)
     }
   }
+}
+
+function parseLatestVersionCursor(cursor: string): Readonly<Record<string, string>> | null {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(cursor)
+  } catch {
+    return null
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    return null
+  }
+  return Object.values(parsed).every((value) => typeof value === "string")
+    ? (parsed as Record<string, string>)
+    : null
 }

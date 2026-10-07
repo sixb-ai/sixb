@@ -7,6 +7,8 @@ import type {
   DatasetVersion,
   LakeMergeSession,
   LakeWriteSession,
+  LatestVersionsSince,
+  ListLatestVersionsSinceInput,
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
@@ -125,6 +127,12 @@ export class DuckLakeStorage implements LakeStorageWithSql<"duckdb"> {
 
   async getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null> {
     return this.snapshotReader.getVersion(datasetId, versionId)
+  }
+
+  async listLatestVersionsSince(
+    input: ListLatestVersionsSinceInput
+  ): Promise<LatestVersionsSince | null> {
+    return this.snapshotReader.listLatestVersionsSince(input)
   }
 
   readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {

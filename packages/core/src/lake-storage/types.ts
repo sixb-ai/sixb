@@ -53,6 +53,24 @@ export interface DatasetCatalogState {
   readonly latestVersion?: DatasetLatestVersionSummary | null
 }
 
+export interface ListLatestVersionsSinceInput {
+  /** A cursor returned by an earlier call, or null to start at the lake's current position. */
+  readonly cursor: string | null
+  /** Report only these datasets. Omit to report every dataset. */
+  readonly datasetIds?: readonly string[]
+}
+
+export interface LatestVersionsSince {
+  /** Opaque position to pass to the next call. */
+  readonly cursor: string
+  /**
+   * The newest data-bearing (non-`schema`) version of each dataset that committed one after the
+   * input cursor and up to the returned one, in no particular order. A provider may stop short of
+   * its newest commit to bound one call; the next call continues. Empty for a null input cursor.
+   */
+  readonly versions: readonly DatasetLatestVersionSummary[]
+}
+
 export interface BeginDatasetWriteInput {
   readonly dataset: DatasetDefinition
   readonly mode?: DatasetWriteMode
@@ -170,6 +188,18 @@ export interface LakeStorage {
 
   getLatestVersion(datasetId: string): Promise<DatasetVersion | null>
   getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null>
+
+  /**
+   * Change feed: which datasets committed data since a cursor. Consumers that must not miss a
+   * commit, such as projection reconciliation, poll it instead of reading every dataset's latest
+   * version. Its cost must not grow with the lake's history: an idle read should be about as
+   * cheap as one metadata lookup.
+   *
+   * Null means the cursor is no longer a position in this lake (for example, the catalog was
+   * recreated or the cursor's commit expired): read current state, then restart from null.
+   */
+  listLatestVersionsSince(input: ListLatestVersionsSinceInput): Promise<LatestVersionsSince | null>
+
   /** Explicit immutable-version reads have stable physical order and stable offset semantics. */
   readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow>
 

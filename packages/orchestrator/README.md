@@ -35,16 +35,36 @@ There is no durable consumer registry, definition signature, cursor table, or ne
 configuration. Permanent errors are logged and remain on retry; this slice adds no quarantine or
 automatic skip policy. A persistent error can block other routes sharing that subscription.
 
-Projection admission has two trigger paths:
+Projection admission has an event path and a reconciliation path:
 
 ```text
-dataset.version.committed -> ProjectionRunDispatcher -> durable execution + run -> queue
-startup + periodic lake reconciliation -----------^
+dataset.version.committed --> ProjectionRunDispatcher -> durable execution + run -> queue
+lake change feed + startup lookup ---^
+stuck-run sweep ---------------------^
 ```
 
-Both paths call the same `ProjectionRunDispatcher`, which derives the same deterministic run ID.
+All of them call the same `ProjectionRunDispatcher`, which derives the same deterministic run ID.
 The queue carries only that `runId`; the durable run owns the pinned dataset version and Projection
 identity.
+
+The event is a separate write after the lake commit, so it is lost when the process stops between
+the two, while no orchestrator runs, or when broker retention overtakes the consumer.
+Reconciliation repairs those losses. Its cost follows what changed, not the length of the lake's
+history:
+
+- On start it looks up the latest data-bearing version of every projected dataset. That covers
+  commits made while no orchestrator ran and projections the deployment added or revised.
+- Every 30 seconds after that, one pass:
+  - reads the lake's change feed (`LakeStorage.listLatestVersionsSince`) from an in-memory cursor
+    and dispatches the newest data version of each changed dataset. Idle, that is one catalog
+    query;
+  - looks up directly each projection whose dispatch failed, until it succeeds;
+  - dispatches again the runs `queued` for longer than one pass interval and the runs that failed
+    with a retryable `queue.enqueue_failed`, which republishes them. Runs admitted under an
+    earlier projection revision are left alone; the start-up lookup admits the current one.
+
+The live event path, not the interval, sets normal projection latency. The interval bounds only
+how long a lost event or publication waits for repair.
 
 ## Usage (co-hosted in `sixb dev`)
 
@@ -62,8 +82,10 @@ dispatcher role) pointed at shared durable providers. In local development it is
 
 - Projection reconciliation repairs a missed dataset event by admitting the latest data-bearing
   version. It is not an event replay log and does not materialize every intermediate version.
-- Publication recovery requires a repeated dispatch. Projection reconciliation supplies one;
+- Publication recovery requires a repeated dispatch. The projection run sweep supplies one;
   event schedules can replay retained events. Direct cron dispatch has no restart catch-up.
+- The change-feed cursor is process memory, so each start pays one latest-version lookup per
+  projected dataset before it tails the feed.
 - Broker progress is process-local. Retention can still overtake a slow consumer; backpressure
   does not extend retention or guarantee that every event survives an outage.
 - Batches are bounded in record count, not a process-wide byte budget. Downstream queue growth

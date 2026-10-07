@@ -148,11 +148,14 @@ export async function startOrchestratorRuntime(
   let orchestratorWorker: OrchestratorWorker | null = null
 
   if (routes.size > 0) {
-    if (projections.length > 0 && !sixb.storage.projectionRuns) {
+    const projectionRuns = sixb.storage.projectionRuns
+    if (projections.length > 0 && !projectionRuns) {
       throw new Error("[SixbCLI] Projection dispatch requires storage.projectionRuns.")
     }
     const projectionReconciliation =
-      projections.length > 0 ? { lakeStorage: sixb.lakeStorage } : undefined
+      projections.length > 0 && projectionRuns
+        ? { lakeStorage: sixb.lakeStorage, projectionRuns }
+        : undefined
     orchestratorWorker = new OrchestratorWorker({
       projectId: sixb.id,
       events: sixb.events,

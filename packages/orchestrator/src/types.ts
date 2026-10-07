@@ -26,6 +26,7 @@ import type {
   WorkflowRunDispatchPort,
 } from "@sixb/core/internal/workflows"
 import type { LakeStorage } from "@sixb/core/lake-storage"
+import type { ProjectionRunStorage } from "@sixb/core/storage"
 
 export type RoutableProjectionDefinition = ProjectionDispatchDescriptor
 
@@ -122,7 +123,17 @@ export interface CompileRoutesResult {
 }
 
 export interface ProjectionReconciliationPorts {
-  readonly lakeStorage: Pick<LakeStorage, "getLatestVersion" | "getVersion" | "listVersions">
+  readonly lakeStorage: Pick<
+    LakeStorage,
+    "getLatestVersion" | "getVersion" | "listVersions" | "listLatestVersionsSince"
+  >
+  /** Source of runs whose queue publication was lost. */
+  readonly projectionRuns: Pick<ProjectionRunStorage, "list">
+  /**
+   * Pause between passes, which also counts a run as stuck once it has stayed `queued` for longer.
+   * Defaults to 30 s.
+   */
+  readonly intervalMs?: number
 }
 
 export type WorkflowDispatchInput = AutomaticWorkflowRunDispatchInput
