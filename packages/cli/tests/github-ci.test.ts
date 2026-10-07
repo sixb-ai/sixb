@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { githubRepoOf, renderWorkflow, type WorkflowInput } from "../src/lib/github-ci"
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
+import { githubRepoOf, hasSecret, renderWorkflow, type WorkflowInput } from "../src/lib/github-ci"
 
 interface Step {
   readonly name?: string
@@ -88,5 +91,37 @@ describe("submodule URLs", () => {
     expect(githubRepoOf("../lib.git", "acme/shop")).toBe("acme/lib")
     expect(githubRepoOf("../../other/lib.git", "acme/shop")).toBe("other/lib")
     expect(githubRepoOf("https://gitlab.com/acme/lib.git", "acme/shop")).toBeNull()
+  })
+})
+
+describe("the GitHub CLI", () => {
+  test("ignores a project GITHUB_TOKEN but honors GH_TOKEN", async () => {
+    // Red check: spawn gh with process.env; the fake gh then reports the connector token.
+    const bin = await mkdtemp(join(tmpdir(), "sixb-fake-gh-"))
+    const saved = {
+      PATH: process.env.PATH,
+      GITHUB_TOKEN: process.env.GITHUB_TOKEN,
+      GH_TOKEN: process.env.GH_TOKEN,
+    }
+    try {
+      // Lists one secret named after the tokens gh would authenticate with.
+      await writeFile(
+        join(bin, "gh"),
+        `#!/bin/sh\nprintf '[{"name":"%s|%s"}]' "\${GITHUB_TOKEN:-none}" "\${GH_TOKEN:-none}"\n`
+      )
+      await chmod(join(bin, "gh"), 0o755)
+      process.env.PATH = `${bin}:${saved.PATH}`
+      process.env.GITHUB_TOKEN = "connector-token"
+      process.env.GH_TOKEN = "explicit-token"
+
+      const repo = { name: "acme/shop", defaultBranch: "main" }
+      expect(await hasSecret(repo, "none|explicit-token")).toBe(true)
+    } finally {
+      for (const [name, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[name]
+        else process.env[name] = value
+      }
+      await rm(bin, { recursive: true, force: true })
+    }
   })
 })

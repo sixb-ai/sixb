@@ -215,7 +215,7 @@ async function gh(
   options: { readonly cwd?: string; readonly input?: string } = {}
 ): Promise<string> {
   try {
-    return await run(["gh", ...args], options)
+    return await run(["gh", ...args], { ...options, env: ghEnvironment() })
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
     throw new SixbCliError(`[SixbDeploy] gh ${args.slice(0, 2).join(" ")} failed: ${reason}`, {
@@ -226,12 +226,26 @@ async function gh(
   }
 }
 
+/**
+ * Bun loads the project's `.env` into this process, and a connector's `GITHUB_TOKEN` there would
+ * take precedence over the user's `gh auth login`. `GH_TOKEN` stays: it is gh's explicit override.
+ */
+function ghEnvironment(): Record<string, string | undefined> {
+  const { GITHUB_TOKEN: _projectToken, ...env } = process.env
+  return env
+}
+
 async function run(
   command: readonly string[],
-  options: { readonly cwd?: string; readonly input?: string }
+  options: {
+    readonly cwd?: string
+    readonly input?: string
+    readonly env?: Record<string, string | undefined>
+  }
 ): Promise<string> {
   const child = Bun.spawn([...command], {
     cwd: options.cwd,
+    ...(options.env === undefined ? {} : { env: options.env }),
     stdin: options.input === undefined ? "ignore" : new Blob([options.input]),
     stdout: "pipe",
     stderr: "pipe",
