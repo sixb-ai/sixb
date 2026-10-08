@@ -86,10 +86,13 @@ export function cleanupSourceVersions(
     ) RETURNING version_id`)
       .all(input.projectId, input.terminalBefore, remaining) as { readonly version_id: number }[]
     // Each version's root_count follows its roots down, so a drained version is found by index.
+    const counts = new Map<number, number>()
+    for (const root of removed) counts.set(root.version_id, (counts.get(root.version_id) ?? 0) + 1)
     const drain = db.query(
-      "UPDATE ontology_sources SET root_count = root_count - 1 WHERE version_id = ?"
+      "UPDATE ontology_sources SET root_count = root_count - ? WHERE version_id = ?"
     )
-    for (const root of removed) drain.run(root.version_id)
+    // These commit with the delete: every ontology storage call runs in the caller's BEGIN IMMEDIATE.
+    for (const [versionId, count] of counts) drain.run(count, versionId)
     rowsDeleted += removed.length
     remaining -= removed.length
   }
