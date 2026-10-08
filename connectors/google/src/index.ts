@@ -13,7 +13,12 @@ export {
 export type { GoogleAdsCustomersResource } from "./ads/resources/customers"
 export type { GoogleAdsReportsResource } from "./ads/resources/reports"
 export type * from "./ads/types"
-export type { GoogleAuthOptions, ServiceAccountKey, TokenSource } from "./auth"
+export type {
+  GoogleAuthOptions,
+  GoogleOAuthOptions,
+  ServiceAccountKey,
+  TokenSource,
+} from "./auth"
 export { createTokenSource } from "./auth"
 export type {
   AnalyticsSurface,
@@ -24,7 +29,7 @@ export type {
 } from "./client"
 export { createGoogleClient } from "./client"
 export { GoogleApiError, GoogleAuthError } from "./errors"
-export type { GoogleConnector } from "./google"
+export type { GoogleConnector, GoogleOAuthConnector } from "./google"
 export { google } from "./google"
 export type {
   GoogleHttp,

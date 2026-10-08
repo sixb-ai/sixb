@@ -1,5 +1,6 @@
 import { GoogleAuthError } from "../errors"
 import { isRecord } from "../guards"
+import { formatOAuthError, readJsonSafe } from "./token-response"
 import type { ServiceAccountKey, TokenSource } from "./types"
 
 const TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
@@ -179,27 +180,6 @@ function describeTokenError(status: number, payload: unknown): string {
   return detail
     ? `token exchange failed with ${status}: ${detail}`
     : `token exchange failed with ${status}.`
-}
-
-function formatOAuthError(payload: Record<string, unknown>): string | null {
-  const error = payload.error
-  if (typeof error !== "string") {
-    return null
-  }
-  const description = payload.error_description
-  return typeof description === "string" ? `${error}: ${description}` : error
-}
-
-async function readJsonSafe(response: Response): Promise<unknown> {
-  const text = await response.text()
-  if (!text) {
-    return undefined
-  }
-  try {
-    return JSON.parse(text)
-  } catch {
-    return text
-  }
 }
 
 function pemToArrayBuffer(pem: string): ArrayBuffer {

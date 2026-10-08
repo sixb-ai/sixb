@@ -7,10 +7,11 @@ Like every Sixb connector they are **typed bridges** to the external system — 
 sync, parse, or project data. Datasets, syncs, and projections are wired project-side by the
 consumer.
 
-One package shares Google's three explicit authentication modes. Drive, Calendar, Gmail, Sheets,
-Meet, and Analytics use one `google()` client with declarative surfaces; Google Ads has a separate
-`googleAds()` factory because its developer token, manager context, version lifecycle, and GAQL
-transport are distinct.
+Both factories accept the same process-wide credentials, and `google()` can also let people connect
+their own Google accounts through Sixb-managed OAuth (see [Auth](#auth)). Drive, Calendar, Gmail,
+Sheets, Meet, and Analytics use one `google()` client with declarative surfaces; Google Ads has a
+separate `googleAds()` factory because its developer token, manager context, version lifecycle, and
+GAQL transport are distinct.
 
 Surfaces implemented: **`drive`** (v3), **`calendar`** (v3), **`gmail`** (v1), **`sheets`** (v4),
 **`meet`** (v2), and **`analytics`** with **Admin** (v1beta) plus **Data** (v1beta).
@@ -590,7 +591,13 @@ Official references:
 
 ## Auth
 
-Three explicit modes (a discriminated union):
+`google()` accepts four explicit modes; `googleAds()` accepts the last three.
+
+- **Connected Google accounts** — `{ oauth: { clientId, clientSecret, scopes, hostedDomain? } }`.
+  People authorize their own Google accounts, and Sixb stores, refreshes, and serves each one as a
+  connector connection. See [Connected Google accounts](#connected-google-accounts).
+
+The other three modes authenticate the whole process with one credential:
 
 - **Application Default Credentials (recommended)** — `{ applicationDefault: true, scopes }`.
   The official `google-auth-library` discovers credentials from the environment and owns token
@@ -611,6 +618,74 @@ Three explicit modes (a discriminated union):
 A missing scope surfaces as Google's `403` (`GoogleApiError`); it does not churn the token. A
 `401` invalidates the cached token and retries once with a fresh one. ADC is never selected
 implicitly, so a process cannot silently pick up a developer's ambient Google identity.
+
+### Connected Google accounts
+
+Register a connector with an OAuth client, then follow
+[Sixb OAuth setup](https://docs.sixb.ai/connectors/authentication) to configure the encryption key
+and connect accounts from your app:
+
+```ts
+import { defineConnector } from "@sixb/core"
+import { google } from "@sixb/connector-google"
+
+export const googleWorkspace = defineConnector(
+  "google-workspace",
+  google({
+    auth: {
+      oauth: {
+        clientId: process.env.GOOGLE_OAUTH_CLIENT_ID!,
+        clientSecret: process.env.GOOGLE_OAUTH_CLIENT_SECRET!,
+        scopes: [
+          "https://www.googleapis.com/auth/gmail.readonly",
+          "https://www.googleapis.com/auth/calendar.readonly",
+        ],
+        hostedDomain: "example.com", // Optional: only accept accounts of this Workspace domain.
+      },
+    },
+  })
+)
+```
+
+```ts
+const client = await sixb.connector(googleWorkspace, {
+  owner: { type: "project" },
+  slot: "support-inbox",
+})
+
+const profile = await client.gmail.users.getProfile("me")
+```
+
+In the [Google Cloud console](https://console.cloud.google.com/auth/clients):
+
+1. Create an OAuth client of type **Web application** and add
+   `https://<sixb-api-origin>/auth/connectors/callback` as an authorized redirect URI for each
+   environment.
+2. Enable every API you call, such as the Gmail API and Google Calendar API, in the same project.
+3. Choose the audience. **Internal** accepts only accounts of your Google Workspace organization
+   and needs no Google review. **External** apps that request sensitive or restricted scopes, such
+   as Gmail or Drive, need Google verification; while an External app is in **Testing**, Google
+   expires its refresh tokens after 7 days.
+
+What to expect:
+
+- Sixb adds `openid` and the account email scope to `scopes`, then offers the Google account that
+  consented. The connection's account ID is Google's stable account ID; its label is the email.
+- Google's consent screen lets people untick individual permissions. If any requested scope is
+  missing, the connection fails with the missing scopes named instead of failing on a later call.
+  Reconnect and allow every permission.
+- `hostedDomain` asks Google's account chooser for accounts of that domain, and Sixb rejects
+  every other account, including personal Gmail accounts.
+- A connection needs reauthorization only when Google reports its grant dead: revoked by the
+  person or an administrator, unused for six months, or invalidated by a password change on a
+  Gmail grant. A misconfigured client, such as a rotated secret, fails requests without
+  disconnecting anyone.
+- Disconnecting deletes the tokens Sixb stores but does not revoke access at Google. Google
+  revokes an account's whole grant to the OAuth client at once, which would also break another
+  connection of the same account. People can remove the app from their Google Account's
+  third-party access settings.
+- Google keeps at most 100 refresh tokens per Google account and OAuth client, and silently
+  invalidates the oldest beyond that. Each authorization creates one.
 
 ### Application Default Credentials
 

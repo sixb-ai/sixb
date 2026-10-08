@@ -1,9 +1,20 @@
-import { type RestClient, rest } from "@sixb/connector-rest"
-import type { ConnectorAdapter, ConnectorContext } from "@sixb/core"
+import {
+  type RestClient,
+  type RestConnectorOptions,
+  type RestRequestContext,
+  rest,
+} from "@sixb/connector-rest"
+import type {
+  ConnectorAccessToken,
+  ConnectorAdapter,
+  ConnectorContext,
+  OAuthConnectorAdapter,
+} from "@sixb/core"
 import { createTokenSource } from "./auth"
+import { createGoogleOAuth } from "./auth/oauth"
 import { createGoogleClient, type GoogleClient } from "./client"
 import { createGoogleHttp, type GoogleHttpClients, type GoogleSurface } from "./http"
-import type { GoogleConnectorOptions } from "./types"
+import type { GoogleConnectorOptions, GoogleOAuthConnectorOptions } from "./types"
 
 /**
  * Base URL per Google API surface. Adding a surface is a one-line entry here
@@ -29,26 +40,74 @@ const UPLOAD_BASE_URLS: Partial<Record<GoogleSurface, string>> = {
 }
 
 export type GoogleConnector = ConnectorAdapter<"google", GoogleClient>
+export type GoogleOAuthConnector = OAuthConnectorAdapter<"google", GoogleClient>
 
-export function google(options: GoogleConnectorOptions): GoogleConnector {
+type GoogleRequestAuth = Pick<RestConnectorOptions, "headers" | "onUnauthorized">
+
+/** Google Workspace and Analytics APIs, authenticated by Sixb-managed OAuth connections. */
+export function google(options: GoogleOAuthConnectorOptions): GoogleOAuthConnector
+/** Google Workspace and Analytics APIs, authenticated by one credential for the whole process. */
+export function google(options: GoogleConnectorOptions): GoogleConnector
+export function google(
+  options: GoogleConnectorOptions | GoogleOAuthConnectorOptions
+): GoogleConnector | GoogleOAuthConnector {
+  if (isOAuthOptions(options)) {
+    return googleOAuth(options)
+  }
+
   const token = createTokenSource(options.auth)
-
-  const common = {
+  const auth: GoogleRequestAuth = {
     headers: () =>
       token.getRequestHeaders?.() ??
       token.get().then((accessToken) => new Headers({ Authorization: `Bearer ${accessToken}` })),
     // The REST adapter fires this on a 401 only, so a stale token is dropped and
     // the request is retried once with a fresh one. 403 (scope) does not churn it.
     onUnauthorized: () => token.invalidate(),
+  }
+  return {
+    type: "google",
+    connect: (context) => connectGoogle(context, auth, options),
+  }
+}
+
+function googleOAuth(options: GoogleOAuthConnectorOptions): GoogleOAuthConnector {
+  const { authentication, discoverAccounts } = createGoogleOAuth(options.auth.oauth)
+  return {
+    type: "google",
+    authentication,
+    discoverAccounts,
+    connect(context) {
+      // A 401 must invalidate the exact token that request sent, not whichever is current now.
+      const requestTokens = new WeakMap<RestRequestContext, ConnectorAccessToken>()
+      return connectGoogle(
+        context,
+        {
+          async headers(request) {
+            const token = await context.tokenSource.get()
+            requestTokens.set(request, token)
+            return new Headers({ Authorization: `Bearer ${token.accessToken}` })
+          },
+          onUnauthorized: (request) => requestTokens.get(request)?.invalidate(),
+        },
+        options
+      )
+    },
+  }
+}
+
+async function connectGoogle(
+  context: ConnectorContext,
+  auth: GoogleRequestAuth,
+  options: Omit<GoogleConnectorOptions, "auth">
+): Promise<GoogleClient> {
+  const common = {
+    ...auth,
     retry: options.retry ?? { maxRetries: 2 },
     timeoutMs: options.timeoutMs,
     minDelayMs: options.minDelayMs,
   }
 
-  const connectAll = async (
-    urls: Record<string, string>,
-    context: ConnectorContext
-  ): Promise<Record<string, RestClient>> =>
+  const connectAll = async (urls: Record<string, string>): Promise<Record<string, RestClient>> =>
     Object.fromEntries(
       await Promise.all(
         Object.entries(urls).map(
@@ -58,18 +117,16 @@ export function google(options: GoogleConnectorOptions): GoogleConnector {
       )
     )
 
-  return {
-    type: "google",
-    async connect(context) {
-      const [api, upload] = await Promise.all([
-        connectAll(BASE_URLS, context),
-        connectAll(UPLOAD_BASE_URLS, context),
-      ])
-      const clients: GoogleHttpClients = {
-        api: api as GoogleHttpClients["api"],
-        upload,
-      }
-      return createGoogleClient(createGoogleHttp(clients))
-    },
+  const [api, upload] = await Promise.all([connectAll(BASE_URLS), connectAll(UPLOAD_BASE_URLS)])
+  const clients: GoogleHttpClients = {
+    api: api as GoogleHttpClients["api"],
+    upload,
   }
+  return createGoogleClient(createGoogleHttp(clients))
+}
+
+function isOAuthOptions(
+  options: GoogleConnectorOptions | GoogleOAuthConnectorOptions
+): options is GoogleOAuthConnectorOptions {
+  return "oauth" in options.auth
 }
