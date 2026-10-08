@@ -58,6 +58,8 @@ export class BullMqQueue<
 {
   private readonly queuesByProject = new Map<string, BullQueue<QueueJobData<TQueueJob>>>()
   private readonly workersByProject = new Map<string, BullWorker<QueueJobData<TQueueJob>>>()
+  /** The fetch blocking each project's Worker, which waiting claims take turns with. */
+  private readonly blockingFetches = new Map<string, Promise<unknown>>()
   private closed = false
 
   constructor(
@@ -106,12 +108,13 @@ export class BullMqQueue<
     workerId: string
     limit?: number
     leaseMs?: number
+    signal?: AbortSignal
   }): Promise<readonly ClaimedQueueJob<TQueueJob>[]> {
     assertNonEmpty(params.projectId, "projectId")
     assertNonEmpty(params.workerId, "workerId")
 
     const limit = params.limit ?? 1
-    if (limit <= 0) return []
+    if (limit <= 0 || params.signal?.aborted) return []
 
     const leaseMs = params.leaseMs ?? this.shared.defaultLeaseMs
     assertPositiveNumber(leaseMs, "leaseMs")
@@ -121,9 +124,12 @@ export class BullMqQueue<
 
     for (let i = 0; i < limit; i++) {
       const token = randomUUID()
-      const bullJob = (await worker.getNextJob(token)) as
-        | BullJob<QueueJobData<TQueueJob>>
-        | undefined
+      // Only an empty-handed waiting claim blocks; the rest of the batch takes what is ready.
+      const bullJob = (
+        params.signal && claimed.length === 0
+          ? await this.waitForJob(params.projectId, worker, token, params.signal)
+          : await worker.getNextJob(token, { block: false })
+      ) as BullJob<QueueJobData<TQueueJob>> | undefined
       if (!bullJob) break
 
       const claimedAtMs = Date.now()
@@ -242,6 +248,36 @@ export class BullMqQueue<
     this.workersByProject.clear()
     this.queuesByProject.clear()
     await Promise.all(closers)
+  }
+
+  /**
+   * Blocks on the lane's wake-up key (BZPOPMIN) until a job arrives or `signal` aborts. Each fetch
+   * returns empty after BullMQ's `drainDelay` (5s), which bounds how long an abort waits. BullMQ
+   * blocks one fetch per Worker and answers a concurrent one at once, so waiting claims take turns
+   * rather than spin.
+   */
+  private async waitForJob(
+    projectId: string,
+    worker: BullWorker<QueueJobData<TQueueJob>>,
+    token: string,
+    signal: AbortSignal
+  ): Promise<BullJob | undefined> {
+    while (!signal.aborted && !this.closed) {
+      const turn = this.blockingFetches.get(projectId)
+      if (turn) {
+        await turn.catch(noop)
+        continue
+      }
+      const fetch = worker.getNextJob(token, { block: true })
+      this.blockingFetches.set(projectId, fetch)
+      try {
+        const job = await fetch
+        if (job) return job
+      } finally {
+        if (this.blockingFetches.get(projectId) === fetch) this.blockingFetches.delete(projectId)
+      }
+    }
+    return undefined
   }
 
   private async loadKnownJob(

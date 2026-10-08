@@ -43,6 +43,7 @@ import {
 import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import {
+  agentRunQueueJobId,
   createAgentRunExecutionToken,
   createAgentRunId,
   createSubagentRunId,
@@ -906,7 +907,6 @@ function workerOptions(
   return {
     ...options,
     apiBaseUrl: options.apiBaseUrl ?? TEST_AGENT_API_BASE_URL,
-    idlePollMs: options.idlePollMs ?? 5,
     defaultMaxSteps: options.defaultMaxSteps ?? 4,
   }
 }
@@ -7559,7 +7559,7 @@ describe("AgentWorker", () => {
     const identity = { projectId: host.id, executionId: sixb.execution.id }
     expect((await storage.aiUsage.summarizeExecution(identity)).modelCallCount).toBe(0)
     available = true
-    const worker = new AgentWorker(host, { idlePollMs: 5 })
+    const worker = new AgentWorker(host, {})
     await worker.start()
     try {
       const summary = await waitFor(
@@ -7719,7 +7719,7 @@ describe("AgentWorker", () => {
       return renewed
     }
 
-    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 90, idlePollMs: 5 }))
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 90 }))
     await worker.start()
     try {
       const request = await requestAgent(sixb, { text: "keep owning" })
@@ -7742,7 +7742,7 @@ describe("AgentWorker", () => {
   test("continues processing after a turn outlives its initial queue lease", async () => {
     const sixb = buildSixb(slowAnswerModel(120))
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45, idlePollMs: 5 }))
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45 }))
 
     await worker.start()
     try {
@@ -7791,7 +7791,7 @@ describe("AgentWorker", () => {
       return originalRenew(params)
     }
 
-    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45, idlePollMs: 5 }))
+    const worker = new AgentWorker(sixb, workerOptions({ leaseMs: 45 }))
     const originalConsoleError = console.error
     console.error = () => {}
     await worker.start()
@@ -8154,7 +8154,7 @@ describe("AgentWorker", () => {
     const sandboxes = new BlockingOutputCollectionSandboxFactory()
     const sixb = buildSixb(outputBashThenAnswerModel(), new InMemoryBroker(), sandboxes)
     const storage = agentStorageOf(sixb)
-    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10 }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       const request = await requestAgent(sixb, {
@@ -8509,7 +8509,7 @@ describe("AgentWorker", () => {
 
     const firstRequest = await requestAgent(sixb, { text: "first" })
 
-    const worker = new AgentWorker(sixb, workerOptions({ concurrency: 2, idlePollMs: 10 }))
+    const worker = new AgentWorker(sixb, workerOptions({ concurrency: 2 }))
     await worker.start()
     try {
       await waitFor(() => (controlled.startedCount() >= 1 ? true : null), {
@@ -8605,7 +8605,7 @@ describe("AgentWorker", () => {
 
     const request = await requestAgent(sixb, { text: "go" })
 
-    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10 }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       await waitFor(() => (controlled.startedCount() >= 1 ? true : null), {
@@ -8750,7 +8750,7 @@ describe("AgentWorker", () => {
 
     const request = await requestAgent(sixb, { text: "go" })
 
-    const worker = new AgentWorker(sixb, workerOptions({ idlePollMs: 10 }))
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
       await controlled.waitForStarted()
@@ -9787,10 +9787,13 @@ describe("AgentWorker", () => {
       triggerMessageId,
       spec: { model: { provider: "test", modelId: "test-model" } },
     })
+    // The run's own job id, as a request enqueues it, so the worker's dispatch scan cannot add a
+    // second job for the same run.
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,
       jobs: [
         {
+          id: agentRunQueueJobId(runId),
           type: "agent.run.requested",
           payload: { runId },
         },
