@@ -1,22 +1,18 @@
 import type { DomainEvent } from "@sixb/core"
 import { scopeKeysForEvent } from "@sixb/core/internal/event-scope"
+import type { StoredDomainEvent } from "@sixb/core/internal/events"
 import type { Elysia } from "elysia"
 import { z } from "zod"
 import { EVENT_TOPICS, EVENT_TYPES } from "../../schemas/events"
 import type { SixbServer } from "../../server"
 import { decodeWsMessage, safeSend, wsRequestSixb, wsStateKey } from "../../utils/ws"
+import { SubscriptionHub } from "./subscription-hub"
 
-interface EventSubscriptionState {
-  topics?: DomainEvent["topic"][]
-  types?: DomainEvent["type"][]
-  objectTypeId?: string
-  primaryId?: string
-  actionId?: string
-  runId?: string
-  afterCursor?: string
-  limit: number
-  polling: boolean
-  timer: ReturnType<typeof setInterval> | null
+const DEFAULT_READ_LIMIT = 200
+
+interface EventSocketState {
+  /** The first subscription replays from where the stream ended when the socket opened. */
+  replayFrom: { readonly afterCursor?: string } | null
   initialized: Promise<void>
   initializationFailureHandled: boolean
 }
@@ -63,33 +59,21 @@ export function parseSubscriptionMessage(payload: unknown):
   return { ok: true, data: parsed.data }
 }
 
-async function resolveLatestCursor(server: SixbServer): Promise<string | undefined> {
-  return server.getHost().events.latestCursor()
-}
-
-function createDefaultState(): EventSubscriptionState {
-  return {
-    topics: undefined,
-    types: undefined,
-    objectTypeId: undefined,
-    primaryId: undefined,
-    actionId: undefined,
-    runId: undefined,
-    afterCursor: undefined,
-    limit: 200,
-    polling: false,
-    timer: null,
-    initialized: Promise.resolve(),
-    initializationFailureHandled: false,
-  }
-}
-
 export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
-  const states = new WeakMap<object, EventSubscriptionState>()
+  const events = server.getHost().events
+  const states = new WeakMap<object, EventSocketState>()
+  const hub = new SubscriptionHub<StoredDomainEvent>({
+    subscribe: (deliver) => events.subscribe({ from: "latest" }, deliver),
+    frames: (batch) => batch.map((event) => ({ type: "event", event })),
+    expired: async () => ({
+      type: "error",
+      message: "[SixbServer] Event cursor expired; refetch current state. Live events continue.",
+    }),
+  })
 
   const awaitInitialization = async (
     ws: { close: () => void; send: (message: string) => void },
-    state: EventSubscriptionState
+    state: EventSocketState
   ): Promise<boolean> => {
     try {
       await state.initialized
@@ -107,83 +91,19 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
     }
   }
 
-  const stopPolling = (ws: object) => {
-    const state = states.get(wsStateKey(ws))
-    if (!state) {
-      return
-    }
-
-    if (state.timer) {
-      clearInterval(state.timer)
-      state.timer = null
-    }
-  }
-
-  const startPolling = (ws: { send: (message: string) => void }) => {
-    const state = states.get(wsStateKey(ws))
-    if (!state || state.timer) {
-      return
-    }
-
-    const sixb = wsRequestSixb(ws)
-    if (!sixb) {
-      safeSend(ws, { type: "error", message: "Execution scope is not available." })
-      return
-    }
-
-    const tick = async () => {
-      if (state.polling) {
-        return
-      }
-
-      state.polling = true
-      try {
-        const p = server.getHost()
-        const events = await p.events.read({
-          afterCursor: state.afterCursor,
-          limit: state.limit,
-          topics: state.topics,
-          types: state.types,
-        })
-
-        // The execution facade owns per-event visibility. The cursor still advances over every
-        // record read, not only the visible ones, so an invisible tail cannot stall polling.
-        for (const event of events) {
-          if (!eventMatchesScope(event, state)) {
-            continue
-          }
-          if (sixb.events.canRead(event)) {
-            safeSend(ws, { type: "event", event })
-          }
-        }
-
-        const last = events[events.length - 1]
-        if (last) {
-          state.afterCursor = last.cursor
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        safeSend(ws, { type: "error", message })
-      } finally {
-        state.polling = false
-      }
-    }
-
-    state.timer = setInterval(() => {
-      void tick()
-    }, 500)
-
-    void tick()
-  }
-
+  app.onStop(() => hub.close())
   return app.ws("/ws/events", {
     async open(ws) {
       // Any authenticated principal may connect; events are filtered per-event
-      // by grants as they stream (see the poll loop in `startPolling`).
-      const state = createDefaultState()
+      // by grants as they stream (see `matches` below).
+      const state: EventSocketState = {
+        replayFrom: null,
+        initialized: Promise.resolve(),
+        initializationFailureHandled: false,
+      }
       states.set(wsStateKey(ws), state)
-      state.initialized = resolveLatestCursor(server).then((cursor) => {
-        state.afterCursor = cursor
+      state.initialized = events.latestCursor().then((afterCursor) => {
+        state.replayFrom = { afterCursor }
       })
       if (!(await awaitInitialization(ws, state))) return
       safeSend(ws, { type: "connected", channel: "events" })
@@ -197,7 +117,8 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
         return
       }
 
-      const state = states.get(wsStateKey(ws))
+      const key = wsStateKey(ws)
+      const state = states.get(key)
       if (!state) {
         safeSend(ws, { type: "error", message: "Subscription state not found." })
         return
@@ -208,38 +129,72 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
       if (!(await awaitInitialization(ws, state))) return
 
       if (parsed.data.type === "unsubscribe") {
-        stopPolling(ws)
-        state.topics = undefined
-        state.types = undefined
-        state.objectTypeId = undefined
-        state.primaryId = undefined
-        state.actionId = undefined
-        state.runId = undefined
-        state.afterCursor = await resolveLatestCursor(server)
+        hub.unsubscribe(key)
         safeSend(ws, { type: "unsubscribed" })
         return
       }
 
-      state.topics = parsed.data.topic ? [parsed.data.topic] : undefined
-      state.types = parsed.data.types
-      state.objectTypeId = parsed.data.objectTypeId
-      state.primaryId = parsed.data.primaryId
-      state.actionId = parsed.data.actionId
-      state.runId = parsed.data.runId
-      state.limit = parsed.data.limit ?? state.limit
-      state.afterCursor = parsed.data.afterCursor ?? state.afterCursor
+      const sixb = wsRequestSixb(ws)
+      if (!sixb) {
+        safeSend(ws, { type: "error", message: "Execution scope is not available." })
+        return
+      }
 
-      startPolling(ws)
-      safeSend(ws, {
-        type: "subscribed",
-        topic: state.topics?.[0] ?? null,
-        types: state.types ?? null,
-        afterCursor: state.afterCursor ?? null,
-      })
+      const filter = parsed.data
+      const topics = filter.topic ? [filter.topic] : undefined
+      const limit = filter.limit ?? DEFAULT_READ_LIMIT
+      // Without a cursor, a later subscription on the same socket starts with live events.
+      const replayFrom =
+        filter.afterCursor === undefined ? state.replayFrom : { afterCursor: filter.afterCursor }
+      state.replayFrom = null
+      try {
+        await hub.subscribe(
+          key,
+          ws,
+          {
+            matches: (event) =>
+              (!filter.topic || event.topic === filter.topic) &&
+              (!filter.types?.length || filter.types.includes(event.type)) &&
+              eventMatchesScope(event, filter) &&
+              sixb.events.canRead(event),
+            replay: replayFrom
+              ? {
+                  afterCursor: replayFrom.afterCursor,
+                  read: async (afterCursor) => {
+                    const records = await events.read({
+                      afterCursor,
+                      limit,
+                      topics,
+                      types: filter.types,
+                    })
+                    return {
+                      records,
+                      cursor: records.at(-1)?.cursor,
+                      hasMore: records.length === limit,
+                    }
+                  },
+                }
+              : undefined,
+          },
+          () =>
+            safeSend(ws, {
+              type: "subscribed",
+              topic: filter.topic ?? null,
+              types: filter.types ?? null,
+              afterCursor: replayFrom?.afterCursor ?? null,
+            })
+        )
+      } catch (error) {
+        safeSend(ws, {
+          type: "error",
+          message: error instanceof Error ? error.message : String(error),
+        })
+        ws.close(1011, "Event stream setup failed")
+      }
     },
 
     close(ws) {
-      stopPolling(ws)
+      hub.unsubscribe(wsStateKey(ws))
       states.delete(wsStateKey(ws))
     },
   })
@@ -250,7 +205,15 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
  * `scopeKeysForEvent` (the same extraction the client predicate uses), so events
  * without those keys (e.g. workflows) never match a scoped subscription.
  */
-function eventMatchesScope(event: DomainEvent, filter: EventSubscriptionState): boolean {
+function eventMatchesScope(
+  event: DomainEvent,
+  filter: {
+    readonly objectTypeId?: string
+    readonly primaryId?: string
+    readonly actionId?: string
+    readonly runId?: string
+  }
+): boolean {
   const { objectTypeId, primaryId, actionId, runId } = filter
   if (
     objectTypeId === undefined &&
