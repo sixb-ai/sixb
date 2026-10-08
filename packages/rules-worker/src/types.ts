@@ -44,8 +44,6 @@ export interface RulesWorkerHost {
 }
 
 export interface RulesWorkerOptions {
-  /** Delay between reconciliation requests. Defaults to 60 seconds. */
-  readonly reconciliationIntervalMs?: number
   /** Stable object/rule-state page size. Defaults to 500. */
   readonly reconciliationPageSize?: number
 }

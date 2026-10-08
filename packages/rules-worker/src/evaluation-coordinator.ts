@@ -3,6 +3,10 @@ import { evaluateRuleEvents } from "./evaluate-rule-event"
 import { reconcileRules } from "./reconcile-rules"
 import type { OntologyRuleEvent, RuleDependencyIndex, RulesWorkerContext } from "./types"
 
+// Quick after a blip; at most once a minute while storage stays down or a subject keeps failing.
+const REPAIR_BACKOFF_MS = 100
+const MAX_REPAIR_BACKOFF_MS = 60_000
+
 interface EvaluationCoordinatorOptions {
   readonly runtime: RulesWorkerContext
   readonly rules: readonly RuleDefinition[]
@@ -23,12 +27,22 @@ export interface RuleEvaluationFailure {
   readonly subject?: { readonly objectTypeId: string; readonly primaryId: string }
 }
 
-/** Serializes live evaluations and full reconciliation through one failure-isolated queue. */
+/**
+ * Serializes live evaluations and reconciliation through one failure-isolated queue.
+ *
+ * A failed evaluation leaves rule state stale, and no later event is bound to touch the same
+ * subject. Every failure therefore schedules a reconciliation, retried with backoff until one
+ * succeeds.
+ */
 export class EvaluationCoordinator {
   private tail: Promise<void> = Promise.resolve()
   private reconciliationQueued = false
+  private repairTimer: ReturnType<typeof setTimeout> | undefined
+  private repairAttempts = 0
 
-  constructor(private readonly options: EvaluationCoordinatorOptions) {}
+  constructor(private readonly options: EvaluationCoordinatorOptions) {
+    options.signal.addEventListener("abort", () => clearTimeout(this.repairTimer), { once: true })
+  }
 
   enqueueLive(events: readonly OntologyRuleEvent[]): Promise<void> {
     if (events.length === 0 || this.options.signal.aborted) return Promise.resolve()
@@ -52,6 +66,7 @@ export class EvaluationCoordinator {
             subject: failure.subject,
           })
         }
+        if (failures.length > 0) this.scheduleRepair()
       },
       { source: "live", eventIds }
     )
@@ -69,6 +84,7 @@ export class EvaluationCoordinator {
             pageSize: this.options.pageSize,
             signal: this.options.signal,
           })
+          this.repairAttempts = 0
         } finally {
           this.reconciliationQueued = false
         }
@@ -81,9 +97,20 @@ export class EvaluationCoordinator {
     return this.tail
   }
 
+  private scheduleRepair(): void {
+    if (this.repairTimer !== undefined || this.options.signal.aborted) return
+    const delayMs = Math.min(REPAIR_BACKOFF_MS * 2 ** this.repairAttempts, MAX_REPAIR_BACKOFF_MS)
+    this.repairAttempts += 1
+    this.repairTimer = setTimeout(() => {
+      this.repairTimer = undefined
+      this.requestReconciliation()
+    }, delayMs)
+  }
+
   private enqueue(run: () => Promise<void>, failure: RuleEvaluationFailure): Promise<void> {
     this.tail = this.tail.then(run).catch((error) => {
       this.options.onError(error, failure)
+      this.scheduleRepair()
     })
     return this.tail
   }
