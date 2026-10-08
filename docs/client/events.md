@@ -79,7 +79,7 @@ useInvalidateOnEvent(
 | --- | --- |
 | `enabled` | Start or stop the subscription. |
 | `afterCursor` | Resume after a stored cursor. |
-| `limit` | Set the event read batch size. |
+| `limit` | Set the page size for replaying from `afterCursor`. |
 | `reconnect`, `reconnectDelayMs` | Control reconnects. |
 | `handshakeTimeoutMs` | Limit the time allowed to establish a subscription. |
 | `onError` | Receive subscription errors. |
