@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { dirname, join, resolve } from "node:path"
-import { startRoleUntilReadyThenStop } from "./shared/cli-process"
+import { runCliToCompletion, startRoleUntilReadyThenStop } from "./shared/cli-process"
 
 // These boot a full production role (a long-running bun runtime) and wait for it
 // to start, so they live as e2e tests: `bun test` skips `*.e2e.ts`, keeping them
@@ -12,6 +12,7 @@ import { startRoleUntilReadyThenStop } from "./shared/cli-process"
 const repoRoot = resolve(import.meta.dir, "..", "..", "..")
 const cliEntry = resolve(import.meta.dir, "..", "src", "index.tsx")
 const fixtureEntry = resolve(import.meta.dir, "fixtures", "prod-roles", "sixb.config.ts")
+const hangingCloseEntry = resolve(dirname(fixtureEntry), "hanging-close.config.ts")
 
 const ROLE_TIMEOUT_MS = 30_000
 
@@ -128,16 +129,39 @@ function eventTypes(logEntries: readonly Record<string, unknown>[]): string[] {
   return logEntries.map((entry) => String(entry.type))
 }
 
-async function startRole(args: readonly string[]) {
+async function startRole(
+  args: readonly string[],
+  options: { readonly entry?: string; readonly whileReady?: () => Promise<void> } = {}
+) {
   const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-roles-"))
   const logPath = join(tempDir, "operations.log")
   tempDirs.push(tempDir)
 
   return startRoleUntilReadyThenStop({
-    cmd: ["bun", cliEntry, ...args, "--entry", fixtureEntry],
+    cmd: ["bun", cliEntry, ...args, "--entry", options.entry ?? fixtureEntry],
     cwd: repoRoot,
     logPath,
+    whileReady: options.whileReady,
   })
+}
+
+/**
+ * `atlas` and `app` load the project only to read its id and auth setting, in a probe that closes
+ * its providers and exits before the role serves anything; holding the project for the life of a
+ * static file server cost about 140 MB per process. To see this fail, load the project in-process
+ * again: its providers then close once, at shutdown, after `role:ready`.
+ */
+function expectProjectReleasedBeforeReady(logEntries: readonly Record<string, unknown>[]): void {
+  const types = eventTypes(logEntries)
+  expect(types.filter((type) => type === "storage:close")).toHaveLength(1)
+  expect(types.indexOf("storage:close")).toBeLessThan(types.indexOf("role:ready"))
+}
+
+/** The runtime config a served page hands the browser bundle. */
+async function servedRuntimeConfig(port: number): Promise<unknown> {
+  const html = await (await fetch(`http://127.0.0.1:${port}/`)).text()
+  const config = html.match(/<script>window\.__SIXB_RUNTIME__ = (.*?);<\/script>/)?.[1]
+  return config ? JSON.parse(config) : null
 }
 
 const backgroundRoles: Array<{
@@ -234,19 +258,34 @@ describe("role startup connection budget", () => {
     async () => {
       await writePrebuiltAssets(PREBUILT_ATLAS)
       const [atlasPort, apiPort] = await getFreePorts(2)
+      let runtimeConfig: unknown = null
       // No `--atlas-public-origin`: Atlas passes its own origin to nothing but the startup
       // panel, and requiring it made the documented production command exit non-zero.
-      const { ready, logEntries } = await startRole([
-        "atlas",
-        "--port",
-        String(atlasPort),
-        "--host",
-        "127.0.0.1",
-        "--api-public-origin",
-        `http://localhost:${apiPort}`,
-      ])
+      const { ready, logEntries } = await startRole(
+        [
+          "atlas",
+          "--port",
+          String(atlasPort),
+          "--host",
+          "127.0.0.1",
+          "--api-public-origin",
+          `http://localhost:${apiPort}`,
+        ],
+        {
+          whileReady: async () => {
+            runtimeConfig = await servedRuntimeConfig(atlasPort)
+          },
+        }
+      )
 
       expect(ready).toBe(true)
+      // The fixture disables auth and Atlas assumes it is on unless told, so `false` here is the
+      // project's setting arriving from the probe.
+      expect(runtimeConfig).toEqual({
+        api: { baseUrl: `http://localhost:${apiPort}` },
+        auth: { audience: "atlas", enabled: false },
+      })
+      expectProjectReleasedBeforeReady(logEntries)
       // The counterpart of every other role's assertion, and the reason `atlas` is off the
       // `StorageSchemaRole` union: it serves a browser bundle, it is the tier that faces the
       // internet, and a container shipping assets has no business holding a DDL grant. Until
@@ -254,8 +293,6 @@ describe("role startup connection budget", () => {
       expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "storage:status")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
-      // It still shuts its providers down: the runtime is loaded even though unused.
-      expect(logEntries).toContainEqual({ type: "storage:close" })
     },
     ROLE_TIMEOUT_MS
   )
@@ -265,24 +302,98 @@ describe("role startup connection budget", () => {
     async () => {
       await writePrebuiltAssets(PREBUILT_APP)
       const [appPort, apiPort] = await getFreePorts(2)
-      const { ready, logEntries } = await startRole([
-        "app",
-        "--port",
-        String(appPort),
-        "--host",
-        "127.0.0.1",
-        "--api-public-origin",
-        `http://localhost:${apiPort}`,
-      ])
+      let runtimeConfig: unknown = null
+      const { ready, logEntries } = await startRole(
+        [
+          "app",
+          "--port",
+          String(appPort),
+          "--host",
+          "127.0.0.1",
+          "--api-public-origin",
+          `http://localhost:${apiPort}`,
+        ],
+        {
+          whileReady: async () => {
+            runtimeConfig = await servedRuntimeConfig(appPort)
+          },
+        }
+      )
 
       expect(ready).toBe(true)
+      expect(runtimeConfig).toMatchObject({
+        api: { baseUrl: `http://localhost:${apiPort}` },
+        auth: { audience: "app", enabled: false },
+      })
       expect(logEntries.some((entry) => entry.type === "storage:migrate")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "storage:status")).toBe(false)
       expect(logEntries.some((entry) => entry.type === "lake:assert")).toBe(false)
-      expect(logEntries).toContainEqual({ type: "storage:close" })
+      expectProjectReleasedBeforeReady(logEntries)
     },
     ROLE_TIMEOUT_MS
   )
+
+  test(
+    "sixb atlas starts when one of the project's providers never finishes closing",
+    async () => {
+      await writePrebuiltAssets(PREBUILT_ATLAS)
+      const [atlasPort, apiPort] = await getFreePorts(2)
+      // Atlas waits for its probe to exit, and the probe closes the project's providers first.
+      // Without a bound on that close, this role never becomes ready.
+      const { ready } = await startRole(
+        [
+          "atlas",
+          "--port",
+          String(atlasPort),
+          "--host",
+          "127.0.0.1",
+          "--api-public-origin",
+          `http://localhost:${apiPort}`,
+        ],
+        { entry: hangingCloseEntry }
+      )
+
+      expect(ready).toBe(true)
+    },
+    ROLE_TIMEOUT_MS
+  )
+
+  for (const role of ["atlas", "app"] as const) {
+    test(
+      `sixb ${role} exits with the project's error when the project fails to load`,
+      async () => {
+        const tempDir = await mkdtemp(join(tmpdir(), "sixb-cli-roles-"))
+        tempDirs.push(tempDir)
+        const entry = join(tempDir, "sixb.config.ts")
+        await writeFile(entry, 'throw new Error("fixture: the project failed to load")\n')
+        const [port, apiPort] = await getFreePorts(2)
+
+        const result = await runCliToCompletion({
+          cmd: [
+            "bun",
+            cliEntry,
+            role,
+            "--entry",
+            entry,
+            "--port",
+            String(port),
+            "--host",
+            "127.0.0.1",
+            "--api-public-origin",
+            `http://localhost:${apiPort}`,
+          ],
+          cwd: repoRoot,
+          timeoutMs: ROLE_TIMEOUT_MS,
+        })
+
+        const output = result.stdout + result.stderr
+        expect(result.exitCode).toBe(1)
+        expect(output).toContain("fixture: the project failed to load")
+        expect(output).toContain(`\`sixb ${role}\` could not load the project`)
+      },
+      ROLE_TIMEOUT_MS
+    )
+  }
 
   test(
     "sixb rules --no-migrate starts without migrating storage",

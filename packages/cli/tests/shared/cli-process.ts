@@ -103,6 +103,8 @@ export async function startRoleUntilReadyThenStop(options: {
   readonly logPath: string
   readonly timeoutMs?: number
   readonly graceMs?: number
+  /** Runs against the started role before it is stopped, e.g. to request what it serves. */
+  readonly whileReady?: () => Promise<void>
 }): Promise<StartRoleResult> {
   // Long-running roles cold-start a full bun runtime; give that generous headroom
   // for slow/contended CI machines before declaring a hang.
@@ -157,8 +159,12 @@ export async function startRoleUntilReadyThenStop(options: {
     await Bun.sleep(graceMs)
   }
 
-  proc.kill("SIGTERM")
-  await proc.exited
+  try {
+    await options.whileReady?.()
+  } finally {
+    proc.kill("SIGTERM")
+    await proc.exited
+  }
 
   return { ready, logEntries: await readLogEntries(options.logPath) }
 }
