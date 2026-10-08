@@ -9,7 +9,12 @@ import {
 } from "./service-account"
 import type { GoogleAuthOptions, TokenSource } from "./types"
 
-export type { GoogleAuthOptions, ServiceAccountKey, TokenSource } from "./types"
+export type {
+  GoogleAuthOptions,
+  GoogleOAuthOptions,
+  ServiceAccountKey,
+  TokenSource,
+} from "./types"
 
 /** Test seams for credential discovery, time, and token exchange. */
 interface TokenSourceDeps extends ServiceAccountTokenSourceDeps {

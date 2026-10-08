@@ -1,11 +1,16 @@
 import type { RestRetryPolicy } from "@sixb/connector-rest"
-import type { GoogleAuthOptions } from "../auth"
+import type { GoogleAuthOptions, GoogleOAuthOptions } from "../auth"
 
 export interface GoogleConnectorOptions {
   readonly auth: GoogleAuthOptions
   readonly timeoutMs?: number
   readonly minDelayMs?: number
   readonly retry?: RestRetryPolicy
+}
+
+/** A Google connector whose accounts are connected through Sixb-managed OAuth. */
+export interface GoogleOAuthConnectorOptions extends Omit<GoogleConnectorOptions, "auth"> {
+  readonly auth: { readonly oauth: GoogleOAuthOptions }
 }
 
 export type * from "./analytics-admin"

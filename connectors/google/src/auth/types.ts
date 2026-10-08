@@ -27,6 +27,20 @@ export type GoogleAuthOptions =
       readonly token: () => string | Promise<string>
     }
 
+/** A Google OAuth client whose grants Sixb stores, refreshes, and serves as connector connections. */
+export interface GoogleOAuthOptions {
+  /** Client ID of a Google Cloud OAuth client of type "Web application". */
+  readonly clientId: string
+  readonly clientSecret: string
+  /**
+   * API scopes to request; the union across every surface you call. `openid` and the account
+   * email scope are always added so Sixb can identify the connected account.
+   */
+  readonly scopes: readonly string[]
+  /** Accept only Google Workspace accounts of this domain, such as `example.com`. */
+  readonly hostedDomain?: string
+}
+
 export interface TokenSource {
   /** Resolve a bearer access token, refreshing it when the auth mode supports refresh. */
   get(): Promise<string>
