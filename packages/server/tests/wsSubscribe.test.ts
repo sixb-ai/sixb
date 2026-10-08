@@ -9,6 +9,7 @@ import {
   SixbHost,
   type SixbHostOptions,
 } from "@sixb/core"
+import { BrokerCursorExpiredError } from "@sixb/core/broker"
 import type { DomainEventService, StableEventEnvelope } from "@sixb/core/internal/events"
 import { parseSubscriptionMessage } from "../src/routes/ws/events"
 import { SixbServer } from "../src/server"
@@ -398,6 +399,39 @@ describe("/ws/events subscriptions", () => {
       { broker }
     )
   })
+
+  // Reproduce: drop the BrokerCursorExpiredError branch from `catchUp` in subscription-hub.ts.
+  test("reports an expired cursor once, then keeps streaming live events", async () => {
+    await withWsServer(
+      async ({ baseUrl, sixb }) => {
+        const ws = new WebSocket(`${baseUrl.replace("http://", "ws://")}/ws/events`)
+
+        try {
+          expect(await nextWsMessage(ws)).toEqual({ type: "connected", channel: "events" })
+          ws.send(JSON.stringify({ type: "subscribe", topic: "telemetry", afterCursor: "expired" }))
+
+          expect(await nextWsMessage(ws)).toMatchObject({ type: "subscribed" })
+          expect(await nextWsMessage(ws)).toEqual({
+            type: "error",
+            message:
+              "[SixbServer] Event cursor expired; refetch current state. Live events continue.",
+          })
+          await expectNoWsMessage(ws)
+
+          const [stored] = await (sixb.events as DomainEventService).publishEnvelopes([
+            telemetryEnvelope(sixb.id, "fan-1", 1200, "2026-02-18T10:00:10.000Z"),
+          ])
+          expect(await nextWsMessage(ws)).toMatchObject({
+            type: "event",
+            event: { cursor: stored?.cursor },
+          })
+        } finally {
+          ws.close()
+        }
+      },
+      { broker: new ExpiredCursorBroker() }
+    )
+  })
 })
 
 function createSixbInstance(options: SixbHostOptions): SixbHost {
@@ -427,6 +461,16 @@ class CountingEventsBroker extends InMemoryBroker {
       subscribed = false
       unsubscribe()
     }
+  }
+}
+
+/** Treats the cursor `expired` as one that retention has already dropped. */
+class ExpiredCursorBroker extends InMemoryBroker {
+  override async read(params: Parameters<InMemoryBroker["read"]>[0]) {
+    if (params.afterCursor === "expired") {
+      throw new BrokerCursorExpiredError("Cursor 'expired' is older than the retained range.")
+    }
+    return super.read(params)
   }
 }
 
