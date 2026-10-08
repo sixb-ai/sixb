@@ -25,6 +25,7 @@ import { createProjectionRunId, getProjectionRegistry } from "@sixb/core/interna
 import { startTestProjectionRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { sqliteStoragePath } from "../src/migrations"
+import { cleanupSourceVersions } from "../src/ontology-storage/source-cleanup"
 
 const Device = defineObjectType({
   id: "Device",
@@ -164,6 +165,74 @@ test("cleanup keeps a superseded version until its plan is gone", async () => {
   await storage.ontology.replacementPlans.purge({ projectId: "liveness", limit: 1_000 })
   await cleanup()
   expect(versions()).toEqual([{ status: "active" }])
+})
+
+// Removal proof: drop the root_count update from cleanupSourceVersions; v1 then outlives its roots.
+test("cleanup deletes a superseded version once the roots it still holds are gone", async () => {
+  const { publish, device } = await devicePublisher()
+  const cleanup = async () => {
+    await storage.ontology.replacementPlans.purge({ projectId: "liveness", limit: 1_000 })
+    // One deletion a pass: a version's roots go over several passes.
+    const pass = () =>
+      storage.ontology.sources.cleanupTerminal({
+        projectId: "liveness",
+        terminalBefore: "2100-01-01T00:00:00.000Z",
+        limit: 1,
+      })
+    while (Object.values(await pass()).some((deleted) => deleted > 0));
+  }
+  const versions = () =>
+    db
+      .query(`SELECT dataset_version_id AS version, status, root_count AS roots
+        FROM ontology_sources ORDER BY version_id`)
+      .all()
+
+  await publish([device("a", "A"), device("b", "B")])
+  await publish([device("a", "A2")], true)
+  await cleanup()
+  expect(versions()).toEqual([
+    { version: "v1", status: "superseded", roots: 1 },
+    { version: "v2", status: "active", roots: 1 },
+  ])
+
+  await publish([device("b", "B2")], true)
+  await cleanup()
+  expect(versions()).toEqual([
+    { version: "v2", status: "superseded", roots: 1 },
+    { version: "v3", status: "active", roots: 1 },
+  ])
+})
+
+// Removal proof: select manifests by `NOT EXISTS` roots again; the plan then walks every
+// superseded version, including all those that still hold live roots.
+test("cleanup finds drained versions by index, not by walking superseded ones", async () => {
+  const { publish, device } = await devicePublisher()
+  await publish([device("a", "A")])
+  await publish([device("a", "A2")])
+  await storage.ontology.replacementPlans.purge({ projectId: "liveness", limit: 1_000 })
+  const plans: string[] = []
+  const observed = new Proxy(db, {
+    get: (target, property) =>
+      property === "query"
+        ? (sql: string) => {
+            const plan = target.query<{ detail: string }, []>(`EXPLAIN QUERY PLAN ${sql}`).all()
+            plans.push(...plan.map((row) => row.detail))
+            return target.query(sql)
+          }
+        : Reflect.get(target, property, target),
+  })
+
+  cleanupSourceVersions(observed, {
+    projectId: "liveness",
+    terminalBefore: "2100-01-01T00:00:00.000Z",
+    limit: 100,
+  })
+  expect(
+    plans.filter((detail) => /^(SCAN|SEARCH) versions\b/.test(detail) && !detail.includes("rowid"))
+  ).toEqual([
+    "SEARCH versions USING COVERING INDEX idx_ontology_sources_drained (project_id=? AND terminal_at<?)",
+  ])
+  expect(db.query("SELECT status FROM ontology_sources").all()).toEqual([{ status: "active" }])
 })
 
 /** A candidate staged with three roots, then abandoned. */

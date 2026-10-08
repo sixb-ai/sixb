@@ -83,10 +83,15 @@ export function cleanupSourceVersions(
       WHERE ${retired}
         AND NOT EXISTS (SELECT 1 FROM ontology_source_rows AS rows WHERE rows.root_id = roots.id)
       ORDER BY roots.retired_at, roots.id LIMIT ?
-    )`)
-      .run(input.projectId, input.terminalBefore, remaining).changes
-    rowsDeleted += removed
-    remaining -= removed
+    ) RETURNING version_id`)
+      .all(input.projectId, input.terminalBefore, remaining) as { readonly version_id: number }[]
+    // Each version's root_count follows its roots down, so a drained version is found by index.
+    const drain = db.query(
+      "UPDATE ontology_sources SET root_count = root_count - 1 WHERE version_id = ?"
+    )
+    for (const root of removed) drain.run(root.version_id)
+    rowsDeleted += removed.length
+    remaining -= removed.length
   }
   const materializationsDeleted =
     remaining === 0
@@ -94,9 +99,8 @@ export function cleanupSourceVersions(
       : db
           .query(`DELETE FROM ontology_sources WHERE version_id IN (
     SELECT versions.version_id FROM ontology_sources AS versions
-    WHERE project_id = ? AND status = 'superseded' AND terminal_at < ? AND ${PLAN_PURGED}
-      AND NOT EXISTS (SELECT 1 FROM ontology_source_roots AS roots
-        WHERE roots.version_id = versions.version_id)
+    WHERE project_id = ? AND status = 'superseded' AND root_count = 0 AND terminal_at < ?
+      AND ${PLAN_PURGED}
     ORDER BY terminal_at, source_id, materialization_id LIMIT ?
   )`)
           .run(input.projectId, input.terminalBefore, remaining).changes

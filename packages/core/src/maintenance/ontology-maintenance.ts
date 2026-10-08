@@ -168,8 +168,12 @@ export class OntologyMaintenance {
     const vectorIndexing = this.vectorIndexing
     if (vectorIndexing) await captureFailure(() => vectorIndexing.drain(), failures)
     const cleanup = await this.cleanupExpiredRows(started, failures)
-    const { outbox, terminalSources } = await this.readOperationalSummaries(failures)
-    this.completePass({ started, failures, cleanup, outbox, terminalSources })
+    const outbox = await captureFailure(
+      () => this.storage.ontology.outbox.summarize({ projectId: this.projectId }),
+      failures,
+      this.snapshot.outbox
+    )
+    this.completePass({ started, failures, cleanup, outbox })
   }
 
   private async cleanupExpiredRows(
@@ -331,29 +335,11 @@ export class OntologyMaintenance {
     if (abortFailure !== undefined) throw abortFailure
   }
 
-  private async readOperationalSummaries(failures: unknown[]): Promise<{
-    readonly outbox: OntologyMaintenanceSnapshot["outbox"]
-    readonly terminalSources: OntologyMaintenanceSnapshot["terminalSources"]
-  }> {
-    const outbox = await captureFailure(
-      () => this.storage.ontology.outbox.summarize({ projectId: this.projectId }),
-      failures,
-      this.snapshot.outbox
-    )
-    const terminalSummary = await captureFailure(
-      () => this.storage.ontology.sources.summarizeTerminal({ projectId: this.projectId }),
-      failures,
-      this.snapshot.terminalSources
-    )
-    return { outbox, terminalSources: terminalSummary }
-  }
-
   private completePass(input: {
     readonly started: Date
     readonly failures: readonly unknown[]
     readonly cleanup: OntologyMaintenanceCleanupSnapshot
     readonly outbox: OntologyMaintenanceSnapshot["outbox"]
-    readonly terminalSources: OntologyMaintenanceSnapshot["terminalSources"]
   }): void {
     const completed = this.now()
     const failure =
@@ -369,7 +355,6 @@ export class OntologyMaintenance {
       consecutiveFailures: failure ? this.snapshot.consecutiveFailures + 1 : 0,
       lastError: failure ? errorMessage(failure) : null,
       outbox: input.outbox,
-      terminalSources: input.terminalSources,
       cleanup: input.cleanup,
     }
     if (failure) this.reportError(failure)
@@ -429,7 +414,6 @@ function emptySnapshot(intervalMs: number): OntologyMaintenanceSnapshot {
     consecutiveFailures: 0,
     lastError: null,
     outbox: null,
-    terminalSources: null,
     cleanup: null,
   }
 }
