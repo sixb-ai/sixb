@@ -175,28 +175,23 @@ export class SqliteRulesStorage implements RulesStorage {
     input: ListRuleStatesReconciliationPageInput
   ): Promise<ListRuleStatesReconciliationPageResult> {
     assertPositiveLimit(input.limit)
+    const { after } = input
+    const cursor = after ? [after.ruleId, after.objectTypeId, after.primaryId] : []
+    // The cursor and order follow the primary key column for column so each page seeks to its
+    // start. `subject_kind` is always 'object' (CHECK); filtering on it steers SQLite onto
+    // idx_rule_states_project_rule and a full sort per page.
     const rows = this.db
       .query(
         `
           SELECT project_id, rule_id, subject_kind, object_type_id, primary_id, triggered_at
           FROM rule_states
-          WHERE project_id = ? AND subject_kind = 'object'
-            AND (
-              ? IS NULL OR
-              (rule_id, object_type_id, primary_id) > (?, ?, ?)
-            )
-          ORDER BY rule_id ASC, object_type_id ASC, primary_id ASC
+          WHERE project_id = ?
+            ${cursor.length > 0 ? "AND (rule_id, subject_kind, object_type_id, primary_id) > (?, 'object', ?, ?)" : ""}
+          ORDER BY rule_id ASC, subject_kind ASC, object_type_id ASC, primary_id ASC
           LIMIT ?
         `
       )
-      .all(
-        input.projectId,
-        input.after?.ruleId ?? null,
-        input.after?.ruleId ?? null,
-        input.after?.objectTypeId ?? null,
-        input.after?.primaryId ?? null,
-        input.limit + 1
-      ) as SqliteRuleStateRow[]
+      .all(input.projectId, ...cursor, input.limit + 1) as SqliteRuleStateRow[]
     return reconciliationPage(rows, input.limit)
   }
 

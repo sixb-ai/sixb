@@ -151,7 +151,11 @@ export class PgRulesStorage implements RulesStorage {
   ): Promise<ListRuleStatesReconciliationPageResult> {
     assertPositiveLimit(input.limit)
     const params: SqlParameter[] = [input.projectId]
-    const cursor = input.after ? "AND (rule_id, object_type_id, primary_id) > ($2, $3, $4)" : ""
+    // The cursor follows the primary key column for column, so the index scan starts at the
+    // cursor instead of at the cursor's rule. `subject_kind` is always 'object' (CHECK).
+    const cursor = input.after
+      ? "AND (rule_id, subject_kind, object_type_id, primary_id) > ($2, 'object', $3, $4)"
+      : ""
     if (input.after) {
       params.push(input.after.ruleId, input.after.objectTypeId, input.after.primaryId)
     }
@@ -161,8 +165,8 @@ export class PgRulesStorage implements RulesStorage {
       `
         SELECT project_id, rule_id, subject_kind, object_type_id, primary_id, triggered_at
         FROM rule_states
-        WHERE project_id = $1 AND subject_kind = 'object' ${cursor}
-        ORDER BY rule_id ASC, object_type_id ASC, primary_id ASC
+        WHERE project_id = $1 ${cursor}
+        ORDER BY rule_id ASC, subject_kind ASC, object_type_id ASC, primary_id ASC
         LIMIT ${limitParameter}
       `,
       params
