@@ -948,6 +948,68 @@ describe("runWorkflowJob", () => {
     expect(resumed.steps.resolveInvoiceWithAgent).toEqual(output)
   })
 
+  // Regression proof: remove the later-node check in createForAgentNodeResume. The stale resume
+  // then takes the run out of `waiting` and re-runs the approval after the agent node.
+  test("treats a repeated agent resume as handled once the run waits on a later node", async () => {
+    const confirmInvoice = defineIntervention("confirm-resolved-invoice")
+      .input({ invoice: ref(Invoice), confidence: "double", reason: "string" })
+      .response({ approved: "boolean" })
+    const workflow = defineWorkflow("agent-then-approval")
+      .input({ transaction: ref(Transaction) })
+      .then(resolveInvoiceWithAgent)
+      .then(confirmInvoice)
+    const sixb = createSixb({ workflows: [workflow] })
+    const runtime = createRuntime(sixb)
+    const runs = sixb.storage.workflowRuns!
+    const parked = await runWorkflowJob({
+      runtime,
+      job: {
+        id: "wfrun_repeated_agent_resume",
+        workflowId: workflow.id,
+        input: { transaction: { objectTypeId: "Transaction", primaryId: "txn_1" } },
+      },
+    })
+    const agentNode = parked.nodes[0]!
+    const token = "agent_execution_1"
+    await runs.agentNodes.start({
+      projectId: sixb.id,
+      nodeRunId: agentNode.id,
+      execution: { token, queueLeaseExpiresAt: new Date("2026-05-08T10:15:00.000Z") },
+    })
+    await runs.agentNodes.finish({
+      projectId: sixb.id,
+      nodeRunId: agentNode.id,
+      executionToken: token,
+      status: "succeeded",
+    })
+    await runs.nodes.finish({
+      projectId: sixb.id,
+      id: agentNode.id,
+      status: "succeeded",
+      output: {
+        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+        confidence: 0.97,
+        reason: "Matching amount and supplier.",
+      },
+    })
+    const resume = {
+      runtime,
+      job: { id: parked.id, workflowId: workflow.id, nodeRunId: agentNode.id },
+    }
+    expect((await runWorkflowResumeJob(resume)).status).toBe("waiting")
+    const listNodes = () =>
+      runs.nodes.list({ projectId: sixb.id, workflowRunId: parked.id, order: "asc" })
+    const nodesWaitingOnApproval = await listNodes()
+
+    const repeated = await runWorkflowResumeJob(resume)
+
+    expect(repeated.status).toBe("waiting")
+    expect(await runs.getById({ projectId: sixb.id, id: parked.id })).toMatchObject({
+      status: "waiting",
+    })
+    expect(await listNodes()).toEqual(nodesWaitingOnApproval)
+  })
+
   test("notifies run waiting when a parked node notification fails", async () => {
     const workflow = defineWorkflow("agent-waiting-observer-fails")
       .input({ transaction: ref(Transaction) })

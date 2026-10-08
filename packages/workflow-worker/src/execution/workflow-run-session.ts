@@ -468,6 +468,11 @@ export class WorkflowRunSession {
     if (run.status === "succeeded") {
       return completedWorkflowResumeResult(context, nodeRuns.nodes)
     }
+    // A later node run means this resume was already applied; delivering it again changes nothing.
+    const latest = nodeRuns.nodes.at(-1)
+    if (latest && latest.nodeIndex > nodeRun.nodeIndex) {
+      return completedWorkflowResumeResult(context, nodeRuns.nodes, latest.nodeIndex)
+    }
     if (run.status !== "waiting" || nodeRun.status !== "succeeded") {
       throw createSixbError(
         "internal.unexpected",
@@ -728,22 +733,24 @@ export class WorkflowRunSession {
   }
 }
 
+/** The run as an earlier delivery of this resume left it, with steps up to `upToNodeIndex`. */
 function completedWorkflowResumeResult(
   context: WorkflowResumeContext,
-  nodeRuns: readonly WorkflowNodeRunRecord[]
+  nodeRuns: readonly WorkflowNodeRunRecord[],
+  upToNodeIndex = context.workflow.nodes.length
 ): WorkflowRunResult {
   const { workflow, run, valueTypesById } = context
   return {
     id: run.id,
     workflowId: workflow.id,
-    status: "succeeded",
+    status: run.status,
     run,
     nodes: nodeRuns,
     steps: reconstructWorkflowState({
       workflow,
       run,
       nodeRuns,
-      upToNodeIndex: workflow.nodes.length,
+      upToNodeIndex,
       valueTypesById,
     }).steps,
   }
