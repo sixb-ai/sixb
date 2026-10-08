@@ -1,5 +1,6 @@
 import { type BlobStorage, supportsDirectUpload } from "../blob-storage"
 import type { OntologyOutboxDispatcher } from "../events"
+import type { VectorIndexingDispatcher } from "../objects/vectors/indexing-dispatch"
 import {
   type FileUploadSession,
   FileUploadSessionError,
@@ -35,6 +36,7 @@ interface OntologyMaintenanceDependencies {
   readonly projectId: string
   readonly storage: Storage
   readonly dispatcher: OntologyOutboxDispatcher
+  readonly vectorIndexing?: VectorIndexingDispatcher
   /** Aborts the provider side of abandoned staged uploads. */
   readonly blobStorage?: BlobStorage
   readonly options?: OntologyMaintenanceOptions
@@ -47,6 +49,7 @@ export class OntologyMaintenance {
   private readonly projectId: string
   private readonly storage: Storage
   private readonly dispatcher: OntologyOutboxDispatcher
+  private readonly vectorIndexing: VectorIndexingDispatcher | undefined
   private readonly blobStorage: BlobStorage | undefined
   private readonly intervalMs: number
   private readonly publishedOutboxRetentionMs: number
@@ -67,6 +70,7 @@ export class OntologyMaintenance {
     this.projectId = dependencies.projectId
     this.storage = dependencies.storage
     this.dispatcher = dependencies.dispatcher
+    this.vectorIndexing = dependencies.vectorIndexing
     this.blobStorage = dependencies.blobStorage
     this.intervalMs = positiveInteger(options.intervalMs ?? DEFAULT_INTERVAL_MS, "intervalMs")
     this.publishedOutboxRetentionMs = nonnegativeInteger(
@@ -161,6 +165,8 @@ export class OntologyMaintenance {
 
     const failures: unknown[] = []
     await captureFailure(() => this.dispatcher.drain(), failures)
+    const vectorIndexing = this.vectorIndexing
+    if (vectorIndexing) await captureFailure(() => vectorIndexing.drain(), failures)
     const cleanup = await this.cleanupExpiredRows(started, failures)
     const { outbox, terminalSources } = await this.readOperationalSummaries(failures)
     this.completePass({ started, failures, cleanup, outbox, terminalSources })

@@ -45,11 +45,10 @@ When vector profiles are declared, the same process hosts a separate `queues.vec
 consumer. `vectorConcurrency` bounds its concurrent calls (default 1), independently of projection
 `concurrency`. No extra worker command is needed. Both consumers participate in start/stop/wait.
 
-The Materializer records coalesced intent with each effective source change. The dispatcher scans
-that intent in bounded pages and idempotently enqueues its projection group id (or individual
-generation id); a crash between the object
-commit and enqueue cannot lose work. It never scans historical objects. See the
-[internal indexing contract](../core/src/objects/vectors/README.md).
+The Materializer records coalesced intent with each effective source change. The process that
+commits it enqueues the projection group id (or individual generation id) right after the commit;
+API maintenance re-dispatches whatever a crash left behind. This worker only consumes the queue.
+See the [internal indexing contract](../core/src/objects/vectors/README.md).
 
 ## Development
 
