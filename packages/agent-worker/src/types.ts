@@ -117,8 +117,6 @@ export interface AgentTurnContext {
 export interface AgentWorkerOptions {
   /** Queue visibility duration, renewed automatically while a turn executes. Defaults to 60s. */
   readonly leaseMs?: number
-  /** Idle poll interval when the queue is empty, in ms. */
-  readonly idlePollMs?: number
   /**
    * Sixb server origin that hosts the agent API gateway, for example `http://localhost:3002`.
    * The sandbox receives a run-scoped gateway URL under this origin.

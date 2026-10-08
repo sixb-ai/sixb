@@ -82,12 +82,16 @@ export interface Queue<
    *
    * `leaseMs` is the visibility timeout for this claim. If the lease expires
    * before the job is acknowledged, the job may be delivered again.
+   *
+   * Without `signal`, returns at once, possibly empty. With `signal`, waits for work instead:
+   * it resolves once it claims at least one job, and empty only after `signal` aborts.
    */
   claim(params: {
     projectId: string
     workerId: string
     limit?: number
     leaseMs?: number
+    signal?: AbortSignal
   }): Promise<readonly ClaimedQueueJob<TQueueJob>[]>
 
   /** Acknowledges successful processing and removes the claimed job from delivery. */

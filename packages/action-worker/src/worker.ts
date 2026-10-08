@@ -22,7 +22,6 @@ export interface ActionWorkerHost extends PrimitiveExecutionHost {
 
 export interface ActionWorkerOptions {
   readonly leaseMs?: number
-  readonly idlePollMs?: number
 }
 
 export class ActionWorker extends QueueWorker<
@@ -40,7 +39,6 @@ export class ActionWorker extends QueueWorker<
       workerId: `action-worker-${host.id}`,
       claimLimit: 1,
       leaseMs: options.leaseMs,
-      idlePollMs: options.idlePollMs,
     })
 
     const actions = host.definitions.actions.list()

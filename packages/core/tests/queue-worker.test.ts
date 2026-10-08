@@ -62,7 +62,6 @@ describe("QueueWorker", () => {
       queue: queues.syncRuns,
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
-      idlePollMs: 10,
     })
 
     const [queued] = await queues.syncRuns.enqueue({
@@ -79,6 +78,74 @@ describe("QueueWorker", () => {
     expect(claimed).toHaveLength(0)
   })
 
+  // To see this fail, sleep 1s after an empty claim in `QueueWorker.claim` instead of passing the
+  // signal: the job then waits out the sleep.
+  test("picks up a job enqueued while idle without waiting out a poll interval", async () => {
+    const queues = new InMemoryQueues()
+    let processed = false
+    class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
+      protected async execute(): Promise<void> {
+        processed = true
+      }
+    }
+    const worker = new TestWorker({
+      projectId: PROJECT_ID,
+      queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
+      workerId: "w",
+    })
+
+    await worker.start()
+    await Bun.sleep(20)
+    await queues.syncRuns.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [{ type: "sync.run.requested", payload: { runId: "s" } }],
+    })
+    await waitFor(() => processed, 250)
+    await worker.stop()
+  })
+
+  // To see this fail, remove the empty-claim check in `QueueWorker.claim`: the worker then claims
+  // in a tight loop until the race below gives up, and never reports anything.
+  test("fails loudly instead of spinning when a queue ignores the claim signal", async () => {
+    const queues = new InMemoryQueues()
+    let claimCalls = 0
+    // Answers at once whatever the signal, like a plain non-blocking claim.
+    queues.syncRuns.claim = async () => {
+      claimCalls += 1
+      await new Promise((resolve) => setImmediate(resolve))
+      return []
+    }
+    class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
+      protected override readonly restartBackoffMs = 0
+      protected override readonly claimFailureDelayMs = 1
+      protected async execute(): Promise<void> {}
+    }
+    const worker = new TestWorker({
+      projectId: PROJECT_ID,
+      queue: queues.syncRuns,
+      failureCodes: SYNC_RUN_FAILURE_CODES,
+      workerId: "w",
+    })
+
+    await worker.start()
+    const failure = await Promise.race([
+      worker.wait().then(
+        () => undefined,
+        (error: unknown) => error
+      ),
+      Bun.sleep(1_000),
+    ])
+    await worker.stop()
+
+    const messages: string[] = []
+    for (let error = failure; error instanceof Error; error = error.cause) {
+      messages.push(error.message)
+    }
+    expect(messages.join("\n")).toContain("claim must wait for work until its signal aborts")
+    expect(claimCalls).toBeLessThan(100)
+  })
+
   test("restarts the loop after repeated queue claim failures", async () => {
     const queues = new InMemoryQueues()
     const originalClaim = queues.syncRuns.claim.bind(queues.syncRuns)
@@ -91,6 +158,7 @@ describe("QueueWorker", () => {
 
     let processed = false
     class TestWorker extends QueueWorker<SyncRunRequestedQueueJob, typeof SYNC_RUN_FAILURE_CODES> {
+      protected override readonly claimFailureDelayMs = 1
       protected async execute(): Promise<void> {
         processed = true
       }
@@ -101,7 +169,6 @@ describe("QueueWorker", () => {
       queue: queues.syncRuns,
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
-      idlePollMs: 1,
     })
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
@@ -141,7 +208,6 @@ describe("QueueWorker", () => {
       queue: queues.syncRuns,
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
-      idlePollMs: 10,
     })
 
     await queues.syncRuns.enqueue({
@@ -201,7 +267,6 @@ describe("QueueWorker", () => {
       queue: queues.syncRuns,
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
-      idlePollMs: 10,
     })
     await queues.syncRuns.enqueue({
       projectId: PROJECT_ID,
@@ -245,7 +310,6 @@ describe("QueueWorker", () => {
       queue: queues.syncRuns,
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
-      idlePollMs: 10,
     })
 
     await queues.syncRuns.enqueue({
@@ -289,7 +353,6 @@ describe("QueueWorker", () => {
       queue: queues.syncRuns,
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
-      idlePollMs: 10,
     })
 
     await queues.syncRuns.enqueue({
@@ -341,7 +404,6 @@ describe("QueueWorker", () => {
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       leaseMs: 90,
-      idlePollMs: 10,
     })
 
     await queues.syncRuns.enqueue({
@@ -385,7 +447,6 @@ describe("QueueWorker", () => {
       queue: queues.syncRuns,
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
-      idlePollMs: 10,
     })
     const consoleError = spyOn(console, "error").mockImplementation(() => {})
 
@@ -440,7 +501,6 @@ describe("QueueWorker", () => {
       failureCodes: SYNC_RUN_FAILURE_CODES,
       workerId: "w",
       claimLimit: 3,
-      idlePollMs: 10,
     })
 
     await queues.syncRuns.enqueue({

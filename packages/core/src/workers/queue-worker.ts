@@ -26,7 +26,6 @@ export interface QueueWorkerConfig<
   readonly workerId: string
   readonly leaseMs?: number
   readonly claimLimit?: number
-  readonly idlePollMs?: number
 }
 
 /**
@@ -48,7 +47,7 @@ export type QueueWorkerFailureDecision<TFailureCode extends SixbErrorCode = neve
 
 const DEFAULT_LEASE_MS = 15 * 60_000
 const DEFAULT_CLAIM_LIMIT = 1
-const DEFAULT_IDLE_POLL_MS = 1_000
+const CLAIM_FAILURE_DELAY_MS = 1_000
 const MAX_CONSECUTIVE_CLAIM_FAILURES = 5
 
 export abstract class QueueWorker<
@@ -56,6 +55,8 @@ export abstract class QueueWorker<
   TFailureCodes extends QueueWorkerFailureCodes,
 > extends Worker {
   protected readonly config: Required<QueueWorkerConfig<TJob, TFailureCodes>>
+  /** Pause after a failed claim. Overridable so tests do not wait out real backoffs. */
+  protected readonly claimFailureDelayMs: number = CLAIM_FAILURE_DELAY_MS
   private consecutiveClaimFailures = 0
 
   constructor(config: QueueWorkerConfig<TJob, TFailureCodes>) {
@@ -67,7 +68,6 @@ export abstract class QueueWorker<
       workerId: config.workerId,
       leaseMs: config.leaseMs ?? DEFAULT_LEASE_MS,
       claimLimit: normalizeClaimLimit(config.claimLimit),
-      idlePollMs: config.idlePollMs ?? DEFAULT_IDLE_POLL_MS,
     }
   }
 
@@ -79,6 +79,9 @@ export abstract class QueueWorker<
   protected async run(signal: AbortSignal): Promise<void> {
     const inFlight = new Set<Promise<void>>()
     let runError: unknown = null
+    // A claim waits for work, so a failed job must also end the wait it would otherwise sit in.
+    const failed = new AbortController()
+    const claimSignal = AbortSignal.any([signal, failed.signal])
 
     try {
       while (!signal.aborted && !runError) {
@@ -90,11 +93,12 @@ export abstract class QueueWorker<
         }
 
         const capacity = this.config.claimLimit - inFlight.size
-        const claimed = await this.claimOrIdle(signal, capacity)
+        const claimed = await this.claim(claimSignal, capacity)
         for (const claimedJob of claimed) {
           const promise = this.handle(claimedJob, signal)
             .catch((error) => {
               runError ??= error
+              failed.abort()
             })
             .finally(() => {
               inFlight.delete(promise)
@@ -137,23 +141,22 @@ export abstract class QueueWorker<
     return { kind: "retry" }
   }
 
-  private async claimOrIdle(
+  private async claim(
     signal: AbortSignal,
     limit: number
   ): Promise<readonly ClaimedQueueJob<TJob>[]> {
-    const { projectId, queue, workerId, leaseMs, idlePollMs } = this.config
+    const { projectId, queue, workerId, leaseMs } = this.config
 
     try {
-      const claimed = await queue.claim({
-        projectId,
-        workerId,
-        limit,
-        leaseMs,
-      })
-      this.consecutiveClaimFailures = 0
-      if (claimed.length === 0) {
-        await sleep(idlePollMs, signal).catch(() => {})
+      // The provider waits until it has work or `signal` aborts, so there is no idle loop here.
+      const claimed = await queue.claim({ projectId, workerId, limit, leaseMs, signal })
+      if (claimed.length === 0 && !signal.aborted) {
+        // A provider that ignores the signal would otherwise spin this loop on a whole core.
+        throw new Error(
+          "[SixbQueueWorker] Queue claim returned no jobs before its signal aborted; the queue provider contract says claim must wait for work until its signal aborts."
+        )
       }
+      this.consecutiveClaimFailures = 0
       return claimed
     } catch (error) {
       if (signal.aborted) return []
@@ -165,7 +168,7 @@ export abstract class QueueWorker<
           { cause: error }
         )
       }
-      await sleep(idlePollMs, signal).catch(() => {})
+      await sleep(this.claimFailureDelayMs, signal).catch(() => {})
       return []
     }
   }
