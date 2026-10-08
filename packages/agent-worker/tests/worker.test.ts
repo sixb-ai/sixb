@@ -1501,6 +1501,28 @@ async function queueWorkflowAgentNode(input: {
   return { sixb, runs, workflow, agentStep, nodeRunId, agentExecutionId }
 }
 
+/** Record a workflow agent node's success the way the worker does, without running a model. */
+async function succeedWorkflowAgentNode(runs: WorkflowRunStorage, nodeRunId: string) {
+  const token = "test-execution-token"
+  await runs.agentNodes.start({
+    projectId: PROJECT_ID,
+    nodeRunId,
+    execution: { token, queueLeaseExpiresAt: new Date(Date.now() + 60_000) },
+  })
+  await runs.agentNodes.finish({
+    projectId: PROJECT_ID,
+    nodeRunId,
+    executionToken: token,
+    status: "succeeded",
+  })
+  await runs.nodes.finish({
+    projectId: PROJECT_ID,
+    id: nodeRunId,
+    status: "succeeded",
+    output: { answer: "Project Alpha", confidence: 0.96 },
+  })
+}
+
 class FailingRunStreamBroker extends InMemoryBroker {
   override append(
     params: Parameters<InMemoryBroker["append"]>[0]
@@ -4003,6 +4025,127 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
     }
+  })
+
+  // Regression proof: catch the resume enqueue failure in workflow-node-execution.ts and the job is
+  // acknowledged instead of retried, leaving the workflow waiting forever.
+  test("keeps a workflow agent job until its resume is queued", async () => {
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      runId: "workflow-resume-unqueued",
+    })
+    sixb.queues.workflows.enqueue = () => Promise.reject(new Error("queue unavailable"))
+    const agents = sixb.queues.agents
+    const retry = agents.retry.bind(agents)
+    const retried: string[] = []
+    agents.retry = (params) => {
+      retried.push(params.jobId)
+      return retry(params)
+    }
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const originalConsoleError = console.error
+    console.error = () => {}
+    await worker.start()
+    try {
+      await waitFor(() => retried.includes(`wfa_job_${nodeRunId}`), { label: "agent job retried" })
+      expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
+        status: "succeeded",
+      })
+    } finally {
+      await worker.stop()
+      console.error = originalConsoleError
+    }
+  })
+
+  test("a redelivery after the node succeeded only queues the resume", async () => {
+    let modelCalls = 0
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model: new WorkerTestModel({
+        generate: async () => {
+          modelCalls += 1
+          throw new Error("[test] the model must not run again")
+        },
+      }),
+      runId: "workflow-resume-redelivered",
+    })
+    await succeedWorkflowAgentNode(runs, nodeRunId)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const [resume] = await waitFor(
+        async () => {
+          const claimed = await sixb.queues.workflows.claim({
+            projectId: PROJECT_ID,
+            workerId: "workflow-test-worker",
+          })
+          return claimed.length > 0 ? claimed : null
+        },
+        { label: "resume queued" }
+      )
+      expect(resume?.job).toMatchObject({
+        type: "workflow.run.resume.requested",
+        payload: { runId: "workflow-resume-redelivered", nodeRunId },
+      })
+      expect(modelCalls).toBe(0)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: restore the repair pass that lists `succeeded` agent nodes and re-sends a
+  // resume for every one whose run is waiting. It resumes this run from the step after node 0.
+  test("never re-sends the resume of an agent step the workflow has moved past", async () => {
+    const runId = "workflow-moved-past-agent"
+    const { sixb, runs, workflow, nodeRunId } = await queueWorkflowAgentNode({
+      model: structuredAnswerModel(),
+      runId,
+    })
+    await succeedWorkflowAgentNode(runs, nodeRunId)
+    const [agentJob] = await sixb.queues.agents.claim({ projectId: PROJECT_ID, workerId: "test" })
+    if (!agentJob) throw new Error("expected the agent node job")
+    await sixb.queues.agents.complete({
+      projectId: PROJECT_ID,
+      jobId: agentJob.job.id,
+      leaseId: agentJob.leaseId,
+    })
+    await runs.resume({ projectId: PROJECT_ID, id: runId })
+    const approvalRunId = `${runId}:node:1`
+    await runs.nodes.start({
+      id: approvalRunId,
+      projectId: PROJECT_ID,
+      workflowRunId: runId,
+      workflowId: workflow.id,
+      nodeIndex: 1,
+      nodeType: "intervention",
+      nodeId: "approve",
+      nodeKey: "approve",
+      input: {},
+    })
+    await runs.nodes.wait({ projectId: PROJECT_ID, id: approvalRunId })
+    await runs.wait({ projectId: PROJECT_ID, id: runId })
+
+    const enqueued: string[] = []
+    sixb.queues.workflows.enqueue = async (params) => {
+      enqueued.push(...params.jobs.map((job) => job.type))
+      return []
+    }
+    // The queued-node scan is the repair pass's last read; stop() then awaits the pass in flight.
+    const list = runs.agentNodes.list.bind(runs.agentNodes)
+    let scanned: () => void = () => {}
+    const repairPassScanned = new Promise<void>((resolve) => {
+      scanned = resolve
+    })
+    runs.agentNodes.list = async (input) => {
+      const result = await list(input)
+      if (input.statuses?.includes("queued")) scanned()
+      return result
+    }
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    await repairPassScanned
+    await worker.stop()
+
+    expect(enqueued).toEqual([])
   })
 
   // Regression proof: prepare the definition's model instead of the catalog binding in worker.start.
