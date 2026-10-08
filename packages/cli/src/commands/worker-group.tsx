@@ -2,12 +2,8 @@ import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
 import { resolveRuntimeEntry } from "../lib/production"
 import { recordApiPublicOrigin } from "../lib/public-origin"
-import {
-  runUntilSignal,
-  stopQuietly,
-  stopSixbProviders,
-  waitForWorkerFailure,
-} from "../lib/runtime"
+import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
+import { stopSixbProviders, waitForWorkerFailure } from "../lib/runtime"
 import { assertShareableProviders } from "../lib/shareable-providers"
 import { migrateStorageForRole } from "../lib/storage-migration"
 import { resolveWorkerConcurrency } from "../lib/worker-concurrency"

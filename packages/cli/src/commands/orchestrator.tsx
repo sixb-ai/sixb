@@ -1,10 +1,9 @@
 import type { LoadedSixbHost } from "../lib/loadSixb"
 import { loadProductionSixb } from "../lib/production"
+import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import {
   type RunningOrchestratorRuntime,
-  runUntilSignal,
   startOrchestratorRuntime,
-  stopQuietly,
   stopSixbProviders,
   waitForWorkerFailure,
 } from "../lib/runtime"

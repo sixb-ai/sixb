@@ -1,8 +1,12 @@
-import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
+import type { AtlasAppServer } from "@sixb/atlas"
+import {
+  answerBrowserRoleProbe,
+  isBrowserRoleProbe,
+  probeBrowserRoleProject,
+} from "../lib/browser-role-probe"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
-import type { LoadedSixbHost } from "../lib/loadSixb"
-import { builtAtlasOutdir, loadProductionSixb } from "../lib/production"
-import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
+import { builtAtlasOutdir, resolveProductionPaths, resolveRuntimeEntry } from "../lib/production"
+import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
 export interface AtlasOptions {
@@ -16,12 +20,27 @@ export interface AtlasOptions {
 export async function runAtlas(options: AtlasOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry, role: "atlas" })
+  if (isBrowserRoleProbe()) {
+    try {
+      await answerBrowserRoleProbe({ entry: options.entry, role: "atlas" })
+    } catch (error) {
+      await renderCliError(error)
+      process.exit(1)
+    }
+    process.exit(0)
+  }
+
+  const entry = await resolveRuntimeEntry({ entry: options.entry })
+  // The server package loads while the probe reads the project, and the probe never loads it.
+  const [project, { createAtlasApp }] = await Promise.all([
+    probeBrowserRoleProject("atlas"),
+    import("@sixb/atlas"),
+  ])
+  const { buildOutdir } = await resolveProductionPaths(entry)
   const app = renderPersistent(
-    <LoadingView title="Starting sixb atlas" subtitle={loaded.entry} status="Starting Atlas" />
+    <LoadingView title="Starting sixb atlas" subtitle={entry} status="Starting Atlas" />
   )
 
-  let sixb: LoadedSixbHost | null = loaded.sixb
   let atlasServer: AtlasAppServer | null = null
 
   try {
@@ -36,19 +55,19 @@ export async function runAtlas(options: AtlasOptions = {}) {
     const atlas = createAtlasApp({
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "atlas",
-      authEnabled: sixb.auth.isEnabled(),
+      authEnabled: project.authEnabled,
     })
     atlasServer = await atlas.start({
       host: topology.host,
       port: topology.atlasPort,
       development: false,
-      outdir: builtAtlasOutdir(loaded.buildOutdir),
+      outdir: builtAtlasOutdir(buildOutdir),
     })
 
     app.rerender(
       <RoleView
         title="Sixb Atlas started"
-        name={sixb.id}
+        name={project.id}
         serviceName="Atlas"
         items={[{ label: "URL", value: servedUrl(topology) }]}
       />
@@ -58,17 +77,10 @@ export async function runAtlas(options: AtlasOptions = {}) {
       app.unmount()
       console.log("\nShutting down atlas...")
       await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
-      if (sixb) {
-        await stopSixbProviders(sixb)
-      }
-      sixb = null
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
-    if (sixb) {
-      await stopSixbProviders(sixb)
-    }
     await renderCliError(error)
     process.exit(1)
   }

@@ -1,8 +1,17 @@
-import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
+import type { CustomAppDevServer } from "@sixb/app"
+import {
+  answerBrowserRoleProbe,
+  isBrowserRoleProbe,
+  probeBrowserRoleProject,
+} from "../lib/browser-role-probe"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
-import type { LoadedSixbHost } from "../lib/loadSixb"
-import { builtAppOutdir, hasBuiltCustomApp, loadProductionSixb } from "../lib/production"
-import { runUntilSignal, stopQuietly, stopSixbProviders } from "../lib/runtime"
+import {
+  builtAppOutdir,
+  hasBuiltCustomApp,
+  resolveProductionPaths,
+  resolveRuntimeEntry,
+} from "../lib/production"
+import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
 import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
 
 export interface AppOptions {
@@ -16,16 +25,31 @@ export interface AppOptions {
 export async function runApp(options: AppOptions = {}) {
   process.env.NODE_ENV = "production"
 
-  const loaded = await loadProductionSixb({ entry: options.entry, role: "app" })
+  if (isBrowserRoleProbe()) {
+    try {
+      await answerBrowserRoleProbe({ entry: options.entry, role: "app" })
+    } catch (error) {
+      await renderCliError(error)
+      process.exit(1)
+    }
+    process.exit(0)
+  }
+
+  const entry = await resolveRuntimeEntry({ entry: options.entry })
+  // The server package loads while the probe reads the project, and the probe never loads it.
+  const [project, { createCustomApp }] = await Promise.all([
+    probeBrowserRoleProject("app"),
+    import("@sixb/app"),
+  ])
+  const { projectRoot, buildOutdir } = await resolveProductionPaths(entry)
   const app = renderPersistent(
-    <LoadingView title="Starting sixb app" subtitle={loaded.entry} status="Starting app" />
+    <LoadingView title="Starting sixb app" subtitle={entry} status="Starting app" />
   )
 
-  let sixb: LoadedSixbHost | null = loaded.sixb
   let customAppServer: CustomAppDevServer | null = null
 
   try {
-    const appOutdir = builtAppOutdir(loaded.buildOutdir)
+    const appOutdir = builtAppOutdir(buildOutdir)
     if (!(await hasBuiltCustomApp(appOutdir))) {
       throw new Error(
         `[SixbCustomApp] No built app found in ${appOutdir}. Run \`sixb build\` before \`sixb app\`.`
@@ -41,10 +65,10 @@ export async function runApp(options: AppOptions = {}) {
     })
 
     const customApp = await createCustomApp({
-      rootDir: loaded.projectRoot,
+      rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
-      authEnabled: sixb.auth.isEnabled(),
+      authEnabled: project.authEnabled,
     })
     customAppServer = await customApp.start({
       host: topology.host,
@@ -52,13 +76,13 @@ export async function runApp(options: AppOptions = {}) {
       outdir: appOutdir,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
-      authEnabled: sixb.auth.isEnabled(),
+      authEnabled: project.authEnabled,
     })
 
     app.rerender(
       <RoleView
         title="Sixb app started"
-        name={sixb.id}
+        name={project.id}
         serviceName="Custom app"
         items={[{ label: "URL", value: servedUrl(topology) }]}
       />
@@ -68,17 +92,10 @@ export async function runApp(options: AppOptions = {}) {
       app.unmount()
       console.log("\nShutting down app...")
       await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-      if (sixb) {
-        await stopSixbProviders(sixb)
-      }
-      sixb = null
     })
   } catch (error) {
     app.unmount()
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-    if (sixb) {
-      await stopSixbProviders(sixb)
-    }
     await renderCliError(error)
     process.exit(1)
   }
