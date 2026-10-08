@@ -29,12 +29,6 @@ const MaintenanceSummarySchema = z.object({
       maxAttempts: z.number().int().nonnegative(),
     })
     .nullable(),
-  terminalSources: z
-    .object({
-      count: z.number().int().nonnegative(),
-      oldestTerminalAt: z.string().nullable(),
-    })
-    .nullable(),
   cleanup: z
     .object({
       publishedOutboxRowsDeleted: z.number().int().nonnegative(),

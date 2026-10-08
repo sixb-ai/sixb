@@ -10113,22 +10113,6 @@
                           "additionalProperties": false,
                           "nullable": true
                         },
-                        "terminalSources": {
-                          "type": "object",
-                          "properties": {
-                            "count": {
-                              "type": "integer",
-                              "minimum": 0
-                            },
-                            "oldestTerminalAt": {
-                              "type": "string",
-                              "nullable": true
-                            }
-                          },
-                          "required": ["count", "oldestTerminalAt"],
-                          "additionalProperties": false,
-                          "nullable": true
-                        },
                         "cleanup": {
                           "type": "object",
                           "properties": {
@@ -10163,7 +10147,6 @@
                         "consecutiveFailures",
                         "lastError",
                         "outbox",
-                        "terminalSources",
                         "cleanup"
                       ],
                       "additionalProperties": false

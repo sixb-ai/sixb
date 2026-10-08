@@ -127,8 +127,6 @@ export type {
   StoredSourceAssertion,
   StoredSourceLinkAssertion,
   StoredSourceObjectAssertion,
-  SummarizeTerminalSourceMaterializationsInput,
-  TerminalSourceMaterializationSummary,
 } from "./sources"
 
 export type { ObjectVectorState, OntologyVectorStorage, StoredObjectVector } from "./vectors"

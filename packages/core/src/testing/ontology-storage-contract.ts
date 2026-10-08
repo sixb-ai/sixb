@@ -460,9 +460,6 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
             adoptedAt: "2026-01-01T00:02:10.000Z",
           })
         ).toBeNull()
-        expect(
-          await storage.ontology.sources.summarizeTerminal({ projectId: "contract-project" })
-        ).toEqual({ count: 1, oldestTerminalAt: "2026-01-01T00:02:00.000Z" })
 
         // Superseded retention does not hold an abandoned candidate back.
         expect(
@@ -482,8 +479,8 @@ export function runOntologyStorageContractSuite<TStorage extends OntologyStorage
           await storage.ontology.sources.purgeAbandoned({ projectId: "contract-project", limit: 1 })
         ).toEqual({ rowsDeleted: 0, materializationsDeleted: 1 })
         expect(
-          await storage.ontology.sources.summarizeTerminal({ projectId: "contract-project" })
-        ).toEqual({ count: 0, oldestTerminalAt: null })
+          await storage.ontology.sources.purgeAbandoned({ projectId: "contract-project", limit: 1 })
+        ).toEqual({ rowsDeleted: 0, materializationsDeleted: 0 })
       })
     })
 
