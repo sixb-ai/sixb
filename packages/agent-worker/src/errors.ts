@@ -52,6 +52,23 @@ export class AgentFinalizationError extends Error {
 }
 
 /**
+ * A workflow agent node succeeded but its workflow resume could not be queued. The worker leaves
+ * the node's job unacknowledged: a redelivery finds the node succeeded and only re-sends the resume.
+ */
+export class WorkflowResumeDispatchError extends Error {
+  readonly name = "WorkflowResumeDispatchError"
+  constructor(
+    readonly nodeRunId: string,
+    options?: ErrorOptions
+  ) {
+    super(
+      `[SixbAgentWorker] Could not queue the workflow resume after agent node '${nodeRunId}'.`,
+      options
+    )
+  }
+}
+
+/**
  * A turn exceeded its wall-clock budget. Unlike a shutdown abort, this is a run-level failure: the
  * run is recorded `failed` and the thread released (a slow-but-alive model must not hold a thread
  * forever). It is persisted as the run failure while coherent partial work is retained as the

@@ -27,8 +27,11 @@ sandbox or API origin. See [recovery-only operation](./docs/usage-accounting.md#
 ## Execution Model
 
 - User requests atomically persist the user message and a `queued` run before dispatch.
-- The queued run is the dispatch intent; workers republish it with a deterministic queue job id until
-  it is claimed, without a parallel outbox table.
+- The queued run is the dispatch intent, without a parallel outbox table. Requests publish it
+  immediately; when that publication fails, the worker republishes it with the same deterministic
+  queue job id on its next repair pass (at start, then every 30 seconds).
+- A workflow agent step's job is acknowledged only after its workflow resume is queued. A
+  redelivery that finds the step already succeeded only queues the resume.
 - The worker transitions the durable run from `queued` to `running` when it claims the job.
 - Before each conversation turn, the worker estimates the next model request and checkpoints older
   complete turns when it crosses the model's input budget. Context limits come from the model

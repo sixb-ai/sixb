@@ -34,6 +34,7 @@ import {
   AgentExecutionLostError,
   AgentFinalizationError,
   AgentTurnTimeoutError,
+  WorkflowResumeDispatchError,
 } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { resolveAgentExecutionPlan, resolveSubagentExecutionPlan } from "./execution-plan"
@@ -55,17 +56,15 @@ import type {
   AgentWorkerOptions,
   AgentWorkerStorage,
 } from "./types"
-import { enqueueWorkflowAgentNodeResume, executeWorkflowAgentNode } from "./workflow-node-execution"
+import { executeWorkflowAgentNode } from "./workflow-node-execution"
 
 const DEFAULT_AGENT_QUEUE_LEASE_MS = 60_000
 const DEFAULT_AGENT_CONCURRENCY = 8
 const SUBAGENT_CONCURRENCY = 4
 const DEFAULT_TURN_TIMEOUT_MS = 10 * 60_000
 const MAX_TIMER_DURATION_MS = 2_147_483_647
-const AGENT_DISPATCH_POLL_MS = 1_000
-/** Reconciliation is a safety net for failed request-time publication; an empty scan idles longer. */
-const AGENT_DISPATCH_IDLE_MS = 10_000
-const MAX_AGENT_DISPATCH_BACKOFF_MS = 30_000
+/** Request paths publish their own jobs; this pass only repairs a publication or cancel they lost. */
+const AGENT_DISPATCH_REPAIR_MS = 30_000
 /** Backoff before redelivering a job whose run could not be finalized (storage was unavailable). */
 const FINALIZE_RETRY_BACKOFF_MS = 5_000
 const PRESTART_RETRY_BACKOFF_MS = 5_000
@@ -582,6 +581,11 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
             availableAt: backoff(aiUsageRecoveryBackoffMs(claimed.job.attempt)),
           }
     }
+    // The node's result is durable; only its workflow resume is unpublished. Redeliver until it is.
+    if (error instanceof WorkflowResumeDispatchError) {
+      console.error(`${error.message} Retrying.`, error.cause)
+      return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
+    }
     // We could not finalize the run (storage unavailable). Redeliver so a later delivery records the
     // fate — but cap the redeliveries so a persistent failure dead-letters instead of churning.
     if (error instanceof AgentFinalizationError) {
@@ -673,66 +677,51 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
     return { kind: "retry", availableAt: backoff(FINALIZE_RETRY_BACKOFF_MS) }
   }
 
-  /** Re-publish queued runs until their deterministic queue jobs are accepted. */
+  /**
+   * Republish queued work and cancel orphaned subagents, at start and then every repair interval.
+   * Each read covers only active rows, and the deterministic job ids make republication idempotent.
+   */
   private async runDispatchLoop(context: AgentWorkerContext, signal: AbortSignal): Promise<void> {
-    let consecutiveFailures = 0
-
     while (!signal.aborted) {
-      let dispatched = 0
       try {
         await this.reconcileInactiveParentSubagents(context)
-        const result = await dispatchQueuedAgentRuns({
-          projectId: context.id,
-          storage: context.storage.agents,
-          queue: this.host.queues.agents,
-        })
-        dispatched = result.dispatched.length
-        const childResult = await dispatchQueuedSubagentRuns({
-          projectId: context.id,
-          storage: context.storage.agents,
-          queue: this.host.queues.agentChildren,
-        })
-        dispatched += childResult.dispatched.length
-        dispatched += await this.dispatchWorkflowAgentNodes(context)
-        dispatched += await this.dispatchWorkflowResumes(context)
-        const dispatchFailures = [...result.failures, ...childResult.failures]
-        if (dispatchFailures.length === 0) {
-          consecutiveFailures = 0
-        } else {
-          consecutiveFailures += 1
+        const results = [
+          await dispatchQueuedAgentRuns({
+            projectId: context.id,
+            storage: context.storage.agents,
+            queue: this.host.queues.agents,
+          }),
+          await dispatchQueuedSubagentRuns({
+            projectId: context.id,
+            storage: context.storage.agents,
+            queue: this.host.queues.agentChildren,
+          }),
+        ]
+        const failures = results.flatMap((result) => result.failures)
+        if (failures.length > 0) {
           console.error(
-            `[SixbAgentWorker] Could not dispatch ${dispatchFailures.length} queued agent run(s); retrying.`,
-            dispatchFailures[0]?.error
+            `[SixbAgentWorker] Could not dispatch ${failures.length} queued agent run(s); retrying.`,
+            failures[0]?.error
           )
         }
+        await this.dispatchWorkflowAgentNodes(context)
       } catch (error) {
-        consecutiveFailures += 1
         console.error("[SixbAgentWorker] Could not scan queued agent runs; retrying.", error)
       }
-
-      const delayMs =
-        consecutiveFailures > 0
-          ? Math.min(
-              AGENT_DISPATCH_POLL_MS * 2 ** (consecutiveFailures - 1),
-              MAX_AGENT_DISPATCH_BACKOFF_MS
-            )
-          : dispatched > 0
-            ? AGENT_DISPATCH_POLL_MS
-            : AGENT_DISPATCH_IDLE_MS
-      await waitForAbort(delayMs, signal)
+      await waitForAbort(AGENT_DISPATCH_REPAIR_MS, signal)
     }
   }
 
-  private async dispatchWorkflowAgentNodes(context: AgentWorkerContext): Promise<number> {
+  private async dispatchWorkflowAgentNodes(context: AgentWorkerContext): Promise<void> {
     const workflowRuns = context.storage.workflowRuns
-    if (!workflowRuns) return 0
+    if (!workflowRuns) return
     const queued = await workflowRuns.agentNodes.list({
       projectId: context.id,
       statuses: ["queued"],
       order: "asc",
       limit: 100,
     })
-    if (queued.runs.length === 0) return 0
+    if (queued.runs.length === 0) return
     await this.host.queues.agents.enqueue({
       projectId: context.id,
       jobs: queued.runs.map((run) => ({
@@ -741,31 +730,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         payload: { nodeRunId: run.nodeRunId },
       })),
     })
-    return queued.runs.length
-  }
-
-  private async dispatchWorkflowResumes(context: AgentWorkerContext): Promise<number> {
-    const workflowRuns = context.storage.workflowRuns
-    if (!workflowRuns) return 0
-    const completed = await workflowRuns.agentNodes.list({
-      projectId: context.id,
-      statuses: ["succeeded"],
-      order: "asc",
-      limit: 100,
-    })
-    let dispatched = 0
-    for (const execution of completed.runs) {
-      const node = await workflowRuns.nodes.getById({
-        projectId: context.id,
-        id: execution.nodeRunId,
-      })
-      if (!node) continue
-      const run = await workflowRuns.getById({ projectId: context.id, id: node.workflowRunId })
-      if (run?.status !== "waiting") continue
-      await enqueueWorkflowAgentNodeResume(this.host, node)
-      dispatched += 1
-    }
-    return dispatched
   }
 
   private async cancelActiveSubagents(parentRunId: string, message: string): Promise<void> {

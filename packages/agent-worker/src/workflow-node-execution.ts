@@ -38,6 +38,7 @@ import type {
 import { AGENT_RUN_FAILURE_CODES, WORKFLOW_RUN_FAILURE_CODES } from "@sixb/core/storage"
 import { prepareAgentModel } from "./context-budget"
 import { shouldRetryAgentPreparation } from "./delivery-policy"
+import { WorkflowResumeDispatchError } from "./errors"
 import { createAgentExecutionContext } from "./execution-context"
 import { resolveWorkflowAgentStepExecutionPlan } from "./execution-plan"
 import { toAgentExecutionFailure } from "./failure"
@@ -204,13 +205,9 @@ export async function executeWorkflowAgentNode(
       result,
     })
     await emitNodeSucceeded(input.host, completedNode, workflow.nodes.length)
-    await enqueueWorkflowAgentNodeResume(input.host, nodeRun).catch((error) => {
-      console.error(
-        `[SixbAgentWorker] Could not resume workflow after agent node '${nodeRun.id}'; the dispatcher will retry.`,
-        error
-      )
-    })
+    await enqueueWorkflowAgentNodeResume(input.host, nodeRun)
   } catch (error) {
+    if (error instanceof WorkflowResumeDispatchError) throw error
     if (lostQueueDelivery(error, signal)) return
 
     const debug =
@@ -313,6 +310,11 @@ async function loadWorkflowAgentNodeExecution(
       `[SixbAgentWorker] Agent workflow node '${job.payload.nodeRunId}' was not found.`,
       { details: { nodeRunId: job.payload.nodeRunId } }
     )
+  }
+  // A delivery that outlived the node's success only owes the workflow its resume.
+  if (executionRecord.status === "succeeded") {
+    await enqueueWorkflowAgentNodeResume(input.host, nodeRun)
+    return null
   }
   if (executionRecord.status !== "queued" && executionRecord.status !== "running") return null
 
@@ -705,23 +707,27 @@ async function emitNodeAndRunFailed(
   )
 }
 
-export async function enqueueWorkflowAgentNodeResume(
+async function enqueueWorkflowAgentNodeResume(
   host: AgentWorkerHost,
   node: Pick<WorkflowNodeRunRecord, "id" | "workflowRunId">
 ): Promise<void> {
-  await host.queues.workflows.enqueue({
-    projectId: host.id,
-    jobs: [
-      {
-        id: workflowAgentResumeQueueJobId(node.id),
-        type: "workflow.run.resume.requested",
-        payload: {
-          runId: node.workflowRunId,
-          nodeRunId: node.id,
+  try {
+    await host.queues.workflows.enqueue({
+      projectId: host.id,
+      jobs: [
+        {
+          id: workflowAgentResumeQueueJobId(node.id),
+          type: "workflow.run.resume.requested",
+          payload: {
+            runId: node.workflowRunId,
+            nodeRunId: node.id,
+          },
         },
-      },
-    ],
-  })
+      ],
+    })
+  } catch (error) {
+    throw new WorkflowResumeDispatchError(node.id, { cause: error })
+  }
 }
 
 function workflowAgentResumeQueueJobId(nodeRunId: string): string {
