@@ -49,7 +49,9 @@ sign-in.
 When sign-in is refused for a reason the person can act on, the page says so, naming their address:
 it hasn't been invited, its account is suspended, or its domain isn't allowed. A provider that sends
 no trusted address is a setup mistake, so the server also logs which claims it did send. Other
-failures show a generic page; set `SIXB_AUTH_DEBUG=1` to log them.
+failures show a generic page; set `SIXB_AUTH_DEBUG=1` to log them. One of them is a callback opened
+in a browser other than the one that started sign-in, so a callback URL sent to someone else can't
+sign them in to the sender's account.
 
 ## How users are matched
 

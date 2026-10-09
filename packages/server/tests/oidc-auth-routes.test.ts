@@ -176,19 +176,46 @@ function cookieValue(setCookie: string | null, name: string): string {
   return match[1]
 }
 
-async function completeSignIn(app: ReturnType<typeof createRuntime>["app"]): Promise<Response> {
-  const signIn = await app.fetch(
+// The `name=value` pair of the cookie that binds a sign-in to the browser that started it.
+function stateCookie(signIn: Response): string {
+  const header = signIn.headers.getSetCookie().find((cookie) => cookie.startsWith("sixb_oidc_"))
+  if (!header) {
+    throw new Error("OIDC state cookie was not set")
+  }
+  return header.split(";")[0] ?? ""
+}
+
+function clearedStateCookie(cookie: string): string {
+  return `${cookie.split("=")[0]}=; Path=/auth/callback; SameSite=Lax; HttpOnly; Max-Age=0`
+}
+
+async function startSignIn(app: ReturnType<typeof createRuntime>["app"]) {
+  const response = await app.fetch(
     new Request(
       "http://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2F",
       { redirect: "manual" }
     )
   )
-  const state = new URL(signIn.headers.get("location") ?? "").searchParams.get("state")
+  const state = new URL(response.headers.get("location") ?? "").searchParams.get("state") ?? ""
+  return { response, state, cookie: stateCookie(response) }
+}
+
+async function callback(
+  app: ReturnType<typeof createRuntime>["app"],
+  state: string,
+  cookie?: string
+): Promise<Response> {
   return app.fetch(
     new Request(`http://api.localhost/auth/callback?code=code&state=${state}`, {
+      headers: cookie ? { cookie } : {},
       redirect: "manual",
     })
   )
+}
+
+async function completeSignIn(app: ReturnType<typeof createRuntime>["app"]): Promise<Response> {
+  const signIn = await startSignIn(app)
+  return callback(app, signIn.state, signIn.cookie)
 }
 
 describe("oidc auth routes", () => {
@@ -222,6 +249,7 @@ describe("oidc auth routes", () => {
 
     const callback = await app.fetch(
       new Request(`http://api.localhost/auth/callback?code=code&state=${state}`, {
+        headers: { cookie: stateCookie(signIn) },
         redirect: "manual",
       })
     )
@@ -270,7 +298,7 @@ describe("oidc auth routes", () => {
     const callback = await app.fetch(
       new Request(
         `http://api.localhost/auth/callback?code=code&state=${state}&returnTo=http%3A%2F%2Fevil.localhost%2Fsteal`,
-        { redirect: "manual" }
+        { headers: { cookie: stateCookie(signIn) }, redirect: "manual" }
       )
     )
 
@@ -283,7 +311,7 @@ describe("oidc auth routes", () => {
     expect(sessionCookie).toContain(".")
   })
 
-  test("callback replay returns a generic error without setting cookies", async () => {
+  test("callback replay returns a generic error without setting session cookies", async () => {
     const { app } = createRuntime()
     const signIn = await app.fetch(
       new Request(
@@ -296,11 +324,12 @@ describe("oidc auth routes", () => {
       "state"
     )}`
 
-    await app.fetch(new Request(callbackUrl, { redirect: "manual" }))
-    const replay = await app.fetch(new Request(callbackUrl, { redirect: "manual" }))
+    const headers = { cookie: stateCookie(signIn) }
+    await app.fetch(new Request(callbackUrl, { headers, redirect: "manual" }))
+    const replay = await app.fetch(new Request(callbackUrl, { headers, redirect: "manual" }))
 
     expect(replay.status).toBe(400)
-    expect(replay.headers.get("set-cookie")).toBeNull()
+    expect(replay.headers.get("set-cookie")).not.toContain("sixb_session")
   })
 
   test("creates OIDC invitation emails and applies invited groups on callback", async () => {
@@ -367,7 +396,7 @@ describe("oidc auth routes", () => {
         `http://api.localhost/auth/callback?code=code&state=${providerUrl.searchParams.get(
           "state"
         )}`,
-        { redirect: "manual" }
+        { headers: { cookie: stateCookie(signIn) }, redirect: "manual" }
       )
     )
 
@@ -415,7 +444,7 @@ describe("oidc auth routes", () => {
     const callback = await completeSignIn(app)
 
     expect(callback.status).toBe(403)
-    expect(callback.headers.get("set-cookie")).toBeNull()
+    expect(callback.headers.get("set-cookie")).not.toContain("sixb_session")
     expect(await callback.text()).toContain("stranger@acme.com hasn't been invited.")
   })
 
@@ -455,5 +484,86 @@ describe("oidc auth routes", () => {
     } finally {
       logged.mockRestore()
     }
+  })
+})
+
+// A callback URL carries everything sign-in needs, so it must only complete in the browser that
+// started that sign-in. Removing the `matchesOidcStateCookie` check from GET /auth/callback fails the
+// refusal tests, comparing only the cookie's presence fails the different-value case, and giving
+// every attempt's cookie the same name fails the two-tab case.
+describe("oidc sign-in browser binding", () => {
+  test("sign-in keeps the attempt's state in a cookie only the callback receives", async () => {
+    const { app } = createRuntime()
+    const signIn = await startSignIn(app)
+    const [header] = signIn.response.headers.getSetCookie()
+
+    expect(signIn.response.headers.getSetCookie()).toHaveLength(1)
+    expect(signIn.cookie).toMatch(/^sixb_oidc_[\w-]{22}=/)
+    expect(signIn.cookie.slice(signIn.cookie.indexOf("=") + 1)).toBe(signIn.state)
+    expect(header).toMatch(/; Path=\/auth\/callback; SameSite=Lax; HttpOnly; Max-Age=(599|600)$/)
+
+    const secure = await app.fetch(
+      new Request(
+        "https://api.localhost/auth/sign-in?audience=atlas&returnTo=http%3A%2F%2Fatlas.localhost%2F",
+        { redirect: "manual" }
+      )
+    )
+    expect(stateCookie(secure)).toStartWith("sixb_oidc_")
+    expect(secure.headers.get("set-cookie")).toEndWith("; Secure")
+  })
+
+  test("callback without the state cookie is refused and leaves the attempt to its browser", async () => {
+    const { app } = createRuntime()
+    const signIn = await startSignIn(app)
+
+    const refused = await callback(app, signIn.state)
+
+    expect(refused.status).toBe(400)
+    expect(await refused.text()).toContain("This sign-in attempt could not be completed.")
+    expect(refused.headers.get("set-cookie")).not.toContain("sixb_session")
+    expect((await callback(app, signIn.state, signIn.cookie)).status).toBe(303)
+  })
+
+  test("callback is refused with another attempt's cookie or a different value", async () => {
+    const { app } = createRuntime()
+    const mine = await startSignIn(app)
+    const theirs = await startSignIn(app)
+    const theirName = theirs.cookie.split("=")[0]
+
+    const otherAttempt = await callback(app, theirs.state, mine.cookie)
+    const otherValue = await callback(app, theirs.state, `${theirName}=${mine.state}`)
+
+    expect(otherAttempt.status).toBe(400)
+    expect(otherAttempt.headers.get("set-cookie")).not.toContain("sixb_session")
+    expect(otherValue.status).toBe(400)
+    expect(otherValue.headers.get("set-cookie")).not.toContain("sixb_session")
+  })
+
+  test("callback clears the state cookie whether sign-in completes or is refused", async () => {
+    const { app, client } = createRuntime()
+    const completed = await startSignIn(app)
+    const success = await callback(app, completed.state, completed.cookie)
+
+    expect(success.status).toBe(303)
+    expect(cookieValue(success.headers.get("set-cookie"), "sixb_session")).toContain(".")
+    expect(success.headers.getSetCookie()).toContain(clearedStateCookie(completed.cookie))
+
+    client.tokenClaims = { sub: "00u-stranger", email: "stranger@acme.com", email_verified: true }
+    const refused = await startSignIn(app)
+    const failure = await callback(app, refused.state, refused.cookie)
+
+    expect(failure.status).toBe(403)
+    expect(failure.headers.getSetCookie()).toEqual([clearedStateCookie(refused.cookie)])
+  })
+
+  test("sign-ins started in two tabs each complete", async () => {
+    const { app } = createRuntime()
+    const first = await startSignIn(app)
+    const second = await startSignIn(app)
+    const cookies = `${first.cookie}; ${second.cookie}`
+
+    expect(first.cookie.split("=")[0]).not.toBe(second.cookie.split("=")[0])
+    expect((await callback(app, second.state, cookies)).status).toBe(303)
+    expect((await callback(app, first.state, cookies)).status).toBe(303)
   })
 })
