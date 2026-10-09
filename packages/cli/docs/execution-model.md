@@ -47,21 +47,23 @@ queue.
 | `pipeline`   | `queues.pipelines`   | orchestrator (pipeline triggers), or API run-request |
 | `projection` | `queues.projections` | orchestrator, on `dataset.version.committed`         |
 | `workflow`   | `queues.workflows`   | orchestrator (scheduled), or API run-request         |
-| `action`     | `queues.actions`     | nothing: requested actions run in place              |
 | `agent`      | `queues.agents`      | a posted agent-thread message, enqueued directly     |
+
+Actions have no queue and no worker.
 
 ### Run records
 
 Every queued execution writes a durable **run record** to `storage`, so progress
-survives restarts and is visible in [Atlas](../../../docs/deployment/overview.md#atlas-admin-ui). A run moves through
-the same lifecycle across worker types:
+survives restarts and is visible in [Atlas](../../../docs/deployment/overview.md#atlas-admin-ui). An
+action's run record is written the same way by the process that requests it. A run moves through
+the same lifecycle across primitives:
 
-| Status      | Meaning                                            |
-| ----------- | -------------------------------------------------- |
-| `running`   | claimed and executing                              |
-| `succeeded` | completed and committed                            |
-| `failed`    | errored; recorded with the failure name/message    |
-| `cancelled` | aborted (by shutdown or an explicit request)       |
+| Status      | Meaning                                                              |
+| ----------- | -------------------------------------------------------------------- |
+| `running`   | claimed by a worker, or executing in the process that requested it  |
+| `succeeded` | completed and committed                                              |
+| `failed`    | errored; recorded with the failure name/message                      |
+| `cancelled` | aborted (by shutdown or an explicit request)                         |
 
 Run records carry the inputs, outputs, timing (`startedAt` / `finishedAt`), and
 any error, so a run stays auditable after the fact.
@@ -84,3 +86,5 @@ catch-up and retention never run.
 
 Because jobs and run records live in durable, shared providers, a crashed worker
 loses no work: the unfinished job's lease expires and another worker reclaims it.
+Actions are the exception: with no job to reclaim, an action whose process crashes
+mid-run stays unfinished.
