@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test"
-import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../src/utils/request-body"
+import {
+  DEFAULT_REQUEST_BODY_LIMIT_BYTES,
+  limitRequestBody,
+  RequestBodyTooLargeError,
+  readRequestBodyWithLimit,
+} from "../src/utils/request-body"
 
 function streamRequest(chunks: readonly Uint8Array[]): Request {
   const stream = new ReadableStream<Uint8Array>({
@@ -68,5 +73,52 @@ describe("readRequestBodyWithLimit", () => {
       10
     )
     expect(bytes.byteLength).toBe(0)
+  })
+})
+
+describe("limitRequestBody", () => {
+  test("rejects a streamed body at the default limit, before reading the rest", async () => {
+    const chunk = new Uint8Array(64 * 1024)
+    let pulled = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled += chunk.byteLength
+        if (pulled > 16 * DEFAULT_REQUEST_BODY_LIMIT_BYTES) {
+          controller.close()
+          return
+        }
+        controller.enqueue(chunk)
+      },
+    })
+    const request = limitRequestBody(
+      new Request("http://localhost/api/objects/query", {
+        method: "POST",
+        body,
+        duplex: "half",
+      } as RequestInit & { duplex: "half" })
+    )
+
+    await expect(request.arrayBuffer()).rejects.toBeInstanceOf(RequestBodyTooLargeError)
+    expect(pulled).toBeLessThan(2 * DEFAULT_REQUEST_BODY_LIMIT_BYTES)
+  })
+
+  test("passes a body within the default limit through unchanged", async () => {
+    const request = limitRequestBody(
+      new Request("http://localhost/api/objects/query", {
+        method: "POST",
+        body: JSON.stringify({ ok: true }),
+      })
+    )
+
+    expect(await request.json()).toEqual({ ok: true })
+  })
+
+  test("lets the route's own limit replace the default", async () => {
+    const request = limitRequestBody(
+      streamRequest([new Uint8Array(DEFAULT_REQUEST_BODY_LIMIT_BYTES), new Uint8Array(1)])
+    )
+
+    const bytes = await readRequestBodyWithLimit(request, 2 * DEFAULT_REQUEST_BODY_LIMIT_BYTES)
+    expect(bytes.byteLength).toBe(DEFAULT_REQUEST_BODY_LIMIT_BYTES + 1)
   })
 })

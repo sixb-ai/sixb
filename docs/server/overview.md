@@ -58,9 +58,11 @@ The response acknowledges the queued request with a `runId`. Read `/api/action-r
 
 For paginated reads, use the parameters and continuation fields documented on that endpoint. Object queries return a `nextPageToken`; see [Paginate results](object-queries.md#paginate-results).
 
+A request body can be at most 1 MiB, except for file uploads, which take files up to 25 MiB. A larger request gets a `413` response.
+
 ## Files
 
-Upload a small file with `POST /api/files` using multipart form data. Larger uploads can use the `/api/files/uploads` session endpoints described in OpenAPI.
+Upload a small file with `POST /api/files` using multipart form data. Larger uploads can use the `/api/files/uploads` session endpoints described in OpenAPI. A file sent through the API can be at most 25 MiB; with S3 or Azure Blob Storage, these endpoints send larger files straight to storage instead.
 
 Read a file through the object or run that owns its reference. For example, download the `scan` property from an invoice:
 
