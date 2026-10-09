@@ -1,10 +1,6 @@
-import { reportRunFailure } from "../../error-reporting/capability"
 import { createSixbError } from "../../errors/internal"
 import type { ActionRunFailure, ActionRunRecord } from "../../storage"
-import { isTerminalActionRun } from "../../storage"
-import { findActionEditCommit } from "../commit-edits"
-import { toActionRunFailure } from "./normalize"
-import type { ActionRunResult, RunActionInput } from "./types"
+import type { ActionRunResult } from "./types"
 
 export function requireFinishedAt(input: {
   readonly actionId: string
@@ -22,80 +18,6 @@ export function requireFinishedAt(input: {
   )
 }
 
-/**
- * Decides whether a redelivered `running` run reached a resumable boundary.
- *
- * A succeeded writeback or an authoritative ontology commit for this run means the previous attempt
- * got far enough that resuming is safe; anything earlier is treated as a lost lease.
- */
-export async function resolveRedeliveredRunningRun(
-  input: RunActionInput,
-  run: ActionRunRecord
-): Promise<
-  | { readonly kind: "resume"; readonly run: ActionRunRecord }
-  | { readonly kind: "finished"; readonly result: ActionRunResult }
-> {
-  let resolution: Awaited<ReturnType<typeof resolveRunningRunUnderFence>>
-  try {
-    resolution = await resolveRunningRunUnderFence(input, run)
-  } catch (error) {
-    const latest = await input.runtime.actionRunsStorage.getById({
-      projectId: input.runtime.id,
-      id: input.run.id,
-    })
-    if (latest && isTerminalActionRun(latest)) {
-      return { kind: "finished", result: skippedResult(input, latest) }
-    }
-    throw error
-  }
-
-  if (resolution.kind === "resume") return resolution
-  reportRedeliveryFailure(input, resolution.run, resolution.failure)
-  return {
-    kind: "finished",
-    result: failedResult(input.run.id, input.run.actionId, resolution.run, resolution.failure),
-  }
-}
-
-async function resolveRunningRunUnderFence(input: RunActionInput, run: ActionRunRecord) {
-  return input.runtime.storage.transaction(
-    async (storage) => {
-      if (!storage.actionRuns) {
-        throw createSixbError(
-          "internal.unexpected",
-          "[Sixb] Resuming an Action run requires transactional Action materialization fencing.",
-          { details: { actionId: input.run.actionId, runId: input.run.id } }
-        )
-      }
-      const locked = await storage.actionRuns.lockForMaterialization({
-        projectId: input.runtime.id,
-        actionId: input.run.actionId,
-        runId: run.id,
-      })
-      const commit = await findActionEditCommit({
-        storage,
-        projectId: input.runtime.id,
-        runId: run.id,
-      })
-      if (locked.writeback?.status === "succeeded" || commit) {
-        return { kind: "resume" as const, run: locked }
-      }
-
-      const failedAt = new Date()
-      const failure = redeliveryFailure(input.run.id, locked, failedAt)
-      const finished = await storage.actionRuns.finish({
-        projectId: input.runtime.id,
-        id: input.run.id,
-        status: "failed",
-        finishedAt: failedAt,
-        error: failure,
-      })
-      return { kind: "failed" as const, run: finished, failure }
-    },
-    { isolation: "serializable" }
-  )
-}
-
 export function failedResult(
   runId: string,
   actionId: string,
@@ -110,54 +32,6 @@ export function failedResult(
     startedAt: run.startedAt ?? run.queuedAt,
     finishedAt: requireFinishedAt({ actionId, runId, finishedAt: run.finishedAt }),
     error: failure,
-    record: run,
-  }
-}
-
-function redeliveryFailure(runId: string, run: ActionRunRecord, failedAt: Date): ActionRunFailure {
-  return toActionRunFailure(
-    {
-      name: "ActionRunLeaseLostError",
-      message: `Action run '${runId}' was redelivered while already running. The previous worker may have lost its queue lease or crashed before reaching a resumable phase boundary.`,
-    },
-    run.phase ?? "validation",
-    {
-      actionId: run.actionId,
-      runId,
-      at: failedAt,
-    }
-  )
-}
-
-function reportRedeliveryFailure(
-  input: RunActionInput,
-  run: ActionRunRecord,
-  failure: ActionRunFailure
-): void {
-  const error = createSixbError(
-    "internal.unexpected",
-    `[Sixb] ${run.error?.message ?? `Action run '${run.id}' lost its lease.`}`,
-    { details: { actionId: input.run.actionId, runId: input.run.id } }
-  )
-  reportRunFailure(input.runtime.errorReporterHost, error, {
-    projectId: input.runtime.id,
-    attempt: input.attempt,
-    runKind: "action",
-    run: {
-      runId: input.run.id,
-      actionId: input.run.actionId,
-    },
-    failure,
-  })
-}
-
-function skippedResult(input: RunActionInput, run: ActionRunRecord): ActionRunResult {
-  return {
-    id: input.run.id,
-    actionId: input.run.actionId,
-    subject: run.subject,
-    status: run.status,
-    skipped: true,
     record: run,
   }
 }

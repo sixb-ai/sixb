@@ -1,11 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { defineObjectType, link, MaterializationConflictError, prop, SixbHost } from "../src"
-import {
-  ActionReadRecorder,
-  commitActionEdits,
-  createActionReadFacade,
-  findActionEditCommit,
-} from "../src/actions"
+import { ActionReadRecorder, commitActionEdits, createActionReadFacade } from "../src/actions"
 import type { EditBatch } from "../src/edits"
 import { lowerEditBatch } from "../src/edits"
 import { recordEdits } from "../src/edits/recorder"
@@ -334,35 +329,6 @@ describe("Action edit commits", () => {
     await expect(commit(host, { runId: "act_replay", batch: divergent })).rejects.toBeInstanceOf(
       MaterializationConflictError
     )
-  })
-
-  test("resolves a resumed run by its exact origin without rerunning handlers", async () => {
-    const { host, sixb } = createRuntime()
-    await seedInvoice(sixb)
-    await startActionRun(host, "act_resume")
-
-    const batch = await recordEdits({ runId: "act_resume" }, ({ objects }) => {
-      objects(Invoice).byId("inv_1").update({ status: "paid" })
-    })
-    const committed = await commit(host, { runId: "act_resume", batch })
-
-    const resumed = await findActionEditCommit({
-      storage: host.storage,
-      projectId: sixb.execution.projectId,
-      runId: "act_resume",
-    })
-    expect(resumed?.commitId).toBe(committed.commitId)
-    expect(resumed?.created).toBe(false)
-    expect(resumed?.changes).toEqual(committed.changes)
-    expect(resumed?.committedAt).toEqual(committed.committedAt)
-
-    expect(
-      await findActionEditCommit({
-        storage: host.storage,
-        projectId: sixb.execution.projectId,
-        runId: "act_unknown",
-      })
-    ).toBeNull()
   })
 
   test("refuses to mutate anything when the Action run identity does not match", async () => {

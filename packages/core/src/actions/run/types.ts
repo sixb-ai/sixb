@@ -41,11 +41,9 @@ interface BaseActionRunResult {
 
 export interface RunActionInput {
   readonly runtime: ActionRunContext
-  /** Durable run loaded before the execution scope is restored. */
+  /** The run its request has just persisted, still queued. */
   readonly run: ActionRunRecord
   readonly signals: ActionRunSignals
-  /** Execution attempt, used to account model calls and to report failures. */
-  readonly attempt: number
 }
 
 export type ActionRunResult =
@@ -59,8 +57,4 @@ export type ActionRunResult =
       readonly startedAt: Date
       readonly finishedAt: Date
       readonly error: ActionRunFailure
-    })
-  | (BaseActionRunResult & {
-      readonly status: ActionRunRecord["status"]
-      readonly skipped: true
     })

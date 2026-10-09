@@ -31,7 +31,6 @@ export async function runEditsAndCommitPhase(
     readonly baseContext: BasePhaseContext
     readonly objectTarget: LoadedObjectTarget | null
     readonly writeback: JsonValue | undefined
-    readonly existingCommit: ActionEditCommitResult | null
     /** Shared with the writeback phase so both phases' reads fence the same commit. */
     readonly reads: ActionReadRecorder
     readonly updateActiveRun: UpdateActiveRun
@@ -40,10 +39,6 @@ export async function runEditsAndCommitPhase(
   const handler = input.action.phases.edits as RuntimePhaseHandler | undefined
   if (!handler) {
     return { run: input.run, result: null }
-  }
-
-  if (input.existingCommit) {
-    return { run: input.run, result: input.existingCommit }
   }
 
   let run = await input.runtime.actionRunsStorage.enterPhase({
