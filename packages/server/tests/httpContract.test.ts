@@ -151,6 +151,7 @@ const reviewDeviceHealth = defineIntervention("review-device-health", {
   .response({
     approved: interventionField("boolean", { required: true }),
     note: interventionField("string", { required: false }),
+    evidence: interventionField("fileRef", { required: false }),
   })
   .defaults(({ input }) => ({ approved: input.healthy }))
 
@@ -1848,6 +1849,27 @@ describe("SixbServer HTTP contract", () => {
         }
       )
       expect(invalidSubmitResponse.status).toBe(400)
+
+      // Regression proof: drop assertValidFileRefs from the submit route; this answers 202.
+      const evidence = await sixb.blobStorage.put({ body: new TextEncoder().encode("photo") })
+      const listedEvidenceResponse = await fetch(
+        `${baseUrl}/api/workflow-interventions/${pending.id}/submit`,
+        {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            response: {
+              approved: true,
+              evidence: { ...evidence, mediaType: "image/png,text/html" },
+            },
+          }),
+        }
+      )
+      expect(listedEvidenceResponse.status).toBe(400)
+      expect(await listedEvidenceResponse.json()).toEqual({
+        error:
+          '[Sixb] Property Workflow "review-device-health-workflow" intervention "review-device-health" response.evidence.mediaType must be one media type, such as "application/pdf"',
+      })
 
       const validSubmitResponse = await fetch(
         `${baseUrl}/api/workflow-interventions/${pending.id}/submit`,

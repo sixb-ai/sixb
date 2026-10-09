@@ -6,6 +6,7 @@ import {
   SYSTEM_PRINCIPAL,
 } from "@sixb/core"
 import { computeBlobDigest, supportsDirectUpload } from "@sixb/core/blob-storage/server"
+import { canonicalMediaType } from "@sixb/core/internal/blob-storage"
 import { createFileUploadId, createUploadExpiresAt } from "@sixb/core/internal/storage"
 import { type FileUploadSession, FileUploadSessionError } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
@@ -72,7 +73,8 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
           const fileRef = await host.blobStorage.put({
             body: file,
             fileName: file.name || undefined,
-            mediaType: file.type || undefined,
+            // Bun derives the part's type from the file name; keep it only if it is well-formed.
+            mediaType: canonicalMediaType(file.type) ?? undefined,
             logicalPath: logicalPath ?? undefined,
           })
 

@@ -1,3 +1,4 @@
+import { canonicalMediaType } from "@sixb/core/internal/blob-storage"
 import { z } from "zod"
 
 export const BlobDigestSchema = z.string().regex(/^sha256:[a-f0-9]{64}$/)
@@ -13,7 +14,12 @@ export const FileRefSchema = z.object({
 
 export const CreateFileUploadBodySchema = z.object({
   fileName: z.string().optional(),
-  mediaType: z.string().optional(),
+  mediaType: z
+    .string()
+    .refine((value) => canonicalMediaType(value) !== null, {
+      message: 'Expected a single media type, such as "application/pdf"',
+    })
+    .optional(),
   sizeBytes: z.number().int().nonnegative().optional(),
   digest: BlobDigestSchema.optional(),
   logicalPath: z.string().optional(),

@@ -64,6 +64,55 @@ describe("file download routes", () => {
     expect(await response.text()).toBe("jpeg bytes")
   })
 
+  // Anyone holding the link opens it on the API origin, without a session. Regression proof: in
+  // files/content.ts, send `fileRef.mediaType` verbatim (JPEG keeps its case) or decide `inline`
+  // with `startsWith("image/")` again (TIFF opens inline).
+  test("opens only display-safe types inline, sandboxed, and downloads the rest", async () => {
+    const { app, sixb } = await createDownloadApi()
+    const cases = [
+      ["IMAGE/JPEG", "image/jpeg", "inline"],
+      ["image/tiff", "image/tiff", "attachment"],
+      ["image/svg+xml", "image/svg+xml", "attachment"],
+      ["text/html;charset=utf-8", "text/html;charset=utf-8", "attachment"],
+    ] as const
+
+    for (const [mediaType, contentType, disposition] of cases) {
+      const file = await sixb.blobs.put({
+        body: new TextEncoder().encode(mediaType),
+        fileName: "file",
+        mediaType,
+      })
+      const response = await fetchPath(app, (await sixb.blobs.createDownloadUrl(file)).url)
+
+      expect(response.status, mediaType).toBe(200)
+      expect(response.headers.get("content-type"), mediaType).toBe(contentType)
+      expect(response.headers.get("content-disposition"), mediaType).toStartWith(`${disposition};`)
+      expect(response.headers.get("content-security-policy"), mediaType).toBe(
+        "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+      )
+    }
+  })
+
+  // A reference stored before media types were validated still gets a URL, and downloads.
+  // Regression proof: require a valid media type in isFileRef; createDownloadUrl then throws.
+  test("serves a stored reference with an invalid media type as a download", async () => {
+    const { app, sixb, photo } = await createDownloadApi()
+    const { url } = await sixb.blobs.createDownloadUrl({
+      ...photo,
+      mediaType: "image/jpeg,text/html",
+    })
+
+    const response = await fetchPath(app, url)
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe("application/octet-stream")
+    expect(response.headers.get("content-disposition")).toStartWith("attachment;")
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    )
+    expect(await response.text()).toBe("jpeg bytes")
+  })
+
   test("answers HEAD and byte ranges, which media fetchers rely on", async () => {
     const { app, sixb, photo } = await createDownloadApi()
     const { url } = await sixb.blobs.createDownloadUrl(photo)

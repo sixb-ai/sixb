@@ -1,5 +1,6 @@
 import type { BlobStorage, FileRef } from "../blob-storage"
 import { isFileRef } from "../blob-storage"
+import { isValidFileRef } from "../blob-storage/validation"
 import type { DatasetMergeCommitResult } from "../lake-storage/merge"
 import { getDatasetMergeChangeValidationError } from "../lake-storage/merge-validation"
 import type {
@@ -207,8 +208,13 @@ async function verifyFileRef(
   columnName: string,
   itemIndex: number
 ): Promise<void> {
-  const blobInfo = await input.blobStorage.stat(fileRef.blobId)
   const context = `${sourceLabel(input)} returned row ${itemIndex} with dataset '${input.dataset.id}' column '${columnName}'`
+  if (!isValidFileRef(fileRef)) {
+    throw new Error(
+      `${context} with an invalid mediaType; use one media type, such as "application/pdf".`
+    )
+  }
+  const blobInfo = await input.blobStorage.stat(fileRef.blobId)
   if (!blobInfo) {
     throw new Error(`${context} referencing unknown blob '${fileRef.blobId}'.`)
   }

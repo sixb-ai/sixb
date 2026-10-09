@@ -142,7 +142,7 @@ const url = objectFileContentUrl({
 const download = <a href={url}>Download invoice</a>
 ```
 
-Use `inline` for images, video, and audio. Pass the current file reference so the URL updates when the property changes. Native links use browser sessions; bearer-token callers must fetch file content through an authenticated request.
+Use `inline` for images, video, and audio. Opened directly, an `inline` URL displays common images, PDFs, and plain text in the browser; other types, including HTML and SVG, download instead. Pass the current file reference so the URL updates when the property changes. Native links use browser sessions; bearer-token callers must fetch file content through an authenticated request.
 
 ## Read run logs
 

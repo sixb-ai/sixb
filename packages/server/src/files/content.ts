@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto"
 import { type BlobInfo, type BlobStorage, type FileRef, isFileRef } from "@sixb/core"
 import { BlobStorageError, supportsRangeRead } from "@sixb/core/blob-storage/server"
+import { canonicalMediaType } from "@sixb/core/internal/blob-storage"
 import { ZodError } from "zod"
 
 export type FileContentDisposition = "inline" | "attachment"
@@ -321,21 +322,55 @@ function decodeJsonPointerSegment(segment: string): string {
   return segment.replaceAll("~1", "/").replaceAll("~0", "~")
 }
 
+/**
+ * The only types a browser displays instead of downloading: raster images, PDF, and plain-text
+ * formats. Everything else, including HTML, SVG, and XML, downloads.
+ */
+const INLINE_MEDIA_TYPES: ReadonlySet<string> = new Set([
+  "application/json",
+  "application/pdf",
+  "image/avif",
+  "image/bmp",
+  "image/gif",
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "text/markdown",
+  "text/plain",
+])
+
+// Keeps any file from running script on the API origin, even when a browser renders it as a page.
+// A sandboxed page cannot run script, but Chrome's PDF viewer does not render in one, so PDFs go
+// without `sandbox`: `default-src 'none'` still blocks script, and `object-src 'self'` lets
+// browsers that show a PDF as an embedded object load it. `style-src 'unsafe-inline'` lets
+// browsers keep the styling of their built-in viewers. Video and audio play in media elements,
+// which ignore the policy of the file they load.
+const FILE_CONTENT_SECURITY_POLICY = "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+const PDF_CONTENT_SECURITY_POLICY =
+  "default-src 'none'; style-src 'unsafe-inline'; object-src 'self'"
+
 function fileContentHeaders(
   fileRef: FileRef,
   stat: BlobInfo,
   requestedDisposition: FileContentDisposition | undefined,
   canReadRange: boolean
 ): Headers {
-  const mediaType = fileRef.mediaType?.trim() || "application/octet-stream"
+  // Parsed again rather than trusted: stored references may predate media type validation.
+  const mediaType = canonicalMediaType(fileRef.mediaType) ?? "application/octet-stream"
+  // Canonical, so everything before the first ";" is the lowercased type/subtype.
+  const baseType = mediaType.split(";", 1)[0]
   const disposition =
-    (requestedDisposition ?? "inline") === "inline" && canRenderInline(mediaType)
+    (requestedDisposition ?? "inline") === "inline" && INLINE_MEDIA_TYPES.has(baseType)
       ? "inline"
       : "attachment"
   const headers = new Headers()
   headers.set("content-type", mediaType)
   headers.set("content-length", stat.sizeBytes.toString())
   headers.set("content-disposition", contentDispositionHeader(disposition, fileNameFor(fileRef)))
+  headers.set(
+    "content-security-policy",
+    baseType === "application/pdf" ? PDF_CONTENT_SECURITY_POLICY : FILE_CONTENT_SECURITY_POLICY
+  )
   // Metadata belongs to the reference, not the blob; changing it must also invalidate caches.
   const representation = JSON.stringify([
     fileRef.digest,
@@ -422,29 +457,6 @@ function rangeNotSatisfiableResponse(sizeBytes: number): Response {
   headers.set("accept-ranges", "bytes")
   headers.set("content-range", `bytes */${sizeBytes}`)
   return new Response(null, { status: 416, headers })
-}
-
-function canRenderInline(mediaType: string): boolean {
-  const baseType = mediaType.split(";")[0]?.trim().toLowerCase()
-  if (!baseType) {
-    return false
-  }
-
-  if (
-    baseType === "text/html" ||
-    baseType === "image/svg+xml" ||
-    baseType === "application/xhtml+xml"
-  ) {
-    return false
-  }
-
-  return (
-    baseType === "application/pdf" ||
-    baseType === "text/plain" ||
-    baseType === "text/markdown" ||
-    baseType === "application/json" ||
-    baseType.startsWith("image/")
-  )
 }
 
 function fileNameFor(fileRef: FileRef): string {

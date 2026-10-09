@@ -5,6 +5,7 @@ import {
   defineGroup,
   defineObjectType,
   defineRole,
+  type FileRef,
   InMemoryBlobStorage,
   InMemoryBroker,
   InMemoryLakeStorage,
@@ -14,6 +15,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createSessionCredential } from "@sixb/core/internal/auth"
+import type { ObjectRow } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -127,6 +129,11 @@ async function seedSession(
   })
 
   return { cookie: `sixb_session${audience === "app" ? "_app" : ""}=${credential.cookieValue}` }
+}
+
+interface InMemoryObjectRows {
+  snapshot(): { rows: Map<string, Map<string, Pick<ObjectRow, "objectTypeId" | "properties">>> }
+  restore(snapshot: ReturnType<InMemoryObjectRows["snapshot"]>): void
 }
 
 function contentRequest(
@@ -370,6 +377,9 @@ describe("object file content routes", () => {
     expect(response.headers.get("content-disposition")).toContain('inline; filename="report.pdf"')
     expect(response.headers.get("etag")).toMatch(/^"sha256:[a-f0-9]{64}"$/)
     expect(response.headers.get("x-content-type-options")).toBe("nosniff")
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; object-src 'self'"
+    )
     expect(response.headers.get("accept-ranges")).toBe("bytes")
     expect(await response.text()).toBe("%PDF test")
   })
@@ -453,7 +463,38 @@ describe("object file content routes", () => {
     expect(response.headers.get("content-disposition")).toContain(
       'attachment; filename="preview.html"'
     )
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    )
     expect(await response.text()).toBe("<h1>unsafe</h1>")
+  })
+
+  // Stored references keep working whatever type they were written with; serving falls back to a
+  // download. Regression proof: require a valid media type in isFileRef; this answers 404.
+  test("serves a stored reference with an invalid media type as a download", async () => {
+    const { app, storage } = await createObjectFileApi()
+    // Writes now reject this type, so rewrite the stored row as one written before they did,
+    // through the in-memory provider's snapshot and restore.
+    const objects = storage.objects as unknown as InMemoryObjectRows
+    const snapshot = objects.snapshot()
+    for (const rows of snapshot.rows.values()) {
+      const row = rows.get("doc-1")
+      if (row?.objectTypeId !== "document") continue
+      row.properties.pdf = { ...(row.properties.pdf as FileRef), mediaType: "image/png,text/html" }
+    }
+    objects.restore(snapshot)
+
+    const response = await app.fetch(
+      contentRequest("/api/objects/document/doc-1/files/content?path=/properties/pdf")
+    )
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get("content-type")).toBe("application/octet-stream")
+    expect(response.headers.get("content-disposition")).toStartWith("attachment;")
+    expect(response.headers.get("content-security-policy")).toBe(
+      "default-src 'none'; style-src 'unsafe-inline'; sandbox"
+    )
+    expect(await response.text()).toBe("%PDF test")
   })
 
   test("returns attachment when requested for otherwise inline-safe content", async () => {

@@ -8,6 +8,7 @@ import {
   type FileDownloadUrlContext,
   revokeFileDownloadUrl,
 } from "./download-urls"
+import { canonicalMediaType } from "./media-type"
 import type {
   AbortBlobUploadInput,
   BlobByteRange,
@@ -60,6 +61,7 @@ export function createBlobsRuntime(
   const executionBlobs: BlobsRuntime = {
     put: (input) => {
       assertAccess()
+      assertMediaType("put", input.mediaType)
       return blobStorage.put(input)
     },
     open: (blobId) => {
@@ -89,6 +91,7 @@ export function createBlobsRuntime(
   if (supportsDirectUpload(blobStorage)) {
     executionBlobs.createUpload = (input) => {
       assertAccess()
+      assertMediaType("createUpload", input.mediaType)
       return blobStorage.createUpload(input)
     }
     executionBlobs.signUploadPart = (input) => {
@@ -97,6 +100,7 @@ export function createBlobsRuntime(
     }
     executionBlobs.completeUpload = (input) => {
       assertAccess()
+      assertMediaType("completeUpload", input.mediaType)
       return blobStorage.completeUpload(input)
     }
     executionBlobs.abortUpload = (input) => {
@@ -106,4 +110,12 @@ export function createBlobsRuntime(
   }
 
   return Object.freeze(executionBlobs)
+}
+
+function assertMediaType(method: string, mediaType: string | undefined): void {
+  if (mediaType !== undefined && canonicalMediaType(mediaType) === null) {
+    throw new Error(
+      `[Sixb] blobs.${method}() mediaType must be one media type, such as "application/pdf". Received ${JSON.stringify(mediaType)}.`
+    )
+  }
 }
