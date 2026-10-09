@@ -21,76 +21,34 @@ export interface ActionRunHost extends PrimitiveExecutionHost {
   readonly definitions: Pick<SixbDefinitions, "actions">
 }
 
-interface ActionRunExecutionOptions {
+export interface ExecuteActionRunInput {
+  readonly run: ActionRunRecord
+  /** The durable execution the run was requested under. */
+  readonly execution: ExecutionRecord
   /** Cancels the run before its irreversible boundary. */
   readonly signal?: AbortSignal
-  /** Execution attempt, used to account model calls and to report failures. */
-  readonly attempt: number
   /** Test-only override of the run's 30-second deadline. */
   readonly timeoutMs?: number
 }
 
-export interface ExecuteActionRunInput extends ActionRunExecutionOptions {
-  readonly runId: string
-}
-
-export interface ExecutePersistedActionRunInput extends ActionRunExecutionOptions {
-  readonly run: ActionRunRecord
-  /** The durable execution the run was requested under. */
-  readonly execution: ExecutionRecord
-}
-
-export interface ExecutedActionRun {
-  readonly result: ActionRunResult
-  /** Correlation id of the durable execution the run was requested under. */
-  readonly correlationId: string
-}
-
 /**
- * Execute a stored Action run, loading it and the durable execution it was requested under.
+ * The model-call attempt an Action run accounts under.
  *
- * A run that is already terminal comes back as a skipped result without invoking any phase.
+ * Model accounting records every call against an execution attempt. A run executes once, in the
+ * process that requested it, so it is always the first.
  */
-export async function executeActionRun(
-  host: ActionRunHost,
-  input: ExecuteActionRunInput
-): Promise<ExecutedActionRun> {
-  const actionRuns = requireActionRunStorage(host, input.runId)
-  const run = await actionRuns.getById({ projectId: host.id, id: input.runId })
-  if (!run) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[Sixb] Action run '${input.runId}' was not found.`,
-      { details: { runId: input.runId } }
-    )
-  }
-
-  const execution = await host.storage.executions.getById({
-    projectId: host.id,
-    id: run.executionId,
-  })
-  if (!execution) {
-    throw createSixbError(
-      "internal.unexpected",
-      `[Sixb] Action run '${run.id}' references missing execution '${run.executionId}'.`,
-      { details: { actionId: run.actionId, runId: run.id, executionId: run.executionId } }
-    )
-  }
-
-  return executePersistedActionRun(host, { ...input, run, execution })
-}
+const MODEL_EXECUTION_ATTEMPT = 1
 
 /**
- * Execute an Action run its caller already holds, inside the durable execution it was requested
- * under.
+ * Execute a requested Action run inside the durable execution it was requested under.
  *
  * Binds the Action's primitive scope to that execution, then runs the phases under the run's
  * deadline and the caller's signal.
  */
-export async function executePersistedActionRun(
+export async function executeActionRun(
   host: ActionRunHost,
-  input: ExecutePersistedActionRunInput
-): Promise<ExecutedActionRun> {
+  input: ExecuteActionRunInput
+): Promise<ActionRunResult> {
   const { run, execution } = input
   const actionRuns = requireActionRunStorage(host, run.id)
   const signals = new ActionRunSignals({
@@ -105,17 +63,15 @@ export async function executePersistedActionRun(
       // Model calls stop with their phase through the `signal` a handler forwards to them. Binding
       // the run's deadline here would also stop the embedding calls behind the vector reads that
       // edits make past the boundary, which must always finish.
-      modelExecution: { attempt: input.attempt, signal: signals.uninterruptible },
+      modelExecution: { attempt: MODEL_EXECUTION_ATTEMPT, signal: signals.uninterruptible },
       execution,
       primitive: { kind: "action", id: run.actionId, runId: run.id },
     })
-    const result = await runAction({
+    return await runAction({
       runtime: buildActionContext(host, actionRuns, bound),
       run,
       signals,
-      attempt: input.attempt,
     })
-    return { result, correlationId: execution.correlationId }
   } finally {
     signals.dispose()
   }

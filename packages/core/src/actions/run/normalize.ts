@@ -8,14 +8,13 @@ import {
 import { isMaterializationConflictError } from "../../materialization/errors"
 import { ACTION_RUN_FAILURE_CODES, type ActionRunFailure, type ActionRunPhase } from "../../storage"
 import { parseActionRunFailure } from "../../storage/action-runs/failure"
-import { WorkerAbortError } from "../../workers/errors"
 import { isActionTimeout } from "./signals"
 
 export function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) {
     throw signal.reason instanceof Error
       ? signal.reason
-      : new WorkerAbortError("[Sixb] Action run was cancelled.")
+      : new DOMException("[Sixb] Action run was cancelled.", "AbortError")
   }
 }
 

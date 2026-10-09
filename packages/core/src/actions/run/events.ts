@@ -30,7 +30,7 @@ export async function emitActionRequested(
 /** Announce the outcome of a run this process executed. */
 export async function emitActionTerminal(
   events: DomainEventLog,
-  result: Exclude<ActionRunResult, { readonly skipped: true }>,
+  result: ActionRunResult,
   correlationId: string
 ): Promise<void> {
   const finishedAt = result.finishedAt.toISOString()
