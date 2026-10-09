@@ -247,29 +247,51 @@ describe("audio transcription", () => {
     expect((await pending).output.text).toBe("Hello")
   })
 
-  test("unknown token or cost estimates fail closed before inference", async () => {
-    for (const meter of ["tokens.total", "cost.catalogEstimated"] as const) {
-      let calls = 0
-      const { sixb, audio, storage } = await setup(
-        createTranscriber(async () => {
-          calls++
-          return { output: { text: "" } }
-        })
-      )
-      await storage.aiLimits.createPolicy({
-        id: "limit",
-        projectId: "audio",
-        subject: { type: "project" },
-        limit:
-          meter === "tokens.total"
-            ? { meter, amount: 10000 }
-            : { meter, amount: { currency: "USD", amountNanos: "1000000000" } },
+  test("an unknown cost estimate fails closed before inference", async () => {
+    let calls = 0
+    const { sixb, audio, storage } = await setup(
+      createTranscriber(async () => {
+        calls++
+        return { output: { text: "" } }
       })
-      await expect(sixb.models.audio.transcribe({ audio })).rejects.toMatchObject({
-        code: "ai.usage_limit_unavailable",
+    )
+    await storage.aiLimits.createPolicy({
+      id: "limit",
+      projectId: "audio",
+      subject: { type: "project" },
+      limit: {
+        meter: "cost.catalogEstimated",
+        amount: { currency: "USD", amountNanos: "1000000000" },
+      },
+    })
+    await expect(sixb.models.audio.transcribe({ audio })).rejects.toMatchObject({
+      code: "ai.usage_limit_unavailable",
+    })
+    expect(calls).toBe(0)
+  })
+
+  // Removal proof: drop the aiLimitMeterApplies filter in model-call-limits.ts; admission fails
+  // with missingEstimate because transcription has no token estimate.
+  test("token limits neither admit nor count transcription", async () => {
+    let calls = 0
+    const { sixb, audio, storage } = await setup(
+      createTranscriber(async () => {
+        calls++
+        return { output: { text: "Hello" }, usage: { audioDurationMs: 1250 } }
       })
-      expect(calls).toBe(0)
-    }
+    )
+    await storage.aiLimits.createPolicy({
+      id: "tokens",
+      projectId: "audio",
+      subject: { type: "project" },
+      limit: { meter: "tokens.total", amount: 10000 },
+    })
+    await sixb.models.audio.transcribe({ audio })
+    await sixb.models.audio.transcribe({ audio })
+    expect(calls).toBe(2)
+    expect(await storage.aiLimits.listPolicyStatuses({ projectId: "audio" })).toMatchObject([
+      { accountingStatus: "complete", consumption: { actual: { amount: 0 } } },
+    ])
   })
 
   // Removal proof: reinstate the token-only early return in reservationEstimates; admission fails.

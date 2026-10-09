@@ -30,7 +30,7 @@ Subscribe to a topic, event types, or a specific object:
 }
 ```
 
-Other optional filters are `primaryId`, `actionId`, and `runId`. `limit` is the read batch size, up to 500, rather than a total event limit.
+Other optional filters are `primaryId`, `actionId`, and `runId`. `limit` is the page size used to replay from a cursor, up to 500, rather than a total event limit.
 
 Each event arrives in an `event` frame:
 
@@ -75,7 +75,7 @@ Without a cursor, a new event connection starts with live changes. To resume, se
 }
 ```
 
-Treat cursors as opaque. Events have bounded retention, so reconnecting clients may need to refetch current state when a cursor expires. Tolerate repeated events by their ID. For paginated history over HTTP, use `GET /api/events` in your API's `/docs` reference.
+Treat cursors as opaque. Events have bounded retention: when a cursor has expired, the server sends an `error` frame and continues with live events, so refetch current state. Tolerate repeated events by their ID. For paginated history over HTTP, use `GET /api/events` in your API's `/docs` reference.
 
 ## Run logs
 

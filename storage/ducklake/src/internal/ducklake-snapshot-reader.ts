@@ -5,6 +5,8 @@ import type {
   DatasetVersion,
   DatasetVersionMode,
   DatasetVersionRef,
+  LatestVersionsSince,
+  ListLatestVersionsSinceInput,
 } from "@sixb/core/lake-storage"
 import { LakeStorageError } from "@sixb/core/lake-storage"
 import type { DuckLakeStorageOptions } from "../types"
@@ -13,8 +15,8 @@ import type { DuckDbQueryRuntime } from "./duckdb-runtime"
 import type { DuckLakeConnectionManager } from "./ducklake-connection-manager"
 import type { DuckLakeDatasetCatalog } from "./ducklake-dataset-catalog"
 import { type DatasetTableRef, resolveDatasetTableRef } from "./ducklake-dataset-table-ref"
-import { encodeDatasetTableName } from "./names"
-import { duckLakeMetadataTableName, quoteSqlString } from "./sql"
+import { decodeDatasetTableName, encodeDatasetTableName } from "./names"
+import { buildDuckLakeMetadataQuery, duckLakeMetadataTableName, quoteSqlString } from "./sql"
 import {
   parseCommitMetadata,
   parseInlineDataChange,
@@ -41,11 +43,24 @@ interface DatasetSnapshotCandidateRow {
   readonly metadata?: SixbCommitMetadata
 }
 
+interface FeedTable {
+  readonly datasetId: string
+  readonly tableId: bigint
+  /** A dataset cannot have a version before its table exists. */
+  readonly startSnapshotId: bigint
+}
+
+interface MissingSnapshotCandidate {
+  readonly snapshotId: string
+  readonly missing: true
+}
+
 interface SnapshotCandidateQueryInput {
+  readonly datasetId: string
   readonly tableId: bigint
   readonly exactSnapshotId?: string
   readonly beforeSnapshotId?: string
-  readonly limit?: number
+  readonly limit: number
 }
 
 interface VisibleSnapshotRowsInput {
@@ -79,6 +94,8 @@ interface FileChangeFlags {
 }
 
 const SNAPSHOT_ROW_BATCH_SIZE = 128
+// One feed read covers at most this many commits; the next read continues from its cursor.
+const FEED_PAGE_SIZE = 512
 
 // The bulk catalog scan shares one descending walk of recent snapshots across
 // all requested datasets, so its cost is bounded by this window rather than by
@@ -187,6 +204,192 @@ export class DuckLakeSnapshotReader {
         latestVersion: row ? this.snapshotRowToSummary(datasetId, row) : null,
       }
     })
+  }
+
+  /**
+   * Change feed over DuckLake's snapshot table, which is an append-only commit log: snapshot ids
+   * only increase, and a commit becomes visible only after every lower id has (concurrent commits
+   * that pick the same id conflict, and the loser retries with the next one). The cursor is the
+   * last snapshot id read. Every query is bounded by a snapshot-id range, so an idle read is one
+   * indexed query that returns the cursor's own snapshot, whatever the history length.
+   */
+  async listLatestVersionsSince(
+    input: ListLatestVersionsSinceInput
+  ): Promise<LatestVersionsSince | null> {
+    this.connections.assertOpen()
+
+    return this.connections.withAttachedRuntime(async (runtime) => {
+      if (input.cursor === null) {
+        return { cursor: await this.queryHeadSnapshotId(runtime), versions: [] }
+      }
+      if (!/^\d+$/.test(input.cursor)) {
+        return null
+      }
+
+      const snapshots = await this.querySnapshotsFrom(runtime, input.cursor)
+      // The cursor's own snapshot proves the cursor is still a position in this lake's history.
+      if (snapshots[0]?.snapshotId !== input.cursor) {
+        return null
+      }
+      const newSnapshots = snapshots.slice(1)
+      if (newSnapshots.length === 0) {
+        return { cursor: input.cursor, versions: [] }
+      }
+
+      const tables = await this.resolveFeedTables(runtime, input.datasetIds)
+      const latest = await this.collectFeedPage(runtime, tables, newSnapshots)
+      return {
+        cursor: newSnapshots[newSnapshots.length - 1]?.snapshotId ?? input.cursor,
+        versions: [...latest].map(([datasetId, row]) => this.snapshotRowToSummary(datasetId, row)),
+      }
+    })
+  }
+
+  private async queryHeadSnapshotId(runtime: DuckDbQueryRuntime): Promise<string> {
+    const [row] = await runtime.query(
+      buildDuckLakeMetadataQuery(
+        this.options,
+        (table) => `SELECT max(snapshot_id) AS snapshot_id FROM ${table("ducklake_snapshot")}`
+      )
+    )
+    if (row?.snapshot_id === null || row?.snapshot_id === undefined) {
+      throw new LakeStorageError("[SixbDuckLake] DuckLake catalog has no snapshots.")
+    }
+    return String(getBigIntLike(row, "snapshot_id"))
+  }
+
+  /** The cursor's snapshot and up to one feed page of snapshots after it, oldest first. */
+  private async querySnapshotsFrom(
+    runtime: DuckDbQueryRuntime,
+    cursor: string
+  ): Promise<readonly { readonly snapshotId: string; readonly createdAt: Date }[]> {
+    const rows = await runtime.query(
+      buildDuckLakeMetadataQuery(
+        this.options,
+        (table) => `
+          SELECT snapshot_id, snapshot_time
+          FROM ${table("ducklake_snapshot")}
+          WHERE snapshot_id >= ${cursor}
+          ORDER BY snapshot_id
+          LIMIT ${FEED_PAGE_SIZE + 1}
+        `
+      )
+    )
+    return rows.map((row) => ({
+      snapshotId: String(getBigIntLike(row, "snapshot_id")),
+      createdAt: getDate(row, "snapshot_time"),
+    }))
+  }
+
+  /** Current dataset tables, with the first snapshot each table id existed in. */
+  private async resolveFeedTables(
+    runtime: DuckDbQueryRuntime,
+    datasetIds: readonly string[] | undefined
+  ): Promise<readonly FeedTable[]> {
+    const requested = datasetIds === undefined ? null : new Set(datasetIds)
+    const rows = await runtime.query(`
+      SELECT table_id, table_name, begin_snapshot, end_snapshot
+      FROM ${duckLakeMetadataTableName(this.options, "ducklake_table")}
+    `)
+
+    const startByTableId = new Map<bigint, bigint>()
+    const current: { datasetId: string; tableId: bigint }[] = []
+    for (const row of rows) {
+      const tableId = getBigIntLike(row, "table_id")
+      const begin = getBigIntLike(row, "begin_snapshot")
+      const start = startByTableId.get(tableId)
+      if (start === undefined || begin < start) {
+        startByTableId.set(tableId, begin)
+      }
+      if (row.end_snapshot !== null && row.end_snapshot !== undefined) {
+        continue
+      }
+      const datasetId = decodeDatasetTableName(getString(row, "table_name"))
+      if (datasetId !== null && (requested === null || requested.has(datasetId))) {
+        current.push({ datasetId, tableId })
+      }
+    }
+
+    return current.map((table) => ({
+      ...table,
+      startSnapshotId: startByTableId.get(table.tableId) ?? 0n,
+    }))
+  }
+
+  /** Folds a page of snapshots, oldest first, into each dataset's newest data version. */
+  private async collectFeedPage(
+    runtime: DuckDbQueryRuntime,
+    tables: readonly FeedTable[],
+    snapshots: readonly { readonly snapshotId: string; readonly createdAt: Date }[]
+  ): Promise<Map<string, DatasetSnapshotRow>> {
+    const latest = new Map<string, DatasetSnapshotRow>()
+    const first = snapshots[0]?.snapshotId
+    const last = snapshots[snapshots.length - 1]?.snapshotId
+    if (first === undefined || last === undefined || tables.length === 0) {
+      return latest
+    }
+
+    const changeRows = await runtime.query(
+      buildDuckLakeMetadataQuery(
+        this.options,
+        (table) => `
+          SELECT snapshot_id, changes_made, commit_extra_info
+          FROM ${table("ducklake_snapshot_changes")}
+          WHERE snapshot_id >= ${first} AND snapshot_id <= ${last}
+        `
+      )
+    )
+    const fileFlags = await this.queryFileChangeFlags(
+      runtime,
+      snapshots.map((snapshot) => snapshot.snapshotId),
+      tables.map((table) => table.tableId)
+    )
+    const changesBySnapshotId = new Map(
+      changeRows.map((row) => [String(getBigIntLike(row, "snapshot_id")), row])
+    )
+    const tablesByTableId = new Map(tables.map((table) => [table.tableId.toString(), table]))
+    const tablesByDatasetId = new Map(tables.map((table) => [table.datasetId, table]))
+
+    for (const snapshot of snapshots) {
+      const changes = changesBySnapshotId.get(snapshot.snapshotId)
+      if (changes === undefined) {
+        continue
+      }
+      const changesMade = getString(changes, "changes_made")
+      const metadata = parseCommitMetadata(changes.commit_extra_info)
+
+      // Only tables this snapshot names, touches through files, or tags can change visibility.
+      const touched = new Set<FeedTable>()
+      for (const change of changesMade.split(",")) {
+        const table = tablesByTableId.get(change.split(":")[1] ?? "")
+        if (table) touched.add(table)
+      }
+      for (const table of tables) {
+        if (fileFlags.has(fileChangeKey(snapshot.snapshotId, table.tableId))) touched.add(table)
+      }
+      const tagged = metadata === undefined ? undefined : tablesByDatasetId.get(metadata.datasetId)
+      if (tagged) touched.add(tagged)
+
+      for (const table of touched) {
+        if (BigInt(snapshot.snapshotId) < table.startSnapshotId) {
+          continue
+        }
+        const flags = fileFlags.get(fileChangeKey(snapshot.snapshotId, table.tableId))
+        const row = this.candidateToSnapshotRow(table.datasetId, table.tableId, {
+          snapshotId: snapshot.snapshotId,
+          createdAt: snapshot.createdAt,
+          changesMade,
+          hasFileChange: flags?.hasFileChange ?? false,
+          hasFileDeleteChange: flags?.hasFileDeleteChange ?? false,
+          ...(metadata !== undefined ? { metadata } : {}),
+        })
+        if (row && row.mode !== "schema") {
+          latest.set(table.datasetId, row)
+        }
+      }
+    }
+
+    return latest
   }
 
   private snapshotRowToSummary(
@@ -604,6 +807,7 @@ export class DuckLakeSnapshotReader {
 
     while (input.visibleRowLimit === undefined || snapshots.length < input.visibleRowLimit) {
       const candidates = await this.querySnapshotCandidates(runtime, {
+        datasetId: input.datasetId,
         tableId: input.tableId,
         exactSnapshotId: input.exactSnapshotId,
         beforeSnapshotId,
@@ -614,6 +818,9 @@ export class DuckLakeSnapshotReader {
       }
 
       for (const candidate of candidates) {
+        if ("missing" in candidate) {
+          continue
+        }
         const snapshot = this.candidateToSnapshotRow(input.datasetId, input.tableId, candidate)
         if (snapshot) {
           snapshots.push(snapshot)
@@ -634,104 +841,144 @@ export class DuckLakeSnapshotReader {
     return snapshots
   }
 
+  /**
+   * Hydrates, newest first, the snapshots that may hold a version of one dataset table: those
+   * that added or removed its data or delete files, that DuckLake recorded as changing it inline,
+   * or whose Sixb commit metadata names the dataset. The text matches are a superset;
+   * candidateToSnapshotRow decides visibility. Only this table's snapshots are read, so the cost
+   * follows the dataset's own history rather than every commit in the catalog.
+   *
+   * Returns one row per candidate id, including ids whose snapshot no longer exists, so the caller
+   * can tell a short batch from the end of the history.
+   */
   private async querySnapshotCandidates(
     runtime: DuckDbQueryRuntime,
     input: SnapshotCandidateQueryInput
-  ): Promise<readonly DatasetSnapshotCandidateRow[]> {
-    if (input.limit !== undefined && input.limit <= 0) {
+  ): Promise<readonly (DatasetSnapshotCandidateRow | MissingSnapshotCandidate)[]> {
+    const tableId = input.tableId.toString()
+    const limit = Math.max(0, Math.trunc(input.limit))
+    if (limit === 0) {
       return []
     }
-
-    // A dataset cannot have a version before its table exists. Use the earliest table record:
-    // a rename may create a newer record with the same table id and must not hide older versions.
-    const ducklakeTable = duckLakeMetadataTableName(this.options, "ducklake_table")
-    const where = [
-      `snapshot.snapshot_id >= (SELECT min(begin_snapshot) FROM ${ducklakeTable} WHERE table_id = ${input.tableId})`,
-    ]
     if (input.exactSnapshotId !== undefined) {
       assertDuckLakeSnapshotId(input.exactSnapshotId)
-      where.push(`snapshot.snapshot_id = ${input.exactSnapshotId}`)
     }
     if (input.beforeSnapshotId !== undefined) {
       assertDuckLakeSnapshotId(input.beforeSnapshotId)
-      where.push(`snapshot.snapshot_id < ${input.beforeSnapshotId}`)
     }
 
-    const whereSql = `WHERE ${where.join(" AND ")}`
-    const limitSql =
-      input.limit === undefined ? "" : `LIMIT ${Math.max(0, Math.trunc(input.limit))}`
-    const ducklakeSnapshot = duckLakeMetadataTableName(this.options, "ducklake_snapshot")
-    const ducklakeSnapshotChanges = duckLakeMetadataTableName(
-      this.options,
-      "ducklake_snapshot_changes"
-    )
-    const ducklakeDataFile = duckLakeMetadataTableName(this.options, "ducklake_data_file")
-    const ducklakeDeleteFile = duckLakeMetadataTableName(this.options, "ducklake_delete_file")
+    const rows = await runtime.query(
+      buildDuckLakeMetadataQuery(this.options, (table) => {
+        // A dataset cannot have a version before its table exists. Use the earliest table record:
+        // a rename may create a newer record with the same table id and must not hide older
+        // versions.
+        const tableStart = `(SELECT min(begin_snapshot) FROM ${table("ducklake_table")} WHERE table_id = ${tableId})`
+        const candidateIds =
+          input.exactSnapshotId !== undefined
+            ? `SELECT CAST(${input.exactSnapshotId} AS BIGINT) AS snapshot_id
+               WHERE ${input.exactSnapshotId} >= ${tableStart}`
+            : `SELECT DISTINCT snapshot_id
+               FROM (
+                 SELECT begin_snapshot AS snapshot_id
+                 FROM ${table("ducklake_data_file")} WHERE table_id = ${tableId}
+                 UNION ALL
+                 SELECT end_snapshot
+                 FROM ${table("ducklake_data_file")}
+                 WHERE table_id = ${tableId} AND end_snapshot IS NOT NULL
+                 UNION ALL
+                 SELECT begin_snapshot
+                 FROM ${table("ducklake_delete_file")} WHERE table_id = ${tableId}
+                 UNION ALL
+                 SELECT end_snapshot
+                 FROM ${table("ducklake_delete_file")}
+                 WHERE table_id = ${tableId} AND end_snapshot IS NOT NULL
+                 UNION ALL
+                 SELECT snapshot_id
+                 FROM ${table("ducklake_snapshot_changes")}
+                 WHERE strpos(',' || changes_made || ',', ${quoteSqlString(`:${tableId},`)}) > 0
+                   OR strpos(
+                     commit_extra_info,
+                     ${quoteSqlString(`"datasetId":${JSON.stringify(input.datasetId)}`)}
+                   ) > 0
+               ) touched
+               WHERE snapshot_id >= ${tableStart}
+                 ${input.beforeSnapshotId === undefined ? "" : `AND snapshot_id < ${input.beforeSnapshotId}`}
+               ORDER BY snapshot_id DESC
+               LIMIT ${limit}`
 
-    const rows = await runtime.query(`
-      WITH candidate_snapshots AS (
-        -- Recent DuckLake snapshots to inspect; Sixb visibility is filtered later.
-        SELECT
-          snapshot.snapshot_id,
-          snapshot.snapshot_time,
-          changes.changes_made,
-          changes.commit_extra_info
-        FROM ${ducklakeSnapshot} snapshot
-        JOIN ${ducklakeSnapshotChanges} changes
-          ON changes.snapshot_id = snapshot.snapshot_id
-        ${whereSql}
-        ORDER BY snapshot.snapshot_id DESC
-        ${limitSql}
-      ),
-      file_changes AS (
-        -- File metadata tells whether this table changed in each candidate snapshot.
-        SELECT begin_snapshot AS snapshot_id, false AS is_delete_change
-        FROM ${ducklakeDataFile}
-        WHERE table_id = ${input.tableId}
-          AND begin_snapshot IN (SELECT snapshot_id FROM candidate_snapshots)
-        UNION ALL
-        SELECT end_snapshot AS snapshot_id, true AS is_delete_change
-        FROM ${ducklakeDataFile}
-        WHERE table_id = ${input.tableId}
-          AND end_snapshot IN (SELECT snapshot_id FROM candidate_snapshots)
-        UNION ALL
-        SELECT begin_snapshot AS snapshot_id, true AS is_delete_change
-        FROM ${ducklakeDeleteFile}
-        WHERE table_id = ${input.tableId}
-          AND begin_snapshot IN (SELECT snapshot_id FROM candidate_snapshots)
-        UNION ALL
-        SELECT end_snapshot AS snapshot_id, true AS is_delete_change
-        FROM ${ducklakeDeleteFile}
-        WHERE table_id = ${input.tableId}
-          AND end_snapshot IN (SELECT snapshot_id FROM candidate_snapshots)
-      ),
-      file_changes_by_snapshot AS (
-        -- Collapse file-level changes into one row per snapshot.
-        SELECT
-          snapshot_id,
-          count(*) > 0 AS has_file_change,
-          count(*) FILTER (WHERE is_delete_change) > 0 AS has_file_delete_change
-        FROM file_changes
-        GROUP BY snapshot_id
-      )
-      SELECT
-        -- Keep metadata-only candidates; Sixb filters them with commit_extra_info.
-        candidate.snapshot_id,
-        candidate.snapshot_time,
-        candidate.changes_made,
-        candidate.commit_extra_info,
-        coalesce(file_changes.has_file_change, false) AS has_file_change,
-        coalesce(file_changes.has_file_delete_change, false) AS has_file_delete_change
-      FROM candidate_snapshots candidate
-      LEFT JOIN file_changes_by_snapshot file_changes
-        ON file_changes.snapshot_id = candidate.snapshot_id
-      ORDER BY candidate.snapshot_id DESC
-    `)
+        return `
+          WITH candidate_ids AS (
+            ${candidateIds}
+          ),
+          candidate_snapshots AS (
+            SELECT
+              snapshot.snapshot_id,
+              snapshot.snapshot_time,
+              changes.changes_made,
+              changes.commit_extra_info
+            FROM ${table("ducklake_snapshot")} snapshot
+            JOIN ${table("ducklake_snapshot_changes")} changes
+              ON changes.snapshot_id = snapshot.snapshot_id
+            WHERE snapshot.snapshot_id IN (SELECT snapshot_id FROM candidate_ids)
+          ),
+          file_changes AS (
+            -- File metadata tells whether this table changed in each candidate snapshot.
+            SELECT begin_snapshot AS snapshot_id, false AS is_delete_change
+            FROM ${table("ducklake_data_file")}
+            WHERE table_id = ${tableId}
+              AND begin_snapshot IN (SELECT snapshot_id FROM candidate_ids)
+            UNION ALL
+            SELECT end_snapshot AS snapshot_id, true AS is_delete_change
+            FROM ${table("ducklake_data_file")}
+            WHERE table_id = ${tableId}
+              AND end_snapshot IN (SELECT snapshot_id FROM candidate_ids)
+            UNION ALL
+            SELECT begin_snapshot AS snapshot_id, true AS is_delete_change
+            FROM ${table("ducklake_delete_file")}
+            WHERE table_id = ${tableId}
+              AND begin_snapshot IN (SELECT snapshot_id FROM candidate_ids)
+            UNION ALL
+            SELECT end_snapshot AS snapshot_id, true AS is_delete_change
+            FROM ${table("ducklake_delete_file")}
+            WHERE table_id = ${tableId}
+              AND end_snapshot IN (SELECT snapshot_id FROM candidate_ids)
+          ),
+          file_changes_by_snapshot AS (
+            -- Collapse file-level changes into one row per snapshot.
+            SELECT
+              snapshot_id,
+              count(*) > 0 AS has_file_change,
+              count(*) FILTER (WHERE is_delete_change) > 0 AS has_file_delete_change
+            FROM file_changes
+            GROUP BY snapshot_id
+          )
+          SELECT
+            -- Keep metadata-only candidates; Sixb filters them with commit_extra_info.
+            candidate_ids.snapshot_id,
+            candidate.snapshot_time,
+            candidate.changes_made,
+            candidate.commit_extra_info,
+            coalesce(file_changes.has_file_change, false) AS has_file_change,
+            coalesce(file_changes.has_file_delete_change, false) AS has_file_delete_change
+          FROM candidate_ids
+          LEFT JOIN candidate_snapshots candidate
+            ON candidate.snapshot_id = candidate_ids.snapshot_id
+          LEFT JOIN file_changes_by_snapshot file_changes
+            ON file_changes.snapshot_id = candidate_ids.snapshot_id
+          ORDER BY candidate_ids.snapshot_id DESC
+        `
+      })
+    )
 
     return rows.map((row) => {
+      const snapshotId = String(getBigIntLike(row, "snapshot_id"))
+      // Expired snapshots keep their file records; they are no longer versions.
+      if (row.snapshot_time === null || row.snapshot_time === undefined) {
+        return { snapshotId, missing: true } as const
+      }
       const metadata = parseCommitMetadata(row.commit_extra_info)
       return {
-        snapshotId: String(getBigIntLike(row, "snapshot_id")),
+        snapshotId,
         createdAt: getDate(row, "snapshot_time"),
         changesMade: getString(row, "changes_made"),
         hasFileChange: getBoolean(row, "has_file_change"),

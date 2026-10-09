@@ -1,33 +1,51 @@
-import type { LogLevel, LogRunRef, SixbRunKind, StoredLogLine } from "@sixb/core"
 import { BrokerCursorExpiredError } from "@sixb/core/broker"
-import type { LoggingService } from "@sixb/core/internal/logging"
 
 const MAX_CLIENT_RECORDS = 1_000
 const MAX_CLIENT_BYTES = 1_048_576
 const MAX_SOCKET_BUFFERED_BYTES = 1_048_576
 const MAX_BATCH_RECORDS = 100
 const FLUSH_DELAY_MS = 10
-const READ_PAGE_SIZE = 500
 
-interface LogSocket {
+interface HubSocket {
   send(message: string): unknown
   close(code?: number, reason?: string): unknown
   readonly raw?: unknown
 }
 
-export interface LogSubscriptionFilter {
-  readonly kinds?: readonly SixbRunKind[]
-  readonly levels?: readonly LogLevel[]
-  readonly run?: LogRunRef
-  readonly afterCursor?: string
+interface HubRecord {
+  readonly cursor: string
 }
 
-interface ClientState {
-  readonly ws: LogSocket
-  readonly filter: LogSubscriptionFilter
-  readonly queue: StoredLogLine[]
+/** One retained broker stream, as the hub consumes and frames it. */
+export interface HubSource<T extends HubRecord> {
+  /** Delivers records appended after the call. */
+  subscribe(deliver: (records: readonly T[]) => void): Promise<() => void>
+  /** Socket frames for one flushed batch, in order. */
+  frames(records: readonly T[]): readonly unknown[]
+  /** Frame for a client whose replay cursor left retention. Live delivery continues after it. */
+  expired(): Promise<unknown>
+}
+
+/** One socket's view of the stream. */
+export interface HubSubscription<T extends HubRecord> {
+  matches(record: T): boolean
+  /** Replays retained records after `afterCursor` (or from the oldest) before live ones. */
+  readonly replay?: {
+    readonly afterCursor: string | undefined
+    read(afterCursor: string | undefined): Promise<{
+      readonly records: readonly T[]
+      readonly cursor?: string
+      readonly hasMore: boolean
+    }>
+  }
+}
+
+interface ClientState<T extends HubRecord> {
+  readonly ws: HubSocket
+  readonly subscription: HubSubscription<T>
+  readonly queue: T[]
   readonly queuedCursors: Set<string>
-  readonly pendingLive: StoredLogLine[]
+  readonly pendingLive: T[]
   readonly pendingCursors: Set<string>
   readonly replayedPendingCursors: Set<string>
   queuedBytes: number
@@ -39,40 +57,44 @@ interface ClientState {
 }
 
 /**
- * One broker subscription per server/project, multiplexed to all connected
- * clients. Each client has a bounded queue so a slow socket cannot retain an
- * unbounded portion of the process heap.
+ * One broker subscription per server/project and stream, multiplexed to all connected clients
+ * and released when the last one leaves. Each client has a bounded queue so a slow socket cannot
+ * retain an unbounded portion of the process heap.
  */
-export class LogSubscriptionHub {
-  private readonly clients = new Map<object, ClientState>()
+export class SubscriptionHub<T extends HubRecord> {
+  private readonly clients = new Map<object, ClientState<T>>()
   private readonly subscriptionGenerations = new WeakMap<object, number>()
-  private startPromise: Promise<void> | null = null
-  private unsubscribeBroker: (() => void) | null = null
+  private started: Promise<() => void> | null = null
   private closed = false
 
-  constructor(private readonly host: { readonly logging: LoggingService }) {}
+  constructor(private readonly source: HubSource<T>) {}
 
   async subscribe(
     key: object,
-    ws: LogSocket,
-    filter: LogSubscriptionFilter,
+    ws: HubSocket,
+    subscription: HubSubscription<T>,
     onSubscribed: () => void
   ): Promise<void> {
-    if (this.closed) throw new Error("Log subscription hub is closed")
+    if (this.closed) throw new Error("Subscription hub is closed")
     const generation = this.nextSubscriptionGeneration(key)
     this.removeClient(key)
 
-    try {
-      await this.ensureStarted()
-    } catch (error) {
+    // The last client leaving while this waits releases the subscription it waited for.
+    let started: Promise<() => void>
+    do {
+      started = this.start()
+      try {
+        await started
+      } catch (error) {
+        if (this.closed || !this.isCurrentSubscription(key, generation)) return
+        throw error
+      }
       if (this.closed || !this.isCurrentSubscription(key, generation)) return
-      throw error
-    }
-    if (this.closed || !this.isCurrentSubscription(key, generation)) return
+    } while (started !== this.started)
 
-    const state: ClientState = {
+    const state: ClientState<T> = {
       ws,
-      filter,
+      subscription,
       queue: [],
       queuedCursors: new Set(),
       pendingLive: [],
@@ -82,14 +104,14 @@ export class LogSubscriptionHub {
       pendingBytes: 0,
       flushTimer: null,
       queueProgressWaiters: new Set(),
-      catchingUp: filter.afterCursor !== undefined,
+      catchingUp: subscription.replay !== undefined,
       closed: false,
     }
     this.clients.set(key, state)
     onSubscribed()
 
-    if (state.catchingUp) {
-      void this.catchUp(key, state)
+    if (subscription.replay) {
+      void this.catchUp(key, state, subscription.replay)
     }
   }
 
@@ -104,7 +126,12 @@ export class LogSubscriptionHub {
     state.closed = true
     if (state.flushTimer) clearTimeout(state.flushTimer)
     this.notifyQueueProgress(state)
+    this.deleteClient(key)
+  }
+
+  private deleteClient(key: object): void {
     this.clients.delete(key)
+    if (this.clients.size === 0) this.release()
   }
 
   private nextSubscriptionGeneration(key: object): number {
@@ -119,63 +146,65 @@ export class LogSubscriptionHub {
 
   async close(): Promise<void> {
     this.closed = true
-    this.unsubscribeBroker?.()
-    this.unsubscribeBroker = null
     for (const key of this.clients.keys()) this.unsubscribe(key)
+    this.release()
   }
 
-  private async ensureStarted(): Promise<void> {
-    if (this.closed) throw new Error("Log subscription hub is closed")
-    if (!this.startPromise) {
-      this.startPromise = this.host.logging
-        .subscribe({ from: "latest" }, (lines) => this.deliverLive(lines))
-        .then((unsubscribe) => {
-          if (this.closed) unsubscribe()
-          else this.unsubscribeBroker = unsubscribe
-        })
-        .catch((error) => {
-          this.startPromise = null
-          throw error
-        })
+  private start(): Promise<() => void> {
+    if (this.closed) return Promise.reject(new Error("Subscription hub is closed"))
+    if (!this.started) {
+      const started = this.source.subscribe((records) => this.deliverLive(records))
+      started.catch(() => {
+        if (this.started === started) this.started = null
+      })
+      this.started = started
     }
-    await this.startPromise
+    return this.started
   }
 
-  private deliverLive(lines: readonly StoredLogLine[]): void {
+  private release(): void {
+    const started = this.started
+    this.started = null
+    started?.then(
+      (unsubscribe) => unsubscribe(),
+      () => undefined
+    )
+  }
+
+  private deliverLive(records: readonly T[]): void {
     for (const state of this.clients.values()) {
-      for (const line of lines) {
-        if (!matches(line, state.filter)) continue
-        if (state.catchingUp) this.enqueuePendingLive(state, line)
-        else this.enqueue(state, line)
+      for (const record of records) {
+        if (!state.subscription.matches(record)) continue
+        if (state.catchingUp) this.enqueuePendingLive(state, record)
+        else this.enqueue(state, record)
       }
     }
   }
 
-  private async catchUp(key: object, state: ClientState): Promise<void> {
-    let afterCursor = state.filter.afterCursor
+  private async catchUp(
+    key: object,
+    state: ClientState<T>,
+    replay: NonNullable<HubSubscription<T>["replay"]>
+  ): Promise<void> {
+    let afterCursor = replay.afterCursor
     try {
       let hasMore = true
       while (hasMore) {
-        const page = await this.host.logging.read({
-          afterCursor,
-          limit: READ_PAGE_SIZE,
-          kinds: state.filter.kinds,
-          levels: state.filter.levels,
-          run: state.filter.run,
-        })
+        const page = await replay.read(afterCursor)
         if (state.closed || this.clients.get(key) !== state) return
 
-        for (const line of page.lines) {
-          if (state.pendingCursors.has(line.cursor)) {
-            state.replayedPendingCursors.add(line.cursor)
+        for (const record of page.records) {
+          if (state.pendingCursors.has(record.cursor)) {
+            state.replayedPendingCursors.add(record.cursor)
           }
-          if (!(await this.enqueueReplay(state, line))) return
+          if (!state.subscription.matches(record)) continue
+          if (!(await this.enqueueReplay(state, record))) return
         }
         if (state.closed) return
         afterCursor = page.cursor ?? afterCursor
         hasMore = page.hasMore
         if (hasMore && !page.cursor) {
-          throw new Error("Log broker returned hasMore without a cursor")
+          throw new Error("Broker returned hasMore without a cursor")
         }
       }
 
@@ -186,8 +215,8 @@ export class LogSubscriptionHub {
       state.pendingCursors.clear()
       state.replayedPendingCursors.clear()
       state.pendingBytes = 0
-      for (const line of pendingLive) {
-        if (!replayedPendingCursors.has(line.cursor)) this.enqueue(state, line)
+      for (const record of pendingLive) {
+        if (!replayedPendingCursors.has(record.cursor)) this.enqueue(state, record)
       }
     } catch (error) {
       if (state.closed || this.clients.get(key) !== state) return
@@ -199,12 +228,7 @@ export class LogSubscriptionHub {
 
       if (error instanceof BrokerCursorExpiredError) {
         try {
-          const latest = await this.host.logging.tail({ limit: 1 })
-          this.send(state, {
-            type: "reset",
-            reason: "cursor_expired",
-            cursor: latest.lines.at(-1)?.cursor ?? latest.cursor,
-          })
+          this.send(state, await this.source.expired())
         } catch (resetError) {
           this.fail(
             state,
@@ -219,28 +243,28 @@ export class LogSubscriptionHub {
     }
   }
 
-  private enqueue(state: ClientState, line: StoredLogLine): void {
-    if (state.closed || state.queuedCursors.has(line.cursor)) return
-    const bytes = encodedBytes(line)
+  private enqueue(state: ClientState<T>, record: T): void {
+    if (state.closed || state.queuedCursors.has(record.cursor)) return
+    const bytes = encodedBytes(record)
     if (!hasQueueCapacity(state, bytes)) {
-      this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
+      this.fail(state, "Stream client is too slow; reconnect from the last cursor.", 1013)
       return
     }
 
-    this.pushQueuedLine(state, line, bytes)
+    this.pushQueuedRecord(state, record, bytes)
   }
 
-  private async enqueueReplay(state: ClientState, line: StoredLogLine): Promise<boolean> {
+  private async enqueueReplay(state: ClientState<T>, record: T): Promise<boolean> {
     if (state.closed) return false
-    if (state.queuedCursors.has(line.cursor)) return true
-    const bytes = encodedBytes(line)
+    if (state.queuedCursors.has(record.cursor)) return true
+    const bytes = encodedBytes(record)
 
     while (!hasQueueCapacity(state, bytes)) {
       // Replay is an internal producer and can pause while already-queued replay
       // batches drain. Pending live records cannot drain until replay finishes,
       // so a queue containing only pending live records has no forward progress.
       if (state.queue.length === 0 || socketBufferedAmount(state.ws) > MAX_SOCKET_BUFFERED_BYTES) {
-        this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
+        this.fail(state, "Stream client is too slow; reconnect from the last cursor.", 1013)
         return false
       }
       this.scheduleFlush(state)
@@ -248,30 +272,30 @@ export class LogSubscriptionHub {
       if (state.closed) return false
     }
 
-    this.pushQueuedLine(state, line, bytes)
+    this.pushQueuedRecord(state, record, bytes)
     return !state.closed
   }
 
-  private pushQueuedLine(state: ClientState, line: StoredLogLine, bytes: number): void {
-    state.queue.push(line)
-    state.queuedCursors.add(line.cursor)
+  private pushQueuedRecord(state: ClientState<T>, record: T, bytes: number): void {
+    state.queue.push(record)
+    state.queuedCursors.add(record.cursor)
     state.queuedBytes += bytes
     this.scheduleFlush(state)
   }
 
-  private enqueuePendingLive(state: ClientState, line: StoredLogLine): void {
-    if (state.closed || state.pendingCursors.has(line.cursor)) return
-    const bytes = encodedBytes(line)
+  private enqueuePendingLive(state: ClientState<T>, record: T): void {
+    if (state.closed || state.pendingCursors.has(record.cursor)) return
+    const bytes = encodedBytes(record)
     if (!hasQueueCapacity(state, bytes)) {
-      this.fail(state, "Log stream client is too slow; reconnect from the last cursor.", 1013)
+      this.fail(state, "Stream client is too slow; reconnect from the last cursor.", 1013)
       return
     }
-    state.pendingLive.push(line)
-    state.pendingCursors.add(line.cursor)
+    state.pendingLive.push(record)
+    state.pendingCursors.add(record.cursor)
     state.pendingBytes += bytes
   }
 
-  private scheduleFlush(state: ClientState): void {
+  private scheduleFlush(state: ClientState<T>): void {
     if (state.closed || state.flushTimer) return
     state.flushTimer = setTimeout(() => {
       state.flushTimer = null
@@ -279,34 +303,34 @@ export class LogSubscriptionHub {
     }, FLUSH_DELAY_MS)
   }
 
-  private flush(state: ClientState): void {
+  private flush(state: ClientState<T>): void {
     if (state.closed || state.queue.length === 0) return
     if (socketBufferedAmount(state.ws) > MAX_SOCKET_BUFFERED_BYTES) {
       this.scheduleFlush(state)
       return
     }
 
-    const lines = state.queue.splice(0, MAX_BATCH_RECORDS)
-    for (const line of lines) {
-      state.queuedCursors.delete(line.cursor)
-      state.queuedBytes -= encodedBytes(line)
+    const records = state.queue.splice(0, MAX_BATCH_RECORDS)
+    for (const record of records) {
+      state.queuedCursors.delete(record.cursor)
+      state.queuedBytes -= encodedBytes(record)
     }
     this.notifyQueueProgress(state)
-    this.send(state, { type: "logs", logs: lines })
+    for (const frame of this.source.frames(records)) this.send(state, frame)
     if (state.queue.length > 0) this.scheduleFlush(state)
   }
 
-  private waitForQueueProgress(state: ClientState): Promise<void> {
+  private waitForQueueProgress(state: ClientState<T>): Promise<void> {
     return new Promise((resolve) => state.queueProgressWaiters.add(resolve))
   }
 
-  private notifyQueueProgress(state: ClientState): void {
+  private notifyQueueProgress(state: ClientState<T>): void {
     const waiters = [...state.queueProgressWaiters]
     state.queueProgressWaiters.clear()
     for (const resolve of waiters) resolve()
   }
 
-  private send(state: ClientState, payload: unknown): void {
+  private send(state: ClientState<T>, payload: unknown): void {
     if (state.closed) return
     try {
       state.ws.send(JSON.stringify(payload))
@@ -315,7 +339,7 @@ export class LogSubscriptionHub {
     }
   }
 
-  private fail(state: ClientState, message: string, closeCode: number): void {
+  private fail(state: ClientState<T>, message: string, closeCode: number): void {
     if (state.closed) return
     try {
       state.ws.send(JSON.stringify({ type: "error", message }))
@@ -326,42 +350,28 @@ export class LogSubscriptionHub {
     if (state.flushTimer) clearTimeout(state.flushTimer)
     this.notifyQueueProgress(state)
     for (const [key, candidate] of this.clients) {
-      if (candidate === state) this.clients.delete(key)
+      if (candidate === state) this.deleteClient(key)
     }
     try {
-      state.ws.close(
-        closeCode,
-        closeCode === 1013 ? "Log stream backpressure" : "Log stream failure"
-      )
+      state.ws.close(closeCode, closeCode === 1013 ? "Stream backpressure" : "Stream failure")
     } catch {
       // Socket is already gone.
     }
   }
 }
 
-function hasQueueCapacity(state: ClientState, bytes: number): boolean {
+function hasQueueCapacity(state: ClientState<HubRecord>, bytes: number): boolean {
   return (
     state.queue.length + state.pendingLive.length < MAX_CLIENT_RECORDS &&
     state.queuedBytes + state.pendingBytes + bytes <= MAX_CLIENT_BYTES
   )
 }
 
-function matches(line: StoredLogLine, filter: LogSubscriptionFilter): boolean {
-  if (filter.run) {
-    if (line.context.run.kind !== filter.run.kind || line.context.run.id !== filter.run.id) {
-      return false
-    }
-  }
-  if (filter.kinds && !filter.kinds.includes(line.context.run.kind)) return false
-  if (filter.levels && !filter.levels.includes(line.level)) return false
-  return true
-}
-
 function encodedBytes(value: unknown): number {
   return new TextEncoder().encode(JSON.stringify(value)).byteLength
 }
 
-function socketBufferedAmount(ws: LogSocket): number {
+function socketBufferedAmount(ws: HubSocket): number {
   const raw = ws.raw
   if (!raw || typeof raw !== "object" || !("bufferedAmount" in raw)) return 0
   const bufferedAmount = (raw as { bufferedAmount?: unknown }).bufferedAmount

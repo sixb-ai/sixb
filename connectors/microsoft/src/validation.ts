@@ -56,6 +56,11 @@ export function query(options?: SelectOptions | ListOptions): string {
   return params.size ? `?${params}` : ""
 }
 
+/** OData string literal: single quotes are escaped by doubling them. */
+export function odataString(value: string): string {
+  return `'${value.replaceAll("'", "''")}'`
+}
+
 export function httpsUrl(value: string): URL {
   let url: URL
   try {

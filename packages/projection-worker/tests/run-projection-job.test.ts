@@ -43,6 +43,7 @@ import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/sto
 import type {
   BeginDatasetMergeInput,
   BeginDatasetWriteInput,
+  ListLatestVersionsSinceInput,
   ReadDatasetRowsInput,
 } from "@sixb/core/lake-storage"
 import type {
@@ -253,6 +254,10 @@ class RecordingLakeStorage implements LakeStorage {
 
   getVersion(datasetId: string, versionId: string) {
     return this.delegate.getVersion(datasetId, versionId)
+  }
+
+  listLatestVersionsSince(input: ListLatestVersionsSinceInput) {
+    return this.delegate.listLatestVersionsSince(input)
   }
 
   readRows(input: ReadDatasetRowsInput): AsyncIterable<DatasetRow> {

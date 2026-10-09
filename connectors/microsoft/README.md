@@ -1,7 +1,8 @@
 # @sixb/connector-microsoft
 
 Typed Microsoft Graph v1.0 connector for Sixb. Covers SharePoint Online sites, document libraries,
-files, folders, Outlook mail, calendars and incremental synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
+files, folders, Outlook mail, calendars, personal and organizational contacts and incremental
+synchronization. Uses `@sixb/connector-rest` for HTTP and Microsoft's
 `@azure/msal-node` for application authentication. Targets the global Microsoft 365 cloud.
 
 ## Quick start
@@ -559,6 +560,164 @@ requires an Exchange Online tenant; passing mocked tests does not establish live
 If cleanup fails after a network interruption, use the unique `sixb-calendar-e2e-...` subject/name
 reported by the test to remove remaining test data.
 
+## Outlook contacts
+
+`client.contacts` reads and writes the personal contacts in a mailbox with the existing application
+authentication and an explicit mailbox ID/UPN. Assign **Application Contacts.Read** (reads, including
+photos and extensions, delta and notifications) or **Application Contacts.ReadWrite** (also every
+write) through Exchange Application RBAC to the approved mailboxes. As for mail and calendars, do not also grant an
+unscoped Entra `Contacts.*` permission: the grants are additive. Graph has no tenant-wide endpoint for
+personal contacts, so call once per mailbox; for the company address book, see
+[Organizational contacts](#organizational-contacts).
+
+```ts
+const mailbox = "sales@contoso.com"
+const ada = await client.contacts.items.create(mailbox, {
+  givenName: "Ada",
+  surname: "Lovelace",
+  emailAddresses: [{ address: "ada@example.com", name: "Ada Lovelace" }],
+  businessPhones: ["+1 555 0100"],
+  businessAddress: { street: "1 Engine Way", city: "London", countryOrRegion: "UK" },
+})
+await client.contacts.items.update(mailbox, ada.id, { jobTitle: "CTO", displayName: ada.displayName })
+await client.contacts.photo.upload(mailbox, ada.id, Bun.file("./ada.jpg"))
+
+for await (const contact of client.contacts.items.listAll(mailbox, { email: "ada@example.com" })) {
+  console.log(contact.id, contact.displayName)
+}
+```
+
+| Surface | Operations |
+| --- | --- |
+| `contacts.items` | `list`, `listAll`, `get`, `create`, `update`, `delete`, `permanentDelete` |
+| `contacts.items.delta` | `list`, `pages` per mailbox and folder |
+| `contacts.folders` | `list`, `listAll`, `get`, `getDefault`, `listChildren`, `listAllChildren`, `create`, `update`, `delete`, `permanentDelete` |
+| `contacts.folders.delta` | `list`, `pages` per mailbox |
+| `contacts.photo` | `get`, `downloadResponse`, `download`, `upload` |
+| `contacts.extensions` | `create`, `get`, `update`, `delete` |
+| Notifications | `contacts.subscribe` |
+
+### Folders and identity
+
+- Item, photo and extension methods use the mailbox's default Contacts folder unless you pass
+  `folderId`. Graph documents contacts in other folders under that folder's path: pass the
+  contact's `parentFolderId` as `folderId` to read, change or delete a contact stored elsewhere.
+- `folders.list` returns what Graph describes as the folder collection in the default Contacts
+  folder; `listChildren` walks deeper. Graph v1.0 documents no address for the default folder itself.
+  `folders.getDefault` reads it through a contact it holds and returns `null` while it is empty.
+- Graph's examples reach nested folders through their parents (`.../childFolders/{id}/...`). The
+  connector addresses every folder by its own ID, as Outlook folder IDs are unique within a mailbox;
+  the live test below exercises this for nested folders.
+- Contact requests, including continuation pages, use immutable IDs; folder IDs are already stable.
+  Graph has no move action for contacts. Re-creating a contact in another folder gives it a new ID.
+- `email` matches any of a contact's addresses exactly. It is the only email filter Graph supports on
+  contacts, and Graph documents no `$search` for them. Other `filter` and `orderBy` expressions pass
+  through to Graph.
+
+### Fields, extensions and photos
+
+- The types cover every property of Graph v1.0's `contact`, including the primary, secondary and
+  tertiary email addresses. An address object is replaced as a whole on update.
+- Graph can regenerate `displayName` when other name fields change. Include it in the update to keep it.
+- Keep your own data on a contact with extended properties (`singleValueExtendedProperties` and
+  `multiValueExtendedProperties` on create and update, read with `expand`) or open extensions
+  (`extensions` on create, then `contacts.extensions`). Extension updates merge and reject `null`.
+- `photo.upload` sends one JPEG of at most 4 MB. Graph cannot delete a contact photo, and downloading
+  the photo of a contact without one answers `404`.
+
+### Contact writes
+
+Mutations are sent once. `MicrosoftContactMutationError.outcomeUnknown` marks an interrupted request;
+HTTP errors remain `MicrosoftApiError`. Contacts have no `transactionId`: after an uncertain create,
+look the contact up with `{ email }` before creating it again. `delete` follows Exchange retention;
+`permanentDelete` purges a contact, or a folder with its contents.
+
+### Contacts delta
+
+Graph tracks contacts one folder at a time. For a full mailbox sync, run `folders.delta` for the
+folder tree, then `items.delta` for every folder, including the default one, each with its own cursor.
+
+```ts
+const root = await client.contacts.folders.getDefault(mailbox)
+if (root) {
+  for await (const page of client.contacts.items.delta.pages(mailbox, root.id, { cursor })) {
+    // Apply this page, then persist page["@odata.nextLink"] ?? page["@odata.deltaLink"].
+  }
+}
+```
+
+Delta accepts `select` and `pageSize`; resume with `{ cursor }` alone. `@removed` can mean that the
+contact moved to another folder rather than that it was deleted. Outlook checkpoints have no fixed
+lifetime: an expired one surfaces as a Graph error (such as `410` or `syncStateNotFound`) and calls
+for a new round and reconciliation, which remain application decisions.
+
+### Contact notifications
+
+`contacts.subscribe(mailbox, options)` covers every personal contact in the mailbox; Graph has no
+folder-scoped contact subscription. It takes the options of `mail.subscribe` without `folderId`,
+delivers to the built-in `onEvent` receiver, lasts at most seven days and needs `Contacts.Read`.
+Renew and recover missed changes as described for mail.
+
+### Contacts live verification
+
+```bash
+MICROSOFT_CONTACTS_E2E=1 MICROSOFT_TENANT_ID=... MICROSOFT_CLIENT_ID=... MICROSOFT_CLIENT_SECRET=... \
+MICROSOFT_CONTACTS_TEST_MAILBOX=contacts-test@contoso.com \
+MICROSOFT_CONTACTS_DENIED_MAILBOX=outside-scope@contoso.com \
+bun test ./connectors/microsoft/tests/contacts.e2e.ts
+```
+
+The test needs a dedicated mailbox with `Application Contacts.ReadWrite` and a mailbox outside that
+scope (it must return `403`). It writes uniquely named `sixb-contacts-e2e-...` folders and contacts,
+checks the default folder lookup, nested folders, the field groups, photo, extensions, delta and
+permanent deletion, then removes its own data.
+
+## Organizational contacts
+
+`client.directory.contacts` reads the tenant's organizational contacts: external addresses that
+administrators manage in Microsoft 365 or Exchange and that appear in the company address book. One
+call covers the whole organization. They are read-only in Graph and are not anyone's personal Outlook
+contacts.
+
+Grant the Entra application permission **OrgContact.Read.All** with admin consent. It covers listing,
+reading, delta, manager, direct reports and direct group memberships; `listTransitiveMemberOf` also
+needs **Group.Read.All**. Related users and groups come back with only `id` and `@odata.type` unless
+the application may read them (for example with `User.ReadBasic.All` or `GroupMember.Read.All`).
+
+```ts
+const { contacts } = client.directory
+for await (const contact of contacts.listAll({ select: ["displayName", "mail", "phones"] })) {
+  console.log(contact.id, contact.displayName, contact.mail)
+}
+await contacts.list({ search: '"displayName:acme"' })
+await contacts.list({ filter: "startsWith(companyName,'Acme')", orderBy: "displayName", advancedQuery: true })
+```
+
+| Surface | Operations |
+| --- | --- |
+| `directory.contacts` | `list`, `listAll`, `get`, `getManager`, `listDirectReports`, `listAllDirectReports`, `listMemberOf`, `listAllMemberOf`, `listTransitiveMemberOf`, `listAllTransitiveMemberOf` |
+| `directory.contacts.delta` | `list`, `pages` |
+
+- `search` uses Graph's `"property:value"` syntax and turns on `ConsistencyLevel: eventual`. Graph
+  does not support `expand` in these advanced queries, so the connector rejects the combination.
+  `advancedQuery: true` also adds `$count=true` (returned as `@odata.count`); Graph requires it for
+  some filters and for `filter` combined with `orderBy`. Advanced results can lag recent changes.
+- Membership listings accept `filter`, `search`, `select` and `top` only as advanced queries; the
+  connector turns that mode on when you pass any of them. Direct reports and manager accept `select`.
+- Delta: `ids` (1–50) limits tracking to specific contacts and `minimal: true` returns only changed
+  properties after the first round. `latest: true` starts tracking from now without listing existing
+  contacts; Graph documents this for Entra resources such as users and groups but not on its
+  orgContact page, so the live test checks it. `@removed.reason` is `changed` (restorable from deleted items) or `deleted`.
+  Directory checkpoints expire after seven days; a `410` with `location` requires a full resync.
+- Graph offers no change notifications for organizational contacts. Poll with delta.
+
+The read-only live test needs a tenant with at least one organizational contact:
+
+```bash
+MICROSOFT_DIRECTORY_E2E=1 MICROSOFT_TENANT_ID=... MICROSOFT_CLIENT_ID=... MICROSOFT_CLIENT_SECRET=... \
+bun test ./connectors/microsoft/tests/directory-contacts.e2e.ts
+```
+
 ## Graph subscriptions
 
 `client.subscriptions` manages Graph v1.0 basic HTTPS notifications using the connector's
@@ -592,7 +751,7 @@ The connector does not own the subscription database, distributed lock, or sched
 
 - For SharePoint libraries use `drives/{id}/root`; for lists use `sites/{siteId}/lists/{listId}`.
   These resources support `updated` only. Native SharePoint `/_api/.../subscriptions` is a different API.
-- Outlook resources include `users/{id}/messages` and `users/{id}/events`. Pass
+- Outlook resources include `users/{id}/messages`, `users/{id}/events` and `users/{id}/contacts`. Pass
   `{ immutableIds: true }` as the second argument to `create` to match this connector's Outlook IDs.
   Changing the ID format of an existing subscription requires recreation.
 - Graph currently caps drive/list subscriptions at 42,300 minutes and basic Outlook subscriptions
@@ -627,7 +786,7 @@ and the existing polling fallback. `reauthorizationRequired` applies across reso
 supported, or a full reconciliation. Do not mark synchronization complete merely on receipt.
 
 Use the resource-specific application permissions in Microsoft's subscription creation table
-(e.g. `Files.Read.All`, `Sites.Read.All`, `Mail.Read`, `Calendars.Read`). Do not assume existing write
+(e.g. `Files.Read.All`, `Sites.Read.All`, `Mail.Read`, `Calendars.Read`, `Contacts.Read`). Do not assume existing write
 permissions suffice. Check permissions for every operation: Microsoft currently lists
 `Files.ReadWrite.All` (driveItem) and `Sites.ReadWrite.All` (list) in the
 [renewal table](https://learn.microsoft.com/en-us/graph/api/subscription-update?view=graph-rest-1.0),
@@ -707,3 +866,14 @@ References: [create](https://learn.microsoft.com/en-us/graph/api/subscription-po
 - [Free/busy limits](https://learn.microsoft.com/en-us/graph/outlook-get-free-busy-schedule)
 - [Webhook delivery](https://learn.microsoft.com/en-us/graph/change-notifications-delivery-webhooks)
 - [Subscription lifecycle](https://learn.microsoft.com/en-us/graph/change-notifications-lifecycle-events)
+
+- [Contact resource](https://learn.microsoft.com/en-us/graph/api/resources/contact?view=graph-rest-1.0)
+- [Contact folders](https://learn.microsoft.com/en-us/graph/api/resources/contactfolder?view=graph-rest-1.0)
+- [Contact delta](https://learn.microsoft.com/en-us/graph/api/contact-delta?view=graph-rest-1.0)
+- [Contact folder delta](https://learn.microsoft.com/en-us/graph/api/contactfolder-delta?view=graph-rest-1.0)
+- [Contact photos](https://learn.microsoft.com/en-us/graph/api/profilephoto-update?view=graph-rest-1.0)
+- [Extended properties](https://learn.microsoft.com/en-us/graph/api/resources/extended-properties-overview?view=graph-rest-1.0)
+- [Open extensions](https://learn.microsoft.com/en-us/graph/api/opentypeextension-post-opentypeextension?view=graph-rest-1.0)
+- [Organizational contacts](https://learn.microsoft.com/en-us/graph/api/resources/orgcontact?view=graph-rest-1.0)
+- [Organizational contact delta](https://learn.microsoft.com/en-us/graph/api/orgcontact-delta?view=graph-rest-1.0)
+- [Advanced directory queries](https://learn.microsoft.com/en-us/graph/aad-advanced-queries)

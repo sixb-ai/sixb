@@ -8,6 +8,7 @@ import {
   AiLimitOperationLock,
   aiLimitAccountingEntryAppliesToSubject,
   aiLimitAmountKey,
+  aiLimitMeterApplies,
   aiLimitPolicyDimensionKey,
   aiLimitQuantityFromAmount,
   aiLimitReservationBuckets,
@@ -227,7 +228,12 @@ export class InMemoryAiLimitStorage implements AiLimitStorage {
       const unavailablePolicies: AiLimitPolicyStatus[] = []
       const unavailableReasons = new Set<"missingEstimate" | "incompleteAccounting">()
       for (const policy of enabledPolicies) {
-        if (!subjectKeys.has(aiLimitSubjectKey(policy.subject))) continue
+        if (
+          !subjectKeys.has(aiLimitSubjectKey(policy.subject)) ||
+          !aiLimitMeterApplies(policy.limit.meter, request.modelKind)
+        ) {
+          continue
+        }
         const limit = normalizeAiLimitAmount(policy.limit)
         const estimate = estimates.get(aiLimitAmountKey(limit))
         const status = await this.policyStatus(policy, request.period)
@@ -268,7 +274,8 @@ export class InMemoryAiLimitStorage implements AiLimitStorage {
       const buckets = aiLimitReservationBuckets(
         enabledPolicies,
         request.subjects,
-        request.estimates
+        request.estimates,
+        request.modelKind
       )
       if (buckets.length === 0) return { status: "notRequired" }
       for (const bucket of buckets) {
@@ -601,6 +608,7 @@ export class InMemoryAiLimitStorage implements AiLimitStorage {
       attempt: record.attempt,
       callId: record.callId,
       occurredAt: new Date(record.occurredAt),
+      ...(record.modelKind === undefined ? {} : { modelKind: record.modelKind }),
       ...(record.usage.totalTokens === undefined ? {} : { totalTokens: record.usage.totalTokens }),
       requesterGroupIds: [...record.requesterGroupIds],
       ...(requester?.type === "user" || requester?.type === "serviceAccount"

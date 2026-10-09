@@ -2,6 +2,7 @@ import type { SQLQueryBindings } from "bun:sqlite"
 import {
   type AiLimitAccountingEntry,
   aiLimitAmountKey,
+  aiLimitMeterApplies,
   aiLimitQuantityFromAmount,
   aiLimitReservationBuckets,
   aiLimitReservationRequestKey,
@@ -194,7 +195,12 @@ export class SqliteAiLimitStorage implements AiLimitStorage {
       const unavailablePolicies: AiLimitPolicyStatus[] = []
       const unavailableReasons = new Set<"missingEstimate" | "incompleteAccounting">()
       for (const policy of enabledPolicies) {
-        if (!subjectKeys.has(aiLimitSubjectKey(policy.subject))) continue
+        if (
+          !subjectKeys.has(aiLimitSubjectKey(policy.subject)) ||
+          !aiLimitMeterApplies(policy.limit.meter, request.modelKind)
+        ) {
+          continue
+        }
         const limit = normalizeAiLimitAmount(policy.limit)
         const estimate = estimates.get(aiLimitAmountKey(limit))
         const status = this.statusForPolicy(policy, request.period)
@@ -235,7 +241,8 @@ export class SqliteAiLimitStorage implements AiLimitStorage {
       const buckets = aiLimitReservationBuckets(
         enabledPolicies,
         request.subjects,
-        request.estimates
+        request.estimates,
+        request.modelKind
       )
       if (buckets.length === 0) return { status: "notRequired" }
       for (const bucket of buckets) {
@@ -637,6 +644,7 @@ export class SqliteAiLimitStorage implements AiLimitStorage {
           SELECT usage.project_id, usage.id AS usage_record_id, usage.execution_id,
                  usage.attempt, usage.call_id, usage.occurred_at,
                  CAST(usage.total_tokens AS TEXT) AS total_tokens,
+                 usage.model_kind,
                  executions.requested_by_user_id,
                  executions.requested_by_service_account_id,
                  valuations.status AS valuation_status,
@@ -691,6 +699,7 @@ export class SqliteAiLimitStorage implements AiLimitStorage {
           SELECT usage.project_id, usage.id AS usage_record_id, usage.execution_id,
                  usage.attempt, usage.call_id, usage.occurred_at,
                  CAST(usage.total_tokens AS TEXT) AS total_tokens,
+                 usage.model_kind,
                  executions.requested_by_user_id,
                  executions.requested_by_service_account_id,
                  valuations.status AS valuation_status,
@@ -776,6 +785,7 @@ interface AiLimitAccountingRow {
   readonly call_id: string
   readonly occurred_at: string
   readonly total_tokens: string | null
+  readonly model_kind: AiLimitAccountingEntry["modelKind"] | null
   readonly requested_by_user_id: string | null
   readonly requested_by_service_account_id: string | null
   readonly valuation_status: "rated" | "unpriceable" | null
@@ -863,6 +873,7 @@ function accountingEntryFromRow(
     attempt: row.attempt,
     callId: row.call_id,
     occurredAt: new Date(row.occurred_at),
+    ...(row.model_kind === null ? {} : { modelKind: row.model_kind }),
     ...(totalTokens !== undefined && Number.isSafeInteger(totalTokens) ? { totalTokens } : {}),
     requesterGroupIds,
     ...(requester ? { requester } : {}),

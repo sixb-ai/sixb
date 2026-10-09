@@ -1,7 +1,9 @@
+import type { ModelKind } from "../../models/definitions"
 import type { AiMoney } from "../ai-cost"
 import { AiLimitStorageError } from "./errors"
 import { aiLimitCalendarMonth } from "./period"
 import type {
+  AiLimitMeter,
   AiLimitPeriod,
   AiLimitPolicy,
   AiLimitQuantity,
@@ -15,6 +17,20 @@ import type {
 } from "./types"
 
 const SIGNED_INT64_MAX = 9_223_372_036_854_775_807n
+
+// These calls are billed per audio second or per search, and their providers report no tokens.
+// Token limits neither admit nor count them; cost limits still do.
+const TOKENLESS_MODEL_KINDS: ReadonlySet<ModelKind> = new Set(["transcription", "reranking"])
+
+/** @internal Whether a limit meter governs calls of this kind. Unclassified calls are metered. */
+export function aiLimitMeterApplies(
+  meter: AiLimitMeter,
+  modelKind: ModelKind | undefined
+): boolean {
+  return (
+    meter !== "tokens.total" || modelKind === undefined || !TOKENLESS_MODEL_KINDS.has(modelKind)
+  )
+}
 
 /** @internal Serialize compound limit operations, including within an existing transaction. */
 export class AiLimitOperationLock {
@@ -55,6 +71,7 @@ export interface AiLimitAccountingEntry {
   readonly attempt: number
   readonly callId: string
   readonly occurredAt: Date
+  readonly modelKind?: ModelKind
   readonly totalTokens?: number
   readonly requesterGroupIds: readonly string[]
   readonly requester?:
@@ -228,6 +245,7 @@ export function normalizeReserveAiModelCall(input: ReserveAiModelCallInput): {
   readonly identity: AiModelCallReservationIdentity
   readonly subjects: readonly AiLimitSubject[]
   readonly estimates: readonly AiLimitQuantity[]
+  readonly modelKind?: ModelKind
   readonly period: AiLimitPeriod
   readonly reservedAt: Date
 } {
@@ -237,6 +255,7 @@ export function normalizeReserveAiModelCall(input: ReserveAiModelCallInput): {
     identity,
     subjects: normalizeAiLimitSubjects(input.subjects),
     estimates: normalizeAiLimitQuantities(input.estimates, "estimates"),
+    ...(input.modelKind === undefined ? {} : { modelKind: input.modelKind }),
     period: aiLimitCalendarMonth(reservedAt),
     reservedAt,
   }
@@ -297,13 +316,16 @@ export function aiLimitReservationRequestKey(
       const amount = normalizeAiLimitAmount(quantity)
       return [amount.meter, amount.currency, amount.amount.toString()]
     }),
+    // Appended only when present, so keys of reservations made before model kinds stay valid.
+    ...(request.modelKind === undefined ? [] : [request.modelKind]),
   ])
 }
 
 export function aiLimitReservationBuckets(
   policies: readonly AiLimitPolicy[],
   subjects: readonly AiLimitSubject[],
-  estimates: readonly AiLimitQuantity[]
+  estimates: readonly AiLimitQuantity[],
+  modelKind?: ModelKind
 ): readonly AiLimitReservationBucket[] {
   const subjectKeys = new Set(subjects.map(aiLimitSubjectKey))
   const estimatesByDimension = new Map(
@@ -313,7 +335,11 @@ export function aiLimitReservationBuckets(
     })
   )
   return policies
-    .filter((policy) => subjectKeys.has(aiLimitSubjectKey(policy.subject)))
+    .filter(
+      (policy) =>
+        subjectKeys.has(aiLimitSubjectKey(policy.subject)) &&
+        aiLimitMeterApplies(policy.limit.meter, modelKind)
+    )
     .flatMap((policy) => {
       const estimate = estimatesByDimension.get(
         aiLimitAmountKey(normalizeAiLimitAmount(policy.limit))
@@ -357,6 +383,7 @@ export function resolveAiLimitActual(
   let accountingStatus: ResolvedAiLimitActual["accountingStatus"] = "complete"
   for (const entry of entries) {
     if (dimension.meter === "tokens.total") {
+      if (!aiLimitMeterApplies(dimension.meter, entry.modelKind)) continue
       if (entry.totalTokens === undefined) {
         accountingStatus = "unavailable"
       } else {

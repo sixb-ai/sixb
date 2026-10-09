@@ -29,6 +29,7 @@ import type {
   CommitDatasetWriteInput,
   DatasetCatalogState,
   DatasetChanges,
+  DatasetLatestVersionSummary,
   DatasetRow,
   DatasetRowChange,
   DatasetVersion,
@@ -36,6 +37,8 @@ import type {
   DatasetWriteMode,
   LakeStorage,
   LakeWriteSession,
+  LatestVersionsSince,
+  ListLatestVersionsSinceInput,
   ReadDatasetChangesInput,
   ReadDatasetRowsInput,
 } from "./types"
@@ -49,6 +52,16 @@ function cloneDatasetVersion(version: DatasetVersion): DatasetVersion {
   return {
     ...structuredClone(version),
     createdAt: new Date(version.createdAt),
+  }
+}
+
+function latestVersionSummary(version: DatasetVersion): DatasetLatestVersionSummary {
+  return {
+    datasetId: version.datasetId,
+    versionId: version.versionId,
+    mode: version.mode,
+    createdAt: version.createdAt,
+    ...(version.rowCount !== undefined ? { rowCount: version.rowCount } : {}),
   }
 }
 
@@ -223,6 +236,9 @@ export class InMemoryLakeStorage implements LakeStorage {
   private readonly sequencesByVersionId = new Map<string, Map<string, DatasetSequenceState>>()
   private readonly latestVersionIdByDataset = new Map<string, string>()
   private readonly commitLocks = new Map<string, Promise<void>>()
+  /** Commit counter for listLatestVersionsSince; each dataset keeps the position of its latest. */
+  private commitPosition = 0
+  private readonly commitPositionByDataset = new Map<string, number>()
 
   async createDataset(definition: DatasetDefinition): Promise<DatasetDefinition> {
     assertDatasetId(definition.id)
@@ -287,15 +303,7 @@ export class InMemoryLakeStorage implements LakeStorage {
         return {
           datasetId,
           materialized: true,
-          latestVersion: latest
-            ? {
-                datasetId: latest.datasetId,
-                versionId: latest.versionId,
-                mode: latest.mode,
-                createdAt: latest.createdAt,
-                ...(latest.rowCount !== undefined ? { rowCount: latest.rowCount } : {}),
-              }
-            : null,
+          latestVersion: latest ? latestVersionSummary(latest) : null,
         }
       })
     )
@@ -360,6 +368,25 @@ export class InMemoryLakeStorage implements LakeStorage {
     }
 
     return this.getVersion(datasetId, latestVersionId)
+  }
+
+  async listLatestVersionsSince(
+    input: ListLatestVersionsSinceInput
+  ): Promise<LatestVersionsSince | null> {
+    const cursor = String(this.commitPosition)
+    if (input.cursor === null) return { cursor, versions: [] }
+    if (!/^\d+$/.test(input.cursor) || Number(input.cursor) > this.commitPosition) return null
+
+    const after = Number(input.cursor)
+    const datasetIds = input.datasetIds ? new Set(input.datasetIds) : null
+    const versions: DatasetLatestVersionSummary[] = []
+    for (const [datasetId, position] of this.commitPositionByDataset) {
+      if (position <= after || (datasetIds && !datasetIds.has(datasetId))) continue
+      // This provider never commits schema-only versions, so the latest version carries data.
+      const latest = await this.getLatestVersion(datasetId)
+      if (latest) versions.push(latestVersionSummary(latest))
+    }
+    return { cursor, versions }
   }
 
   async getVersion(datasetId: string, versionId: string): Promise<DatasetVersion | null> {
@@ -564,6 +591,7 @@ export class InMemoryLakeStorage implements LakeStorage {
         visibleRows.map((row) => cloneRow(row))
       )
       this.latestVersionIdByDataset.set(options.merge.dataset.id, versionId)
+      this.commitPositionByDataset.set(options.merge.dataset.id, ++this.commitPosition)
       if (ordered) this.sequencesByVersionId.set(versionId, ordered.states)
 
       return { outcome: "created", version: cloneDatasetVersion(version) }
@@ -636,6 +664,7 @@ export class InMemoryLakeStorage implements LakeStorage {
       visibleRows.map((row) => cloneRow(row))
     )
     this.latestVersionIdByDataset.set(options.write.dataset.id, versionId)
+    this.commitPositionByDataset.set(options.write.dataset.id, ++this.commitPosition)
 
     return { ...cloneDatasetVersion(version), outcome: "created" }
   }

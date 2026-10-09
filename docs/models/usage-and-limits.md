@@ -28,6 +28,9 @@ Limits reset at the start of each UTC calendar month. Editing a limit does not r
 Every applicable limit must allow a call before it starts. Once a limit is reached, further calls
 are blocked.
 
+Token limits count calls billed by tokens: generation, embeddings, and decisions. Transcription and
+reranking are billed by audio duration or per search, so only cost limits apply to them.
+
 Limits control whether calls can start. They are not hard caps on a provider's bill, because a
 call's actual usage can exceed its estimate. Use
 [`maxOutputTokens`](./configuration.md#model-and-response-controls) to bound the output of an individual call.
@@ -46,17 +49,16 @@ generation waits while projections continue updating objects.
 Calls to `sixb.models.audio.transcribe()` appear in Atlas with their cost and audio duration,
 when available.
 
-Vercel Gateway transcription is currently blocked when a token or cost limit applies,
-because Sixb cannot estimate its usage before the call.
+Vercel Gateway transcription is currently blocked when a cost limit applies, because Sixb
+cannot estimate its cost before the call.
 
 ## Reranking
 
 Queries using `.rerank()` add one accounted model call for their candidates. Direct provider
 `rerank()` calls bypass Sixb's usage and limit controls.
 
-Gateway rerankers may report a cost without token usage. Prefer cost limits when a model has a
-known catalog tariff. Missing pricing prevents admission under a cost limit; missing actual
-tokens makes token-limit accounting unavailable and blocks subsequent calls under that limit.
+Gateway rerankers report a cost without token usage. Reranking counts toward cost limits only;
+a model without catalog pricing cannot run while a cost limit applies.
 
 ## Permissions
 

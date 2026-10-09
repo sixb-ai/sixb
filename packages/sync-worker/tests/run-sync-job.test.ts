@@ -413,6 +413,9 @@ describe("runSyncJob", () => {
       listVersions(datasetId, limit) {
         return lakeStorage.listVersions(datasetId, limit)
       },
+      listLatestVersionsSince(input) {
+        return lakeStorage.listLatestVersionsSince(input)
+      },
       beginWrite(input) {
         calls.push(`begin:${input.dataset.id}`)
         return lakeStorage.beginWrite(input)
@@ -1135,6 +1138,9 @@ describe("runSyncJob", () => {
       },
       listVersions(datasetId, limit) {
         return lakeStorage.listVersions(datasetId, limit)
+      },
+      listLatestVersionsSince(input) {
+        return lakeStorage.listLatestVersionsSince(input)
       },
       async beginWrite(input) {
         const write = await lakeStorage.beginWrite(input)

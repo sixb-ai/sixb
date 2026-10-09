@@ -28,7 +28,7 @@ import type { ProjectionDispatchDescriptor } from "@sixb/core/internal/projectio
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { compileRoutes } from "../src/compile-routes"
-import { reconcileProjectionDispatch } from "../src/projection-dispatch-reconciler"
+import { ProjectionDispatchReconciler } from "../src/projection-dispatch-reconciler"
 import type {
   OrchestratorRoutes,
   PipelineDispatcherPort,
@@ -373,6 +373,16 @@ function createTestProjectionDispatcher(
   }
 }
 
+async function noLakeChanges() {
+  return { cursor: "0", versions: [] }
+}
+
+const noProjectionRuns: ProjectionReconciliationPorts["projectionRuns"] = {
+  async list() {
+    return { runs: [], hasMore: false, total: 0 }
+  },
+}
+
 function invoiceProjectionDescriptor(
   overrides: Partial<ProjectionDispatchDescriptor> = {}
 ): ProjectionDispatchDescriptor {
@@ -663,7 +673,7 @@ describe("OrchestratorWorker", () => {
     const dispatches: ProjectionDispatchInput[] = []
     await startWorker(eventRuntime, queues, routes, PROJECT_ID, {
       dispatcher: createTestProjectionDispatcher(dispatches),
-      reconciliation: { lakeStorage: new InMemoryLakeStorage() },
+      reconciliation: { lakeStorage: new InMemoryLakeStorage(), projectionRuns: noProjectionRuns },
     })
 
     const [sourceEvent] = await eventRuntime.append({
@@ -699,7 +709,7 @@ describe("OrchestratorWorker", () => {
 
     await startWorker(createEvents(), queues, routes, PROJECT_ID, {
       dispatcher: createTestProjectionDispatcher(dispatches),
-      reconciliation: { lakeStorage },
+      reconciliation: { lakeStorage, projectionRuns: noProjectionRuns },
     })
 
     await waitFor(() => dispatches.length === 1)
@@ -723,25 +733,27 @@ describe("OrchestratorWorker", () => {
       attempts += 1
       if (attempts === 1) throw new Error("queue unavailable")
     })
-    const input = {
+    const reconciler = new ProjectionDispatchReconciler({
       projectId: PROJECT_ID,
       dispatcher,
       descriptors: [descriptor],
       lakeStorage,
-    }
+      projectionRuns: noProjectionRuns,
+    })
 
     const originalError = console.error
     console.error = () => {}
     try {
-      await reconcileProjectionDispatch(input)
-      await reconcileProjectionDispatch(input)
-      await reconcileProjectionDispatch(input)
+      await reconciler.pass()
+      await reconciler.pass()
+      await reconciler.pass()
     } finally {
       console.error = originalError
     }
 
-    expect(attempts).toBe(3)
-    expect(dispatches).toHaveLength(2)
+    // The failed lookup is retried once; nothing changed after it succeeded.
+    expect(attempts).toBe(2)
+    expect(dispatches).toHaveLength(1)
   })
 
   test("reconciles the latest data version behind schema-only versions", async () => {
@@ -762,11 +774,13 @@ describe("OrchestratorWorker", () => {
     }
     const dispatches: ProjectionDispatchInput[] = []
 
-    await reconcileProjectionDispatch({
+    await new ProjectionDispatchReconciler({
       projectId: PROJECT_ID,
       dispatcher: createTestProjectionDispatcher(dispatches),
       descriptors: [invoiceProjectionDescriptor()],
+      projectionRuns: noProjectionRuns,
       lakeStorage: {
+        listLatestVersionsSince: noLakeChanges,
         async listVersions() {
           return [schemaVersion, dataVersion]
         },
@@ -777,7 +791,7 @@ describe("OrchestratorWorker", () => {
           return versionId === dataVersion.versionId ? dataVersion : null
         },
       },
-    })
+    }).pass()
 
     expect(dispatches[0]?.datasetVersion.versionId).toBe(dataVersion.versionId)
   })
@@ -799,11 +813,13 @@ describe("OrchestratorWorker", () => {
     }
 
     try {
-      await reconcileProjectionDispatch({
+      await new ProjectionDispatchReconciler({
         projectId: PROJECT_ID,
         dispatcher: createTestProjectionDispatcher([]),
         descriptors: [descriptor],
+        projectionRuns: noProjectionRuns,
         lakeStorage: {
+          listLatestVersionsSince: noLakeChanges,
           async listVersions() {
             return [schemaVersion]
           },
@@ -814,7 +830,7 @@ describe("OrchestratorWorker", () => {
             return schemaVersion
           },
         },
-      })
+      }).pass()
     } finally {
       console.error = originalError
     }

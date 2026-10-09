@@ -11,7 +11,6 @@ import type {
   RulesWorkerOptions,
 } from "./types"
 
-const DEFAULT_RECONCILIATION_INTERVAL_MS = 60_000
 const DEFAULT_RECONCILIATION_PAGE_SIZE = 500
 const MAX_RECONCILIATION_PAGE_SIZE = 1_000
 
@@ -25,13 +24,13 @@ const ontologyEventTypes = [
 ] as const satisfies readonly DomainEvent["type"][]
 
 /**
- * Rules worker backed by live wake-up events and periodic current-state reconciliation.
+ * Rules worker backed by live wake-up events. Current state is reconciled at startup and after a
+ * failure, the only times an event's effect can have been missed.
  */
 export class RulesWorker extends Worker {
   private readonly runtime: RulesWorkerHost
   private readonly rules: readonly RuleDefinition[]
   private readonly index: RuleDependencyIndex
-  private readonly reconciliationIntervalMs: number
   private readonly reconciliationPageSize: number
 
   constructor(runtime: RulesWorkerHost, options: RulesWorkerOptions = {}) {
@@ -50,10 +49,6 @@ export class RulesWorker extends Worker {
     // Rules are definitions, not runtime state, so the dependency index can be
     // computed once per worker instance and reused for every event batch.
     this.index = buildRuleDependencyIndex(rules)
-    this.reconciliationIntervalMs = positiveInteger(
-      options.reconciliationIntervalMs ?? DEFAULT_RECONCILIATION_INTERVAL_MS,
-      "reconciliationIntervalMs"
-    )
     this.reconciliationPageSize = boundedPositiveInteger(
       options.reconciliationPageSize ?? DEFAULT_RECONCILIATION_PAGE_SIZE,
       "reconciliationPageSize",
@@ -102,7 +97,7 @@ export class RulesWorker extends Worker {
     // Subscribe first: events arriving during the initial scan join the same serialized queue and
     // re-read current state after reconciliation.
     coordinator.requestReconciliation()
-    await requestPeriodicReconciliation(coordinator, this.reconciliationIntervalMs, signal)
+    await waitForAbort(signal)
 
     unsubscribe()
     await coordinator.drain()
@@ -122,31 +117,10 @@ function isOntologyRuleEvent(event: StoredDomainEvent): event is OntologyRuleEve
   )
 }
 
-async function requestPeriodicReconciliation(
-  coordinator: EvaluationCoordinator,
-  intervalMs: number,
-  signal: AbortSignal
-): Promise<void> {
-  while (!signal.aborted) {
-    await waitForAbort(intervalMs, signal)
-    if (!signal.aborted) coordinator.requestReconciliation()
-  }
-}
-
-async function waitForAbort(timeoutMs: number, signal: AbortSignal): Promise<void> {
-  await new Promise<void>((resolve) => {
-    if (signal.aborted) {
-      resolve()
-      return
-    }
-
-    const timer = setTimeout(finish, timeoutMs)
-    function finish(): void {
-      clearTimeout(timer)
-      signal.removeEventListener("abort", finish)
-      resolve()
-    }
-    signal.addEventListener("abort", finish, { once: true })
+function waitForAbort(signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal.aborted) resolve()
+    else signal.addEventListener("abort", () => resolve(), { once: true })
   })
 }
 

@@ -285,13 +285,16 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
       assertProjectionRunNonEmpty(input.projectId, "projectId")
       assertProjectionRunListWindow(input.limit, "limit")
       assertProjectionRunListWindow(input.offset, "offset")
-      if (input.statuses?.length === 0) return { runs: [], hasMore: false, total: 0 }
+      if (input.statuses?.length === 0 || input.errorCodes?.length === 0) {
+        return { runs: [], hasMore: false, total: 0 }
+      }
 
       const order = input.order ?? "desc"
       const offset = input.offset ?? 0
       const limit = input.limit ?? this.rows.size
       const statuses = input.statuses ? new Set(input.statuses) : null
       const objectTypeIds = input.objectTypeIds ? new Set(input.objectTypeIds) : null
+      const errorCodes = input.errorCodes ? new Set(input.errorCodes) : null
       const filtered = [...this.rows.values()]
         .filter((record) => record.projectId === input.projectId)
         .filter((record) =>
@@ -314,6 +317,9 @@ export class InMemoryProjectionRunStorage implements ProjectionRunStorage {
             : true
         )
         .filter((record) => (statuses ? statuses.has(record.status) : true))
+        .filter((record) =>
+          errorCodes ? record.error !== undefined && errorCodes.has(record.error.code) : true
+        )
         .filter((record) =>
           matchesRunListDateFilters(record, {
             statuses,

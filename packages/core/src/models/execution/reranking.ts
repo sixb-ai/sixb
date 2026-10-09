@@ -76,6 +76,7 @@ async function executeReranking(
     callId,
     providerId: model.providerId,
     modelId: model.modelId,
+    modelKind: "reranking",
     costEstimator: model.costEstimator,
     inputTokens: { status: "estimated", tokens, method: "utf8BytesDividedByFour" },
     outputTokenAllowance: 0,

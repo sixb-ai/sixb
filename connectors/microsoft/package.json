@@ -1,7 +1,7 @@
 {
   "name": "@sixb/connector-microsoft",
   "version": "0.1.2",
-  "description": "Typed Microsoft Graph connector for Sixb (SharePoint, Outlook mail and calendars)",
+  "description": "Typed Microsoft Graph connector for Sixb (SharePoint, Outlook mail, calendars and contacts)",
   "keywords": [
     "sixb",
     "bun",
@@ -11,7 +11,8 @@
     "onedrive",
     "outlook",
     "email",
-    "calendar"
+    "calendar",
+    "contacts"
   ],
   "homepage": "https://sixb.ai",
   "bugs": {

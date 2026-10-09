@@ -1,4 +1,5 @@
 import type { AiModelCallReservationIdentity } from "../../storage"
+import type { ModelKind } from "../definitions"
 import type { ModelCostEstimator, ModelMoney } from "../pricing"
 
 /** Default output ceiling when a call and its resolved model supply no limit. */
@@ -24,6 +25,8 @@ export interface AiModelCallAdmissionInput {
   readonly callId: string
   readonly providerId: string
   readonly modelId: string
+  /** Selects the applicable limit meters; transcription and reranking skip token limits. */
+  readonly modelKind?: ModelKind
   readonly costEstimator?: ModelCostEstimator
   /** A non-token estimate, computed by the resolved binding before inference. */
   readonly reservationCost?: ModelMoney

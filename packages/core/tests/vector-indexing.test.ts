@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test"
+import { describe, expect, mock, spyOn, test } from "bun:test"
 import {
   defineObjectType,
   type EmbeddingModel,
@@ -17,7 +17,7 @@ import { vectorSources } from "../src/objects/vectors/profile"
 import { ProjectionRegistry } from "../src/projections/registry"
 import { getInMemoryOntologyStorageTestingAdapter } from "../src/storage/ontology/in-memory/testing"
 import { createTestSixb } from "../src/testing"
-import { createTestRuntimeDeps } from "./test-runtime-deps"
+import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
 
 function fixture(resolve?: EmbeddingModel["resolve"]) {
   const deps = createTestRuntimeDeps()
@@ -405,5 +405,54 @@ test("automatic indexing rejects catalog representation drift before inference",
   expect(await f.indexing.get({ projectId: f.host.id, id: work!.id })).toMatchObject({
     status: "failed",
     error: { code: "vector.model_unavailable" },
+  })
+})
+
+describe("vector indexing dispatch", () => {
+  const claim = (f: ReturnType<typeof fixture>) =>
+    f.queues.vectorIndexing.claim({ projectId: f.host.id, workerId: "test", limit: 10 })
+
+  test("a commit hands its intent to the queue without a poll", async () => {
+    // Removal proof: drop `this.vectorIndexing?.notify()` from SixbHost; nothing is ever enqueued.
+    const f = fixture()
+    await f.write("source")
+    const [work] = await f.due()
+    const claimed = await waitFor(
+      () => claim(f),
+      (jobs) => jobs.length > 0
+    )
+    expect(claimed.map(({ job }) => job.payload.indexingId)).toEqual([work!.id])
+  })
+
+  test("maintenance dispatches intent that its commit could not hand off", async () => {
+    // Removal proof: drop the vector drain from OntologyMaintenance.runPass; nothing is enqueued.
+    const f = fixture()
+    const queue = f.queues.vectorIndexing
+    const enqueue = queue.enqueue.bind(queue)
+    const logged = spyOn(console, "error").mockImplementation(() => {})
+    try {
+      queue.enqueue = async () => {
+        throw new Error("queue unavailable")
+      }
+      await f.write("source")
+      await waitFor(
+        () => logged.mock.calls.length,
+        (calls) => calls > 0
+      )
+      queue.enqueue = enqueue
+      expect(await claim(f)).toEqual([])
+      const maintenance = await f.host.startOntologyMaintenance()
+      try {
+        const claimed = await waitFor(
+          () => claim(f),
+          (jobs) => jobs.length > 0
+        )
+        expect(claimed).toHaveLength(1)
+      } finally {
+        await maintenance.stop()
+      }
+    } finally {
+      logged.mockRestore()
+    }
   })
 })
