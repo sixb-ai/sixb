@@ -440,7 +440,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         })
         // Access tokens are not sessions; a native client's session has no cookies to renew.
         if (!caller.authenticated || caller.credentialSource !== "session") {
-          return jsonResponse({ authenticated: false as const }, 200)
+          return signedOutSessionResponse(host)
         }
         // A native client belongs to no web app; tell it whether its user may open Atlas.
         if (caller.session.bearer) {
@@ -453,7 +453,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             ? await host.auth.getSession(request, { ...authOptions, sessionActivity: "foreground" })
             : caller
         if (!session.authenticated) {
-          return jsonResponse({ authenticated: false as const }, 200)
+          return signedOutSessionResponse(host)
         }
 
         const cookieOptions = host.auth.getCookieOptions(authOptions)
@@ -1946,6 +1946,11 @@ function authSessionBody(
     },
     session: { id: session.session.id, expiresAt: toIsoString(session.session.expiresAt) },
   }
+}
+
+/** No session. Says whether auth is on, so a browser shell knows whether to ask for sign-in. */
+function signedOutSessionResponse(host: SixbHostView): Response {
+  return jsonResponse({ authenticated: false as const, authEnabled: host.auth.isEnabled() }, 200)
 }
 
 function authSessionJsonResponse(

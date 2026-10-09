@@ -1464,9 +1464,12 @@
                         "authenticated": {
                           "type": "boolean",
                           "enum": [false]
+                        },
+                        "authEnabled": {
+                          "type": "boolean"
                         }
                       },
-                      "required": ["authenticated"],
+                      "required": ["authenticated", "authEnabled"],
                       "additionalProperties": false
                     },
                     {

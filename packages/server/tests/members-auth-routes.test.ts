@@ -406,12 +406,12 @@ describe("auth member routes", () => {
     expect(await suspend.json()).toMatchObject({
       member: { user: { id: "usr_target", status: "suspended" }, groupIds: ["commercial"] },
     })
-    expect(await sessionAfterSuspend.json()).toEqual({ authenticated: false })
+    expect(await sessionAfterSuspend.json()).toEqual({ authenticated: false, authEnabled: true })
     expect(reactivate.status).toBe(200)
     expect(await reactivate.json()).toMatchObject({
       member: { user: { id: "usr_target", status: "active" }, groupIds: ["commercial"] },
     })
-    expect(await sessionAfterReactivate.json()).toEqual({ authenticated: false })
+    expect(await sessionAfterReactivate.json()).toEqual({ authenticated: false, authEnabled: true })
   })
 
   test("enforces self-protection", async () => {

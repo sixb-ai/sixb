@@ -75,6 +75,8 @@ export interface SixbSharedBrowserClientController extends SixbBrowserClientCont
 }
 
 let activeBrowserController: SixbBrowserClientController | null = null
+// Controllers whose API reported that it runs without auth: a 401 there is not a sign-in prompt.
+const authDisabledControllers = new WeakSet<SixbBrowserClientController>()
 
 declare global {
   interface Window {
@@ -134,6 +136,7 @@ export function configureSixbBrowserClient(
 
     if (
       !config.auth.enabled ||
+      authDisabledControllers.has(controller) ||
       response.status !== 401 ||
       isAuthRedirectExcludedRequest(config, request) ||
       request.headers.has("authorization")
@@ -462,6 +465,12 @@ export async function requireSixbBrowserAuthSession(
   }
 
   controller.setCsrfToken(null)
+  // The shell cannot know whether the project uses auth; the API can. Without it, there is
+  // nobody to sign in as and every request is allowed.
+  if (data.authEnabled === false) {
+    authDisabledControllers.add(controller)
+    return data
+  }
   const returnTo = options.returnTo ?? window.location.href
   const redirect = options.redirect ?? ((url: string) => window.location.assign(url))
   redirect(createSixbSignInUrl(config, returnTo))

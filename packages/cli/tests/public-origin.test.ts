@@ -8,7 +8,7 @@ import {
   SixbHost,
 } from "@sixb/core"
 import { createTestSixb } from "@sixb/core/testing"
-import { recordApiPublicOrigin } from "../src/lib/public-origin"
+import { recordApiPublicOrigin } from "../src/lib/runtime"
 
 const previousOrigin = process.env.SIXB_API_PUBLIC_ORIGIN
 

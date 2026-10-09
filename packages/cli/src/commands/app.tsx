@@ -1,9 +1,5 @@
-import type { CustomAppDevServer } from "@sixb/app"
-import {
-  answerBrowserRoleProbe,
-  isBrowserRoleProbe,
-  probeBrowserRoleProject,
-} from "../lib/browser-role-probe"
+import { basename } from "node:path"
+import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
 import { resolveBrowserTopology, servedUrl } from "../lib/browser-topology"
 import {
   builtAppOutdir,
@@ -12,7 +8,7 @@ import {
   resolveRuntimeEntry,
 } from "../lib/production"
 import { runUntilSignal, stopQuietly } from "../lib/role-lifecycle"
-import { LoadingView, RoleView, renderCliError, renderPersistent } from "../ui"
+import { loadRoleView } from "../lib/role-view"
 
 export interface AppOptions {
   entry?: string
@@ -23,28 +19,17 @@ export interface AppOptions {
 }
 
 export async function runApp(options: AppOptions = {}) {
+  // Before NODE_ENV changes: see loadRoleView.
+  const view = await loadRoleView()
   process.env.NODE_ENV = "production"
 
-  if (isBrowserRoleProbe()) {
-    try {
-      await answerBrowserRoleProbe({ entry: options.entry, role: "app" })
-    } catch (error) {
-      await renderCliError(error)
-      process.exit(1)
-    }
-    process.exit(0)
-  }
-
   const entry = await resolveRuntimeEntry({ entry: options.entry })
-  // The server package loads while the probe reads the project, and the probe never loads it.
-  const [project, { createCustomApp }] = await Promise.all([
-    probeBrowserRoleProject("app"),
-    import("@sixb/app"),
-  ])
   const { projectRoot, buildOutdir } = await resolveProductionPaths(entry)
-  const app = renderPersistent(
-    <LoadingView title="Starting sixb app" subtitle={entry} status="Starting app" />
-  )
+  const app = view.startup({
+    title: "Starting sixb app",
+    subtitle: entry,
+    status: "Starting app",
+  })
 
   let customAppServer: CustomAppDevServer | null = null
 
@@ -68,7 +53,8 @@ export async function runApp(options: AppOptions = {}) {
       rootDir: projectRoot,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
-      authEnabled: project.authEnabled,
+      // No authEnabled: the page asks the API whether the project uses auth, so serving the
+      // bundle never loads the project.
     })
     customAppServer = await customApp.start({
       host: topology.host,
@@ -76,17 +62,14 @@ export async function runApp(options: AppOptions = {}) {
       outdir: appOutdir,
       apiBaseUrl: topology.apiPublicOrigin,
       audience: "app",
-      authEnabled: project.authEnabled,
     })
 
-    app.rerender(
-      <RoleView
-        title="Sixb app started"
-        name={project.id}
-        serviceName="Custom app"
-        items={[{ label: "URL", value: servedUrl(topology) }]}
-      />
-    )
+    app.started({
+      title: "Sixb app started",
+      name: basename(projectRoot),
+      serviceName: "Custom app",
+      items: [{ label: "URL", value: servedUrl(topology) }],
+    })
 
     await runUntilSignal(async () => {
       app.unmount()
@@ -96,7 +79,7 @@ export async function runApp(options: AppOptions = {}) {
   } catch (error) {
     app.unmount()
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
-    await renderCliError(error)
+    await view.error(error)
     process.exit(1)
   }
 }

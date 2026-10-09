@@ -274,6 +274,11 @@ export const RevokeAuthInvitationResponseSchema = z.object({
 export const AuthSessionResponseSchema = z.union([
   z.object({
     authenticated: z.literal(false),
+    /**
+     * False when the project runs without auth: every request is allowed and there is nothing to
+     * sign in to. Browser shells read it instead of being told by the server that serves them.
+     */
+    authEnabled: z.boolean(),
   }),
   z.object({
     authenticated: z.literal(true),

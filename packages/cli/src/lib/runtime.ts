@@ -7,6 +7,7 @@ import {
   getProjectionDispatchDescriptors,
   ProjectionRunDispatcher,
 } from "@sixb/core/internal/projections"
+import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import { SyncRunDispatcher } from "@sixb/core/internal/syncs"
 import type { Worker } from "@sixb/core/internal/workers"
 import { WorkflowRunDispatcher } from "@sixb/core/internal/workflows"
@@ -22,6 +23,7 @@ import { RulesWorker } from "@sixb/rules-worker"
 import { SyncWorker } from "@sixb/sync-worker"
 import { WorkflowWorker } from "@sixb/workflow-worker"
 import type { LoadedSixbHost } from "./loadSixb"
+import { configuredOrigin } from "./public-origin"
 import { stopQuietly } from "./role-lifecycle"
 import type { WorkerConcurrency } from "./worker-registry"
 import { agentRuntimeRequired, agentWorkerRequired } from "./worker-registry"
@@ -70,6 +72,16 @@ export interface RunningOrchestratorRuntime {
   readonly orchestratorWorker: OrchestratorWorker | null
   readonly warnings: readonly string[]
   stop(): Promise<void>
+}
+
+/**
+ * Tell a worker process's host where the API is reachable, so the code it runs can hand out URLs
+ * a third party will fetch (`blobs.createDownloadUrl()`). The API process needs no call: the
+ * server records the origin it serves. Without one, those calls fail and name the variable.
+ */
+export function recordApiPublicOrigin(sixb: LoadedSixbHost, value: string | undefined): void {
+  const origin = configuredOrigin(value, "SIXB_API_PUBLIC_ORIGIN", "API public origin")
+  if (origin) setApiPublicOrigin(sixb, origin)
 }
 
 export async function migrateRuntimeStorage(sixb: LoadedSixbHost): Promise<void> {
