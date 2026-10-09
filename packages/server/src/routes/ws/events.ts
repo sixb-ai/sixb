@@ -95,7 +95,7 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
   return app.ws("/ws/events", {
     async open(ws) {
       // Any authenticated principal may connect; events are filtered per-event
-      // by grants as they stream (see `matches` below).
+      // by grants as they stream (see `view` below).
       const state: EventSocketState = {
         replayFrom: null,
         initialized: Promise.resolve(),
@@ -155,8 +155,10 @@ export function registerEventStreamRoutes(app: Elysia, server: SixbServer) {
             matches: (event) =>
               (!filter.topic || event.topic === filter.topic) &&
               (!filter.types?.length || filter.types.includes(event.type)) &&
-              eventMatchesScope(event, filter) &&
-              sixb.events.canRead(event),
+              eventMatchesScope(event, filter),
+            // The execution facade owns per-event visibility: it withholds events the caller
+            // cannot view and omits marked properties the caller is not cleared for.
+            view: (event) => sixb.events.readable(event),
             replay: replayFrom
               ? {
                   afterCursor: replayFrom.afterCursor,

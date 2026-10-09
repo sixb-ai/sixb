@@ -438,6 +438,8 @@ export type {
   ObjectReadRoot,
   ObjectReadScopeFactory,
   ObjectReadStorage,
+  ObjectRedactionReason,
+  ObjectRedactions,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,

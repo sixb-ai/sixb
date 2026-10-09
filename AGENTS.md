@@ -98,7 +98,7 @@ repo's `typecheck` chain reads source.
 
 - Define ontology types with `defineObjectType`, `prop`, `link`, `action`, and `defineValueType`.
 - Most runtimes start with `createSixb()`.
-- `createSixb()` auto-discovers `ontology/`, `actions/`, `datasets/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, `connectors/`, `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,policies}/`. The `app/` directory is served separately and is not part of `createSixb()` discovery.
+- `createSixb()` auto-discovers `ontology/`, `actions/`, `datasets/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`, `connectors/`, `rules/`, `workflows/`, `agents/`, and `security/{groups,roles,markings,policies}/`. The `app/` directory is served separately and is not part of `createSixb()` discovery.
 - `sixb.objects(MyType)` is the typed API for object CRUD, telemetry, links, and actions.
 - Important domain events include `object.created`, `object.updated`, `object.deleted`, `link.created`, `link.updated`, `link.deleted`, `telemetry.appended`, and `action.requested`.
 - Convention-based discovery is the normal registration model.

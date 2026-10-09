@@ -8,6 +8,12 @@ export type ErrorResponse = {
   error: string
 }
 
+export type ObjectRedactions = {
+  [key: string]: {
+    reason: "missing_clearance"
+  }
+}
+
 export type ObjectQueryObject = {
   score?: number
   primaryId: string
@@ -15,6 +21,7 @@ export type ObjectQueryObject = {
   properties: {
     [key: string]: unknown
   }
+  redactions?: ObjectRedactions
   createdAt: string
   updatedAt: string
   links?: {
@@ -8711,6 +8718,11 @@ export type ListObjectsResponses = {
       properties: {
         [key: string]: unknown
       }
+      redactions?: {
+        [key: string]: {
+          reason: "missing_clearance"
+        }
+      }
       createdAt: string
       updatedAt: string
     }>
@@ -9040,6 +9052,11 @@ export type GetObjectResponses = {
     properties: {
       [key: string]: unknown
     }
+    redactions?: {
+      [key: string]: {
+        reason: "missing_clearance"
+      }
+    }
     createdAt: string
     updatedAt: string
   }
@@ -9094,6 +9111,11 @@ export type UpsertObjectResponses = {
     objectTypeId: string
     properties: {
       [key: string]: unknown
+    }
+    redactions?: {
+      [key: string]: {
+        reason: "missing_clearance"
+      }
     }
     createdAt: string
     updatedAt: string
@@ -12156,6 +12178,11 @@ export type ListEventsResponses = {
                     after: null
                   }
             }
+            redactions?: {
+              [key: string]: {
+                reason: "missing_clearance"
+              }
+            }
           }
         }
       | {
@@ -12318,6 +12345,11 @@ export type ListEventsResponses = {
                     after: null
                   }
             }
+            redactions?: {
+              [key: string]: {
+                reason: "missing_clearance"
+              }
+            }
           }
         }
       | {
@@ -12468,6 +12500,11 @@ export type ListEventsResponses = {
                       | null
                     after: null
                   }
+            }
+            redactions?: {
+              [key: string]: {
+                reason: "missing_clearance"
+              }
             }
           }
         }

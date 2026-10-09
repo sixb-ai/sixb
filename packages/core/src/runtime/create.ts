@@ -20,7 +20,12 @@ import type { Queues } from "../queues"
 import type { RuleDefinition } from "../rules"
 import type { SandboxFactory } from "../sandboxes"
 import type { ScheduleDefinition } from "../schedules"
-import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "../security"
+import type {
+  GroupDefinition,
+  MarkingDefinition,
+  MembershipPolicyDefinition,
+  RoleDefinition,
+} from "../security"
 import type { ParamsConfig } from "../shared/params/types"
 import type { ShareDefinition } from "../shares"
 import type { Storage } from "../storage"
@@ -63,6 +68,7 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
   projections?: readonly ProjectionDefinition[]
   rules?: readonly RuleDefinition[]
   workflows?: readonly WorkflowDefinition[]
+  markings?: readonly MarkingDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]
@@ -124,6 +130,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     projections: [...(options.projections ?? []), ...definitions.projections],
     rules: [...(options.rules ?? []), ...definitions.rules],
     workflows: [...(options.workflows ?? []), ...definitions.workflows],
+    markings: [...(options.markings ?? []), ...definitions.markings],
     groups: [...(options.groups ?? []), ...definitions.groups],
     roles: [...(options.roles ?? []), ...definitions.roles],
     membershipPolicies: [...(options.membershipPolicies ?? []), ...definitions.membershipPolicies],

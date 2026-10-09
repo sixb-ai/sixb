@@ -14,7 +14,7 @@
 import type {
   ActionDefinition,
   DatasetDefinition,
-  InferObjectProperties,
+  InferObjectReadProperties,
   InferPropertyValue,
   PipelineDefinition,
   RuleDefinition,
@@ -116,7 +116,7 @@ type ObjectPropertiesEventOf<
 > = Override<
   TEvent,
   {
-    payload: Override<TEvent["payload"], { properties: InferObjectProperties<TObjectType> }>
+    payload: Override<TEvent["payload"], { properties: InferObjectReadProperties<TObjectType> }>
   }
 >
 

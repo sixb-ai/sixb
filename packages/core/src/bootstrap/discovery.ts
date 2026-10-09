@@ -21,7 +21,12 @@ import { isProjectionDefinition } from "../projections/builders"
 import { isRuleDefinition } from "../rules"
 import { RuntimeError } from "../runtime/errors"
 import { isScheduleDefinition } from "../schedules"
-import { isGroupDefinition, isMembershipPolicyDefinition, isRoleDefinition } from "../security"
+import {
+  isGroupDefinition,
+  isMarkingDefinition,
+  isMembershipPolicyDefinition,
+  isRoleDefinition,
+} from "../security"
 import { isShareDefinition } from "../shares"
 import { isSyncDefinition } from "../syncs"
 import { isWorkflowDefinition } from "../workflows"
@@ -71,6 +76,7 @@ export type DiscoveryModuleKind =
   | "connector"
   | "dataset"
   | "group"
+  | "marking"
   | "membershipPolicy"
   | "ontology"
   | "pipeline"
@@ -142,6 +148,11 @@ const definitionDiscoveryRegistry = {
     directory: ["workflows"],
     kind: "workflow",
     isDefinition: isWorkflowDefinition,
+  },
+  markings: {
+    directory: ["security", "markings"],
+    kind: "marking",
+    isDefinition: isMarkingDefinition,
   },
   groups: {
     directory: ["security", "groups"],

@@ -39,10 +39,13 @@ import { rerankObjectCandidates } from "./reranking-executor"
 import { findQueryReranking } from "./reranking-query"
 import { compareQueryScalarValues, queryScalarValuesEqual } from "./scalar-values"
 import {
+  type AdmittedObjectQuery,
+  type ObjectQuerySemanticAdmission,
   type ObjectQueryValidationIssue,
   resolveObjectQueryResultShape,
   type ValidatedObjectQuery,
   validateObjectQuery,
+  validateObjectQueryWithAdmission,
 } from "./validate"
 
 export interface QueryExecutorOptions
@@ -73,6 +76,8 @@ export interface QueryExecutorOptions
   authorization?: AuthorizationContext
   /** Registered execution capability for queries reached through a bound Sixb SDK. */
   runtimeAuthorization?: RuntimeAuthorization
+  /** Reader-specific admission applied after grants, such as marking clearances. */
+  admission?: ObjectQuerySemanticAdmission
 }
 
 export interface ExecuteObjectQueryInput {
@@ -138,15 +143,7 @@ export async function executeObjectQuery(
   input: ExecuteObjectQueryInput,
   options: QueryExecutorOptions
 ): Promise<ExecuteObjectQueryResult> {
-  const normalized = normalizeObjectQuery(input.query)
-  const validated = validateObjectQuery(normalized, {
-    ontology: options.ontology,
-    maxLimit: options.maxLimit,
-    maxPageSize: options.maxPageSize,
-    maxRefs: options.maxRefs,
-    normalize: false,
-  })
-  assertQueryViewable(input.projectId, validated, options)
+  const validated = validateExecutableQuery(input, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -242,15 +239,7 @@ export async function countObjects(
   input: ExecuteObjectCountInput,
   options: QueryExecutorOptions
 ): Promise<ExecuteObjectCountResult> {
-  const normalized = normalizeObjectQuery(input.query)
-  const validated = validateObjectQuery(normalized, {
-    ontology: options.ontology,
-    maxLimit: options.maxLimit,
-    maxPageSize: options.maxPageSize,
-    maxRefs: options.maxRefs,
-    normalize: false,
-  })
-  assertQueryViewable(input.projectId, validated, options)
+  const validated = validateExecutableQuery(input, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -303,15 +292,7 @@ export async function existsObjects(
   input: ExecuteObjectExistsInput,
   options: QueryExecutorOptions
 ): Promise<ExecuteObjectExistsResult> {
-  const normalized = normalizeObjectQuery(input.query)
-  const validated = validateObjectQuery(normalized, {
-    ontology: options.ontology,
-    maxLimit: options.maxLimit,
-    maxPageSize: options.maxPageSize,
-    maxRefs: options.maxRefs,
-    normalize: false,
-  })
-  assertQueryViewable(input.projectId, validated, options)
+  const validated = validateExecutableQuery(input, options)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
   const hasCountObjects = typeof options.storage.countObjects === "function"
@@ -364,16 +345,17 @@ export async function facetObjects(
   input: ExecuteObjectFacetsInput,
   options: QueryExecutorOptions
 ): Promise<ExecuteObjectFacetsResult> {
-  const normalized = normalizeObjectQuery(input.query)
-  const validated = validateObjectQuery(normalized, {
-    ontology: options.ontology,
-    maxLimit: options.maxLimit,
-    maxPageSize: options.maxPageSize,
-    maxRefs: options.maxRefs,
-    normalize: false,
-  })
-  assertQueryViewable(input.projectId, validated, options)
+  const validated = validateExecutableQuery(input, options)
   const facets = validateObjectFacetRequests(input.facets, validated.result.objectTypeIds, options)
+  facets.forEach((facet, index) => {
+    const denial = options.admission?.property({
+      state: validated.admissionState,
+      propertyId: facet.propertyId,
+      use: "facet",
+      path: `$.facets[${index}].propertyId`,
+    })
+    if (denial) throw denial
+  })
   const aggregateQuery = stripOuterRowShape(validated.query)
   const capabilities = options.storage.queryCapabilities()
   const hasQueryObjects = typeof options.storage.queryObjects === "function"
@@ -428,6 +410,31 @@ export async function facetObjects(
     ),
     plan,
   }
+}
+
+/**
+ * Validate, authorize the touched types, then admit the query for the reader.
+ *
+ * Grants are checked first so a denial never describes properties of a type the caller cannot
+ * view. The admitted query is the one executed: an admission may narrow it, as markings narrow
+ * default text fields.
+ */
+function validateExecutableQuery(
+  input: { readonly projectId: string; readonly query: ObjectQuery },
+  options: QueryExecutorOptions
+): AdmittedObjectQuery {
+  const validationOptions = {
+    ontology: options.ontology,
+    maxLimit: options.maxLimit,
+    maxPageSize: options.maxPageSize,
+    maxRefs: options.maxRefs,
+    normalize: false,
+  }
+  const normalized = normalizeObjectQuery(input.query)
+  const validated = validateObjectQuery(normalized, validationOptions)
+  assertQueryViewable(input.projectId, validated, options)
+  if (!options.admission) return { ...validated, admissionState: {} }
+  return validateObjectQueryWithAdmission(normalized, validationOptions, options.admission)
 }
 
 // Authorization happens at planning time: a scoped query must hold a view

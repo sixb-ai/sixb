@@ -345,11 +345,15 @@ export const ObjectQueryLinksRequestSchema = z
   })
   .strict()
 
+/** Properties omitted because the caller lacks a clearance for their markings. */
+export const ObjectRedactionsSchema = z.record(z.object({ reason: z.literal("missing_clearance") }))
+
 export const TwinObjectSchema = z.object({
   score: z.number().finite().optional(),
   primaryId: z.string(),
   objectTypeId: z.string(),
   properties: z.record(z.unknown()),
+  redactions: ObjectRedactionsSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 })
@@ -385,6 +389,16 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
       error: { type: "string" },
     },
   },
+  // Properties omitted because the caller lacks a clearance for their markings.
+  ObjectRedactions: {
+    type: "object",
+    additionalProperties: {
+      type: "object",
+      required: ["reason"],
+      additionalProperties: false,
+      properties: { reason: { type: "string", enum: ["missing_clearance"] } },
+    },
+  },
   ObjectQueryObject: {
     type: "object",
     required: ["primaryId", "objectTypeId", "properties", "createdAt", "updatedAt"],
@@ -394,6 +408,7 @@ export const ObjectQueryOpenApiSchemas: OpenApiSchemas = {
       primaryId: { type: "string" },
       objectTypeId: { type: "string" },
       properties: { type: "object", additionalProperties: true },
+      redactions: { $ref: "#/components/schemas/ObjectRedactions" },
       createdAt: { type: "string" },
       updatedAt: { type: "string" },
       // Populated only on the query route, by an `expand` node: linked objects

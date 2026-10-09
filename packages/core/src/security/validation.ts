@@ -5,6 +5,7 @@ import type {
   GrantCapability,
   GrantDefinition,
   GroupDefinition,
+  MarkingDefinition,
   MembershipPolicyDefinition,
   RegisteredSecurityDefinitions,
   RoleDefinition,
@@ -129,6 +130,32 @@ function assertNoDuplicateOperations(
       )
     }
     seen.add(operation)
+  }
+}
+
+export function assertMarkingDefinition(
+  value: unknown,
+  createError: CreateSecurityError = (message) => new SecurityValidationError(message)
+): asserts value is MarkingDefinition {
+  if (!isRecord(value)) {
+    throw createError("[Sixb] Marking definition must be an object.")
+  }
+
+  if (value.kind !== "marking") {
+    throw createError("[Sixb] Marking definition kind must be 'marking'.")
+  }
+
+  assertNonEmptyString(value.id, "Marking id", createError)
+  assertOptionalString(value.label, `Marking '${value.id}' label`, createError)
+  assertOptionalString(value.description, `Marking '${value.id}' description`, createError)
+}
+
+export function isMarkingDefinition(value: unknown): value is MarkingDefinition {
+  try {
+    assertMarkingDefinition(value, (message) => new Error(message))
+    return true
+  } catch {
+    return false
   }
 }
 
@@ -285,6 +312,10 @@ export function assertRoleDefinition(
   for (const grant of value.grants) {
     assertGrantDefinition(grant, `Role '${value.id}' grants`, createError)
   }
+
+  if (value.clearances !== undefined) {
+    assertStringArray(value.clearances, `Role '${value.id}' clearances`, createError)
+  }
 }
 
 export function isRoleDefinition(value: unknown): value is RoleDefinition {
@@ -297,6 +328,7 @@ export function isRoleDefinition(value: unknown): value is RoleDefinition {
 }
 
 export function validateSecurityDefinitionsAtStartup(input: {
+  readonly markings?: readonly MarkingDefinition[]
   readonly groups: readonly GroupDefinition[]
   readonly membershipPolicies: readonly MembershipPolicyDefinition[]
   readonly roles?: readonly RoleDefinition[]
@@ -325,9 +357,20 @@ export function validateSecurityDefinitionsAtStartup(input: {
   /** Registered Share ids — when provided, share grants must reference them. */
   readonly shareIds?: ReadonlySet<string>
 }): RegisteredSecurityDefinitions {
+  const markingsById = new Map<string, MarkingDefinition>()
   const groupsById = new Map<string, GroupDefinition>()
   const rolesById = new Map<string, RoleDefinition>()
   const membershipPoliciesById = new Map<string, MembershipPolicyDefinition>()
+
+  for (const marking of input.markings ?? []) {
+    assertMarkingDefinition(marking)
+
+    if (markingsById.has(marking.id)) {
+      throw new SecurityValidationError(`[Sixb] Duplicate marking id: ${marking.id}`)
+    }
+
+    markingsById.set(marking.id, marking)
+  }
 
   for (const group of input.groups) {
     assertGroupDefinition(group)
@@ -352,11 +395,23 @@ export function validateSecurityDefinitionsAtStartup(input: {
       )
     }
 
-    if (role.grants.length === 0) {
-      throw new SecurityValidationError(`[Sixb] Role '${role.id}' must declare at least one grant.`)
+    const clearances = role.clearances ?? []
+    if (role.grants.length === 0 && clearances.length === 0) {
+      throw new SecurityValidationError(
+        `[Sixb] Role '${role.id}' must declare at least one grant or clearance.`
+      )
     }
 
     assertNoDuplicateIds(role.grantedToGroupIds, `Role '${role.id}' grantedTo`)
+    assertNoDuplicateIds(clearances, `Role '${role.id}' clearances`)
+
+    for (const markingId of clearances) {
+      if (!markingsById.has(markingId)) {
+        throw new SecurityValidationError(
+          `[Sixb] Role '${role.id}' clearances reference unknown marking '${markingId}'. Add it to 'security/markings/' or pass it to createSixb({ markings }).`
+        )
+      }
+    }
 
     for (const groupId of role.grantedToGroupIds) {
       if (!groupsById.has(groupId)) {
@@ -416,6 +471,8 @@ export function validateSecurityDefinitionsAtStartup(input: {
   }
 
   return {
+    markings: [...markingsById.values()],
+    markingsById,
     groups: [...groupsById.values()],
     groupsById,
     roles: [...rolesById.values()],

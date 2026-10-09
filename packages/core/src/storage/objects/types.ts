@@ -33,7 +33,19 @@ export interface ObjectRow {
    * `.links` typing are layered on top of this runtime shape.
    */
   links?: ObjectRowLinks
+  /**
+   * Properties omitted because the reader lacks a clearance, keyed by property id.
+   *
+   * Populated by the authorized object reader; storage providers never read or write it.
+   */
+  redactions?: ObjectRedactions
 }
+
+/** Why a property was omitted from a read. */
+export type ObjectRedactionReason = "missing_clearance"
+
+/** Omitted properties keyed by property id. A redacted property is absent, never `null`. */
+export type ObjectRedactions = Readonly<Record<string, { readonly reason: ObjectRedactionReason }>>
 
 /** Per-link expansion result keyed by link id (see {@link ObjectQueryExpand}). */
 export type ObjectRowLinks = Record<string, ExpandedLinkValue>

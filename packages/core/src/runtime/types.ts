@@ -43,11 +43,12 @@ import type { OntologyDocumentInput, OntologyRegistry, OntologySource } from "..
 import type {
   LinkToken,
   ObjectTypeProperties,
+  ObjectTypeReadProperties,
   ObjectTypeWithPropertyTokens,
   PropertyToken,
 } from "../ontology/tokens"
 import type { Queues } from "../queues"
-import type { ActionRunRecord, ObjectLinkRow, Storage } from "../storage"
+import type { ActionRunRecord, ObjectLinkRow, ObjectRedactions, Storage } from "../storage"
 // ── Shared runtime context ──────────────────────────────────
 
 /**
@@ -100,7 +101,7 @@ export type { OntologyDocumentInput, OntologySource }
 // ── Rows ────────────────────────────────────────────────────
 //
 // Rows read `properties` from the type inferred where the object type is defined
-// (`ObjectTypeProperties`), never from the schema, so relating two rows — or anything returning
+// (`ObjectTypeReadProperties`), never from the schema, so relating two rows — or anything returning
 // them — costs no schema inference. Rows and query builders also declare their variance, so
 // TypeScript never measures it: a measurement that overflows (TS2589) caches the variance it gave
 // up on, under which a plain query once passed for an expanded one.
@@ -109,7 +110,10 @@ export type { OntologyDocumentInput, OntologySource }
 export type TwinObject<out TObjectType extends ObjectTypeWithPropertyTokens> = {
   primaryId: string
   objectTypeId: TObjectType["id"]
-  properties: ObjectTypeProperties<TObjectType>
+  /** A marked property is absent when the reader lacks its clearance; see `redactions`. */
+  properties: ObjectTypeReadProperties<TObjectType>
+  /** Properties omitted because the reader lacks a clearance, keyed by property id. */
+  redactions?: ObjectRedactions
   createdAt: Date
   updatedAt: Date
 }

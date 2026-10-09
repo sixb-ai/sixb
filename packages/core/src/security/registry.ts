@@ -1,10 +1,17 @@
 import { type ResolvedRole, resolveRoleGrants } from "../authorization"
 import { APPLICATION_IDS } from "./applications"
-import type { GroupDefinition, MembershipPolicyDefinition, RoleDefinition } from "./types"
+import type {
+  GroupDefinition,
+  MarkingDefinition,
+  MembershipPolicyDefinition,
+  RoleDefinition,
+} from "./types"
 import { validateSecurityDefinitionsAtStartup } from "./validation"
 
 /** Read-only access to validated security definitions and resolved role grants. */
 export interface SecurityDefinitionCatalog {
+  listMarkings(): readonly MarkingDefinition[]
+  getMarkingById(markingId: string): MarkingDefinition | null
   listGroups(): readonly GroupDefinition[]
   getGroupById(groupId: string): GroupDefinition | null
   listRoles(): readonly RoleDefinition[]
@@ -15,6 +22,7 @@ export interface SecurityDefinitionCatalog {
 }
 
 export interface SecurityRegistryOptions {
+  readonly markings?: readonly MarkingDefinition[]
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
@@ -32,6 +40,7 @@ export interface SecurityRegistryOptions {
 }
 
 export class SecurityRegistry implements SecurityDefinitionCatalog {
+  private readonly markingsById: ReadonlyMap<string, MarkingDefinition>
   private readonly groupsById: ReadonlyMap<string, GroupDefinition>
   private readonly rolesById: ReadonlyMap<string, RoleDefinition>
   private readonly membershipPoliciesById: ReadonlyMap<string, MembershipPolicyDefinition>
@@ -39,6 +48,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
 
   constructor(input: SecurityRegistryOptions) {
     const definitions = validateSecurityDefinitionsAtStartup({
+      markings: input.markings ?? [],
       groups: input.groups ?? [],
       roles: input.roles ?? [],
       membershipPolicies: input.membershipPolicies ?? [],
@@ -71,6 +81,7 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       getSubTypes: input.getSubTypes ?? (() => []),
     }
 
+    this.markingsById = definitions.markingsById
     this.groupsById = definitions.groupsById
     this.rolesById = definitions.rolesById
     this.membershipPoliciesById = definitions.membershipPoliciesById
@@ -78,7 +89,16 @@ export class SecurityRegistry implements SecurityDefinitionCatalog {
       id: role.id,
       grantedToGroupIds: role.grantedToGroupIds,
       grants: resolveRoleGrants(role, universe),
+      clearances: new Set(role.clearances ?? []),
     }))
+  }
+
+  listMarkings(): readonly MarkingDefinition[] {
+    return [...this.markingsById.values()]
+  }
+
+  getMarkingById(markingId: string): MarkingDefinition | null {
+    return this.markingsById.get(markingId) ?? null
   }
 
   listGroups(): readonly GroupDefinition[] {

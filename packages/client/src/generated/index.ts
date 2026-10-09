@@ -669,6 +669,7 @@ export type {
   ObjectQueryRequest,
   ObjectQueryResponse,
   ObjectQuerySortField,
+  ObjectRedactions,
   ObjectRef,
   PostAgentThreadMessageData,
   PostAgentThreadMessageError,

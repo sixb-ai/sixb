@@ -162,6 +162,67 @@ const NOOP_QUERY_ADMISSION: ObjectQuerySemanticAdmission = Object.freeze({
     input.states[0] ?? NOOP_ADMISSION_STATE,
 })
 
+/**
+ * Admit a query only when both admissions admit it, each reducing its own state.
+ *
+ * The first denial wins, in order, so composing keeps each admission's messages unchanged.
+ */
+export function composeObjectQueryAdmissions(
+  first: ObjectQuerySemanticAdmission,
+  second: ObjectQuerySemanticAdmission
+): ObjectQuerySemanticAdmission {
+  const parts = new WeakMap<
+    ObjectQueryAdmissionState,
+    readonly [ObjectQueryAdmissionState, ObjectQueryAdmissionState]
+  >()
+  const join = (
+    left: ObjectQueryAdmissionState,
+    right: ObjectQueryAdmissionState
+  ): ObjectQueryAdmissionState => {
+    const state = Object.freeze({})
+    parts.set(state, [left, right])
+    return state
+  }
+  const split = (state: ObjectQueryAdmissionState) => {
+    const pair = parts.get(state)
+    if (!pair) throw new Error("[Sixb] Composed query admission received a foreign state.")
+    return pair
+  }
+  const transition = (
+    left: ObjectQueryAdmissionTransition,
+    right: ObjectQueryAdmissionTransition
+  ): ObjectQueryAdmissionTransition => {
+    const denial = left.denial ?? right.denial
+    return { state: join(left.state, right.state), ...(denial ? { denial } : {}) }
+  }
+
+  const admission: ObjectQuerySemanticAdmission = {
+    empty: () => join(first.empty(), second.empty()),
+    source: (input) => transition(first.source(input), second.source(input)),
+    edge: (input) => {
+      const [left, right] = split(input.state)
+      return transition(
+        first.edge({ ...input, state: left }),
+        second.edge({ ...input, state: right })
+      )
+    },
+    property: (input) => {
+      const [left, right] = split(input.state)
+      return (
+        first.property({ ...input, state: left }) ?? second.property({ ...input, state: right })
+      )
+    },
+    set: (input) => {
+      const pairs = input.states.map(split)
+      return join(
+        first.set({ ...input, states: pairs.map(([left]) => left) }),
+        second.set({ ...input, states: pairs.map(([, right]) => right) })
+      )
+    },
+  }
+  return Object.freeze(admission)
+}
+
 export function validateObjectQuery(
   query: ObjectQuery,
   options: ObjectQueryValidationOptions
@@ -896,16 +957,15 @@ function validateTextQuery(
       continue
     }
 
-    if (fieldsByObjectType) fieldsByObjectType[objectType.id] = uniqueStrings(fieldIds)
+    const admitted = admitTextFields(fieldIds, fields === undefined, {
+      state: admissionState,
+      objectTypeId: objectType.id,
+      path: `${path}.fields`,
+      ctx,
+    })
+    if (fieldsByObjectType) fieldsByObjectType[objectType.id] = uniqueStrings(admitted)
 
     for (const fieldId of fieldIds) {
-      admitProperty(ctx, {
-        state: admissionState,
-        propertyId: fieldId,
-        objectTypeId: objectType.id,
-        use: "text",
-        path: `${path}.fields`,
-      })
       const property = getProperty(objectType, fieldId)
       if (!property) {
         addIssue(
@@ -932,6 +992,43 @@ function validateTextQuery(
   }
 
   return fieldsByObjectType ? { fieldsByObjectType } : {}
+}
+
+/**
+ * Admit the fields a text query searches. Every explicit field must be admitted. Default fields
+ * come from the type's search profile, so a reader that cannot use one searches the others
+ * instead; only a type left with no usable default field is denied.
+ */
+function admitTextFields(
+  fieldIds: readonly string[],
+  defaults: boolean,
+  input: {
+    readonly state: ObjectQueryAdmissionState
+    readonly objectTypeId: string
+    readonly path: string
+    readonly ctx: QueryValidationContext
+  }
+): readonly string[] {
+  const admitted: string[] = []
+  let firstDenial: Error | undefined
+  for (const fieldId of fieldIds) {
+    const denial = input.ctx.admission.property({
+      state: input.state,
+      propertyId: fieldId,
+      objectTypeId: input.objectTypeId,
+      use: "text",
+      path: input.path,
+    })
+    if (!denial) {
+      admitted.push(fieldId)
+    } else if (!defaults) {
+      recordAdmissionDenial(input.ctx, denial)
+    } else {
+      firstDenial ??= denial
+    }
+  }
+  if (admitted.length === 0 && firstDenial) recordAdmissionDenial(input.ctx, firstDenial)
+  return admitted
 }
 
 function validateVectorProfileQuery(

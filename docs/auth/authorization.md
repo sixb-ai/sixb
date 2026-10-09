@@ -38,7 +38,7 @@ export const financeAccess = defineRole("finance-access", {
 })
 ```
 
-Members receive the combined grants of every role assigned to their groups. Resource access is denied unless granted. Giving someone permission to run an action does not give them permission to edit objects directly.
+Members receive the combined grants of every role assigned to their groups. To hide sensitive properties from some of them, add [markings](markings.md). Resource access is denied unless granted. Giving someone permission to run an action does not give them permission to edit objects directly.
 
 ## Choose permissions
 

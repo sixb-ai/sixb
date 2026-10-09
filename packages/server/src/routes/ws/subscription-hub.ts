@@ -29,6 +29,11 @@ export interface HubSource<T extends HubRecord> {
 /** One socket's view of the stream. */
 export interface HubSubscription<T extends HubRecord> {
   matches(record: T): boolean
+  /**
+   * The matching record as this socket may read it, or `undefined` to withhold it. It keeps the
+   * record's cursor. Omit to deliver matching records unchanged.
+   */
+  view?(record: T): T | undefined
   /** Replays retained records after `afterCursor` (or from the oldest) before live ones. */
   readonly replay?: {
     readonly afterCursor: string | undefined
@@ -174,9 +179,10 @@ export class SubscriptionHub<T extends HubRecord> {
   private deliverLive(records: readonly T[]): void {
     for (const state of this.clients.values()) {
       for (const record of records) {
-        if (!state.subscription.matches(record)) continue
-        if (state.catchingUp) this.enqueuePendingLive(state, record)
-        else this.enqueue(state, record)
+        const visible = visibleRecord(state.subscription, record)
+        if (!visible) continue
+        if (state.catchingUp) this.enqueuePendingLive(state, visible)
+        else this.enqueue(state, visible)
       }
     }
   }
@@ -197,8 +203,9 @@ export class SubscriptionHub<T extends HubRecord> {
           if (state.pendingCursors.has(record.cursor)) {
             state.replayedPendingCursors.add(record.cursor)
           }
-          if (!state.subscription.matches(record)) continue
-          if (!(await this.enqueueReplay(state, record))) return
+          const visible = visibleRecord(state.subscription, record)
+          if (!visible) continue
+          if (!(await this.enqueueReplay(state, visible))) return
         }
         if (state.closed) return
         afterCursor = page.cursor ?? afterCursor
@@ -358,6 +365,14 @@ export class SubscriptionHub<T extends HubRecord> {
       // Socket is already gone.
     }
   }
+}
+
+function visibleRecord<T extends HubRecord>(
+  subscription: HubSubscription<T>,
+  record: T
+): T | undefined {
+  if (!subscription.matches(record)) return undefined
+  return subscription.view ? subscription.view(record) : record
 }
 
 function hasQueueCapacity(state: ClientState<HubRecord>, bytes: number): boolean {

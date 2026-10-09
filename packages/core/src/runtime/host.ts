@@ -74,6 +74,7 @@ import { type SchedulerController, SchedulerRuntime } from "../scheduler"
 import type { ScheduleDefinition } from "../schedules"
 import type {
   GroupDefinition,
+  MarkingDefinition,
   MembershipPolicyDefinition,
   RoleDefinition,
   SecurityDefinitionCatalog,
@@ -129,6 +130,7 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   models?: ModelCatalogInput
   /** Project tools available to Agent runtimes. */
   tools?: readonly AgentToolDefinition[]
+  markings?: readonly MarkingDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]
   membershipPolicies?: readonly MembershipPolicyDefinition[]

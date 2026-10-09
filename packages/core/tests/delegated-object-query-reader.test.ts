@@ -1,6 +1,9 @@
 import { expect, test } from "bun:test"
+import { defineObjectType, prop } from "../src"
 import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
 import { createDelegatedRequestScope } from "../src/execution/scopes"
+import { OntologyRegistry } from "../src/ontology"
+import type { ObjectStorage, QueryObjectsInput } from "../src/storage"
 import { InMemoryStorage } from "../src/storage/in-memory"
 import { createMaterializerTestFixture, objectReadScopeContractOntology } from "../src/testing"
 
@@ -157,4 +160,83 @@ test("delegated object-query terminals never reveal a guessed sibling outside th
       includeObjects: true,
     })
   ).toEqual({ objects: [], links: [], hasMore: false })
+})
+
+test("delegated default text search never sends an unselected field to the provider", async () => {
+  // Reproduce: make the reader's executor admission return only the clearance admission. The
+  // executor then re-resolves default text fields without the selection and sends `body`.
+  const Note = defineObjectType({
+    id: "ScopeNote",
+    name: "Scope Note",
+    properties: [
+      prop("id", "string", { required: true, primary: true }),
+      prop("title", "string", { query: { searchable: true, text: true } }),
+      prop("body", "string", { query: { searchable: true, text: true } }),
+    ],
+    search: { defaultText: ["title", "body"] },
+  })
+  const ontology = new OntologyRegistry({ sources: [Note] })
+  const storage = new InMemoryStorage()
+  await createMaterializerTestFixture({ projectId, ontology, storage }).seed({
+    objects: [
+      {
+        ref: { objectTypeId: Note.id, primaryId: "note-1" },
+        properties: { id: "note-1", title: "Visible title", body: "unselected-word" },
+      },
+    ],
+  })
+  // The in-memory provider also hides unselected values from text matching, so observe the query
+  // the reader sends instead of relying on that second line of defense.
+  const providerQueries: unknown[] = []
+  const objectStorage: ObjectStorage = Object.create(storage.objects, {
+    createSelectedReadScope: {
+      value: (params: Parameters<ObjectStorage["createSelectedReadScope"]>[0]) => {
+        const selected = storage.objects.createSelectedReadScope(params)
+        return Object.create(selected, {
+          queryObjects: {
+            value: (input: QueryObjectsInput) => {
+              providerQueries.push(input.query)
+              return selected.queryObjects?.(input)
+            },
+          },
+        })
+      },
+    },
+  })
+  const reader = createAuthorizedObjectReader({
+    scope: createDelegatedRequestScope({
+      projectId,
+      requestId: "request-text",
+      correlationId: "correlation-text",
+      objectRead: {
+        selection: {
+          kind: "selected",
+          roots: [
+            {
+              anchor: { objectTypeId: Note.id, primaryId: "note-1" },
+              node: {
+                objects: [{ objectTypeId: Note.id, propertyIds: ["id", "title"] }],
+                links: [],
+              },
+            },
+          ],
+        },
+        limits: { maxTraversalFacts: 100, maxOutputJsonBytes: 100_000 },
+      },
+    }),
+    ontology,
+    objectStorage,
+  })
+
+  const result = await reader.executeQuery({
+    query: {
+      kind: "text",
+      input: { kind: "refs", refs: [{ objectTypeId: Note.id, primaryId: "note-1" }] },
+      query: "Visible",
+    },
+  })
+  expect(result.objects.map((row) => row.primaryId)).toEqual(["note-1"])
+  expect(providerQueries).toEqual([
+    expect.objectContaining({ fieldsByObjectType: { [Note.id]: ["title"] } }),
+  ])
 })

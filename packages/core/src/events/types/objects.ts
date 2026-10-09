@@ -1,3 +1,4 @@
+import type { ObjectRedactions } from "../../storage/objects/types"
 import type { EventEnvelope } from "../envelope"
 import type { PropertyChangeMap } from "../property-changes"
 
@@ -6,12 +7,16 @@ export interface ObjectMutationEventPayload<TValue = unknown> {
   primaryId: string
   properties: Record<string, TValue>
   propertyChanges: PropertyChangeMap<TValue>
+  /** Properties omitted for this reader, which lacks their clearance. Never stored. */
+  redactions?: ObjectRedactions
 }
 
 export interface ObjectDeletedEventPayload<TValue = unknown> {
   objectTypeId: string
   primaryId: string
   propertyChanges: PropertyChangeMap<TValue>
+  /** Properties omitted for this reader, which lacks their clearance. Never stored. */
+  redactions?: ObjectRedactions
 }
 
 export interface ObjectCreatedEvent extends EventEnvelope {
