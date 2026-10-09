@@ -59,7 +59,7 @@ const auth = oidc({
 })
 ```
 
-Configure your provider's callback URL using the public API origin and `/auth/callback`. To support email invitations with OIDC, also supply `sendInvitation`.
+Configure your provider's callback URL using the public API origin and `/auth/callback`. Sign-in completes only in the browser that started it, so the callback URL must use the same host as the API URL your app signs in through. To support email invitations with OIDC, also supply `sendInvitation`.
 
 Sign-in trusts an address only when the provider marks it verified. Microsoft Entra never does, so return the address to trust with `trustedEmail`. Entra's `preferred_username` is the name people sign in to Microsoft with, and every user has one, including users without a mailbox:
 

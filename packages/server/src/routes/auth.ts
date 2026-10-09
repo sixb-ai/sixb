@@ -22,6 +22,7 @@ import {
   isOidcAuthStrategy,
   type MagicLinkAuthStrategy,
   type MemberSummary,
+  type OidcStartSignInResult,
   SignInRefusedError,
   shouldUseSecureCookies,
   verifyCsrfToken,
@@ -1383,9 +1384,10 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const existingPending = getCookie(request, MAGIC_LINK_PENDING_COOKIE_NAME)?.trim()
           response.headers.append(
             "set-cookie",
-            magicLinkPendingCookieHeader({
+            callbackCookieHeader({
               request,
               host,
+              name: MAGIC_LINK_PENDING_COOKIE_NAME,
               value: result.status === "sent" ? pending.secret : existingPending || pending.secret,
               maxAgeSeconds: magicLinkPendingCookieMaxAgeSeconds(strategy),
             })
@@ -1401,7 +1403,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             returnTo: authRedirect.returnTo,
             requestOrigin: authRedirect.requestOrigin,
           })
-          return redirectResponse(result.redirectTo)
+          return oidcSignInRedirect(request, host, result)
         }
 
         return strategyNotImplementedResponse("Sign-in is not implemented yet.")
@@ -1441,7 +1443,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             returnTo: authRedirect.returnTo,
             requestOrigin: authRedirect.requestOrigin,
           })
-          return redirectResponse(result.redirectTo)
+          return oidcSignInRedirect(request, host, result)
         }
 
         return strategyNotImplementedResponse("Sign-in is not implemented yet.")
@@ -1528,8 +1530,15 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           const now = new Date()
           const sessionCredential = createSessionCredential()
           const device = resolveSessionDevice(request)
+          const state = new URL(request.url).searchParams.get("state")
 
+          let response: Response
           try {
+            if (!state || !matchesOidcStateCookie(request, state)) {
+              throw new Error(
+                "[SixbServer] OIDC callback reached a browser that did not start this sign-in."
+              )
+            }
             const authOptions = resolveAuthOptions(options, request)
             const result = await strategy.completeOidcSignIn({
               projectId: host.id,
@@ -1546,7 +1555,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
               },
             })
 
-            return sessionCallbackCompletionResponse({
+            response = sessionCallbackCompletionResponse({
               host,
               request,
               apiOrigin: options.resolveAuthRequestOrigin(request),
@@ -1557,11 +1566,25 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
             })
           } catch (error) {
             logAuthCallbackError("OIDC", error)
-            if (error instanceof SignInRefusedError) {
-              return htmlMessageResponse(signInRefusalMessage(error), 403, "You can't sign in")
-            }
-            return htmlMessageResponse("This sign-in attempt could not be completed.", 400)
+            response =
+              error instanceof SignInRefusedError
+                ? htmlMessageResponse(signInRefusalMessage(error), 403, "You can't sign in")
+                : htmlMessageResponse("This sign-in attempt could not be completed.", 400)
           }
+          // Completed or refused, this attempt is over for this browser.
+          if (state) {
+            response.headers.append(
+              "set-cookie",
+              callbackCookieHeader({
+                request,
+                host,
+                name: oidcStateCookieName(state),
+                value: "",
+                maxAgeSeconds: 0,
+              })
+            )
+          }
+          return response
         }
 
         return strategyNotImplementedResponse("Auth callback is not implemented yet.")
@@ -1670,16 +1693,17 @@ function matchesMagicLinkRequester(pendingSecret: string, requesterHash: string)
   return expected.length === provided.length && timingSafeEqual(expected, provided)
 }
 
-// SameSite=Lax, not Strict: the emailed link arrives as a cross-site top-level
-// navigation and the cookie must accompany that GET for the fast path to work.
-function magicLinkPendingCookieHeader(params: {
+// SameSite=Lax, not Strict: the emailed link and the identity provider's redirect arrive as
+// cross-site top-level navigations, and the cookie must accompany that GET.
+function callbackCookieHeader(params: {
   readonly request: Request
   readonly host: SixbHostView
+  readonly name: string
   readonly value: string
   readonly maxAgeSeconds: number
 }): string {
   const parts = [
-    `${MAGIC_LINK_PENDING_COOKIE_NAME}=${params.value}`,
+    `${params.name}=${params.value}`,
     "Path=/auth/callback",
     "SameSite=Lax",
     "HttpOnly",
@@ -1736,9 +1760,10 @@ async function completeMagicLinkCallback(input: {
     if (input.clearPendingCookie) {
       response.headers.append(
         "set-cookie",
-        magicLinkPendingCookieHeader({
+        callbackCookieHeader({
           request: input.request,
           host: input.host,
+          name: MAGIC_LINK_PENDING_COOKIE_NAME,
           value: "",
           maxAgeSeconds: 0,
         })
@@ -1748,6 +1773,41 @@ async function completeMagicLinkCallback(input: {
   } catch {
     return await invalidMagicLinkResponse(input.options, input.authRedirectHint)
   }
+}
+
+// Binds an OIDC sign-in to the browser that started it: only that browser holds a cookie carrying
+// the attempt's state, so the callback URL completes nowhere else. Each attempt has its own cookie,
+// so a sign-in in another tab doesn't displace it. The name is a digest and the value is encoded
+// because the strategy owns the state's format.
+function oidcStateCookieName(state: string): string {
+  return `sixb_oidc_${createHash("sha256").update(state).digest("base64url").slice(0, 22)}`
+}
+
+function oidcSignInRedirect(
+  request: Request,
+  host: SixbHostView,
+  result: OidcStartSignInResult
+): Response {
+  const response = redirectResponse(result.redirectTo)
+  response.headers.append(
+    "set-cookie",
+    callbackCookieHeader({
+      request,
+      host,
+      name: oidcStateCookieName(result.state),
+      value: encodeURIComponent(result.state),
+      maxAgeSeconds: Math.max(0, Math.floor((result.expiresAt.getTime() - Date.now()) / 1000)),
+    })
+  )
+  return response
+}
+
+function matchesOidcStateCookie(request: Request, state: string): boolean {
+  const held = getCookie(request, oidcStateCookieName(state))
+  if (!held) return false
+  const expected = Buffer.from(encodeURIComponent(state))
+  const provided = Buffer.from(held)
+  return expected.length === provided.length && timingSafeEqual(expected, provided)
 }
 
 function bearerTokensBody(
