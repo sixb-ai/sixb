@@ -108,7 +108,7 @@ async function startSignIn(input: {
     requestOrigin: "http://localhost",
     now: new Date("2026-05-17T09:58:00.000Z"),
   })
-  return { strategy, redirectTo: new URL(start.redirectTo) }
+  return { strategy, start, redirectTo: new URL(start.redirectTo) }
 }
 
 async function signIn(input: Parameters<typeof startSignIn>[0] & { readonly sessionId?: string }) {
@@ -152,7 +152,7 @@ describe("oidc auth strategy", () => {
   test("creates an authorization attempt and redirects with state nonce and PKCE", async () => {
     const authStorage = new InMemoryAuthStorage()
     const client = new FakeOidcClient()
-    const { redirectTo } = await startSignIn({ authStorage, client })
+    const { start, redirectTo } = await startSignIn({ authStorage, client })
     const state = redirectTo.searchParams.get("state")
     const nonce = redirectTo.searchParams.get("nonce")
     const stateParts = state?.split(".") ?? []
@@ -179,6 +179,10 @@ describe("oidc auth strategy", () => {
     })
     expect(attempt?.stateHash).not.toBe(state)
     expect(attempt?.nonceHash).not.toBe(nonce)
+    // The server keeps this state in the browser's cookie until the attempt expires.
+    expect(start.state).toBe(state ?? "")
+    expect(start.expiresAt).toEqual(new Date("2026-05-17T10:08:00.000Z"))
+    expect(attempt?.expiresAt).toEqual(start.expiresAt)
   })
 
   test("completes invited user sign-in and applies invitation groups", async () => {

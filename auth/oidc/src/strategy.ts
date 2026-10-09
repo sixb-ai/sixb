@@ -112,6 +112,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
     })
     const codeVerifier = this.client.randomPKCECodeVerifier()
     const codeChallenge = await this.client.calculatePKCECodeChallenge(codeVerifier)
+    const expiresAt = new Date(now.getTime() + DEFAULT_OIDC_ATTEMPT_TTL_MS)
 
     await input.authStorage.oidcAuthorizationAttempts.create({
       id: attemptId,
@@ -123,7 +124,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       codeVerifier,
       returnTo: input.returnTo,
       createdAt: now,
-      expiresAt: new Date(now.getTime() + DEFAULT_OIDC_ATTEMPT_TTL_MS),
+      expiresAt,
     })
 
     const redirectTo = this.client.buildAuthorizationUrl(await this.getConfiguration(), {
@@ -137,7 +138,7 @@ class OidcAuthStrategyImpl implements OidcAuthStrategy {
       nonce,
     })
 
-    return { redirectTo: redirectTo.toString() }
+    return { redirectTo: redirectTo.toString(), state, expiresAt }
   }
 
   async completeOidcSignIn(input: OidcCallbackInput): Promise<OidcCallbackResult> {
