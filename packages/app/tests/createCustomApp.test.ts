@@ -651,6 +651,21 @@ describe("createCustomApp.dev", () => {
     expect(runtime).toContain("await signOut({ throwOnError: true })")
   })
 
+  test("renders an API-unavailable view instead of a blank page when the session fails", async () => {
+    const { mainPath, runtimePath } = await generateAppEntry(
+      tempRoot,
+      join(tempRoot, ".sixb", "generated")
+    )
+    const main = await readFile(mainPath, "utf-8")
+    const runtime = await readFile(runtimePath, "utf-8")
+
+    // The session request is the first call to the API: unreachable, CORS, or a 5xx all land here.
+    expect(main).toContain("requireSixbBrowserAuthSession(runtimeConfig, browserClient).catch(")
+    expect(main).toContain("renderApiUnavailable(runtimeConfig.api.baseUrl)")
+    expect(runtime).toContain("export function renderApiUnavailable(apiBaseUrl: string)")
+    expect(runtime).toContain("Can't reach the Sixb API")
+  })
+
   test("wraps routes in an error boundary that special-cases 404s", async () => {
     const { runtimePath } = await generateAppEntry(tempRoot, join(tempRoot, ".sixb", "generated"))
     const runtime = await readFile(runtimePath, "utf-8")
