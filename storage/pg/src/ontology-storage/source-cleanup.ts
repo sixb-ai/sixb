@@ -80,7 +80,8 @@ export async function cleanupSourceVersions(
   let rowsDeleted = removedRows.length
   remaining -= rowsDeleted
   if (remaining > 0) {
-    const removed = await sql`
+    // Each version's root_count follows its roots down, so a drained version is found by index.
+    const [removed] = await sql<{ readonly count: number }[]>`
       WITH selected AS (
         SELECT roots.ctid FROM ontology_source_roots AS roots
         JOIN ontology_sources AS versions ON versions.version_id = roots.version_id
@@ -88,10 +89,18 @@ export async function cleanupSourceVersions(
           AND NOT EXISTS (SELECT 1 FROM ontology_source_rows AS rows WHERE rows.root_id = roots.id)
         ORDER BY roots.retired_at, roots.id
         LIMIT ${remaining} FOR UPDATE OF roots SKIP LOCKED
-      ) DELETE FROM ontology_source_roots AS roots USING selected WHERE roots.ctid = selected.ctid RETURNING 1
+      ), removed AS (
+        DELETE FROM ontology_source_roots AS roots USING selected WHERE roots.ctid = selected.ctid
+        RETURNING roots.version_id
+      ), drained AS (
+        UPDATE ontology_sources AS versions SET root_count = versions.root_count - counts.count
+        FROM (SELECT version_id, count(*)::int AS count FROM removed GROUP BY version_id) AS counts
+        WHERE versions.version_id = counts.version_id
+        RETURNING counts.count
+      ) SELECT COALESCE(sum(count), 0)::int AS count FROM drained
     `
-    rowsDeleted += removed.length
-    remaining -= removed.length
+    rowsDeleted += removed?.count ?? 0
+    remaining -= removed?.count ?? 0
   }
   const removedManifests =
     remaining === 0
@@ -99,10 +108,8 @@ export async function cleanupSourceVersions(
       : await sql`
     WITH selected AS (
       SELECT versions.ctid FROM ontology_sources AS versions
-      WHERE project_id = ${input.projectId} AND status = 'superseded'
+      WHERE project_id = ${input.projectId} AND status = 'superseded' AND root_count = 0
         AND terminal_at < ${input.terminalBefore} AND ${sql.unsafe(PLAN_PURGED)}
-        AND NOT EXISTS (SELECT 1 FROM ontology_source_roots AS roots
-          WHERE roots.version_id = versions.version_id)
       ORDER BY terminal_at, source_id, materialization_id LIMIT ${remaining} FOR UPDATE SKIP LOCKED
     ) DELETE FROM ontology_sources AS versions USING selected WHERE versions.ctid = selected.ctid RETURNING 1
   `

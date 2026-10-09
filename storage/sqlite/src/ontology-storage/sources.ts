@@ -33,8 +33,6 @@ import type {
   PurgeAbandonedSourceMaterializationsInput,
   StageSourceRowsInput,
   StageSourceRowsResult,
-  SummarizeTerminalSourceMaterializationsInput,
-  TerminalSourceMaterializationSummary,
 } from "@sixb/core/storage"
 import { yieldSqliteEventLoop } from "../transactions"
 import {
@@ -314,30 +312,6 @@ export class SqliteOntologySourceStorage implements OntologySourceStorage {
       assertNonblank(input.projectId, "Abandoned source purge project id")
       assertPositiveInteger(input.limit, "Abandoned source purge limit")
       return purgeAbandonedSourceVersions(this.db, input)
-    })
-  }
-
-  async summarizeTerminal(
-    input: SummarizeTerminalSourceMaterializationsInput
-  ): Promise<TerminalSourceMaterializationSummary> {
-    return this.runRootOperation(() => {
-      assertNonblank(input.projectId, "Terminal source summary project id")
-      const summary = this.db
-        .query(
-          `
-            SELECT COUNT(*) AS terminal_count, MIN(terminal_at) AS oldest_terminal_at
-            FROM ontology_sources
-            WHERE project_id = ? AND status IN ('superseded', 'abandoned')
-          `
-        )
-        .get(input.projectId) as {
-        readonly terminal_count: number
-        readonly oldest_terminal_at: string | null
-      }
-      return {
-        count: summary.terminal_count,
-        oldestTerminalAt: summary.oldest_terminal_at,
-      }
     })
   }
 

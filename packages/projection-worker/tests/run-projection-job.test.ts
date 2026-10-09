@@ -1306,8 +1306,8 @@ describe("runProjectionJob", () => {
     ).toMatchObject({ status: "failed", attempt: 2 })
     // The only terminal source version is the abandoned candidate.
     expect(
-      await deps.storage.ontology.sources.summarizeTerminal({ projectId: sixb.id })
-    ).toMatchObject({ count: 1 })
+      await deps.storage.ontology.sources.purgeAbandoned({ projectId: sixb.id, limit: 1_000 })
+    ).toMatchObject({ materializationsDeleted: 1 })
   })
 
   test("resumes telemetry from the durable offset without an exact-multiple empty commit", async () => {

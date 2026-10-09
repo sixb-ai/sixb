@@ -578,9 +578,7 @@ export type {
   StreamMaterializationVectorChangesInput,
   StreamReplacementPlanStateInput,
   SummarizeOntologyOutboxInput,
-  SummarizeTerminalSourceMaterializationsInput,
   TelemetryOntologyCommitIntent,
-  TerminalSourceMaterializationSummary,
 } from "./ontology"
 export { ONTOLOGY_OUTBOX_FAILURE_CODES } from "./ontology"
 export type {

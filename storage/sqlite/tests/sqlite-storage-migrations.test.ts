@@ -533,6 +533,13 @@ const expectedStorageMigrationRows = [
     status: "applied",
     version: 58,
   },
+  {
+    adapter_id: SQLITE_STORAGE_ADAPTER_ID,
+    checksum_length: 64,
+    id: "059-drained-source-versions",
+    status: "applied",
+    version: 59,
+  },
 ]
 
 afterEach(async () => {
@@ -612,6 +619,41 @@ describe("SQLite storage migrations", () => {
         { id: "transcription", model_kind: "transcription" },
         { id: "unclassified", model_kind: null },
       ])
+    } finally {
+      db.close()
+    }
+  })
+
+  test("counts the roots each superseded version still holds", async () => {
+    // Removal proof: omit 059's UPDATE; the drained version below keeps its staged count.
+    const db = new Database(":memory:")
+    try {
+      const steps = sqliteStorageMigrations.steps
+      const index = steps.findIndex((step) => step.id === "059-drained-source-versions")
+      for (const step of steps.slice(0, index)) await step.up(db)
+      db.exec(`
+        INSERT INTO ontology_sources (version_id, project_id, source_id, materialization_id,
+          projection_run_id, projection_kind, protocol, status, execution_token, dataset_id,
+          dataset_version_id, dataset_version_created_at, projection_revision, ownership_hash,
+          ontology_revision, root_count, assertion_count, created_at, ready_at, activated_at,
+          terminal_at, last_commit_id, updated_at)
+        SELECT version, 'p', 's', 'm' || version, 'r' || version, 'object', 'replacement', status,
+          NULL, 'd', 'v', '2026-01-01', 'r', 'h', 'o', 2, 2, '2026-01-01', '2026-01-01',
+          '2026-01-01', terminal_at, 'c', '2026-01-02'
+        FROM (SELECT 1 AS version, 'superseded' AS status, '2026-01-02' AS terminal_at
+          UNION ALL SELECT 2, 'superseded', '2026-01-02' UNION ALL SELECT 3, 'active', NULL);
+        INSERT INTO ontology_source_roots (version_id, project_id, root_key, staging_ordinal)
+        VALUES (2, 'p', 'b', 1), (3, 'p', 'a', 0), (3, 'p', 'b', 1);
+      `)
+
+      await steps[index]!.up(db)
+      expect(db.query("SELECT version_id, status, root_count FROM ontology_sources").all()).toEqual(
+        [
+          { version_id: 1, status: "superseded", root_count: 0 },
+          { version_id: 2, status: "superseded", root_count: 1 },
+          { version_id: 3, status: "active", root_count: 2 },
+        ]
+      )
     } finally {
       db.close()
     }

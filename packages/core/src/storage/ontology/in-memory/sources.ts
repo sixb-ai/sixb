@@ -33,8 +33,6 @@ import type {
   StageSourceAssertion,
   StageSourceRowsInput,
   StageSourceRowsResult,
-  SummarizeTerminalSourceMaterializationsInput,
-  TerminalSourceMaterializationSummary,
 } from "../sources"
 import { findActiveSourceMaterialization } from "./materializations-state"
 import {
@@ -336,30 +334,6 @@ export class InMemoryOntologySourceStorage implements OntologySourceStorage {
       }
     }
     return { rowsDeleted, materializationsDeleted }
-  }
-
-  async summarizeTerminal(
-    input: SummarizeTerminalSourceMaterializationsInput
-  ): Promise<TerminalSourceMaterializationSummary> {
-    return this.runRootOperation(() => {
-      assertNonblank(input.projectId, "Terminal source summary project id")
-      let count = 0
-      let oldestTerminalAt: string | null = null
-      for (const materialization of this.state.sourceMaterializations.values()) {
-        if (
-          materialization.projectId !== input.projectId ||
-          (materialization.status !== "superseded" && materialization.status !== "abandoned") ||
-          materialization.terminalAt === null
-        ) {
-          continue
-        }
-        count += 1
-        if (oldestTerminalAt === null || materialization.terminalAt < oldestTerminalAt) {
-          oldestTerminalAt = materialization.terminalAt
-        }
-      }
-      return { count, oldestTerminalAt }
-    })
   }
 
   private async assertCurrentExecution(

@@ -185,15 +185,6 @@ export interface PurgeAbandonedSourceMaterializationsInput {
   readonly limit: number
 }
 
-export interface SummarizeTerminalSourceMaterializationsInput {
-  readonly projectId: string
-}
-
-export interface TerminalSourceMaterializationSummary {
-  readonly count: number
-  readonly oldestTerminalAt: string | null
-}
-
 export interface AssertSourceMaterializationExecutionInput {
   readonly projectId: string
   readonly source: ProjectionSourceRef
@@ -234,7 +225,4 @@ export interface OntologySourceStorage {
   purgeAbandoned(
     input: PurgeAbandonedSourceMaterializationsInput
   ): Promise<CleanupTerminalSourceMaterializationsResult>
-  summarizeTerminal(
-    input: SummarizeTerminalSourceMaterializationsInput
-  ): Promise<TerminalSourceMaterializationSummary>
 }

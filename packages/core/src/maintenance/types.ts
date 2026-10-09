@@ -38,10 +38,6 @@ export interface OntologyMaintenanceSnapshot {
     readonly retryingCount: number
     readonly maxAttempts: number
   } | null
-  readonly terminalSources: {
-    readonly count: number
-    readonly oldestTerminalAt: string | null
-  } | null
   readonly cleanup: OntologyMaintenanceCleanupSnapshot | null
 }
 

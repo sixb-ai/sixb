@@ -3188,10 +3188,6 @@ export type GetStatusResponses = {
         retryingCount: number
         maxAttempts: number
       } | null
-      terminalSources: {
-        count: number
-        oldestTerminalAt: string | null
-      } | null
       cleanup: {
         publishedOutboxRowsDeleted: number
         terminalSourceRowsDeleted: number
