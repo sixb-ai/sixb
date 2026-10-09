@@ -30,7 +30,6 @@ describe("public core export boundaries", () => {
     ])
       expect(Object.hasOwn(core, name)).toBe(false)
     expect(internalActions.requestAction).toBeFunction()
-    expect(internalActions.executeActionRun).toBeFunction()
     expect(internalActions.drainActionRuns).toBeFunction()
     expect(core.createSixb).toBeFunction()
     expect(core.defineAction).toBeFunction()

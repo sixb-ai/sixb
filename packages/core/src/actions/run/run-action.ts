@@ -1,10 +1,9 @@
 import { reportRunFailure } from "../../error-reporting/capability"
 import { createSixbError } from "../../errors/internal"
 import type { ActionRunFailure, ActionRunRecord } from "../../storage"
-import { isTerminalActionRun } from "../../storage"
 import { isActionPhaseFailure, toActionRunFailure, unwrapActionPhaseError } from "./normalize"
 import { executeActionPhases, isPastBoundary } from "./phases"
-import { failedResult, requireFinishedAt, resolveRedeliveredRunningRun } from "./results"
+import { failedResult, requireFinishedAt } from "./results"
 import type { ActionRunResult, RunActionInput } from "./types"
 
 /**
@@ -28,33 +27,30 @@ export class UnrecordedActionRunError extends Error {
 }
 
 /**
- * Run a stored Action run to a terminal status.
+ * Run a queued Action run to a terminal status.
  *
- * A run that is already terminal comes back skipped. Otherwise its outcome is recorded on the run
- * before this resolves; it rejects when the run cannot execute here, or with an
- * {@link UnrecordedActionRunError} when its outcome cannot be recorded.
+ * Its outcome is recorded on the run before this resolves; it rejects when the run cannot execute
+ * here, or with an {@link UnrecordedActionRunError} when its outcome cannot be recorded.
  */
 export async function runAction(input: RunActionInput): Promise<ActionRunResult> {
-  const { runtime, signals } = input
-  const { id: runId, actionId } = input.run
+  const { runtime, run, signals } = input
+  const { id: runId, actionId } = run
 
-  let existingRun = input.run
-  if (existingRun.projectId !== runtime.id) {
+  if (run.projectId !== runtime.id) {
     throw createSixbError(
       "internal.unexpected",
-      `[Sixb] Action run '${runId}' belongs to project '${existingRun.projectId}', not '${runtime.id}'.`,
-      { details: { actionId, runId, durableProjectId: existingRun.projectId } }
+      `[Sixb] Action run '${runId}' belongs to project '${run.projectId}', not '${runtime.id}'.`,
+      { details: { actionId, runId, durableProjectId: run.projectId } }
     )
   }
-  if (isTerminalActionRun(existingRun)) {
-    return {
-      id: runId,
-      actionId,
-      subject: existingRun.subject,
-      status: existingRun.status,
-      skipped: true,
-      record: existingRun,
-    }
+  // A run executes once, right after the request that persisted it: past `queued`, it already ran
+  // or is running elsewhere.
+  if (run.status !== "queued") {
+    throw createSixbError(
+      "internal.unexpected",
+      `[Sixb] Action run '${runId}' cannot execute from status '${run.status}'.`,
+      { details: { actionId, runId } }
+    )
   }
 
   const action = runtime.actions.getById(actionId)
@@ -76,26 +72,10 @@ export async function runAction(input: RunActionInput): Promise<ActionRunResult>
     return failedResult(runId, actionId, finishedRun, failure)
   }
 
-  if (existingRun.status === "running") {
-    const resolution = await resolveRedeliveredRunningRun(input, existingRun)
-    if (resolution.kind === "finished") return resolution.result
-    existingRun = resolution.run
-  }
-  if (existingRun.status !== "queued" && existingRun.status !== "running") {
-    throw createSixbError(
-      "internal.unexpected",
-      `[Sixb] Action run '${runId}' cannot execute from status '${existingRun.status}'.`,
-      { details: { actionId, runId } }
-    )
-  }
-
   let activeRun: ActionRunRecord | null = null
   let startedRun: ActionRunRecord | null = null
   try {
-    startedRun =
-      existingRun.status === "running"
-        ? existingRun
-        : await runtime.actionRunsStorage.start({ projectId: runtime.id, id: runId })
+    startedRun = await runtime.actionRunsStorage.start({ projectId: runtime.id, id: runId })
     activeRun = startedRun
 
     const finalRun = await executeActionPhases({
@@ -103,8 +83,8 @@ export async function runAction(input: RunActionInput): Promise<ActionRunResult>
       action,
       run: startedRun,
       signals,
-      updateActiveRun(run) {
-        activeRun = run
+      updateActiveRun(latest) {
+        activeRun = latest
       },
     })
 
@@ -173,7 +153,6 @@ function reportActionFailure(
 ): void {
   reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
-    attempt: input.attempt,
     runKind: "action",
     run: { runId: input.run.id, actionId: input.run.actionId },
     failure,
