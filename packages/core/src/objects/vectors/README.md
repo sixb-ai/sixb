@@ -12,7 +12,8 @@ eligible set after link and property authorization; it never filters a global to
 
 ```text
 Effective object change → invalidate stale vector + persist latest intent (one transaction)
-ProjectionWorker → durable queue → project AI admission → provider → save result → fenced commit
+Commit wake-up (or API maintenance pass) → durable queue
+ProjectionWorker → project AI admission → provider → save result → fenced commit
 ```
 
 `materializer/effective/vector-indexing.ts` compares effective source fingerprints after projection
@@ -22,7 +23,10 @@ There is no historical scan or configuration-only backfill.
 
 The queue owns delivery leases. Ontology storage owns intent keyed by project/object/profile, plus
 its generation id and `pending → running → ready` state. Dispatch has a separate due time so long
-queues cannot starve later entries. Reconciliation can enqueue the same generation safely.
+queues cannot starve later entries. `indexing-dispatch.ts` enqueues due intent after every commit
+in the committing process and pushes its due time 30 seconds out; the API's maintenance pass
+drains the same path, so intent a crash left undispatched waits at most one pass. Enqueueing the
+same generation twice is safe.
 
 `indexing.ts` exposes only a core-owned processing capability. Kernel authority cannot bind the
 public domain SDK. `ontology.indexVectors` authorizes only the persisted results of its work item or durable group.

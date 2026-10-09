@@ -155,6 +155,20 @@ export function runProjectionRunStorageContractSuite<TStorage extends Projection
           status: "failed",
           error: { code: "queue.enqueue_failed", message: "queue unavailable" },
         })
+        const failedWith = (errorCodes: ProjectionRunFailureCode[]) =>
+          context.projectionRuns.list({
+            projectId: input.projectId,
+            statuses: ["failed"],
+            errorCodes,
+          })
+        await expect(failedWith(["queue.enqueue_failed"])).resolves.toMatchObject({
+          runs: [{ id: input.id }],
+          total: 1,
+        })
+        await expect(failedWith(["projection.execution_failed"])).resolves.toMatchObject({
+          total: 0,
+        })
+        await expect(failedWith([])).resolves.toMatchObject({ total: 0 })
 
         const requeued = await context.projectionRuns.queue(admission)
         expect(requeued).toMatchObject({

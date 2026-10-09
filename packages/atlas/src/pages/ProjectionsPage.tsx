@@ -4,9 +4,11 @@ import type {
   ListProjectionsResponse,
 } from "@sixb/client"
 import {
+  events,
   getProjectionOptions,
   listProjectionRunsOptions,
   listProjectionsOptions,
+  useEvents,
 } from "@sixb/client/hooks"
 import {
   Badge,
@@ -66,6 +68,21 @@ const KIND_LABEL: Record<ProjectionKind, string> = {
   object: "Object",
   link: "Link",
   telemetry: "Telemetry",
+}
+
+const RUN_POLL_MS = 5000
+// A commit queues its run when the orchestrator dispatches the commit event, or at the latest on
+// the orchestrator's next 30s reconciliation pass.
+const COMMIT_WATCH_MS = 60_000
+
+/** Runs publish no events: poll while one is pending, or for a while after its dataset commits. */
+export function projectionRunsPollInterval(
+  runs: readonly Pick<ProjectionRun, "status">[],
+  committedAt: number,
+  now = Date.now()
+): number | false {
+  const pending = runs.some((run) => run.status === "queued" || run.status === "running")
+  return pending || now - committedAt < COMMIT_WATCH_MS ? RUN_POLL_MS : false
 }
 
 function projectionKind(projection: Pick<Projection, "_tag">): ProjectionKind {
@@ -819,12 +836,23 @@ export function ProjectionDetailPage() {
     enabled: decodedId.length > 0,
   })
 
+  const datasetId = projectionQuery.data?.datasetId ?? ""
+  const [committedAt, setCommittedAt] = useState(0)
+  useEvents(
+    events.datasets(),
+    (event) => {
+      if (event.payload.datasetId === datasetId) setCommittedAt(Date.now())
+    },
+    { enabled: datasetId.length > 0 }
+  )
+
   const runsQuery = useQuery({
     ...listProjectionRunsOptions({
       query: { projectionId: decodedId, limit: "20", order: "desc" },
     }),
     enabled: decodedId.length > 0,
-    refetchInterval: 5000,
+    refetchInterval: (query) =>
+      projectionRunsPollInterval(query.state.data?.runs ?? [], committedAt),
   })
 
   const projection = projectionQuery.data
