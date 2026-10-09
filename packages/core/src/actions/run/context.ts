@@ -1,3 +1,10 @@
+import { createSixbError } from "../../errors/internal"
+import type { Logger } from "../../logging"
+import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
+import type { ActionRunRecord } from "../../storage"
+import { ObjectNotFoundError } from "../../storage"
+import type { ActionReadRecorder } from "../read-facade"
+import { createActionReadFacade } from "../read-facade"
 import type {
   ActionDefinition,
   ActionObjectSubject,
@@ -5,16 +12,10 @@ import type {
   ActionRuntimeFacade,
   ActionSubject,
   ActionTargetObject,
-  Logger,
-  ObjectTypeWithPropertyTokens,
-} from "@sixb/core"
-import { isObjectActionDefinition, ObjectNotFoundError } from "@sixb/core"
-import type { ActionReadRecorder } from "@sixb/core/internal/actions"
-import { coerceActionParamsToTyped, createActionReadFacade } from "@sixb/core/internal/actions"
-import { createSixbError } from "@sixb/core/internal/errors"
-import type { ActionRunRecord } from "@sixb/core/storage"
-import type { RunActionJobInput } from "../types"
-import type { LoadedObjectTarget } from "./types"
+} from "../types"
+import { coerceActionParamsToTyped, isObjectActionDefinition } from "../validation"
+import type { LoadedObjectTarget } from "./phase-types"
+import type { RunActionJobInput } from "./types"
 
 export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): ActionRuntimeFacade {
   return {
@@ -118,7 +119,7 @@ export async function loadObjectTarget(input: {
     if (input.run.subject.kind !== "none") {
       throw createSixbError(
         "internal.unexpected",
-        `[SixbActionWorker] Action '${input.action.id}' does not accept a subject.`,
+        `[Sixb] Action '${input.action.id}' does not accept a subject.`,
         { details: { actionId: input.action.id, runId: input.run.id } }
       )
     }
@@ -136,7 +137,7 @@ export async function loadObjectTarget(input: {
   if (!actionAppliesToSubject) {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbActionWorker] Action '${input.action.id}' is not valid for object type '${subjectObjectType.id}'.`,
+      `[Sixb] Action '${input.action.id}' is not valid for object type '${subjectObjectType.id}'.`,
       { details: { actionId: input.action.id, runId: input.run.id } }
     )
   }
@@ -170,7 +171,7 @@ export function requireObjectSubject<
   if (subject.kind !== "object") {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbActionWorker] Action '${input.actionId}' requires an object subject.`,
+      `[Sixb] Action '${input.actionId}' requires an object subject.`,
       { details: input }
     )
   }
@@ -184,7 +185,7 @@ export function requireObjectTarget(
   if (!target) {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbActionWorker] Action '${input.actionId}' requires an object target.`,
+      `[Sixb] Action '${input.actionId}' requires an object target.`,
       { details: input }
     )
   }

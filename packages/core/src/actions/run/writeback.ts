@@ -1,20 +1,21 @@
-import type { JsonValue } from "@sixb/core"
-import { assertJsonValue, cloneJsonValue, isObjectActionDefinition } from "@sixb/core"
-import type { ActionReadRecorder } from "@sixb/core/internal/actions"
-import type { ActionRunRecord } from "@sixb/core/storage"
-import { toActionRunFailure, translateActionPhaseError } from "../normalize"
+import type { JsonValue } from "../../json"
+import { assertJsonValue, cloneJsonValue } from "../../json"
+import type { ActionRunRecord } from "../../storage"
+import type { ActionReadRecorder } from "../read-facade"
+import { isObjectActionDefinition } from "../validation"
 import {
   type BasePhaseContext,
   requireObjectTarget,
   toActionReadFacade,
   toActionRuntimeFacade,
 } from "./context"
+import { toActionRunFailure, translateActionPhaseError } from "./normalize"
 import type {
   LoadedObjectTarget,
   PhaseExecutionBase,
   RuntimePhaseHandler,
   UpdateActiveRun,
-} from "./types"
+} from "./phase-types"
 
 export async function runWritebackPhase(
   input: PhaseExecutionBase & {

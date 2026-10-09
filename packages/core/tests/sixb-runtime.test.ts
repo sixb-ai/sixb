@@ -21,7 +21,7 @@ import {
   SixbHost,
   valueTypeRef,
 } from "../src"
-import { recordEdits } from "../src/actions/worker"
+import { recordEdits } from "../src/edits/recorder"
 import type { ObjectStorage, QueryObjectsInput, QueryObjectsResult } from "../src/storage"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"

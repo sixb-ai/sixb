@@ -6,9 +6,9 @@ import {
   createActionReadFacade,
   findActionEditCommit,
 } from "../src/actions"
-import { recordEdits } from "../src/actions/worker"
 import type { EditBatch } from "../src/edits"
 import { lowerEditBatch } from "../src/edits"
+import { recordEdits } from "../src/edits/recorder"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
 import { createLinkScopeFingerprint } from "../src/materializer"
 import type { ObjectRow, Storage, TimeseriesHistoryBatchResult } from "../src/storage"

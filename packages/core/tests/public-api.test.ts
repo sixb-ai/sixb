@@ -25,11 +25,13 @@ describe("public core export boundaries", () => {
       "requestSyncRun",
       "requestPipelineRun",
       "requestWorkflowRun",
+      "executeActionRun",
       "emptyGrantIndex",
       "validateSchemaOrRefValue",
     ])
       expect(Object.hasOwn(core, name)).toBe(false)
     expect(internalActions.requestAction).toBeFunction()
+    expect(internalActions.executeActionRun).toBeFunction()
     expect(core.createSixb).toBeFunction()
     expect(core.defineAction).toBeFunction()
     expect(core.ActionRunFailedError).toBeFunction()
@@ -97,10 +99,8 @@ describe("public core export boundaries", () => {
     expect(internalStorage.finishActionRunPhase).toBeFunction()
   })
 
-  test("worker edit recording and event routing have internal subpaths", () => {
-    expect(Object.hasOwn(pkg.exports, "./actions/worker")).toBe(false)
+  test("event routing has an internal subpath", () => {
     expect(Object.hasOwn(pkg.exports, "./events/scope")).toBe(false)
-    expect(Object.hasOwn(pkg.exports, "./internal/action-edits")).toBe(true)
     expect(Object.hasOwn(pkg.exports, "./internal/event-scope")).toBe(true)
   })
 })

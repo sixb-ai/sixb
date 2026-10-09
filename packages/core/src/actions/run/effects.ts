@@ -1,11 +1,11 @@
-import type { JsonValue } from "@sixb/core"
-import { isObjectActionDefinition } from "@sixb/core"
-import type { ActionEditCommitResult } from "@sixb/core/internal/actions"
-import { reportActionPhaseFailure } from "@sixb/core/internal/error-reporting"
-import type { ActionRunRecord } from "@sixb/core/storage"
-import { toActionRunFailure, translateActionPhaseError } from "../normalize"
+import { reportActionPhaseFailure } from "../../error-reporting/capability"
+import type { JsonValue } from "../../json"
+import type { ActionRunRecord } from "../../storage"
+import type { ActionEditCommitResult } from "../commit-edits"
+import { isObjectActionDefinition } from "../validation"
 import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
-import type { LoadedObjectTarget, PhaseExecutionBase, UpdateActiveRun } from "./types"
+import { toActionRunFailure, translateActionPhaseError } from "./normalize"
+import type { LoadedObjectTarget, PhaseExecutionBase, UpdateActiveRun } from "./phase-types"
 
 export async function runEffectsPhase(
   input: PhaseExecutionBase & {

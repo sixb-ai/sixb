@@ -1,16 +1,14 @@
-import { isObjectActionDefinition } from "@sixb/core"
-import {
-  ActionReadRecorder,
-  findActionEditCommit,
-  runActionValidators,
-} from "@sixb/core/internal/actions"
-import { resolveLoggingService } from "@sixb/core/internal/logging"
-import type { ActionRunRecord } from "@sixb/core/storage"
-import { throwIfAborted, translateActionPhaseError } from "../normalize"
+import { resolveLoggingService } from "../../logging/service"
+import type { ActionRunRecord } from "../../storage"
+import { findActionEditCommit } from "../commit-edits"
+import { ActionReadRecorder } from "../read-facade"
+import { isObjectActionDefinition } from "../validation"
+import { runActionValidators } from "../validators"
 import { createBasePhaseContext, loadObjectTarget } from "./context"
 import { runEditsAndCommitPhase } from "./edits-commit"
 import { runEffectsPhase } from "./effects"
-import type { PhaseExecutionBase, UpdateActiveRun } from "./types"
+import { throwIfAborted, translateActionPhaseError } from "./normalize"
+import type { PhaseExecutionBase, UpdateActiveRun } from "./phase-types"
 import { runWritebackPhase } from "./writeback"
 
 export async function executeActionPhases(

@@ -1,17 +1,13 @@
-import { isMaterializationConflictError } from "@sixb/core"
-import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
 import {
   createSixbError,
   isSixbError,
   summarizeErrorMessage,
   toSixbFailure,
-} from "@sixb/core/internal/errors"
-import { WorkerAbortError } from "@sixb/core/internal/workers"
-import {
-  ACTION_RUN_FAILURE_CODES,
-  type ActionRunFailure,
-  type ActionRunPhase,
-} from "@sixb/core/storage"
+} from "../../errors/internal"
+import { isMaterializationConflictError } from "../../materialization/errors"
+import { ACTION_RUN_FAILURE_CODES, type ActionRunFailure, type ActionRunPhase } from "../../storage"
+import { parseActionRunFailure } from "../../storage/action-runs/failure"
+import { WorkerAbortError } from "../../workers/errors"
 
 export function throwIfAborted(signal: AbortSignal): void {
   if (signal.aborted) {

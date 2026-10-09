@@ -1,14 +1,10 @@
-import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { createSixbError } from "@sixb/core/internal/errors"
-import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
-import { isTerminalActionRun } from "@sixb/core/storage"
-import { executeActionPhases } from "./action-execution/phases"
-import {
-  failedResult,
-  requireFinishedAt,
-  resolveRedeliveredRunningRun,
-} from "./action-execution/results"
+import { reportRunFailure } from "../../error-reporting/capability"
+import { createSixbError } from "../../errors/internal"
+import type { ActionRunFailure, ActionRunRecord } from "../../storage"
+import { isTerminalActionRun } from "../../storage"
 import { throwIfAborted, toActionRunFailure, unwrapActionPhaseError } from "./normalize"
+import { executeActionPhases } from "./phases"
+import { failedResult, requireFinishedAt, resolveRedeliveredRunningRun } from "./results"
 import type { ActionRunResult, RunActionJobInput } from "./types"
 
 export async function runActionJob(input: RunActionJobInput): Promise<ActionRunResult> {
@@ -25,7 +21,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   ) {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbActionWorker] Action job '${job.id}' does not match durable run '${existingRun.id}' in project '${existingRun.projectId}'.`,
+      `[Sixb] Action job '${job.id}' does not match durable run '${existingRun.id}' in project '${existingRun.projectId}'.`,
       {
         details: {
           actionId: job.actionId,
@@ -52,7 +48,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   if (!action) {
     const error = createSixbError(
       "internal.unexpected",
-      `[SixbActionWorker] Unknown action '${job.actionId}'.`,
+      `[Sixb] Unknown action '${job.actionId}'.`,
       { details: { actionId: job.actionId, runId: job.id } }
     )
     const failedAt = new Date()
@@ -81,7 +77,7 @@ export async function runActionJob(input: RunActionJobInput): Promise<ActionRunR
   if (existingRun.status !== "queued" && existingRun.status !== "running") {
     throw createSixbError(
       "internal.unexpected",
-      `[SixbActionWorker] Action run '${job.id}' cannot execute from status '${existingRun.status}'.`,
+      `[Sixb] Action run '${job.id}' cannot execute from status '${existingRun.status}'.`,
       { details: { actionId: job.actionId, runId: job.id } }
     )
   }
