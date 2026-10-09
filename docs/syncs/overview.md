@@ -79,6 +79,7 @@ Incremental checkpoints are saved separately for each connection and account.
 ## Import files
 
 Use `blobs.put()` to store a file and include its returned reference in a `fileRef` column.
+`mediaType` is optional; when you pass it, it must be a single media type such as `application/pdf`.
 An async generator lets the sync return rows as files are fetched:
 
 ```ts

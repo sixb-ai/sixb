@@ -24,6 +24,7 @@ export {
 } from "./properties"
 export { validateQueryMetadata } from "./query"
 export {
+  assertValidFileRefs,
   isRecord,
   resolveValueTypeRef,
   resolveValueTypeSchema,

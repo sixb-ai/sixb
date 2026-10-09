@@ -4,6 +4,8 @@ import {
   defineObjectType,
   defineOntology,
   defineValueType,
+  defineWorkflow,
+  defineWorkflowStep,
   InMemoryBlobStorage,
   InMemoryLakeStorage,
   InMemoryQueues,
@@ -19,6 +21,7 @@ import {
   SixbHost,
   valueTypeRef,
 } from "../src"
+import { recordEdits } from "../src/actions/worker"
 import type { ObjectStorage, QueryObjectsInput, QueryObjectsResult } from "../src/storage"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps, waitFor } from "./test-runtime-deps"
@@ -443,6 +446,96 @@ describe("SixbHost runtime", () => {
         },
       })
     ).rejects.toThrow("must be a fileRef")
+  })
+
+  // Each caller boundary checks the media type itself, because the shared validator also
+  // re-checks stored state. Regression proof: drop assertValidFileRefs from
+  // normalizeRuntimeObject, normalizeRuntimeLink, normalizeObjectEditProperties,
+  // normalizeLinkEditProperties, normalizeActionParams, or requestWorkflowRun; that write passes.
+  test("rejects a file reference whose media type is not one media type wherever a caller writes it", async () => {
+    const Folder = defineObjectType({
+      id: "Folder",
+      name: "Folder",
+      properties: [prop("id", "string", { required: true, primary: true })],
+      links: [link("documents", Document, { properties: [prop("cover", "fileRef")] })],
+    })
+    const attach = defineAction("attach")
+      .on(Document)
+      .params({ file: param("fileRef") })
+      .writeback(async () => {})
+    const noop = defineWorkflowStep("noop")
+      .input({ file: "fileRef" })
+      .output({})
+      .run(async () => ({}))
+    const review = defineWorkflow("review").input({ file: "fileRef" }).then(noop)
+    const sixb = createTestSixb({
+      ontology: [Document, Folder],
+      actions: [attach],
+      workflows: [review],
+      ...createTestRuntimeDeps(),
+    })
+    const file = await sixb.blobs.put({
+      body: new TextEncoder().encode("document bytes"),
+      mediaType: "application/pdf",
+    })
+    const listed = { ...file, mediaType: "image/png,text/html" }
+    const rejected = (path: string) =>
+      `[Sixb] Property ${path}.mediaType must be one media type, such as "application/pdf"`
+    await sixb.objects(Document).upsert({ properties: { id: "doc:1", file } })
+    await sixb.objects(Folder).upsert({ properties: { id: "folder:1" } })
+    const documentRef = { objectTypeId: "Document", primaryId: "doc:1" } as const
+
+    await expect(
+      sixb.objects(Document).upsert({ properties: { id: "doc:2", file: listed } })
+    ).rejects.toThrow(rejected("Document.file"))
+    await expect(
+      sixb.objects(Folder).upsertLink({
+        sourceId: "folder:1",
+        linkId: "documents",
+        targetTypeId: "Document",
+        targetId: "doc:1",
+        properties: { cover: listed },
+      })
+    ).rejects.toThrow(rejected("Folder.documents.cover"))
+    await expect(
+      recordEdits({ runId: "act_1" }, ({ objects }) => {
+        objects(Document).create({ id: "doc:3", file: listed })
+      })
+    ).rejects.toThrow(rejected("Document.file"))
+    await expect(
+      recordEdits({ runId: "act_1" }, ({ objects }) => {
+        objects(Folder)
+          .byId("folder:1")
+          .link(Folder.l.documents, documentRef, { properties: { cover: listed } })
+      })
+    ).rejects.toThrow(rejected("Folder.documents.cover"))
+    await expect(
+      sixb
+        .objects(Document)
+        .requestAction({ id: "doc:1", action: attach, params: { file: listed } })
+    ).rejects.toThrow(rejected("Document.attach.file"))
+    await expect(sixb.workflows.request(review, { input: { file: listed } })).rejects.toThrow(
+      rejected('Workflow "review" input.file')
+    )
+
+    await expect(
+      sixb.objects(Document).requestAction({ id: "doc:1", action: attach, params: { file } })
+    ).resolves.toMatchObject({ created: true })
+    await expect(sixb.workflows.request(review, { input: { file } })).resolves.toMatchObject({
+      created: true,
+    })
+  })
+
+  // Regression proof: drop assertMediaType from blobs.put() in blob-storage/execution.ts.
+  test("rejects a blob whose mediaType is not exactly one media type", () => {
+    const sixb = createTestSixb({ ontology: [Document], ...createTestRuntimeDeps() })
+
+    expect(() =>
+      sixb.blobs.put({
+        body: new TextEncoder().encode("file bytes"),
+        mediaType: "image/png,text/html",
+      })
+    ).toThrow('[Sixb] blobs.put() mediaType must be one media type, such as "application/pdf".')
   })
 
   test("exposes configured queues on the runtime", () => {

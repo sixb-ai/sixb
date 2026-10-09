@@ -1,5 +1,6 @@
 import { isPlainRecord } from "../json"
 import { blobIdFromDigest } from "./derive"
+import { canonicalMediaType } from "./media-type"
 import type {
   BlobDigest,
   BlobStorage,
@@ -27,6 +28,18 @@ export function isFileRef(value: unknown): value is FileRef {
     (value.fileName === undefined || typeof value.fileName === "string") &&
     (value.mediaType === undefined || typeof value.mediaType === "string") &&
     (value.logicalPath === undefined || typeof value.logicalPath === "string")
+  )
+}
+
+/**
+ * `isFileRef`, plus a `mediaType` that, when present, is exactly one media type. Paths that store
+ * a reference a caller hands them use this. Reads keep `isFileRef`, so references stored before
+ * the rule still load; file routes re-parse the type before serving it.
+ */
+export function isValidFileRef(value: unknown): value is FileRef {
+  return (
+    isFileRef(value) &&
+    (value.mediaType === undefined || canonicalMediaType(value.mediaType) !== null)
   )
 }
 

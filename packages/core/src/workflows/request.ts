@@ -6,6 +6,7 @@ import {
   executionRecordInputFromRuntime,
 } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
+import { assertValidFileRefs } from "../ontology/validation"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { dispatchWorkflowRun } from "./run-dispatch"
 import type { WorkflowDefinition, WorkflowRunSource } from "./types"
@@ -49,6 +50,8 @@ export async function requestWorkflowRun(
     authorization: runtime.runtimeAuthorization,
   })
   assertAuthorized(runtime, { kind: "workflow.run", workflowId: workflow.id })
+  // Only caller input: automatic runs carry stored data, which may predate the rule.
+  assertValidFileRefs(options.input, `Workflow "${workflow.id}" input`)
   return dispatchWorkflowRun({
     errorReporterHost: runtime,
     projectId: runtime.projectId,

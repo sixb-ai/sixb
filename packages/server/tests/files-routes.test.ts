@@ -265,6 +265,27 @@ describe("file routes", () => {
     expect(new Date(upload.expiresAt).getTime()).toBeGreaterThan(Date.now())
   })
 
+  // Regression proof: drop the refine from CreateFileUploadBodySchema.mediaType; both are created.
+  test("refuses a staged upload whose media type is not exactly one media type", async () => {
+    const blobStorage = new TestDirectBlobStorage()
+    const { app } = createFilesApi(blobStorage)
+
+    for (const mediaType of ["image/png,text/html", ""]) {
+      const response = await app.fetch(
+        jsonRequest("/api/files/uploads", {
+          fileName: "image.png",
+          mediaType,
+          sizeBytes: 3,
+          digest: computeBlobDigest(new TextEncoder().encode("abc")),
+        })
+      )
+
+      expect(response.status, mediaType).toBe(422)
+      expect(await response.text(), mediaType).toContain("Expected a single media type")
+    }
+    expect(blobStorage.createInput).toBeUndefined()
+  })
+
   test("answers 501 on every staged upload route when storage keeps no upload sessions", async () => {
     const storage = new InMemoryStorage()
     const withoutSessions = new Proxy(storage, {

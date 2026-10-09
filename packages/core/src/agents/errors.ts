@@ -39,6 +39,7 @@ export type AgentRequestErrorCode =
   | "active_run_exists"
   | "authority_not_inheritable"
   | "invalid_context"
+  | "invalid_attachment"
   | "storage_unavailable"
   | "sandbox_not_configured"
   | "invalid_sandbox_params"

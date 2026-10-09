@@ -220,6 +220,20 @@ describe("shared dataset writer", () => {
         expect(lakeStorage.aborts).toBe(1)
         expect(await lakeStorage.getLatestVersion(dataset.id)).toBeNull()
       }
+      // Regression proof: drop the isValidFileRef check from verifyFileRef; the row commits.
+      const lakeStorage = new ObservedLake()
+      const row = { id: "1", file: { ...ref, mediaType: "image/png,text/html" } }
+      await expect(
+        writeDataset({
+          lakeStorage,
+          blobStorage,
+          dataset,
+          mode,
+          signal: new AbortController().signal,
+          readValues: async () => [{ value: mode === "merge" ? change.upsert(row) : row }],
+        })
+      ).rejects.toThrow("column 'file' with an invalid mediaType; use one media type")
+      expect(await lakeStorage.getLatestVersion(dataset.id)).toBeNull()
     }
     const result = await writeDataset({
       lakeStorage: new InMemoryLakeStorage(),

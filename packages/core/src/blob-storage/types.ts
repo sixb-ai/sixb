@@ -7,7 +7,9 @@ export type BlobDigest = `sha256:${string}`
  * `blobId` is always `blob_<sha256 hex>` derived from `digest`. `fileName`,
  * `mediaType`, and `logicalPath` are caller-supplied per-reference metadata (not
  * part of blob identity) and are untrusted — consumers must sanitize them before
- * using them for paths, headers, or rendering.
+ * using them for paths, headers, or rendering. A caller storing a reference must give a
+ * single media type such as `image/png` (`isValidFileRef`); references stored earlier may
+ * hold anything, so file routes re-parse it before serving.
  */
 export interface FileRef {
   readonly blobId: string

@@ -1,4 +1,4 @@
-import { isFileRef } from "../../blob-storage/validation"
+import { isFileRef, isValidFileRef } from "../../blob-storage/validation"
 import { withFailureMessage } from "../../errors/failure-message"
 import type { ObjectFieldSchema, Schema, ValueType, ValueTypeRefSchema } from ".."
 import { isDecimalString } from "../decimal"
@@ -198,6 +198,31 @@ export function validateSchemaValue(
       valueTypesById,
       diagnosticPath
     )
+  }
+}
+
+/**
+ * Reject a value from a caller that holds a file reference whose `mediaType` is not exactly one
+ * media type, anywhere inside it. Call it where caller input is accepted, after
+ * `validateSchemaValue`; that validator also re-checks stored state, which must keep loading
+ * references written before the rule.
+ */
+export function assertValidFileRefs(value: unknown, path: string): void {
+  if (isFileRef(value)) {
+    if (!isValidFileRef(value)) {
+      throw withFailureMessage(
+        new OntologyValidationError(
+          `[Sixb] Property ${path}.mediaType must be one media type, such as "application/pdf"`
+        ),
+        `Property ${path}.mediaType must be one media type, such as "application/pdf".`
+      )
+    }
+    return
+  }
+  if (Array.isArray(value)) {
+    for (const [index, item] of value.entries()) assertValidFileRefs(item, `${path}[${index}]`)
+  } else if (isRecord(value)) {
+    for (const [key, item] of Object.entries(value)) assertValidFileRefs(item, `${path}.${key}`)
   }
 }
 

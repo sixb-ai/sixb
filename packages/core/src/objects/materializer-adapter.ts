@@ -25,6 +25,7 @@ import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import {
   assertKnownProperties,
   assertLinkTargetType,
+  assertValidFileRefs,
   normalizeLinkProperties,
   normalizeObjectProperties,
   validateLinkProperties,
@@ -146,6 +147,7 @@ export function normalizeRuntimeObject(input: {
   const { objectType, primaryPropertyId, properties, valueTypesById } = input
   assertKnownProperties(objectType, properties)
   validateObjectProperties(objectType, properties, valueTypesById)
+  assertValidFileRefs(properties, objectType.id)
 
   const primaryValue = properties[primaryPropertyId]
   if (primaryValue === undefined || primaryValue === null) {
@@ -185,6 +187,7 @@ export function normalizeRuntimeLink(input: {
   const { objectType, linkDefinition, linkId, targetTypeId, properties, valueTypesById } = input
   assertLinkTargetType(objectType.id, linkId, linkDefinition, targetTypeId, input.isValidLinkTarget)
   validateLinkProperties(objectType, linkDefinition, properties, undefined, valueTypesById)
+  assertValidFileRefs(properties, `${objectType.id}.${linkId}`)
   const normalized = normalizeLinkProperties(objectType, linkDefinition, properties, valueTypesById)
   if (normalized === undefined) return undefined
   return normalizeJsonProperties(normalized, `${objectType.id}.${linkId} properties`)

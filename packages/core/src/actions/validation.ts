@@ -1,6 +1,7 @@
 import type { ValueType } from "../ontology"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
+import { assertValidFileRefs } from "../ontology/validation"
 import { coerceParamsToTyped, normalizeParams } from "../shared/params/validation"
 import type { ActionRunParams } from "../storage/action-runs"
 import { ActionDefinitionError } from "./errors"
@@ -52,10 +53,12 @@ export function normalizeActionParams(
   params: Record<string, unknown>,
   pathPrefix: string
 ): ActionRunParams {
-  return normalizeParams(runtime.ontology.getValueTypesById(), paramsConfig, params, {
+  const normalized = normalizeParams(runtime.ontology.getValueTypesById(), paramsConfig, params, {
     kind: "action",
     id: pathPrefix,
   })
+  assertValidFileRefs(normalized, pathPrefix)
+  return normalized
 }
 
 /**

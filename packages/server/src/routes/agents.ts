@@ -203,6 +203,7 @@ function handleAgentRouteError(
       case "invalid_sandbox_params":
       case "agent_selector_removed":
       case "invalid_context":
+      case "invalid_attachment":
       case "invalid_model_selection":
       case "model_not_found":
         set.status = 400

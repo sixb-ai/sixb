@@ -8,6 +8,7 @@ import {
 } from "@sixb/core"
 import { publishAgentRunCancel } from "@sixb/core/internal/agents"
 import { createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
+import { assertValidFileRefs } from "@sixb/core/internal/ontology"
 import type { Sixb, WorkflowRunView } from "@sixb/core/internal/request-execution"
 import {
   snapshotWorkflowInterventionResponse,
@@ -731,6 +732,10 @@ export function registerWorkflowRoutes(app: Elysia, host: SixbHostView) {
             value: parsedBody.response,
             valueTypesById: host.definitions.ontology.getValueTypesById(),
           })
+          assertValidFileRefs(
+            parsedBody.response,
+            `Workflow "${workflow.id}" intervention "${node.intervention.id}" response`
+          )
 
           const submitted = await storage.submit({
             projectId: host.id,

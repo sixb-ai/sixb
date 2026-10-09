@@ -3,6 +3,7 @@ import type { Principal } from "../auth"
 import { SYSTEM_PRINCIPAL } from "../auth"
 import { assertAuthorized } from "../authorization"
 import type { FileRef } from "../blob-storage"
+import { isValidFileRef } from "../blob-storage/validation"
 import {
   canInheritAgentRequestAuthorization,
   createInheritedAgentExecutionRecord,
@@ -89,6 +90,7 @@ export async function requestAgentRun(
   assertAuthorized(runtime, { kind: "agent.run" })
   assertRequestAuthorityCanRunAgent(runtime)
   const spec = resolveConversationRunSpec({ models, input })
+  assertAttachments(input.attachments)
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
   // empty conversation behind. The resulting parts are the exact snapshot persisted below.
@@ -236,6 +238,17 @@ export async function retryAgentRun(
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
+}
+
+function assertAttachments(attachments: readonly FileRef[] | undefined): void {
+  for (const [index, attachment] of (attachments ?? []).entries()) {
+    if (!isValidFileRef(attachment)) {
+      throw new AgentRequestError(
+        "invalid_attachment",
+        `[Sixb] Attachment ${index} is not a valid file reference.`
+      )
+    }
+  }
 }
 
 function assertSandboxExecutionAvailable(thread: AgentThreadRecord): void {

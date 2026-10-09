@@ -555,6 +555,17 @@ describe("agent routes", () => {
       fileName: "pipeline.log",
       mediaType: "text/plain",
     })
+    // Regression proof: drop assertAttachments from requestAgentRun; the message is accepted.
+    const invalidAttachmentResponse = await app.fetch(
+      jsonRequest(`/api/agent-threads/${createThreadBody.thread.id}/messages`, "POST", {
+        text: "Check the failed pipeline.",
+        attachments: [{ ...attachment, mediaType: "text/plain,text/html" }],
+      })
+    )
+    expect(invalidAttachmentResponse.status).toBe(400)
+    expect(await invalidAttachmentResponse.json()).toEqual({
+      error: "[Sixb] Attachment 0 is not a valid file reference.",
+    })
     const postMessageResponse = await app.fetch(
       jsonRequest(`/api/agent-threads/${createThreadBody.thread.id}/messages`, "POST", {
         text: "Check the failed pipeline.",

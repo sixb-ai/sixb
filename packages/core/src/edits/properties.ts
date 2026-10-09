@@ -3,6 +3,7 @@ import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import {
   assertKnownProperties,
+  assertValidFileRefs,
   normalizeObjectProperties,
   validateObjectProperties,
   validatePropertyValue,
@@ -20,6 +21,7 @@ export function normalizeObjectEditProperties(params: {
   assertKnownProperties(objectType, properties)
   assertNoTelemetryProperties(objectType.properties, properties, path)
   validateObjectProperties(objectType, properties, valueTypesById)
+  assertValidFileRefs(properties, objectType.id)
   return normalizeObjectProperties(objectType.properties, properties, valueTypesById, path)
 }
 
@@ -60,6 +62,7 @@ export function normalizeLinkEditProperties(params: {
       valueTypesById
     )
   }
+  assertValidFileRefs(properties, `${sourceObjectTypeId}.${linkId}`)
 
   return normalizeObjectProperties(
     linkProperties,
