@@ -278,6 +278,65 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
         })
       })
 
+      test("with a signal, waits for work and wakes when a job is enqueued", async () => {
+        await withQueues(async (queues) => {
+          let settled = false
+          const claim = queues.syncRuns
+            .claim({
+              projectId: "project-a",
+              workerId: "worker-1",
+              signal: AbortSignal.timeout(4_000),
+            })
+            .finally(() => {
+              settled = true
+            })
+          await Bun.sleep(50)
+          expect(settled).toBe(false)
+
+          await queues.syncRuns.enqueue({
+            projectId: "project-a",
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" } }],
+          })
+
+          expect((await claim).map((claimed) => claimed.job.payload.runId)).toEqual(["s-1"])
+        })
+      })
+
+      test("with a signal, wakes when a delayed job comes due", async () => {
+        await withQueues(async (queues) => {
+          const availableAt = new Date(Date.now() + shortLeaseMs).toISOString()
+          await queues.syncRuns.enqueue({
+            projectId: "project-a",
+            jobs: [{ type: "sync.run.requested", payload: { runId: "s-1" }, availableAt }],
+          })
+
+          const claimed = await queues.syncRuns.claim({
+            projectId: "project-a",
+            workerId: "worker-1",
+            signal: AbortSignal.timeout(4_000),
+          })
+
+          expect(claimed).toHaveLength(1)
+          expect(Date.now()).toBeGreaterThanOrEqual(Date.parse(availableAt))
+        })
+      })
+
+      // A provider may finish a blocking read before it sees the abort; BullMQ's lasts up to 5s.
+      test("with a signal, returns empty once the signal aborts", async () => {
+        await withQueues(async (queues) => {
+          const waiting = new AbortController()
+          const claim = queues.syncRuns.claim({
+            projectId: "project-a",
+            workerId: "worker-1",
+            signal: waiting.signal,
+          })
+          await Bun.sleep(20)
+          waiting.abort()
+
+          expect(await claim).toEqual([])
+        })
+      }, 10_000)
+
       test("isolates jobs across distinct projectIds", async () => {
         await withQueues(async (queues) => {
           await queues.syncRuns.enqueue({

@@ -106,7 +106,6 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
       workerId: `agent-worker-${host.id}`,
       claimLimit: options.concurrency ?? DEFAULT_AGENT_CONCURRENCY,
       leaseMs,
-      idlePollMs: options.idlePollMs,
     })
 
     this.host = host
@@ -116,10 +115,7 @@ export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAI
         .list()
         .some((workflow) => workflow.nodes.some((node) => node.type === "agent"))
     this.context = hasAgentWork ? buildAgentContext(host, options, turnTimeoutMs) : null
-    this.subagentWorker = new SubagentQueueWorker(this, host, {
-      leaseMs,
-      idlePollMs: options.idlePollMs,
-    })
+    this.subagentWorker = new SubagentQueueWorker(this, host, leaseMs)
   }
 
   override async start(): Promise<void> {
@@ -1033,7 +1029,7 @@ class SubagentQueueWorker extends QueueWorker<SubagentQueueJob, typeof AGENT_RUN
   constructor(
     private readonly owner: AgentWorker,
     host: AgentWorkerHost,
-    options: { readonly leaseMs: number; readonly idlePollMs?: number }
+    leaseMs: number
   ) {
     super({
       projectId: host.id,
@@ -1041,8 +1037,7 @@ class SubagentQueueWorker extends QueueWorker<SubagentQueueJob, typeof AGENT_RUN
       failureCodes: AGENT_RUN_FAILURE_CODES,
       workerId: `subagent-worker-${host.id}`,
       claimLimit: SUBAGENT_CONCURRENCY,
-      leaseMs: options.leaseMs,
-      idlePollMs: options.idlePollMs,
+      leaseMs,
     })
   }
 

@@ -133,7 +133,6 @@ test.skipIf(!enabled)(
         skillsDir: false,
         defaultMaxSteps: 3,
         turnTimeoutMs: 120_000,
-        idlePollMs: 20,
       })
       const requested = await api.agent.runs.request({
         text: "Read Device fan-1 using the Sixb CLI and report its label.",

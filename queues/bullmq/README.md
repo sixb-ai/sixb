@@ -58,7 +58,8 @@ Per-project queues keep tenants isolated — `getNextJob` on one project's queue
 | Sixb `Queue<TJob, TFailureCode>` | BullMQ                                      |
 | -------------------------------- | ------------------------------------------- |
 | `enqueue(jobs)`                  | `queue.addBulk([{ name, data, opts }])`     |
-| `claim({ leaseMs })`             | `worker.getNextJob(token)` + `extendLock`   |
+| `claim({ leaseMs })`             | `worker.getNextJob(token, { block: false })` + `extendLock` |
+| `claim({ leaseMs, signal })`     | `worker.getNextJob(token)` (blocks on BZPOPMIN, up to 5s per fetch) until a job or abort |
 | `complete(leaseId)`              | `job.moveToCompleted(_, token, false)`      |
 | `retry(availableAt)`             | `job.moveToDelayed(ts, token)`              |
 | `fail(failure)`                  | `job.moveToFailed(err, token, false)`       |

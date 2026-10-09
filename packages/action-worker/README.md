@@ -32,7 +32,6 @@ await worker.stop()
 | Option | Default | Purpose |
 | --- | --- | --- |
 | `leaseMs` | provider default | How long a claimed job stays invisible to other workers. Set it above your slowest action, or a long action gets picked up twice. |
-| `idlePollMs` | provider default | Poll interval when the queue is empty. |
 
 Requires a storage provider with `actionRuns` support and, for actions that read or write files, a
 blob storage provider. Both are checked at construction, so a missing provider fails at boot rather

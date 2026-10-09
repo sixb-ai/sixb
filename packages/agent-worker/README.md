@@ -153,4 +153,3 @@ The terminal run state is stored on the run record:
   runs.
 - `turnTimeoutMs`: wall-clock turn budget; defaults to 10 minutes.
 - `defaultMaxSteps`: framework model step cap; defaults to `100`.
-- `idlePollMs`: queue polling interval while idle.

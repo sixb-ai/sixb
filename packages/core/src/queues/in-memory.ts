@@ -109,11 +109,16 @@ function eligibleAt(record: QueueRecord): number {
   return Math.max(record.availableAtMs, record.leaseExpiryMs ?? -Infinity)
 }
 
+// Largest delay `setTimeout` accepts; a waiting claim that wakes early just waits again.
+const MAX_TIMER_DELAY_MS = 2_147_483_647
+
 interface QueueLane {
   // Terminal records remain here for caller-id deduplication, never in the delivery indexes.
   readonly records: Map<string, QueueRecord>
   readonly ready: IndexedHeap<QueueRecord>
   readonly waiting: IndexedHeap<QueueRecord>
+  /** Wakes claims waiting on this lane. */
+  readonly waiters: Set<() => void>
 }
 
 function toClaimedQueueJob<TQueueJob extends QueueJob>(
@@ -175,6 +180,27 @@ class InMemoryQueueStore {
       lane.ready.delete(record)
       lane.waiting.set(record)
     }
+    // Any change can make a job claimable or move the next due time; waiters look again.
+    for (const wake of lane.waiters) wake()
+  }
+
+  /** Resolves when the lane changes, its next delayed job or lease comes due, or `signal` aborts. */
+  waitForWork(projectId: string, queueId: string, signal: AbortSignal): Promise<void> {
+    const lane = this.lane(projectId, queueId)
+    const next = lane.waiting.peek()
+    const dueInMs = next ? eligibleAt(next) - Date.now() : MAX_TIMER_DELAY_MS
+    return new Promise((resolve) => {
+      // Always armed: like a blocking read on a socket, a waiting claim keeps its process alive.
+      const timer = setTimeout(wake, Math.min(dueInMs, MAX_TIMER_DELAY_MS))
+      function wake(): void {
+        clearTimeout(timer)
+        lane.waiters.delete(wake)
+        signal.removeEventListener("abort", wake)
+        resolve()
+      }
+      lane.waiters.add(wake)
+      signal.addEventListener("abort", wake, { once: true })
+    })
   }
 
   takeReady<TQueueJob extends QueueJob>(
@@ -216,6 +242,7 @@ class InMemoryQueueStore {
         waiting: new IndexedHeap(
           (left, right) => eligibleAt(left) - eligibleAt(right) || left.sequence - right.sequence
         ),
+        waiters: new Set(),
       }
       queues.set(queueId, lane)
     }
@@ -263,6 +290,7 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     workerId: string
     limit?: number
     leaseMs?: number
+    signal?: AbortSignal
   }): Promise<readonly ClaimedQueueJob<TQueueJob>[]> {
     assertNonEmpty(params.projectId, "projectId")
     assertNonEmpty(params.workerId, "workerId")
@@ -275,27 +303,34 @@ class InMemoryQueue<TQueueJob extends QueueJob, TFailureCode extends SixbErrorCo
     const leaseMs = params.leaseMs ?? 30_000
     assertPositiveNumber(leaseMs, "leaseMs")
 
-    const now = Date.now()
-    const claimedAt = new Date(now).toISOString()
-    // Validate before removing candidates, and cache the same millisecond precision we return.
-    const leaseExpiry = new Date(now + leaseMs)
-    const leaseExpiresAt = leaseExpiry.toISOString()
-    const claimable = this.store.takeReady<TQueueJob>(params.projectId, this.queueId, now, limit)
-
-    return claimable.map((record) => {
-      // Attempts count claims so redelivery after lease expiry or retry is visible to workers.
-      record.job = {
-        ...record.job,
-        attempt: record.job.attempt + 1,
+    for (;;) {
+      if (params.signal?.aborted) return []
+      const now = Date.now()
+      const claimedAt = new Date(now).toISOString()
+      // Validate before removing candidates, and cache the same millisecond precision we return.
+      const leaseExpiry = new Date(now + leaseMs)
+      const leaseExpiresAt = leaseExpiry.toISOString()
+      const claimable = this.store.takeReady<TQueueJob>(params.projectId, this.queueId, now, limit)
+      if (claimable.length === 0 && params.signal) {
+        await this.store.waitForWork(params.projectId, this.queueId, params.signal)
+        continue
       }
-      record.leaseId = randomUUID()
-      record.claimedAt = claimedAt
-      record.leaseExpiresAt = leaseExpiresAt
-      record.leaseExpiryMs = leaseExpiry.getTime()
-      this.store.schedule(params.projectId, record, now)
 
-      return toClaimedQueueJob(record)
-    })
+      return claimable.map((record) => {
+        // Attempts count claims so redelivery after lease expiry or retry is visible to workers.
+        record.job = {
+          ...record.job,
+          attempt: record.job.attempt + 1,
+        }
+        record.leaseId = randomUUID()
+        record.claimedAt = claimedAt
+        record.leaseExpiresAt = leaseExpiresAt
+        record.leaseExpiryMs = leaseExpiry.getTime()
+        this.store.schedule(params.projectId, record, now)
+
+        return toClaimedQueueJob(record)
+      })
+    }
   }
 
   async complete(params: { projectId: string; jobId: string; leaseId: string }): Promise<void> {
