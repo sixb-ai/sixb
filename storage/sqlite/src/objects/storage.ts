@@ -250,23 +250,19 @@ export class SqliteObjectStorage implements ObjectStorage {
     limit: number
   }): Promise<{ objects: readonly ObjectRow[]; nextPrimaryId?: string }> {
     assertReconciliationPageLimit(params.limit)
+    // A cursor written as `? IS NULL OR …` cannot seek, so every page would rescan from the start.
+    const cursor = params.afterPrimaryId === undefined ? [] : [params.afterPrimaryId]
     const rows = this.db
       .query(
         `
           SELECT * FROM objects
           WHERE project_id = ? AND object_type_id = ?
-            AND (? IS NULL OR primary_id > ?)
+            ${cursor.length > 0 ? "AND primary_id > ?" : ""}
           ORDER BY primary_id ASC
           LIMIT ?
         `
       )
-      .all(
-        params.projectId,
-        params.objectTypeId,
-        params.afterPrimaryId ?? null,
-        params.afterPrimaryId ?? null,
-        params.limit + 1
-      ) as DatabaseRow[]
+      .all(params.projectId, params.objectTypeId, ...cursor, params.limit + 1) as DatabaseRow[]
     const hasMore = rows.length > params.limit
     const objects = rows.slice(0, params.limit).map((row) => rowToObject(row))
     const last = objects.at(-1)

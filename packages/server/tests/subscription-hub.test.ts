@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { InMemoryBroker } from "@sixb/core"
 import { LOGS_STREAM, LoggingService } from "@sixb/core/internal/logging"
-import { LogSubscriptionHub } from "../src/routes/ws/log-subscription-hub"
+import { createLogSubscriptionHub, logSubscription } from "../src/routes/ws/logs"
 
 const PROJECT_ID = "log-subscription-hub-test"
 const REPLAY_COUNT = 1_001
@@ -28,6 +28,24 @@ class TestLogSocket {
   }
 }
 
+class CountingSubscribeBroker extends InMemoryBroker {
+  active = 0
+
+  override async subscribe(
+    params: Parameters<InMemoryBroker["subscribe"]>[0],
+    handler: Parameters<InMemoryBroker["subscribe"]>[1]
+  ): Promise<() => void> {
+    const unsubscribe = await super.subscribe(params, handler)
+    this.active += 1
+    let subscribed = true
+    return () => {
+      if (subscribed) this.active -= 1
+      subscribed = false
+      unsubscribe()
+    }
+  }
+}
+
 class DelayedSubscribeBroker extends InMemoryBroker {
   private readonly subscribeStarted = new Deferred<void>()
   private readonly subscribeRelease = new Deferred<void>()
@@ -50,13 +68,18 @@ class DelayedSubscribeBroker extends InMemoryBroker {
   }
 }
 
-describe("LogSubscriptionHub", () => {
+describe("SubscriptionHub", () => {
   test("replays more than the client queue capacity without treating catch-up as a slow client", async () => {
-    const { anchorCursor, hub } = await createReplayHub()
+    const { anchorCursor, hub, logging } = await createReplayHub()
     const socket = new TestLogSocket()
 
     try {
-      await hub.subscribe({}, socket, { afterCursor: anchorCursor }, () => undefined)
+      await hub.subscribe(
+        {},
+        socket,
+        logSubscription(logging, { afterCursor: anchorCursor }),
+        () => undefined
+      )
       await waitFor(
         () => socket.closeCode !== undefined || socket.deliveredLogCount === REPLAY_COUNT
       )
@@ -69,11 +92,16 @@ describe("LogSubscriptionHub", () => {
   })
 
   test("still closes a replay when the socket buffer is over the backpressure limit", async () => {
-    const { anchorCursor, hub } = await createReplayHub()
+    const { anchorCursor, hub, logging } = await createReplayHub()
     const socket = new TestLogSocket(1_048_577)
 
     try {
-      await hub.subscribe({}, socket, { afterCursor: anchorCursor }, () => undefined)
+      await hub.subscribe(
+        {},
+        socket,
+        logSubscription(logging, { afterCursor: anchorCursor }),
+        () => undefined
+      )
       await waitFor(() => socket.closeCode !== undefined)
 
       expect(socket.closeCode).toBe(1013)
@@ -86,12 +114,12 @@ describe("LogSubscriptionHub", () => {
   test("does not install a client that unsubscribes while hub startup is pending", async () => {
     const broker = new DelayedSubscribeBroker()
     const logging = new LoggingService({ projectId: PROJECT_ID, broker })
-    const hub = new LogSubscriptionHub({ logging })
+    const hub = createLogSubscriptionHub(logging)
     const socket = new TestLogSocket()
     const key = {}
     let subscribed = false
 
-    const pendingSubscribe = hub.subscribe(key, socket, {}, () => {
+    const pendingSubscribe = hub.subscribe(key, socket, logSubscription(logging, {}), () => {
       subscribed = true
     })
     await broker.waitForSubscribeStart()
@@ -109,18 +137,23 @@ describe("LogSubscriptionHub", () => {
   test("only installs the latest subscription when two requests race during startup", async () => {
     const broker = new DelayedSubscribeBroker()
     const logging = new LoggingService({ projectId: PROJECT_ID, broker })
-    const hub = new LogSubscriptionHub({ logging })
+    const hub = createLogSubscriptionHub(logging)
     const socket = new TestLogSocket()
     const key = {}
     const subscribed: string[] = []
 
-    const first = hub.subscribe(key, socket, { kinds: ["sync"] }, () => {
+    const first = hub.subscribe(key, socket, logSubscription(logging, { kinds: ["sync"] }), () => {
       subscribed.push("first")
     })
     await broker.waitForSubscribeStart()
-    const second = hub.subscribe(key, socket, { kinds: ["workflow"] }, () => {
-      subscribed.push("second")
-    })
+    const second = hub.subscribe(
+      key,
+      socket,
+      logSubscription(logging, { kinds: ["workflow"] }),
+      () => {
+        subscribed.push("second")
+      }
+    )
     broker.releaseSubscribe()
 
     try {
@@ -134,12 +167,17 @@ describe("LogSubscriptionHub", () => {
   test("does not install a pending client after the hub closes", async () => {
     const broker = new DelayedSubscribeBroker()
     const logging = new LoggingService({ projectId: PROJECT_ID, broker })
-    const hub = new LogSubscriptionHub({ logging })
+    const hub = createLogSubscriptionHub(logging)
     let subscribed = false
 
-    const pendingSubscribe = hub.subscribe({}, new TestLogSocket(), {}, () => {
-      subscribed = true
-    })
+    const pendingSubscribe = hub.subscribe(
+      {},
+      new TestLogSocket(),
+      logSubscription(logging, {}),
+      () => {
+        subscribed = true
+      }
+    )
     await broker.waitForSubscribeStart()
     await hub.close()
     broker.releaseSubscribe()
@@ -147,15 +185,59 @@ describe("LogSubscriptionHub", () => {
 
     expect(subscribed).toBe(false)
   })
+
+  // Reproduce: drop the `release()` call from `deleteClient`, or the restart loop in `subscribe`,
+  // in subscription-hub.ts.
+  test("releases the broker subscription when the last client leaves and restarts it on demand", async () => {
+    const broker = new CountingSubscribeBroker()
+    const logging = new LoggingService({ projectId: PROJECT_ID, broker })
+    const hub = createLogSubscriptionHub(logging)
+    const first = {}
+    const second = {}
+
+    try {
+      await hub.subscribe(first, new TestLogSocket(), logSubscription(logging, {}), () => undefined)
+      await hub.subscribe(
+        second,
+        new TestLogSocket(),
+        logSubscription(logging, {}),
+        () => undefined
+      )
+      expect(broker.active).toBe(1)
+
+      hub.unsubscribe(first)
+      expect(broker.active).toBe(1)
+      hub.unsubscribe(second)
+      await waitFor(() => broker.active === 0)
+
+      await hub.subscribe(first, new TestLogSocket(), logSubscription(logging, {}), () => undefined)
+      // The last client leaves while the next subscribe waits on the started subscription.
+      const socket = new TestLogSocket()
+      const pending = hub.subscribe(second, socket, logSubscription(logging, {}), () => undefined)
+      hub.unsubscribe(first)
+      await pending
+      await waitFor(() => broker.active === 1)
+      await broker.append({
+        projectId: PROJECT_ID,
+        streamId: LOGS_STREAM.id,
+        records: [{ name: "workflow.info", payload: logPayload("after restart") }],
+      })
+      await waitFor(() => socket.deliveredLogCount === 1)
+    } finally {
+      await hub.close()
+    }
+    await waitFor(() => broker.active === 0)
+  })
 })
 
 async function createReplayHub(): Promise<{
   readonly anchorCursor: string
-  readonly hub: LogSubscriptionHub
+  readonly hub: ReturnType<typeof createLogSubscriptionHub>
+  readonly logging: LoggingService
 }> {
   const broker = new InMemoryBroker()
   const logging = new LoggingService({ projectId: PROJECT_ID, broker })
-  const hub = new LogSubscriptionHub({ logging })
+  const hub = createLogSubscriptionHub(logging)
 
   await broker.ensureStream({ projectId: PROJECT_ID, stream: LOGS_STREAM })
   const [anchor] = await broker.append({
@@ -175,7 +257,7 @@ async function createReplayHub(): Promise<{
     })),
   })
 
-  return { anchorCursor: anchor.cursor, hub }
+  return { anchorCursor: anchor.cursor, hub, logging }
 }
 
 function logPayload(message: string) {
