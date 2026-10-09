@@ -655,6 +655,7 @@ export class AuthRuntime {
     caller: AuthenticatedUserRequestSession,
     input: CreatePersonalAccessTokenInput
   ): Promise<CreateAccessTokenResult> {
+    assertSessionCaller(caller)
     const storage = this.requireAuthStorage()
     // A personal token can only carry groups the caller currently belongs to.
     const groupIds = constrainRequestedGroupIds(input.groupIds, caller.groupIds, {
@@ -815,6 +816,7 @@ export class AuthRuntime {
     caller: AuthenticatedUserRequestSession,
     input: CreateServiceAccountAccessTokenInput
   ): Promise<CreateServiceAccountAccessTokenResult> {
+    assertSessionCaller(caller)
     const storage = this.requireAuthStorage()
     const { serviceAccount, groupIds: serviceAccountGroupIds } =
       await this.requireManageableServiceAccount(storage, caller.groupIds, input.serviceAccountId)
@@ -1562,6 +1564,18 @@ function memberGroups(memberships: readonly GroupMembershipRecord[]): {
 /** The interactive session a caller authenticated with, when it used one. */
 function callerSessionId(caller: AuthenticatedRequestAuthSession): string | undefined {
   return caller.credentialSource === "session" ? caller.session.id : undefined
+}
+
+// Access tokens are created only by a signed-in person, never by another access token. A token
+// minting one could hand out more groups or a later expiry than it carries, and what it minted
+// would outlive its own revocation.
+function assertSessionCaller(caller: AuthenticatedUserRequestSession): void {
+  if (caller.credentialSource !== "session") {
+    throw new AuthRuntimeError(
+      "authorization_denied",
+      "[Sixb] Access tokens can only be created from a signed-in session, not with another access token."
+    )
+  }
 }
 
 function constrainTokenGroupIds(

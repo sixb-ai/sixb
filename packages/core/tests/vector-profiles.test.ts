@@ -1,6 +1,13 @@
 import { describe, expect, mock, test } from "bun:test"
 import type { ObjectQuery } from "../src"
-import { defineObjectType, type EmbeddingModel, OntologyRegistry, prop } from "../src"
+import {
+  AuthorizationError,
+  defineObjectType,
+  type EmbeddingModel,
+  link,
+  OntologyRegistry,
+  prop,
+} from "../src"
 import { emptyGrantIndex } from "../src/authorization"
 import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
 import { createDelegatedRequestScope } from "../src/execution/scopes"
@@ -212,6 +219,48 @@ describe("named vector profiles", () => {
       denied.objects(Product).query().vector("content", "private search", { k: 1 }).list()
     ).rejects.toThrow()
     expect(f.embed).not.toHaveBeenCalled()
+  })
+
+  test("search through a link is denied when the link can reach an excluded subtype", async () => {
+    // Revert check: skip touchLinkTargets in validateOutgoingTraverse and this search gets past
+    // authorization.
+    const embed = mock(model.embed)
+    const RecalledProduct = defineObjectType({
+      id: "RecalledProduct",
+      name: "Recalled Product",
+      extends: Product,
+      properties: [],
+    })
+    const Shelf = defineObjectType({
+      id: "Shelf",
+      name: "Shelf",
+      properties: [prop("id", "string", { primary: true, required: true })],
+      links: [link("products", Product)],
+    })
+    const scoped = createTestSixb(
+      {
+        ...createTestRuntimeDeps(),
+        ontology: [Product, RecalledProduct, Shelf],
+        models: { embedding: [{ ...model, embed }] },
+      },
+      {
+        authorization: {
+          principal: { type: "user", id: "shelf-reader" },
+          groupIds: [],
+          roleIds: [],
+          grants: { ...emptyGrantIndex(), "view:object": new Set([Shelf.id, Product.id]) },
+        },
+      }
+    )
+    await expect(
+      scoped
+        .objects(Shelf)
+        .query()
+        .traverse(Shelf.l.products)
+        .vector("content", "search", { k: 1 })
+        .list()
+    ).rejects.toThrow(AuthorizationError)
+    expect(embed).not.toHaveBeenCalled()
   })
 
   test("index uses the configured model, independent profiles and stable scores", async () => {

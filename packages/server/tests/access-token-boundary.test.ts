@@ -12,13 +12,11 @@ describe("access token auth boundary", () => {
       ["GET", "/api/project"],
       ["GET", "/api/auth/access-management-options"],
       ["GET", "/api/auth/access-tokens"],
-      ["POST", "/api/auth/access-tokens"],
       ["POST", "/api/auth/access-tokens/tok_1/revoke"],
       ["GET", "/api/auth/service-accounts"],
       ["POST", "/api/auth/service-accounts"],
       ["POST", "/api/auth/service-accounts/svc_1/disable"],
       ["GET", "/api/auth/service-accounts/svc_1/access-tokens"],
-      ["POST", "/api/auth/service-accounts/svc_1/access-tokens"],
       ["POST", "/api/auth/service-accounts/svc_1/access-tokens/tok_1/revoke"],
       ["GET", "/api/object-types"],
       ["GET", "/api/object-types/device"],
@@ -60,6 +58,9 @@ describe("access token auth boundary", () => {
 
   test("rejects raw, admin, browser, and integration routes", () => {
     const rejectedRoutes = [
+      // Creating a token takes a signed-in session; an access token cannot mint another.
+      ["POST", "/api/auth/access-tokens"],
+      ["POST", "/api/auth/service-accounts/svc_1/access-tokens"],
       // The object, link, and telemetry writes moved out of this list: they enforce `edit:object`
       // and `append:telemetry` now, which is the precondition SIXB_API_ROUTES states for bearer
       // eligibility. Link reads moved out too now that they enforce both source and target view.

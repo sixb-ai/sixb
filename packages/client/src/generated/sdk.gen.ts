@@ -612,7 +612,6 @@ export const createAuthPersonalAccessToken = <ThrowOnError extends boolean = fal
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
       { scheme: "bearer", type: "http" },
-      { scheme: "bearer", type: "http" },
     ],
     url: "/api/auth/access-tokens",
     ...options,
@@ -737,7 +736,6 @@ export const createAuthServiceAccountAccessToken = <ThrowOnError extends boolean
   >({
     security: [
       { name: "x-sixb-csrf", type: "apiKey" },
-      { scheme: "bearer", type: "http" },
       { scheme: "bearer", type: "http" },
     ],
     url: "/api/auth/service-accounts/{serviceAccountId}/access-tokens",

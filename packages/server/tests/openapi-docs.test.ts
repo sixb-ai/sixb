@@ -141,6 +141,8 @@ describe("OpenAPI docs", () => {
     ])
 
     const sessionMutationRoutes = [
+      ["post", "/api/auth/access-tokens"],
+      ["post", "/api/auth/service-accounts/{serviceAccountId}/access-tokens"],
       ["post", "/api/auth/invitations"],
       ["post", "/api/auth/invitations/{invitationId}/revoke"],
       ["patch", "/api/auth/members/{userId}/groups"],

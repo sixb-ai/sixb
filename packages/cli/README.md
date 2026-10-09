@@ -276,8 +276,10 @@ sixb objects list
 
 ## API credential management
 
-Personal access tokens are user-owned credentials. They can manage personal tokens, service
-accounts, and service-account tokens within the caller's existing groups and permissions.
+Personal access tokens are user-owned credentials. They can list and revoke personal tokens and
+manage service accounts and their tokens within the caller's existing groups and permissions.
+Creating a token of either kind requires a profile signed in with `sixb login`: an access token
+cannot create another.
 
 ```bash
 sixb token list

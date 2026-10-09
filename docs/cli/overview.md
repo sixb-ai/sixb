@@ -138,7 +138,7 @@ These commands return JSON. Use scoped help for the operation you need, such as 
 
 ## Tokens and service accounts
 
-Create and revoke credentials from an authenticated user profile:
+Create and revoke credentials from a profile signed in with `sixb login`:
 
 ```bash
 sixb token create --name "Local script" --expires-in 30d
@@ -149,7 +149,9 @@ sixb service-account create --id finance-integration --name "Finance integration
 sixb service-account token create finance-integration --name "Production" --expires-in 30d
 ```
 
-Use `--group` to select permitted groups and `--expires-in` or `--expires-at` to set expiration. Tokens are shown only when created. Service-account tokens cannot manage credentials themselves.
+Use `--group` to select permitted groups and `--expires-in` or `--expires-at` to set expiration. Tokens are shown only when created.
+
+Creating a token requires that sign-in. A personal access token, whether passed with `--token`, set in `SIXB_API_TOKEN`, or saved with `--token-stdin`, can list and revoke tokens and manage service accounts but cannot create tokens, so no token can produce one with more access or a later expiry than its own. Service-account tokens cannot manage credentials at all.
 
 Use `--json` for machine-readable output from profile and credential commands. See [Members & service accounts](../auth/members.md) for the access model.
 

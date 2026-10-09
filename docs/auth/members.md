@@ -46,6 +46,8 @@ Choose the credential that matches the caller:
 
 Manage credentials in **Settings → Tokens** in Atlas or through the [CLI](../cli/overview.md#tokens-and-service-accounts). Tokens are shown only when created. Save them in your secret manager and revoke them when no longer needed.
 
+Creating a token requires signing in, in Atlas or with `sixb login`. A personal access token can list and revoke tokens and manage service accounts but cannot create tokens, so no token can produce one with more access or a later expiry than its own.
+
 For example, after signing in with the CLI, create a service account in a group you are allowed to assign, then issue its token:
 
 ```bash

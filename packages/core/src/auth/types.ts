@@ -190,6 +190,12 @@ export interface OidcStartSignInInput {
 
 export interface OidcStartSignInResult {
   readonly redirectTo: string
+  /**
+   * The `state` sent to the provider. The server keeps it in a cookie until `expiresAt` and
+   * completes the callback only in the browser that holds it.
+   */
+  readonly state: string
+  readonly expiresAt: Date
 }
 
 export interface OidcCallbackInput {
