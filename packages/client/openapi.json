@@ -2073,9 +2073,6 @@
             "sixbCsrf": []
           },
           {
-            "sixbAccessToken": []
-          },
-          {
             "sixbSession": []
           }
         ],
@@ -3167,9 +3164,6 @@
         "security": [
           {
             "sixbCsrf": []
-          },
-          {
-            "sixbAccessToken": []
           },
           {
             "sixbSession": []

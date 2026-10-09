@@ -496,6 +496,101 @@ describe("SixbHost auth runtime", () => {
     await expect(sixb.auth.listServiceAccounts(caller)).resolves.toEqual({ serviceAccounts: [] })
   })
 
+  // Reproduce: remove `assertSessionCaller` from createPersonalAccessToken or
+  // createServiceAccountAccessToken; the token limited to "commercial" then mints new tokens, the
+  // unscoped one carrying every group its user has.
+  test("creates access tokens only from a signed-in session", async () => {
+    const deps = createTestRuntimeDeps()
+    const sixb = new SixbHost({
+      ontology: [],
+      ...deps,
+      auth: authStrategy,
+    })
+    const session = await seedAuthenticatedUser(sixb, deps, {
+      userId: "usr_1",
+      email: "ava@acme.com",
+      groupIds: ["commercial", "finance"],
+    })
+    const scoped = createAccessTokenCredential("personal", "tok_scoped")
+    await deps.storage.auth.accessTokens.create({
+      id: scoped.tokenId,
+      projectId: sixb.id,
+      name: "CI",
+      kind: "personal",
+      subject: { type: "user", id: "usr_1" },
+      tokenHash: scoped.tokenHash,
+      groupIds: ["commercial"],
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    const token = await resolveCaller(
+      sixb,
+      new Request("http://localhost/api/auth/access-tokens", {
+        headers: { authorization: `Bearer ${scoped.tokenValue}` },
+      })
+    )
+    expect(token).toMatchObject({ credentialSource: "accessToken", groupIds: ["commercial"] })
+
+    // Neither an unscoped token nor one inside the caller's own scope can be minted by a token.
+    for (const groupIds of [undefined, ["commercial"]]) {
+      await expect(
+        sixb.auth.createPersonalAccessToken(token, {
+          name: "Minted",
+          expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+          groupIds,
+        })
+      ).rejects.toMatchObject({
+        code: "authorization_denied",
+        message: expect.stringContaining("can only be created from a signed-in session"),
+      })
+    }
+
+    // The token may manage a service account inside its scope, but not issue it a credential.
+    await sixb.auth.createServiceAccount(session, {
+      id: "svc_commercial",
+      name: "Commercial sync",
+      groupIds: ["commercial"],
+    })
+    await expect(
+      sixb.auth.listServiceAccountAccessTokens(token, { serviceAccountId: "svc_commercial" })
+    ).resolves.toMatchObject({ accessTokens: [] })
+    await expect(
+      sixb.auth.createServiceAccountAccessToken(token, {
+        serviceAccountId: "svc_commercial",
+        name: "Minted",
+        expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      })
+    ).rejects.toMatchObject({ code: "authorization_denied" })
+
+    // A signed-in session still creates tokens, inheriting every group or limited to some.
+    const inheriting = await sixb.auth.createPersonalAccessToken(session, {
+      name: "Inherits groups",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+    })
+    expect(inheriting.accessToken.groupIds).toBeUndefined()
+    const limited = await sixb.auth.createPersonalAccessToken(session, {
+      name: "Finance only",
+      expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      groupIds: ["finance"],
+    })
+    expect(limited.accessToken.groupIds).toEqual(["finance"])
+    await expect(
+      sixb.auth.createServiceAccountAccessToken(session, {
+        serviceAccountId: "svc_commercial",
+        name: "Sync token",
+        expiresAt: new Date("2099-01-01T00:00:00.000Z"),
+      })
+    ).resolves.toMatchObject({ accessToken: { kind: "serviceAccount" } })
+
+    // Only the session's tokens were stored.
+    const { accessTokens } = await sixb.auth.listPersonalAccessTokens(session)
+    expect(accessTokens.map((accessToken) => accessToken.name).sort()).toEqual([
+      "CI",
+      "Finance only",
+      "Inherits groups",
+    ])
+  })
+
   test("resolves sessions and cookie names by audience", async () => {
     const deps = createTestRuntimeDeps()
     const sixb = new SixbHost({

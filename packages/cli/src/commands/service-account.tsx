@@ -12,6 +12,7 @@ import { createCliSixbClient, unwrapSixbApiResult } from "../lib/api-client"
 import { resolveProfileApiClientConfig } from "../lib/profile-api-client"
 import { KeyValueResultView, renderStatic, SecretResultView, TableResultView } from "../ui"
 import {
+  assertSignedIn,
   formatDate,
   formatGroups,
   normalizeGroupIds,
@@ -218,7 +219,9 @@ async function createServiceAccountToken(options: ServiceAccountCommandOptions) 
 
   const expiresAt = resolveExpiration(options)
   const groupIds = normalizeGroupIds(options.groupIds)
-  const client = createCliSixbClient(await resolveProfileApiClientConfig(options))
+  const config = await resolveProfileApiClientConfig(options)
+  assertSignedIn(config)
+  const client = createCliSixbClient(config)
   const result = unwrapSixbApiResult(
     await createAuthServiceAccountAccessToken({
       client,

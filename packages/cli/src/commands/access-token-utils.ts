@@ -1,3 +1,16 @@
+import type { SixbApiClientConfig } from "../lib/api-client"
+
+/**
+ * The API creates tokens only for a signed-in session, never for another access token, so say how
+ * to sign in rather than relaying its refusal.
+ */
+export function assertSignedIn(config: SixbApiClientConfig): void {
+  if (config.tokenSource === "session") return
+  throw new Error(
+    `[SixbCLI] Creating a token requires signing in; an access token cannot create another token. Run \`sixb login ${config.apiUrl}\`, then create the token from that profile.`
+  )
+}
+
 export interface ExpirationOptions {
   readonly expiresAt?: string
   readonly expiresIn?: string

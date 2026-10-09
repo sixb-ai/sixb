@@ -177,34 +177,53 @@ describe("access token management routes", () => {
     })
   })
 
-  test("allows personal access tokens to manage the caller's personal tokens", async () => {
+  // Reproduce: set `accessToken: true` back on createAuthPersonalAccessToken or
+  // createAuthServiceAccountAccessToken in SIXB_API_ROUTES; the request then reaches the runtime,
+  // which refuses it with its own message instead. Remove `assertSessionCaller` from the runtime as
+  // well and the token gets a 201.
+  test("lets personal access tokens list and revoke personal tokens but not create them", async () => {
     const { app, storage } = createRuntime()
-    await seedSession(storage)
+    const session = await seedSession(storage)
     const credential = await seedPersonalAccessToken(storage)
     const bearerHeaders = { authorization: `Bearer ${credential.tokenValue}` }
 
-    const listResponse = await app.fetch(
-      jsonRequest("/api/auth/access-tokens", "GET", bearerHeaders)
-    )
-    expect(listResponse.status).toBe(200)
-    await expect(listResponse.json()).resolves.toMatchObject({
-      accessTokens: [{ id: credential.tokenId, name: "CLI bootstrap token" }],
-    })
+    for (const body of [
+      { name: "Minted", expiresAt: "2099-01-01T00:00:00.000Z" },
+      { name: "Minted", expiresAt: "2099-01-01T00:00:00.000Z", groupIds: ["agents"] },
+    ]) {
+      const mintResponse = await app.fetch(
+        jsonRequest("/api/auth/access-tokens", "POST", bearerHeaders, body)
+      )
+      expect(mintResponse.status).toBe(403)
+      await expect(mintResponse.json()).resolves.toEqual({
+        error: "Access tokens cannot authenticate this route",
+      })
+    }
 
+    // A signed-in session creates the token, inheriting the user's groups when none are named.
     const createResponse = await app.fetch(
-      jsonRequest("/api/auth/access-tokens", "POST", bearerHeaders, {
-        name: "Rotated CLI token",
+      jsonRequest("/api/auth/access-tokens", "POST", session.headers, {
+        name: "Inherits groups",
         expiresAt: "2099-01-01T00:00:00.000Z",
-        groupIds: ["agents"],
       })
     )
     expect(createResponse.status).toBe(201)
     const created = (await createResponse.json()) as {
       accessToken: { readonly id: string; readonly groupIds?: readonly string[] }
-      tokenValue: string
     }
-    expect(created.tokenValue.startsWith("sixb_pat_")).toBe(true)
-    expect(created.accessToken.groupIds).toEqual(["agents"])
+    expect(created.accessToken.groupIds).toBeUndefined()
+
+    const listResponse = await app.fetch(
+      jsonRequest("/api/auth/access-tokens", "GET", bearerHeaders)
+    )
+    expect(listResponse.status).toBe(200)
+    const listed = (await listResponse.json()) as {
+      accessTokens: readonly { readonly id: string; readonly name: string }[]
+    }
+    expect(listed.accessTokens.map((token) => token.name).sort()).toEqual([
+      "CLI bootstrap token",
+      "Inherits groups",
+    ])
 
     const revokeResponse = await app.fetch(
       jsonRequest(`/api/auth/access-tokens/${created.accessToken.id}/revoke`, "POST", bearerHeaders)
@@ -215,9 +234,9 @@ describe("access token management routes", () => {
     })
   })
 
-  test("allows personal access tokens to manage service accounts and service-account tokens", async () => {
+  test("lets personal access tokens manage service accounts but not create their tokens", async () => {
     const { app, storage } = createRuntime()
-    await seedSession(storage)
+    const session = await seedSession(storage)
     const credential = await seedPersonalAccessToken(storage)
     const bearerHeaders = { authorization: `Bearer ${credential.tokenValue}` }
 
@@ -239,8 +258,19 @@ describe("access token management routes", () => {
       },
     })
 
-    const createTokenResponse = await app.fetch(
+    const mintResponse = await app.fetch(
       jsonRequest("/api/auth/service-accounts/svc_cli/access-tokens", "POST", bearerHeaders, {
+        name: "Sandbox token",
+        expiresAt: "2099-01-01T00:00:00.000Z",
+      })
+    )
+    expect(mintResponse.status).toBe(403)
+    await expect(mintResponse.json()).resolves.toEqual({
+      error: "Access tokens cannot authenticate this route",
+    })
+
+    const createTokenResponse = await app.fetch(
+      jsonRequest("/api/auth/service-accounts/svc_cli/access-tokens", "POST", session.headers, {
         name: "Sandbox token",
         expiresAt: "2099-01-01T00:00:00.000Z",
         groupIds: ["agents"],
@@ -248,11 +278,8 @@ describe("access token management routes", () => {
     )
     expect(createTokenResponse.status).toBe(201)
     const createdToken = (await createTokenResponse.json()) as {
-      accessToken: { readonly id: string; readonly groupIds?: readonly string[] }
-      tokenValue: string
+      accessToken: { readonly id: string }
     }
-    expect(createdToken.tokenValue.startsWith("sixb_sat_")).toBe(true)
-    expect(createdToken.accessToken.groupIds).toEqual(["agents"])
 
     const listTokensResponse = await app.fetch(
       jsonRequest("/api/auth/service-accounts/svc_cli/access-tokens", "GET", bearerHeaders)
