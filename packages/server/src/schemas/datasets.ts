@@ -12,9 +12,27 @@ export const DatasetVersionsQuerySchema = z.object({
   limit: z.string().optional(),
 })
 
+/**
+ * Elysia's query parser splits any comma-separated value into an array before validation, and
+ * pushes a repeated key's value into the existing array as-is. `?columns=id`, `?columns=id,title`,
+ * `?columns=id&columns=title` and `?columns=x&columns=id,title` therefore arrive as a string, a
+ * flat array, a flat array, and a nested array. All of them name the same thing: a column list.
+ */
+const QueryStringListSchema = z.preprocess(flattenQueryStringList, z.array(z.string()))
+
+function flattenQueryStringList(value: unknown): unknown {
+  if (typeof value !== "string" && !Array.isArray(value)) return value
+  const items = [value].flat(Number.POSITIVE_INFINITY)
+  if (!items.every((item) => typeof item === "string")) return value
+  return items
+    .flatMap((item) => item.split(","))
+    .map((item) => item.trim())
+    .filter(Boolean)
+}
+
 export const DatasetRowsQuerySchema = z.object({
   versionId: z.string().optional(),
-  columns: z.string().optional(),
+  columns: QueryStringListSchema.optional(),
   limit: z.string().optional(),
   offset: z.string().optional(),
 })
