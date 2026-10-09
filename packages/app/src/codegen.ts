@@ -934,6 +934,35 @@ export function startApp(options: StartAppOptions = {}) {
 export function renderAccessDenied() {
   getRoot().render(<AccessDeniedView />)
 }
+
+export function renderApiUnavailable(apiBaseUrl: string) {
+  getRoot().render(
+    <AppFallback
+      title="Can't reach the Sixb API"
+      detail={
+        "This app could not load your session from " +
+        apiBaseUrl +
+        ". Check that the API is running and allows this origin, then retry."
+      }
+      action={
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          style={{
+            padding: "0.5rem 1rem",
+            borderRadius: "var(--radius, 0.5rem)",
+            border: "1px solid var(--border, #cbd2d9)",
+            background: "transparent",
+            color: "inherit",
+            cursor: "pointer",
+          }}
+        >
+          Retry
+        </button>
+      }
+    />
+  )
+}
 `
 
   const runtimePath = join(generatedDir, "app-runtime.tsx")
@@ -946,7 +975,7 @@ export function renderAccessDenied() {
   readSixbBrowserRuntimeConfig,
   requireSixbBrowserAuthSession,
 } from "@sixb/client/browser"
-import { renderAccessDenied, startApp } from "./app-runtime"
+import { renderAccessDenied, renderApiUnavailable, startApp } from "./app-runtime"
 
 const runtimeConfig = readSixbBrowserRuntimeConfig({ audience: "app" })
 const browserClient = configureSixbBrowserClient(runtimeConfig)
@@ -956,19 +985,23 @@ if (import.meta.hot) {
   import.meta.hot.dispose(() => browserClient.dispose())
 }
 
+// Without the API's answer the app can neither render nor send the user to sign in.
 const authSession = runtimeConfig.auth.enabled
-  ? await requireSixbBrowserAuthSession(runtimeConfig, browserClient)
+  ? await requireSixbBrowserAuthSession(runtimeConfig, browserClient).catch((error: unknown) => {
+      console.error("[SixbCustomApp] Could not load the session from the API:", error)
+      return "unavailable" as const
+    })
   : null
-const applicationAccessDenied =
-  authSession?.authenticated === true && !authSession.applicationAccess.allowed
-const canRenderApp =
+
+if (authSession === "unavailable") {
+  renderApiUnavailable(runtimeConfig.api.baseUrl)
+} else if (
   !runtimeConfig.auth.enabled ||
   (authSession?.authenticated === false && authSession.authEnabled === false) ||
   (authSession?.authenticated === true && authSession.applicationAccess.allowed)
-
-if (canRenderApp) {
+) {
   startApp()
-} else if (applicationAccessDenied) {
+} else if (authSession?.authenticated === true && !authSession.applicationAccess.allowed) {
   renderAccessDenied()
 }
 `
