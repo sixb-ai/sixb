@@ -22,7 +22,6 @@ with leases and retries. The `queues` provider
 exposes one lane per kind of background work:
 
 ```ts
-sixb.queues.actions
 sixb.queues.syncRuns
 sixb.queues.pipelines
 sixb.queues.projections
