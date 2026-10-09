@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test"
+import { afterEach, describe, expect, jest, test } from "bun:test"
 import type { DomainEvent, RuleDefinition, SixbErrorContext, Storage } from "@sixb/core"
 import {
   defineObjectType,
@@ -294,6 +294,81 @@ describe("RulesWorker", () => {
     expect(objects.pageReads).toBe(1)
   })
 
+  test("an idle worker reads current state once, at startup", async () => {
+    // Reproduce the regression by re-arming `coordinator.requestReconciliation()` on a timer in
+    // `RulesWorker.run`: the advanced clock then fires it and the page count grows.
+    const storage = createStorage()
+    const objects = new CountingReconciliationObjectStorage(storage.objects)
+    replaceObjectStorage(storage, objects.storage)
+    jest.useFakeTimers()
+    try {
+      const worker = track(new RulesWorker(createRuntime({ storage })))
+      await worker.start()
+      await settle()
+      jest.advanceTimersByTime(24 * 60 * 60_000)
+      await settle()
+
+      expect(objects.pageReads).toBe(1)
+    } finally {
+      jest.useRealTimers()
+    }
+  })
+
+  test("a failed live evaluation is repaired without another event", async () => {
+    const originalError = console.error
+    console.error = () => {}
+
+    try {
+      const events = createDomainEventService()
+      const storage = createStorage()
+      replaceObjectStorage(storage, new ThrowOnceObjectStorage(storage.objects).storage)
+      await seedCurrentObject(storage, "posted", "tx-0")
+      const worker = track(new RulesWorker(createRuntime({ events, storage })))
+      await worker.start()
+      await waitFor(async () => (await ruleEventTypes(events)).length === 1)
+
+      // Committed after the startup pass and announced once; that one evaluation fails.
+      await seedCurrentObject(storage, "posted")
+      await events.publishEnvelopes([objectUpdatedEvent("posted")])
+
+      await waitFor(async () => (await ruleEventTypes(events)).length === 2)
+    } finally {
+      console.error = originalError
+    }
+  })
+
+  test("a failed reconciliation is retried until it succeeds", async () => {
+    const originalError = console.error
+    console.error = () => {}
+
+    try {
+      const events = createDomainEventService()
+      const storage = createStorage()
+      const objects = storage.objects
+      let failed = false
+      replaceObjectStorage(
+        storage,
+        objectStorageFacade(objects, {
+          listByPrimaryIdPage: async (params) => {
+            if (!failed) {
+              failed = true
+              throw new Error("Object storage failed.")
+            }
+            return objects.listByPrimaryIdPage(params)
+          },
+        })
+      )
+      await seedCurrentObject(storage, "posted")
+      const worker = track(new RulesWorker(createRuntime({ events, storage })))
+      await worker.start()
+
+      await waitFor(async () => (await ruleEventTypes(events)).length === 1)
+      expect(failed).toBe(true)
+    } finally {
+      console.error = originalError
+    }
+  })
+
   test("serializes live evaluation behind reconciliation", async () => {
     const events = createDomainEventService()
     const storage = createStorage()
@@ -357,9 +432,9 @@ describe("RulesWorker", () => {
       await flushSixbErrors(runtime)
 
       // The claim: tx-2 was still evaluated even though tx-1, ahead of it in the batch, threw.
-      // Asserting the read rather than the resulting event is deliberate — reconciliation repairs a
-      // dropped candidate within one interval, so an event assertion cannot tell isolation apart
-      // from the safety net having done the work.
+      // Asserting the read rather than the resulting event is deliberate — a failure schedules a
+      // reconciliation that repairs a dropped candidate, so an event assertion cannot tell isolation
+      // apart from the safety net having done the work.
       expect(objects.subjectReads).toContain("tx-2")
 
       // Exactly one live failure, and it names the candidate rather than just the batch.
@@ -652,6 +727,13 @@ async function waitFor(fn: () => boolean | Promise<boolean>, timeoutMs = 2_000):
     await Bun.sleep(10)
   }
   throw new Error("Timed out waiting for condition.")
+}
+
+/** Drains promise work; `process.nextTick` still runs while timers are faked. */
+async function settle(): Promise<void> {
+  for (let tick = 0; tick < 10; tick += 1) {
+    await new Promise<void>((resolve) => process.nextTick(resolve))
+  }
 }
 
 function createDeferred<T>() {

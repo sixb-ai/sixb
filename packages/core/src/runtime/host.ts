@@ -57,6 +57,7 @@ import { bindEmbeddingModels } from "../models/execution/embedding"
 import { bindRerankingModels } from "../models/execution/reranking"
 import { ModelExecutionSession } from "../models/execution/session"
 import { createVectorIndexingRuntime } from "../objects/vectors/indexing"
+import { VectorIndexingDispatcher } from "../objects/vectors/indexing-dispatch"
 import { registerVectorIndexingRuntime } from "../objects/vectors/indexing-runtime"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
@@ -143,6 +144,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   private readonly webhookRegistry: WebhookRegistry
   private readonly hostContext: SixbHostContext
   private readonly committedFacts: OntologyOutboxDispatcher
+  private readonly vectorIndexing?: VectorIndexingDispatcher
   private readonly eventService: DomainEventService
   private readonly ontologyMaintenance: OntologyMaintenance
   private readonly storageReadiness: StorageReadiness
@@ -236,10 +238,24 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
           ...failure,
         }),
     })
+    const vectorIndexing = this.storage.ontology.vectorIndexing
+    if (
+      vectorIndexing &&
+      definitions.ontology
+        .listObjectTypes()
+        .some((type) => Object.keys(type.search?.vectors ?? {}).length > 0)
+    ) {
+      this.vectorIndexing = new VectorIndexingDispatcher(
+        this.projectId,
+        vectorIndexing,
+        this.queues.vectorIndexing
+      )
+    }
     this.ontologyMaintenance = new OntologyMaintenance({
       projectId: this.projectId,
       storage: this.storage,
       dispatcher: this.committedFacts,
+      vectorIndexing: this.vectorIndexing,
       blobStorage: this.blobStorage,
       options: options.ontologyMaintenance,
     })
@@ -302,7 +318,10 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
       runtime,
       createOntologyMutationRuntime({
         materializer: this.materializer.withScope(capturedScope),
-        notifyCommittedFacts: () => this.committedFacts.notify(),
+        notifyCommittedFacts: () => {
+          this.committedFacts.notify()
+          this.vectorIndexing?.notify()
+        },
       })
     )
     return createBoundSixb<InferSandboxParams<TParams>>(
@@ -358,6 +377,7 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
   /** Close the runtime broker provider if it owns external resources. */
   async closeBroker(): Promise<void> {
     await this.committedFacts.stop()
+    await this.vectorIndexing?.stop()
     await this.ontologyMaintenance.stop()
     await this.broker.close?.()
   }
