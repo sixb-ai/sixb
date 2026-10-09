@@ -1,8 +1,11 @@
 import { describe, expect, test } from "bun:test"
+import { lstat, mkdir, mkdtemp, readlink, rm, symlink, writeFile } from "node:fs/promises"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import type { DeployRelease } from "@sixb/core/deploy"
 import { deploymentLayout } from "../src/layout"
 import { renderCaddySnippet, renderCtl, renderProcessManifest, renderUnit } from "../src/render"
-import { renderDeployScript } from "../src/scripts"
+import { renderDeployScript, STEP_MARKER } from "../src/scripts"
 
 const release: DeployRelease = {
   name: "northline",
@@ -168,5 +171,55 @@ describe("deploy script", () => {
     expect(script).toContain("export NODE_ENV='production'")
     expect(script).toContain("ready_url='http://127.0.0.1:3002/ready'")
     expect(script).toContain("sudo -n /usr/bin/systemctl reload caddy")
+  })
+
+  test("lets dependency install scripts call node when the server has none", async () => {
+    // Red check: remove the node link from renderInstallBun; the first case finds no link.
+    const { labels, script } = renderDeployScript({
+      release,
+      layout,
+      incoming: "/home/sixb/northline/deploy/incoming/abc.123",
+      record: {
+        commit: "abc",
+        ref: "main",
+        deployedAt: "2026-09-30T12:00:00.000Z",
+        deployedBy: "ci",
+      },
+    })
+    const index = labels.indexOf("Install Bun 1.4.2")
+    const step = script
+      .split(`${STEP_MARKER} ${index} start\n`)[1]
+      ?.split(`\nprintf '%s\\t%s\\t%s\\n' ${STEP_MARKER} ${index} done`)[0]
+    if (!step) throw new Error("Missing Install Bun step")
+
+    const root = await mkdtemp(join(tmpdir(), "sixb-install-bun-"))
+    try {
+      const runStep = async (name: string, withNode: boolean) => {
+        const bunDir = join(root, name, "bun")
+        const tools = join(root, name, "tools")
+        await mkdir(bunDir, { recursive: true })
+        await mkdir(tools, { recursive: true })
+        // Bun is already installed, so the step skips the download.
+        await writeFile(join(bunDir, "bun"), "#!/bin/sh\necho 1.4.2\n", { mode: 0o755 })
+        await symlink(Bun.which("ln")!, join(tools, "ln"))
+        if (withNode) await writeFile(join(tools, "node"), "#!/bin/sh\n", { mode: 0o755 })
+        const child = Bun.spawn(["/bin/bash", "-euc", step], {
+          env: { BUN: join(bunDir, "bun"), BUN_DIR: bunDir, PATH: `${bunDir}:${tools}` },
+          stdout: "pipe",
+          stderr: "pipe",
+        })
+        expect(await child.exited).toBe(0)
+        return join(bunDir, "node")
+      }
+
+      const linked = await runStep("without-node", false)
+      expect((await lstat(linked)).isSymbolicLink()).toBe(true)
+      expect(await readlink(linked)).toBe(join(root, "without-node", "bun", "bun"))
+
+      const untouched = await runStep("with-node", true)
+      await expect(lstat(untouched)).rejects.toThrow()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
   })
 })
