@@ -6,7 +6,6 @@ import {
 
 const environmentVariables = [
   "SIXB_SYNC_WORKER_CONCURRENCY",
-  "SIXB_ACTION_WORKER_CONCURRENCY",
   "SIXB_AGENT_WORKER_CONCURRENCY",
   "SIXB_PIPELINE_WORKER_CONCURRENCY",
   "SIXB_PROJECTION_WORKER_CONCURRENCY",
@@ -76,16 +75,6 @@ describe("worker concurrency configuration", () => {
     expect(() => resolveWorkerConcurrency(["agent"])).toThrow("type=count")
     expect(() => resolveWorkerConcurrency(["unknown=2"])).toThrow(
       "Unknown worker concurrency type 'unknown'"
-    )
-  })
-
-  test("keeps the action worker's deliberate serial limit", () => {
-    expect(resolveSingleWorkerConcurrency("action", undefined)).toEqual({})
-    expect(() => resolveSingleWorkerConcurrency("action", "2")).toThrow(
-      "Action worker concurrency is fixed at 1"
-    )
-    expect(() => resolveWorkerConcurrency(["action=2"])).toThrow(
-      "Action worker concurrency is fixed at 1"
     )
   })
 })

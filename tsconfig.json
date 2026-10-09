@@ -3,7 +3,6 @@
   "compilerOptions": {
     "noEmit": true,
     "paths": {
-      "@sixb/action-worker": ["./packages/action-worker/src/index.ts"],
       "@sixb/agent-ui": ["./packages/agent-ui/src/index.ts"],
       "@sixb/agent-ui/react-router": ["./packages/agent-ui/src/react-router.tsx"],
       "@sixb/agent-worker": ["./packages/agent-worker/src/index.ts"],

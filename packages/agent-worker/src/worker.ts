@@ -81,10 +81,10 @@ type Reservation<TRun extends AgentRunRecord = AgentRunRecord> =
  *
  * The queue delivery owns liveness and redelivery. Each claim installs a fresh execution token on
  * the durable run; storage checks that token to fence late writes from stale deliveries. A run's
- * terminal fate lives on its record (like the action worker), so a
- * model/tool failure that we successfully record still acknowledges the job. The job is only left
- * for redelivery when we **cannot** record the fate (storage unavailable) — acking then would leave
- * the thread silently locked forever, since nothing else reclaims a run but a redelivered job.
+ * terminal fate lives on its record, so a model/tool failure that we successfully record still
+ * acknowledges the job. The job is only left for redelivery when we **cannot** record the fate
+ * (storage unavailable) — acking then would leave the thread silently locked forever, since nothing
+ * else reclaims a run but a redelivered job.
  */
 export class AgentWorker extends QueueWorker<AgentQueueJob, typeof AGENT_RUN_FAILURE_CODES> {
   private readonly host: AgentWorkerHost

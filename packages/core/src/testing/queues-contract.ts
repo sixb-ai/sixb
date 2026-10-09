@@ -388,17 +388,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
               },
             ],
           })
-          await queues.actions.enqueue({
-            projectId: "project-a",
-            jobs: [
-              {
-                type: "action.run.requested",
-                payload: {
-                  runId: "act_1",
-                },
-              },
-            ],
-          })
           await queues.agents.enqueue({
             projectId: "project-a",
             jobs: [
@@ -433,11 +422,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
             workerId: "workflow-worker-1",
             limit: 10,
           })
-          const actionLane = await queues.actions.claim({
-            projectId: "project-a",
-            workerId: "action-worker-1",
-            limit: 10,
-          })
           const agentLane = await queues.agents.claim({
             projectId: "project-a",
             workerId: "agent-worker-1",
@@ -460,8 +444,6 @@ export function runQueueContractSuite(label: string, options: QueueContractSuite
           expect(projectionLane[0]?.job.payload.runId).toBe("projection-run-1")
           expect(workflowLane).toHaveLength(1)
           expect(workflowLane[0]?.job.payload.runId).toBe("workflow-run-1")
-          expect(actionLane).toHaveLength(1)
-          expect(actionLane[0]?.job.payload.runId).toBe("act_1")
           expect(agentLane).toHaveLength(1)
           expect(agentLane[0]?.job).toMatchObject({
             type: "agent.run.requested",

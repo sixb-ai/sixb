@@ -29,7 +29,6 @@
     "prepack": "bun run build"
   },
   "dependencies": {
-    "@sixb/action-worker": "workspace:*",
     "@sixb/agent-worker": "workspace:*",
     "@sixb/app": "workspace:^",
     "@sixb/atlas": "workspace:^",

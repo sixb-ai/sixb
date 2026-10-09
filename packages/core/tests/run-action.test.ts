@@ -23,6 +23,14 @@ import { ActionRunSignals } from "../src/actions/run/signals"
 import type { ActionRunContext } from "../src/actions/run/types"
 import { attachSixbErrorReporter } from "../src/error-reporting/internal"
 import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
+import { LOGS_STREAM } from "../src/logging/stream"
+import {
+  type DecisionModel,
+  defineLanguageModel,
+  type LanguageModel,
+  type LanguageModelStreamEvent,
+  question,
+} from "../src/models"
 import type { ActionRunParams, ActionRunRecord } from "../src/storage"
 import { decorateOperationScopedMethodForTesting } from "../src/storage/operation-scope"
 import { createTestSixb, queueTestActionRun } from "../src/testing"
@@ -65,7 +73,7 @@ function createSixb(
   ontology: readonly OntologySource[] = [Device]
 ) {
   const host = new SixbHost({
-    id: "action-worker-tests",
+    id: "action-run-tests",
     ontology,
     actions,
     broker: new InMemoryBroker(),
@@ -214,7 +222,7 @@ describe("runAction", () => {
       ).rejects.toMatchObject({
         code: "internal.unexpected",
         message:
-          "[Sixb] Action run 'act_stored' belongs to project 'other-project', not 'action-worker-tests'.",
+          "[Sixb] Action run 'act_stored' belongs to project 'other-project', not 'action-run-tests'.",
         retryable: false,
         details: { actionId: "count", runId: "act_stored", durableProjectId: "other-project" },
       })
@@ -1393,6 +1401,233 @@ describe("runAction", () => {
       })
     }
     expect(invoked).toBe(0)
+  })
+
+  test("reports a failed run once, with the handler's original error", async () => {
+    const originalError = new Error("writeback failed")
+    const fail = defineAction("fail")
+      .on(Device)
+      .params({})
+      .writeback(() => {
+        throw originalError
+      })
+    const { host, sixb } = createSixb([fail])
+    const reports: Array<{ error: Error; context: SixbErrorContext }> = []
+    const reporter = attachSixbErrorReporter(host, (error, context) => {
+      reports.push({ error, context })
+    })
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await queueActionRun(host, {
+      id: "act_fail",
+      actionId: "fail",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const result = await runStoredAction({ host, runId: "act_fail" })
+    await reporter.flush()
+
+    if (!("error" in result)) throw new Error(`Expected a failed run, got ${result.status}.`)
+    expect(result.error).toMatchObject({
+      code: "action.phase_failed",
+      details: { actionId: "fail", runId: "act_fail", phase: "writeback" },
+    })
+    expect(result.record.error).toEqual(result.error)
+    expect(reports).toHaveLength(1)
+    expect(reports[0]?.error).toBe(originalError)
+    expect(reports[0]?.context).toEqual({
+      type: "run.failed",
+      notificationId: `project:${host.id}:run:action:act_fail:failed:${result.error.at}`,
+      projectId: host.id,
+      occurredAt: result.error.at,
+      attempt: 1,
+      runKind: "action",
+      run: { runId: "act_fail", actionId: "fail" },
+      failure: result.error,
+    })
+  })
+
+  test("streams a run-scoped log line to the broker", async () => {
+    const noteStatus = defineAction("noteStatus")
+      .on(Device)
+      .params({ status: param("string") })
+      .writeback((ctx) => {
+        ctx.logger.info("Applying status", { status: ctx.params.status })
+      })
+    const { host, sixb } = createSixb([noteStatus])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    await queueActionRun(host, {
+      id: "act_log",
+      actionId: "noteStatus",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: { status: "active" },
+    })
+
+    await runStoredAction({ host, runId: "act_log" })
+
+    const { records } = await host.broker.read({
+      projectId: host.id,
+      streamId: LOGS_STREAM.id,
+      names: ["action.info"],
+    })
+    const line = records.find(
+      (record) => (record.payload as { message?: string }).message === "Applying status"
+    )
+    expect(line?.key).toBe("action:act_log")
+    expect(line?.payload).toMatchObject({
+      level: "info",
+      fields: { status: "active" },
+      context: { phase: "writeback", run: { kind: "action", id: "act_log" } },
+    })
+  })
+
+  test("hands stored date and timestamp params to handlers as Dates", async () => {
+    const observed: { dueDate: unknown; day: unknown }[] = []
+    const setDue = defineAction("setDue")
+      .on(Device)
+      .params({ dueDate: param("timestamp"), day: param("date") })
+      .writeback((ctx) => {
+        observed.push({ dueDate: ctx.params.dueDate, day: ctx.params.day })
+        // Typed as Date, so this must not throw at runtime.
+        return { iso: ctx.params.dueDate.toISOString() }
+      })
+    const { host, sixb } = createSixb([setDue])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device 1" })
+    // Stored params are JSON, as a request normalized them.
+    await queueActionRun(host, {
+      id: "act_due",
+      actionId: "setDue",
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: { dueDate: "2026-06-20T12:34:56.000Z", day: "2026-06-20" },
+    })
+
+    const result = await runStoredAction({ host, runId: "act_due" })
+
+    expect(result.status).toBe("succeeded")
+    const seen = observed[0]
+    expect(seen?.dueDate).toBeInstanceOf(Date)
+    expect(seen?.day).toBeInstanceOf(Date)
+    expect((seen?.dueDate as Date).toISOString()).toBe("2026-06-20T12:34:56.000Z")
+  })
+})
+
+describe("runAction model accounting", () => {
+  test("persists a decision writeback and accounts for it under the run's attempt", async () => {
+    // Removal proof: omit the decision facade or its accounting call; this path fails.
+    const questions = {
+      status: question.choice({
+        instructions: "Operational status?",
+        options: { ready: "Operational", blocked: "Unusable" },
+      }),
+    }
+    const model: DecisionModel = {
+      providerId: "test",
+      modelId: "decision",
+      definition: {
+        kind: "decision",
+        providerId: "test",
+        modelId: "decision",
+        capabilities: { questions: ["choice"] },
+      },
+      evaluate: async () => ({
+        output: { status: { choice: "ready", probabilities: { ready: 1, blocked: 0 } } },
+        usage: { inputTokens: 6, outputTokens: 4 },
+      }),
+    }
+    const decideStatus = defineAction("decide-status")
+      .on(Device)
+      .params({})
+      .writeback(
+        async ({ sixb }) =>
+          (await sixb.models.decision.evaluate({ model, input: "Repaired", questions })).output
+      )
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.status.choice })
+      })
+    const { host, sixb } = createSixb([decideStatus])
+    await sixb.objects.upsert("Device", { id: "decision-device", name: "Device" })
+    await queueActionRun(host, {
+      id: "act_decide",
+      actionId: decideStatus.id,
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "decision-device" },
+      params: {},
+    })
+
+    const { record: run } = await runStoredAction({ host, runId: "act_decide" })
+
+    expect(run.status).toBe("succeeded")
+    expect(run.writeback).toMatchObject({
+      status: "succeeded",
+      result: { status: { choice: "ready" } },
+    })
+    expect(
+      await host.storage.aiUsage?.getLatestForExecution({
+        projectId: host.id,
+        executionId: run.executionId,
+      })
+    ).toMatchObject({ attempt: 1, usage: { inputTokens: 6, outputTokens: 4, totalTokens: 10 } })
+  })
+
+  test("accounts for direct generation in writeback before persisting the result", async () => {
+    // Removal proof: remove models from the Action facade or the run's attempt binding.
+    const model: LanguageModel = {
+      providerId: "test",
+      modelId: "extract",
+      definition: defineLanguageModel({
+        kind: "language",
+        providerId: "test",
+        modelId: "extract",
+        capabilities: { nativeStructuredOutput: true },
+      }),
+      async stream() {
+        return {
+          events: (async function* (): AsyncIterable<LanguageModelStreamEvent> {
+            yield { type: "stream-start" }
+            yield { type: "text-start", id: "text" }
+            yield { type: "text-delta", id: "text", delta: '{"status":"ready"}' }
+            yield { type: "text-end", id: "text" }
+            yield {
+              type: "finish",
+              finishReason: "stop",
+              usage: { inputTokens: 5, outputTokens: 3 },
+            }
+          })(),
+        }
+      },
+    }
+    const extractStatus = defineAction("extract-status")
+      .on(Device)
+      .params({})
+      .writeback(async ({ sixb }) => {
+        const result = await sixb.models.language.generate({
+          model,
+          prompt: "Extract status",
+          output: { status: "string" },
+        })
+        return result.output
+      })
+      .edits(({ objects, subject, writeback }) => {
+        objects(Device).byId(subject.primaryId).update({ status: writeback.status })
+      })
+    const { host, sixb } = createSixb([extractStatus])
+    await sixb.objects.upsert("Device", { id: "device-1", name: "Device" })
+    await queueActionRun(host, {
+      id: "act_extract",
+      actionId: extractStatus.id,
+      subject: { kind: "object", objectTypeId: "Device", primaryId: "device-1" },
+      params: {},
+    })
+
+    const { record: run } = await runStoredAction({ host, runId: "act_extract" })
+
+    expect(run.status).toBe("succeeded")
+    expect(run.writeback).toMatchObject({ status: "succeeded", result: { status: "ready" } })
+    expect(
+      await host.storage.aiUsage?.getLatestForExecution({
+        projectId: host.id,
+        executionId: run.executionId,
+      })
+    ).toMatchObject({ attempt: 1, requesterGroupIds: [], usage: { totalTokens: 8 } })
   })
 })
 

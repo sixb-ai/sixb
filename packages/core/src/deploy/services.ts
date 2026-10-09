@@ -1,5 +1,4 @@
 import type {
-  DeployConfigurableWorkerType,
   DeployHttpServiceName,
   DeployServiceName,
   DeploySingletonServiceName,
@@ -19,26 +18,18 @@ const SERVICES = {
   workers: "workers",
 } as const satisfies Record<DeployServiceName, "http" | "singleton" | "workers">
 
-/** Whether each worker type's concurrency can be configured. */
-const WORKER_TYPES: {
-  readonly [Type in DeployWorkerType]: Type extends DeployConfigurableWorkerType ? true : false
-} = {
+const WORKER_TYPES = {
   sync: true,
-  action: false,
   agent: true,
   pipeline: true,
   projection: true,
   workflow: true,
-}
+} as const satisfies Record<DeployWorkerType, true>
 
 /** Every service, in the order a deployment lists them. */
 export const DEPLOY_SERVICES = Object.keys(SERVICES) as DeployServiceName[]
 
 export const DEPLOY_WORKER_TYPES = Object.keys(WORKER_TYPES) as DeployWorkerType[]
-
-export const DEPLOY_CONFIGURABLE_WORKER_TYPES = DEPLOY_WORKER_TYPES.filter(
-  (workerType): workerType is DeployConfigurableWorkerType => WORKER_TYPES[workerType]
-)
 
 export function isDeployHttpService(service: DeployServiceName): service is DeployHttpServiceName {
   return SERVICES[service] === "http"
