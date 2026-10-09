@@ -2,6 +2,88 @@
 
 Sixb packages are versioned independently. Each release entry names the packages that shipped.
 
+## 2026-10-09 — Framework 0.1.17
+
+### Highlights
+
+- Rerank vector search results with a model: register a reranker such as
+  `vercelGateway.reranking("voyage/rerank-2.5-lite")` and opt in per query with
+  `.rerank({ model })`.
+- Transcribe stored audio with `sixb.models.audio.transcribe({ audio })`, starting with Vercel AI
+  Gateway transcription models. Atlas shows transcription duration and cost with other model calls.
+- Hand a stored file to services that fetch media from a URL, such as Instagram and TikTok, with
+  `sixb.blobs.createDownloadUrl()`, and revoke one early with `sixb.blobs.revokeDownloadUrl()`.
+  Shared-link pages now play video and audio.
+- Let people connect their own Google accounts through Sixb-managed OAuth with
+  `google({ auth: { oauth: { clientId, clientSecret, scopes, hostedDomain } } })`.
+- Read and sync Outlook contacts and contact folders, and the tenant's organizational contacts,
+  with the Microsoft connector's `client.contacts` and `client.directory.contacts`.
+- Serve large PostgreSQL object lists, deep cursor pages, and relationship queries from bounded
+  index scans, and prepare indexes from ontology declarations. Declare recurring sorts and text
+  counts with `defineObjectType({ query: { indexes } })`; `sixb db prepare` prepares them on demand.
+- Plan projection publications outside the commit transaction and recheck only what intervening
+  commits touched, so large publications no longer hold locks for minutes or restart under
+  concurrent edits. Outbox events are stored as compact drafts, about 70% smaller.
+- Remove idle background polling: projection reconciliation tails a lake change feed, vector
+  indexing is dispatched when its commit lands, the rules worker reconciles only at startup and
+  after a failure, event sockets share one broker subscription per API process, queue claims wait
+  for work, and source-version cleanup no longer walks history. Atlas polls projection runs only
+  while one is pending.
+- Fix a redelivered agent resume re-running workflow steps after the run had moved past the agent
+  node, and first-time `sixb deploy` setup on projects whose `.env` holds a `GITHUB_TOKEN` or whose
+  server has no Node.
+
+### Upgrade notes
+
+- Upgrade core, exact worker/storage consumers, server, client, and CLI together to `0.1.17`.
+  Upgrade DuckLake to `0.1.8`, lake-local to `0.1.6`, and BullMQ queues to `0.1.6` at the same
+  time: the orchestrator now requires the lake change feed, and queue workers require a claim that
+  waits for work. Upgrade Atlas to `0.1.14` and the app package to `0.1.10`, and rebuild
+  application assets. Reranking and transcription require Vercel AI Gateway `0.1.6`.
+- Apply PostgreSQL migrations 053–060 and SQLite migrations 053–059 with old runtime roles
+  stopped. Migration 054 rewrites the outbox into compact drafts, refuses to convert if any stored
+  event would not rebuild exactly, and drops `requested_by` and `executor` from commits. The
+  migrations also add replacement-plan and commit-touch tables (UNLOGGED on PostgreSQL), drop
+  PostgreSQL's whole-document JSON index on objects, and recount superseded source versions.
+  Rehearse on a representative `0.1.16` database backup and measure downtime and disk/WAL
+  requirements. Rollback requires a database backup and matching binaries, not just an older
+  application commit. With SQLite, migrate once before starting additional roles with
+  `--no-migrate`.
+- On PostgreSQL, startup and `sixb db migrate` now prepare declared query indexes after migrations.
+  Initial text preparation rewrites the objects table and blocks writes: run `sixb db migrate`
+  ahead of deployment when needed. `--no-migrate` and `SIXB_SKIP_MIGRATION=1` skip preparation too.
+  Indexes add disk and write cost, and removing a declaration does not drop its index.
+- `.facets()` returns `{ total, facets }` instead of an array, in the SDK, HTTP API, generated
+  client, and query hooks.
+- Queue workers no longer accept `idlePollMs`. A third-party queue provider must honor
+  `claim({ signal })` by waiting until it claims a job or the signal aborts: a worker now fails
+  when a claim returns empty first. A third-party lake storage provider must implement
+  `listLatestVersionsSince()`. `/status` no longer reports `maintenance.terminalSources`.
+- Token limits now apply only to token-billed calls: transcription and reranking skip them, while
+  cost limits still apply, and a call is refused when an applicable budget cannot be evaluated.
+  Reranking is bounded to 100 candidates, 1 MiB of input, and a 30-second model call. Neither
+  reranking nor transcription inference is retried automatically.
+- Set `SIXB_API_PUBLIC_ORIGIN` for the API and every worker that creates download URLs. Anyone
+  holding a URL can read its file until it expires (one hour by default) or is revoked.
+- Google OAuth requires an OAuth client registered for your deployment. Disconnecting deletes the
+  stored tokens but does not revoke the Google grant. An interrupted Microsoft contact write is not
+  retried and throws a `MicrosoftContactMutationError` with `outcomeUnknown`; check before writing
+  again.
+
+### Package versions
+
+- `0.1.17`: `@sixb/core`, `@sixb/client`, `@sixb/server`, `@sixb/cli`, `@sixb/orchestrator`,
+  `@sixb/pg`, `@sixb/sqlite`, `@sixb/action-worker`, `@sixb/agent-worker`, `@sixb/pipeline-worker`,
+  `@sixb/projection-worker`, `@sixb/rules-worker`, `@sixb/sync-worker`, `@sixb/workflow-worker`.
+- `0.1.14`: `@sixb/atlas`.
+- `0.1.10`: `@sixb/app`.
+- `0.1.8`: `@sixb/ducklake`.
+- `0.1.7`: `@sixb/connector-google`.
+- `0.1.6`: `@sixb/lake-local`, `@sixb/queues-bullmq`, `@sixb/vercel-ai-gateway`.
+- `0.1.5`: `@sixb/connector-meta`, `@sixb/connector-tiktok`.
+- `0.1.3`: `@sixb/blob-s3`, `@sixb/connector-microsoft`.
+- `0.1.1`: `@sixb/deploy-ssh`.
+
 ## 2026-10-05 — Framework 0.1.16
 
 ### Highlights

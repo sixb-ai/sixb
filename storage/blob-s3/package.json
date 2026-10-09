@@ -1,6 +1,6 @@
 {
   "name": "@sixb/blob-s3",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "S3-compatible blob storage for Sixb fileRef payloads",
   "keywords": [
     "sixb",
