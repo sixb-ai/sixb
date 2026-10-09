@@ -1,25 +1,20 @@
-import {
-  type ConfigurableWorkerType,
-  WORKER_CONCURRENCY_CONFIG,
-  WORKER_TYPES,
-  type WorkerConcurrency,
-  type WorkerType,
-} from "./worker-registry"
+import { WORKER_TYPES, type WorkerConcurrency, type WorkerType } from "./worker-registry"
+
+/** The environment variable that sets each worker type's concurrency. */
+const ENVIRONMENT_VARIABLES = {
+  sync: "SIXB_SYNC_WORKER_CONCURRENCY",
+  agent: "SIXB_AGENT_WORKER_CONCURRENCY",
+  pipeline: "SIXB_PIPELINE_WORKER_CONCURRENCY",
+  projection: "SIXB_PROJECTION_WORKER_CONCURRENCY",
+  workflow: "SIXB_WORKFLOW_WORKER_CONCURRENCY",
+} as const satisfies Record<WorkerType, string>
 
 /** Resolve the scalar concurrency accepted by `sixb worker <type>`. */
 export function resolveSingleWorkerConcurrency(
   workerType: WorkerType,
   value: string | undefined
 ): WorkerConcurrency {
-  const definition = WORKER_CONCURRENCY_CONFIG[workerType]
-  if (!isConfigurableWorkerType(workerType)) {
-    if (value !== undefined || nonblank(process.env[definition.environmentVariable])) {
-      throw fixedActionConcurrency()
-    }
-    return {}
-  }
-
-  const environmentVariable = definition.environmentVariable
+  const environmentVariable = ENVIRONMENT_VARIABLES[workerType]
   const configured = value?.trim() ?? nonblank(process.env[environmentVariable])
   if (configured === undefined) return {}
 
@@ -33,19 +28,12 @@ export function resolveSingleWorkerConcurrency(
 export function resolveWorkerConcurrency(values: readonly string[] = []): WorkerConcurrency {
   const overrides = values.map(parseWorkerConcurrencyEntry)
   const overriddenWorkerTypes = new Set(overrides.map((entry) => entry.workerType))
-  const resolved: Partial<Record<ConfigurableWorkerType, number>> = {}
+  const resolved: Partial<Record<WorkerType, number>> = {}
 
   for (const workerType of WORKER_TYPES) {
-    const definition = WORKER_CONCURRENCY_CONFIG[workerType]
-    if (!isConfigurableWorkerType(workerType)) {
-      if (nonblank(process.env[definition.environmentVariable])) {
-        throw fixedActionConcurrency()
-      }
-      continue
-    }
     if (overriddenWorkerTypes.has(workerType)) continue
 
-    const environmentVariable = definition.environmentVariable
+    const environmentVariable = ENVIRONMENT_VARIABLES[workerType]
     const configured = nonblank(process.env[environmentVariable])
     if (configured !== undefined) {
       resolved[workerType] = parseConcurrency(configured, environmentVariable)
@@ -60,7 +48,7 @@ export function resolveWorkerConcurrency(values: readonly string[] = []): Worker
 }
 
 function parseWorkerConcurrencyEntry(value: string): {
-  readonly workerType: ConfigurableWorkerType
+  readonly workerType: WorkerType
   readonly concurrency: number
 } {
   const separator = value.indexOf("=")
@@ -72,11 +60,8 @@ function parseWorkerConcurrencyEntry(value: string): {
   const configured = value.slice(separator + 1).trim()
   if (!isWorkerType(workerType)) {
     throw new Error(
-      `[SixbCLI] Unknown worker concurrency type '${workerType || value}'. Available: ${WORKER_TYPES.filter(isConfigurableWorkerType).join(", ")}.`
+      `[SixbCLI] Unknown worker concurrency type '${workerType || value}'. Available: ${WORKER_TYPES.join(", ")}.`
     )
-  }
-  if (!isConfigurableWorkerType(workerType)) {
-    throw fixedActionConcurrency()
   }
 
   return {
@@ -105,10 +90,6 @@ function isWorkerType(value: string): value is WorkerType {
   return WORKER_TYPES.some((workerType) => workerType === value)
 }
 
-function isConfigurableWorkerType(value: WorkerType): value is ConfigurableWorkerType {
-  return WORKER_CONCURRENCY_CONFIG[value].configurable
-}
-
 function invalidConcurrency(value: string, source: string): Error {
   return new Error(
     `[SixbCLI] Invalid worker concurrency '${value}'. Use a positive integer with ${source}.`
@@ -120,8 +101,4 @@ function invalidWorkerConcurrencyEntry(value: string): Error {
     `[SixbCLI] Invalid worker concurrency '${value}'. Use a repeatable type=count value like ` +
       "--concurrency agent=4 --concurrency sync=2."
   )
-}
-
-function fixedActionConcurrency(): Error {
-  return new Error("[SixbCLI] Action worker concurrency is fixed at 1 and cannot be configured.")
 }

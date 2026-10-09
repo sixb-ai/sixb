@@ -127,7 +127,6 @@ class SharedQueues implements Queues {
   readonly pipelines = claimLoggingQueue(this.inner.pipelines, "pipeline")
   readonly projections = claimLoggingQueue(this.inner.projections, "projection")
   readonly workflows = claimLoggingQueue(this.inner.workflows, "workflow")
-  readonly actions = claimLoggingQueue(this.inner.actions, "action")
   readonly agents = claimLoggingQueue(this.inner.agents, "agent")
   readonly agentChildren = claimLoggingQueue(this.inner.agentChildren, "agent-child")
 

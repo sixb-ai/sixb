@@ -3,8 +3,6 @@ import type { SixbErrorCode } from "../errors/types"
 import { QueueError } from "./errors"
 import { IndexedHeap } from "./indexed-heap"
 import type {
-  ActionQueueJobFailureCode,
-  ActionRunRequestedQueueJob,
   AgentQueueJob,
   AgentQueueJobFailureCode,
   ClaimedQueueJob,
@@ -457,10 +455,6 @@ export class InMemoryQueues implements Queues {
   readonly workflows = new InMemoryQueue<WorkflowQueueJob, WorkflowQueueJobFailureCode>(
     this.store,
     "workflow.runs"
-  )
-  readonly actions = new InMemoryQueue<ActionRunRequestedQueueJob, ActionQueueJobFailureCode>(
-    this.store,
-    "action.runs"
   )
   readonly agents = new InMemoryQueue<AgentQueueJob, AgentQueueJobFailureCode>(
     this.store,

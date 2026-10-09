@@ -162,7 +162,6 @@ describe("ontology clean-break architecture", () => {
     const mutationModules = [
       join(coreSource, "objects"),
       join(coreSource, "actions"),
-      join(workspaceRoot, "packages/action-worker/src"),
       join(workspaceRoot, "packages/projection-worker/src"),
     ]
     const files = (await Promise.all(mutationModules.map(typescriptFiles))).flat()
@@ -222,7 +221,6 @@ describe("ontology clean-break architecture", () => {
       join(coreSource, "materializer"),
       join(coreSource, "storage/ontology"),
       join(coreSource, "actions/run"),
-      join(workspaceRoot, "packages/action-worker/src"),
       join(workspaceRoot, "packages/projection-worker/src"),
       join(workspaceRoot, "storage/sqlite/src/ontology-storage"),
       join(workspaceRoot, "storage/pg/src/ontology-storage"),
