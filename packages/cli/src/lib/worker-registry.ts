@@ -1,4 +1,3 @@
-import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
 import type { Worker } from "@sixb/core/internal/workers"
 import { PipelineWorker } from "@sixb/pipeline-worker"
@@ -9,36 +8,11 @@ import { SixbCliError } from "./errors"
 import type { LoadedSixbHost } from "./loadSixb"
 import { configuredOrigin } from "./public-origin"
 
-export const WORKER_TYPES = [
-  "sync",
-  "action",
-  "agent",
-  "pipeline",
-  "projection",
-  "workflow",
-] as const
+export const WORKER_TYPES = ["sync", "agent", "pipeline", "projection", "workflow"] as const
 
 export type WorkerType = (typeof WORKER_TYPES)[number]
 
-export const WORKER_CONCURRENCY_CONFIG = {
-  sync: { configurable: true, environmentVariable: "SIXB_SYNC_WORKER_CONCURRENCY" },
-  action: { configurable: false, environmentVariable: "SIXB_ACTION_WORKER_CONCURRENCY" },
-  agent: { configurable: true, environmentVariable: "SIXB_AGENT_WORKER_CONCURRENCY" },
-  pipeline: { configurable: true, environmentVariable: "SIXB_PIPELINE_WORKER_CONCURRENCY" },
-  projection: { configurable: true, environmentVariable: "SIXB_PROJECTION_WORKER_CONCURRENCY" },
-  workflow: { configurable: true, environmentVariable: "SIXB_WORKFLOW_WORKER_CONCURRENCY" },
-} as const satisfies Record<
-  WorkerType,
-  { readonly configurable: boolean; readonly environmentVariable: string }
->
-
-export type ConfigurableWorkerType = {
-  [Type in WorkerType]: (typeof WORKER_CONCURRENCY_CONFIG)[Type]["configurable"] extends true
-    ? Type
-    : never
-}[WorkerType]
-
-export type WorkerConcurrency = Readonly<Partial<Record<ConfigurableWorkerType, number>>>
+export type WorkerConcurrency = Readonly<Partial<Record<WorkerType, number>>>
 export type QueueWorkerProcess = Worker & { readonly concurrency: number }
 
 export interface WorkerCreationOptions {
@@ -69,9 +43,6 @@ const workerFactories: Record<WorkerType, WorkerFactory> = {
   sync: {
     create: (sixb, options) =>
       new SyncWorker(sixb, { concurrency: options.workerConcurrency?.sync }),
-  },
-  action: {
-    create: (sixb) => new ActionWorker(sixb),
   },
   agent: {
     create: (sixb, options) =>
@@ -117,6 +88,7 @@ export function resolveWorkerTypeToStart(requestedWorker?: string): WorkerType {
     throw new Error(`[SixbWorker] Usage: sixb worker <${knownWorkers().replaceAll(", ", "|")}>`)
   }
 
+  if (requestedWorker === "action") throw removedActionWorker()
   if (!isWorkerType(requestedWorker)) {
     throw new Error(
       `[SixbWorker] Unknown worker '${requestedWorker}'. Available: ${knownWorkers()}`
@@ -124,6 +96,14 @@ export function resolveWorkerTypeToStart(requestedWorker?: string): WorkerType {
   }
 
   return requestedWorker
+}
+
+/** `action` was a worker type until Actions ran in the process that requests them. */
+function removedActionWorker(): Error {
+  return new Error(
+    "[SixbWorker] 'action' is no longer a worker type: Actions run in the process that requests " +
+      "them (API, workflows, syncs). Remove it from the command."
+  )
 }
 
 /**
@@ -201,10 +181,6 @@ export function resolveRegisteredWorkerTypes(sixb: LoadedSixbHost): readonly Wor
 
   if (sixb.definitions.projections.list().length > 0) {
     workerTypes.push("projection")
-  }
-
-  if (sixb.definitions.actions.list().length > 0) {
-    workerTypes.push("action")
   }
 
   if (agentWorkerRequired(sixb)) {

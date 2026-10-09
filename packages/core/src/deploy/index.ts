@@ -8,7 +8,6 @@ export type {
   DeployCiCredential,
   DeployCommand,
   DeployConfig,
-  DeployConfigurableWorkerType,
   DeployContext,
   DeployControlAction,
   DeployEnv,

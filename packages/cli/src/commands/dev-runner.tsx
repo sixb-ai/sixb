@@ -148,7 +148,6 @@ export async function runDevRuntime(options: DevOptions = {}) {
         uiUrl={topology.atlasPublicOrigin}
         appUrl={appUrl}
         workers={[
-          { type: "action", worker: runtime.actionWorker },
           { type: "agent", worker: runtime.agentWorker },
           { type: "projection", worker: runtime.projectionWorker },
           { type: "pipeline", worker: runtime.pipelineWorker },
