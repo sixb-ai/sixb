@@ -396,7 +396,7 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
   async list(input: ListProjectionRunsInput): Promise<ListProjectionRunsResult> {
     assertProjectionRunNonEmpty(input.projectId, "projectId")
 
-    if (input.statuses && input.statuses.length === 0) {
+    if (input.statuses?.length === 0 || input.errorCodes?.length === 0) {
       return { runs: [], hasMore: false, total: 0 }
     }
 
@@ -434,6 +434,12 @@ export class SqliteProjectionRunStorage implements ProjectionRunStorage {
     if (input.statuses) {
       whereClauses.push(`status IN (${input.statuses.map(() => "?").join(", ")})`)
       args.push(...input.statuses)
+    }
+    if (input.errorCodes) {
+      whereClauses.push(
+        `json_extract(error, '$.code') IN (${input.errorCodes.map(() => "?").join(", ")})`
+      )
+      args.push(...input.errorCodes)
     }
     if (input.startedAfter) {
       whereClauses.push("COALESCE(started_at, queued_at) >= ?")
