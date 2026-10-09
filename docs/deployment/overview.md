@@ -70,6 +70,8 @@ Run each needed command as a separate managed process or container:
 | `bun sixb scheduler` | Run cron schedules, if used. |
 | `bun sixb rules` | Evaluate rules, if used. |
 
+`atlas` and `app` serve the built bundles without loading `sixb.config.ts`, so they need only their public origins, not the project's secrets or database access.
+
 Keep at least one API process running for event recovery and maintenance. Start workers and rules before the orchestrator and scheduler. On shutdown, stop producers before workers.
 
 In development, `bun sixb dev` starts these services together. Use the separate commands in production so your process manager can restart and scale them independently.

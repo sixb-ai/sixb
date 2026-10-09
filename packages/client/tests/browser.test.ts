@@ -729,9 +729,12 @@ describe("browser client auth", () => {
       redirect: (url) => automaticRedirects.push(url),
     })
     controller.setCsrfToken("csrf_stale")
-    const fetchMock = Object.assign(async () => Response.json({ authenticated: false }), {
-      preconnect: fetch.preconnect,
-    }) satisfies typeof fetch
+    const fetchMock = Object.assign(
+      async () => Response.json({ authenticated: false, authEnabled: true }),
+      {
+        preconnect: fetch.preconnect,
+      }
+    ) satisfies typeof fetch
     client.setConfig({ fetch: fetchMock })
 
     await requireSixbBrowserAuthSession(runtimeConfig, controller, {
@@ -742,6 +745,39 @@ describe("browser client auth", () => {
     expect(controller.getCsrfToken()).toBeNull()
     expect(automaticRedirects).toEqual([])
     expect(bootstrapRedirects).toHaveLength(1)
+  })
+
+  test("a shell that assumed auth stops redirecting once the API reports it is off", async () => {
+    const automaticRedirects: string[] = []
+    const bootstrapRedirects: string[] = []
+    const controller = configureBrowserClient({
+      getCurrentUrl: () => "http://localhost:3001/devices",
+      redirect: (url) => automaticRedirects.push(url),
+    })
+    client.setConfig({
+      fetch: Object.assign(
+        async () => Response.json({ authenticated: false, authEnabled: false }),
+        {
+          preconnect: fetch.preconnect,
+        }
+      ) satisfies typeof fetch,
+    })
+
+    const session = await requireSixbBrowserAuthSession(runtimeConfig, controller, {
+      redirect: (url) => bootstrapRedirects.push(url),
+    })
+    await requestSyncRun({
+      body: {},
+      path: { syncId: "sync_1" },
+      fetch: Object.assign(
+        async () => Response.json({ error: "Authentication required" }, { status: 401 }),
+        { preconnect: fetch.preconnect }
+      ) satisfies typeof fetch,
+    })
+
+    expect(session).toEqual({ authenticated: false, authEnabled: false })
+    expect(bootstrapRedirects).toEqual([])
+    expect(automaticRedirects).toEqual([])
   })
 
   test("dispose removes expired-session redirect handling", async () => {

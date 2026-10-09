@@ -206,6 +206,19 @@ describe("server auth guard", () => {
     expect(await response.json()).toEqual({ id: "test-project" })
   })
 
+  test("tells a browser shell that the project runs without auth", async () => {
+    const { sixb } = createRuntime()
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+
+    const response = await app.fetch(new Request("http://localhost/api/auth/session"))
+
+    // Atlas and app shells do not load the project, so this is how they learn not to redirect.
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ authenticated: false, authEnabled: false })
+  })
+
   test("fails closed in production when auth is missing", () => {
     const previous = process.env.NODE_ENV
     process.env.NODE_ENV = "production"
@@ -970,7 +983,7 @@ describe("server auth guard", () => {
       csrfToken: expect.any(String),
       session: { id: "ses_1" },
     })
-    expect(await wrongCookieName.json()).toEqual({ authenticated: false })
+    expect(await wrongCookieName.json()).toEqual({ authenticated: false, authEnabled: true })
   })
 
   test("rejects API browser requests from unknown origins", async () => {

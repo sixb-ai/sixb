@@ -418,6 +418,7 @@ export type GetAuthSessionResponses = {
   200:
     | {
         authenticated: false
+        authEnabled: boolean
       }
     | {
         authenticated: true

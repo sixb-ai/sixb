@@ -12,7 +12,6 @@ import {
   wantsManagementJson,
 } from "./lib/command-line"
 import { errorMessage, SixbApiError } from "./lib/errors"
-import { CommandHelpView, HelpView, renderCliError, renderStatic, VersionView } from "./ui"
 
 const args = process.argv.slice(2)
 
@@ -73,12 +72,13 @@ async function readPackageVersion(): Promise<string> {
 async function main(): Promise<void> {
   const parsed = parseCliArgs(args)
   if (parsed.kind === "version") {
-    await renderStatic(<VersionView version={VERSION} />)
+    const { renderVersion } = await import("./ui")
+    await renderVersion(VERSION)
     return
   }
   if (parsed.kind === "help") {
-    if (parsed.help.path.length === 0) await renderStatic(<HelpView />)
-    else await renderStatic(<CommandHelpView help={parsed.help} />)
+    const { renderHelp } = await import("./ui")
+    await renderHelp(parsed.help)
     return
   }
   if (parsed.kind === "instance") {
@@ -405,14 +405,11 @@ main().catch(async (error) => {
   const exitCode = cliExitCode(error)
   if (wantsManagementJson(args)) {
     process.stderr.write(`${JSON.stringify({ error: cliErrorBody(error) })}\n`)
-  } else if (error instanceof CliUsageError) {
-    if (error.help.path.length === 0) {
-      await renderStatic(<HelpView errorMessage={error.message} />)
-    } else {
-      await renderStatic(<CommandHelpView help={error.help} errorMessage={error.message} />)
-    }
   } else {
-    await renderCliError(error)
+    // Loaded on demand, and never through JSX here: see `renderHelp` in `./ui`.
+    const { renderCliError, renderHelp } = await import("./ui")
+    if (error instanceof CliUsageError) await renderHelp(error.help, error.message)
+    else await renderCliError(error)
   }
   process.exit(exitCode)
 })

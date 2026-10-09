@@ -963,6 +963,7 @@ const applicationAccessDenied =
   authSession?.authenticated === true && !authSession.applicationAccess.allowed
 const canRenderApp =
   !runtimeConfig.auth.enabled ||
+  (authSession?.authenticated === false && authSession.authEnabled === false) ||
   (authSession?.authenticated === true && authSession.applicationAccess.allowed)
 
 if (canRenderApp) {

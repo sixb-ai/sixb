@@ -47,7 +47,7 @@ const controller = configureSixbBrowserClient(config)
 await requireSixbBrowserAuthSession(config, controller)
 ```
 
-This handles cookies, CSRF, session activity, and sign-in redirects. Call `controller.dispose()` when tearing down this setup. Expired sessions redirect to sign-in; failed mutations are not automatically retried.
+This handles cookies, CSRF, session activity, and sign-in redirects. When the API runs with auth disabled, `requireSixbBrowserAuthSession` returns `{ authenticated: false, authEnabled: false }` instead of redirecting. Call `controller.dispose()` when tearing down this setup. Expired sessions redirect to sign-in; failed mutations are not automatically retried.
 
 React hooks also need a TanStack `QueryClientProvider`. A Sixb-served app supplies it for you; a standalone React app supplies its own.
 

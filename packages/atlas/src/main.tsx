@@ -44,6 +44,7 @@ async function start(): Promise<void> {
     : null
   canRenderApp =
     !runtimeConfig.auth.enabled ||
+    (authSession?.authenticated === false && authSession.authEnabled === false) ||
     (authSession?.authenticated === true && authSession.applicationAccess.allowed)
 
   if (canRenderApp) {

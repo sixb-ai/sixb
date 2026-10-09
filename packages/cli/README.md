@@ -411,9 +411,9 @@ requires `SIXB_API_PUBLIC_ORIGIN`, `SIXB_ATLAS_PUBLIC_ORIGIN`,
 and `SIXB_APP_PUBLIC_ORIGIN` when a built custom app is served.
 
 `sixb atlas` and `sixb app` serve only prebuilt assets. Run `sixb build` before starting them.
-They fail with a clear error instead of compiling assets at startup. They still need the project's
-environment: at startup each runs `sixb.config.ts` once, in a short-lived child process, to read
-the project id and whether auth is enabled, then serves without keeping the project loaded.
+They fail with a clear error instead of compiling assets at startup. They never load
+`sixb.config.ts`, so they need neither the project's environment nor access to its database: the
+served page asks the API whether auth is enabled.
 
 `sixb worker <type>` is intended for queue backends that can be shared across processes. Each
 worker process owns exactly one queue type. `sixb worker-group [types...]` co-hosts several queue

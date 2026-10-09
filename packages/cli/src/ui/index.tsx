@@ -44,6 +44,52 @@ export async function renderCliError(
   )
 }
 
+// The entrypoint and the browser roles render through these rather than JSX of their own: a module
+// with JSX loads React as soon as it is evaluated, and `atlas` and `app` load neither React nor
+// Ink outside a terminal.
+
+export async function renderVersion(version: string): Promise<void> {
+  await renderStatic(<VersionView version={version} />)
+}
+
+/** Root or command help, after the usage error that led to it when there is one. */
+export async function renderHelp(help: CliHelp, usageError?: string): Promise<void> {
+  await renderStatic(
+    help.path.length === 0 ? (
+      <HelpView errorMessage={usageError} />
+    ) : (
+      <CommandHelpView help={help} errorMessage={usageError} />
+    )
+  )
+}
+
+export interface RoleStartupPanel {
+  started(view: {
+    readonly title: string
+    readonly name: string
+    readonly serviceName: string
+    readonly items: KeyValueItem[]
+  }): void
+  unmount(): void
+}
+
+/** A long-running role's loading panel, replaced by its started view. */
+export function renderRoleStartup(loading: {
+  readonly title: string
+  readonly subtitle: string
+  readonly status: string
+}): RoleStartupPanel {
+  const app = renderPersistent(<LoadingView {...loading} />)
+  return {
+    started(view) {
+      app.rerender(<RoleView {...view} />)
+    },
+    unmount() {
+      app.unmount()
+    },
+  }
+}
+
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
     <Text color="cyan" bold>
