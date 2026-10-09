@@ -52,6 +52,9 @@ export async function upsertObjectBatch(
         ],
       }
     },
-    value: ([outcome]) => toObjectRow(ctx.projectId, requireEffectiveObject(outcome)),
+    value: ([outcome]) =>
+      ctx.objectReader.redactWrittenRow(
+        toObjectRow(ctx.projectId, requireEffectiveObject(outcome))
+      ),
   })
 }

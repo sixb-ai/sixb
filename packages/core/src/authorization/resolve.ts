@@ -70,7 +70,7 @@ function expandSelection(
  *
  * Pure set-union over pre-resolved roles: roles match when their grantedTo
  * groups intersect the principal's memberships, and their concrete id sets
- * union into the principal's grant index.
+ * and clearances union into the principal's context.
  */
 export function resolveAuthorizationContext(input: {
   readonly principal: Principal
@@ -81,6 +81,7 @@ export function resolveAuthorizationContext(input: {
   const memberGroupIds = new Set(input.groupIds)
   const roleIds: string[] = []
   const grants = emptyGrantSets()
+  const clearances = new Set<string>()
 
   for (const role of input.roles) {
     if (!role.grantedToGroupIds.some((groupId) => memberGroupIds.has(groupId))) {
@@ -96,6 +97,9 @@ export function resolveAuthorizationContext(input: {
         grants[kind].add(id)
       }
     }
+    for (const markingId of role.clearances ?? []) {
+      clearances.add(markingId)
+    }
   }
 
   return {
@@ -104,5 +108,6 @@ export function resolveAuthorizationContext(input: {
     groupIds: input.groupIds,
     roleIds,
     grants,
+    clearances,
   }
 }

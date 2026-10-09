@@ -34,5 +34,7 @@ export async function upsertObject(
   const commit = await commitRuntimeOperations(ctx, [
     objectUpsertOperation({ id: runtimeOperationId(0), ref, properties: normalized.properties }),
   ])
-  return toObjectRow(ctx.projectId, requireEffectiveObject(commit.outcomes[0]))
+  return ctx.objectReader.redactWrittenRow(
+    toObjectRow(ctx.projectId, requireEffectiveObject(commit.outcomes[0]))
+  )
 }

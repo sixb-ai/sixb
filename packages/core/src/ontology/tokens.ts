@@ -1,4 +1,4 @@
-import type { InferObjectProperties } from "./inference"
+import type { InferObjectProperties, InferObjectReadProperties } from "./inference"
 import {
   createLinkPathSelection,
   type LinkPathSelectionBuilder,
@@ -75,7 +75,10 @@ export type ObjectTypeWithPropertyTokens<TObjectType extends ObjectType = Object
  */
 export type ObjectPropertiesMetadata<TObjectType extends ObjectType> = {
   readonly [objectPropertiesBrand]?: string extends TObjectType["id"]
-    ? { readonly properties: Record<string, unknown> }
+    ? {
+        readonly properties: Record<string, unknown>
+        readonly readProperties: Record<string, unknown>
+      }
     : ObjectPropertiesCarrier<TObjectType>
 }
 
@@ -91,6 +94,7 @@ export type ObjectPropertiesMetadata<TObjectType extends ObjectType> = {
  */
 interface ObjectPropertiesCarrier<in out TObjectType extends ObjectType> {
   readonly properties: InferObjectProperties<TObjectType>
+  readonly readProperties: InferObjectReadProperties<TObjectType>
 }
 
 /**
@@ -102,6 +106,13 @@ interface ObjectPropertiesCarrier<in out TObjectType extends ObjectType> {
 export type ObjectTypeProperties<TObjectType extends ObjectTypeWithPropertyTokens> = NonNullable<
   TObjectType[typeof objectPropertiesBrand]
 >["properties"]
+
+/**
+ * The property values of an object type as a read returns them: a marked property is optional,
+ * because a reader without clearance receives it redacted.
+ */
+export type ObjectTypeReadProperties<TObjectType extends ObjectTypeWithPropertyTokens> =
+  NonNullable<TObjectType[typeof objectPropertiesBrand]>["readProperties"]
 
 /**
  * Object type with property tokens (`p.*`) and link tokens (`l.*`).

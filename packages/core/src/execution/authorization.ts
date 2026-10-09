@@ -596,6 +596,7 @@ function snapshotAuthorizationContext(
     groupIds: Object.freeze([...context.groupIds]),
     roleIds: Object.freeze([...context.roleIds]),
     grants: frozenGrants,
+    clearances: new ImmutableGrantSet(context.clearances ?? []),
   })
 }
 

@@ -236,3 +236,13 @@ Telemetry supports scalar and structured values, but cannot contain file or user
 with a physical `semanticType` also require a valid [unit](units-and-semantics.md).
 
 See [Telemetry](../objects/telemetry.md) for appending readings and querying their history.
+
+## Protect sensitive values
+
+Mark a property to hide its value from roles without the matching clearance:
+
+```ts
+prop("amount", "decimal", { markings: [financial] })
+```
+
+See [Markings](../auth/markings.md).

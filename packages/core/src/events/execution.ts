@@ -1,5 +1,6 @@
 import { assertPrivileged, canViewEvent } from "../authorization"
 import { resolveRuntimeAuthorizationForProject } from "../execution/authorization"
+import { redactDomainEvent, resolvePropertyClearance } from "../objects/property-clearance"
 import type { SixbRuntimeContext } from "../runtime/types"
 import type {
   EventsAppendInput,
@@ -10,7 +11,8 @@ import type {
 import type { StoredDomainEvent } from "./types"
 
 export interface EventsRuntime {
-  canRead(event: StoredDomainEvent): boolean
+  /** The event as this execution may read it: hidden events are `undefined`, others redacted. */
+  readable(event: StoredDomainEvent): StoredDomainEvent | undefined
   append(input: EventsAppendInput): Promise<readonly StoredDomainEvent[]>
   emit(input: EventsAppendInput, options: EventsEmitOptions): Promise<void>
   read(input?: EventsReadInput): Promise<readonly StoredDomainEvent[]>
@@ -23,30 +25,27 @@ export interface EventsRuntime {
 
 export function createEventsRuntime(runtime: SixbRuntimeContext): EventsRuntime {
   const authority = resolveRuntimeAuthorizationForProject(runtime)
-  const visibleEvents = (events: readonly StoredDomainEvent[]): readonly StoredDomainEvent[] => {
+  const clearance =
+    authority.type === "principal"
+      ? resolvePropertyClearance(runtime.ontology, authority.context.clearances ?? new Set())
+      : undefined
+  const readable = (event: StoredDomainEvent): StoredDomainEvent | undefined => {
     switch (authority.type) {
       case "denied":
       case "delegated":
-        return []
+        return undefined
       case "principal":
-        return events.filter((event) => canViewEvent(authority.context, event))
+        if (!canViewEvent(authority.context, event)) return undefined
+        return clearance ? redactDomainEvent(event, clearance) : event
       case "unrestricted":
-        return [...events]
+        return event
     }
   }
+  const visibleEvents = (events: readonly StoredDomainEvent[]): readonly StoredDomainEvent[] =>
+    events.flatMap((event) => readable(event) ?? [])
 
   return {
-    canRead: (event) => {
-      switch (authority.type) {
-        case "denied":
-        case "delegated":
-          return false
-        case "principal":
-          return canViewEvent(authority.context, event)
-        case "unrestricted":
-          return true
-      }
-    },
+    readable,
     append: (input) => {
       assertPrivileged(runtime, "events.append")
       return runtime.events.append(input)

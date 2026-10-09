@@ -1,6 +1,7 @@
 import type { DomainEvent } from "@sixb/core"
 import { z } from "zod"
 import { JsonNullSchema, JsonValueSchema } from "./common"
+import { ObjectRedactionsSchema } from "./objects"
 
 const PropertyChangeSchema = z.discriminatedUnion("operation", [
   z.object({ operation: z.literal("created"), after: JsonValueSchema }),
@@ -22,11 +23,13 @@ const ObjectMutationPayloadSchema = z.object({
   primaryId: z.string(),
   properties: z.record(JsonValueSchema),
   propertyChanges: PropertyChangesSchema,
+  redactions: ObjectRedactionsSchema.optional(),
 })
 const ObjectDeletedPayloadSchema = z.object({
   objectTypeId: z.string(),
   primaryId: z.string(),
   propertyChanges: PropertyChangesSchema,
+  redactions: ObjectRedactionsSchema.optional(),
 })
 const LinkSubjectSchema = z.object({
   sourceTypeId: z.string(),

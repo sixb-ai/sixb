@@ -42,6 +42,20 @@
           }
         }
       },
+      "ObjectRedactions": {
+        "type": "object",
+        "additionalProperties": {
+          "type": "object",
+          "required": ["reason"],
+          "additionalProperties": false,
+          "properties": {
+            "reason": {
+              "type": "string",
+              "enum": ["missing_clearance"]
+            }
+          }
+        }
+      },
       "ObjectQueryObject": {
         "type": "object",
         "required": ["primaryId", "objectTypeId", "properties", "createdAt", "updatedAt"],
@@ -59,6 +73,9 @@
           "properties": {
             "type": "object",
             "additionalProperties": true
+          },
+          "redactions": {
+            "$ref": "#/components/schemas/ObjectRedactions"
           },
           "createdAt": {
             "type": "string"
@@ -26187,6 +26204,20 @@
                             "type": "object",
                             "additionalProperties": {}
                           },
+                          "redactions": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "type": "object",
+                              "properties": {
+                                "reason": {
+                                  "type": "string",
+                                  "enum": ["missing_clearance"]
+                                }
+                              },
+                              "required": ["reason"],
+                              "additionalProperties": false
+                            }
+                          },
                           "createdAt": {
                             "type": "string"
                           },
@@ -26985,6 +27016,20 @@
                       "type": "object",
                       "additionalProperties": {}
                     },
+                    "redactions": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "reason": {
+                            "type": "string",
+                            "enum": ["missing_clearance"]
+                          }
+                        },
+                        "required": ["reason"],
+                        "additionalProperties": false
+                      }
+                    },
                     "createdAt": {
                       "type": "string"
                     },
@@ -27116,6 +27161,20 @@
                     "properties": {
                       "type": "object",
                       "additionalProperties": {}
+                    },
+                    "redactions": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "reason": {
+                            "type": "string",
+                            "enum": ["missing_clearance"]
+                          }
+                        },
+                        "required": ["reason"],
+                        "additionalProperties": false
+                      }
                     },
                     "createdAt": {
                       "type": "string"
@@ -36169,6 +36228,20 @@
                                             }
                                           ]
                                         }
+                                      },
+                                      "redactions": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "type": "object",
+                                          "properties": {
+                                            "reason": {
+                                              "type": "string",
+                                              "enum": ["missing_clearance"]
+                                            }
+                                          },
+                                          "required": ["reason"],
+                                          "additionalProperties": false
+                                        }
                                       }
                                     },
                                     "required": [
@@ -36649,6 +36722,20 @@
                                             }
                                           ]
                                         }
+                                      },
+                                      "redactions": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "type": "object",
+                                          "properties": {
+                                            "reason": {
+                                              "type": "string",
+                                              "enum": ["missing_clearance"]
+                                            }
+                                          },
+                                          "required": ["reason"],
+                                          "additionalProperties": false
+                                        }
                                       }
                                     },
                                     "required": [
@@ -37102,6 +37189,20 @@
                                               "additionalProperties": false
                                             }
                                           ]
+                                        }
+                                      },
+                                      "redactions": {
+                                        "type": "object",
+                                        "additionalProperties": {
+                                          "type": "object",
+                                          "properties": {
+                                            "reason": {
+                                              "type": "string",
+                                              "enum": ["missing_clearance"]
+                                            }
+                                          },
+                                          "required": ["reason"],
+                                          "additionalProperties": false
                                         }
                                       }
                                     },

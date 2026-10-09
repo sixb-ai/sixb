@@ -26,6 +26,8 @@
  * ```
  */
 
+import { markingIdsFrom } from "../security/builders"
+import type { MarkingDefinition } from "../security/types"
 import type { ObjectTypeWithPropertyTokens, ObjectTypeWithTokens } from "./tokens"
 import { createLinkTokenMap, createPropertyTokenMap } from "./tokens"
 import type {
@@ -353,7 +355,16 @@ type PropertyOptions = {
   mode?: PropertyMode
   semanticType?: QuantitativeTypeId
   query?: PropertyQueryMetadata
+  /** Readers need a clearance for every marking to receive this property's value. */
+  markings?: readonly MarkingDefinition[]
 }
+
+/** The property records marking ids; only a declared, non-empty list marks it. */
+type MarkingsFromOptions<TOptions> = TOptions extends {
+  markings: readonly [MarkingDefinition, ...MarkingDefinition[]]
+}
+  ? { markings: readonly string[] }
+  : { markings?: readonly string[] }
 
 type PropertyResult<
   TId extends string,
@@ -369,7 +380,8 @@ type PropertyResult<
   FieldFromOptions<TOptions, "primary", true> &
   FieldFromOptions<TOptions, "mode", PropertyMode> &
   FieldFromOptions<TOptions, "semanticType", QuantitativeTypeId> &
-  FieldFromOptions<TOptions, "query", PropertyQueryMetadata>
+  FieldFromOptions<TOptions, "query", PropertyQueryMetadata> &
+  MarkingsFromOptions<TOptions>
 
 /**
  * Shorthand for creating a {@link Property}.
@@ -396,11 +408,15 @@ export function prop<
   const TOptions extends PropertyOptions,
 >(id: TId, schema: TSchema, options: TOptions): PropertyResult<TId, TSchema, TOptions>
 export function prop(id: string, schema: Schema, options?: PropertyOptions): Property {
+  const { markings, ...rest } = options ?? {}
   return {
     id,
     name: options?.name ?? id,
     schema,
-    ...options,
+    ...rest,
+    ...(markings && markings.length > 0
+      ? { markings: markingIdsFrom(markings, `Property '${id}' markings`) }
+      : {}),
   }
 }
 

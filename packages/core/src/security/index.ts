@@ -1,10 +1,11 @@
 export { applications } from "./applications"
 export type {
   DefineGroupOptions,
+  DefineMarkingOptions,
   DefineMembershipPolicyOptions,
   DefineRoleOptions,
 } from "./builders"
-export { defineGroup, defineMembershipPolicy, defineRole } from "./builders"
+export { defineGroup, defineMarking, defineMembershipPolicy, defineRole } from "./builders"
 export { SecurityValidationError } from "./errors"
 export type { BreadthSelector, BreadthTarget } from "./every"
 export { every } from "./every"
@@ -31,6 +32,7 @@ export type {
   GroupReference,
   ManageGrant,
   ManageGrantTarget,
+  MarkingDefinition,
   MembershipOperation,
   MembershipPolicyDefinition,
   ObserveGrant,
@@ -50,6 +52,7 @@ export {
   assertMembershipPolicyDefinition,
   assertRoleDefinition,
   isGroupDefinition,
+  isMarkingDefinition,
   isMembershipPolicyDefinition,
   isRoleDefinition,
   validateSecurityDefinitionsAtStartup,

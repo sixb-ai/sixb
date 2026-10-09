@@ -923,6 +923,77 @@ export const contractOperator = defineRole("contract.operator", {
       ],
     })
   })
+
+  test("createSixb discovers markings from security/markings", async () => {
+    const projectRoot = await createTempProjectRoot()
+
+    await writeProjectFile(
+      projectRoot,
+      "security/markings/financial.ts",
+      `import { defineMarking } from "${coreModuleUrl}"
+
+export const financial = defineMarking("financial", { label: "Financial" })
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "ontology/invoice.ts",
+      `import { defineObjectType, prop } from "${coreModuleUrl}"
+import { financial } from "../security/markings/financial"
+
+export const Invoice = defineObjectType({
+  id: "invoice",
+  name: "Invoice",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("amount", "double", { markings: [financial] }),
+  ],
+})
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "security/groups/finance.ts",
+      `import { defineGroup } from "${coreModuleUrl}"
+
+export const finance = defineGroup("finance")
+`
+    )
+
+    await writeProjectFile(
+      projectRoot,
+      "security/roles/finance-clearance.ts",
+      `import { defineRole } from "${coreModuleUrl}"
+import { finance } from "../groups/finance"
+import { financial } from "../markings/financial"
+
+export const financeClearance = defineRole("finance.clearance", {
+  grantedTo: [finance],
+  clearances: [financial],
+})
+`
+    )
+
+    const sixb = await createSixb({
+      projectRoot,
+      ...createTestRuntimeDeps(),
+    })
+
+    expect(sixb.definitions.security.listMarkings()).toEqual([
+      { kind: "marking", id: "financial", label: "Financial" },
+    ])
+    expect(sixb.definitions.security.getRoleById("finance.clearance")).toMatchObject({
+      grants: [],
+      clearances: ["financial"],
+    })
+    expect(
+      sixb.definitions.ontology
+        .getObjectTypeById("invoice")
+        ?.properties.find((property) => property.id === "amount")?.markings
+    ).toEqual(["financial"])
+  })
 })
 
 async function createTempProjectRoot(): Promise<string> {

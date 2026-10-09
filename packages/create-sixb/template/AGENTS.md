@@ -50,7 +50,7 @@ schedules/     cron triggers
 pipelines/     transform datasets
 rules/         continuous evaluation over object state
 workflows/     multi-step processes (with human-in-the-loop)
-security/      groups/ roles/ policies/
+security/      groups/ roles/ markings/ policies/
 app/           custom React UI — NOT discovered (served separately)
 ```
 

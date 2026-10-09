@@ -16,10 +16,12 @@ import { type RuleDefinition, validateRulesAtStartup } from "../rules"
 import { type ScheduleDefinition, validateSchedulesAtStartup } from "../schedules"
 import {
   type GroupDefinition,
+  type MarkingDefinition,
   type MembershipPolicyDefinition,
   type RoleDefinition,
   SecurityRegistry,
 } from "../security"
+import { validatePropertyMarkingsAtStartup } from "../security/markings"
 import { type ShareDefinition, validateSharesAtStartup } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import {
@@ -46,6 +48,7 @@ interface DefinitionOptions {
   readonly tools?: readonly AgentToolDefinition[]
   readonly models?: ModelCatalogInput
   readonly shares?: readonly ShareDefinition[]
+  readonly markings?: readonly MarkingDefinition[]
   readonly groups?: readonly GroupDefinition[]
   readonly roles?: readonly RoleDefinition[]
   readonly membershipPolicies?: readonly MembershipPolicyDefinition[]
@@ -156,6 +159,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   const workflowsById = indexUniqueDefinitions("workflow", workflows)
 
   const security = new SecurityRegistry({
+    markings: options.markings ?? [],
     groups: options.groups ?? [],
     roles: options.roles ?? [],
     membershipPolicies: options.membershipPolicies ?? [],
@@ -171,6 +175,10 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),
   })
   validateWorkflowAgentStepGroupReferences(workflows, security)
+  validatePropertyMarkingsAtStartup({
+    ontology,
+    markingIds: new Set(security.listMarkings().map((marking) => marking.id)),
+  })
 
   const projectionRegistry = new ProjectionRegistry({
     projections: options.projections ?? [],

@@ -2,6 +2,7 @@ import { SecurityValidationError } from "./errors"
 import type {
   GrantDefinition,
   GroupDefinition,
+  MarkingDefinition,
   MembershipOperation,
   MembershipPolicyDefinition,
   RoleDefinition,
@@ -18,11 +19,18 @@ export interface DefineGroupOptions {
   readonly description?: string
 }
 
+export interface DefineMarkingOptions {
+  readonly label?: string
+  readonly description?: string
+}
+
 export interface DefineRoleOptions {
   readonly label?: string
   readonly description?: string
   readonly grantedTo: readonly GroupDefinition[]
-  readonly grants: readonly GrantDefinition[]
+  readonly grants?: readonly GrantDefinition[]
+  /** Markings this role's members may read. */
+  readonly clearances?: readonly MarkingDefinition[]
 }
 
 export interface DefineMembershipPolicyOptions {
@@ -81,6 +89,37 @@ export function defineGroup<const TId extends string>(
   }
 }
 
+/** Read the ids of marking definitions, rejecting anything else such as a bare id. */
+export function markingIdsFrom(
+  markings: readonly MarkingDefinition[],
+  field: string
+): readonly string[] {
+  return markings.map((marking) => {
+    if (!isRecord(marking) || marking.kind !== "marking") {
+      throw new SecurityValidationError(`[Sixb] ${field} must contain only marking definitions.`)
+    }
+
+    assertNonEmptyString(marking.id, `${field} marking id`)
+    return marking.id
+  })
+}
+
+export function defineMarking<const TId extends string>(
+  id: TId,
+  options: DefineMarkingOptions = {}
+): MarkingDefinition<TId> {
+  assertNonEmptyString(id, "Marking id")
+  assertOptionalString(options.label, `Marking '${id}' label`)
+  assertOptionalString(options.description, `Marking '${id}' description`)
+
+  return {
+    kind: "marking",
+    id,
+    ...(options.label !== undefined ? { label: options.label } : {}),
+    ...(options.description !== undefined ? { description: options.description } : {}),
+  }
+}
+
 export function defineRole<const TId extends string>(
   id: TId,
   options: DefineRoleOptions
@@ -91,13 +130,17 @@ export function defineRole<const TId extends string>(
   assertNonEmptyArray(options.grantedTo, `Role '${id}' grantedTo`)
 
   const grantedToGroupIds = groupIdsFrom(options.grantedTo, `Role '${id}' grantedTo`)
+  const grants = options.grants ?? []
+  const clearances = markingIdsFrom(options.clearances ?? [], `Role '${id}' clearances`)
 
-  for (const grant of options.grants) {
+  for (const grant of grants) {
     assertGrantDefinition(grant, `Role '${id}' grants`)
   }
 
-  if (options.grants.length === 0) {
-    throw new SecurityValidationError(`[Sixb] Role '${id}' grants must not be empty.`)
+  if (grants.length === 0 && clearances.length === 0) {
+    throw new SecurityValidationError(
+      `[Sixb] Role '${id}' must declare at least one grant or clearance.`
+    )
   }
 
   return {
@@ -106,7 +149,8 @@ export function defineRole<const TId extends string>(
     ...(options.label !== undefined ? { label: options.label } : {}),
     ...(options.description !== undefined ? { description: options.description } : {}),
     grantedToGroupIds,
-    grants: options.grants,
+    grants,
+    ...(clearances.length > 0 ? { clearances } : {}),
   }
 }
 

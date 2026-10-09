@@ -8,6 +8,19 @@ export interface GroupDefinition<TId extends string = string> {
 }
 
 /**
+ * A classification carried by sensitive properties.
+ *
+ * A principal reads a marked property only when one of its roles lists the marking in
+ * `clearances`. No grant bypasses a marking.
+ */
+export interface MarkingDefinition<TId extends string = string> {
+  readonly kind: "marking"
+  readonly id: TId
+  readonly label?: string
+  readonly description?: string
+}
+
+/**
  * A group named either by its definition or by its id.
  *
  * Both forms are unavoidable. Sessions and stored memberships hand you ids, so a runtime caller has
@@ -149,6 +162,8 @@ export interface RoleDefinition<TId extends string = string> {
   readonly description?: string
   readonly grantedToGroupIds: readonly string[]
   readonly grants: readonly GrantDefinition[]
+  /** Ids of the markings this role's members may read. Absent means none. */
+  readonly clearances?: readonly string[]
 }
 
 export type MembershipOperation = "invite" | "assignGroups" | "suspend"
@@ -162,6 +177,8 @@ export interface MembershipPolicyDefinition<TId extends string = string> {
 }
 
 export interface RegisteredSecurityDefinitions {
+  readonly markings: readonly MarkingDefinition[]
+  readonly markingsById: ReadonlyMap<string, MarkingDefinition>
   readonly groups: readonly GroupDefinition[]
   readonly groupsById: ReadonlyMap<string, GroupDefinition>
   readonly roles: readonly RoleDefinition[]

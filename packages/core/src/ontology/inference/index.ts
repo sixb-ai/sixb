@@ -211,6 +211,31 @@ export type InferObjectProperties<
         }
       >
 
+/**
+ * Property values as a principal reads them. A marked property may be redacted, so it is optional
+ * even when required; writes keep {@link InferObjectProperties}.
+ */
+export type InferObjectReadProperties<
+  TObjectType extends { properties: readonly Property[] },
+  TValueTypes extends readonly ValueType[] = RegisteredValueTypes,
+> = string extends TObjectType["properties"][number]["id"]
+  ? Record<string, unknown>
+  : Simplify<
+      {
+        [TProp in TObjectType["properties"][number] as TProp extends { required: true }
+          ? TProp extends { markings: readonly string[] }
+            ? never
+            : TProp["id"]
+          : never]: InferPropertyValue<TProp, TValueTypes>
+      } & {
+        [TProp in TObjectType["properties"][number] as TProp extends { required: true }
+          ? TProp extends { markings: readonly string[] }
+            ? TProp["id"]
+            : never
+          : TProp["id"]]?: InferPropertyValue<TProp, TValueTypes>
+      }
+    >
+
 /** Useful for APIs that should only accept telemetry-mode properties. */
 export type InferTelemetryPropertyIds<TObjectType extends { properties: readonly Property[] }> =
   Extract<TObjectType["properties"][number], { mode: "telemetry" }>["id"]

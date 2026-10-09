@@ -146,12 +146,8 @@ export function createTestingScope(input: {
 }
 
 function withoutSession(context: AuthorizationContext): AuthorizationContext {
-  return {
-    principal: context.principal,
-    groupIds: context.groupIds,
-    roleIds: context.roleIds,
-    grants: context.grants,
-  }
+  const { sessionId: _sessionId, ...withoutSessionId } = context
+  return withoutSessionId
 }
 
 function createRequestExecution(input: {

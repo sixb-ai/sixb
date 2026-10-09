@@ -42,6 +42,8 @@ export interface ResolvedRole {
   readonly id: string
   readonly grantedToGroupIds: readonly string[]
   readonly grants: GrantIndex
+  /** Marking ids this role clears. Absent means none. */
+  readonly clearances?: ReadonlySet<string>
 }
 
 export interface AuthorizationContext {
@@ -51,4 +53,9 @@ export interface AuthorizationContext {
   /** Roles whose grantedTo groups intersect the principal's memberships. */
   readonly roleIds: readonly string[]
   readonly grants: GrantIndex
+  /**
+   * Marking ids the principal may read, unioned from its roles. Absent means none: a context built
+   * without clearances reads no marked property.
+   */
+  readonly clearances?: ReadonlySet<string>
 }

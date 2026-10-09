@@ -10,6 +10,7 @@ import {
 import type {
   ExpandedLinkValue,
   ExpandedObjectRow,
+  ObjectRedactions,
   ObjectRow,
   ObjectRowLinks,
 } from "@sixb/core/storage"
@@ -62,6 +63,7 @@ function serializeObject(row: {
   primaryId: string
   objectTypeId: string
   properties: Record<string, unknown>
+  redactions?: ObjectRedactions
   createdAt: Date
   updatedAt: Date
 }) {
@@ -70,6 +72,7 @@ function serializeObject(row: {
     primaryId: row.primaryId,
     objectTypeId: row.objectTypeId,
     properties: row.properties,
+    ...(row.redactions === undefined ? {} : { redactions: row.redactions }),
     createdAt: toIsoString(row.createdAt),
     updatedAt: toIsoString(row.updatedAt),
   }
@@ -252,8 +255,15 @@ async function searchObjects(
           input: { kind: "start", objectTypeId: objectType.id },
         },
       }
-      const result = await sixb.objects.executeQuery({ query: objectQuery })
-      return result.objects
+      try {
+        const result = await sixb.objects.executeQuery({ query: objectQuery })
+        return result.objects
+      } catch (error) {
+        // Default text fields the caller cannot read are skipped; a type left with none denies
+        // its search. Global search covers what the caller can read, so it matches nothing there.
+        if (error instanceof AuthorizationError) return []
+        throw error
+      }
     })
   )
 

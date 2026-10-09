@@ -284,6 +284,11 @@ export interface Property {
   semanticType?: QuantitativeTypeId
   /** Query/indexing metadata for this property. */
   query?: PropertyQueryMetadata
+  /**
+   * Marking ids. A principal receives this property only when its roles clear every marking;
+   * otherwise the value is omitted and listed in the object's `redactions`.
+   */
+  markings?: readonly string[]
 }
 
 /**

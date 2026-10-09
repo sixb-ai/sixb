@@ -257,7 +257,15 @@ describe("selected object query admission", () => {
       query: "visible",
       fields: ["title"],
     })
-    expectDenied({ kind: "text", input: start(Proposal.id), query: "hidden" })
+    // Default text fields come from the search profile: the reader searches the ones it can read,
+    // and is denied only when none are left.
+    const defaults = authorize({ kind: "text", input: start(Proposal.id), query: "visible" })
+    expect(defaults.query).toMatchObject({ fieldsByObjectType: { [Proposal.id]: ["title"] } })
+    expectDenied({
+      kind: "text",
+      input: traverse("reviewers", start(Proposal.id)),
+      query: "hidden",
+    })
     expectDenied({
       kind: "text",
       input: start(Proposal.id),
