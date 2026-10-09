@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import type { DatasetDefinition, LakeStorage, SixbHostView } from "@sixb/core"
-import { col, defineDataset } from "@sixb/core"
+import { col, defineDataset, InMemoryLakeStorage } from "@sixb/core"
 import type { DatasetCatalogState } from "@sixb/core/lake-storage"
 import { Elysia } from "elysia"
 import { registerDatasetRoutes } from "../src/routes/datasets"
@@ -148,5 +148,49 @@ describe("dataset catalog routes", () => {
     expect(item.latestVersion?.mode).toBe("snapshot")
 
     expect(calls()).toBe(1)
+  })
+})
+
+describe("dataset rows route", () => {
+  const issues = defineDataset("raw.tracker.issues", {
+    schema: [col("id", "string"), col("title", "string"), col("state", "string")],
+  })
+  const issueRows = [
+    { id: "issue-1", title: "Crash on save", state: "open" },
+    { id: "issue-2", title: "Typo in docs", state: "closed" },
+  ]
+
+  async function createRowsApp() {
+    const lakeStorage = new InMemoryLakeStorage()
+    await lakeStorage.createDataset(issues)
+    const write = await lakeStorage.beginWrite({ dataset: issues, mode: "snapshot" })
+    await write.writeRows(issueRows)
+    await write.commit()
+    return createTestApp(lakeStorage, [issues])
+  }
+
+  // Elysia splits a comma-separated query value into an array before validation, so declaring
+  // `columns` as a plain string rejected every multi-column request with a 422. To see this test
+  // fail, set `columns: z.string().optional()` back in `DatasetRowsQuerySchema`.
+  test.each([
+    ["columns=id,title", ["id", "title"]],
+    ["columns=id&columns=title", ["id", "title"]],
+    // Elysia nests a later comma-separated value: `["state", ["id", " title"]]`.
+    ["columns=state&columns=id,%20title", ["state", "id", "title"]],
+  ])("?%s returns exactly the requested columns", async (search, expected) => {
+    const app = await createRowsApp()
+
+    const response = await app.handle(
+      new Request(`http://localhost/api/datasets/${issues.id}/rows?${search}`)
+    )
+    expect(response.status).toBe(200)
+
+    const body = (await response.json()) as { columns: string[]; rows: unknown[] }
+    expect(body.columns).toEqual(expected)
+    expect(body.rows).toEqual(
+      issueRows.map((row) =>
+        Object.fromEntries(expected.map((column) => [column, row[column as keyof typeof row]]))
+      )
+    )
   })
 })

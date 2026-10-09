@@ -4873,7 +4873,7 @@ export type ListDatasetRowsData = {
   }
   query?: {
     versionId?: string
-    columns?: string
+    columns?: Array<string>
     limit?: string
     offset?: string
   }

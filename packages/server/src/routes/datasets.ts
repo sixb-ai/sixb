@@ -184,17 +184,6 @@ function datasetVersionNotFound(datasetId: string, versionId?: string) {
   })
 }
 
-function parseColumns(value: string | undefined): readonly string[] | undefined {
-  if (!value) return undefined
-
-  const columns = value
-    .split(",")
-    .map((column) => column.trim())
-    .filter(Boolean)
-
-  return columns.length > 0 ? columns : undefined
-}
-
 function resolveColumns(version: DatasetVersion, requested: readonly string[] | undefined) {
   const available = new Set(version.schema.columns.map((column) => column.name))
   const selected = requested ?? version.schema.columns.map((column) => column.name)
@@ -353,7 +342,8 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
             throw datasetVersionNotFound(params.datasetId, parsed.versionId)
           }
 
-          const requestedColumns = parseColumns(parsed.columns)
+          // An empty `?columns=` reads every column, like omitting it.
+          const requestedColumns = parsed.columns?.length ? parsed.columns : undefined
           const columns = resolveColumns(version, requestedColumns)
           const rows = await collectRows(
             host.lakeStorage.readRows({
