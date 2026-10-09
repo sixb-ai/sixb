@@ -69,7 +69,6 @@
       "@sixb/core/internal/action-run-storage": [
         "./packages/core/src/storage/action-runs/failure.ts"
       ],
-      "@sixb/core/internal/action-edits": ["./packages/core/src/actions/worker.ts"],
       "@sixb/core/internal/actions": ["./packages/core/src/actions/index.ts"],
       "@sixb/core/internal/agents/streams": ["./packages/core/src/agents/streams/internal.ts"],
       "@sixb/core/internal/agents": ["./packages/core/src/agents/index.ts"],

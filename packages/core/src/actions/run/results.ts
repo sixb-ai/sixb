@@ -1,10 +1,10 @@
-import { findActionEditCommit } from "@sixb/core/internal/actions"
-import { reportRunFailure } from "@sixb/core/internal/error-reporting"
-import { createSixbError } from "@sixb/core/internal/errors"
-import type { ActionRunFailure, ActionRunRecord } from "@sixb/core/storage"
-import { isTerminalActionRun } from "@sixb/core/storage"
-import { toActionRunFailure } from "../normalize"
-import type { ActionRunResult, RunActionJobInput } from "../types"
+import { reportRunFailure } from "../../error-reporting/capability"
+import { createSixbError } from "../../errors/internal"
+import type { ActionRunFailure, ActionRunRecord } from "../../storage"
+import { isTerminalActionRun } from "../../storage"
+import { findActionEditCommit } from "../commit-edits"
+import { toActionRunFailure } from "./normalize"
+import type { ActionRunResult, RunActionJobInput } from "./types"
 
 export function requireFinishedAt(input: {
   readonly actionId: string
@@ -17,7 +17,7 @@ export function requireFinishedAt(input: {
 
   throw createSixbError(
     "internal.unexpected",
-    `[SixbActionWorker] Action run '${input.runId}' finished without a finishedAt timestamp.`,
+    `[Sixb] Action run '${input.runId}' finished without a finishedAt timestamp.`,
     { details: { actionId: input.actionId, runId: input.runId } }
   )
 }
@@ -63,7 +63,7 @@ async function resolveRunningRunUnderFence(input: RunActionJobInput, run: Action
       if (!storage.actionRuns) {
         throw createSixbError(
           "internal.unexpected",
-          "[SixbActionWorker] Action workers require transactional Action materialization fencing.",
+          "[Sixb] Resuming an Action run requires transactional Action materialization fencing.",
           { details: { actionId: input.job.actionId, runId: input.job.id } }
         )
       }
@@ -136,7 +136,7 @@ function reportRedeliveryFailure(
 ): void {
   const error = createSixbError(
     "internal.unexpected",
-    `[SixbActionWorker] ${run.error?.message ?? `Action run '${run.id}' lost its lease.`}`,
+    `[Sixb] ${run.error?.message ?? `Action run '${run.id}' lost its lease.`}`,
     { details: { actionId: input.job.actionId, runId: input.job.id } }
   )
   reportRunFailure(input.runtime.errorReporterHost, error, {
