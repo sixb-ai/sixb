@@ -480,6 +480,8 @@ export type {
   MembershipPolicyDefinition,
   ObserveGrant,
   ObserveGrantTarget,
+  RedactionReason,
+  Redactions,
   RegisteredSecurityDefinitions,
   RoleDefinition,
   RunGrant,
@@ -583,6 +585,7 @@ export {
 export type {
   DatasetProducer,
   DatasetRow,
+  DatasetVersion,
   LakeStorage,
   LakeStorageWithSql,
 } from "./lake-storage"
@@ -896,7 +899,13 @@ export type {
 export type { CreateFileDownloadUrlOptions, FileDownloadUrl } from "./blob-storage/download-urls"
 export type { BlobsRuntime } from "./blob-storage/execution"
 export type { ConnectorRuntime } from "./connectors/execution"
-export type { DatasetIngestInput, DatasetIngestResult, DatasetsRuntime } from "./datasets/execution"
+export type {
+  DatasetIngestInput,
+  DatasetIngestResult,
+  DatasetReadRowsInput,
+  DatasetRows,
+  DatasetsRuntime,
+} from "./datasets/execution"
 export type {
   SixbActionPhaseFailedContext,
   SixbErrorContext,
@@ -1001,8 +1010,6 @@ export type {
   ActionRunPhase,
   AgentRunFailureCode,
   AiCostSummary,
-  ObjectRedactionReason,
-  ObjectRedactions,
   PipelineRunFailureCode,
   ProjectionRunFailureCode,
   SyncRunFailureCode,

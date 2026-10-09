@@ -1,7 +1,8 @@
 import { AuthorizationError } from "../authorization/errors"
 import type { StoredDomainEvent } from "../events/types"
 import type { OntologyDefinitionCatalog } from "../ontology/registry"
-import type { ExpandedLinkValue, ExpandedObjectRow, ObjectRedactions, ObjectRow } from "../storage"
+import { missingClearanceRedactions } from "../security/redactions"
+import type { ExpandedLinkValue, ExpandedObjectRow, ObjectRow } from "../storage"
 import type {
   ObjectQueryAdmissionState,
   ObjectQueryPropertyUse,
@@ -89,7 +90,7 @@ export function redactObjectRow<TRow extends ObjectRow>(
   const redacted: TRow = { ...row }
   if (hidden.size > 0) {
     redacted.properties = withoutKeys(row.properties, hidden)
-    redacted.redactions = redactionsFor(hidden)
+    redacted.redactions = missingClearanceRedactions(hidden)
   }
   if (links !== undefined) {
     redacted.links = Object.fromEntries(
@@ -124,19 +125,13 @@ export function redactDomainEvent(
   const payload = {
     ...event.payload,
     propertyChanges: withoutKeys(event.payload.propertyChanges, hidden),
-    redactions: redactionsFor(hidden),
+    redactions: missingClearanceRedactions(hidden),
   }
   if (event.type === "object.deleted") return { ...event, payload }
   return {
     ...event,
     payload: { ...payload, properties: withoutKeys(event.payload.properties, hidden) },
   }
-}
-
-function redactionsFor(hidden: ReadonlySet<string>): ObjectRedactions {
-  return Object.fromEntries(
-    [...hidden].map((propertyId) => [propertyId, { reason: "missing_clearance" }] as const)
-  )
 }
 
 function withoutKeys<TValue>(

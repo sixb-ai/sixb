@@ -39,6 +39,18 @@ export interface WriteDatasetInput<TValue extends DatasetWriteValue = DatasetWri
 export type WriteDatasetResult = DatasetMergeCommitResult & { readonly rowsRead: number }
 
 /**
+ * The definition the lake receives. Markings are enforced from the registered definition and never
+ * stored, so a stored schema cannot keep a classification the code has since changed.
+ */
+export function lakeDatasetDefinition(dataset: DatasetDefinition): DatasetDefinition {
+  if (!dataset.schema.columns.some((column) => column.markings)) return dataset
+  return {
+    ...dataset,
+    schema: { columns: dataset.schema.columns.map(({ markings: _markings, ...column }) => column) },
+  }
+}
+
+/**
  * Validate, stage, and commit one dataset write using existing lake sessions.
  *
  * The caller owns fetching/cancelling its source, execution bookkeeping, and publishing the
@@ -48,7 +60,8 @@ export type WriteDatasetResult = DatasetMergeCommitResult & { readonly rowsRead:
 export async function writeDataset<TValue extends DatasetWriteValue>(
   input: WriteDatasetInput<TValue>
 ): Promise<WriteDatasetResult> {
-  const { lakeStorage, dataset, signal } = input
+  const { lakeStorage, signal } = input
+  const dataset = lakeDatasetDefinition(input.dataset)
   let abortWrite: (() => Promise<void>) | undefined
   let rowsRead = 0
   const onRead = () => {

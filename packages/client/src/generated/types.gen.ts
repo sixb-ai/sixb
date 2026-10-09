@@ -8,7 +8,7 @@ export type ErrorResponse = {
   error: string
 }
 
-export type ObjectRedactions = {
+export type Redactions = {
   [key: string]: {
     reason: "missing_clearance"
   }
@@ -21,7 +21,7 @@ export type ObjectQueryObject = {
   properties: {
     [key: string]: unknown
   }
-  redactions?: ObjectRedactions
+  redactions?: Redactions
   createdAt: string
   updatedAt: string
   links?: {
@@ -4950,6 +4950,11 @@ export type ListDatasetRowsResponses = {
       sizeBytes?: number
     }
     columns: Array<string>
+    redactions?: {
+      [key: string]: {
+        reason: "missing_clearance"
+      }
+    }
     rows: Array<{
       [key: string]: unknown
     }>

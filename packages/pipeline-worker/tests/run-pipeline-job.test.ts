@@ -9,6 +9,7 @@ import type {
 import {
   col,
   defineDataset,
+  defineMarking,
   definePipeline,
   definePipelineStep,
   InMemoryLakeStorage,
@@ -507,6 +508,38 @@ describe("runPipelineJob", () => {
         versionId: result.version?.versionId,
       },
     })
+  })
+
+  test("writes a marked output without storing its markings", async () => {
+    const lakeStorage = new InMemoryLakeStorage()
+    await seedDatasetVersion(lakeStorage, rawCustomersDataset, [{ id: "cust_1", name: "Ada" }])
+    const scoredDataset = defineDataset("customer_scores", {
+      schema: [
+        col("id", "string"),
+        col("risk", "float64", { markings: [defineMarking("financial")] }),
+      ],
+    })
+    const scoreStep = definePipelineStep("score-customers")
+      .inputs({ rawCustomers: rawCustomersDataset })
+      .output(scoredDataset)
+      .run(async ({ output }) => {
+        await output.writeRows([{ id: "cust_1", risk: 0.4 }])
+      })
+    const runtime = createRuntime({
+      pipelines: [definePipeline("scores").then(scoreStep)],
+      datasets: [rawCustomersDataset, scoredDataset],
+      lakeStorage,
+    })
+
+    const result = await runPipelineJob({ runtime, job: { id: "run_score", pipelineId: "scores" } })
+
+    // Markings are enforced from the registered definition, never from the lake.
+    const stored = await lakeStorage.getDataset(scoredDataset.id)
+    expect(stored?.schema.columns).toEqual([
+      { name: "id", type: "string" },
+      { name: "risk", type: "float64" },
+    ])
+    expect(result.version?.schema.columns).toEqual(stored?.schema.columns)
   })
 
   test("runs multiple JS steps in order and lets downstream steps read upstream outputs", async () => {

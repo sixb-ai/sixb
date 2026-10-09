@@ -6,6 +6,7 @@ import type {
   ObjectQuerySortField,
   QueryScalarKind,
 } from "../../objects/query"
+import type { Redactions } from "../../security/types"
 import type { ObjectReadExecutionLimits } from "./execution-limits"
 import type { LinkBatchKey, ObjectBatchKey } from "./keys"
 
@@ -38,14 +39,8 @@ export interface ObjectRow {
    *
    * Populated by the authorized object reader; storage providers never read or write it.
    */
-  redactions?: ObjectRedactions
+  redactions?: Redactions
 }
-
-/** Why a property was omitted from a read. */
-export type ObjectRedactionReason = "missing_clearance"
-
-/** Omitted properties keyed by property id. A redacted property is absent, never `null`. */
-export type ObjectRedactions = Readonly<Record<string, { readonly reason: ObjectRedactionReason }>>
 
 /** Per-link expansion result keyed by link id (see {@link ObjectQueryExpand}). */
 export type ObjectRowLinks = Record<string, ExpandedLinkValue>

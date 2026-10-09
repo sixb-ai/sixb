@@ -1,3 +1,5 @@
+import { markingIdsFrom } from "../security/builders"
+import type { MarkingDefinition } from "../security/types"
 import { DatasetValidationError } from "./errors"
 import type {
   DatasetColumnDefinition,
@@ -10,6 +12,8 @@ import { assertDatasetColumnDefinition, assertDatasetDefinition } from "./valida
 
 type DatasetColumnOptions = {
   readonly nullable?: boolean
+  /** Principals need a clearance for every marking to read this column. */
+  readonly markings?: readonly MarkingDefinition[]
 }
 
 type DefineDatasetOptions = {
@@ -112,6 +116,13 @@ type DerivedColumns<
     : DerivedBaseColumns<TParent, TOptions>
   : DerivedBaseColumns<TParent, TOptions>
 
+/** The column records marking ids; only a declared, non-empty list marks it. */
+type MarkingsFromOptions<TOptions> = TOptions extends {
+  readonly markings: readonly [MarkingDefinition, ...MarkingDefinition[]]
+}
+  ? { readonly markings: readonly string[] }
+  : { readonly markings?: readonly string[] }
+
 type DatasetColumnResult<
   TName extends string,
   TType extends DatasetColumnType,
@@ -119,7 +130,8 @@ type DatasetColumnResult<
 > = {
   readonly name: TName
   readonly type: TType
-} & FieldFromOptions<TOptions, "nullable", boolean>
+} & FieldFromOptions<TOptions, "nullable", boolean> &
+  MarkingsFromOptions<TOptions>
 
 type DatasetDefinitionResult<TId extends string, TOptions extends DefineDatasetOptions> = Omit<
   DatasetDefinition<TId, TOptions["schema"]>,
@@ -165,10 +177,14 @@ export function col(
   type: DatasetColumnType,
   options?: DatasetColumnOptions
 ): DatasetColumnDefinition {
+  const markings = options?.markings
   const column: DatasetColumnDefinition = {
     name,
     type,
     ...(options?.nullable !== undefined ? { nullable: options.nullable } : {}),
+    ...(markings && markings.length > 0
+      ? { markings: markingIdsFrom(markings, `Dataset column '${name}' markings`) }
+      : {}),
   }
 
   assertDatasetColumnDefinition(column, (message) => new DatasetValidationError(message))

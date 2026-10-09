@@ -16,6 +16,8 @@ export interface DatasetColumnDefinition<
   readonly name: TName
   readonly type: TType
   readonly nullable?: boolean
+  /** Marking ids. Principals need a clearance for each one to read this column. */
+  readonly markings?: readonly string[]
 }
 
 export interface DatasetSchema<

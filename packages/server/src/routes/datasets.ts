@@ -184,21 +184,6 @@ function datasetVersionNotFound(datasetId: string, versionId?: string) {
   })
 }
 
-function resolveColumns(version: DatasetVersion, requested: readonly string[] | undefined) {
-  const available = new Set(version.schema.columns.map((column) => column.name))
-  const selected = requested ?? version.schema.columns.map((column) => column.name)
-
-  for (const column of selected) {
-    if (!available.has(column)) {
-      throw new Error(
-        `Dataset '${version.datasetId}' does not have column '${column}' at version '${version.versionId}'`
-      )
-    }
-  }
-
-  return selected
-}
-
 async function collectRows(rows: AsyncIterable<Readonly<Record<string, unknown>>>) {
   const collected: Record<string, unknown>[] = []
   for await (const row of rows) {
@@ -330,30 +315,23 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
         const { params, query, set } = context
         const sixb = requireRequestSixb(context)
         try {
-          requireDataset(sixb, params.datasetId)
+          const dataset = requireDataset(sixb, params.datasetId)
           const parsed = DatasetRowsQuerySchema.parse(query)
           const limit = parseLimit(parsed.limit, DEFAULT_ROW_LIMIT, MAX_ROW_LIMIT)
           const offset = parseOffset(parsed.offset)
-          const version = parsed.versionId
-            ? await host.lakeStorage.getVersion(params.datasetId, parsed.versionId)
-            : await host.lakeStorage.getLatestVersion(params.datasetId)
-
-          if (!version) {
+          const page = await sixb.datasets.readRows(dataset, {
+            versionId: parsed.versionId,
+            // An empty `?columns=` reads every column, like omitting it.
+            columns: parsed.columns?.length ? parsed.columns : undefined,
+            limit,
+            offset,
+          })
+          if (!page) {
             throw datasetVersionNotFound(params.datasetId, parsed.versionId)
           }
 
-          // An empty `?columns=` reads every column, like omitting it.
-          const requestedColumns = parsed.columns?.length ? parsed.columns : undefined
-          const columns = resolveColumns(version, requestedColumns)
-          const rows = await collectRows(
-            host.lakeStorage.readRows({
-              datasetId: params.datasetId,
-              versionId: version.versionId,
-              columns: requestedColumns,
-              limit,
-              offset,
-            })
-          )
+          const { version, columns, redactions } = page
+          const rows = await collectRows(page.rows)
           const hasMore =
             version.rowCount === undefined
               ? rows.length === limit
@@ -364,6 +342,7 @@ export function registerDatasetRoutes(app: Elysia, host: SixbHostView) {
             versionId: version.versionId,
             version: serializeDatasetVersion(version),
             columns: [...columns],
+            ...(redactions === undefined ? {} : { redactions }),
             rows,
             count: rows.length,
             limit,

@@ -48,7 +48,7 @@ import type {
   PropertyToken,
 } from "../ontology/tokens"
 import type { Queues } from "../queues"
-import type { ActionRunRecord, ObjectLinkRow, ObjectRedactions, Storage } from "../storage"
+import type { ActionRunRecord, ObjectLinkRow, Redactions, Storage } from "../storage"
 // ── Shared runtime context ──────────────────────────────────
 
 /**
@@ -113,7 +113,7 @@ export type TwinObject<out TObjectType extends ObjectTypeWithPropertyTokens> = {
   /** A marked property is absent when the reader lacks its clearance; see `redactions`. */
   properties: ObjectTypeReadProperties<TObjectType>
   /** Properties omitted because the reader lacks a clearance, keyed by property id. */
-  redactions?: ObjectRedactions
+  redactions?: Redactions
   createdAt: Date
   updatedAt: Date
 }

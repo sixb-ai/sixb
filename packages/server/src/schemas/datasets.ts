@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { RedactionsSchema } from "./common"
 
 export const DatasetParamsSchema = z.object({
   datasetId: z.string().min(1),
@@ -117,7 +118,10 @@ export const DatasetRowsResponseSchema = z.object({
   datasetId: z.string(),
   versionId: z.string(),
   version: DatasetVersionSchema,
+  /** Returned columns. Redacted columns are left out. */
   columns: z.array(z.string()),
+  /** Columns omitted because the caller lacks a clearance for their markings. */
+  redactions: RedactionsSchema.optional(),
   rows: z.array(z.record(z.unknown())),
   count: z.number(),
   limit: z.number(),
