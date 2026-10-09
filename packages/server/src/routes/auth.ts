@@ -742,7 +742,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Create a personal access token",
           tags: [OPENAPI_TAGS.authAccessTokens.name],
           operationId: "createAuthPersonalAccessToken",
-          security: accessTokenSecurityRequirement("createAuthPersonalAccessToken"),
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )
@@ -978,7 +978,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           summary: "Create an access token for an auth service account",
           tags: [OPENAPI_TAGS.authServiceAccounts.name],
           operationId: "createAuthServiceAccountAccessToken",
-          security: accessTokenSecurityRequirement("createAuthServiceAccountAccessToken"),
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
         },
       }
     )

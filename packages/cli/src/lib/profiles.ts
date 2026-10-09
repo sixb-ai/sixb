@@ -52,7 +52,8 @@ export interface ResolvedProfile {
     | "profile-environment"
     | "current-profile"
     | "default"
-  readonly tokenSource?: "--token" | "SIXB_API_TOKEN" | "SIXB_TOKEN" | "profile"
+  /** `"session"` is the sign-in `sixb login` saved on the profile; `"profile"`, a saved token. */
+  readonly tokenSource?: "--token" | "SIXB_API_TOKEN" | "SIXB_TOKEN" | "profile" | "session"
 }
 
 export function resolveConfigPath(options: ProfileStoreOptions = {}): string {
@@ -210,7 +211,7 @@ async function resolvedStoredProfile(
         `[SixbCLI] The sign-in for profile '${profile}' has ended. Run \`sixb login ${stored.apiUrl} --profile ${profile}\` again.`
       )
     }
-    return { ...base, token, tokenSource: "profile" }
+    return { ...base, token, tokenSource: "session" }
   }
   return stored.token ? { ...base, tokenSource: "profile" } : base
 }
