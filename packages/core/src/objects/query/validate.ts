@@ -42,7 +42,10 @@ export interface ObjectQueryValidationIssue {
 export interface ValidatedObjectQuery {
   query: ObjectQuery
   result: ObjectQueryResultShape
-  /** Every object type the query touches, including intermediate traversal types. */
+  /**
+   * Every object type the query touches, including intermediate traversal types and the subtypes
+   * an outgoing link can reach.
+   */
   touchedObjectTypeIds: readonly string[]
 }
 
@@ -530,9 +533,7 @@ function validateStart(
     return { result: { objectTypeIds: [] }, query: { kind: "start", objectTypeId } }
   }
 
-  const objectTypeIds = includeSubtypes
-    ? uniqueStrings([objectTypeId, ...ctx.ontology.listSubTypes(objectTypeId)])
-    : [objectTypeId]
+  const objectTypeIds = includeSubtypes ? withSubtypes([objectTypeId], ctx) : [objectTypeId]
 
   return { result: { objectTypeIds }, query: { kind: "start", objectTypeId, includeSubtypes } }
 }
@@ -1060,7 +1061,9 @@ function validateOutgoingTraverse(
     }
   }
 
-  return { objectTypeIds: uniqueStrings(targetTypeIds) }
+  const objectTypeIds = uniqueStrings(targetTypeIds)
+  touchLinkTargets(objectTypeIds, ctx)
+  return { objectTypeIds }
 }
 
 function validateIncomingTraverse(
@@ -1261,7 +1264,22 @@ function resolveOutgoingExpansionTargets(
     )
   }
 
-  return { objectTypeIds: uniqueStrings(targetTypeIds) }
+  const objectTypeIds = uniqueStrings(targetTypeIds)
+  touchLinkTargets(objectTypeIds, ctx)
+  return { objectTypeIds }
+}
+
+/**
+ * Following a link outgoing reads every subtype of its declared targets: links accept subtype
+ * targets and storage follows them by link id alone. Authorize those reads like a `start` that
+ * includes subtypes; the result shape keeps the declared targets that later nodes validate against.
+ * Incoming edges already name every source type they can return: storage matches a pinned
+ * `sourceObjectTypeId` exactly, and otherwise subtypes inherit the link.
+ */
+function touchLinkTargets(objectTypeIds: readonly string[], ctx: QueryValidationContext): void {
+  for (const objectTypeId of withSubtypes(objectTypeIds, ctx)) {
+    ctx.touchedObjectTypeIds.add(objectTypeId)
+  }
 }
 
 function resolveIncomingExpansionTargets(
@@ -1655,6 +1673,10 @@ function keyForTypeIds(typeIds: readonly string[]): string {
 
 function uniqueStrings(values: readonly string[]): string[] {
   return [...new Set(values)]
+}
+
+function withSubtypes(objectTypeIds: readonly string[], ctx: QueryValidationContext): string[] {
+  return uniqueStrings(objectTypeIds.flatMap((id) => [id, ...ctx.ontology.listSubTypes(id)]))
 }
 
 function admitTransition(
