@@ -1,17 +1,18 @@
-import type { JsonValue } from "@sixb/core"
-import { isObjectActionDefinition } from "@sixb/core"
-import { recordEdits } from "@sixb/core/internal/action-edits"
-import type { ActionEditCommitResult, ActionReadRecorder } from "@sixb/core/internal/actions"
-import { commitActionEdits } from "@sixb/core/internal/actions"
-import type { ActionRunRecord } from "@sixb/core/storage"
-import { translateActionPhaseError } from "../normalize"
+import { recordEdits } from "../../edits/recorder"
+import type { JsonValue } from "../../json"
+import type { ActionRunRecord } from "../../storage"
+import type { ActionEditCommitResult } from "../commit-edits"
+import { commitActionEdits } from "../commit-edits"
+import type { ActionReadRecorder } from "../read-facade"
+import { isObjectActionDefinition } from "../validation"
 import { type BasePhaseContext, requireObjectSubject, toActionReadFacade } from "./context"
+import { translateActionPhaseError } from "./normalize"
 import type {
   LoadedObjectTarget,
   PhaseExecutionBase,
   RuntimePhaseHandler,
   UpdateActiveRun,
-} from "./types"
+} from "./phase-types"
 
 /**
  * Records the run's edits and commits them through the ontology Materializer.

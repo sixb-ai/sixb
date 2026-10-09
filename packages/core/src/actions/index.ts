@@ -23,6 +23,9 @@ export type {
   WaitForActionRunInput,
 } from "./request"
 export { requestAction, requestActionAndWait, waitForActionRun } from "./request"
+export type { ActionRunHost } from "./run/execute"
+export { executeActionRun } from "./run/execute"
+export type { ActionRunResult } from "./run/types"
 export type {
   ActionBinding,
   ActionBlobContext,

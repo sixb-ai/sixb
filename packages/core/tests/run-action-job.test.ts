@@ -15,15 +15,15 @@ import {
   prop,
   type SixbErrorContext,
   SixbHost,
-} from "@sixb/core"
-import { findActionEditCommit } from "@sixb/core/internal/actions"
-import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
-import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
-import type { ActionRunParams, ActionRunRecord } from "@sixb/core/storage"
-import { createTestSixb, queueTestActionRun } from "@sixb/core/testing"
-import { runActionJob } from "../src/run-action-job"
-import type { ActionWorkerContext, RunActionJobInput } from "../src/types"
-import type { ActionWorkerHost } from "../src/worker"
+} from "../src"
+import { findActionEditCommit } from "../src/actions"
+import type { ActionRunHost } from "../src/actions/run/execute"
+import { runActionJob } from "../src/actions/run/run-action-job"
+import type { ActionRunContext, RunActionJobInput } from "../src/actions/run/types"
+import { attachSixbErrorReporter } from "../src/error-reporting/internal"
+import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
+import type { ActionRunParams, ActionRunRecord } from "../src/storage"
+import { createTestSixb, queueTestActionRun } from "../src/testing"
 
 const Device = defineObjectType({
   id: "Device",
@@ -54,7 +54,7 @@ interface DeviceObjectSet {
   get(id: string): Promise<{ properties: Record<string, unknown> } | null>
 }
 
-function deviceObjects(sixb: ActionWorkerContext["sixb"]): DeviceObjectSet {
+function deviceObjects(sixb: ActionRunContext["sixb"]): DeviceObjectSet {
   return sixb.objects(Device)
 }
 
@@ -75,10 +75,7 @@ function createSixb(
   return { host, sixb: createTestSixb(host) }
 }
 
-async function createContext(
-  host: ActionWorkerHost,
-  run: ActionRunRecord
-): Promise<ActionWorkerContext> {
+async function createContext(host: ActionRunHost, run: ActionRunRecord): Promise<ActionRunContext> {
   const durableExecution = await host.storage.executions.getById({
     projectId: host.id,
     id: run.executionId,
@@ -114,7 +111,7 @@ async function createContext(
 }
 
 async function queueActionRun(
-  host: ActionWorkerHost,
+  host: ActionRunHost,
   input: {
     readonly id: string
     readonly actionId: string
@@ -133,7 +130,7 @@ async function queueActionRun(
 }
 
 async function runStoredActionJob(
-  input: Omit<RunActionJobInput, "run" | "runtime"> & { readonly host: ActionWorkerHost }
+  input: Omit<RunActionJobInput, "run" | "runtime"> & { readonly host: ActionRunHost }
 ): ReturnType<typeof runActionJob> {
   const run = await input.host.storage.actionRuns?.getById({
     projectId: input.host.id,
@@ -202,7 +199,7 @@ describe("runActionJob", () => {
     ).rejects.toMatchObject({
       code: "internal.unexpected",
       message:
-        "[SixbActionWorker] Action job 'act_other' does not match durable run 'act_stored' in project 'action-worker-tests'.",
+        "[Sixb] Action job 'act_other' does not match durable run 'act_stored' in project 'action-worker-tests'.",
       retryable: false,
       details: {
         actionId: "count",

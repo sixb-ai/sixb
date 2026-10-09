@@ -1,22 +1,14 @@
-import type {
-  ActionSubject,
-  ActionsRuntime,
-  BlobsRuntime,
-  ConnectorRuntime,
-  DomainEventLog,
-  ModelsRuntime,
-  ObjectsRuntime,
-  SixbDefinitions,
-  Storage,
-} from "@sixb/core"
-import type { LoggingService } from "@sixb/core/internal/logging"
-import type { OntologyMutationRuntime } from "@sixb/core/internal/runtime"
-import type {
-  ActionRunFailure,
-  ActionRunRecord,
-  ActionRunStorage,
-  ObjectRow,
-} from "@sixb/core/storage"
+import type { BlobsRuntime } from "../../blob-storage/execution"
+import type { ConnectorRuntime } from "../../connectors/execution"
+import type { DomainEventLog } from "../../events"
+import type { LoggingService } from "../../logging/service"
+import type { ModelsRuntime } from "../../models/generation-types"
+import type { ObjectsRuntime } from "../../objects/execution"
+import type { SixbDefinitions } from "../../runtime/definitions"
+import type { OntologyMutationRuntime } from "../../runtime/ontology-mutations"
+import type { ActionRunFailure, ActionRunRecord, ActionRunStorage, Storage } from "../../storage"
+import type { ActionsRuntime } from "../execution"
+import type { ActionSubject } from "../types"
 
 /** Execution-bound primitives exposed to Action phase handlers. */
 export interface ActionExecutionFacade {
@@ -27,7 +19,7 @@ export interface ActionExecutionFacade {
   readonly blobs: BlobsRuntime
 }
 
-export interface ActionWorkerContext {
+export interface ActionRunContext {
   readonly id: string
   readonly errorReporterHost: object
   readonly events: DomainEventLog
@@ -52,7 +44,7 @@ interface BaseActionRunResult {
 }
 
 export interface RunActionJobInput {
-  readonly runtime: ActionWorkerContext
+  readonly runtime: ActionRunContext
   readonly job: ActionJob
   /** Durable run loaded before the execution scope is restored. */
   readonly run: ActionRunRecord
@@ -77,8 +69,3 @@ export type ActionRunResult =
       readonly status: ActionRunRecord["status"]
       readonly skipped: true
     })
-
-export type ActionTargetRow = Pick<
-  ObjectRow,
-  "primaryId" | "objectTypeId" | "properties" | "createdAt" | "updatedAt"
->
