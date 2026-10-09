@@ -21,7 +21,7 @@ import {
   type RoleDefinition,
   SecurityRegistry,
 } from "../security"
-import { validatePropertyMarkingsAtStartup } from "../security/markings"
+import { validateMarkingsAtStartup } from "../security/markings"
 import { type ShareDefinition, validateSharesAtStartup } from "../shares"
 import type { SyncDefinition } from "../syncs"
 import {
@@ -175,10 +175,6 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     getSubTypes: (objectTypeId) => ontology.listSubTypes(objectTypeId),
   })
   validateWorkflowAgentStepGroupReferences(workflows, security)
-  validatePropertyMarkingsAtStartup({
-    ontology,
-    markingIds: new Set(security.listMarkings().map((marking) => marking.id)),
-  })
 
   const projectionRegistry = new ProjectionRegistry({
     projections: options.projections ?? [],
@@ -188,6 +184,13 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   validateMergeSyncProjectionSafety({
     syncs,
     telemetryProjections: projectionRegistry.listTelemetry(),
+  })
+  validateMarkingsAtStartup({
+    markingIds: new Set(security.listMarkings().map((marking) => marking.id)),
+    ontology,
+    datasetsById,
+    pipelines,
+    projections: projectionRegistry,
   })
 
   return Object.freeze({

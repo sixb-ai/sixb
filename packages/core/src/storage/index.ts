@@ -21,6 +21,7 @@ export type {
 } from "../materialization/model"
 export type { ModelProviderIds } from "../models/events"
 export type { ObjectRef } from "../ontology"
+export type { RedactionReason, Redactions } from "../security/types"
 export type {
   ShareAccessPlan,
   ShareScopedActionGrant,
@@ -438,8 +439,6 @@ export type {
   ObjectReadRoot,
   ObjectReadScopeFactory,
   ObjectReadStorage,
-  ObjectRedactionReason,
-  ObjectRedactions,
   ObjectRow,
   ObjectRowLinks,
   ObjectStorage,

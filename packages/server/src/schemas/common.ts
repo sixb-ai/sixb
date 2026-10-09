@@ -13,6 +13,9 @@ export function codedErrorResponseSchema<
   })
 }
 
+/** Values omitted because the caller lacks a clearance for their markings. */
+export const RedactionsSchema = z.record(z.object({ reason: z.literal("missing_clearance") }))
+
 export const SuccessResponseSchema = z.object({ success: z.boolean() })
 
 /** The canonical `Principal` shape from `@sixb/core`. */

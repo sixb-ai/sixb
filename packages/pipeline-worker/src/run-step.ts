@@ -1,4 +1,5 @@
 import type { DatasetDefinition, PipelineDefinition, PipelineStepDefinition } from "@sixb/core"
+import { lakeDatasetDefinition } from "@sixb/core/internal/datasets"
 import { captureSixbFailure } from "@sixb/core/internal/errors"
 import type { DatasetVersion } from "@sixb/core/lake-storage"
 import { PIPELINE_RUN_FAILURE_CODES, type PipelineStepRunRecord } from "@sixb/core/storage"
@@ -49,14 +50,16 @@ export async function runStep(input: {
   let outputDataset: DatasetDefinition
   let expectedLatestVersionId: string | null
   try {
-    outputDataset = requireRegisteredDataset({
-      dataset: runtime.datasets.getById(step.output.id),
-      pipelineId: pipeline.id,
-      pipelineRunId: job.id,
-      stepId: step.id,
-      role: "output",
-      datasetId: step.output.id,
-    })
+    outputDataset = lakeDatasetDefinition(
+      requireRegisteredDataset({
+        dataset: runtime.datasets.getById(step.output.id),
+        pipelineId: pipeline.id,
+        pipelineRunId: job.id,
+        stepId: step.id,
+        role: "output",
+        datasetId: step.output.id,
+      })
+    )
 
     await runtime.lakeStorage.createDataset(outputDataset)
     // Capture the output guard before any input is pinned. A later capture could legitimize

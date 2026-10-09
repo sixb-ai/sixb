@@ -789,7 +789,7 @@ describe("SixbServer HTTP contract", () => {
       )
       expect(invalidRowsResponse.status).toBe(400)
       expect((await invalidRowsResponse.json()) as { error: string }).toEqual({
-        error: `Dataset 'raw.github.events' does not have column 'missing' at version '${versionId}'`,
+        error: `[Sixb] Dataset 'raw.github.events' does not have column 'missing' at version '${versionId}'.`,
       })
 
       const invalidOffsetResponse = await fetch(

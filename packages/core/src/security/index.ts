@@ -37,6 +37,8 @@ export type {
   MembershipPolicyDefinition,
   ObserveGrant,
   ObserveGrantTarget,
+  RedactionReason,
+  Redactions,
   RegisteredSecurityDefinitions,
   RoleDefinition,
   RunGrant,

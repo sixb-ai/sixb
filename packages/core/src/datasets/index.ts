@@ -2,7 +2,13 @@ export { col, defineDataset } from "./builders"
 export type { MergeChange } from "./changes"
 export { change } from "./changes"
 export { DatasetValidationError } from "./errors"
-export type { DatasetIngestInput, DatasetIngestResult, DatasetsRuntime } from "./execution"
+export type {
+  DatasetIngestInput,
+  DatasetIngestResult,
+  DatasetReadRowsInput,
+  DatasetRows,
+  DatasetsRuntime,
+} from "./execution"
 export type {
   DatasetColumnDefinition,
   DatasetColumnDefinitionOf,

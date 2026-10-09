@@ -1,9 +1,20 @@
 import { describe, expect, test } from "bun:test"
 import type { DatasetDefinition, LakeStorage, SixbHostView } from "@sixb/core"
-import { col, defineDataset, InMemoryLakeStorage } from "@sixb/core"
+import {
+  col,
+  defineDataset,
+  InMemoryBlobStorage,
+  InMemoryBroker,
+  InMemoryLakeStorage,
+  InMemoryQueues,
+  InMemoryStorage,
+  SixbHost,
+} from "@sixb/core"
 import type { DatasetCatalogState } from "@sixb/core/lake-storage"
 import { Elysia } from "elysia"
 import { registerDatasetRoutes } from "../src/routes/datasets"
+import { createSixbApi, SixbServer } from "../src/server"
+import { createTestBrowserPolicy } from "./helpers"
 
 /**
  * A LakeStorage that only answers the bulk catalog read. Any per-dataset call
@@ -166,7 +177,18 @@ describe("dataset rows route", () => {
     const write = await lakeStorage.beginWrite({ dataset: issues, mode: "snapshot" })
     await write.writeRows(issueRows)
     await write.commit()
-    return createTestApp(lakeStorage, [issues])
+    // Rows are read through the request's execution scope, so this needs a real host.
+    const host = new SixbHost({
+      id: "dataset-rows-tests",
+      ontology: [],
+      datasets: [issues],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage,
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+    return createSixbApi(new SixbServer({ host, quiet: true, browser: createTestBrowserPolicy() }))
   }
 
   // Elysia splits a comma-separated query value into an array before validation, so declaring

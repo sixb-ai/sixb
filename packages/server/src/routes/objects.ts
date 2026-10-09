@@ -10,9 +10,9 @@ import {
 import type {
   ExpandedLinkValue,
   ExpandedObjectRow,
-  ObjectRedactions,
   ObjectRow,
   ObjectRowLinks,
+  Redactions,
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { ZodError, z } from "zod"
@@ -63,7 +63,7 @@ function serializeObject(row: {
   primaryId: string
   objectTypeId: string
   properties: Record<string, unknown>
-  redactions?: ObjectRedactions
+  redactions?: Redactions
   createdAt: Date
   updatedAt: Date
 }) {

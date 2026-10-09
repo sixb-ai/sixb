@@ -8,10 +8,10 @@ export interface GroupDefinition<TId extends string = string> {
 }
 
 /**
- * A classification carried by sensitive properties.
+ * A classification carried by sensitive properties and dataset columns.
  *
- * A principal reads a marked property only when one of its roles lists the marking in
- * `clearances`. No grant bypasses a marking.
+ * A principal reads a marked value only when one of its roles lists the marking in `clearances`.
+ * No grant bypasses a marking.
  */
 export interface MarkingDefinition<TId extends string = string> {
   readonly kind: "marking"
@@ -19,6 +19,15 @@ export interface MarkingDefinition<TId extends string = string> {
   readonly label?: string
   readonly description?: string
 }
+
+/** Why a value was omitted from a read. */
+export type RedactionReason = "missing_clearance"
+
+/**
+ * Values omitted from a read, keyed by property id or column name. A redacted value is absent,
+ * never `null`.
+ */
+export type Redactions = Readonly<Record<string, { readonly reason: RedactionReason }>>
 
 /**
  * A group named either by its definition or by its id.

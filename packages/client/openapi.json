@@ -42,7 +42,7 @@
           }
         }
       },
-      "ObjectRedactions": {
+      "Redactions": {
         "type": "object",
         "additionalProperties": {
           "type": "object",
@@ -75,7 +75,7 @@
             "additionalProperties": true
           },
           "redactions": {
-            "$ref": "#/components/schemas/ObjectRedactions"
+            "$ref": "#/components/schemas/Redactions"
           },
           "createdAt": {
             "type": "string"
@@ -15154,6 +15154,20 @@
                       "type": "array",
                       "items": {
                         "type": "string"
+                      }
+                    },
+                    "redactions": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "object",
+                        "properties": {
+                          "reason": {
+                            "type": "string",
+                            "enum": ["missing_clearance"]
+                          }
+                        },
+                        "required": ["reason"],
+                        "additionalProperties": false
                       }
                     },
                     "rows": {

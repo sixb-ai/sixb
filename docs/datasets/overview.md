@@ -83,6 +83,15 @@ Pass `{ nullable: true }` when a column may be missing or `null`. Use the `json`
 col("raw", "json", { nullable: true })
 ```
 
+## Sensitive columns
+
+Pass `markings` to hide a column from roles that are not cleared for it. Derived datasets keep the
+markings of the columns they copy. See [Markings](../auth/markings.md).
+
+```ts
+col("amount", "decimal", { markings: [financial] })
+```
+
 ## Column types
 
 | Type | Accepts |
@@ -131,6 +140,22 @@ export const invoicesSummary = defineDataset("invoices.summary").derive(rawInvoi
 
 Derived datasets do not inherit their parent's primary key. Declare `primaryKey` explicitly when
 the derived rows preserve the same identity contract.
+
+## Read rows
+
+`sixb.datasets.readRows(dataset)` streams the rows of the latest version. Pass `versionId` to read
+an earlier version, and `columns`, `limit`, or `offset` to read less. It returns `null` when the
+version does not exist.
+
+```ts
+const result = await sixb.datasets.readRows(rawInvoicesDataset, { limit: 100 })
+for await (const row of result?.rows ?? []) {
+  console.log(row.id, row.amount)
+}
+```
+
+The caller needs a view grant on the dataset. Columns it is not cleared for are left out of
+`columns` and of every row, and listed in `redactions`. See [Markings](../auth/markings.md).
 
 ## File location
 
