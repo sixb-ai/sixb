@@ -20,6 +20,7 @@ import type {
 } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { type InternalRequestAuthState, registerInternalRequestAuthState } from "../auth/scope"
+import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
 import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./files"
 
 const MAX_AGENT_API_BODY_BYTES = 1_000_000
@@ -100,16 +101,11 @@ async function handleAgentApiGatewayRequest(input: {
     )
   }
 
-  let body: ArrayBuffer | undefined
+  let body: Uint8Array<ArrayBuffer> | undefined
   try {
-    body = await readRequestBody(
-      input.request,
-      isSimpleFileUpload(input.request.method, upstreamPath)
-        ? DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES
-        : MAX_AGENT_API_BODY_BYTES
-    )
+    body = await readGatewayRequestBody(input.request, upstreamPath)
   } catch (error) {
-    if (error instanceof PayloadTooLargeError) {
+    if (error instanceof RequestBodyTooLargeError) {
       return jsonError(413, error.message)
     }
     throw error
@@ -343,33 +339,26 @@ function copyHeader(source: Headers, target: Headers, name: string): void {
   }
 }
 
-async function readRequestBody(
+async function readGatewayRequestBody(
   request: Request,
-  maxBytes: number
-): Promise<ArrayBuffer | undefined> {
+  upstreamPath: string
+): Promise<Uint8Array<ArrayBuffer> | undefined> {
   if (!request.body || request.method === "GET" || request.method === "HEAD") {
     return undefined
   }
 
-  const reader = request.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-
-  while (true) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > maxBytes) {
-      throw new PayloadTooLargeError(
-        maxBytes === MAX_AGENT_API_BODY_BYTES
-          ? "Agent API gateway request body exceeds 1MB."
-          : `Agent API gateway file upload request body exceeds the ${maxBytes} byte limit.`
-      )
-    }
-    chunks.push(value)
+  if (isSimpleFileUpload(request.method, upstreamPath)) {
+    return readRequestBodyWithLimit(
+      request,
+      DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES,
+      `Agent API gateway file upload request body exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES} byte limit.`
+    )
   }
-
-  return concatChunks(chunks, total)
+  return readRequestBodyWithLimit(
+    request,
+    MAX_AGENT_API_BODY_BYTES,
+    "Agent API gateway request body exceeds 1MB."
+  )
 }
 
 function isSimpleFileUpload(method: string, pathname: string): boolean {
@@ -386,19 +375,6 @@ function matchesWorkflowRunStart(pathname: string): boolean {
   )
 }
 
-function concatChunks(chunks: readonly Uint8Array[], total: number): ArrayBuffer {
-  const buffer = new ArrayBuffer(total)
-  const result = new Uint8Array(buffer)
-  let offset = 0
-  for (const chunk of chunks) {
-    result.set(chunk, offset)
-    offset += chunk.byteLength
-  }
-  return buffer
-}
-
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status })
 }
-
-class PayloadTooLargeError extends Error {}

@@ -9394,6 +9394,12 @@ export type UploadFileContentErrors = {
     error: string
   }
   /**
+   * Response for status 413
+   */
+  413: {
+    error: string
+  }
+  /**
    * Response for status 501
    */
   501: {

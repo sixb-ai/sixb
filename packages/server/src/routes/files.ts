@@ -24,7 +24,7 @@ import {
   SignedFileUploadPartSchema,
 } from "../schemas/files"
 import { handleRouteError, unconfiguredStorageResponse } from "../utils/http"
-import { RequestBodyTooLargeError, readRequestBodyWithLimit } from "../utils/request-body"
+import { readRequestBodyWithLimit } from "../utils/request-body"
 // The simple-upload ceiling lives in @sixb/core so the client staged-switch
 // threshold and this server limit stay a single source of truth. The body limit
 // adds headroom for multipart/form-data encoding overhead on the `POST /api/files`
@@ -39,16 +39,14 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
       "/api/files",
       async ({ request, set }) => {
         try {
-          const requestSizeError = requestSizeLimitError(
+          const bytes = await readRequestBodyWithLimit(
             request,
-            DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES
+            DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES,
+            `File upload request exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES} byte limit.`
           )
-          if (requestSizeError) {
-            set.status = 413
-            return { error: requestSizeError }
-          }
-
-          const form = await request.formData()
+          const form = await new Response(bytes, {
+            headers: { "content-type": request.headers.get("content-type") ?? "" },
+          }).formData()
           const file = form.get("file")
           const logicalPath = form.get("logicalPath")
 
@@ -203,7 +201,10 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
             return { error: contentLengthSizeError }
           }
 
-          const uploadBytes = readParsedUploadBytes(context)
+          const uploadBytes = await readRequestBodyWithLimit(
+            request,
+            DEFAULT_SIMPLE_FILE_UPLOAD_BYTES
+          )
           if (uploadBytes.byteLength === 0) {
             set.status = 400
             return { error: "Expected upload content body." }
@@ -237,18 +238,16 @@ export function registerFileRoutes(app: Elysia, host: SixbHostView) {
       },
       {
         params: FileUploadIdParamsSchema,
-        // Replace Elysia's default body parser so the octet-stream is read through
-        // the size-capped streaming reader instead of being fully buffered first.
-        parse: readCappedUploadBody,
-        // The cap is enforced during parsing, which is outside the handler's
-        // try/catch, so map its too-large error to 413 here.
-        error: mapUploadContentError,
+        // The handler reads the content itself, once it knows the caller and the session, so
+        // Elysia must not parse the body first.
+        parse: "none",
         response: {
           200: SuccessResponseSchema,
           400: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,
           410: ErrorResponseSchema,
+          413: ErrorResponseSchema,
           501: ErrorResponseSchema,
         },
         detail: {
@@ -496,39 +495,6 @@ function fileUploadResponse(session: FileUploadSession) {
   }
 }
 
-// Elysia `parse` hook: reads the staged content stream with a hard size ceiling,
-// so an oversized (or chunked, content-length-lying) body is rejected before it
-// is fully buffered. Its result becomes `context.body`.
-function readCappedUploadBody(context: { request: Request }): Promise<Uint8Array> {
-  return readRequestBodyWithLimit(context.request, DEFAULT_SIMPLE_FILE_UPLOAD_BYTES)
-}
-
-function readParsedUploadBytes(context: { body?: unknown }): Uint8Array {
-  return context.body instanceof Uint8Array ? context.body : new Uint8Array(0)
-}
-
-function mapUploadContentError(context: {
-  error: unknown
-  set: { status?: number | string }
-}): { error: string } | undefined {
-  const tooLarge = asRequestBodyTooLarge(context.error)
-  if (tooLarge) {
-    context.set.status = 413
-    return { error: tooLarge.message }
-  }
-  return undefined
-}
-
-// The cap runs in the `parse` phase, so Elysia surfaces it wrapped in a
-// ParseError; the original error is carried on `cause`.
-function asRequestBodyTooLarge(error: unknown): RequestBodyTooLargeError | undefined {
-  if (error instanceof RequestBodyTooLargeError) {
-    return error
-  }
-  const cause = (error as { cause?: unknown } | null | undefined)?.cause
-  return cause instanceof RequestBodyTooLargeError ? cause : undefined
-}
-
 // A non-pending session is terminal; surface which terminal state so the route
 // boundary maps it to 409. Store lookups already raise `not_found`/`expired`.
 function terminalSessionError(status: "completed" | "aborted"): FileUploadSessionError {
@@ -645,20 +611,6 @@ function expectedSizeBytesValueError(
     actualSizeBytes !== expectedSizeBytes
     ? `File upload size mismatch: expected ${expectedSizeBytes} bytes, received ${actualSizeBytes}.`
     : null
-}
-
-function requestSizeLimitError(request: Request, maxSizeBytes: number): string | null {
-  const value = request.headers.get("content-length")
-  if (value === null) {
-    return null
-  }
-
-  const sizeBytes = Number(value)
-  if (!Number.isSafeInteger(sizeBytes) || sizeBytes <= maxSizeBytes) {
-    return null
-  }
-
-  return `File upload request exceeds the ${maxSizeBytes} byte limit.`
 }
 
 function expectedContentLengthError(session: FileUploadSession, request: Request): string | null {

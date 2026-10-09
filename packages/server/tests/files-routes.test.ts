@@ -158,6 +158,19 @@ function oversizedUploadRequest(): Request {
   })
 }
 
+// A stream body carries no content-length, so only a limit applied while reading can stop it.
+function chunkedBody(sizeBytes: number): ReadableStream<Uint8Array> {
+  const chunk = new Uint8Array(1024 * 1024)
+  return new ReadableStream({
+    start(controller) {
+      for (let sent = 0; sent < sizeBytes; sent += chunk.byteLength) {
+        controller.enqueue(chunk.subarray(0, Math.min(chunk.byteLength, sizeBytes - sent)))
+      }
+      controller.close()
+    },
+  })
+}
+
 function jsonRequest(path: string, body?: unknown): Request {
   return new Request(`http://localhost${path}`, {
     method: "POST",
@@ -231,6 +244,24 @@ describe("file routes", () => {
     const { app } = createFilesApi()
 
     const response = await app.fetch(oversizedUploadRequest())
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      error: `File upload request exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES} byte limit.`,
+    })
+  })
+
+  test("rejects a chunked upload request over the limit while reading it", async () => {
+    const { app } = createFilesApi()
+
+    const response = await app.fetch(
+      new Request("http://localhost/api/files", {
+        method: "POST",
+        headers: { "content-type": "multipart/form-data; boundary=sixb-test" },
+        body: chunkedBody(DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES + 1),
+        duplex: "half",
+      } as RequestInit & { duplex: "half" })
+    )
 
     expect(response.status).toBe(413)
     expect(await response.json()).toEqual({
@@ -541,5 +572,25 @@ describe("file routes", () => {
       })
     )
     expect(response.status).toBe(413)
+  })
+
+  test("rejects chunked staged content over the upload size limit", async () => {
+    const { app } = createFilesApi()
+    const createResponse = await app.fetch(jsonRequest("/api/files/uploads", {}))
+    const upload = (await createResponse.json()) as { uploadId: string }
+
+    const response = await app.fetch(
+      new Request(`http://localhost/api/files/uploads/${upload.uploadId}/content`, {
+        method: "PUT",
+        headers: { "content-type": "application/octet-stream" },
+        body: chunkedBody(DEFAULT_SIMPLE_FILE_UPLOAD_BYTES + 1),
+        duplex: "half",
+      } as RequestInit & { duplex: "half" })
+    )
+
+    expect(response.status).toBe(413)
+    expect(await response.json()).toEqual({
+      error: `Request body exceeds the ${DEFAULT_SIMPLE_FILE_UPLOAD_BYTES} byte limit.`,
+    })
   })
 })
