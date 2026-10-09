@@ -18,6 +18,7 @@ import {
   defineSync,
   defineWorkflow,
   defineWorkflowStep,
+  every,
   link,
   type PipelineDefinition,
   prop,
@@ -45,6 +46,7 @@ const Contract = defineObjectType({
     // A real telemetry property: an append with an empty `properties` produces no points at all, so
     // the append tests below would pass without asserting anything.
     prop("temperature", "double", { mode: "telemetry", semanticType: "Temperature" }),
+    prop("stage", "string", { query: { searchable: true, filterable: true, facet: true } }),
   ],
 })
 
@@ -148,6 +150,7 @@ const blindWriters = defineGroup("blind-writers")
 const ingest = defineGroup("ingest")
 const linkers = defineGroup("linkers")
 const blindLinkers = defineGroup("blind-linkers")
+const unsignedReaders = defineGroup("unsigned-readers")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
@@ -209,6 +212,12 @@ const blindInvoiceLinker = defineRole("invoice.blind-linker", {
   grants: [can.view(Invoice), can.edit(Invoice)],
 })
 
+// Everything except one subtype: the shape of a role kept away from confidential records.
+const unsignedContractReader = defineRole("contract.unsigned-reader", {
+  grantedTo: [unsignedReaders],
+  grants: [can.view(every.object().except([SignedContract]))],
+})
+
 const principal = { type: "user", id: "adam" } as const
 
 // No explicit instance annotations anywhere in this file: naming
@@ -235,6 +244,7 @@ function createRuntime() {
       ingest,
       linkers,
       blindLinkers,
+      unsignedReaders,
     ],
     roles: [
       contractOperator,
@@ -247,6 +257,7 @@ function createRuntime() {
       contractIngestor,
       invoiceLinker,
       blindInvoiceLinker,
+      unsignedContractReader,
     ],
     ...createTestRuntimeDeps(),
   })
@@ -369,6 +380,83 @@ describe("bound Sixb object reads", () => {
     expect(
       await principalSixb.objects.listLinks({ objectTypeId: "invoice", objectId: "i1" })
     ).toEqual([])
+  })
+})
+
+describe("bound Sixb link traversal", () => {
+  // Invoice.contract declares Contract; i1 links to a Contract and to a SignedContract subtype.
+  async function createLinkedRuntime() {
+    const host = createRuntime()
+    const sixb = createTestSixb(host)
+    await sixb.objects(Contract).upsert({ properties: { id: "c1", stage: "draft" } })
+    await sixb.objects(SignedContract).upsert({ properties: { id: "s1", stage: "signed" } })
+    await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
+    for (const [targetTypeId, targetId] of [
+      ["contract", "c1"],
+      ["signed-contract", "s1"],
+    ] as const) {
+      await sixb.objects(Invoice).upsertLink({
+        sourceId: "i1",
+        linkId: "contract",
+        targetTypeId,
+        targetId,
+      })
+    }
+    return host
+  }
+
+  test("following a link is denied like a direct read when it can reach an excluded subtype", async () => {
+    // Revert check: drop the touchLinkTargets calls in validate.ts and every link read below
+    // reaches s1.
+    const host = await createLinkedRuntime()
+    const scoped = bindPrincipal(host, contextFor(host, ["unsigned-readers"]))
+
+    // Direct reads of the subtype, or of its supertype including subtypes, are denied.
+    await expect(scoped.objects(SignedContract).get("s1")).rejects.toThrow(AuthorizationError)
+    await expect(scoped.objects.list({ objectTypeIds: ["contract"] })).rejects.toThrow(
+      AuthorizationError
+    )
+
+    const contracts = scoped.objects(Invoice).query().traverse(Invoice.l.contract)
+    await expect(contracts.list()).rejects.toThrow(AuthorizationError)
+    await expect(contracts.count()).rejects.toThrow(AuthorizationError)
+    await expect(contracts.exists()).rejects.toThrow(AuthorizationError)
+    await expect(contracts.facets([{ property: Contract.p.stage, limit: 10 }])).rejects.toThrow(
+      AuthorizationError
+    )
+    await expect(
+      scoped.objects(Invoice).query().expand(Invoice.l.contract).limit(10).list()
+    ).rejects.toThrow(AuthorizationError)
+
+    // The supertype alone stays readable, and so do links that cannot reach the subtype.
+    expect((await scoped.objects(Contract).query().list()).objects).toMatchObject([
+      { primaryId: "c1" },
+    ])
+    expect(
+      await scoped
+        .objects(Contract)
+        .query()
+        .traverse(Invoice.l.contract, { direction: "incoming" })
+        .count()
+    ).toBe(1)
+  })
+
+  test("viewable subtypes come through every link read", async () => {
+    const host = await createLinkedRuntime()
+    const scoped = bindPrincipal(host, contextFor(host, ["linkers"]))
+    const contracts = scoped.objects(Invoice).query().traverse(Invoice.l.contract)
+
+    expect((await contracts.list()).objects.map((row) => row.primaryId).sort()).toEqual([
+      "c1",
+      "s1",
+    ])
+    expect(await contracts.count()).toBe(2)
+    const [stages] = (await contracts.facets([{ property: Contract.p.stage, limit: 10 }])).facets
+    expect(stages?.buckets.map((bucket) => bucket.value).sort()).toEqual(["draft", "signed"])
+    const [invoice] = (
+      await scoped.objects(Invoice).query().expand(Invoice.l.contract).limit(10).list()
+    ).objects
+    expect(invoice?.links?.contract).toHaveLength(2)
   })
 })
 

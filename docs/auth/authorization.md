@@ -71,7 +71,7 @@ const grants = [
 ]
 ```
 
-Use `.except([Definition])` to exclude definitions from a selector.
+Use `.except([Definition])` to exclude definitions from a selector. A query is denied when it can return a type the caller cannot view, so excluding a subtype also denies queries that follow or expand a relationship pointing to its parent type.
 
 Object writes require both `can.view(Type)` and `can.edit(Type)`. Relationship writes need edit access to the source and view access to the target. `can.view(Type)` includes its subtypes; edit and telemetry-append grants cover only the types explicitly selected.
 
