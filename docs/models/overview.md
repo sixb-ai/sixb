@@ -13,6 +13,10 @@ Think of the sandbox as the agent's computer. Sixb equips it with the [Sixb CLI]
 which lets the agent inspect your ontology, query live data, request actions, and start workflows.
 Your domain definitions give the agent a way to discover what exists and what it can do.
 
+Before working with a type, the agent reads a reference file that Sixb writes from your ontology
+and [your notes](../ontology/overview.md#explain-it-to-the-agent), limited to what the person it
+works for can see.
+
 The same agent can work across your application as its domain grows. Add
 [tools and skills](./tools-and-authorization.md) when it needs additional capabilities or
 instructions for a particular task.

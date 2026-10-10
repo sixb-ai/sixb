@@ -4,6 +4,7 @@ import type { ConnectorDefinition } from "../connectors"
 import type { DatasetDefinition } from "../datasets"
 import type { ModelCatalog } from "../models"
 import type { OntologyDefinitionCatalog } from "../ontology"
+import type { OntologyDocsCatalog } from "../ontology/docs"
 import type { PipelineDefinition } from "../pipelines"
 import type { ProjectionDefinitionCatalog } from "../projections"
 import type { RuleDefinition } from "../rules"
@@ -28,6 +29,8 @@ export interface SixbDefinitions {
   readonly skills: AgentSkillCatalog
   /** The conversational Agent's instructions, from `SIXB.md`. Absent without that file. */
   readonly projectInstructions?: string
+  /** Where each object type's Agent reference doc lives, with the docs and scripts of `ontology/`. */
+  readonly ontologyDocs: OntologyDocsCatalog
   readonly connectors: DefinitionCatalog<ConnectorDefinition>
   readonly datasets: DefinitionCatalog<DatasetDefinition>
   /** Absent until a project configures `models` in createSixb(). */

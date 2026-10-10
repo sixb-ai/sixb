@@ -4,6 +4,7 @@ import type {
   BlobStorage,
   Broker,
   DomainEventLog,
+  OntologyDocsCatalog,
   Queues,
   SandboxDefinition,
   SandboxFactory,
@@ -13,7 +14,7 @@ import type {
   ValueType,
 } from "@sixb/core"
 import type { AgentExecutionHost } from "@sixb/core/internal/agent-execution"
-import type { RunModelLoopInput } from "@sixb/core/internal/agents"
+import type { PropertyClearance, RunModelLoopInput } from "@sixb/core/internal/agents"
 import type { LoggingService } from "@sixb/core/internal/logging"
 import type { RecoverAiModelCall } from "@sixb/core/internal/model-execution"
 import type { ModelTool } from "@sixb/core/models"
@@ -51,7 +52,14 @@ export interface AgentWorkerHost extends AgentExecutionHost {
   readonly queues: Queues
   readonly definitions: Pick<
     SixbDefinitions,
-    "workflows" | "ontology" | "security" | "models" | "tools" | "skills" | "projectInstructions"
+    | "workflows"
+    | "ontology"
+    | "security"
+    | "models"
+    | "tools"
+    | "skills"
+    | "projectInstructions"
+    | "ontologyDocs"
   >
   readonly sandboxes?: SandboxFactory
   readonly logging?: LoggingService
@@ -68,6 +76,7 @@ export interface AgentWorkerContext {
   readonly sandboxes: SandboxFactory
   readonly logging?: LoggingService
   readonly valueTypesById: ReadonlyMap<string, ValueType>
+  readonly ontologyDocs: OntologyDocsCatalog
   readonly apiBaseUrl: string
   readonly streamSink: StreamSink
   /** Durable fallback used only when the direct model-call ledger append remains unavailable. */
@@ -79,6 +88,8 @@ export interface AgentWorkerContext {
 /** Provider ports activated only after an Agent execution scope is bound. */
 export interface AgentExecutionContext extends AgentWorkerContext {
   readonly sixb: Sixb
+  /** Marked properties the execution cannot read; absent when it reads every property. */
+  readonly propertyClearance?: PropertyClearance
   readonly authorPrincipal?: AuthorizablePrincipal
   readonly blobStorage: BlobStorage
   readonly connector: AgentToolRunContext["connector"]

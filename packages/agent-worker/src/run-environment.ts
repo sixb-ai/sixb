@@ -1,5 +1,6 @@
-import type { AgentToolRunInfo, Sandbox, SandboxDefinition } from "@sixb/core"
+import type { AgentToolRunInfo, OntologyDocsCatalog, Sandbox, SandboxDefinition } from "@sixb/core"
 import { resolveLoggingService } from "@sixb/core/internal/logging"
+import { type RenderedOntologyDocs, renderOntologyDocs } from "@sixb/core/internal/ontology"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import type { WorkflowIOSnapshot } from "@sixb/core/internal/workflows"
 import type { ModelTool } from "@sixb/core/models"
@@ -112,12 +113,14 @@ export async function createConversationAgentEnvironment(
     : undefined
   let environment: AgentExecutionEnvironment | undefined
   try {
+    const ontologyDocs = renderRunOntologyDocs(context)
     // Resolve application access before any compaction model call. Once acquired, this
     // environment owns preservation even if history, attachments or runtime preparation fail.
     const prepared = preflight
       ? await prepareAgentConversationContext({
           context,
           plan,
+          ontologyIndex: ontologyDocs.index,
           run,
           budget: preflight.budget,
           runtime: {
@@ -159,6 +162,7 @@ export async function createConversationAgentEnvironment(
       toolRun: { kind: "conversation", id: run.id, threadId: run.threadId },
       apiBaseUrl,
       attachmentContext,
+      ontologyDocs,
       frameworkTools: input.frameworkTools,
       onDetachedTeardown: input.onDetachedTeardown,
     })
@@ -249,6 +253,7 @@ export async function createWorkflowAgentNodeEnvironment(
       executionToken: execution.token,
     }),
     attachmentContext,
+    ontologyDocs: renderRunOntologyDocs(context),
     errorDetails: input.errorDetails,
     onDetachedTeardown: input.onDetachedTeardown,
   })
@@ -265,6 +270,8 @@ interface AgentEnvironmentSetup extends CreateAgentEnvironmentInput {
   readonly threadId?: string
   readonly apiBaseUrl: string
   readonly attachmentContext: PreparedAgentAttachmentContext
+  /** Installed under `$SIXB_ONTOLOGY_DIR`; only a conversation's prompt lists them. */
+  readonly ontologyDocs?: RenderedOntologyDocs
   readonly errorDetails?: AgentErrorDetails
   readonly frameworkTools?: readonly ModelTool[]
 }
@@ -346,6 +353,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
     apiOrigin: new URL(apiBaseUrl).origin,
     attachmentContext,
     skills: plan.skills,
+    ontologyFiles: input.ontologyDocs?.files ?? [],
   })
   // Creation failure is surfaced where it is awaited (turn / sandbox tool / dispose); attach a no-op
   // catch so a rejection observed by none of them is not reported as unhandled.
@@ -377,6 +385,10 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
         mode,
         instructions: plan.instructions,
         skills: plan.skills,
+        // Workflow prompts are kept lean: their steps get the files without the index.
+        ...(mode === "conversation" && input.ontologyDocs
+          ? { ontologyIndex: input.ontologyDocs.index }
+          : {}),
         sandboxResetAt: input.persistentSandbox?.resetAt,
         workspace: input.persistentSandbox?.promptContext,
       }),
@@ -395,6 +407,46 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       ])
     },
   }
+}
+
+/** Requesters with the same view share rendered docs; a project has few distinct views. */
+const renderedOntologyDocs = new WeakMap<OntologyDocsCatalog, Map<string, RenderedOntologyDocs>>()
+const MAX_RENDERED_ONTOLOGY_VIEWS = 16
+
+/** Reference docs for the object types this run's requester can see, from its own view. */
+function renderRunOntologyDocs(context: AgentExecutionContext): RenderedOntologyDocs {
+  const { sixb, propertyClearance, ontologyDocs: catalog } = context
+  const objectTypes = sixb.objects.listTypes()
+  const actionsByType = new Map(
+    objectTypes.map((objectType) => [objectType.id, sixb.actions.listForType(objectType)])
+  )
+  // Definitions are immutable, so the visible types, hidden properties, and requestable actions
+  // determine the output.
+  const key = JSON.stringify(
+    objectTypes.map((objectType) => [
+      objectType.id,
+      [...(propertyClearance?.hiddenPropertyIds(objectType.id) ?? [])],
+      actionsByType.get(objectType.id)?.map((action) => action.id),
+    ])
+  )
+  const views = renderedOntologyDocs.get(catalog) ?? new Map<string, RenderedOntologyDocs>()
+  renderedOntologyDocs.set(catalog, views)
+  const cached = views.get(key)
+  if (cached) return cached
+
+  const rendered = renderOntologyDocs({
+    catalog,
+    objectTypes,
+    valueTypesById: sixb.objects.getValueTypesById(),
+    actionsFor: (objectType) => actionsByType.get(objectType.id) ?? [],
+    ...(propertyClearance === undefined
+      ? {}
+      : { hiddenPropertyIds: propertyClearance.hiddenPropertyIds }),
+  })
+  views.set(key, rendered)
+  const oldest = views.keys().next().value
+  if (views.size > MAX_RENDERED_ONTOLOGY_VIEWS && oldest !== undefined) views.delete(oldest)
+  return rendered
 }
 
 function emptyAttachmentContext(projectId: string): PreparedAgentAttachmentContext {
@@ -416,10 +468,11 @@ interface ProvisionSandboxInput {
   readonly apiOrigin: string
   readonly attachmentContext: PreparedAgentAttachmentContext
   readonly skills: ResolvedAgentExecutionPlan["skills"]
+  readonly ontologyFiles: RenderedOntologyDocs["files"]
 }
 
 async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSandboxHandle> {
-  const { context, actorId, run, apiBaseUrl, apiOrigin, skills } = input
+  const { context, actorId, run, apiBaseUrl, apiOrigin, skills, ontologyFiles } = input
   let sandbox: Sandbox | null = null
   try {
     sandbox =
@@ -437,6 +490,7 @@ async function provisionSandbox(input: ProvisionSandboxInput): Promise<AgentSand
       runId: run.id,
       attachments: input.attachmentContext,
       skills,
+      ontologyFiles,
     })
     await assertAgentRuntimeProfile({
       sandbox,

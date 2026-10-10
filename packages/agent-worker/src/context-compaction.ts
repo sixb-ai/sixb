@@ -9,6 +9,7 @@ import {
   serializeAgentMessagesForSummary,
   shouldCompactAgentContext,
 } from "@sixb/core/internal/agents"
+import type { OntologyDocsIndexEntry } from "@sixb/core/internal/ontology"
 import type { ModelTool } from "@sixb/core/models"
 import type {
   AgentContextCheckpointReason,
@@ -53,6 +54,8 @@ export interface PreparedAgentConversationContext {
 export async function prepareAgentConversationContext(input: {
   readonly context: AgentExecutionContext
   readonly plan: ResolvedAgentExecutionPlan
+  /** The ontology files listed in the conversation's prompt. */
+  readonly ontologyIndex?: readonly OntologyDocsIndexEntry[]
   readonly budget: AgentContextBudget
   readonly run: ConversationAgentRunRecord
   readonly runtime: AgentTurnRuntime
@@ -71,6 +74,7 @@ export async function prepareAgentConversationContext(input: {
       mode: "conversation",
       instructions: plan.instructions,
       skills: plan.skills,
+      ...(input.ontologyIndex === undefined ? {} : { ontologyIndex: input.ontologyIndex }),
     }),
     tools: contextEstimateTools([
       ...agentModelToolSpecs({

@@ -40,7 +40,7 @@ limitation blocks, and a minimal reproducible example when possible.
 `createSixb()` in `sixb.config.ts` auto-discovers exported definitions from these folders:
 
 ```
-ontology/      object types + value types
+ontology/      object types + value types (+ .md notes and scripts/ for the chat agent)
 actions/       typed commands against objects
 datasets/      table-shaped data
 syncs/         pull external data into datasets

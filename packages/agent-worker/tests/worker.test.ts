@@ -28,6 +28,8 @@ import {
   InMemoryQueues,
   InMemoryStorage,
   type ModelCatalogInput,
+  type ObjectTypeWithPropertyTokens,
+  type OntologyDocsInput,
   prop,
   type RunCommandOptions,
   type Sandbox,
@@ -54,6 +56,7 @@ import { emptyGrantIndex } from "@sixb/core/internal/authorization"
 import { attachSixbErrorReporter } from "@sixb/core/internal/error-reporting"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { enqueueAiModelCallRecovery } from "@sixb/core/internal/model-execution"
+import { renderOntologyDocs } from "@sixb/core/internal/ontology"
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import { workflowAgentStepActorId } from "@sixb/core/internal/workflows"
@@ -99,6 +102,7 @@ import * as agentEnvironment from "../src/run-environment"
 import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
 import { SubagentCoordinator } from "../src/subagent-tools"
+import { createAgentTurnRuntime } from "../src/turn-runtime"
 import type {
   AgentExecutionContext,
   AgentWorkerContext,
@@ -1006,6 +1010,13 @@ function bashImageThenViewModel(captureViewed: (prompt: unknown) => void): Worke
   })
 }
 
+const MeetingRoom = defineObjectType({
+  id: "MeetingRoom",
+  name: "Meeting room",
+  description: "A bookable meeting room. Synced from the facilities system.",
+  properties: [prop("id", "string", { required: true, primary: true })],
+})
+
 function testSkill(name: string): AgentSkillDefinition {
   return {
     name,
@@ -1312,6 +1323,8 @@ function buildSixb(
     readonly sandboxConfig?: SandboxConfig
     readonly skills?: readonly AgentSkillDefinition[]
     readonly projectInstructions?: string
+    readonly ontology?: readonly ObjectTypeWithPropertyTokens[]
+    readonly ontologyDocs?: OntologyDocsInput
     readonly agentTools?: readonly AgentToolDefinition[]
     readonly projectTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
@@ -1320,7 +1333,7 @@ function buildSixb(
 ): TestSixb {
   return new SixbHost({
     id: PROJECT_ID,
-    ontology: [],
+    ontology: options.ontology ?? [],
     tools: options.projectTools ?? options.agentTools,
     ...(options.connectors === undefined ? {} : { connectors: options.connectors }),
     groups: [AGENT_RUNTIME_GROUP],
@@ -1350,6 +1363,7 @@ function buildSixb(
     ...(options.projectInstructions === undefined
       ? {}
       : { projectInstructions: options.projectInstructions }),
+    ...(options.ontologyDocs === undefined ? {} : { ontologyDocs: options.ontologyDocs }),
   })
 }
 
@@ -1647,6 +1661,7 @@ async function buildAgentWorkerContext(
     sandboxes: sixb.sandboxes,
     logging: sixb.logging,
     valueTypesById: sixb.definitions.ontology.getValueTypesById(),
+    ontologyDocs: sixb.definitions.ontologyDocs,
     // Mirror the production boundary (worker.ts buildAgentContext): normalize the server base once.
     apiBaseUrl: normalizeApiBaseUrl(input.apiBaseUrl ?? TEST_AGENT_API_BASE_URL),
     streamSink: NOOP_STREAM_SINK,
@@ -3827,11 +3842,19 @@ describe("AgentWorker", () => {
     const sandboxes = new RecordingSandboxFactory()
     const sixb = new SixbHost({
       id: PROJECT_ID,
-      ontology: [],
+      ontology: [MeetingRoom],
       workflows: [workflow],
       tools: [lookupProject],
       skills: [testSkill("project-matching"), testSkill("customer-replies")],
       projectInstructions: "Always answer in French.",
+      ontologyDocs: {
+        modules: [{ path: "meeting-room.ts", objectTypeIds: ["MeetingRoom"] }],
+        docs: [
+          { path: "meeting-room.md", contents: "Rooms are booked by the hour." },
+          { path: "conventions.md", contents: "# Naming conventions" },
+        ],
+        scripts: [],
+      },
       groups: [AGENT_RUNTIME_GROUP],
       broker: new InMemoryBroker(),
       storage: new InMemoryStorage(),
@@ -4037,6 +4060,15 @@ describe("AgentWorker", () => {
       expect(installedSkills?.map((path) => path.split("/.sixb/agent/skills/")[1])).toEqual([
         "project-matching/SKILL.md",
       ])
+      // The step's service account cannot view MeetingRoom: neither its doc nor its notes are
+      // mounted. Its prompt lists no ontology files; the files are there for its instructions.
+      const installedOntologyDocs = sandboxes.sandboxes[0]?.writtenFiles
+        .map((file) => file.path)
+        .filter((path) => path.includes("/.sixb/agent/ontology/"))
+      expect(installedOntologyDocs?.map((path) => path.split("/.sixb/agent/ontology/")[1])).toEqual(
+        ["conventions.md"]
+      )
+      expect(capturedSystem).not.toContain("Ontology reference files")
       expect(await runs.nodes.getById({ projectId: PROJECT_ID, id: nodeRunId })).toMatchObject({
         status: "succeeded",
         output: { answer: "Project Alpha", confidence: 0.96 },
@@ -8244,7 +8276,67 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("advertises and materializes project Agent Skills and instructions", async () => {
+  test("counts the conversation's ontology index in its context budget", async () => {
+    // Reproduce: drop `ontologyIndex` from the estimate in prepareAgentConversationContext; the
+    // oversized prompt then passes preflight.
+    // Below the index's condensation threshold, so every file is listed.
+    const types = Array.from({ length: 140 }, (_, index) =>
+      defineObjectType({
+        id: `Type${index}`,
+        name: `Type ${index}`,
+        description: `A long description of type ${index} that fills the ontology index. `.repeat(
+          3
+        ),
+        properties: [prop("id", "string", { required: true, primary: true })],
+      })
+    )
+    const prepare = async (ontology: readonly ObjectTypeWithPropertyTokens[]) => {
+      const host = buildSixb(answerModel(), new InMemoryBroker(), new RecordingSandboxFactory(), {
+        ontology,
+      })
+      const run = await reserveRequestedRun(host, await requestAgent(host, { text: "Work" }))
+      const context = await buildAgentWorkerContext(host)
+      const execution = await context.storage.executions.getById({
+        projectId: PROJECT_ID,
+        id: run.executionId,
+      })
+      if (!execution) throw new Error("Expected the run's execution.")
+      const runtime = createAgentTurnRuntime({
+        context,
+        run,
+        signal: new AbortController().signal,
+        execution,
+      })
+      try {
+        return await conversationPreparation.prepareAgentConversationContext({
+          context,
+          plan: executionPlanFor(host),
+          ontologyIndex: renderOntologyDocs({
+            catalog: host.definitions.ontologyDocs,
+            objectTypes: context.sixb.objects.listTypes(),
+            valueTypesById: context.sixb.objects.getValueTypesById(),
+            actionsFor: () => [],
+          }).index,
+          budget: {
+            windowTokens: 8_000,
+            inputBudgetTokens: 4_000,
+            reserveTokens: 2_000,
+            keepRecentTokens: 1_000,
+            source: "model",
+          },
+          run,
+          runtime,
+        })
+      } finally {
+        runtime.dispose()
+      }
+    }
+
+    await expect(prepare([])).resolves.toBeDefined()
+    await expect(prepare(types)).rejects.toMatchObject({ code: "context_limit_exceeded" })
+  })
+
+  test("advertises and materializes project Agent Skills, instructions, and ontology docs", async () => {
     const acmeStyle: AgentSkillDefinition = {
       name: "acme-style",
       description: "Use when drafting Acme customer-facing messages.",
@@ -8273,7 +8365,16 @@ describe("AgentWorker", () => {
       }),
       new InMemoryBroker(),
       sandboxes,
-      { skills: [acmeStyle], projectInstructions: "Always answer in French." }
+      {
+        skills: [acmeStyle],
+        projectInstructions: "Always answer in French.",
+        ontology: [MeetingRoom],
+        ontologyDocs: {
+          modules: [{ path: "rooms/meeting-room.ts", objectTypeIds: ["MeetingRoom"] }],
+          docs: [{ path: "rooms/meeting-room.md", contents: "Rooms are booked by the hour." }],
+          scripts: [],
+        },
+      }
     )
     const storage = agentStorageOf(sixb)
     const worker = new AgentWorker(sixb, workerOptions())
@@ -8297,6 +8398,13 @@ describe("AgentWorker", () => {
       expect(capturedSystem).toContain("Use when drafting Acme customer-facing messages.")
       expect(capturedSystem).toContain(
         "<agent_instructions>\nAlways answer in French.\n</agent_instructions>"
+      )
+      expect(capturedSystem).toContain(
+        [
+          ".sixb/agent/ontology/",
+          "└── rooms/",
+          "    └── meeting-room.md  MeetingRoom: A bookable meeting room.",
+        ].join("\n")
       )
 
       const command = sandboxes.sandboxes[0]?.commands.find(
@@ -8322,6 +8430,11 @@ describe("AgentWorker", () => {
         )?.mode
       ).toBe(0o755)
       expect(sandbox.writtenFiles.some((file) => file.path.includes("/skills/sixb/"))).toBe(false)
+      const ontologyDir = command?.options.env?.SIXB_ONTOLOGY_DIR
+      if (!ontologyDir) throw new Error("Expected the ontology docs sandbox env.")
+      const roomDoc = sandbox.readFileContents(join(ontologyDir, "rooms", "meeting-room.md"))
+      expect(roomDoc).toStartWith("# MeetingRoom — Meeting room\n")
+      expect(roomDoc).toContain("## Project notes\n\nRooms are booked by the hour.")
     } finally {
       await worker.stop()
     }

@@ -175,6 +175,72 @@ describe("agent system prompt", () => {
     expect(prompt).not.toContain("Available Agent Skills")
   })
 
+  test("lists the ontology files it is given and tells the agent to read them first", () => {
+    const prompt = renderAgentSystemPrompt({
+      mode: "conversation",
+      skills: SKILLS,
+      ontologyIndex: [
+        { path: "billing/invoice.md", summary: "Invoice: A bill sent to a customer." },
+        { path: "billing/scripts/", summary: "Scripts" },
+        { path: "crm/Customer.md", summary: "Customer: A company we bill." },
+        { path: "notes.md", summary: "" },
+      ],
+    })
+
+    expect(prompt).toContain("installed under $SIXB_ONTOLOGY_DIR")
+    expect(prompt).toContain(
+      "Before querying, inspecting, or changing objects of a type, read its file"
+    )
+    expect(prompt).toContain(
+      "Read a file at .sixb/agent/ontology/<path in the tree>, for example .sixb/agent/ontology/billing/invoice.md."
+    )
+    expect(prompt).toContain(
+      [
+        ".sixb/agent/ontology/",
+        "├── billing/",
+        "│   ├── scripts/  Scripts",
+        "│   └── invoice.md  Invoice: A bill sent to a customer.",
+        "├── crm/",
+        "│   └── Customer.md  Customer: A company we bill.",
+        "└── notes.md",
+      ].join("\n")
+    )
+    expect(prompt.indexOf("Available Agent Skills")).toBeLessThan(
+      prompt.indexOf(".sixb/agent/ontology/\n")
+    )
+    expect(renderAgentSystemPrompt({ mode: "conversation", skills: [] })).not.toContain(
+      "Ontology reference files"
+    )
+  })
+
+  test("condenses a large ontology index into folders with file counts", () => {
+    const ontologyIndex = [
+      ...Array.from({ length: 100 }, (_, index) => ({
+        path: `billing/type-${index}.md`,
+        summary: `Type${index}`,
+      })),
+      ...Array.from({ length: 60 }, (_, index) => ({
+        path: `crm/accounts/type-${index}.md`,
+        summary: `Account${index}`,
+      })),
+      { path: "crm/scripts/", summary: "Scripts" },
+      { path: "conventions.md", summary: "Naming conventions" },
+    ]
+    const prompt = renderAgentSystemPrompt({ mode: "conversation", skills: [], ontologyIndex })
+
+    expect(prompt).toContain("There are too many files to list")
+    expect(prompt).toContain(
+      [
+        ".sixb/agent/ontology/  1 file",
+        "├── billing/  100 files",
+        "└── crm/  60 files",
+        "    ├── accounts/  60 files",
+        "    └── scripts/  Scripts",
+      ].join("\n")
+    )
+    expect(prompt).not.toContain("type-0.md  ")
+  })
+
   test("builds a transform-only workflow output finalizer prompt", () => {
     const prompt = renderWorkflowOutputFinalizerPrompt({
       instructions: "Prefer invoices approved by finance.",

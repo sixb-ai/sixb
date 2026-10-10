@@ -8,7 +8,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks"
 import { readdir } from "node:fs/promises"
-import { join, relative, resolve } from "node:path"
+import { join, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import { isActionDefinition } from "../actions"
 import { isConnectorDefinition } from "../connectors"
@@ -30,32 +30,57 @@ import {
 import { isShareDefinition } from "../shares"
 import { isSyncDefinition } from "../syncs"
 import { isWorkflowDefinition } from "../workflows"
+import { isOntologyScriptsDirectory } from "./agent-context"
 
 const moduleExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"])
 
-export async function discoverOntologySources(
-  projectRoot: string
-): Promise<readonly OntologySource[]> {
-  const exportedCandidates = await loadFamilyExports(projectRoot, "ontology", ["ontology"])
+/** An `ontology/` module and the object types it exports, directly or re-exported. */
+export interface DiscoveredOntologyModule {
+  /** POSIX path relative to `ontology/`. */
+  readonly path: string
+  readonly objectTypeIds: readonly string[]
+}
+
+export interface DiscoveredOntology {
+  readonly sources: readonly OntologySource[]
+  readonly modules: readonly DiscoveredOntologyModule[]
+}
+
+export async function discoverOntologySources(projectRoot: string): Promise<DiscoveredOntology> {
+  const loadedModules = await loadFamilyModules(projectRoot, "ontology", ["ontology"])
 
   const ontologyDocuments: OntologyDocumentInput[] = []
   const objectTypes: ObjectTypeWithPropertyTokens[] = []
   const valueTypes: ValueType[] = []
+  const modules: DiscoveredOntologyModule[] = []
+  const seen = new Set<unknown>()
 
-  for (const candidate of exportedCandidates) {
-    if (isOntologyDocumentInput(candidate)) {
-      ontologyDocuments.push(candidate)
-      continue
-    }
+  for (const loaded of loadedModules) {
+    const objectTypeIds: string[] = []
+    for (const candidate of loaded.exports) {
+      const first = !seen.has(candidate)
+      seen.add(candidate)
 
-    if (isObjectTypeWithPropertyTokens(candidate)) {
-      objectTypes.push(candidate)
-      continue
-    }
+      if (isOntologyDocumentInput(candidate)) {
+        objectTypeIds.push(...candidate.objectTypes.map((objectType) => objectType.id))
+        if (first) ontologyDocuments.push(candidate)
+        continue
+      }
 
-    if (isValueType(candidate)) {
-      valueTypes.push(candidate)
+      if (isObjectTypeWithPropertyTokens(candidate)) {
+        objectTypeIds.push(candidate.id)
+        if (first) objectTypes.push(candidate)
+        continue
+      }
+
+      if (isValueType(candidate) && first) {
+        valueTypes.push(candidate)
+      }
     }
+    modules.push({
+      path: toPosix(relative("ontology", loaded.path)),
+      objectTypeIds: [...new Set(objectTypeIds)],
+    })
   }
 
   const discoveredSources: OntologySource[] = [...ontologyDocuments, ...objectTypes]
@@ -68,7 +93,7 @@ export async function discoverOntologySources(
     })
   }
 
-  return discoveredSources
+  return { sources: discoveredSources, modules }
 }
 
 export type DiscoveryModuleKind =
@@ -213,9 +238,18 @@ async function discoverDefinitionFamily(
   projectRoot: string,
   family: DefinitionDiscoveryFamily<unknown>
 ): Promise<readonly unknown[]> {
-  const exportedCandidates = await loadFamilyExports(projectRoot, family.kind, family.directory)
+  const loadedModules = await loadFamilyModules(projectRoot, family.kind, family.directory)
+  const exportedCandidates = new Set(loadedModules.flatMap((loaded) => loaded.exports))
 
-  return exportedCandidates.filter(family.isDefinition)
+  return [...exportedCandidates].filter(family.isDefinition)
+}
+
+/**
+ * Every module file of the `ontology/` family, as absolute paths. `scripts/` directories hold the
+ * Agent's ontology scripts, not definitions, so they are never imported.
+ */
+export function listOntologyModuleFiles(projectRoot: string): Promise<string[]> {
+  return listModuleFiles(join(projectRoot, "ontology"), isOntologyScriptsDirectory)
 }
 
 // ── Internal helpers ────────────────────────────────────────
@@ -225,15 +259,24 @@ async function listFamilyModules(
   kind: DiscoveryModuleKind,
   directory: readonly string[]
 ): Promise<ProjectModule[]> {
-  const paths = await listModuleFiles(join(projectRoot, ...directory))
+  const paths =
+    kind === "ontology"
+      ? await listOntologyModuleFiles(projectRoot)
+      : await listModuleFiles(join(projectRoot, ...directory))
   return paths.map((path) => ({ kind, path: relative(projectRoot, path) }))
 }
 
-async function loadFamilyExports(
+interface LoadedProjectModule {
+  /** Relative to the project root. */
+  readonly path: string
+  readonly exports: readonly unknown[]
+}
+
+async function loadFamilyModules(
   projectRoot: string,
   kind: DiscoveryModuleKind,
   directory: readonly string[]
-): Promise<unknown[]> {
+): Promise<LoadedProjectModule[]> {
   const project = bundledProject.getStore()
   if (project) {
     if (resolve(projectRoot) !== project.projectRoot) {
@@ -242,11 +285,11 @@ async function loadFamilyExports(
           "Run the built entry from the project root and use that root in createSixb()."
       )
     }
-    return loadModuleExports(project.modules.filter((module) => module.kind === kind))
+    return loadModules(project.modules.filter((module) => module.kind === kind))
   }
 
   const modules = await listFamilyModules(projectRoot, kind, directory)
-  return loadModuleExports(
+  return loadModules(
     modules.map((module) => ({
       ...module,
       load: () => import(pathToFileURL(resolve(projectRoot, module.path)).href),
@@ -254,9 +297,10 @@ async function loadFamilyExports(
   )
 }
 
-async function loadModuleExports(modules: readonly BundledProjectModule[]): Promise<unknown[]> {
-  const exportedCandidates: unknown[] = []
-  const seen = new Set<unknown>()
+async function loadModules(
+  modules: readonly BundledProjectModule[]
+): Promise<LoadedProjectModule[]> {
+  const loaded: LoadedProjectModule[] = []
 
   for (const module of modules) {
     let moduleNamespace: Record<string, unknown>
@@ -267,12 +311,15 @@ async function loadModuleExports(modules: readonly BundledProjectModule[]): Prom
       throw new RuntimeError(`Failed to load ${module.kind} module '${module.path}': ${reason}`)
     }
 
+    const exportedCandidates: unknown[] = []
+    const seen = new Set<unknown>()
     for (const exportedValue of Object.values(moduleNamespace)) {
       collectExportedCandidates(exportedValue, exportedCandidates, seen)
     }
+    loaded.push({ path: module.path, exports: exportedCandidates })
   }
 
-  return exportedCandidates
+  return loaded
 }
 
 function collectExportedCandidates(value: unknown, target: unknown[], seen: Set<unknown>): void {
@@ -297,7 +344,10 @@ function collectExportedCandidates(value: unknown, target: unknown[], seen: Set<
   target.push(value)
 }
 
-async function listModuleFiles(dir: string): Promise<string[]> {
+async function listModuleFiles(
+  dir: string,
+  skipDirectory: (name: string) => boolean = () => false
+): Promise<string[]> {
   let entries: import("node:fs").Dirent[]
   try {
     entries = (await readdir(dir, { withFileTypes: true })) as import("node:fs").Dirent[]
@@ -314,7 +364,9 @@ async function listModuleFiles(dir: string): Promise<string[]> {
   for (const entry of sortedEntries) {
     const fullPath = join(dir, entry.name)
     if (entry.isDirectory()) {
-      files.push(...(await listModuleFiles(fullPath)))
+      if (!skipDirectory(entry.name)) {
+        files.push(...(await listModuleFiles(fullPath, skipDirectory)))
+      }
       continue
     }
 
@@ -349,6 +401,10 @@ function hasSupportedModuleExtension(fileName: string): boolean {
     }
   }
   return false
+}
+
+function toPosix(path: string): string {
+  return path.split(sep).join("/")
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

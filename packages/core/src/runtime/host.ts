@@ -59,6 +59,7 @@ import { ModelExecutionSession } from "../models/execution/session"
 import { createVectorIndexingRuntime } from "../objects/vectors/indexing"
 import { VectorIndexingDispatcher } from "../objects/vectors/indexing-dispatch"
 import { registerVectorIndexingRuntime } from "../objects/vectors/indexing-runtime"
+import type { OntologyDocsInput } from "../ontology/docs"
 import type { PipelineDefinition } from "../pipelines/types"
 import { registerProjectionRegistry } from "../projections/internal"
 import type { ProjectionDefinition } from "../projections/types"
@@ -134,6 +135,8 @@ export interface SixbHostOptions<in out TParams extends ParamsConfig = ParamsCon
   skills?: readonly AgentSkillDefinition[]
   /** The conversational Agent's instructions. createSixb() reads them from `SIXB.md`. */
   projectInstructions?: string
+  /** The Agent's files under `ontology/`. createSixb() discovers them. */
+  ontologyDocs?: OntologyDocsInput
   markings?: readonly MarkingDefinition[]
   groups?: readonly GroupDefinition[]
   roles?: readonly RoleDefinition[]

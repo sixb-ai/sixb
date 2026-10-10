@@ -1,3 +1,9 @@
+export type {
+  OntologyDocsIndexEntry,
+  RenderedOntologyDocs,
+  RenderOntologyDocsInput,
+} from "./docs-markdown"
+export { renderOntologyDocs } from "./docs-markdown"
 export { schemaFieldsToJsonSchema, schemaRecordToJsonSchema } from "./json-schema"
 export { resolvePropertyQueryCapabilities } from "./query-capabilities"
 export { validateSchemaOrRefValue } from "./refs"

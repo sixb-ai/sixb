@@ -64,6 +64,7 @@ export {
   userRef,
   valueTypeRef,
 } from "./ontology"
+export type { OntologyDoc, OntologyDocsCatalog, OntologyDocsInput } from "./ontology/docs"
 
 // ── Actions ─────────────────────────────────────────────────
 

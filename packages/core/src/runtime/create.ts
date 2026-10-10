@@ -4,8 +4,12 @@ import type { AgentToolDefinition } from "../agents"
 import { assertNoAgentDefinitions } from "../agents/retired-config"
 import type { SixbAuthConfig } from "../auth"
 import type { BlobStorage } from "../blob-storage"
-import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap"
-import { discoverAgentSkills, discoverProjectInstructions } from "../bootstrap/agent-context"
+import {
+  discoverAgentSkills,
+  discoverOntologyFiles,
+  discoverProjectInstructions,
+} from "../bootstrap/agent-context"
+import { discoverOntologySources, discoverProjectDefinitions } from "../bootstrap/discovery"
 import type { Broker } from "../broker"
 import type { ConnectorConnectionOptions, ConnectorDefinition } from "../connectors/types"
 import type { DatasetDefinition } from "../datasets"
@@ -85,7 +89,8 @@ export interface CreateSixbOptions<in out TParams extends ParamsConfig = ParamsC
  * The host auto-discovers exported definitions from `ontology/`, `actions/`, `datasets/`,
  * `connectors/`, `syncs/`, `schedules/`, `pipelines/`, `projections/`,
  * `rules/`, `workflows/`, `shares/`, and `security/{groups,roles,policies}/`
- * relative to `projectRoot`, along with the Agent's `skills/` and `SIXB.md`.
+ * relative to `projectRoot`, along with the Agent's `skills/`, `SIXB.md`, and the docs and scripts
+ * under `ontology/`.
  */
 export async function createSixb<const TParams extends ParamsConfig = ParamsConfig>(
   options: CreateSixbOptions<TParams>
@@ -94,7 +99,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
   const projectRoot = resolve(options.projectRoot ?? process.cwd())
 
   const discoveredOntology = await discoverOntologySources(projectRoot)
-  const allSources = [...(options.ontologies ?? []), ...discoveredOntology]
+  const allSources = [...(options.ontologies ?? []), ...discoveredOntology.sources]
 
   if (allSources.length === 0) {
     throw new RuntimeError(
@@ -105,6 +110,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
   const definitions = await discoverProjectDefinitions(projectRoot)
   const skills = await discoverAgentSkills(projectRoot)
   const projectInstructions = await discoverProjectInstructions(projectRoot)
+  const ontologyFiles = await discoverOntologyFiles(projectRoot)
 
   // Explicit definitions come first so local setup can override ordering while duplicate ids are
   // still rejected by the SixbHost constructor. Every family merges — `actions` and `projections`
@@ -141,6 +147,7 @@ export async function createSixb<const TParams extends ParamsConfig = ParamsConf
     tools: options.tools,
     skills,
     ...(projectInstructions === undefined ? {} : { projectInstructions }),
+    ontologyDocs: { modules: discoveredOntology.modules, ...ontologyFiles },
     shares: [...(options.shares ?? []), ...definitions.shares],
     auth: options.auth,
   })

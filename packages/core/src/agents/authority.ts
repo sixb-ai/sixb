@@ -3,6 +3,8 @@ import type { AuthorizationContext } from "../authorization"
 import { resolveAuthorizationContext } from "../authorization"
 import { createSixbError } from "../errors/internal"
 import type { AuthorizablePrincipal, AuthorizationRef } from "../execution"
+import { type PropertyClearance, resolvePropertyClearance } from "../objects/property-clearance"
+import type { OntologyDefinitionCatalog } from "../ontology/registry"
 import type { SecurityDefinitionCatalog } from "../security"
 import type {
   AccessTokenRecord,
@@ -18,6 +20,19 @@ import { agentServiceAccountId } from "./identity"
 export type AgentExecutionAuthorization =
   | { readonly type: "principal"; readonly context: AuthorizationContext }
   | { readonly type: "disabled" }
+
+/**
+ * The marked properties an Agent execution cannot read, resolved exactly as its object reader
+ * resolves them. Disabled authorization reads everything.
+ */
+export function resolveAgentPropertyClearance(
+  ontology: OntologyDefinitionCatalog,
+  authorization: AgentExecutionAuthorization
+): PropertyClearance | undefined {
+  return authorization.type === "principal"
+    ? resolvePropertyClearance(ontology, authorization.context.clearances ?? new Set())
+    : undefined
+}
 
 type UserCredentialRef = NonNullable<
   Extract<AuthorizationRef, { readonly type: "principal" }>["credential"]

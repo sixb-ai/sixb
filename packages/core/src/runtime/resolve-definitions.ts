@@ -10,6 +10,7 @@ import { assertDatasetDefinition } from "../datasets/validation"
 import { createModelCatalog, type ModelCatalogInput } from "../models"
 import { sameEmbeddingModel } from "../models/embedding-model"
 import { OntologyRegistry } from "../ontology"
+import { createOntologyDocsCatalog, type OntologyDocsInput } from "../ontology/docs"
 import type { PipelineDefinition } from "../pipelines/types"
 import { ProjectionRegistry } from "../projections"
 import type { ProjectionDefinition } from "../projections/types"
@@ -49,6 +50,7 @@ interface DefinitionOptions {
   readonly tools?: readonly AgentToolDefinition[]
   readonly skills?: readonly AgentSkillDefinition[]
   readonly projectInstructions?: string
+  readonly ontologyDocs?: OntologyDocsInput
   readonly models?: ModelCatalogInput
   readonly shares?: readonly ShareDefinition[]
   readonly markings?: readonly MarkingDefinition[]
@@ -96,6 +98,10 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   }
   const tools = createAgentToolCatalog(options.tools)
   const skills = createAgentSkillCatalog(options.skills)
+  const ontologyDocs = createOntologyDocsCatalog({
+    objectTypes: ontology.listObjectTypes(),
+    ...(options.ontologyDocs === undefined ? {} : { docs: options.ontologyDocs }),
+  })
   const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])
 
   // Datasets resolve first because syncs, pipelines, projections, and security depend on them.
@@ -206,6 +212,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
     ...(options.projectInstructions === undefined
       ? {}
       : { projectInstructions: options.projectInstructions }),
+    ontologyDocs,
     connectors: createDefinitionCatalog(connectorsById),
     datasets: createDefinitionCatalog(datasetsById),
     ...(models === undefined ? {} : { models }),

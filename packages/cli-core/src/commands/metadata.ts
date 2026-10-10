@@ -21,6 +21,9 @@ Discovery:
   sixb ontology list                  Compact visible type and relationship catalog
   sixb ontology get <type>            Inspect one object type, properties, links, and actions
 
+Read an object type's file under $SIXB_ONTOLOGY_DIR before querying it. Use \`sixb ontology get\`
+for a type that has no file there.
+
 Objects:
   sixb objects inspect <type> <id>    Inspect an object and its related graph in one command
   sixb objects list [options]         Browse materialized objects
@@ -58,6 +61,10 @@ const LOCAL_MAIN_HELP = SANDBOX_MAIN_HELP.replace("Sixb agent CLI", "Sixb instan
   )
   .replace(
     "  sixb doctor                         Check the sandbox and API gateway\n  sixb context                        Print the current run context\n",
+    ""
+  )
+  .replace(
+    "\nRead an object type's file under $SIXB_ONTOLOGY_DIR before querying it. Use `sixb ontology get`\nfor a type that has no file there.\n",
     ""
   )
 
@@ -156,7 +163,8 @@ Predicates use op, not kind:
 Traversal and expansion directions are outgoing or incoming. For incoming relationships, the link
 is declared on the child/source type; add sourceObjectTypeId when needed to disambiguate it.
 
-Run \`sixb ontology get <type>\` first; never guess property or link ids. Use refs for exact
+Run \`sixb ontology get <type>\` first (in the agent sandbox, read the type's file under
+$SIXB_ONTOLOGY_DIR instead); never guess property or link ids. Use refs for exact
 identities. Put limits and pages inside the query tree.
 
 Vector profile names are the keys of the type's search.vectors. Vector input is a start node,

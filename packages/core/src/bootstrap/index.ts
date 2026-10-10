@@ -6,7 +6,6 @@ export type {
   ProjectModule,
 } from "./discovery"
 export {
-  discoverOntologySources,
   discoverProjectDefinitions,
   listProjectModules,
   withProjectModules,
