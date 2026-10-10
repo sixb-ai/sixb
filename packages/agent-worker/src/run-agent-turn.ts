@@ -152,6 +152,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         executionToken,
         projectId,
         modelId: plan.model.modelId,
+        projectTools: plan.tools,
         status: "failed",
         finishReason: "timeout",
         error: toAgentExecutionFailure(new AgentTurnTimeoutError(runId, turnTimeoutMs), {
@@ -176,6 +177,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       executionToken,
       projectId,
       modelId: plan.model.modelId,
+      projectTools: plan.tools,
       status: "cancelled",
       ...stopReason(),
       parts: interruptedParts,
@@ -231,6 +233,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         executionToken,
         projectId,
         modelId: plan.model.modelId,
+        projectTools: plan.tools,
         status: "cancelled",
         ...stopReason(),
         parts: interruptedParts,
@@ -258,10 +261,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     const interruptedAfterCollection = await finalizeIfInterrupted()
     if (interruptedAfterCollection) return interruptedAfterCollection
-    const assistantParts = assistantPartsWithAttachments(
-      assistant.parts,
-      outputAttachments.attachments
-    )
+    const assistantParts = assistantPartsWithAttachments(assistant.parts, {
+      projectTools: plan.tools,
+      outputAttachments: outputAttachments.attachments,
+    })
     const assistantMessageId = createAgentMessageId()
 
     const interruptedBeforeCommit = await finalizeIfInterrupted()
@@ -339,6 +342,7 @@ async function finalizeInterruptedTurn(input: {
   readonly executionToken: string
   readonly projectId: string
   readonly modelId?: string
+  readonly projectTools: ResolvedAgentExecutionPlan["tools"]
   readonly status: "failed" | "cancelled"
   readonly finishReason?: AgentRunFinishReason
   readonly error?: AgentRunFailure
@@ -359,7 +363,7 @@ async function finalizeInterruptedTurn(input: {
     completedAt,
   } = input
   const parts = input.parts?.some((part) => part.type !== "step-start")
-    ? assistantPartsWithAttachments(input.parts)
+    ? assistantPartsWithAttachments(input.parts, { projectTools: input.projectTools })
     : undefined
 
   await context.beforeFinalize?.()

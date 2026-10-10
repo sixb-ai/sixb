@@ -22,7 +22,7 @@ function useTextDocument(source: AgentDocumentSource) {
       "agent-document-preview",
       source.threadId,
       source.messageId,
-      source.partIndex,
+      source.path,
       source.fileRef.digest,
       "text",
     ],
@@ -31,7 +31,7 @@ function useTextDocument(source: AgentDocumentSource) {
     queryFn: async ({ signal }) => {
       const response = await getAgentMessageFileContent({
         path: { threadId: source.threadId, messageId: source.messageId },
-        query: { path: `/parts/${source.partIndex}/fileRef`, disposition: "inline" },
+        query: { path: source.path, disposition: "inline" },
         parseAs: "blob",
         throwOnError: true,
         signal,
@@ -55,7 +55,7 @@ export function useCustomDocument(source: AgentDocumentSource, maxFileSizeBytes:
       "agent-document-preview",
       source.threadId,
       source.messageId,
-      source.partIndex,
+      source.path,
       source.fileRef.digest,
       "blob",
     ],
@@ -64,7 +64,7 @@ export function useCustomDocument(source: AgentDocumentSource, maxFileSizeBytes:
     queryFn: async ({ signal }) => {
       const response = await getAgentMessageFileContent({
         path: { threadId: source.threadId, messageId: source.messageId },
-        query: { path: `/parts/${source.partIndex}/fileRef`, disposition: "inline" },
+        query: { path: source.path, disposition: "inline" },
         parseAs: "blob",
         throwOnError: true,
         signal,

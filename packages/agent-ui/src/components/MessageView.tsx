@@ -47,7 +47,11 @@ function UserMessage({ message }: { message: AgentMessage }) {
             <UserFileAttachment
               key={index}
               fileRef={part.fileRef}
-              document={agentMessageDocumentSource(message, index)}
+              document={agentMessageDocumentSource(
+                message,
+                part.fileRef,
+                `/parts/${index}/fileRef`
+              )}
             />
           ))}
         </div>
@@ -67,7 +71,7 @@ function AssistantMessage({ message }: { message: AgentMessage }) {
       {message.compaction ? <CompactionResult summary={message.compaction.summary} /> : null}
       <AssistantBody
         parts={normalizeDurableParts(message.parts, {
-          fileSource: (partIndex) => agentMessageDocumentSource(message, partIndex),
+          fileSource: (fileRef, path) => agentMessageDocumentSource(message, fileRef, path),
         })}
       />
       {message.annotations.map((annotation, index) => (
@@ -399,14 +403,13 @@ function contextPartsOf(message: AgentMessage): AgentContextEntryInput[] {
 
 function agentMessageDocumentSource(
   message: AgentMessage,
-  partIndex: number
-): AgentDocumentSource | undefined {
-  const part = message.parts[partIndex]
-  if (part?.type !== "file") return
+  fileRef: AgentFileRef,
+  path: string
+): AgentDocumentSource {
   return createAgentDocumentSource({
     threadId: message.threadId,
     messageId: message.id,
-    partIndex,
-    fileRef: part.fileRef,
+    path,
+    fileRef,
   })
 }

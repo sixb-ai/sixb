@@ -89,8 +89,8 @@ function isDocumentSource(value: unknown): value is AgentDocumentSource {
       (typeof value.kind === "string" && DOCUMENT_KINDS.has(value.kind as AgentDocumentKind))) &&
     typeof value.threadId === "string" &&
     typeof value.messageId === "string" &&
-    typeof value.partIndex === "number" &&
-    Number.isInteger(value.partIndex) &&
+    typeof value.path === "string" &&
+    value.path.startsWith("/parts/") &&
     typeof value.inlineUrl === "string" &&
     typeof value.downloadUrl === "string" &&
     typeof fileRef.blobId === "string" &&
