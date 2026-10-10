@@ -93,6 +93,10 @@ the inference or accounting path.
 
 ## Attachments
 
+An answer's attachments are the files its project tools returned and the files published to
+`$SIXB_OUTPUT_DIR`, each once. Files a built-in tool only read, such as the image `view_file`
+prepared for the model, stay in that tool's result and are shown in the work trace.
+
 Assistant file attachments remain structured message parts for display and download; they are not
 replayed as assistant text. Earlier files in the retained conversation are discoverable through the
 sandbox's `$SIXB_ATTACHMENTS` manifest and inspectable using `view_file` when materialized. Current
@@ -130,8 +134,18 @@ The terminal run state is stored on the run record:
 - Turn timeout: `failed` with `finishReason: "timeout"`; coherent partial work is finalized as the
   assistant message before the thread is released. This controlled limit is not emitted as an
   unhandled runtime failure
-- Worker shutdown during a turn: `cancelled`
+- User cancel during a turn: `cancelled`
+- Worker shutdown during a conversation turn: `cancelled` with `finishReason: "interrupted"`,
+  coherent partial work kept as the assistant message so the user can continue from it
 - Queue ownership lost mid-turn: the turn is aborted and stale durable writes are fenced
+- Conversation turn found `running` on redelivery (its worker crashed or lost the queue lease):
+  `cancelled` with `finishReason: "interrupted"`, recorded without calling the model. The turn
+  already streamed and billed its model calls, so it is retried only on request
+  (`POST .../runs/:runId/retry`). Subagents and workflow agent nodes are replayed instead. A run
+  whose projected queue lease has not lapsed is still owned by a live delivery: a duplicate job
+  leaves it alone and is retried once that lease runs out
+- Preparation dependency failure (storage, model catalog) before the first model call: retried in
+  place with a short backoff, never through a redelivery
 - Finalization storage failure: job is retried up to a bounded attempt limit; if finalization still
   cannot be recorded, the job is marked failed and the run remains non-terminal for repair
 

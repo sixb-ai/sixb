@@ -4301,7 +4301,7 @@ export const cancelAgentRunMutation = (
 }
 
 /**
- * Retry a failed agent run
+ * Retry a failed or interrupted agent run
  */
 export const retryAgentRunMutation = (
   options?: Partial<Options<RetryAgentRunData>>

@@ -113,16 +113,22 @@ export function AgentChat({
               }
             : undefined
         }
+        interrupted={
+          presentation.kind === "interrupted"
+            ? { hasProgress: presentation.hasProgress }
+            : undefined
+        }
         onRetry={
           !conversation.sandboxRecovery &&
           (presentation.kind === "failed" ||
-            (presentation.kind === "timeout" && !presentation.hasProgress))
+            ((presentation.kind === "timeout" || presentation.kind === "interrupted") &&
+              !presentation.hasProgress))
             ? () => conversation.retry(presentation.run)
             : undefined
         }
         onContinue={
           !conversation.sandboxRecovery &&
-          presentation.kind === "timeout" &&
+          (presentation.kind === "timeout" || presentation.kind === "interrupted") &&
           presentation.hasProgress
             ? conversation.continueAfterTimeout
             : undefined

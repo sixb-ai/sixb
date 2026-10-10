@@ -2614,7 +2614,7 @@ export const cancelAgentRun = <ThrowOnError extends boolean = false>(
   })
 
 /**
- * Retry a failed agent run
+ * Retry a failed or interrupted agent run
  */
 export const retryAgentRun = <ThrowOnError extends boolean = false>(
   options: Options<RetryAgentRunData, ThrowOnError>

@@ -1149,6 +1149,39 @@ describe("agent routes", () => {
     ).resolves.toMatchObject({ activeRunId: second.run.id, messageCount: 3 })
   })
 
+  test("retries an interrupted run but not one that was stopped", async () => {
+    const { app, storage, sixb } = createApp()
+    const retry = async (finishReason: "interrupted" | undefined) => {
+      const request = await createTestSixb(sixb).agent.runs.request({ text: "resume me" })
+      const execution = testExecution()
+      await storage.agents.runs.start({ id: request.run.id, projectId: sixb.id, execution })
+      await storage.agents.runs.finish({
+        id: request.run.id,
+        projectId: sixb.id,
+        executionToken: execution.token,
+        status: "cancelled",
+        ...(finishReason === undefined ? {} : { finishReason }),
+      })
+      return app.fetch(
+        jsonRequest(
+          `/api/agent-threads/${request.run.threadId}/runs/${request.run.id}/retry`,
+          "POST",
+          {}
+        )
+      )
+    }
+
+    const stopped = await retry(undefined)
+    expect(stopped.status).toBe(409)
+    await expect(stopped.json()).resolves.toEqual({
+      error: "Only failed or interrupted agent runs can be retried",
+    })
+
+    const interrupted = await retry("interrupted")
+    expect(interrupted.status).toBe(202)
+    await expect(interrupted.json()).resolves.toMatchObject({ run: { status: "queued" } })
+  })
+
   test("reads agent runs without exposing execution tokens", async () => {
     const { app, storage, sixb } = createApp()
     const thread = await storage.agents.threads.create({

@@ -38,6 +38,11 @@ export interface RunAgentTurnInput {
   readonly run: ConversationAgentRunRecord
   /** The worker's shutdown signal. */
   readonly signal: AbortSignal
+  /**
+   * The worker's own stop, when `signal` also carries a user cancel. A turn it ends first is
+   * recorded with `finishReason: "interrupted"` so the user can resume it.
+   */
+  readonly stopSignal?: AbortSignal
   /** Shared with preflight when this turn performed compaction. */
   readonly runtime?: AgentTurnRuntime
   /** Preflight's retained projection, avoiding a second storage read in the worker path. */
@@ -127,6 +132,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     ...(context.environmentFailureSignal ? [context.environmentFailureSignal] : []),
   ])
   let interruptedParts: readonly AgentMessagePart[] | undefined
+  const stopReason = () =>
+    stoppedByWorker(signal, input.stopSignal) ? { finishReason: "interrupted" as const } : {}
 
   const finalizeIfInterrupted = async (error?: unknown): Promise<AgentRunRecord | null> => {
     if (runtime.sourceSignal.reason instanceof QueueDeliveryLeaseLostError) {
@@ -145,6 +152,7 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         executionToken,
         projectId,
         modelId: plan.model.modelId,
+        projectTools: plan.tools,
         status: "failed",
         finishReason: "timeout",
         error: toAgentExecutionFailure(new AgentTurnTimeoutError(runId, turnTimeoutMs), {
@@ -169,7 +177,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
       executionToken,
       projectId,
       modelId: plan.model.modelId,
+      projectTools: plan.tools,
       status: "cancelled",
+      ...stopReason(),
       parts: interruptedParts,
     })
   }
@@ -223,7 +233,9 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         executionToken,
         projectId,
         modelId: plan.model.modelId,
+        projectTools: plan.tools,
         status: "cancelled",
+        ...stopReason(),
         parts: interruptedParts,
       })
     }
@@ -249,10 +261,10 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
 
     const interruptedAfterCollection = await finalizeIfInterrupted()
     if (interruptedAfterCollection) return interruptedAfterCollection
-    const assistantParts = assistantPartsWithAttachments(
-      assistant.parts,
-      outputAttachments.attachments
-    )
+    const assistantParts = assistantPartsWithAttachments(assistant.parts, {
+      projectTools: plan.tools,
+      outputAttachments: outputAttachments.attachments,
+    })
     const assistantMessageId = createAgentMessageId()
 
     const interruptedBeforeCommit = await finalizeIfInterrupted()
@@ -292,6 +304,14 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
   }
 }
 
+/**
+ * Whether the worker's stop, rather than the user's, ended the turn. Whichever fired first wins:
+ * the combined turn signal carries the reason of the first source that aborted it.
+ */
+export function stoppedByWorker(turnSignal: AbortSignal, stopSignal?: AbortSignal): boolean {
+  return stopSignal?.aborted === true && turnSignal.reason === stopSignal.reason
+}
+
 function ensureVisibleAssistantMessage(
   message: AgentMessage,
   input: { readonly finishReason: string | undefined; readonly maxSteps: number }
@@ -322,6 +342,7 @@ async function finalizeInterruptedTurn(input: {
   readonly executionToken: string
   readonly projectId: string
   readonly modelId?: string
+  readonly projectTools: ResolvedAgentExecutionPlan["tools"]
   readonly status: "failed" | "cancelled"
   readonly finishReason?: AgentRunFinishReason
   readonly error?: AgentRunFailure
@@ -342,7 +363,7 @@ async function finalizeInterruptedTurn(input: {
     completedAt,
   } = input
   const parts = input.parts?.some((part) => part.type !== "step-start")
-    ? assistantPartsWithAttachments(input.parts)
+    ? assistantPartsWithAttachments(input.parts, { projectTools: input.projectTools })
     : undefined
 
   await context.beforeFinalize?.()

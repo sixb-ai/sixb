@@ -6,7 +6,8 @@ import type { AgentDocumentSource } from "./types"
 export interface CreateAgentDocumentSourceInput {
   readonly threadId: string
   readonly messageId: string
-  readonly partIndex: number
+  /** JSON pointer to the file reference in the message, such as `/parts/2/fileRef`. */
+  readonly path: string
   readonly fileRef: AgentFileRef
   /** Explicit base URL for pure callers and tests. Defaults to the configured Sixb client URL. */
   readonly baseUrl?: string
@@ -21,7 +22,7 @@ export function createAgentDocumentSource(
     fileRef: input.fileRef,
     threadId: input.threadId,
     messageId: input.messageId,
-    partIndex: input.partIndex,
+    path: input.path,
     inlineUrl: agentMessageFileContentUrl(input, "inline"),
     downloadUrl: agentMessageFileContentUrl(input, "attachment"),
   }
@@ -34,10 +35,7 @@ function agentMessageFileContentUrl(
   const routePath = `/api/agent-threads/${encodeURIComponent(input.threadId)}/messages/${encodeURIComponent(
     input.messageId
   )}/files/content`
-  const params = new URLSearchParams({
-    path: `/parts/${input.partIndex}/fileRef`,
-    disposition,
-  })
+  const params = new URLSearchParams({ path: input.path, disposition })
   const baseUrl = input.baseUrl ?? client.getConfig().baseUrl
 
   if (!baseUrl && typeof window === "undefined") {

@@ -48,6 +48,7 @@ import {
   createAgentRunId,
   createSubagentRunId,
   ensureManagedAgentExecutionIdentity,
+  isAgentToolResult,
   publishAgentRunCancel,
 } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
@@ -93,10 +94,15 @@ import { loadAgentSkills } from "../src/agent-skills"
 import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
 import * as conversationPreparation from "../src/context-compaction"
-import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
+import { MAX_AGENT_DELIVERY_ATTEMPTS } from "../src/delivery-policy"
+import {
+  AgentExecutionLostError,
+  AgentFinalizationError,
+  AgentRunOwnedElsewhereError,
+} from "../src/errors"
 import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { finishRunOrThrow } from "../src/finalize"
-import { runAgentTurn } from "../src/run-agent-turn"
+import { runAgentTurn, stoppedByWorker } from "../src/run-agent-turn"
 import * as agentEnvironment from "../src/run-environment"
 import { createConversationAgentEnvironment } from "../src/run-environment"
 import { createBrokerStreamSink, NOOP_STREAM_SINK } from "../src/stream-sink"
@@ -899,6 +905,32 @@ class InspectableAgentWorker extends AgentWorker {
   decideExecutionError(claimed: ClaimedQueueJob<AgentQueueJob>, error: unknown) {
     return this.onExecutionError(claimed, error)
   }
+
+  decideAbortError(claimed: ClaimedQueueJob<AgentQueueJob>, error: unknown) {
+    return this.onAbortError(claimed, error)
+  }
+}
+
+/** Fail the worker's durable execution reads while `failing(read)` says so. */
+function withFailingExecutionReads(sixb: TestSixb, failing: (read: number) => boolean) {
+  const reads = { count: 0 }
+  const host = withStorage(
+    sixb,
+    new Proxy(sixb.storage, {
+      get: (target, property, receiver) =>
+        property === "executions"
+          ? {
+              ...target.executions,
+              getById: async (params: Parameters<Storage["executions"]["getById"]>[0]) => {
+                reads.count += 1
+                if (failing(reads.count)) throw new Error("storage blip")
+                return target.executions.getById(params)
+              },
+            }
+          : Reflect.get(target, property, receiver),
+    })
+  )
+  return { host, reads }
 }
 
 function workerOptions(
@@ -2930,7 +2962,7 @@ describe("AgentWorker", () => {
     await sixb.queues.agents.enqueue({
       projectId: PROJECT_ID,
       jobs: [
-        { id: "agt_job_workspace-run", type: "agent.run.requested", payload: { runId: run.id } },
+        { id: "agt_job_sandbox-run", type: "agent.run.requested", payload: { runId: run.id } },
       ],
     })
     const completion = observeQueueSettlement(sixb.queues.agents)
@@ -7164,10 +7196,10 @@ describe("AgentWorker", () => {
     }
   })
 
-  // Regression proof: resolve authority before reserving the run; revoked redeliveries stay running.
+  // Regression proof: resolve authority before reserving the run; a revoked run stays queued.
   test.each([
     "active",
-    "revoked-after-crash",
+    "revoked-before-start",
     "revoked-after-takeover",
   ] as const)("revalidates a user's session before running the project Agent: %s", async (scenario) => {
     const model = answerModel()
@@ -7212,11 +7244,6 @@ describe("AgentWorker", () => {
     const currentSession = auth.sessions.getById.bind(auth.sessions)
     let takeoverToken: string | undefined
     if (scenario !== "active") {
-      await storage.runs.start({
-        projectId: PROJECT_ID,
-        id: requested.run.id,
-        execution: freshTestExecution(),
-      })
       await auth.sessions.revoke({ projectId: PROJECT_ID, id: sessionId, revokedAt: new Date() })
     }
     const sessionLookup: typeof currentSession = async (params) => {
@@ -7260,8 +7287,8 @@ describe("AgentWorker", () => {
       await completion.wait()
       if (scenario === "active") {
         expect(run.status).toBe("succeeded")
-      } else if (scenario === "revoked-after-crash") {
-        expect(run).toMatchObject({ status: "failed", attempt: 2 })
+      } else if (scenario === "revoked-before-start") {
+        expect(run).toMatchObject({ status: "failed", attempt: 1 })
         expect(run.execution).toBeUndefined()
         expect(modelCalls).not.toHaveBeenCalled()
         expect(
@@ -7773,7 +7800,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("redelivers without reporting when queue ownership is lost", async () => {
+  test("ends the turn as interrupted without reporting when queue ownership is lost", async () => {
     const sixb = buildSixb(slowAnswerModel(120))
     const storage = agentStorageOf(sixb)
     let reportCount = 0
@@ -7805,11 +7832,15 @@ describe("AgentWorker", () => {
         { label: "redelivered run terminal" }
       )
 
-      expect(finalRun).toMatchObject({ status: "succeeded", attempt: 2 })
+      expect(finalRun).toMatchObject({
+        status: "cancelled",
+        finishReason: "interrupted",
+        attempt: 2,
+      })
       const assistants = (await listMessages(storage, request.run.threadId)).filter(
         (message) => message.role === "assistant"
       )
-      expect(assistants).toHaveLength(1)
+      expect(assistants).toHaveLength(0)
       await reporter.flush()
       expect(reportCount).toBe(0)
     } finally {
@@ -7946,7 +7977,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("views and publishes an image created by bash", async () => {
+  test("views an image created by bash without attaching it to the answer", async () => {
     let viewedPrompt: unknown
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(
@@ -7979,6 +8010,20 @@ describe("AgentWorker", () => {
       const viewCall = assistant?.parts.find(
         (part) => part.type === "tool-call" && part.toolName === "view_file"
       )
+      const viewed =
+        viewCall?.type === "tool-call" && viewCall.state === "output-available"
+          ? viewCall.output
+          : undefined
+      if (!isAgentToolResult(viewed) || viewed.content[1]?.type !== "file") {
+        throw new Error("Expected the viewed image in the view_file result.")
+      }
+      expect(
+        new Uint8Array(
+          await new Response(
+            await sixb.blobStorage.open(viewed.content[1].fileRef.blobId)
+          ).arrayBuffer()
+        )
+      ).toEqual(TEST_PNG_BYTES)
       expect(viewCall).toMatchObject({
         state: "output-available",
         output: {
@@ -7992,17 +8037,8 @@ describe("AgentWorker", () => {
           ],
         },
       })
-      const filePart = assistant?.parts.find((part) => part.type === "file")
-      expect(filePart).toMatchObject({
-        type: "file",
-        fileRef: { fileName: "bash-image.png", mediaType: "image/png" },
-      })
-      if (!filePart || filePart.type !== "file") throw new Error("Expected viewed image file.")
-      expect(
-        new Uint8Array(
-          await new Response(await sixb.blobStorage.open(filePart.fileRef.blobId)).arrayBuffer()
-        )
-      ).toEqual(TEST_PNG_BYTES)
+      // Viewing is work, not a deliverable: the image stays in the trace only.
+      expect(assistant?.parts.some((part) => part.type === "file")).toBe(false)
       expect(
         sandboxes.sandboxes[0]?.writtenFiles.some((file) =>
           file.path.includes(".sixb/agent/artifacts/")
@@ -8623,6 +8659,8 @@ describe("AgentWorker", () => {
         { label: "run terminal after cancel" }
       )
       expect(run.status).toBe("cancelled")
+      // A user's own stop is not an interruption: nothing is offered to resume it.
+      expect(run.finishReason).toBeUndefined()
 
       // The thread is released, so the user can immediately steer with a new message.
       const thread = await storage.threads.getById({
@@ -8794,6 +8832,36 @@ describe("AgentWorker", () => {
     } finally {
       await worker.stop()
     }
+  })
+
+  test("keeps the partial answer of a turn interrupted by a worker stop, ready to resume", async () => {
+    // Regression proof: drop `stopSignal` from the worker's runAgentTurn call; the run ends with no
+    // finish reason, like a user's own stop.
+    const partial = "Let me start by checking the pipeline logs"
+    const controlled = partialTextThenBlockingModel(partial)
+    const sixb = buildSixb(controlled.model, new InMemoryBroker(), new RecordingSandboxFactory())
+    const storage = agentStorageOf(sixb)
+    const request = await requestAgent(sixb, { text: "go" })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    await controlled.waitForStarted()
+    await waitFor(
+      async () => {
+        const records = await listRunStreamRecords(sixb.broker, request.run.id)
+        return JSON.stringify(records).includes(partial) ? true : null
+      },
+      { label: "partial text streamed" }
+    )
+    await worker.stop()
+
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })).toMatchObject(
+      { status: "cancelled", finishReason: "interrupted" }
+    )
+    const assistant = (await listMessages(storage, request.run.threadId)).find(
+      (message) => message.role === "assistant"
+    )
+    expect(assistant?.parts).toContainEqual({ type: "text", text: partial })
   })
 
   test("publishes UI chunks before appending the finalized assistant message", async () => {
@@ -8991,66 +9059,264 @@ describe("AgentWorker", () => {
     await expect(promise).rejects.toMatchObject({ code: "active_run_exists" })
   })
 
-  test("reclaims a crashed run on redelivery and completes it (attempt++)", async () => {
-    const sixb = buildSixbWithEchoTool(toolThenAnswerModel())
+  test("ends a crashed turn as interrupted on redelivery without calling the model", async () => {
+    // Regression proof: drop the running-run branch in AgentWorker.execute; the turn is replayed,
+    // the model is called again, and the run succeeds on attempt 2.
+    const model = toolThenAnswerModel()
+    const sixb = buildSixbWithEchoTool(model)
     const storage = agentStorageOf(sixb)
+    const modelCalls = spyOn(model, "stream")
 
-    // Trigger normally, then simulate a worker that crashed after starting the durable run. The
-    // redelivered queue job rotates its execution token before continuing.
-    const {
-      run: { id: runId },
-    } = await requestAgent(sixb, {
-      text: "echo hi",
-    })
-    const crashedRunId = runId
+    // Trigger normally, then simulate a worker that crashed after starting the durable run: its
+    // projected lease has lapsed, as it has whenever the queue redelivers a dead delivery's job.
+    const request = await requestAgent(sixb, { text: "echo hi" })
+    const crashedExecution = {
+      ...freshTestExecution(),
+      queueLeaseExpiresAt: new Date(Date.now() - 1),
+    }
     await storage.runs.start({
-      id: crashedRunId,
+      id: request.run.id,
       projectId: PROJECT_ID,
-      execution: freshTestExecution(),
+      execution: crashedExecution,
     })
-    // Regression guard: hard-code the recorder attempt to 1 instead of using the reclaimed durable
-    // run and this captures [1, 1], even though the terminal run correctly reports attempt 2.
-    const recordedAttempts: number[] = []
-    const workerHost = withStorage(
-      sixb,
-      withAiUsageRecordInterceptor(sixb.storage, async (input, record) => {
-        recordedAttempts.push(input.attempt)
-        return record()
-      })
-    )
 
-    const worker = new AgentWorker(workerHost, workerOptions())
+    const worker = new AgentWorker(sixb, workerOptions())
     await worker.start()
     try {
-      const reclaimed = await waitFor(
+      const interrupted = await waitFor(
         async () => {
-          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: crashedRunId })
+          const run = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
           return run && run.status !== "queued" && run.status !== "running" ? run : null
         },
-        { label: "crashed run reclaimed + finished" }
+        { label: "crashed run interrupted" }
       )
-      expect(reclaimed.status).toBe("succeeded")
-      expect(reclaimed.attempt).toBe(2)
-      expect(recordedAttempts).toEqual([2, 2])
-
-      const streamRecords = await listRunStreamRecords(sixb.broker, crashedRunId)
-      expect(
-        streamRecords.find((record) => record.name === "agent.run.started")?.payload
-      ).toMatchObject({
-        type: "agent.run.started",
-        runId: crashedRunId,
+      expect(interrupted).toMatchObject({
+        status: "cancelled",
+        finishReason: "interrupted",
         attempt: 2,
+        error: { code: "runtime.cancelled" },
       })
+      expect(modelCalls).not.toHaveBeenCalled()
+      expect(
+        (await listMessages(storage, request.run.threadId)).filter((m) => m.role === "assistant")
+      ).toHaveLength(0)
+      expect(
+        await storage.threads.getById({ projectId: PROJECT_ID, id: request.run.threadId })
+      ).toMatchObject({ activeRunId: null })
+
+      const streamRecords = await listRunStreamRecords(sixb.broker, request.run.id)
+      expect(streamRecords.some((record) => record.name === "agent.run.started")).toBe(false)
       expect(
         streamRecords.find((record) => record.name === "agent.run.finished")?.payload
       ).toMatchObject({
         type: "agent.run.finished",
-        status: "succeeded",
-        runId: crashedRunId,
+        status: "cancelled",
+        finishReason: "interrupted",
         attempt: 2,
       })
+
+      // The dead delivery's token was rotated before the run ended, so it can write nothing.
+      await expect(
+        storage.runs.finish({
+          projectId: PROJECT_ID,
+          id: request.run.id,
+          executionToken: crashedExecution.token,
+          status: "succeeded",
+        })
+      ).rejects.toBeInstanceOf(AgentStorageError)
     } finally {
       await worker.stop()
+      modelCalls.mockRestore()
+    }
+  })
+
+  test("leaves a turn whose delivery still holds its lease to that delivery", async () => {
+    // Regression proof: drop the projected-lease check in AgentWorker.execute; the duplicate job
+    // ends the live turn as interrupted.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const request = await requestAgent(sixb, { text: "hello" })
+    const [delivered] = await sixb.queues.agents.claim({
+      projectId: PROJECT_ID,
+      workerId: "live-owner",
+      leaseMs: 60_000,
+    })
+    if (!delivered) throw new Error("Expected the request's job.")
+    await sixb.queues.agents.complete({
+      projectId: PROJECT_ID,
+      jobId: delivered.job.id,
+      leaseId: delivered.leaseId,
+    })
+    const ownerExecution = freshTestExecution()
+    await storage.runs.start({
+      id: request.run.id,
+      projectId: PROJECT_ID,
+      execution: ownerExecution,
+    })
+    await sixb.queues.agents.enqueue({
+      projectId: PROJECT_ID,
+      jobs: [{ type: "agent.run.requested", payload: { runId: request.run.id } }],
+    })
+    const retries: (string | undefined)[] = []
+    const retry = sixb.queues.agents.retry.bind(sixb.queues.agents)
+    const retried = spyOn(sixb.queues.agents, "retry").mockImplementation(async (input) => {
+      retries.push(input.availableAt)
+      await retry(input)
+    })
+
+    const worker = new AgentWorker(sixb, workerOptions())
+    await worker.start()
+    try {
+      await waitFor(async () => (retries.length > 0 ? retries : null), {
+        label: "duplicate job deferred",
+      })
+      expect(retries[0]).toBe(ownerExecution.queueLeaseExpiresAt.toISOString())
+      expect(
+        await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+      ).toMatchObject({ status: "running", attempt: 1, execution: { token: ownerExecution.token } })
+    } finally {
+      await worker.stop()
+      retried.mockRestore()
+    }
+  })
+
+  test("retries a turn's preparation in place instead of leaving it to a redelivery", async () => {
+    // Regression proof: rethrow every failure from retryPreparationInPlace; the run fails on the
+    // first storage blip.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const { host, reads } = withFailingExecutionReads(sixb, (read) => read === 1)
+
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      const request = await requestAgent(sixb, { text: "hello" })
+      const run = await waitFor(
+        async () => {
+          const current = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+          return current && current.status !== "queued" && current.status !== "running"
+            ? current
+            : null
+        },
+        { label: "run prepared after a storage blip" }
+      )
+      expect(run).toMatchObject({ status: "succeeded", attempt: 1 })
+      expect(reads.count).toBeGreaterThanOrEqual(2)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  test("fails the turn in place once preparation retries reach the delivery cap", async () => {
+    // Regression proof: rethrow preparation failures for a redelivery instead of recording them;
+    // the job is retried and the thread stays locked.
+    const sixb = buildSixb(answerModel())
+    attachSixbErrorReporter(sixb, () => {})
+    const storage = agentStorageOf(sixb)
+    const { host, reads } = withFailingExecutionReads(sixb, () => true)
+    const request = await requestAgent(sixb, { text: "hello" })
+    // Spend earlier deliveries so this one starts one retry short of the cap.
+    for (let attempt = 1; attempt < MAX_AGENT_DELIVERY_ATTEMPTS - 1; attempt += 1) {
+      const [claimed] = await sixb.queues.agents.claim({ projectId: PROJECT_ID, workerId: "spent" })
+      if (!claimed) throw new Error("Expected the request's job.")
+      await sixb.queues.agents.retry({
+        projectId: PROJECT_ID,
+        jobId: claimed.job.id,
+        leaseId: claimed.leaseId,
+      })
+    }
+    const retried = spyOn(sixb.queues.agents, "retry")
+
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    try {
+      const run = await waitFor(
+        async () => {
+          const current = await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })
+          return current && current.status !== "queued" && current.status !== "running"
+            ? current
+            : null
+        },
+        { label: "run failed after its last preparation retry" }
+      )
+      expect(run).toMatchObject({ status: "failed", attempt: 1 })
+      expect(reads.count).toBe(2)
+      expect(
+        await storage.threads.getById({ projectId: PROJECT_ID, id: request.run.threadId })
+      ).toMatchObject({ activeRunId: null })
+      expect(retried).not.toHaveBeenCalled()
+    } finally {
+      await worker.stop()
+      retried.mockRestore()
+    }
+  })
+
+  test("ends a turn stopped during its preparation backoff as interrupted", async () => {
+    // Regression proof: record the raw abort for a worker stop in AgentWorker.execute's catch;
+    // the run has no finish reason and nothing to resume.
+    const sixb = buildSixb(answerModel())
+    const storage = agentStorageOf(sixb)
+    const { host, reads } = withFailingExecutionReads(sixb, () => true)
+    const request = await requestAgent(sixb, { text: "hello" })
+
+    const worker = new AgentWorker(host, workerOptions())
+    await worker.start()
+    await waitFor(async () => (reads.count > 0 ? true : null), { label: "first blip" })
+    await worker.stop()
+
+    expect(await storage.runs.getById({ projectId: PROJECT_ID, id: request.run.id })).toMatchObject(
+      { status: "cancelled", finishReason: "interrupted" }
+    )
+    expect(
+      await storage.threads.getById({ projectId: PROJECT_ID, id: request.run.threadId })
+    ).toMatchObject({ activeRunId: null })
+  })
+
+  test("keeps a deferred duplicate deferred, even during shutdown or under clock skew", async () => {
+    // Regression proof: drop the AgentRunOwnedElsewhereError case from onAbortError; a duplicate
+    // delivered during shutdown is failed and its live run is orphaned.
+    const sixb = buildSixb(answerModel())
+    const worker = new InspectableAgentWorker(sixb, workerOptions({ skillsDir: false }))
+    const now = new Date().toISOString()
+    const claimed: ClaimedQueueJob<AgentQueueJob> = {
+      leaseId: "lease-1",
+      claimedAt: now,
+      leaseExpiresAt: now,
+      job: {
+        id: "job-1",
+        projectId: PROJECT_ID,
+        createdAt: now,
+        availableAt: now,
+        attempt: 2,
+        type: "agent.run.requested",
+        payload: { runId: "run-1" },
+      },
+    }
+    const ownedUntil = new Date(Date.now() + 60_000)
+    const owned = new AgentRunOwnedElsewhereError("run-1", ownedUntil)
+    for (const decision of [
+      await worker.decideExecutionError(claimed, owned),
+      worker.decideAbortError(claimed, owned),
+    ]) {
+      expect(decision).toEqual({ kind: "retry", availableAt: ownedUntil.toISOString() })
+    }
+
+    // A lease that lapses in a moment, or by a skewed clock already has, still waits a second.
+    const skewed = new AgentRunOwnedElsewhereError("run-1", new Date(Date.now() + 10))
+    const decision = await worker.decideExecutionError(claimed, skewed)
+    expect(decision.kind).toBe("retry")
+    expect(
+      Date.parse(decision.kind === "retry" ? (decision.availableAt ?? "") : "")
+    ).toBeGreaterThanOrEqual(Date.now() + 900)
+  })
+
+  test("lets whichever stop fired first decide whether a turn was interrupted", () => {
+    for (const first of ["user", "worker"] as const) {
+      const user = new AbortController()
+      const worker = new AbortController()
+      const turn = AbortSignal.any([worker.signal, user.signal])
+      for (const stop of first === "user" ? [user, worker] : [worker, user]) stop.abort()
+      expect(stoppedByWorker(turn, worker.signal)).toBe(first === "worker")
     }
   })
 
@@ -9385,7 +9651,9 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("cancels the run when the worker is stopped mid-turn", async () => {
+  test("ends the turn as interrupted when the worker is stopped mid-turn", async () => {
+    // Regression proof: record the raw error instead of AgentTurnInterruptedError for a worker
+    // stop in AgentWorker.execute; the run has no finish reason and nothing to resume.
     // A model whose stream blocks until the call is aborted, so the turn is reliably in-flight.
     const blockingModel = new WorkerTestModel({
       modelId: "mock-model",
@@ -9424,7 +9692,7 @@ describe("AgentWorker", () => {
     await worker.stop()
 
     const list = await storage.runs.list({ projectId: PROJECT_ID, threadId })
-    expect(list.runs[0]?.status).toBe("cancelled")
+    expect(list.runs[0]).toMatchObject({ status: "cancelled", finishReason: "interrupted" })
     expect(
       (await listRunStreamRecords(sixb.broker, runId)).find(
         (record) => record.name === "agent.run.finished"
@@ -9432,6 +9700,7 @@ describe("AgentWorker", () => {
     ).toMatchObject({
       type: "agent.run.finished",
       status: "cancelled",
+      finishReason: "interrupted",
       runId,
       attempt: 1,
     })
