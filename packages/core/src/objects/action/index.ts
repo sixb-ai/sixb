@@ -1,3 +1,3 @@
-export { ActionRunFailedError, ActionRunTimeoutError, ActionValidationError } from "./errors"
-export type { RequestActionAndWaitOptions, RequestActionOptions } from "./request"
-export { requestAction, requestActionAndWait } from "./request"
+export { ActionRunFailedError, ActionValidationError } from "./errors"
+export type { RequestActionOptions } from "./request"
+export { requestAction } from "./request"

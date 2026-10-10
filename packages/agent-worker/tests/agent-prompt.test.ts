@@ -168,7 +168,7 @@ describe("agent system prompt", () => {
     expect(prompt).toContain("preserve every `objectTypeId` and `primaryId` byte-for-byte")
     expect(prompt).toContain("its `inputSchema` is the exact JSON shape")
     expect(prompt).toContain('`{"objectTypeId":"Type","primaryId":"opaque:id"}`')
-    expect(prompt).toContain("--file - --wait")
+    expect(prompt).toContain("`sixb actions request <action-id> --file -`;")
     expect(prompt).toContain("Never inspect the environment to infer identifiers")
     expect(prompt).toContain("Use `--run-id` only for a request-specific idempotency key")
     expect(prompt).not.toContain("Agent Skills are installed")

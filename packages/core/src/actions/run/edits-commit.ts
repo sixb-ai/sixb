@@ -6,7 +6,7 @@ import { commitActionEdits } from "../commit-edits"
 import type { ActionReadRecorder } from "../read-facade"
 import { isObjectActionDefinition } from "../validation"
 import { type BasePhaseContext, requireObjectSubject, toActionReadFacade } from "./context"
-import { translateActionPhaseError } from "./normalize"
+import { throwIfAborted, translateActionPhaseError } from "./normalize"
 import type {
   LoadedObjectTarget,
   PhaseExecutionBase,
@@ -21,6 +21,9 @@ import type {
  * a query or listing returned, are captured as expected revisions so a commit fails when that state
  * changes. Query membership and telemetry history stay call-level snapshots. Domain events are
  * durable outbox facts written inside the commit, so this phase never appends events itself.
+ *
+ * `signal` stops the edits handler and the step before the commit; the commit itself is never
+ * interrupted.
  */
 export async function runEditsAndCommitPhase(
   input: PhaseExecutionBase & {
@@ -71,6 +74,7 @@ export async function runEditsAndCommitPhase(
       async ({ objects }) => {
         const baseContext = {
           ...input.baseContext,
+          signal: input.signal,
           objects,
           read: toActionReadFacade(input.runtime, reads),
           writeback: input.writeback,
@@ -98,6 +102,7 @@ export async function runEditsAndCommitPhase(
     })
   }
 
+  throwIfAborted(input.signal)
   run = await input.runtime.actionRunsStorage.enterPhase({
     projectId: input.runtime.id,
     id: input.run.id,
@@ -116,10 +121,10 @@ export async function runEditsAndCommitPhase(
       dependencies: reads.dependencies(),
     })
   } catch (error) {
+    // The commit ran to its end whatever `signal` did meanwhile, so its error is never a timeout.
     throw translateActionPhaseError(error, "commit", {
       actionId: input.action.id,
       runId: input.run.id,
-      signal: input.signal,
     })
   }
 

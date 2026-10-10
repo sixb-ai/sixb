@@ -1,7 +1,7 @@
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
 import type { ActionRunRecord, ObjectRow } from "../../storage"
 import type { ActionDefinition, ActionTargetObject } from "../types"
-import type { RunActionJobInput } from "./types"
+import type { ActionRunContext } from "./types"
 
 export type LoadedObjectTarget = {
   readonly subjectObjectType: ObjectTypeWithPropertyTokens
@@ -11,8 +11,9 @@ export type LoadedObjectTarget = {
 }
 
 export type PhaseExecutionBase = {
-  readonly runtime: RunActionJobInput["runtime"]
+  readonly runtime: ActionRunContext
   readonly action: ActionDefinition
+  /** The signal this phase's handler runs under; see `ActionRunSignals`. */
   readonly signal: AbortSignal
 }
 

@@ -1,10 +1,10 @@
 # @sixb/action-worker
 
-Worker that runs Sixb action requests.
+Worker that runs Sixb action jobs from `queues.actions`.
 
-`sixb.objects(T).byId(id).requestAction(...)` enqueues; this worker is what dequeues, runs the action
-handler, and records the run in `storage.actionRuns`. Nothing runs inline — if no action worker is
-running, requests accumulate in the queue.
+Requesting an action does not enqueue one: `sixb.actions.request(...)` and
+`sixb.objects(T).byId(id).requestAction(...)` run the action in the requesting process. This worker
+only runs jobs already in the queue, and records each run in `storage.actionRuns`.
 
 ## Install
 

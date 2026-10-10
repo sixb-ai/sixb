@@ -4,6 +4,7 @@ import {
   type DatasetDefinition,
   type DatasetRow,
   type DomainEventLog,
+  defineAction,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -810,6 +811,44 @@ describe("startSixbRuntime", () => {
       "blob-storage:stop",
       "logger:stop",
     ])
+  })
+
+  // A stopping API closed its client connections already; the Actions they requested still run.
+  // Guard proof: drop the `drainActionRuns` call from `stopSixbProviders` (`src/lib/runtime.ts`),
+  // and storage closes while the writeback is still in flight.
+  test("waits for in-flight Actions before closing storage", async () => {
+    const calls: string[] = []
+    const started = deferred<void>()
+    const release = deferred<void>()
+    const slow = defineAction("slow")
+      .params({})
+      .writeback(async () => {
+        calls.push("writeback:start")
+        started.resolve()
+        await release.promise
+        calls.push("writeback:done")
+      })
+    const sixb = new SixbHost({
+      id: "cli-action-drain",
+      ontology: [Transaction],
+      actions: [slow],
+      broker: new InMemoryBroker(),
+      storage: new ClosableStorage(calls),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+
+    const run = createTestSixb(sixb).actions.request({ actionId: "slow" })
+    await started.promise
+    const stopping = stopSixbProviders(sixb)
+    await Bun.sleep(0)
+    expect(calls).toEqual(["writeback:start"])
+
+    release.resolve()
+    await expect(run).resolves.toMatchObject({ status: "succeeded" })
+    await stopping
+    expect(calls).toEqual(["writeback:start", "writeback:done", "storage:stop"])
   })
 
   test("flushes delivery failures reported during broker shutdown", async () => {

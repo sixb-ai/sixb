@@ -237,28 +237,6 @@ export function ObjectTypeSchemaView({ parsed }: CommandViewProps) {
   )
 }
 
-/** `sixb actions request` — a calm confirmation that a run was requested. */
-export function ActionResultView({ parsed }: CommandViewProps) {
-  const result = isRecord(parsed.json) ? parsed.json : null
-  const runId = result && typeof result.runId === "string" ? result.runId : null
-  if (!runId) return <StructuredDataView parsed={parsed} />
-
-  const created = result?.created !== false
-  const queuedAt = typeof result?.queuedAt === "string" ? result.queuedAt : undefined
-
-  return (
-    <div className="space-y-1">
-      <p className="text-foreground">
-        {created ? "Action requested." : "Action already in progress."}
-      </p>
-      <p className="text-[11px] text-muted-foreground/60">
-        Run <span className="font-mono text-muted-foreground">{runId}</span>
-        {queuedAt ? ` · queued ${formatRelativeTime(queuedAt)}` : ""}
-      </p>
-    </div>
-  )
-}
-
 const STATUS_DOT: Record<string, string> = {
   succeeded: "bg-emerald-500",
   failed: "bg-destructive",
@@ -267,7 +245,7 @@ const STATUS_DOT: Record<string, string> = {
   cancelled: "bg-muted-foreground/40",
 }
 
-/** `sixb action-runs get` — the run's status, timing, and any error. */
+/** `sixb actions request` and `sixb action-runs get` — the run's status, timing, and error. */
 export function ActionRunView({ parsed }: CommandViewProps) {
   const run = isRecord(parsed.json) ? parsed.json : null
   if (!run) return <StructuredDataView parsed={parsed} />

@@ -226,12 +226,13 @@ describe("agent API gateway", () => {
         }),
       })
     )
-    expect(action.status).toBe(202)
-    const actionRun = (await action.json()) as { runId: string }
+    expect(action.status).toBe(200)
+    const actionRun = (await action.json()) as { id: string }
+    expect(actionRun).toMatchObject({ actionId: "label-device", status: "succeeded" })
     const actionRuns = await app.fetch(new Request(`${gatewayBaseUrl}/api/action-runs`))
     expect(actionRuns.status).toBe(200)
     await expect(actionRuns.json()).resolves.toMatchObject({
-      runs: [expect.objectContaining({ id: actionRun.runId, actionId: "label-device" })],
+      runs: [expect.objectContaining({ id: actionRun.id, actionId: "label-device" })],
     })
 
     const workflows = await app.fetch(new Request(`${gatewayBaseUrl}/api/workflows`))
@@ -522,10 +523,11 @@ describe("agent API gateway", () => {
         actionParamsPath,
       ])
       expect(action.exitCode).toBe(0)
-      const actionResult = JSON.parse(action.stdout) as { runId: string }
+      const actionResult = JSON.parse(action.stdout) as { id: string }
       expect(actionResult).toMatchObject({
-        created: true,
-        runId: expect.any(String),
+        id: expect.any(String),
+        actionId: "label-device",
+        status: "succeeded",
       })
 
       const actionRuns = await runAgentCli(baseUrl.href, [
@@ -536,7 +538,7 @@ describe("agent API gateway", () => {
       ])
       expect(actionRuns.exitCode).toBe(0)
       expect(JSON.parse(actionRuns.stdout)).toMatchObject({
-        runs: [expect.objectContaining({ id: actionResult.runId, actionId: "label-device" })],
+        runs: [expect.objectContaining({ id: actionResult.id, actionId: "label-device" })],
         hasMore: false,
       })
 

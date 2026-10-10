@@ -1,6 +1,7 @@
 import { ActionWorker } from "@sixb/action-worker"
 import { AgentWorker } from "@sixb/agent-worker"
 import { migrateStorage } from "@sixb/core"
+import { ACTION_RUN_DRAIN_TIMEOUT_MS, drainActionRuns } from "@sixb/core/internal/actions"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { PipelineRunDispatcher } from "@sixb/core/internal/pipelines"
 import {
@@ -99,6 +100,10 @@ export async function checkRuntimeLakeDefinitions(sixb: LoadedSixbHost): Promise
 }
 
 export async function stopSixbProviders(sixb: LoadedSixbHost): Promise<void> {
+  // Actions run inside the request that asked for them, and a client that disconnects does not stop
+  // them: refuse new ones and give those in flight time to finish before closing what they use, so
+  // a retry under the same run id finds a terminal run instead of one left in progress.
+  await stopQuietly(() => drainActionRuns(sixb, ACTION_RUN_DRAIN_TIMEOUT_MS))
   await stopQuietly(() => flushSixbErrors(sixb))
   await stopQuietly(() => sixb.closeConnectors())
   await stopQuietly(() => closeProvider(sixb.queues))

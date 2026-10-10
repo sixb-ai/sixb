@@ -1,7 +1,7 @@
 import type { SixbHostView } from "@sixb/core"
-import type { ActionRunRecord } from "@sixb/core/storage"
 import type { Elysia } from "elysia"
 import { z } from "zod"
+import { serializeActionRunDetail, serializeActionRunSummary } from "../actions/serialize"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import {
@@ -15,7 +15,6 @@ import {
   ActionRunDetailSchema,
   ActionRunIdParamsSchema,
   ActionRunListResponseSchema,
-  ActionRunSummarySchema,
   ActionRunsQuerySchema,
 } from "../schemas/actions"
 import { ErrorResponseSchema } from "../schemas/common"
@@ -24,7 +23,6 @@ import {
   handleRouteError,
   parseDate,
   parseOptionalInt,
-  toIsoString,
   unconfiguredStorageResponse,
 } from "../utils/http"
 
@@ -37,57 +35,6 @@ const ActionRunFileContentQuerySchema = FileContentQuerySchema.extend({
       "Action run file content paths must start with /params/ or /writeback/result/"
     ),
 })
-
-function serializeActionRunSummary(
-  run: ActionRunRecord
-): ReturnType<typeof ActionRunSummarySchema.parse> {
-  return ActionRunSummarySchema.parse({
-    id: run.id,
-    projectId: run.projectId,
-    actionId: run.actionId,
-    subject: run.subject,
-    status: run.status,
-    phase: run.phase,
-    queuedAt: toIsoString(run.queuedAt),
-    startedAt: run.startedAt ? toIsoString(run.startedAt) : undefined,
-    finishedAt: run.finishedAt ? toIsoString(run.finishedAt) : undefined,
-    error: run.error,
-  })
-}
-
-function serializeActionRunDetail(
-  run: ActionRunRecord
-): ReturnType<typeof ActionRunDetailSchema.parse> {
-  return ActionRunDetailSchema.parse({
-    ...serializeActionRunSummary(run),
-    params: run.params,
-    writeback: run.writeback
-      ? run.writeback.status === "succeeded"
-        ? {
-            status: "succeeded",
-            completedAt: toIsoString(run.writeback.completedAt),
-            result: run.writeback.result,
-          }
-        : {
-            status: "failed",
-            completedAt: toIsoString(run.writeback.completedAt),
-            error: run.writeback.error,
-          }
-      : undefined,
-    effects: run.effects
-      ? run.effects.status === "succeeded"
-        ? {
-            status: "succeeded",
-            completedAt: toIsoString(run.effects.completedAt),
-          }
-        : {
-            status: "failed",
-            completedAt: toIsoString(run.effects.completedAt),
-            error: run.effects.error,
-          }
-      : undefined,
-  })
-}
 
 async function actionRunFileContentResponse(
   host: SixbHostView,

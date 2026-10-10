@@ -5,13 +5,12 @@ import type { ActionEditCommitResult } from "../commit-edits"
 import { isObjectActionDefinition } from "../validation"
 import { type BasePhaseContext, requireObjectSubject, toActionRuntimeFacade } from "./context"
 import { toActionRunFailure, translateActionPhaseError } from "./normalize"
-import type { LoadedObjectTarget, PhaseExecutionBase, UpdateActiveRun } from "./phase-types"
+import type { PhaseExecutionBase, UpdateActiveRun } from "./phase-types"
 
 export async function runEffectsPhase(
   input: PhaseExecutionBase & {
     readonly run: ActionRunRecord
     readonly baseContext: BasePhaseContext
-    readonly objectTarget: LoadedObjectTarget | null
     readonly writeback: JsonValue | undefined
     readonly commit: ActionEditCommitResult
     readonly updateActiveRun: UpdateActiveRun
@@ -33,6 +32,7 @@ export async function runEffectsPhase(
       const effects = input.action.phases.effects
       await effects({
         ...input.baseContext,
+        signal: input.signal,
         subject: requireObjectSubject(input.run.subject, {
           actionId: input.action.id,
           runId: input.run.id,
@@ -45,6 +45,7 @@ export async function runEffectsPhase(
       const effects = input.action.phases.effects
       await effects({
         ...input.baseContext,
+        signal: input.signal,
         sixb: toActionRuntimeFacade(input.runtime),
         writeback: input.writeback,
         commit: input.commit,

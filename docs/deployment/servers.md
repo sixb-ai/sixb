@@ -91,7 +91,7 @@ Turn off `app` when the project has no custom app. The scheduler and rules proce
 | `orchestrator`, `scheduler`, `rules` | `env`, `process`. Each always runs as one process. |
 | `workers` | `types` (default: every type the project registers work for), `concurrency` per type (action jobs run one at a time), `agentTurnTimeout` such as `"10m"`, `env`, `process` |
 
-`process` sets `maxMemory` (restart a process that grows past a size such as `"512M"`), `killTimeoutMs` (how long a stopping process may take; default 10000), and `restartDelayMs` (the wait before restarting a process that exited, growing with each restart; default 1000). For `workers` and your own processes, `instances` runs several copies.
+`process` sets `maxMemory` (restart a process that grows past a size such as `"512M"`), `killTimeoutMs` (how long a stopping process may take; default 10000, and 40000 for `api`, which first waits up to 35 seconds for the Actions it is running), and `restartDelayMs` (the wait before restarting a process that exited, growing with each restart; default 1000). For `workers` and your own processes, `instances` runs several copies.
 
 ### Your own processes
 

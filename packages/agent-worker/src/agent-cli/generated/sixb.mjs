@@ -451,11 +451,11 @@ History options:
   actions: `Usage:
   sixb actions list [--type <object-type>]
   sixb actions get <action-id>
-  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>] [--wait]
+  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>]
 
 \`actions get\` includes inputSchema, the exact JSON shape accepted by the Action. The JSON file
-contains that parameter object; use - to read standard input. --wait returns the terminal Action
-run and waits at most 25 seconds.`,
+contains that parameter object; use - to read standard input. \`actions request\` runs the Action
+and prints its finished run, with its status and any error.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>
@@ -590,15 +590,13 @@ async function actions(api, args) {
       "--subject-type": "string",
       "--subject-id": "string",
       "--file": "string",
-      "--run-id": "string",
-      "--wait": "boolean"
+      "--run-id": "string"
     }, "actions request", 1);
     const actionId = positionals[0] ?? "";
     const subjectType = options["--subject-type"];
     const subjectId = options["--subject-id"];
     const paramsSource = options["--file"];
     const runId = options["--run-id"];
-    const wait = options["--wait"];
     if (Boolean(subjectType) !== Boolean(subjectId)) {
       fail("--subject-type and --subject-id must be provided together.");
     }
@@ -606,41 +604,13 @@ async function actions(api, args) {
     if (Array.isArray(params) || typeof params !== "object" || params === null) {
       fail("Action params must be a JSON object.");
     }
-    const requested = await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
+    return writeJson(await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
       params,
       ...subjectType && subjectId ? { subject: { kind: "object", objectTypeId: subjectType, primaryId: subjectId } } : {},
       ...runId ? { runId } : {}
-    });
-    if (!wait)
-      return writeJson(requested);
-    const requestedRunId = asRecord2(requested).runId;
-    if (typeof requestedRunId !== "string" || requestedRunId.length === 0) {
-      throw new CliError({
-        code: "invalid_api_response",
-        message: "The Action request response did not contain a run id."
-      }, EXIT_API);
-    }
-    return writeJson(await waitForActionRun(api, requestedRunId));
+    }));
   }
   fail(`Unknown actions command '${sub}'.`);
-}
-var ACTION_WAIT_TIMEOUT_MS = 25000;
-var ACTION_WAIT_POLL_MS = 250;
-var TERMINAL_ACTION_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
-async function waitForActionRun(api, runId) {
-  const startedAt = Date.now();
-  while (Date.now() - startedAt < ACTION_WAIT_TIMEOUT_MS) {
-    const run = await api.get(`/api/action-runs/${encodeURIComponent(runId)}`);
-    const status = asRecord2(run).status;
-    if (typeof status === "string" && TERMINAL_ACTION_STATUSES.has(status))
-      return run;
-    await new Promise((resolve) => setTimeout(resolve, ACTION_WAIT_POLL_MS));
-  }
-  throw new CliError({
-    code: "action_wait_timeout",
-    message: `Action run '${runId}' did not finish within ${ACTION_WAIT_TIMEOUT_MS / 1000} seconds.`,
-    hint: `Inspect it with 'sixb action-runs get ${runId}'.`
-  }, EXIT_API);
 }
 
 // ../cli-core/src/commands/files.ts

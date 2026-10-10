@@ -66,7 +66,7 @@ See [OAuth connection flows](../../docs/connectors/authentication.md#connect-an-
 | `GET` | `/api/status` | Runtime status (object type and function counts) |
 | `GET` | `/api/actions` | List registered actions |
 | `GET` | `/api/actions/:actionId` | Get action metadata |
-| `POST` | `/api/actions/:actionId` | Request an action (`subject` is optional for global actions) |
+| `POST` | `/api/actions/:actionId` | Run an action and return its finished run (`subject` is optional for global actions) |
 | `GET` | `/api/object-types` | List registered object types |
 | `GET` | `/api/object-types/:objectTypeId` | Get object type definition |
 | `GET` | `/api/objects` | List objects (`?objectTypeId=&idPrefix=&limit=&offset=&orderBy=&order=`) |

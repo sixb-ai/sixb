@@ -182,11 +182,11 @@ History options:
   actions: `Usage:
   sixb actions list [--type <object-type>]
   sixb actions get <action-id>
-  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>] [--wait]
+  sixb actions request <action-id> [--subject-type <type> --subject-id <id>] [--file <path|->] [--run-id <id>]
 
 \`actions get\` includes inputSchema, the exact JSON shape accepted by the Action. The JSON file
-contains that parameter object; use - to read standard input. --wait returns the terminal Action
-run and waits at most 25 seconds.`,
+contains that parameter object; use - to read standard input. \`actions request\` runs the Action
+and prints its finished run, with its status and any error.`,
   "action-runs": `Usage:
   sixb action-runs list [options]
   sixb action-runs get <run-id>

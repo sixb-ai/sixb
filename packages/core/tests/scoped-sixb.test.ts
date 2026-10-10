@@ -18,6 +18,7 @@ import {
   defineSync,
   defineWorkflow,
   defineWorkflowStep,
+  every,
   link,
   type PipelineDefinition,
   prop,
@@ -148,6 +149,7 @@ const blindWriters = defineGroup("blind-writers")
 const ingest = defineGroup("ingest")
 const linkers = defineGroup("linkers")
 const blindLinkers = defineGroup("blind-linkers")
+const broadSenders = defineGroup("broad-senders")
 
 const contractOperator = defineRole("contract.operator", {
   grantedTo: [commercial],
@@ -157,6 +159,12 @@ const contractOperator = defineRole("contract.operator", {
 const invoiceViewer = defineRole("invoice.viewer", {
   grantedTo: [finance],
   grants: [can.view(Invoice)],
+})
+
+// View on every type but one subtype: a broad grant does not reach the types it excepts.
+const broadContractSender = defineRole("contract.broad-sender", {
+  grantedTo: [broadSenders],
+  grants: [can.view(every.object().except([SignedContract])), can.apply(sendContract)],
 })
 
 // Apply without view — object actions must require both grants.
@@ -235,6 +243,7 @@ function createRuntime() {
       ingest,
       linkers,
       blindLinkers,
+      broadSenders,
     ],
     roles: [
       contractOperator,
@@ -247,6 +256,7 @@ function createRuntime() {
       contractIngestor,
       invoiceLinker,
       blindInvoiceLinker,
+      broadContractSender,
     ],
     ...createTestRuntimeDeps(),
   })
@@ -418,10 +428,10 @@ describe("bound Sixb actions", () => {
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
     const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
-    const { runId } = await operator
+    const run = await operator
       .objects(Contract)
       .requestAction({ id: "c1", actionId: "send-contract" })
-    expect(runId).toBeString()
+    expect(run.status).toBe("succeeded")
 
     // view without apply
     await sixb.objects(Invoice).upsert({ properties: { id: "i1" } })
@@ -452,6 +462,52 @@ describe("bound Sixb actions", () => {
     expect(
       senderOnly.objects(Contract).requestAction({ id: "c1", actionId: "send-contract" })
     ).rejects.toThrow(AuthorizationError)
+  })
+
+  // Guard proof: drop the `object.view` check on the subject's type from `requestAction`
+  // (`actions/request.ts`), and the fresh request runs on a contract its caller cannot view. Drop
+  // `assertCanViewReplayedRun` as well, and the replay hands that caller the stored run.
+  test("object actions require visibility of the subject's own type", async () => {
+    const host = createRuntime()
+    await seedPrincipal(host)
+    const sixb = createTestSixb(host)
+    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
+    await sixb.objects(SignedContract).upsert({ properties: { id: "s1" } })
+    const signed = { kind: "object", objectTypeId: "signed-contract", primaryId: "s1" } as const
+    const broad = bindPrincipal(host, contextFor(host, ["broad-senders"]))
+
+    await expect(
+      broad.actions.request({
+        actionId: "send-contract",
+        subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
+      })
+    ).resolves.toMatchObject({ status: "succeeded" })
+
+    await expect(
+      broad.actions.request({ actionId: "send-contract", subject: signed, runId: "act_unseen" })
+    ).rejects.toThrow(AuthorizationError)
+    expect(
+      await host.storage.actionRuns?.getById({ projectId: host.id, id: "act_unseen" })
+    ).toBeNull()
+
+    // A run on the subtype, requested by someone who may view it, then replayed by both callers.
+    const run = await sixb.actions.request({
+      actionId: "send-contract",
+      subject: signed,
+      runId: "act_signed",
+    })
+    expect(run.status).toBe("succeeded")
+    await expect(
+      broad.actions.request({ actionId: "send-contract", subject: signed, runId: "act_signed" })
+    ).rejects.toThrow(AuthorizationError)
+    expect(await broad.actions.runs.getById("act_signed")).toBeNull()
+
+    // `view(Contract)` reaches its subtypes, so this caller may both request and read the run.
+    const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
+    await expect(
+      operator.actions.request({ actionId: "send-contract", subject: signed, runId: "act_signed" })
+    ).resolves.toEqual(run)
+    expect(await operator.actions.runs.getById("act_signed")).toEqual(run)
   })
 })
 
@@ -557,31 +613,15 @@ describe("bound Sixb operational access", () => {
     await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
 
     const operator = bindPrincipal(host, contextFor(host, ["commercial"]))
-    const { runId } = await operator.actions.request({
+    const run = await operator.actions.request({
       actionId: "send-contract",
       subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
     })
-    expect(runId).toBeString()
+    expect(run.status).toBe("succeeded")
 
     const runner = bindPrincipal(host, contextFor(host, ["operations"]))
     expect(
       runner.actions.request({
-        actionId: "send-contract",
-        subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
-      })
-    ).rejects.toThrow(AuthorizationError)
-  })
-
-  test("requestActionAndWait enforces the same grant as requestAction", async () => {
-    // It requests through `requestAction` and then only reads the run it just created, so the flat
-    // verb is safe to expose — but the assertion has to be pinned, not assumed from the call chain.
-    const host = createRuntime()
-    const sixb = createTestSixb(host)
-    await sixb.objects(Contract).upsert({ properties: { id: "c1" } })
-
-    const runner = bindPrincipal(host, contextFor(host, ["operations"]))
-    await expect(
-      runner.actions.requestAndWait({
         actionId: "send-contract",
         subject: { kind: "object", objectTypeId: "contract", primaryId: "c1" },
       })
@@ -1231,7 +1271,7 @@ describe("bound Sixb surface", () => {
       ].sort()
     )
     expect(Object.keys(scoped.actions).sort()).toEqual(
-      ["getById", "list", "listForType", "listGlobal", "request", "requestAndWait", "runs"].sort()
+      ["getById", "list", "listForType", "listGlobal", "request", "runs"].sort()
     )
     expect(Object.keys(scoped.datasets).sort()).toEqual(["getById", "ingest", "list"])
     expect(Object.keys(scoped.workflows).sort()).toEqual(

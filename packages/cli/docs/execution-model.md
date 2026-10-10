@@ -25,11 +25,16 @@ The orchestrator subscribes only to the event types its routes need, and fan-out
 (one event -> several jobs) is best-effort: a failure enqueuing one job never
 drops its siblings.
 
-Two paths skip the orchestrator. Requesting an [action](../../../docs/actions/overview.md)
-enqueues onto `queues.actions` directly (the `action.requested` event is an
-observation, not a route) and posting a message to an [agent](../../../docs/models/built-in-agent.md)
-thread enqueues onto `queues.agents`, while the API can enqueue a sync, pipeline,
-or workflow run on demand. All still flow through the queue/worker half of the model.
+Requesting an [action](../../../docs/actions/overview.md) skips the whole model: the
+requesting process persists the run, executes it, and returns its terminal record (the
+`action.requested` event is an observation, not a route). A process that stops
+gracefully refuses new action requests and waits up to 35 seconds for those it runs;
+one that crashes leaves their runs unfinished, with no job to resume them.
+
+Posting a message to an [agent](../../../docs/models/built-in-agent.md) thread skips the
+orchestrator and enqueues onto `queues.agents` directly, while the API can enqueue a
+sync, pipeline, or workflow run on demand. These still flow through the queue/worker
+half of the model.
 
 ### Queues and workers
 
@@ -42,7 +47,7 @@ queue.
 | `pipeline`   | `queues.pipelines`   | orchestrator (pipeline triggers), or API run-request |
 | `projection` | `queues.projections` | orchestrator, on `dataset.version.committed`         |
 | `workflow`   | `queues.workflows`   | orchestrator (scheduled), or API run-request         |
-| `action`     | `queues.actions`     | a requested action, enqueued directly                |
+| `action`     | `queues.actions`     | nothing: requested actions run in place              |
 | `agent`      | `queues.agents`      | a posted agent-thread message, enqueued directly     |
 
 ### Run records

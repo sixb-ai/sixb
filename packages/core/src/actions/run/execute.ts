@@ -7,8 +7,10 @@ import {
 } from "../../execution/primitive"
 import type { LoggingService } from "../../logging/service"
 import type { SixbDefinitions } from "../../runtime/definitions"
-import type { ActionRunStorage, Storage } from "../../storage"
-import { runActionJob } from "./run-action-job"
+import type { ActionRunRecord, ActionRunStorage, Storage } from "../../storage"
+import type { ExecutionRecord } from "../../storage/executions"
+import { runAction } from "./run-action"
+import { ActionRunSignals } from "./signals"
 import type { ActionRunContext, ActionRunResult } from "./types"
 
 /** What executing a stored Action run needs from its host. */
@@ -19,11 +21,23 @@ export interface ActionRunHost extends PrimitiveExecutionHost {
   readonly definitions: Pick<SixbDefinitions, "actions">
 }
 
-export interface ExecuteActionRunInput {
-  readonly runId: string
-  readonly signal: AbortSignal
-  /** Delivery attempt, used to account model calls and to report failures. */
+interface ActionRunExecutionOptions {
+  /** Cancels the run before its irreversible boundary. */
+  readonly signal?: AbortSignal
+  /** Execution attempt, used to account model calls and to report failures. */
   readonly attempt: number
+  /** Test-only override of the run's 30-second deadline. */
+  readonly timeoutMs?: number
+}
+
+export interface ExecuteActionRunInput extends ActionRunExecutionOptions {
+  readonly runId: string
+}
+
+export interface ExecutePersistedActionRunInput extends ActionRunExecutionOptions {
+  readonly run: ActionRunRecord
+  /** The durable execution the run was requested under. */
+  readonly execution: ExecutionRecord
 }
 
 export interface ExecutedActionRun {
@@ -33,25 +47,15 @@ export interface ExecutedActionRun {
 }
 
 /**
- * Execute a stored Action run inside the durable execution it was requested under.
+ * Execute a stored Action run, loading it and the durable execution it was requested under.
  *
- * Loads the run and its execution, binds the Action's primitive scope to that execution, then runs
- * the phases. A run that is already terminal comes back as a skipped result without invoking any
- * phase.
+ * A run that is already terminal comes back as a skipped result without invoking any phase.
  */
 export async function executeActionRun(
   host: ActionRunHost,
   input: ExecuteActionRunInput
 ): Promise<ExecutedActionRun> {
-  const actionRuns = host.storage.actionRuns
-  if (!actionRuns) {
-    throw createSixbError(
-      "internal.unexpected",
-      "[Sixb] Action execution requires storage.actionRuns support.",
-      { details: { runId: input.runId } }
-    )
-  }
-
+  const actionRuns = requireActionRunStorage(host, input.runId)
   const run = await actionRuns.getById({ projectId: host.id, id: input.runId })
   if (!run) {
     throw createSixbError(
@@ -61,43 +65,72 @@ export async function executeActionRun(
     )
   }
 
-  const durableExecution = await host.storage.executions.getById({
+  const execution = await host.storage.executions.getById({
     projectId: host.id,
     id: run.executionId,
   })
-  if (!durableExecution) {
+  if (!execution) {
     throw createSixbError(
       "internal.unexpected",
       `[Sixb] Action run '${run.id}' references missing execution '${run.executionId}'.`,
-      {
-        details: {
-          actionId: run.actionId,
-          runId: run.id,
-          executionId: run.executionId,
-        },
-      }
+      { details: { actionId: run.actionId, runId: run.id, executionId: run.executionId } }
     )
   }
 
-  const execution = bindDurablePrimitiveExecution(host, {
-    modelExecution: { attempt: input.attempt, signal: input.signal },
-    execution: durableExecution,
-    primitive: {
-      kind: "action",
-      id: run.actionId,
-      runId: run.id,
-    },
+  return executePersistedActionRun(host, { ...input, run, execution })
+}
+
+/**
+ * Execute an Action run its caller already holds, inside the durable execution it was requested
+ * under.
+ *
+ * Binds the Action's primitive scope to that execution, then runs the phases under the run's
+ * deadline and the caller's signal.
+ */
+export async function executePersistedActionRun(
+  host: ActionRunHost,
+  input: ExecutePersistedActionRunInput
+): Promise<ExecutedActionRun> {
+  const { run, execution } = input
+  const actionRuns = requireActionRunStorage(host, run.id)
+  const signals = new ActionRunSignals({
+    actionId: run.actionId,
+    runId: run.id,
+    caller: input.signal,
+    timeoutMs: input.timeoutMs,
   })
 
-  const result = await runActionJob({
-    runtime: buildActionContext(host, actionRuns, execution),
-    job: { id: run.id, actionId: run.actionId },
-    run,
-    signal: input.signal,
-    attempt: input.attempt,
-  })
+  try {
+    const bound = bindDurablePrimitiveExecution(host, {
+      // Model calls stop with their phase through the `signal` a handler forwards to them. Binding
+      // the run's deadline here would also stop the embedding calls behind the vector reads that
+      // edits make past the boundary, which must always finish.
+      modelExecution: { attempt: input.attempt, signal: signals.uninterruptible },
+      execution,
+      primitive: { kind: "action", id: run.actionId, runId: run.id },
+    })
+    const result = await runAction({
+      runtime: buildActionContext(host, actionRuns, bound),
+      run,
+      signals,
+      attempt: input.attempt,
+    })
+    return { result, correlationId: execution.correlationId }
+  } finally {
+    signals.dispose()
+  }
+}
 
-  return { result, correlationId: durableExecution.correlationId }
+function requireActionRunStorage(host: ActionRunHost, runId: string): ActionRunStorage {
+  const actionRuns = host.storage.actionRuns
+  if (!actionRuns) {
+    throw createSixbError(
+      "internal.unexpected",
+      "[Sixb] Action execution requires storage.actionRuns support.",
+      { details: { runId } }
+    )
+  }
+  return actionRuns
 }
 
 function buildActionContext(

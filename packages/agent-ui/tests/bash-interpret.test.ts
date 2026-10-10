@@ -299,6 +299,26 @@ describe("describeBash", () => {
     expect(description.detail).toBe("customer cust-001")
   })
 
+  test("summarizes a requested action from the finished run it returns", () => {
+    const intent = { kind: "sixb", command: "actions.request", args: ["archiveCustomer"] } as const
+    const run = (status: string) =>
+      output(
+        JSON.stringify({
+          actionId: "archiveCustomer",
+          status,
+          subject: { kind: "object", objectTypeId: "customer", primaryId: "cust-001" },
+        })
+      )
+
+    expect(describeBash(intent, run("succeeded"))).toMatchObject({
+      title: "Archive customer succeeded",
+      runningTitle: "Running the archive customer action",
+      detail: "customer cust-001",
+    })
+    expect(describeBash(intent, run("failed")).title).toBe("Archive customer failed")
+    expect(describeBash(intent, output("not json")).title).toBe("Ran the archive customer action")
+  })
+
   test("summarizes an object inspection graph", () => {
     const description = describeBash(
       {

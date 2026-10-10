@@ -128,16 +128,13 @@ test("dev reloads backend modules, rediscovers files, recovers, and keeps fronte
       headers: { "content-type": "application/json" },
       body: "{}",
     })
-    expect(response.status).toBe(202)
-    const requested = (await response.json()) as { runId: string }
-    let status = ""
-    await waitFor(
-      async () => {
-        status = await (await request(`${api}/api/action-runs/${requested.runId}`)).text()
-        return (await events()).some((e) => e.type === "action" && e.value === value)
-      },
-      () => `${status}\n${output}`
-    )
+    const run: unknown = await response.json()
+    expect({ status: response.status, run }).toMatchObject({
+      status: 200,
+      run: { status: "succeeded" },
+    })
+    // The API answers once the Action has run, so its writeback has already logged the value.
+    expect((await events()).some((e) => e.type === "action" && e.value === value)).toBe(true)
   }
   const runPipeline = async (value: string) => {
     const response = await request(`${api}/api/pipelines/copy/runs`, { method: "POST" })

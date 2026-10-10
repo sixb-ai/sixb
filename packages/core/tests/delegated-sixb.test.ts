@@ -66,6 +66,8 @@ interface TestProposalQuery {
   traverse(link: unknown): TestProposalQuery
 }
 
+const REPLAY_BUDGET_BYTES = 400
+
 interface TestProposalSet {
   get(id: string): Promise<{ primaryId: string } | null>
   list(input?: {
@@ -326,7 +328,7 @@ describe("delegated Sixb runtime", () => {
     }
     await seedShareAuthority(host, {
       grantId: "grant-owner",
-      sessionIds: ["session-original", "session-rotated", "session-budgeted"],
+      sessionIds: ["session-original", "session-rotated", "session-budgeted", "session-replay"],
       access,
     })
     await seedShareAuthority(host, {
@@ -363,7 +365,7 @@ describe("delegated Sixb runtime", () => {
       params: { note: "stable payload" },
       runId: "grant-owned-run",
     })
-    expect(first).toMatchObject({ created: true, runId: "grant-owned-run" })
+    expect(first).toMatchObject({ id: "grant-owned-run", status: "succeeded" })
 
     const run = await host.storage.actionRuns?.getById({
       projectId: host.id,
@@ -418,6 +420,35 @@ describe("delegated Sixb runtime", () => {
       metric: "outputJsonBytes",
       limit: 64,
     })
+    // The budget admits the subject read but not the replayed run. Guard proof: drop the output
+    // check from `enforceDelegatedOutputBudget` in `actions/request.ts` and the whole run is
+    // returned.
+    const replayBudget = host.withScope(
+      createSharedTestScope({
+        projectId: host.id,
+        requestId: "shared-request-session-replay",
+        correlationId: "shared-correlation-session-replay",
+        access,
+        limits: { maxTraversalFacts: 100, maxOutputJsonBytes: REPLAY_BUDGET_BYTES },
+        delegation: { kind: "share", grantId: "grant-owner", sessionId: "session-replay" },
+      })
+    )
+    await expect(
+      (replayBudget.objects(Proposal) as unknown as TestProposalSet).requestAction({
+        id: "proposal-1",
+        actionId: approveProposal.id,
+        params: { note: "stable payload" },
+        runId: "grant-owned-run",
+      })
+    ).rejects.toMatchObject({
+      code: "object_read_limit_exceeded",
+      metric: "outputJsonBytes",
+      limit: REPLAY_BUDGET_BYTES,
+      message:
+        "[Sixb] Action run 'grant-owned-run' finished with status 'succeeded', but its record " +
+        `exceeds this caller's outputJsonBytes limit (${REPLAY_BUDGET_BYTES}). Requesting it ` +
+        "again returns the same record.",
+    })
     await expect(
       rotatedProposals.requestAction({
         id: "proposal-1",
@@ -425,7 +456,7 @@ describe("delegated Sixb runtime", () => {
         params: { note: "stable payload" },
         runId: "grant-owned-run",
       })
-    ).resolves.toMatchObject({ created: false, runId: "grant-owned-run" })
+    ).resolves.toEqual(first)
 
     expect(await other.actions.runs.getById("grant-owned-run")).toBeNull()
     await expect(

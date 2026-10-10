@@ -8,7 +8,7 @@ import {
   SixbHost,
 } from "../src"
 import { createActionsRuntime } from "../src/actions/execution"
-import { requestAction, waitForActionRun } from "../src/actions/request"
+import { requestAction } from "../src/actions/request"
 import { AuthorizationError } from "../src/authorization"
 import { createDisabledRuntimeAuthorization } from "../src/execution/authorization"
 import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
@@ -373,7 +373,7 @@ describe("delegated Action admission", () => {
     }
   })
 
-  test("exposes inert delegated Action metadata while keeping runs and polling closed", async () => {
+  test("exposes inert delegated Action metadata while keeping runs closed", async () => {
     const { runtimeHost, runtimeDeps } = await createFixture()
     const { runtime, scope } = createDelegatedRuntime(runtimeHost, {
       requestId: "closed-action-surfaces",
@@ -411,9 +411,6 @@ describe("delegated Action admission", () => {
       expect(actions.listForType(ArchivedProposal)).toEqual([])
       await expect(actions.runs.getById("guessed-run")).resolves.toBeNull()
       await expect(actions.runs.list()).resolves.toEqual({ runs: [], hasMore: false, total: 0 })
-      await expect(waitForActionRun(runtime, { runId: "guessed-run" })).rejects.toThrow(
-        "cannot cross a durable execution boundary"
-      )
       expect(getReads).toBe(0)
       expect(listReads).toBe(0)
     } finally {

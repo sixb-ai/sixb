@@ -1,14 +1,8 @@
 import type { ActionSubject } from "@sixb/core"
 import { ActionRunFailedError, isObjectActionDefinition } from "@sixb/core"
-import { parseActionRunFailure } from "@sixb/core/internal/action-run-storage"
-import { createSixbError, toSixbFailure } from "@sixb/core/internal/errors"
+import { createSixbError } from "@sixb/core/internal/errors"
 import type { WorkflowActionNodeDefinition } from "@sixb/core/internal/workflows"
 import { snapshotWorkflowActionInput } from "@sixb/core/internal/workflows"
-import {
-  ACTION_RUN_FAILURE_CODES,
-  type ActionRunFailure,
-  type ActionRunPhase,
-} from "@sixb/core/storage"
 import type { WorkflowNodeExecutor } from "../execution/node-executor"
 import { isRecord } from "../normalize"
 import { callWorkflowMapper } from "./mapper"
@@ -64,30 +58,31 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
     })
     const actionRunId = `${context.job.id}:action:${nodeIndex}`
 
-    const run = await context.runtime.sixb.actions.requestAndWait({
+    // No `signal`: the run is bounded by its own deadline, and cancelling it would leave a
+    // terminal `cancelled` run that a redelivery of this node, under the same run id, could only
+    // report as a failure.
+    const run = await context.runtime.sixb.actions.request({
       actionId: node.action.id,
       subject: mapperResult.subject,
       params: { ...mapperResult.params },
       runId: actionRunId,
-      signal: context.signal,
       onRequested: () => context.markSideEffectBoundaryPassed(),
     })
     if (run.status !== "succeeded") {
-      const finishedAt = run.finishedAt ?? new Date()
+      // `request` resolves only with a terminal run, and a terminal failure always records why.
+      if (!run.error) {
+        throw createSixbError(
+          "internal.unexpected",
+          `[SixbWorkflowWorker] Action run '${run.id}' ended with status '${run.status}' and no recorded failure.`,
+          { details: { actionId: run.actionId, runId: run.id, nodeId: node.id } }
+        )
+      }
       throw new ActionRunFailedError({
         runId: run.id,
         actionId: run.actionId,
         subject: run.subject,
-        error:
-          run.error ??
-          actionRunStatusFailure({
-            status: run.status,
-            phase: run.phase,
-            actionId: run.actionId,
-            runId: run.id,
-            at: finishedAt,
-          }),
-        finishedAt: finishedAt.toISOString(),
+        error: run.error,
+        finishedAt: (run.finishedAt ?? new Date()).toISOString(),
       })
     }
 
@@ -95,34 +90,6 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
       outputSnapshot: { actionRunId },
     }
   },
-}
-
-function actionRunStatusFailure(input: {
-  readonly status: "queued" | "running" | "failed" | "cancelled"
-  readonly phase?: ActionRunPhase
-  readonly actionId: string
-  readonly runId: string
-  readonly at: Date
-}): ActionRunFailure {
-  const phase = input.phase ?? (input.status === "cancelled" ? "cancelled" : "validation")
-  const error = createSixbError(
-    input.status === "cancelled" ? "runtime.cancelled" : "internal.unexpected",
-    `Action run finished with status '${input.status}'.`,
-    {
-      details: {
-        actionId: input.actionId,
-        runId: input.runId,
-        phase,
-      },
-    }
-  )
-  return parseActionRunFailure(
-    toSixbFailure(error, {
-      allowedCodes: ACTION_RUN_FAILURE_CODES,
-      at: input.at,
-    }),
-    phase
-  )
 }
 
 function normalizeActionMapperResult(input: {

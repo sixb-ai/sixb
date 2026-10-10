@@ -26,7 +26,7 @@ export const buildingControlsConnector = defineConnector("building-controls", {
       })
       .idempotencyKey(({ body }) => body.deliveryId)
       .handle(async ({ body, sixb }) => {
-        const result = await sixb.actions.request({
+        const run = await sixb.actions.request({
           actionId: "record-building-alarm",
           runId: `alarm-delivery-${body.deliveryId}`,
           params: {
@@ -40,7 +40,7 @@ export const buildingControlsConnector = defineConnector("building-controls", {
             observedAt: body.alarm.observed_at,
           },
         })
-        return { status: 202, body: { actionRunId: result.runId } }
+        return { status: 200, body: { actionRunId: run.id, status: run.status } }
       }),
   ],
   connect: createBuildingControlsClient,

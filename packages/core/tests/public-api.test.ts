@@ -19,8 +19,7 @@ describe("public core export boundaries", () => {
   test("run orchestration is internal while application authoring remains public", () => {
     for (const name of [
       "requestAction",
-      "requestActionAndWait",
-      "waitForActionRun",
+      "drainActionRuns",
       "requestAgentRun",
       "requestSyncRun",
       "requestPipelineRun",
@@ -32,6 +31,7 @@ describe("public core export boundaries", () => {
       expect(Object.hasOwn(core, name)).toBe(false)
     expect(internalActions.requestAction).toBeFunction()
     expect(internalActions.executeActionRun).toBeFunction()
+    expect(internalActions.drainActionRuns).toBeFunction()
     expect(core.createSixb).toBeFunction()
     expect(core.defineAction).toBeFunction()
     expect(core.ActionRunFailedError).toBeFunction()

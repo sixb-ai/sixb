@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test"
+import { describe, expect, test } from "bun:test"
 import { defineObjectType, prop, stringEnum } from "@sixb/core"
 import { QueryClient } from "@tanstack/react-query"
 import { type ActionRunDetail, ActionRunFailedError } from "../src/actions"
@@ -26,29 +26,6 @@ import {
   objectQueryKeys,
   objectQueryOptions,
 } from "../src/query-hooks"
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = []
-  readonly sent: string[] = []
-  closed = false
-  onopen: (() => void) | null = null
-  onmessage: ((event: { data: string }) => void) | null = null
-  onerror: (() => void) | null = null
-  onclose: (() => void) | null = null
-
-  constructor(readonly url: string) {
-    FakeWebSocket.instances.push(this)
-  }
-
-  send(data: string): void {
-    this.sent.push(data)
-  }
-
-  close(): void {
-    this.closed = true
-    this.onclose?.()
-  }
-}
 
 const Project = defineObjectType({
   id: "Project",
@@ -88,53 +65,44 @@ function createActionRun(overrides: Partial<ActionRunDetail> = {}): ActionRunDet
     projectId: "proj",
     actionId: "approveQuote",
     subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
-    status: "queued",
+    status: "succeeded",
+    phase: "commit",
     queuedAt: "2026-06-29T12:00:00.000Z",
+    startedAt: "2026-06-29T12:00:00.000Z",
+    finishedAt: "2026-06-29T12:00:02.000Z",
     params: {},
     ...overrides,
   }
 }
 
-function createActionTestClient() {
+function actionFailure(message: string): NonNullable<ActionRunDetail["error"]> {
+  return {
+    code: "action.phase_failed",
+    message,
+    retryable: false,
+    at: "2026-06-29T12:00:02.000Z",
+    details: { actionId: "approveQuote", runId: "act_1", phase: "writeback" },
+  }
+}
+
+/** A client whose API answers every action request with `respond()`, recording each request. */
+function createActionTestClient(respond: () => Response = () => Response.json(createActionRun())) {
   const requests: { method: string; path: string; body?: unknown }[] = []
-  const succeeded = createActionRun({
-    status: "succeeded",
-    finishedAt: "2026-06-29T12:00:02.000Z",
-  })
   const client = createClient(
     createConfig({
       baseUrl: "http://sixb.test",
       fetch: (async (request: Request) => {
-        const url = new URL(request.url)
-        const body = request.method === "POST" ? await request.json() : undefined
-        requests.push({ method: request.method, path: url.pathname, body })
-        if (request.method === "POST" && url.pathname.startsWith("/api/actions/")) {
-          return Response.json(
-            { runId: "act_1", queuedAt: "2026-06-29T12:00:00.000Z", created: true },
-            { status: 202 }
-          )
-        }
-        if (request.method === "GET" && url.pathname === "/api/action-runs/act_1") {
-          return Response.json(succeeded)
-        }
-        return Response.json({ error: "Unexpected request" }, { status: 500 })
+        requests.push({
+          method: request.method,
+          path: new URL(request.url).pathname,
+          body: await request.json(),
+        })
+        return respond()
       }) as unknown as typeof fetch,
     })
   )
-  return { client, requests, succeeded }
+  return { client, requests }
 }
-
-let originalWebSocket: typeof WebSocket
-
-beforeEach(() => {
-  originalWebSocket = globalThis.WebSocket
-  FakeWebSocket.instances = []
-  globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket
-})
-
-afterEach(() => {
-  globalThis.WebSocket = originalWebSocket
-})
 
 describe("objectQueryOptions", () => {
   test("objectQueryKeys match the option factory query keys", () => {
@@ -254,59 +222,47 @@ describe("object query invalidation helpers", () => {
 })
 
 describe("actionRunMutationOptions", () => {
-  test("configured mutations treat variables as action params and wait for the terminal run", async () => {
-    const { client, requests, succeeded } = createActionTestClient()
+  const expectedRequest = {
+    method: "POST",
+    path: "/api/actions/approveQuote",
+    body: {
+      subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
+      params: { note: "Approved" },
+    },
+  }
+
+  test("configured mutations send variables as action params and resolve with the run", async () => {
+    const { client, requests } = createActionTestClient()
     const options = actionRunMutationOptions<{ note: string }>({
       client,
       actionId: "approveQuote",
       subject: { objectType: Project, primaryId: "p_1" },
-      timeoutMs: 500,
     })
 
     const mutationFn = options.mutationFn as (params: { note: string }) => Promise<ActionRunDetail>
     const run = await mutationFn({ note: "Approved" })
 
-    expect(run).toEqual(succeeded)
-    expect(requests).toEqual([
-      {
-        method: "POST",
-        path: "/api/actions/approveQuote",
-        body: {
-          subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
-          params: { note: "Approved" },
-        },
-      },
-      { method: "GET", path: "/api/action-runs/act_1", body: undefined },
-    ])
-    expect(FakeWebSocket.instances[0]?.closed).toBe(true)
+    expect(run).toEqual(createActionRun())
+    expect(requests).toEqual([expectedRequest])
   })
 
   test("configured mutations still accept the generated object subject shape", async () => {
-    const { client, requests, succeeded } = createActionTestClient()
+    const { client, requests } = createActionTestClient()
     const options = actionRunMutationOptions<{ note: string }>({
       client,
       actionId: "approveQuote",
       subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
-      timeoutMs: 500,
     })
 
     const mutationFn = options.mutationFn as (params: { note: string }) => Promise<ActionRunDetail>
-    const run = await mutationFn({ note: "Approved" })
+    await mutationFn({ note: "Approved" })
 
-    expect(run).toEqual(succeeded)
-    expect(requests[0]).toEqual({
-      method: "POST",
-      path: "/api/actions/approveQuote",
-      body: {
-        subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
-        params: { note: "Approved" },
-      },
-    })
+    expect(requests).toEqual([expectedRequest])
   })
 
   test("dynamic mutations accept the full generated request shape", async () => {
-    const { client, requests, succeeded } = createActionTestClient()
-    const options = actionRunMutationOptions({ client, timeoutMs: 500 })
+    const { client, requests } = createActionTestClient()
+    const options = actionRunMutationOptions({ client })
 
     const mutationFn = options.mutationFn as (
       request: ActionRunMutationRequest
@@ -319,25 +275,18 @@ describe("actionRunMutationOptions", () => {
       },
     })
 
-    expect(run).toEqual(succeeded)
-    expect(requests[0]).toEqual({
-      method: "POST",
-      path: "/api/actions/approveQuote",
-      body: {
-        subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
-        params: { note: "Approved" },
-      },
-    })
+    expect(run).toEqual(createActionRun())
+    expect(requests).toEqual([expectedRequest])
   })
 
   test("dynamic mutations accept ontology object subjects", async () => {
-    const { client, requests, succeeded } = createActionTestClient()
-    const options = actionRunMutationOptions({ client, timeoutMs: 500 })
+    const { client, requests } = createActionTestClient()
+    const options = actionRunMutationOptions({ client })
 
     const mutationFn = options.mutationFn as (
       request: ActionRunMutationRequest
     ) => Promise<ActionRunDetail>
-    const run = await mutationFn({
+    await mutationFn({
       path: { actionId: "approveQuote" },
       body: {
         subject: { objectType: Project, primaryId: "p_1" },
@@ -345,25 +294,53 @@ describe("actionRunMutationOptions", () => {
       },
     })
 
-    expect(run).toEqual(succeeded)
-    expect(requests[0]).toEqual({
-      method: "POST",
-      path: "/api/actions/approveQuote",
-      body: {
-        subject: { kind: "object", objectTypeId: "Project", primaryId: "p_1" },
-        params: { note: "Approved" },
-      },
+    expect(requests).toEqual([expectedRequest])
+  })
+
+  test("rejects with ActionRunFailedError when the run failed or was cancelled", async () => {
+    for (const status of ["failed", "cancelled"] as const) {
+      const finished = createActionRun({
+        status,
+        phase: "writeback",
+        error: actionFailure("Writeback failed"),
+      })
+      const { client } = createActionTestClient(() => Response.json(finished))
+      const options = actionRunMutationOptions<{ note: string }>({
+        client,
+        actionId: "approveQuote",
+      })
+
+      const mutationFn = options.mutationFn as (params: {
+        note: string
+      }) => Promise<ActionRunDetail>
+      const error = await mutationFn({ note: "Approved" }).catch((caught: unknown) => caught)
+
+      expect(error).toBeInstanceOf(ActionRunFailedError)
+      expect(error).toMatchObject({ status, message: "Writeback failed", run: finished })
+    }
+  })
+
+  test("rejects with the API error when the request did not become a run", async () => {
+    const inProgress = {
+      error: "Action run 'act_1' is already in progress.",
+      code: "action.run_in_progress",
+    }
+    const { client } = createActionTestClient(() => Response.json(inProgress, { status: 409 }))
+    const options = actionRunMutationOptions<{ note: string }>({
+      client,
+      actionId: "approveQuote",
+      runId: "act_1",
     })
+
+    const mutationFn = options.mutationFn as (params: { note: string }) => Promise<ActionRunDetail>
+
+    await expect(mutationFn({ note: "Approved" })).rejects.toEqual(inProgress)
   })
 
   test("invalidateOnCommit invalidates action run and object query caches", async () => {
     const queryClient = new QueryClient()
     const query = activeProjects()
-    const run = createActionRun({
-      status: "succeeded",
-      phase: "effects",
-      finishedAt: "2026-06-29T12:00:02.000Z",
-    })
+    const run = createActionRun({ phase: "effects" })
     const actionRunKey = getActionRunQueryKey({ path: { runId: "act_1" } })
     const actionRunsKey = listActionRunsQueryKey()
     const actionRunsInfiniteKey = listActionRunsInfiniteQueryKey()
@@ -407,17 +384,10 @@ describe("actionRunMutationOptions", () => {
   test("terminal failure errors invalidate action run caches without object commit invalidation", async () => {
     const queryClient = new QueryClient()
     const query = activeProjects()
-    const failed = createActionRun({
-      status: "failed",
-      finishedAt: "2026-06-29T12:00:02.000Z",
-      error: {
-        code: "internal.unexpected",
-        message: "Writeback failed",
-        retryable: false,
-        at: "2026-06-29T12:00:02.000Z",
-        details: { actionId: "approveQuote", runId: "act_1", phase: "writeback" },
-      },
-    })
+    const failed = {
+      ...createActionRun({ phase: "writeback", error: actionFailure("Writeback failed") }),
+      status: "failed" as const,
+    }
     const actionRunKey = getActionRunQueryKey({ path: { runId: "act_1" } })
     const actionRunsKey = listActionRunsQueryKey()
     const objectQueryKey = objectQueryKeys.list(query)
@@ -441,11 +411,7 @@ describe("actionRunMutationOptions", () => {
       context: unknown
     ) => Promise<void>
 
-    await onError(
-      new ActionRunFailedError(failed as ActionRunDetail & { readonly status: "failed" }),
-      { note: "Approved" },
-      undefined
-    )
+    await onError(new ActionRunFailedError(failed), { note: "Approved" }, undefined)
 
     expect(queryClient.getQueryState(actionRunKey)?.isInvalidated).toBe(true)
     expect(queryClient.getQueryState(actionRunsKey)?.isInvalidated).toBe(true)

@@ -27411,6 +27411,7 @@
       },
       "post": {
         "summary": "Request an action",
+        "description": "Runs the action and returns its terminal run. A run that fails is returned with status `failed`. An error response usually means no run was requested, but a 500 can follow a run that started: request again with the same `runId` to get its record. A `runId` that was already used returns that run once it has finished, and 409 while it still runs. 503 means the server is stopping and started nothing.",
         "tags": ["Actions"],
         "operationId": "requestAction",
         "security": [
@@ -27595,27 +27596,369 @@
           }
         },
         "responses": {
-          "202": {
-            "description": "Response for status 202",
+          "200": {
+            "description": "Response for status 200",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "runId": {
+                    "id": {
                       "type": "string"
+                    },
+                    "projectId": {
+                      "type": "string"
+                    },
+                    "actionId": {
+                      "type": "string"
+                    },
+                    "subject": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["none"]
+                            }
+                          },
+                          "required": ["kind"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "kind": {
+                              "type": "string",
+                              "enum": ["object"]
+                            },
+                            "objectTypeId": {
+                              "type": "string",
+                              "minLength": 1
+                            },
+                            "primaryId": {
+                              "type": "string",
+                              "minLength": 1
+                            }
+                          },
+                          "required": ["kind", "objectTypeId", "primaryId"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": ["queued", "running", "succeeded", "failed", "cancelled"]
+                    },
+                    "phase": {
+                      "type": "string",
+                      "enum": [
+                        "request",
+                        "enqueue",
+                        "validation",
+                        "writeback",
+                        "edits",
+                        "commit",
+                        "effects",
+                        "cancelled"
+                      ]
                     },
                     "queuedAt": {
                       "type": "string"
                     },
-                    "jobId": {
+                    "startedAt": {
                       "type": "string"
                     },
-                    "created": {
-                      "type": "boolean"
+                    "finishedAt": {
+                      "type": "string"
+                    },
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "code": {
+                          "type": "string",
+                          "enum": [
+                            "internal.unexpected",
+                            "runtime.cancelled",
+                            "queue.enqueue_failed",
+                            "action.phase_failed",
+                            "action.read_conflict",
+                            "action.timeout"
+                          ]
+                        },
+                        "message": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "retryable": {
+                          "type": "boolean"
+                        },
+                        "at": {
+                          "type": "string",
+                          "format": "date-time"
+                        },
+                        "details": {
+                          "type": "object",
+                          "properties": {
+                            "actionId": {
+                              "type": "string"
+                            },
+                            "runId": {
+                              "type": "string"
+                            },
+                            "phase": {
+                              "type": "string",
+                              "enum": [
+                                "request",
+                                "enqueue",
+                                "validation",
+                                "writeback",
+                                "edits",
+                                "commit",
+                                "effects",
+                                "cancelled"
+                              ]
+                            }
+                          },
+                          "required": ["actionId", "runId", "phase"],
+                          "additionalProperties": false
+                        },
+                        "httpStatus": {
+                          "type": "integer",
+                          "minimum": 100,
+                          "maximum": 599
+                        },
+                        "redacted": {
+                          "type": "boolean",
+                          "enum": [true]
+                        },
+                        "truncated": {
+                          "type": "boolean",
+                          "enum": [true]
+                        }
+                      },
+                      "required": ["code", "message", "retryable", "at", "details"],
+                      "additionalProperties": false
+                    },
+                    "params": {
+                      "type": "object",
+                      "additionalProperties": {}
+                    },
+                    "writeback": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["succeeded"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "result": {
+                              "description": "Any JSON-compatible value.",
+                              "nullable": true,
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "number"
+                                },
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {}
+                                },
+                                {
+                                  "type": "object",
+                                  "additionalProperties": true
+                                }
+                              ]
+                            }
+                          },
+                          "required": ["status", "completedAt", "result"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "internal.unexpected",
+                                    "runtime.cancelled",
+                                    "queue.enqueue_failed",
+                                    "action.phase_failed",
+                                    "action.read_conflict",
+                                    "action.timeout"
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "maxLength": 4096
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                },
+                                "at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "details": {
+                                  "type": "object",
+                                  "properties": {
+                                    "actionId": {
+                                      "type": "string"
+                                    },
+                                    "runId": {
+                                      "type": "string"
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": ["writeback"]
+                                    }
+                                  },
+                                  "required": ["actionId", "runId", "phase"],
+                                  "additionalProperties": false
+                                },
+                                "httpStatus": {
+                                  "type": "integer",
+                                  "minimum": 100,
+                                  "maximum": 599
+                                },
+                                "redacted": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                },
+                                "truncated": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                }
+                              },
+                              "required": ["code", "message", "retryable", "at", "details"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["status", "completedAt", "error"],
+                          "additionalProperties": false
+                        }
+                      ]
+                    },
+                    "effects": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["succeeded"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            }
+                          },
+                          "required": ["status", "completedAt"],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "status": {
+                              "type": "string",
+                              "enum": ["failed"]
+                            },
+                            "completedAt": {
+                              "type": "string"
+                            },
+                            "error": {
+                              "type": "object",
+                              "properties": {
+                                "code": {
+                                  "type": "string",
+                                  "enum": [
+                                    "internal.unexpected",
+                                    "runtime.cancelled",
+                                    "queue.enqueue_failed",
+                                    "action.phase_failed",
+                                    "action.read_conflict",
+                                    "action.timeout"
+                                  ]
+                                },
+                                "message": {
+                                  "type": "string",
+                                  "maxLength": 4096
+                                },
+                                "retryable": {
+                                  "type": "boolean"
+                                },
+                                "at": {
+                                  "type": "string",
+                                  "format": "date-time"
+                                },
+                                "details": {
+                                  "type": "object",
+                                  "properties": {
+                                    "actionId": {
+                                      "type": "string"
+                                    },
+                                    "runId": {
+                                      "type": "string"
+                                    },
+                                    "phase": {
+                                      "type": "string",
+                                      "enum": ["effects"]
+                                    }
+                                  },
+                                  "required": ["actionId", "runId", "phase"],
+                                  "additionalProperties": false
+                                },
+                                "httpStatus": {
+                                  "type": "integer",
+                                  "minimum": 100,
+                                  "maximum": 599
+                                },
+                                "redacted": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                },
+                                "truncated": {
+                                  "type": "boolean",
+                                  "enum": [true]
+                                }
+                              },
+                              "required": ["code", "message", "retryable", "at", "details"],
+                              "additionalProperties": false
+                            }
+                          },
+                          "required": ["status", "completedAt", "error"],
+                          "additionalProperties": false
+                        }
+                      ]
                     }
                   },
-                  "required": ["runId", "queuedAt", "created"],
+                  "required": [
+                    "id",
+                    "projectId",
+                    "actionId",
+                    "subject",
+                    "status",
+                    "queuedAt",
+                    "params"
+                  ],
                   "additionalProperties": false
                 }
               }
@@ -27667,6 +28010,115 @@
                     }
                   },
                   "required": ["error"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Response for status 409",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["action.run_in_progress"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Response for status 500",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": [
+                        "action.phase_failed",
+                        "action.read_conflict",
+                        "action.run_in_progress",
+                        "action.timeout",
+                        "agent.execution_failed",
+                        "ai.usage_limit_exceeded",
+                        "ai.usage_limit_unavailable",
+                        "connector.adapter_invalid",
+                        "connector.authorization_invalid",
+                        "connector.authorization_required",
+                        "connector.configuration_invalid",
+                        "connector.credentials_unavailable",
+                        "connector.not_found",
+                        "connector.operation_conflict",
+                        "connector.operation_in_progress",
+                        "connector.provider_failed",
+                        "connector.provider_unavailable",
+                        "connector.replacement_required",
+                        "connector.revocation_pending",
+                        "dataset.not_found",
+                        "dataset.version_incompatible",
+                        "dataset.version_not_found",
+                        "dataset.version_read_inconsistent",
+                        "event.delivery_failed",
+                        "internal.unexpected",
+                        "queue.enqueue_failed",
+                        "pipeline.step_failed",
+                        "projection.definition_invalid",
+                        "projection.execution_failed",
+                        "projection.not_found",
+                        "projection.run_already_terminal",
+                        "projection.run_identity_mismatch",
+                        "runtime.cancelled",
+                        "runtime.stopping",
+                        "vector.model_unavailable",
+                        "vector.response_invalid",
+                        "vector.outcome_unknown",
+                        "storage.unavailable",
+                        "sync.execution_failed",
+                        "webhook.delivery_failed",
+                        "webhook.delivery_rejected",
+                        "workflow.node_failed"
+                      ],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Response for status 503",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    },
+                    "code": {
+                      "type": "string",
+                      "enum": ["runtime.stopping"],
+                      "description": "Stable machine-readable failure code for programmatic handling."
+                    }
+                  },
+                  "required": ["error", "code"],
                   "additionalProperties": false
                 }
               }
@@ -28877,7 +29329,8 @@
                                   "runtime.cancelled",
                                   "queue.enqueue_failed",
                                   "action.phase_failed",
-                                  "action.read_conflict"
+                                  "action.read_conflict",
+                                  "action.timeout"
                                 ]
                               },
                               "message": {
@@ -29110,7 +29563,8 @@
                             "runtime.cancelled",
                             "queue.enqueue_failed",
                             "action.phase_failed",
-                            "action.read_conflict"
+                            "action.read_conflict",
+                            "action.timeout"
                           ]
                         },
                         "message": {
@@ -29230,7 +29684,8 @@
                                     "runtime.cancelled",
                                     "queue.enqueue_failed",
                                     "action.phase_failed",
-                                    "action.read_conflict"
+                                    "action.read_conflict",
+                                    "action.timeout"
                                   ]
                                 },
                                 "message": {
@@ -29320,7 +29775,8 @@
                                     "runtime.cancelled",
                                     "queue.enqueue_failed",
                                     "action.phase_failed",
-                                    "action.read_conflict"
+                                    "action.read_conflict",
+                                    "action.timeout"
                                   ]
                                 },
                                 "message": {

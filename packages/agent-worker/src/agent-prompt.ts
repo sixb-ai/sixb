@@ -150,7 +150,7 @@ function renderRuntimeContext(mode: AgentExecutionMode, skills: readonly AgentSk
     renderInstanceHelp("sandbox"),
     "When exact object references are provided, preserve every `objectTypeId` and `primaryId` byte-for-byte and start with `sixb objects get <object-type> <primary-id>...`. Use `objects inspect` only when related objects are actually needed, with the narrowest useful bounds.",
     'When an Action id is provided, inspect it directly with `sixb actions get <action-id>`; its `inputSchema` is the exact JSON shape accepted by the Action. An object-reference parameter is an object such as `{"objectTypeId":"Type","primaryId":"opaque:id"}`, never a bare id.',
-    "Send Action params as one JSON object through standard input with `sixb actions request <action-id> --file - --wait`. Never inspect the environment to infer identifiers.",
+    "Send Action params as one JSON object through standard input with `sixb actions request <action-id> --file -`; it runs the Action and prints the finished run, with its status and any error. Never inspect the environment to infer identifiers.",
     "Do not use ontology or Action listings, broad object inspection, or environment inspection when exact references and commands are already known. Use `--run-id` only for a request-specific idempotency key.",
     ...fileContext,
     "With read, use relative paths from this prompt or sandboxPath values.",

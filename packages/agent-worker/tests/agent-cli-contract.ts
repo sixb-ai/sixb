@@ -343,6 +343,10 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
             message: "Unknown actions request option '--params-file'.",
           },
           {
+            args: ["actions", "request", "update-customer", "--wait"],
+            message: "Unknown actions request option '--wait'.",
+          },
+          {
             args: ["workflows", "start", "review-customer", "--input-file", "input.json"],
             message: "Unknown workflows start option '--input-file'.",
           },
@@ -1000,40 +1004,32 @@ export function runAgentCliContractSuite(implementation: AgentCliContractImpleme
       }
     })
 
-    test("requests and waits for the exact Action run in one command", async () => {
-      let reads = 0
+    test("prints the finished Action run the request returns", async () => {
+      const run = {
+        id: "act/opaque",
+        actionId: "dispatch/work",
+        status: "failed",
+        error: { code: "action.phase_failed", message: "Dispatch was refused." },
+      }
       const api = startTestApi((request) => {
         if (request.method === "POST" && request.url.pathname === "/api/actions/dispatch%2Fwork") {
-          return json({ runId: "act/opaque", queuedAt: new Date(0).toISOString(), created: true })
-        }
-        if (request.method === "GET" && request.url.pathname === "/api/action-runs/act%2Fopaque") {
-          reads += 1
-          return json({
-            id: "act/opaque",
-            actionId: "dispatch/work",
-            status: reads === 1 ? "running" : "succeeded",
-          })
+          return json(run)
         }
       })
       try {
         const result = await runCli(
           implementation,
-          ["actions", "request", "dispatch/work", "--run-id", "act/opaque", "--wait"],
+          ["actions", "request", "dispatch/work", "--run-id", "act/opaque"],
           apiEnv(api)
         )
 
         expect(result.exitCode).toBe(0)
         expect(result.stderr).toBe("")
-        expect(JSON.parse(result.stdout)).toEqual({
-          id: "act/opaque",
-          actionId: "dispatch/work",
-          status: "succeeded",
-        })
+        expect(JSON.parse(result.stdout)).toEqual(run)
         expect(api.requests.map((request) => `${request.method} ${request.url.pathname}`)).toEqual([
           "POST /api/actions/dispatch%2Fwork",
-          "GET /api/action-runs/act%2Fopaque",
-          "GET /api/action-runs/act%2Fopaque",
         ])
+        expect(api.requests[0]?.body).toEqual({ params: {}, runId: "act/opaque" })
       } finally {
         api.close()
       }

@@ -3,6 +3,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import type { DeployConfig, DeployRelease, DeployTarget } from "@sixb/core/deploy"
+import { ACTION_RUN_DRAIN_TIMEOUT_MS } from "@sixb/core/internal/actions"
 import { parseCliArgs } from "../src/lib/command-line"
 import { buildDeployRelease } from "../src/lib/deploy-release"
 import { packSource, resolveBunVersion } from "../src/lib/deploy-source"
@@ -162,6 +163,31 @@ describe("deploy release", () => {
       "sixb worker-group sync agent --agent-turn-timeout 30m " +
         "--concurrency sync=2 --concurrency agent=8 --no-migrate"
     )
+  })
+
+  // A stopping API waits for its in-flight Actions before closing storage. Guard proof: drop the
+  // API default from `sixbService` in `src/lib/deploy-release.ts`, or raise the drain bound in core
+  // past it, and a graceful restart kills Actions the API was still running.
+  test("lets a stopping API finish the Actions it is running", () => {
+    const built = release({ services: { workers: { process: { killTimeoutMs: 5_000 } } } })
+
+    expect(service(built, "api").process.killTimeoutMs).toBeGreaterThan(ACTION_RUN_DRAIN_TIMEOUT_MS)
+    expect(
+      built.services
+        .filter((entry) => entry.name !== "api")
+        .map((entry) => [entry.name, entry.process.killTimeoutMs])
+    ).toEqual([
+      ["atlas", 10_000],
+      ["app", 10_000],
+      ["orchestrator", 10_000],
+      ["scheduler", 10_000],
+      ["rules", 10_000],
+      ["workers", 5_000],
+    ])
+    expect(
+      release({ services: { api: { process: { killTimeoutMs: 60_000 } } } }).services[0]?.process
+        .killTimeoutMs
+    ).toBe(60_000)
   })
 
   test("gives every service the public origins, then its own environment", () => {

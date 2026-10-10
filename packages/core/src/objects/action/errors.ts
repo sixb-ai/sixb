@@ -42,15 +42,3 @@ export class ActionRunFailedError extends Error {
     this.finishedAt = payload.finishedAt
   }
 }
-
-export class ActionRunTimeoutError extends Error {
-  readonly name = "ActionRunTimeoutError"
-  readonly runId: string
-  readonly timeoutMs: number
-
-  constructor(params: { runId: string; timeoutMs: number }) {
-    super(`Action run '${params.runId}' did not finish within ${params.timeoutMs}ms.`)
-    this.runId = params.runId
-    this.timeoutMs = params.timeoutMs
-  }
-}

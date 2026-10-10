@@ -1,3 +1,4 @@
+import { shareActionRunExecutor } from "../actions/run/executor"
 import { shareSixbErrorReporter } from "../error-reporting/capability"
 import type { ExecutionContext } from "../execution"
 import {
@@ -85,7 +86,6 @@ export interface ExecutionObjectByIdHandle<TObjectType extends ObjectTypeWithPro
   extends ObjectReadByIdHandle<TObjectType> {
   vector: ObjectByIdHandle<TObjectType>["vector"]
   requestAction: ObjectByIdHandle<TObjectType>["requestAction"]
-  requestActionAndWait: ObjectByIdHandle<TObjectType>["requestActionAndWait"]
   link: ObjectByIdHandle<TObjectType>["link"]
   unlink: ObjectByIdHandle<TObjectType>["unlink"]
   delete: ObjectByIdHandle<TObjectType>["delete"]
@@ -96,7 +96,6 @@ export interface ExecutionObjectByIdHandle<TObjectType extends ObjectTypeWithPro
 export interface ExecutionObjectSet<TObjectType extends ObjectTypeWithPropertyTokens>
   extends ObjectReadSet<TObjectType> {
   requestAction: ObjectSet<TObjectType>["requestAction"]
-  requestActionAndWait: ObjectSet<TObjectType>["requestActionAndWait"]
   upsert: ObjectSet<TObjectType>["upsert"]
   upsertLink: ObjectSet<TObjectType>["upsertLink"]
   removeLink: ObjectSet<TObjectType>["removeLink"]
@@ -171,6 +170,7 @@ export function createObjectsRuntime(
   }
   shareOntologyMutationRuntime(runtime, capturedRuntime)
   shareSixbErrorReporter(runtime, capturedRuntime)
+  shareActionRunExecutor(runtime, capturedRuntime)
   Object.freeze(capturedRuntime)
   const ontologyView = () => getAuthorizedOntologyView(objectReader)
   const objects = Object.assign(

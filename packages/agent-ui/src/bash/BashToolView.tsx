@@ -26,7 +26,6 @@ import {
   type ParsedBashOutput,
 } from "./interpret"
 import {
-  ActionResultView,
   ActionRunView,
   FacetsView,
   GenericCommandView,
@@ -220,7 +219,6 @@ function BashResult({
     case "telemetry.query":
       return <TelemetryBulkView parsed={parsed} />
     case "actions.request":
-      return <ActionResultView parsed={parsed} />
     case "action-runs.get":
       return <ActionRunView parsed={parsed} />
     // Remaining CLI surfaces render through the neutral data view — structured, never raw JSON.

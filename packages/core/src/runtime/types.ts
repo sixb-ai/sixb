@@ -5,12 +5,7 @@
  * Each level narrows generic parameters so downstream code stays type-safe.
  */
 
-import type {
-  ActionDefinitionCatalog,
-  ActionParamsConfig,
-  InferActionParams,
-  RequestActionResult,
-} from "../actions"
+import type { ActionDefinitionCatalog, ActionParamsConfig, InferActionParams } from "../actions"
 import type { AuthorizationContext } from "../authorization"
 import type { Broker } from "../broker"
 import type { DomainEventLog } from "../events"
@@ -824,36 +819,25 @@ export interface ObjectByIdHandle<TObjectType extends ObjectTypeWithPropertyToke
     target: ObjectRef<ResolveTargetTypeId<TLinkToken["targetObjectTypeId"]>>
   ): Promise<void>
 
-  /** Request an action on this object by id (dynamic / server contexts). */
+  /**
+   * Run an action on this object by id (dynamic / server contexts) and return its terminal run.
+   * A failed run resolves with status `failed`.
+   */
   requestAction(input: {
     actionId: string
     params?: Record<string, unknown>
     runId?: string
-  }): Promise<RequestActionResult>
+    signal?: AbortSignal
+  }): Promise<ActionRunRecord>
 
   /**
-   * Request an action on this object using a typed action reference.
+   * Run an action on this object using a typed action reference, and return its terminal run.
    * Params are inferred from the action's declared shape.
    */
   requestAction<const TAction extends TypedActionReference>(input: {
     action: TAction
     params: NoInfer<TypedActionParams<TAction>>
     runId?: string
-  }): Promise<RequestActionResult>
-
-  /** Request an action and wait for the terminal lifecycle event. */
-  requestActionAndWait(input: {
-    actionId: string
-    params?: Record<string, unknown>
-    timeoutMs?: number
-    signal?: AbortSignal
-  }): Promise<ActionRunRecord>
-
-  /** Request a typed action and wait for the terminal lifecycle event. */
-  requestActionAndWait<const TAction extends TypedActionReference>(input: {
-    action: TAction
-    params: NoInfer<TypedActionParams<TAction>>
-    timeoutMs?: number
     signal?: AbortSignal
   }): Promise<ActionRunRecord>
 
@@ -895,40 +879,27 @@ export interface ObjectSet<TObjectType extends ObjectTypeWithPropertyTokens>
     }[]
   ): Promise<void>
 
-  /** Request an action on an object of this type by id (dynamic / server contexts). */
+  /**
+   * Run an action on an object of this type by id (dynamic / server contexts) and return its
+   * terminal run. A failed run resolves with status `failed`.
+   */
   requestAction(input: {
     id: string
     actionId: string
     params?: Record<string, unknown>
     runId?: string
-  }): Promise<RequestActionResult>
+    signal?: AbortSignal
+  }): Promise<ActionRunRecord>
 
   /**
-   * Request an action on an object of this type using a typed action reference.
-   * Params are inferred from the action's declared shape.
+   * Run an action on an object of this type using a typed action reference, and return its
+   * terminal run. Params are inferred from the action's declared shape.
    */
   requestAction<const TAction extends TypedActionReference>(input: {
     id: string
     action: TAction
     params: NoInfer<TypedActionParams<TAction>>
     runId?: string
-  }): Promise<RequestActionResult>
-
-  /** Request an action on an object and wait for the terminal lifecycle event. */
-  requestActionAndWait(input: {
-    id: string
-    actionId: string
-    params?: Record<string, unknown>
-    timeoutMs?: number
-    signal?: AbortSignal
-  }): Promise<ActionRunRecord>
-
-  /** Request a typed action and wait for the terminal lifecycle event. */
-  requestActionAndWait<const TAction extends TypedActionReference>(input: {
-    id: string
-    action: TAction
-    params: NoInfer<TypedActionParams<TAction>>
-    timeoutMs?: number
     signal?: AbortSignal
   }): Promise<ActionRunRecord>
 

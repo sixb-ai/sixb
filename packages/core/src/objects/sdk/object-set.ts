@@ -5,6 +5,7 @@
  */
 
 import type { ActionDefinition } from "../../actions"
+import { shareActionRunExecutor } from "../../actions/run/executor"
 import type { AuthorizationContext } from "../../authorization"
 import { shareSixbErrorReporter } from "../../error-reporting/capability"
 import type { ExecutionContext } from "../../execution"
@@ -18,10 +19,7 @@ import type {
   SixbRuntimeContext,
   TwinObject,
 } from "../../runtime/types"
-import {
-  requestActionAndWait as requestActionAndWaitLeaf,
-  requestAction as requestActionLeaf,
-} from "../action"
+import { requestAction as requestActionLeaf } from "../action"
 import type { ExecutionObjectContext, ResolvedLinkContext } from "../context"
 import { requireLinkDefinition } from "../context"
 import { removeLink as removeLinkLeaf, upsertLink as upsertLinkLeaf } from "../link"
@@ -85,6 +83,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
   }
   shareOntologyMutationRuntime(params, resolvedCtx)
   shareSixbErrorReporter(params, resolvedCtx)
+  shareActionRunExecutor(params, resolvedCtx)
 
   const objectSet = {
     get: async (id: string) => {
@@ -146,6 +145,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
       actionId?: string
       params?: Record<string, unknown>
       runId?: string
+      signal?: AbortSignal
     }) => {
       const actionId = input.action?.id ?? input.actionId
       if (!actionId) {
@@ -157,32 +157,7 @@ export function createObjectSet<TObjectType extends ObjectTypeWithPropertyTokens
         primaryId: input.id,
         actionId,
         params: input.params,
-        options: { runId: input.runId },
-      })
-    },
-
-    requestActionAndWait: async (input: {
-      id: string
-      action?: ActionDefinition
-      actionId?: string
-      params?: Record<string, unknown>
-      timeoutMs?: number
-      signal?: AbortSignal
-    }) => {
-      const actionId = input.action?.id ?? input.actionId
-      if (!actionId) {
-        throw new OntologyValidationError(
-          "[Sixb] requestActionAndWait requires either 'action' or 'actionId'"
-        )
-      }
-      return requestActionAndWaitLeaf(resolvedCtx, {
-        primaryId: input.id,
-        actionId,
-        params: input.params,
-        options: {
-          timeoutMs: input.timeoutMs,
-          signal: input.signal,
-        },
+        options: { runId: input.runId, signal: input.signal },
       })
     },
 
