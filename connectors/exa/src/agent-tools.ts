@@ -117,7 +117,7 @@ export function exaWebSearch(
   return defineAgentTool("web_search")
     .description("Search the web and return bounded source text with URLs and metadata.")
     .input({ query: "string" })
-    .run(async ({ input, connector, signal: runSignal }) => {
+    .run(async ({ input, sixb: { connector }, signal: runSignal }) => {
       const query = input.query.trim()
       if (!query) {
         throw new AgentToolPublicError("[SixbExa] web_search query must not be empty.")
@@ -180,7 +180,7 @@ export function exaWebFetch(
   return defineAgentTool("web_fetch")
     .description("Fetch one web page and return bounded source content with its URL and metadata.")
     .input({ url: "string" })
-    .run(async ({ input, connector, signal: runSignal }) => {
+    .run(async ({ input, sixb: { connector }, signal: runSignal }) => {
       const requestedUrl = normalizeFetchUrl(input.url)
       limits.domainPolicy.assertAllows(requestedUrl.parsed, {
         toolName: "web_fetch",

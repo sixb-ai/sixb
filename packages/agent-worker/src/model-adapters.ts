@@ -2,8 +2,8 @@ import type {
   AgentMessagePart,
   AgentToolArtifacts,
   AgentToolDefinition,
-  AgentToolRunContext,
   AgentToolRunInfo,
+  AgentToolRuntimeFacade,
   JsonValue,
   Logger,
   ValueType,
@@ -39,7 +39,7 @@ interface ModelToolsFromAgentDefinitionsInput {
   readonly definitions: readonly AgentToolDefinition[]
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly run: AgentToolRunInfo
-  readonly connector: AgentToolRunContext["connector"]
+  readonly sixb: AgentToolRuntimeFacade
   readonly logger: Logger
   readonly artifactsForToolCall: (input: {
     readonly toolName: string
@@ -97,7 +97,7 @@ function modelToolFromAgentDefinition(
           toolCallId,
           signal,
           run: context.run,
-          connector: context.connector,
+          sixb: context.sixb,
           logger: context.logger,
           artifacts: context.artifactsForToolCall({
             toolName: definition.name,

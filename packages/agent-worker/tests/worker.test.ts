@@ -5,22 +5,31 @@ import { join } from "node:path"
 import { exa } from "@sixb/connector-exa"
 import { exaWebFetch, exaWebSearch } from "@sixb/connector-exa/agent-tools"
 import {
+  type AgentMessagePart,
   AgentRequestError,
   type AgentRuntime,
   type AgentToolArtifact,
   type AgentToolDefinition,
   type AgentToolResult,
   type AgentToolRunInfo,
+  AuthorizationError,
+  agent,
   type BlobStorage,
   type Broker,
   type CommandResult,
   type ConnectorDefinition,
   type CreateSandboxOptions,
+  can,
+  change,
+  col,
   defineAgentStep,
   defineAgentTool,
   defineConnector,
+  defineDataset,
   defineGroup,
+  defineMarking,
   defineObjectType,
+  defineRole,
   defineWorkflow,
   type EmbeddingModel,
   InMemoryBlobStorage,
@@ -38,6 +47,7 @@ import {
   type SandboxSourceAuth,
   type SixbErrorContext,
   SixbHost,
+  type SixbHostOptions,
   type Storage,
 } from "@sixb/core"
 import type { AgentRunStreamEvent } from "@sixb/core/agents/streams"
@@ -94,6 +104,7 @@ import { normalizeApiBaseUrl } from "../src/api-url"
 import { prepareAgentAttachments } from "../src/attachments"
 import * as conversationPreparation from "../src/context-compaction"
 import { AgentExecutionLostError, AgentFinalizationError } from "../src/errors"
+import { agentToolRuntime } from "../src/execution-context"
 import { resolveAgentExecutionPlan } from "../src/execution-plan"
 import { finishRunOrThrow } from "../src/finalize"
 import { runAgentTurn } from "../src/run-agent-turn"
@@ -894,6 +905,8 @@ const echoAgentTool = defineAgentTool("echo")
   .run(({ input }) => ({ echoed: input.value }))
 
 type TestSixb = AgentWorkerHost & { readonly blobStorage: BlobStorage }
+type TestSecurity = Pick<SixbHostOptions, "ontology" | "datasets" | "markings" | "groups" | "roles">
+type TestUser = { readonly type: "user"; readonly id: string }
 
 class InspectableAgentWorker extends AgentWorker {
   decideExecutionError(claimed: ClaimedQueueJob<AgentQueueJob>, error: unknown) {
@@ -1307,6 +1320,7 @@ function buildSixb(
     readonly projectTools?: readonly AgentToolDefinition[]
     readonly connectors?: readonly ConnectorDefinition[]
     readonly models?: ModelCatalogInput
+    readonly security?: TestSecurity
   } = {}
 ): TestSixb {
   return new SixbHost({
@@ -1315,6 +1329,7 @@ function buildSixb(
     tools: options.projectTools ?? options.agentTools,
     ...(options.connectors === undefined ? {} : { connectors: options.connectors }),
     groups: [AGENT_RUNTIME_GROUP],
+    ...options.security,
     broker,
     storage: new InMemoryStorage(),
     lakeStorage: new InMemoryLakeStorage(),
@@ -1392,7 +1407,7 @@ function withOneFailingWorkflowAgentFinalization(storage: Storage): Storage {
   }
 }
 
-async function seedRequesterUser(storage: Storage, principal = REQUESTER): Promise<void> {
+async function seedRequesterUser(storage: Storage, principal: TestUser = REQUESTER): Promise<void> {
   const auth = storage.auth
   if (!auth) throw new Error("expected auth storage")
   const existing = await auth.users.getById({ projectId: PROJECT_ID, id: principal.id })
@@ -1414,11 +1429,13 @@ async function queueWorkflowAgentNode(input: {
   readonly runId: string
   readonly requestedByPrincipal?: typeof REQUESTER
   readonly requesterGroupIds?: readonly string[]
+  /** Declared groups double as the step's groups. */
+  readonly security?: TestSecurity
 }) {
   const agentStep = defineAgentStep("workflow-usage-step", {
     model: input.model,
     instructions: "Resolve the best project.",
-    groups: [AGENT_RUNTIME_GROUP],
+    groups: input.security?.groups ?? [AGENT_RUNTIME_GROUP],
     ...(input.tools === undefined ? {} : { tools: input.tools }),
   })
     .input({ query: "string" })
@@ -1431,6 +1448,7 @@ async function queueWorkflowAgentNode(input: {
     workflows: [workflow],
     tools: input.tools ?? [],
     groups: [AGENT_RUNTIME_GROUP],
+    ...input.security,
     broker: new InMemoryBroker(),
     storage: input.storage ?? new InMemoryStorage(),
     lakeStorage: new InMemoryLakeStorage(),
@@ -1661,7 +1679,6 @@ async function buildAgentWorkerContext(
     ...context,
     sixb: agentSixb,
     blobStorage: agentSixb.blobs,
-    connector: agentSixb.connector,
   }
 }
 
@@ -1671,7 +1688,7 @@ function requestAgent(sixb: TestSixb, input: Parameters<AgentRuntime["runs"]["re
 
 async function requestAgentAs(
   sixb: TestSixb,
-  principal: typeof REQUESTER,
+  principal: TestUser,
   input: Parameters<AgentRuntime["runs"]["request"]>[0]
 ) {
   const auth = sixb.storage.auth
@@ -5769,12 +5786,12 @@ describe("AgentWorker", () => {
     const selectedEcho = defineAgentTool("echo")
       .description("Echo through the registered knowledge connector.")
       .input({ value: "string" })
-      .run(async ({ input, run, signal, connector, logger }) => {
+      .run(async ({ input, run, signal, sixb, logger }) => {
         selectedCalls += 1
         if (run.kind !== "conversation") throw new Error("Expected a conversation Agent run.")
         handlerContext = { runId: run.id, threadId: run.threadId }
         handlerSignal = signal
-        const client = await connector(knowledge)
+        const client = await sixb.connector(knowledge)
         logger.info("selected tool called", { value: input.value })
         return { echoed: client.echo(input.value) }
       })
@@ -9903,6 +9920,468 @@ describe("AgentWorker", () => {
         (m) => m.role === "assistant"
       )
       expect(assistants).toHaveLength(0)
+    } finally {
+      await worker.stop()
+    }
+  })
+})
+
+describe("agent tools act as the requester", () => {
+  const financial = defineMarking("financial")
+  const Customer = defineObjectType({
+    id: "customer",
+    name: "Customer",
+    properties: [prop("id", "string", { required: true, primary: true }), prop("name", "string")],
+  })
+  const Invoice = defineObjectType({
+    id: "invoice",
+    name: "Invoice",
+    properties: [
+      prop("id", "string", { required: true, primary: true }),
+      prop("title", "string"),
+      prop("amount", "double", { markings: [financial] }),
+    ],
+  })
+  const payments = defineDataset("invoice_payments", {
+    schema: [col("id", "string"), col("amount", "decimal", { markings: [financial] })],
+    primaryKey: "id",
+  })
+  const finance = defineGroup("finance")
+  const sales = defineGroup("sales")
+  const FINANCE_USER = { type: "user", id: "usr_finance" } as const
+  const SALES_USER = { type: "user", id: "usr_sales" } as const
+
+  const readInvoice = defineAgentTool("read_invoice")
+    .description("Read an invoice, its customer and its payments.")
+    .input({ invoiceId: "string" })
+    .run(async ({ input, sixb }) => {
+      const invoice = await sixb.objects(Invoice).get(input.invoiceId)
+      const customer = await sixb
+        .objects(Customer)
+        .get("c1")
+        .then((row) => row?.properties.name ?? null, deniedOrThrow)
+      const paymentColumns = await sixb.datasets
+        .readRows(payments)
+        .then((result) => result?.columns ?? null, deniedOrThrow)
+      return {
+        invoice: invoice?.properties ?? null,
+        redactions: invoice?.redactions ?? null,
+        customer,
+        paymentColumns,
+      }
+    })
+
+  function deniedOrThrow(error: unknown): "denied" {
+    if (error instanceof AuthorizationError) return "denied"
+    throw error
+  }
+
+  const SUMMARY_PROMPT = "Summarize invoice inv-1."
+  // Passes no signal of its own: only the run can cancel its model call.
+  const summarizeInvoice = defineAgentTool("summarize_invoice")
+    .description("Summarize an invoice with the project's model.")
+    .input({})
+    .run(async ({ sixb }) => {
+      const { output } = await sixb.models.language.generate({ prompt: SUMMARY_PROMPT })
+      return { summary: output }
+    })
+
+  /** Call one tool, then answer once the conversation holds a reply; answer tools directly. */
+  function toolCallThenAnswerModel(
+    toolName: string,
+    input: Readonly<Record<string, string>>,
+    options: {
+      readonly onAgentCall?: () => void
+      readonly onToolCall?: (request: LanguageModelRequest) => Promise<never>
+    } = {}
+  ): WorkerTestModel {
+    const text = (value: string) => ({
+      content: [{ type: "text" as const, text: value }],
+      finishReason: "stop" as const,
+      usage: USAGE,
+    })
+    return new WorkerTestModel({
+      modelId: "mock-model",
+      generate: async (request) => {
+        const { messages } = request
+        const [first] = messages
+        const fromTool =
+          first?.role === "user" &&
+          first.content.some((part) => part.type === "text" && part.text === SUMMARY_PROMPT)
+        if (fromTool) return options.onToolCall?.(request) ?? text("Paid in full.")
+        options.onAgentCall?.()
+        if (messages.some((message) => message.role !== "system" && message.role !== "user")) {
+          return text(JSON.stringify({ answer: "Done.", confidence: 1 }))
+        }
+        return {
+          content: [
+            {
+              type: "tool-call",
+              toolCallId: `call-${toolName}`,
+              toolName,
+              input: JSON.stringify(input),
+            },
+          ],
+          finishReason: "tool-calls",
+          usage: USAGE,
+        }
+      },
+    })
+  }
+
+  async function seedInvoice(host: TestSixb): Promise<void> {
+    const trusted = createTestSixb(host)
+    await trusted.objects(Customer).upsert({ properties: { id: "c1", name: "Acme" } })
+    await trusted.objects(Invoice).upsert({
+      properties: { id: "inv-1", title: "Alpha", amount: 120 },
+    })
+    await trusted.datasets.ingest(payments, {
+      changes: [change.upsert({ id: "pay-1", amount: "120.00" })],
+    })
+  }
+
+  async function seedMember(
+    host: TestSixb,
+    user: TestUser,
+    groupIds: readonly string[]
+  ): Promise<void> {
+    await seedRequesterUser(host.storage, user)
+    for (const groupId of groupIds) {
+      await authStorageOf(host).groupMemberships.upsert({
+        projectId: PROJECT_ID,
+        userId: user.id,
+        groupId,
+        source: "manual",
+      })
+    }
+  }
+
+  async function finishedRun(host: TestSixb, runId: string) {
+    return waitFor(
+      async () => {
+        const run = await agentStorageOf(host).runs.getById({ projectId: PROJECT_ID, id: runId })
+        return run && run.status !== "queued" && run.status !== "running" ? run : null
+      },
+      { label: `agent run '${runId}' terminal`, timeoutMs: 10_000 }
+    )
+  }
+
+  function toolOutput(parts: readonly AgentMessagePart[], toolName: string): unknown {
+    const call = parts.find((part) => part.type === "tool-call" && part.toolName === toolName)
+    if (call?.type !== "tool-call" || call.state !== "output-available") {
+      throw new Error(`Expected a '${toolName}' result.`)
+    }
+    return call.output
+  }
+
+  async function chatToolOutput(host: TestSixb, user: TestUser, toolName: string) {
+    const request = await requestAgentAs(host, user, { text: "Read invoice inv-1." })
+    const run = await finishedRun(host, request.run.id)
+    expect(run.status).toBe("succeeded")
+    const messages = await listMessages(agentStorageOf(host), request.run.threadId)
+    return toolOutput(
+      messages.flatMap((message) => message.parts),
+      toolName
+    )
+  }
+
+  // Regression proof: build the tools' facade in run-environment.ts from an unrestricted SDK
+  // (`createTestSixb(host)`) instead of the run's; the sales user then reads the amount and the
+  // customer.
+  test("a chat tool sees exactly what the requesting user sees", async () => {
+    const sixb = buildSixb(
+      toolCallThenAnswerModel(readInvoice.name, { invoiceId: "inv-1" }),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      {
+        projectTools: [readInvoice],
+        security: {
+          ontology: [Customer, Invoice],
+          datasets: [payments],
+          markings: [financial],
+          groups: [finance, sales],
+          roles: [
+            defineRole("invoice-readers", {
+              grantedTo: [finance, sales],
+              grants: [can.run(agent), can.view(Invoice), can.view(payments)],
+            }),
+            defineRole("finance-access", {
+              grantedTo: [finance],
+              grants: [can.view(Customer)],
+              clearances: [financial],
+            }),
+          ],
+        },
+      }
+    )
+    await seedInvoice(sixb)
+    await seedMember(sixb, FINANCE_USER, [finance.id])
+    await seedMember(sixb, SALES_USER, [sales.id])
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      await expect(chatToolOutput(sixb, FINANCE_USER, readInvoice.name)).resolves.toEqual({
+        invoice: { id: "inv-1", title: "Alpha", amount: 120 },
+        redactions: null,
+        customer: "Acme",
+        paymentColumns: ["id", "amount"],
+      })
+      await expect(chatToolOutput(sixb, SALES_USER, readInvoice.name)).resolves.toEqual({
+        invoice: { id: "inv-1", title: "Alpha" },
+        redactions: { amount: { reason: "missing_clearance" } },
+        customer: "denied",
+        paymentColumns: ["id"],
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: same as above, the step's service account then reads the amount and the
+  // customer its groups do not grant.
+  test("a workflow tool sees what the step's groups grant", async () => {
+    const billing = defineGroup("billing-agents")
+    const { sixb, runs, workflow, agentStep, nodeRunId } = await queueWorkflowAgentNode({
+      model: toolCallThenAnswerModel(readInvoice.name, { invoiceId: "inv-1" }),
+      tools: [readInvoice],
+      runId: "workflow-tool-authority",
+      requesterGroupIds: [finance.id],
+      security: {
+        ontology: [Customer, Invoice],
+        datasets: [payments],
+        markings: [financial],
+        groups: [billing],
+        roles: [
+          defineRole("billing-invoices", { grantedTo: [billing], grants: [can.view(Invoice)] }),
+        ],
+      },
+    })
+    // The workflow worker provisions the step's identity before it queues the node.
+    await ensureManagedAgentExecutionIdentity({
+      auth: sixb.storage.auth,
+      projectId: PROJECT_ID,
+      actorId: workflowAgentStepActorId(workflow.id, agentStep.id),
+      name: "Billing step",
+      description: "Workflow task",
+      groupIds: [billing.id],
+    })
+    await seedInvoice(sixb)
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const node = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow tool node terminal", timeoutMs: 10_000 }
+      )
+      expect(node.status).toBe("succeeded")
+      expect(toolOutput(node.trace ?? [], readInvoice.name)).toEqual({
+        invoice: { id: "inv-1", title: "Alpha" },
+        redactions: { amount: { reason: "missing_clearance" } },
+        customer: "denied",
+        paymentColumns: "denied",
+      })
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: hand tools `sixb.objects` or `sixb.datasets` in agentToolRuntime(); their
+  // writes become reachable.
+  test("leaves data writes out of a tool's reach, even through a cast", () => {
+    const sixb = buildSixb(answerModel(), new InMemoryBroker(), new RecordingSandboxFactory(), {
+      security: { ontology: [Customer, Invoice], markings: [financial] },
+    })
+    const tools = agentToolRuntime(createTestSixb(sixb))
+    const invoices = tools.objects(Invoice)
+
+    expect(Object.isFrozen(tools)).toBe(true)
+    expect(Object.keys(tools).sort()).toEqual([
+      "actions",
+      "connector",
+      "datasets",
+      "models",
+      "objects",
+      "telemetry",
+    ])
+    expect(Object.isFrozen(tools.datasets)).toBe(true)
+    expect(Object.keys(tools.datasets).sort()).toEqual(["getById", "list", "readRows"])
+    expect(Object.keys(invoices).sort()).toEqual(["byId", "get", "list", "query"])
+    expect(Object.keys(invoices.byId("inv-1")).sort()).toEqual(["get", "listLinks"])
+    expect(Object.keys(tools.objects)).toEqual([])
+  })
+
+  function recordUsage(host: TestSixb) {
+    const recorded: { readonly executionId: string; readonly attempt: number }[] = []
+    const workerHost = withStorage(
+      host,
+      withAiUsageRecordInterceptor(host.storage, async ({ executionId, attempt }, record) => {
+        recorded.push({ executionId, attempt })
+        return record()
+      })
+    )
+    return { workerHost, recorded }
+  }
+
+  // Regression proof: remove the bindAgentModelExecution call after the turn runtime in
+  // worker.ts; the tool's generate() then fails without a bound execution attempt.
+  test("accounts a tool's model call to a reclaimed chat run like the Agent's own", async () => {
+    const sixb = buildSixb(
+      toolCallThenAnswerModel(summarizeInvoice.name, {}),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [summarizeInvoice] }
+    )
+    const request = await requestAgentAs(sixb, REQUESTER, { text: "Summarize inv-1." })
+    // A worker crashed after starting the run: this delivery reclaims it as attempt 2.
+    await agentStorageOf(sixb).runs.start({
+      id: request.run.id,
+      projectId: PROJECT_ID,
+      execution: freshTestExecution(),
+    })
+    const { workerHost, recorded } = recordUsage(sixb)
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const run = await finishedRun(sixb, request.run.id)
+      expect(run).toMatchObject({ status: "succeeded", attempt: 2 })
+      const messages = await listMessages(agentStorageOf(sixb), request.run.threadId)
+      expect(
+        toolOutput(
+          messages.flatMap((message) => message.parts),
+          summarizeInvoice.name
+        )
+      ).toEqual({ summary: "Paid in full." })
+      // The Agent's tool call, the tool's own call, then the Agent's answer.
+      expect(recorded).toEqual(
+        Array.from({ length: 3 }, () => ({ executionId: run.executionId, attempt: 2 }))
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: remove the bindAgentModelExecution call in workflow-node-execution.ts; the
+  // tool's call fails, so only the node's own three calls are recorded.
+  test("accounts a tool's model call to a workflow node like the node's own", async () => {
+    const model = toolCallThenAnswerModel(summarizeInvoice.name, {})
+    const { sixb, runs, nodeRunId, agentExecutionId } = await queueWorkflowAgentNode({
+      model,
+      models: { language: [model] },
+      tools: [summarizeInvoice],
+      runId: "workflow-tool-model-call",
+    })
+    const { workerHost, recorded } = recordUsage(sixb)
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const node = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow tool model call node terminal", timeoutMs: 10_000 }
+      )
+      expect(node.status).toBe("succeeded")
+      expect(toolOutput(node.trace ?? [], summarizeInvoice.name)).toEqual({
+        summary: "Paid in full.",
+      })
+      // The tool call, the tool's own call, the research answer, then the structured output.
+      expect(recorded).toEqual(
+        Array.from({ length: 4 }, () => ({ executionId: agentExecutionId, attempt: 1 }))
+      )
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: bind `turnSignal` instead of the node's deadline in
+  // workflow-node-execution.ts; the tool's call then outlives the deadline and the test times out.
+  test("cancels a tool's model call at the workflow node's deadline", async () => {
+    let toolCallCancelled = false
+    const model = toolCallThenAnswerModel(
+      summarizeInvoice.name,
+      {},
+      {
+        onToolCall: ({ signal }) =>
+          new Promise((_, reject) =>
+            signal.addEventListener("abort", () => {
+              toolCallCancelled = true
+              reject(signal.reason)
+            })
+          ),
+      }
+    )
+    const { sixb, runs, nodeRunId } = await queueWorkflowAgentNode({
+      model,
+      models: { language: [model] },
+      tools: [summarizeInvoice],
+      runId: "workflow-tool-deadline",
+    })
+    const worker = new AgentWorker(sixb, workerOptions({ skillsDir: false, turnTimeoutMs: 200 }))
+    await worker.start()
+    try {
+      const node = await waitFor(
+        async () => {
+          const record = await runs.agentNodes.getByNodeRunId({ projectId: PROJECT_ID, nodeRunId })
+          return record && record.status !== "queued" && record.status !== "running" ? record : null
+        },
+        { label: "workflow tool deadline node terminal", timeoutMs: 5_000 }
+      )
+      expect(node.status).not.toBe("succeeded")
+      expect(toolCallCancelled).toBe(true)
+    } finally {
+      await worker.stop()
+    }
+  })
+
+  // Regression proof: stop passing `accounting` to bindAgentModelExecution, so the tool's calls
+  // open their own recorder; the Agent then answers after the unrecorded call and the run succeeds.
+  test("stops the run when a tool's model call cannot be accounted", async () => {
+    let agentCalls = 0
+    const sixb = buildSixb(
+      toolCallThenAnswerModel(
+        summarizeInvoice.name,
+        {},
+        {
+          onAgentCall: () => {
+            agentCalls += 1
+          },
+        }
+      ),
+      new InMemoryBroker(),
+      new RecordingSandboxFactory(),
+      { projectTools: [summarizeInvoice] }
+    )
+    const callIds: string[] = []
+    const workerHost = withStorage(
+      sixb,
+      withAiUsageRecordInterceptor(sixb.storage, async (usage, record) => {
+        if (!callIds.includes(usage.callId)) callIds.push(usage.callId)
+        // The second call is the tool's: neither the ledger nor its durable recovery takes it.
+        if (usage.callId === callIds[1]) throw new Error("usage storage unavailable")
+        return record()
+      })
+    )
+    const queue = sixb.queues.agents
+    const enqueue = queue.enqueue.bind(queue)
+    queue.enqueue = async (params) => {
+      if (params.jobs.some((job) => job.type === "agent.ai-usage.record.requested")) {
+        throw new Error("agent queue unavailable")
+      }
+      return enqueue(params)
+    }
+    const worker = new AgentWorker(workerHost, workerOptions({ skillsDir: false }))
+    await worker.start()
+    try {
+      const request = await requestAgentAs(sixb, REQUESTER, { text: "Summarize inv-1." })
+      const run = await finishedRun(sixb, request.run.id)
+      expect(run.status).toBe("failed")
+      expect(run.error?.code).toBe("agent.execution_failed")
+      expect(callIds).toHaveLength(2)
+      expect(agentCalls).toBe(1)
     } finally {
       await worker.stop()
     }

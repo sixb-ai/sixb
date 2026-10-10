@@ -16,6 +16,7 @@ export interface AgentTurnRuntime {
   readonly timedOut: () => boolean
   /** Surface ownership, accounting, timeout, or cancellation before another durable action. */
   readonly assertCanContinue: () => void
+  /** End the run: aborts `signal`, so a tool call that outlived it stops calling models. */
   dispose(): void
 }
 
@@ -45,6 +46,7 @@ export function createAgentTurnRuntime(input: {
     recoverAiModelCall: input.context.recoverAiModelCall,
   })
   const timeout = new AbortController()
+  const ended = new AbortController()
   let timedOut = false
   const timer = setTimeout(() => {
     timedOut = true
@@ -53,7 +55,7 @@ export function createAgentTurnRuntime(input: {
 
   return {
     sourceSignal: input.signal,
-    signal: AbortSignal.any([input.signal, timeout.signal]),
+    signal: AbortSignal.any([input.signal, timeout.signal, ended.signal]),
     usageRecorder,
     timedOut: () => timedOut,
     assertCanContinue() {
@@ -68,6 +70,7 @@ export function createAgentTurnRuntime(input: {
     },
     dispose() {
       clearTimeout(timer)
+      ended.abort(new DOMException("The Agent run has ended.", "AbortError"))
     },
   }
 }

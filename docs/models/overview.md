@@ -50,8 +50,9 @@ The agent's access depends on where it runs:
 | Chat | The signed-in user's permissions. |
 | Workflow step | Permissions granted through the step's configured groups. |
 
-Sixb enforces permissions when the agent accesses project data or requests an operation.
-Instructions and skills do not grant access.
+Sixb enforces permissions when the agent, or a [tool](./tools-and-authorization.md#read-project-data)
+it calls, accesses project data or requests an operation. Instructions and skills do not grant
+access.
 
 For example, this role lets members of your existing employees group use the agent and read invoices:
 

@@ -1,3 +1,5 @@
+import type { AgentToolRuntimeFacade, Sixb } from "@sixb/core"
+import { createObjectReadFacade } from "@sixb/core/internal/actions"
 import { bindDurableAgentExecution } from "@sixb/core/internal/agent-execution"
 import type { AgentExecutionAuthorization } from "@sixb/core/internal/agents"
 import type { ExecutionRecord } from "@sixb/core/storage"
@@ -24,6 +26,30 @@ export function createAgentExecutionContext(input: {
     sixb,
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),
     blobStorage: sixb.blobs,
-    connector: sixb.connector,
   }
+}
+
+/**
+ * Narrow the run's SDK to what agent tools may call. A handler cannot reach past the facade into
+ * operations the run must not perform directly, such as writing data without an action, reaching
+ * blobs by id regardless of the requester, or starting workflows.
+ */
+export function agentToolRuntime(sixb: Sixb): AgentToolRuntimeFacade {
+  const read = createObjectReadFacade(sixb, {
+    resolveObjectType: (objectTypeId) => sixb.objects.resolveType(objectTypeId),
+    getHistoryBatch: (input) => sixb.objects.getTelemetryHistoryBatch(input),
+  })
+  const { datasets } = sixb
+  return Object.freeze({
+    objects: read.objects,
+    telemetry: read.telemetry,
+    actions: sixb.actions,
+    datasets: Object.freeze({
+      list: () => datasets.list(),
+      getById: (datasetId: string) => datasets.getById(datasetId),
+      readRows: (...args: Parameters<typeof datasets.readRows>) => datasets.readRows(...args),
+    }),
+    models: sixb.models,
+    connector: sixb.connector,
+  })
 }

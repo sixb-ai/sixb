@@ -70,6 +70,16 @@ export class AiModelCallRecorder {
       })
   }
 
+  /** The execution every call this recorder admits is attributed to. */
+  get executionId(): string {
+    return this.input.executionId
+  }
+
+  /** The execution attempt every call this recorder admits is attributed to. */
+  get attempt(): number {
+    return this.input.attempt
+  }
+
   /** Wrap the resolved model so all calls in an execution share admission. */
   wrapModel(model: LanguageModel): LanguageModel {
     return {
