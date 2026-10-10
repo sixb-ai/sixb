@@ -12,7 +12,7 @@ The two messaging slots are **not** the same thing — keep them distinct.
 | Shape | Append-only event log | Lease-based work lanes |
 | Purpose | Records what happened, fans out to subscribers | Dispatches and retries background jobs |
 | Operations | `append`, `read`, `latestCursor`, `subscribe` | `enqueue`, `claim`, `complete`, `retry`, `fail`, `renewLease` |
-| Carries | Domain [events](../../../docs/events/overview.md) (`object.created`, `object.updated`, `telemetry.appended`, `link.created`, `action.requested`, …) | Run requests, one per lane |
+| Carries | Domain [events](../../../docs/websockets/overview.md#domain-events) (`object.created`, `object.updated`, `telemetry.appended`, `link.created`, `sync.run.finished`, …) | Run requests, one per lane |
 | Replayable | Yes — retained, ordered history | No — jobs are consumed |
 
 For ontology facts, the operational database is authoritative: the Materializer writes

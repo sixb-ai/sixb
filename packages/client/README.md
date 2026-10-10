@@ -208,19 +208,6 @@ function LiveDashboard() {
 }
 ```
 
-Action events can be scoped by run, action id, or object subject when a screen needs custom
-coordination:
-
-```typescript
-useEvents(events.actions().run("run_123").terminal(), (event) => {
-  console.log("action finished", event.payload.runId)
-})
-
-useEvents(events.actions().subject(Thermostat).byId("living-room").completed(), () => {
-  console.log("thermostat action succeeded")
-})
-```
-
 Use `useInvalidateOnEvent(builder, resolveKeys)` to invalidate TanStack Query keys on
 matching events. See `docs/client/events.md` for the full event builder and hook guide.
 
