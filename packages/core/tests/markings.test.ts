@@ -15,6 +15,7 @@ import {
 } from "../src"
 import { createAuthorizedObjectReader } from "../src/execution/authorized-object-reader"
 import { createDelegatedRequestScope, createTestingScope } from "../src/execution/scopes"
+import { redactDomainEvent, resolvePropertyClearance } from "../src/objects/property-clearance"
 import type { OntologyRegistry } from "../src/ontology"
 import { createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -40,6 +41,7 @@ const Invoice = defineObjectType({
   properties: [
     prop("id", "string", { required: true, primary: true }),
     prop("title", "string", { query: { searchable: true, text: true } }),
+    prop("labels", { type: "array", items: "string" }),
     prop("notes", "string", { query: { searchable: true, text: true }, markings: [financial] }),
     prop("amount", "double", {
       required: true,
@@ -188,6 +190,33 @@ describe("markings on object reads", () => {
     })
   })
 
+  test("redacted rows are detached copies that share one frozen redactions record", async () => {
+    const host = createHost()
+    const { trusted, salesReader } = await seed(host)
+    await trusted.objects(Invoice).upsert({
+      properties: { id: "inv-3", title: "Gamma", labels: ["urgent"], amount: 10 },
+    })
+
+    const first = await salesReader.objects.get(Invoice.id, "inv-3")
+    const second = await salesReader.objects.get(Invoice.id, "inv-3")
+    if (!first || !second) throw new Error("expected the seeded invoice")
+    expect(first.redactions).toBe(second.redactions)
+    expect(Object.isFrozen(first.redactions)).toBe(true)
+    expect(Object.isFrozen(first.redactions?.amount)).toBe(true)
+    expect(() => {
+      Object.assign(first.redactions ?? {}, { title: { reason: "missing_clearance" } })
+    }).toThrow(TypeError)
+
+    // Each read is still the caller's own deep copy, detached from storage and from other reads.
+    // Reproduce: return `result` instead of its structuredClone in the reader's #detachRows.
+    ;(first.properties.labels as string[]).push("leaked")
+    expect(second.properties.labels).toEqual(["urgent"])
+    expect((await salesReader.objects.get(Invoice.id, "inv-3"))?.properties.labels).toEqual([
+      "urgent",
+    ])
+    expect((await trusted.objects.get(Invoice.id, "inv-3"))?.properties.labels).toEqual(["urgent"])
+  })
+
   test("projecting a marked property returns it redacted instead of failing", async () => {
     const host = createHost()
     const { salesReader } = await seed(host)
@@ -321,6 +350,39 @@ describe("markings on writes and events", () => {
       (event) => event.type === "object.created" && event.payload.primaryId === "inv-1"
     )
     expect(cleared?.type === "object.created" && cleared.payload.properties.amount).toBe(120)
+  })
+
+  test("redacted events share one frozen redactions record and copy only own keys", async () => {
+    const host = createHost()
+    const { trusted } = await seed(host)
+    const clearance = resolvePropertyClearance(host.definitions.ontology, new Set())
+    const stored = (await trusted.events.read()).find(
+      (event) => event.type === "object.created" && event.payload.primaryId === "inv-1"
+    )
+    if (!clearance || stored?.type !== "object.created") {
+      throw new Error("expected a clearance and the created invoice event")
+    }
+
+    // A parsed `__proto__` key is an own property: it must stay one, not become the prototype.
+    const properties: typeof stored.payload.properties = JSON.parse(
+      '{"id":"inv-1","__proto__":{"amount":1},"amount":120}'
+    )
+    const redacted = redactDomainEvent(
+      { ...stored, payload: { ...stored.payload, properties } },
+      clearance
+    )
+    if (redacted.type !== "object.created") throw new Error("expected an object event")
+    expect(JSON.stringify(redacted.payload.properties)).toBe(
+      '{"id":"inv-1","__proto__":{"amount":1}}'
+    )
+    expect(Object.getPrototypeOf(redacted.payload.properties)).toBe(Object.prototype)
+    expect(properties.amount).toBe(120)
+
+    const again = redactDomainEvent(stored, clearance)
+    expect(again.type === "object.created" && again.payload.redactions).toBe(
+      redacted.payload.redactions
+    )
+    expect(Object.isFrozen(redacted.payload.redactions)).toBe(true)
   })
 })
 

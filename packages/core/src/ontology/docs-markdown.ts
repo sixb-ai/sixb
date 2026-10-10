@@ -24,7 +24,7 @@ export interface RenderOntologyDocsInput {
    * Marked properties the reader is not cleared for. Like the ontology API, docs still list them,
    * flagged, so the agent can say the information exists; their values cannot be read or queried.
    */
-  readonly restrictedPropertyIds?: (objectTypeId: string) => ReadonlySet<string>
+  readonly restrictedPropertyIds?: (objectTypeId: string) => ReadonlySet<string> | undefined
 }
 
 export interface OntologyDocsIndexEntry {

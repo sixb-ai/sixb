@@ -9,7 +9,9 @@ import {
   createAuthorizedOntologyView,
 } from "../objects/authorized-ontology-view"
 import {
+  attachRedactions,
   createClearanceQueryAdmission,
+  omitHiddenProperties,
   type PropertyClearance,
   redactObjectRow,
   resolvePropertyClearance,
@@ -186,7 +188,7 @@ class AuthorizedObjectReaderImpl {
       ...request,
       projectId: this.#runtime.projectId,
     })
-    return detachReadResult(row && this.#redact(row))
+    return this.#detachRows(row && this.#omitHidden(row), (detached) => [detached])
   }
 
   async getByPrimaryIdBatch(
@@ -203,8 +205,9 @@ class AuthorizedObjectReaderImpl {
       ...request,
       projectId: this.#runtime.projectId,
     })
-    return detachReadResult(
-      new Map([...rows].map(([key, row]) => [key, this.#redact(row)] as const))
+    return this.#detachRows(
+      new Map([...rows].map(([key, row]) => [key, this.#omitHidden(row)] as const)),
+      (detached) => detached.values()
     )
   }
 
@@ -279,7 +282,10 @@ class AuthorizedObjectReaderImpl {
       ...(objectTypeId === undefined ? {} : { objectTypeId }),
       projectId: this.#runtime.projectId,
     })
-    return detachReadResult({ ...page, objects: page.objects.map((row) => this.#redact(row)) })
+    return this.#detachRows(
+      { ...page, objects: page.objects.map((row) => this.#omitHidden(row)) },
+      (detached) => detached.objects
+    )
   }
 
   async listLinks(input: ListLinksInput): ReturnType<ObjectReadStorage["listLinks"]> {
@@ -342,7 +348,10 @@ class AuthorizedObjectReaderImpl {
       },
       this.#queryExecutorOptions()
     )
-    return detachReadResult({ ...result, objects: result.objects.map((row) => this.#redact(row)) })
+    return this.#detachRows(
+      { ...result, objects: result.objects.map((row) => this.#omitHidden(row)) },
+      (detached) => detached.objects
+    )
   }
 
   async queryLinks(
@@ -527,8 +536,28 @@ class AuthorizedObjectReaderImpl {
     return this.#clearance ? redactObjectRow(row, this.#clearance) : row
   }
 
+  #omitHidden<TRow extends ObjectRow>(row: TRow): TRow {
+    return this.#clearance ? omitHiddenProperties(row, this.#clearance) : row
+  }
+
+  /**
+   * Detach a result whose rows went through {@link #omitHidden}, then list their redactions on
+   * the copy. Each row is deep-copied once, and never with a hidden value.
+   */
+  #detachRows<TResult>(
+    result: TResult,
+    rows: (detached: TResult) => Iterable<ObjectRow | null>
+  ): TResult {
+    const detached = detachReadResult(result)
+    const clearance = this.#clearance
+    if (clearance) {
+      for (const row of rows(detached)) if (row) attachRedactions(row, clearance)
+    }
+    return detached
+  }
+
   #hidesProperty(item: { readonly objectTypeId: string; readonly propertyId: string }): boolean {
-    return this.#clearance?.hiddenPropertyIds(item.objectTypeId).has(item.propertyId) ?? false
+    return this.#clearance?.missingMarking(item.objectTypeId, item.propertyId) !== undefined
   }
 
   #admitDelegatedQuery(query: ObjectQuery): AdmittedObjectQuery | undefined {
