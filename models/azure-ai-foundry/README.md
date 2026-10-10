@@ -162,6 +162,9 @@ Responses use full-history replay with `store: false` and encrypted reasoning. R
 the endpoint, deployment, and protocol. Chat compatibility is selected with `profile`;
 DeepSeek reasoning replay uses `reasoningReplay: "tool-continuation"`.
 
+Every protocol accepts `reasoning`, the level Sixb applies when the model runs without an explicit
+choice, such as `foundry.chat("production", { reasoning: "low" })`.
+
 Messages `thinkingMode` selects manual or adaptive thinking. Manual budgets start at 1024 tokens
 and must stay below the output ceiling. Inline media has a 20 MiB aggregate default limit,
 configurable with `maxInputFileBytes`. Provider-native tools, audio/video, and worker native-PDF

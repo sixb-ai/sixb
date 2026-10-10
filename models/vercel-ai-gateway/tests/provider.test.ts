@@ -1648,3 +1648,15 @@ function answerOutput(): ModelOutput<{ answer: string }> {
     },
   }
 }
+
+test("carries a default reasoning set on the model binding", async () => {
+  const gateway = createVercelGateway({ fetch: async () => Response.json({ data: [] }) })
+  const model = gateway("zai/glm-5.3-flash", { reasoning: "low" })
+
+  expect(model.defaultReasoning).toBe("low")
+  expect((await model.resolve?.({ offline: true }))?.defaultReasoning).toBe("low")
+  expect(gateway("openai/gpt-5.5").defaultReasoning).toBeUndefined()
+  expect(() =>
+    gateway("openai/gpt-5.5", { reasoning: { budgetTokens: 1_000 } as unknown as "low" })
+  ).toThrow("[SixbVercelGateway] reasoning must be one of:")
+})

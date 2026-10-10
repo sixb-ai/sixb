@@ -16,11 +16,13 @@ import {
   type LanguageModelRateCard,
   type LanguageModelRequest,
   MODEL_REASONING_EFFORTS,
+  MODEL_REASONING_LEVELS,
   type ModelCapabilities,
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
   ModelProviderError,
   type ModelReasoningCapabilities,
+  type ModelReasoningLevel,
   type ModelReportedCost,
   type ModelResponseFormat,
   type ModelUsage,
@@ -70,6 +72,8 @@ export interface VercelGatewayOptions {
 }
 
 export interface VercelGatewayModelOptions {
+  /** Reasoning Sixb applies when this model runs without an explicit choice. */
+  readonly reasoning?: ModelReasoningLevel
   /** Default output ceiling; individual calls may request less. */
   readonly maxOutputTokens?: number
   readonly request?: JsonObject
@@ -744,6 +748,7 @@ class VercelGatewayLanguageModel implements LanguageModel {
   readonly modelId: string
   readonly definition: LanguageModelDefinition
   readonly costEstimator: ModelCostEstimator
+  readonly defaultReasoning?: ModelReasoningLevel
 
   constructor(
     private readonly transport: GatewayTransport,
@@ -770,6 +775,14 @@ class VercelGatewayLanguageModel implements LanguageModel {
     }
     if (options.request !== undefined) {
       assertJsonObject(options.request, "model request options")
+    }
+    if (options.reasoning !== undefined) {
+      if (!(MODEL_REASONING_LEVELS as readonly unknown[]).includes(options.reasoning)) {
+        throw new TypeError(
+          `[SixbVercelGateway] reasoning must be one of: ${MODEL_REASONING_LEVELS.join(", ")}.`
+        )
+      }
+      this.defaultReasoning = options.reasoning
     }
     if (options.providerOptions !== undefined) {
       assertJsonObject(options.providerOptions, "model provider options")

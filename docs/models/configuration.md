@@ -37,6 +37,28 @@ The first language model is the default. Chat users can choose from this catalog
 reasoning effort their selected model supports. An [AI workflow step](../workflows/overview.md#add-an-ai-task)
 can select a model and reasoning effort through its `model` and `reasoning` options.
 
+### Default reasoning
+
+Give a model a default reasoning effort with the `reasoning` option of its binding:
+
+```ts
+const glmModel = vercelGateway("zai/glm-5.3-flash", { reasoning: "low" })
+
+createSixb({ models: { language: [glmModel, openaiModel] } })
+```
+
+Sixb applies it whenever this model runs without an explicit choice: chat messages, AI workflow
+steps, and `generate()` calls. Without one, the provider's own default applies. An explicit
+`reasoning` always wins. Sixb checks the level against the capabilities the provider declares at
+startup; if the provider later reports that the model does not support it, the call falls back to
+the provider default. A provider you write yourself sets the level as `defaultReasoning` on the
+`LanguageModel` it returns.
+
+Chat follows the project defaults until a user picks a model or an effort. Choosing a model starts
+from that model's default reasoning, and **Reset to default** forgets the choice, so later changes
+to your defaults reach the user again. The chosen reasoning is fixed when a message is sent, so a
+retry runs with the same setting.
+
 ## Generate a response
 
 Use `sixb.models.language.generate()` inside an action or workflow step when your code supplies

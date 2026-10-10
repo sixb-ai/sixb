@@ -13,7 +13,11 @@ import {
   type ModelDefinition,
 } from "./definitions"
 import { assertEmbeddingModel, type EmbeddingModel } from "./embedding-model"
-import type { LanguageModel } from "./language-model"
+import {
+  type LanguageModel,
+  MODEL_REASONING_LEVELS,
+  modelReasoningSupportIssue,
+} from "./language-model"
 import { assertRerankingModel, type RerankingModel } from "./reranking-model"
 
 /** Stable identity of a configured provider binding. */
@@ -143,7 +147,10 @@ function createLanguageCatalog(
     throw new RuntimeError("[Sixb] 'models.language' must be an array of Sixb language models.")
   }
 
-  const index = indexModelBindings(models, "language", assertLanguageModel)
+  const index = indexModelBindings(models, "language", (model, position) => {
+    assertLanguageModel(model, position)
+    assertDefaultReasoning(model, position)
+  })
   const [defaultEntry] = index.list()
   if (!defaultEntry) {
     throw new RuntimeError(
@@ -162,6 +169,23 @@ function createEmbeddingCatalog(
   }
 
   return indexModelBindings(models ?? [], "embedding", assertEmbeddingModel)
+}
+
+// Capabilities known without catalog I/O. Unknown support is accepted: providers fall back to their
+// default when a resolved model turns out not to support the level.
+function assertDefaultReasoning(model: LanguageModel, index: number): void {
+  const reasoning: unknown = model.defaultReasoning
+  if (reasoning === undefined) return
+  if (!(MODEL_REASONING_LEVELS as readonly unknown[]).includes(reasoning)) {
+    throw invalidLanguageModel(
+      index,
+      `expected 'defaultReasoning' to be one of: ${MODEL_REASONING_LEVELS.join(", ")}`
+    )
+  }
+  const issue = modelReasoningSupportIssue(model.definition.capabilities.reasoning, reasoning)
+  if (issue !== undefined) {
+    throw invalidLanguageModel(index, `default reasoning '${reasoning}' cannot be used: ${issue}`)
+  }
 }
 
 function assertLanguageModel(model: unknown, index: number): asserts model is LanguageModel {

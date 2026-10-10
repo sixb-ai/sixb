@@ -84,6 +84,12 @@ export interface LanguageModel {
   readonly definition: LanguageModelDefinition
   readonly costEstimator?: ModelCostEstimator
   /**
+   * Reasoning Sixb applies whenever this model runs without an explicit choice: chat turns, AI
+   * workflow steps, subagents, and direct generation. Providers set it from their model options;
+   * Sixb checks it against `definition.capabilities` at startup.
+   */
+  readonly defaultReasoning?: ModelReasoningLevel
+  /**
    * Return an executable model pinned to operational metadata, preserving model identity.
    * `offline` requires a local snapshot without catalog I/O. Workers retain this model
    * for generation and compaction; later catalog refreshes must not change its capabilities/limits.
