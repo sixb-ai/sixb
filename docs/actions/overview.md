@@ -130,8 +130,11 @@ external change unrecorded. Pass `run.idempotencyKey` to the external API, as ab
 retried after a lost response applies once.
 
 For notifications or other work after saving, add `.effects()` after `.edits()`. Its handler gets
-`writeback` and `commit`, which describes the saved changes. An effects error is recorded in
-`run.effects`; it does not undo the edits or make the committed action fail. Pass
+`writeback` and `commit`, which describes the saved changes. Effects run after the request returns
+the run, which does not wait for them, and only for a run that committed edits. Their outcome is
+recorded later in `run.effects`, when the run's `phase` becomes `effects`; an effects error does not
+undo the edits or make the committed action fail. If the process stops, or their outcome cannot be
+recorded, a succeeded run may never get `run.effects`, so do not wait for it indefinitely. Pass
 `run.idempotencyKey` to these calls as well.
 
 The order is `validate` → `writeback` → `edits` → `effects`. Only add the handlers you need, with
@@ -218,11 +221,19 @@ if (run.status === "failed") {
 A run that fails comes back with `status: "failed"` and its `error`; it is not thrown. The call
 throws when no run was requested, such as for an unknown action, invalid params, or a missing
 permission. It can also throw `internal.unexpected` after a run started, when that run's record
-cannot be returned: request it again with the same `runId` to get the record.
+could not be written: request it again with the same `runId` to get the record, or to run the
+action again if it was never written.
 
-Pass a `runId` to make a request safe to retry. A repeated request with that `runId` returns the
-run once it has finished, without running the action again, and fails with
-[`action.run_in_progress`](../errors/overview.md#error-catalog) while it still runs.
+A run is recorded once, when it ends. Its record holds the request (`params` and `subject`), how it
+ended (`status`, and `error` when it failed), the last `phase` it reached, its writeback's result,
+and when it started and finished. A run that commits edits is recorded with them, so no edits are
+ever saved without their run. A run cut short, for example by a crash, leaves no record.
+
+Pass a `runId` to make a request safe to retry. A repeated request with a `runId` that is recorded
+returns that run without running the action again. While the same process still runs it, a repeated
+request fails with [`action.run_in_progress`](../errors/overview.md#error-catalog). Two processes
+can both run the same `runId`: the one that records it second returns the first one's record, and
+both may have called the writeback, which is why it should pass `run.idempotencyKey` along.
 
 A run has 30 seconds to get through validation and a successful writeback, or through validation
 and edits when it has no writeback. A run that runs out of time before then stops, commits nothing,

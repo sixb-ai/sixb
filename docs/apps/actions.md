@@ -38,9 +38,10 @@ export function MarkPaidButton({ invoiceId }: { invoiceId: string }) {
 }
 ```
 
-`isPending` stays true while the action runs. `isSuccess` means the action succeeded. `isError`
-covers rejected requests and runs that failed or timed out; for a run, the error is an
-`ActionRunFailedError` whose `run` holds its details. Leaving the page does not cancel the action.
+`isPending` stays true while the action runs; its effects run after it returns. `isSuccess` means
+the action succeeded. `isError` covers rejected requests and runs that failed or timed out; for a
+run, the error is an `ActionRunFailedError` whose `run` holds its details. Leaving the page does not
+cancel the action.
 
 ## Run a global action
 
