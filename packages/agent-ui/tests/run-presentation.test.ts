@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { createLiveRunState, type LiveRunState } from "../src/liveRun"
+import { createLiveRunState, type LiveRunState } from "@sixb/client"
 import {
   type ActiveTurnSources,
   EXTENDED_WAITING_STATUS_MS,
@@ -263,9 +263,8 @@ describe("presentActiveTurn", () => {
               kind: "tool",
               tool: { toolName: "bash", state: "input-streaming", inputText: "curl" },
             },
-            { kind: "step-start" },
           ],
-          partKeys: ["t1", "r1", "r2", "tool1", "step1"],
+          partKeys: ["t1", "r1", "r2", "tool1"],
         }),
       })
     )

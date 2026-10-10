@@ -8,6 +8,7 @@ import {
 import { type Auth, type Client, type Config, createClient, createConfig } from "./generated/client"
 import { client as sharedClient } from "./generated/client.gen"
 import { createSixbSessionFetch, type SixbSessionOptions, type SixbSessionStore } from "./session"
+import { type SixbWebSocketFactory, setClientWebSocketFactory } from "./ws-socket"
 
 export { normalizeSixbApiBaseUrl } from "./base-url"
 
@@ -46,6 +47,8 @@ export interface SixbClientOptions {
   readonly baseUrl?: string
   readonly auth?: SixbClientAuth
   readonly fetch?: typeof fetch
+  /** How the client opens its WebSockets. Defaults to the runtime's `WebSocket`. */
+  readonly webSocket?: SixbWebSocketFactory
   readonly headers?: Config["headers"]
   readonly credentials?: RequestCredentials
 }
@@ -110,6 +113,7 @@ export function createSixbClient(options: SixbClientOptions = {}): SixbClient {
   const client = createClient(createSixbClientConfig(options))
   markClientSharedAuthority(client, sharedGrantId(options))
   markClientSessionAuthority(client, sixbSessionOptions(options))
+  setClientWebSocketFactory(client, options.webSocket)
   installSixbErrorInterceptor(client)
   return client
 }
@@ -121,6 +125,7 @@ export function configureSixbClient(
   client.setConfig(createSixbClientConfig(options))
   markClientSharedAuthority(client, sharedGrantId(options))
   markClientSessionAuthority(client, sixbSessionOptions(options))
+  setClientWebSocketFactory(client, options.webSocket)
   installSixbErrorInterceptor(client)
   return client
 }

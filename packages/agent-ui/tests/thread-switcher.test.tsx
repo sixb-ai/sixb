@@ -1,8 +1,8 @@
 import { expect, test } from "bun:test"
+import { createLiveRunState } from "@sixb/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { renderToStaticMarkup } from "react-dom/server"
 import { ConversationPanel, type ConversationPanelProps } from "../src/components/ConversationPanel"
-import { createLiveRunState } from "../src/liveRun"
 import type { Agent, AgentThread } from "../src/types"
 
 const agent: Agent = {
