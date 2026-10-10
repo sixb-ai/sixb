@@ -24,7 +24,7 @@ export interface SixbDefinitions {
   readonly ontology: OntologyDefinitionCatalog
   readonly actions: ActionDefinitionCatalog
   readonly tools: AgentToolCatalog
-  /** The project files the Agent reads: `skills/` and `SIXB.md`. */
+  /** The project files the Agent reads: `skills/`, `SIXB.md`, and the docs of `ontology/`. */
   readonly agent: AgentDefinitions
   readonly connectors: DefinitionCatalog<ConnectorDefinition>
   readonly datasets: DefinitionCatalog<DatasetDefinition>

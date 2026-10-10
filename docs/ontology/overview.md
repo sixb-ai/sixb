@@ -52,5 +52,31 @@ The same `Invoice` definition then gives your [app](../apps/querying-data.md) ty
 connects [actions](../actions/overview.md) to invoices. Agents and workflows can use those actions
 to make changes. You define each type and operation once, and reuse them across your project.
 
+## Explain it to the agent
+
+Before working with a type, the [agent](../models/overview.md) reads a reference file that Sixb
+writes from your definitions, limited to what the person it works for can see.
+
+Add what your definitions cannot say, such as business rules or vocabulary, in a Markdown file next
+to the module that defines the type, with the same name. Sixb adds it to the reference file:
+
+```md
+<!-- ontology/invoice.md, next to ontology/invoice.ts -->
+An invoice is overdue 30 days after it is sent, not after its due date.
+```
+
+Put work the agent would otherwise rebuild on every question, such as a search that combines
+several queries or a calculation over a type's data, in a `scripts/` folder anywhere under
+`ontology/`. The agent runs these files in its sandbox, where they query the project with the
+`sixb` CLI as the person it works for. They are never loaded as definitions. Point to them from
+the type's notes:
+
+```md
+<!-- ontology/support/ticket.md -->
+To search a customer's tickets, run
+`bun $SIXB_ONTOLOGY_DIR/support/scripts/search-history.ts <customerId> "<question>"`.
+It combines keyword and meaning search and prints the best tickets first.
+```
+
 Continue with [Object types](object-types.md) to define your first type, [Properties](properties.md)
 to choose its values and query capabilities, or [Links](links.md) to connect it to other types.

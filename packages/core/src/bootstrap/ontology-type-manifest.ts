@@ -1,10 +1,11 @@
-import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises"
+import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { dirname, extname, join, relative, resolve, sep } from "node:path"
 import { pathToFileURL } from "node:url"
 import type { OntologyDocumentInput } from "../ontology/registry"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { ValueType } from "../ontology/types"
 import { RuntimeError } from "../runtime/errors"
+import { listOntologyModuleFiles } from "./discovery"
 
 const moduleExtensions = new Set([".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"])
 
@@ -44,8 +45,7 @@ export async function discoverOntologyTypeManifest(
   projectRoot: string
 ): Promise<OntologyTypeManifestDiscovery> {
   const resolvedProjectRoot = resolve(projectRoot)
-  const ontologyDir = join(resolvedProjectRoot, "ontology")
-  const modulePaths = await listModuleFiles(ontologyDir)
+  const modulePaths = await listOntologyModuleFiles(resolvedProjectRoot)
   const entries = new Map<string, OntologyTypeManifestEntry>()
   const valueTypeEntries = new Map<string, OntologyValueTypeManifestEntry>()
   const seen = new Set<unknown>()
@@ -271,37 +271,6 @@ async function loadOntologyModule(input: {
   }
 }
 
-async function listModuleFiles(dir: string): Promise<string[]> {
-  let entries: import("node:fs").Dirent[]
-  try {
-    entries = (await readdir(dir, { withFileTypes: true })) as import("node:fs").Dirent[]
-  } catch (error) {
-    if (isNotFoundError(error)) {
-      return []
-    }
-    throw error
-  }
-
-  const files: string[] = []
-  const sortedEntries = [...entries].sort((a, b) => a.name.localeCompare(b.name))
-
-  for (const entry of sortedEntries) {
-    const fullPath = join(dir, entry.name)
-    if (entry.isDirectory()) {
-      files.push(...(await listModuleFiles(fullPath)))
-      continue
-    }
-
-    if (!entry.isFile() || !hasSupportedModuleExtension(entry.name)) {
-      continue
-    }
-
-    files.push(fullPath)
-  }
-
-  return files
-}
-
 function toGeneratedModuleSpecifier(input: {
   readonly fromDir: string
   readonly modulePath: string
@@ -314,10 +283,6 @@ function toGeneratedModuleSpecifier(input: {
 function stripSupportedModuleExtension(path: string): string {
   const extension = extname(path)
   return moduleExtensions.has(extension) ? path.slice(0, -extension.length) : path
-}
-
-function hasSupportedModuleExtension(fileName: string): boolean {
-  return moduleExtensions.has(extname(fileName).toLowerCase())
 }
 
 function isNotFoundError(error: unknown): boolean {

@@ -10,6 +10,7 @@ import { assertDatasetDefinition } from "../datasets/validation"
 import { createModelCatalog, type ModelCatalogInput } from "../models"
 import { sameEmbeddingModel } from "../models/embedding-model"
 import { OntologyRegistry } from "../ontology"
+import { createOntologyDocsCatalog } from "../ontology/docs"
 import type { PipelineDefinition } from "../pipelines/types"
 import { ProjectionRegistry } from "../projections"
 import type { ProjectionDefinition } from "../projections/types"
@@ -95,6 +96,10 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
   }
   const tools = createAgentToolCatalog(options.tools)
   const skills = createAgentSkillCatalog(options.agent?.skills)
+  const ontologyDocs = createOntologyDocsCatalog({
+    objectTypes: ontology.listObjectTypes(),
+    ...(options.agent?.ontologyDocs === undefined ? {} : { docs: options.agent.ontologyDocs }),
+  })
   const connectorsById = indexUniqueDefinitions("connector", options.connectors ?? [])
 
   // Datasets resolve first because syncs, pipelines, projections, and security depend on them.
@@ -206,6 +211,7 @@ export function resolveDefinitions(options: DefinitionOptions): ResolvedDefiniti
       ...(options.agent?.instructions === undefined
         ? {}
         : { instructions: options.agent.instructions }),
+      ontologyDocs,
     }),
     connectors: createDefinitionCatalog(connectorsById),
     datasets: createDefinitionCatalog(datasetsById),

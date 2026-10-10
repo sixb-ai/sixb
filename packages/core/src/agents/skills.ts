@@ -1,3 +1,4 @@
+import type { OntologyDocsCatalog, OntologyDocsInput } from "../ontology/docs"
 import { RuntimeError } from "../runtime/errors"
 
 /** A project file the Agent receives byte-for-byte in its sandbox. */
@@ -29,6 +30,8 @@ export interface AgentDefinitionsInput {
   readonly skills?: readonly AgentSkillDefinition[]
   /** The conversational Agent's instructions, from `SIXB.md`. */
   readonly instructions?: string
+  /** The modules, docs, and scripts of `ontology/`. */
+  readonly ontologyDocs?: OntologyDocsInput
 }
 
 /** The project files the Agent reads, validated with the other definitions. */
@@ -36,6 +39,8 @@ export interface AgentDefinitions {
   readonly skills: AgentSkillCatalog
   /** Absent without `SIXB.md`. */
   readonly instructions?: string
+  /** Where each object type's reference doc lives, with the docs and scripts of `ontology/`. */
+  readonly ontologyDocs: OntologyDocsCatalog
 }
 
 /** Index skills by name. Discovery validates each skill; names must also be unique. */

@@ -1,14 +1,16 @@
 /**
- * Discovery of the project files the Agent reads: Agent Skills under `skills/` and the
- * conversational Agent's instructions in `SIXB.md`.
+ * Discovery of the project files the Agent reads: Agent Skills under `skills/`, the conversational
+ * Agent's instructions in `SIXB.md`, and the hand-written docs and scripts under `ontology/`.
  *
  * Contents are read here, once, so the Agent receives exactly what was validated. Built projects
  * run from their project root with the committed tree, so the same reads work after `sixb build`.
  */
 
-import { lstat, readdir, readFile } from "node:fs/promises"
+import type { Dirent } from "node:fs"
+import { lstat, readdir, readFile, stat } from "node:fs/promises"
 import { basename, join, relative, sep } from "node:path"
 import type { AgentProjectFile, AgentSkillDefinition } from "../agents/skills"
+import type { OntologyDoc } from "../ontology/docs"
 import { RuntimeError } from "../runtime/errors"
 
 /** The project's instructions for the conversational Agent, at the project root. */
@@ -33,12 +35,89 @@ const UNQUOTED_COLON_VALUE_RE = /^\s*[\w-]+:\s+[^\s"'|>].*:\s/
 export function isAgentContextPath(path: string): boolean {
   const segments = path.split("/")
   if (segments.some(isIgnoredAgentContextName)) return false
-  return path === PROJECT_INSTRUCTIONS_FILE || segments[0] === "skills"
+  if (path === PROJECT_INSTRUCTIONS_FILE || segments[0] === "skills") return true
+  if (segments[0] !== "ontology") return false
+  return isMarkdown(path) || segments.slice(1, -1).some(isOntologyScriptsDirectory)
 }
 
 /** Files and folders the Agent never receives, wherever they appear in its directories. */
 export function isIgnoredAgentContextName(name: string): boolean {
   return name.startsWith(".") || IGNORED_NAMES.has(name)
+}
+
+/** A `scripts/` directory anywhere under `ontology/` holds Agent scripts: mounted, never imported. */
+export function isOntologyScriptsDirectory(name: string): boolean {
+  return name === "scripts"
+}
+
+export interface DiscoveredOntologyFiles {
+  /** Markdown under `ontology/`, outside `scripts/` directories. */
+  readonly docs: readonly OntologyDoc[]
+  /** Every file in a `scripts/` directory under `ontology/`. */
+  readonly scripts: readonly AgentProjectFile[]
+}
+
+/** Read the hand-written docs and scripts under `ontology/`. Paths are relative to `ontology/`. */
+export async function discoverOntologyFiles(projectRoot: string): Promise<DiscoveredOntologyFiles> {
+  const ontologyDir = join(projectRoot, "ontology")
+  const docs: OntologyDoc[] = []
+  const scripts: AgentProjectFile[] = []
+  const budget = createFilesBudget("ontology/")
+
+  async function walk(dir: string, inScripts: boolean): Promise<void> {
+    let entries: Dirent[]
+    try {
+      entries = await readdir(dir, { withFileTypes: true })
+    } catch (error) {
+      if (isNotFound(error)) return
+      throw error
+    }
+
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (isIgnoredAgentContextName(entry.name)) continue
+      const path = join(dir, entry.name)
+      const relativePath = toPosixRelative(ontologyDir, path)
+      if (entry.isSymbolicLink()) {
+        // Module discovery skips symlinks; a folder, doc, or script the Agent would miss fails.
+        const target = await stat(path).catch(() => undefined)
+        if (inScripts || isMarkdown(entry.name) || target?.isDirectory()) {
+          throw new RuntimeError(
+            `[Sixb] Ontology path 'ontology/${relativePath}' must not be a symlink.`
+          )
+        }
+        continue
+      }
+      if (entry.isDirectory()) {
+        await walk(path, inScripts || isOntologyScriptsDirectory(entry.name))
+        continue
+      }
+      if (!entry.isFile() || !(inScripts || isMarkdown(entry.name))) continue
+
+      const info = await lstat(path)
+      budget(info.size)
+      if (inScripts) {
+        const mode = info.mode & 0o777
+        scripts.push(
+          Object.freeze({
+            path: relativePath,
+            contents: await readFile(path),
+            ...((mode & 0o111) === 0 ? {} : { mode }),
+          })
+        )
+      } else {
+        const contents = decodeUtf8(await readFile(path))
+        if (contents === undefined) {
+          throw new RuntimeError(
+            `[Sixb] Ontology doc 'ontology/${relativePath}' must be UTF-8 text.`
+          )
+        }
+        docs.push(Object.freeze({ path: relativePath, contents }))
+      }
+    }
+  }
+
+  await walk(ontologyDir, false)
+  return { docs, scripts }
 }
 
 /** Read and validate every `skills/<name>/` directory. A missing `skills/` has no skills. */
@@ -240,6 +319,10 @@ function createFilesBudget(directory: string): FilesBudget {
       )
     }
   }
+}
+
+function isMarkdown(path: string): boolean {
+  return path.toLowerCase().endsWith(".md")
 }
 
 function decodeUtf8(bytes: Uint8Array): string | undefined {
