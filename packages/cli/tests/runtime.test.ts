@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test"
+import { describe, expect, spyOn, test } from "bun:test"
+import { AgentWorker } from "@sixb/agent-worker"
 import {
   col,
   type DatasetDefinition,
@@ -276,6 +277,96 @@ describe("startSixbRuntime", () => {
     expect(runtime.warnings).toHaveLength(0)
 
     await runtime.stop()
+  })
+
+  // Guard: start the agent worker before `options.api`, or stop it after; the order changes.
+  test("runs agent turns only while the API this process serves listens", async () => {
+    const calls: string[] = []
+    const sixb = new SixbHost({
+      id: "cli-agent-api-order",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: new InMemoryQueues(),
+    })
+    sixb.closeConnectors = async () => {
+      calls.push("connectors:stop")
+    }
+    const agentStart = spyOn(AgentWorker.prototype, "start").mockImplementation(async () => {
+      calls.push("agent:start")
+    })
+    const agentStop = spyOn(AgentWorker.prototype, "stop").mockImplementation(async () => {
+      calls.push("agent:stop")
+    })
+
+    try {
+      const runtime = await startSixbRuntime(sixb, {
+        cohostWorkers: true,
+        api: {
+          start: async () => {
+            calls.push("api:start")
+          },
+          stop: async () => {
+            calls.push("api:stop")
+          },
+        },
+      })
+      expect(calls).toEqual(["api:start", "agent:start"])
+
+      await runtime.stop()
+      expect(calls).toEqual([
+        "api:start",
+        "agent:start",
+        "agent:stop",
+        "api:stop",
+        "connectors:stop",
+      ])
+    } finally {
+      agentStart.mockRestore()
+      agentStop.mockRestore()
+    }
+  })
+
+  test("starts no agent turn and stops everything when the API cannot listen", async () => {
+    // Regression proof: start the agent worker before `options.api`; it starts and this fails.
+    const calls: string[] = []
+    const sixb = new SixbHost({
+      id: "cli-agent-api-start-failure",
+      ontology: [Zone],
+      broker: new InMemoryBroker(),
+      storage: new InMemoryStorage(),
+      lakeStorage: createLakeStorage(),
+      blobStorage: new InMemoryBlobStorage(),
+      queues: Object.assign(new InMemoryQueues(), {
+        async close() {
+          calls.push("queues:close")
+        },
+      }),
+    })
+    const agentStart = spyOn(AgentWorker.prototype, "start").mockImplementation(async () => {
+      calls.push("agent:start")
+    })
+
+    try {
+      await expect(
+        startSixbRuntime(sixb, {
+          cohostWorkers: true,
+          api: {
+            start: async () => {
+              throw new Error("port in use")
+            },
+            stop: async () => {
+              calls.push("api:stop")
+            },
+          },
+        })
+      ).rejects.toThrow("port in use")
+      expect(calls).toEqual(["api:stop", "queues:close"])
+    } finally {
+      agentStart.mockRestore()
+    }
   })
 
   test("does not co-host the sync worker unless explicitly enabled", async () => {

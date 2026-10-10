@@ -1,7 +1,7 @@
 import { dirname, resolve } from "node:path"
 import { type CustomAppDevServer, createCustomApp } from "@sixb/app"
 import { type AtlasAppServer, createAtlasApp } from "@sixb/atlas"
-import { createSixbServer, type SixbServer } from "@sixb/server"
+import { createSixbServer } from "@sixb/server"
 import { resolveAgentTurnTimeoutMs } from "../lib/agent-turn-timeout"
 import { apiDocsUrl, apiEventsUrl, apiUrl, resolveBrowserTopology } from "../lib/browser-topology"
 import { type LoadedSixbHost, loadSixbFromEntry } from "../lib/loadSixb"
@@ -35,7 +35,6 @@ export async function runDevRuntime(options: DevOptions = {}) {
     <LoadingView title="Starting sixb" subtitle={entry} status="Loading runtime" />
   )
 
-  let server: SixbServer | null = null
   let atlasServer: AtlasAppServer | null = null
   let customAppServer: CustomAppDevServer | null = null
   let sixb: LoadedSixbHost | null = null
@@ -83,19 +82,7 @@ export async function runDevRuntime(options: DevOptions = {}) {
       : null
 
     abort.signal.throwIfAborted()
-    runtimeOwnsProviders = true
-    runtime = await startSixbRuntime(host, {
-      cohostWorkers: true,
-      agentApiBaseUrl: topology.apiPublicOrigin,
-      agentTurnTimeoutMs,
-      workerConcurrency,
-    })
-    abort.signal.throwIfAborted()
-    const authEnabled = host.auth.isEnabled()
-
-    app.rerender(<LoadingView title="Starting sixb" subtitle={entry} status="Starting server" />)
-
-    server = createSixbServer({
+    const server = createSixbServer({
       host: sixb,
       port: topology.apiPort,
       hostname: topology.apiHost,
@@ -106,8 +93,25 @@ export async function runDevRuntime(options: DevOptions = {}) {
       },
       ...(authExperience ? { authExperience } : {}),
     })
-    await server.start()
+    runtimeOwnsProviders = true
+    // The runtime owns the server's lifecycle so agent turns run only while it listens.
+    runtime = await startSixbRuntime(host, {
+      cohostWorkers: true,
+      api: {
+        start: () => {
+          app.rerender(
+            <LoadingView title="Starting sixb" subtitle={entry} status="Starting server" />
+          )
+          return server.start()
+        },
+        stop: () => server.stop(),
+      },
+      agentApiBaseUrl: topology.apiPublicOrigin,
+      agentTurnTimeoutMs,
+      workerConcurrency,
+    })
     abort.signal.throwIfAborted()
+    const authEnabled = host.auth.isEnabled()
 
     const atlas = createAtlasApp({
       apiBaseUrl: topology.apiPublicOrigin,
@@ -173,7 +177,6 @@ export async function runDevRuntime(options: DevOptions = {}) {
     app.unmount()
     await stopQuietly(() => customAppServer?.stop() ?? Promise.resolve())
     await stopQuietly(() => atlasServer?.stop() ?? Promise.resolve())
-    await stopQuietly(() => server?.stop() ?? Promise.resolve())
     await stopQuietly(() => runtime?.stop() ?? Promise.resolve())
     if (sixb && !runtimeOwnsProviders) await stopSixbProviders(sixb)
     process.off("SIGINT", requestShutdown)
