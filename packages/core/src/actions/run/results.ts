@@ -4,7 +4,7 @@ import type { ActionRunFailure, ActionRunRecord } from "../../storage"
 import { isTerminalActionRun } from "../../storage"
 import { findActionEditCommit } from "../commit-edits"
 import { toActionRunFailure } from "./normalize"
-import type { ActionRunResult, RunActionJobInput } from "./types"
+import type { ActionRunResult, RunActionInput } from "./types"
 
 export function requireFinishedAt(input: {
   readonly actionId: string
@@ -29,7 +29,7 @@ export function requireFinishedAt(input: {
  * got far enough that resuming is safe; anything earlier is treated as a lost lease.
  */
 export async function resolveRedeliveredRunningRun(
-  input: RunActionJobInput,
+  input: RunActionInput,
   run: ActionRunRecord
 ): Promise<
   | { readonly kind: "resume"; readonly run: ActionRunRecord }
@@ -41,7 +41,7 @@ export async function resolveRedeliveredRunningRun(
   } catch (error) {
     const latest = await input.runtime.actionRunsStorage.getById({
       projectId: input.runtime.id,
-      id: input.job.id,
+      id: input.run.id,
     })
     if (latest && isTerminalActionRun(latest)) {
       return { kind: "finished", result: skippedResult(input, latest) }
@@ -53,23 +53,23 @@ export async function resolveRedeliveredRunningRun(
   reportRedeliveryFailure(input, resolution.run, resolution.failure)
   return {
     kind: "finished",
-    result: failedResult(input.job.id, input.job.actionId, resolution.run, resolution.failure),
+    result: failedResult(input.run.id, input.run.actionId, resolution.run, resolution.failure),
   }
 }
 
-async function resolveRunningRunUnderFence(input: RunActionJobInput, run: ActionRunRecord) {
+async function resolveRunningRunUnderFence(input: RunActionInput, run: ActionRunRecord) {
   return input.runtime.storage.transaction(
     async (storage) => {
       if (!storage.actionRuns) {
         throw createSixbError(
           "internal.unexpected",
           "[Sixb] Resuming an Action run requires transactional Action materialization fencing.",
-          { details: { actionId: input.job.actionId, runId: input.job.id } }
+          { details: { actionId: input.run.actionId, runId: input.run.id } }
         )
       }
       const locked = await storage.actionRuns.lockForMaterialization({
         projectId: input.runtime.id,
-        actionId: input.job.actionId,
+        actionId: input.run.actionId,
         runId: run.id,
       })
       const commit = await findActionEditCommit({
@@ -82,10 +82,10 @@ async function resolveRunningRunUnderFence(input: RunActionJobInput, run: Action
       }
 
       const failedAt = new Date()
-      const failure = redeliveryFailure(input.job.id, locked, failedAt)
+      const failure = redeliveryFailure(input.run.id, locked, failedAt)
       const finished = await storage.actionRuns.finish({
         projectId: input.runtime.id,
-        id: input.job.id,
+        id: input.run.id,
         status: "failed",
         finishedAt: failedAt,
         error: failure,
@@ -130,31 +130,31 @@ function redeliveryFailure(runId: string, run: ActionRunRecord, failedAt: Date):
 }
 
 function reportRedeliveryFailure(
-  input: RunActionJobInput,
+  input: RunActionInput,
   run: ActionRunRecord,
   failure: ActionRunFailure
 ): void {
   const error = createSixbError(
     "internal.unexpected",
     `[Sixb] ${run.error?.message ?? `Action run '${run.id}' lost its lease.`}`,
-    { details: { actionId: input.job.actionId, runId: input.job.id } }
+    { details: { actionId: input.run.actionId, runId: input.run.id } }
   )
   reportRunFailure(input.runtime.errorReporterHost, error, {
     projectId: input.runtime.id,
     attempt: input.attempt,
     runKind: "action",
     run: {
-      runId: input.job.id,
-      actionId: input.job.actionId,
+      runId: input.run.id,
+      actionId: input.run.actionId,
     },
     failure,
   })
 }
 
-function skippedResult(input: RunActionJobInput, run: ActionRunRecord): ActionRunResult {
+function skippedResult(input: RunActionInput, run: ActionRunRecord): ActionRunResult {
   return {
-    id: input.job.id,
-    actionId: input.job.actionId,
+    id: input.run.id,
+    actionId: input.run.actionId,
     subject: run.subject,
     status: run.status,
     skipped: true,

@@ -1,5 +1,4 @@
 import { expect, test } from "bun:test"
-import { ActionWorker } from "@sixb/action-worker"
 import {
   InMemoryBlobStorage,
   InMemoryBroker,
@@ -12,12 +11,15 @@ import { createTestSixb } from "@sixb/core/testing"
 import { Ticket, triage, triageQuestions, triageTicket } from "../examples/triage"
 import { createTypesafe } from "../src"
 
-function setup() {
+/** `beforeAnswer` runs while Jev evaluates, before its answer reaches the caller. */
+function setup(options: { readonly beforeAnswer?: () => Promise<void> } = {}) {
   let calls = 0
+  const reportedErrors: string[] = []
   const jev = createTypesafe({
     apiKey: "test-key",
     fetch: async () => {
       calls++
+      await options.beforeAnswer?.()
       return Response.json({
         model: "jev-1.13.0",
         usage: { input_tokens: 100, output_tokens: 25 },
@@ -49,8 +51,11 @@ function setup() {
     queues: new InMemoryQueues(),
     blobStorage: new InMemoryBlobStorage(),
     lakeStorage: new InMemoryLakeStorage(),
+    onError: (error) => {
+      reportedErrors.push(error.message)
+    },
   })
-  return { host, sixb: createTestSixb(host), calls: () => calls }
+  return { host, sixb: createTestSixb(host), calls: () => calls, reportedErrors }
 }
 
 test("the documented questions work through the runtime and retain priced output usage", async () => {
@@ -72,66 +77,40 @@ test("the documented questions work through the runtime and retain priced output
 })
 
 test("the action example persists and applies a decision", async () => {
-  const { host, sixb, calls } = setup()
+  const { sixb, calls } = setup()
   await sixb.objects(Ticket).upsert({ properties: { id: "ticket", description: "Stopped" } })
-  const worker = new ActionWorker(host)
-  await worker.start()
-  try {
-    const run = await sixb
-      .objects(Ticket)
-      .requestActionAndWait({ id: "ticket", actionId: triageTicket.id })
-    expect(run.status).toBe("succeeded")
-    expect((await sixb.objects(Ticket).get("ticket"))?.properties.category).toBe("maintenance")
-    expect(run.writeback).toMatchObject({
-      result: { description: "Stopped", output: { blocked: { probability: 0.9 } } },
-    })
-    expect(calls()).toBe(1)
-  } finally {
-    await worker.stop()
-  }
+
+  const run = await sixb
+    .objects(Ticket)
+    .requestAction({ id: "ticket", action: triageTicket, params: {} })
+
+  expect(run.status).toBe("succeeded")
+  expect((await sixb.objects(Ticket).get("ticket"))?.properties.category).toBe("maintenance")
+  expect(run.writeback).toMatchObject({
+    result: { description: "Stopped", output: { blocked: { probability: 0.9 } } },
+  })
+  expect(calls()).toBe(1)
 })
 
-test("the example rejects a stale persisted decision on redelivery without calling Jev again", async () => {
-  // Removal proof: remove the freshness guard in examples/triage.ts; the run then succeeds.
-  const { host, sixb, calls } = setup()
-  await sixb
-    .objects(Ticket)
-    .upsert({ properties: { id: "ticket", description: "Already repaired", category: "other" } })
-  const { runId } = await sixb
-    .objects(Ticket)
-    .requestAction({ id: "ticket", actionId: triageTicket.id })
-  await host.storage.actionRuns!.start({ projectId: host.id, id: runId })
-  await host.storage.actionRuns!.recordWriteback({
-    projectId: host.id,
-    id: runId,
-    status: "succeeded",
-    result: {
-      description: "Stopped",
-      previousCategory: null,
-      callId: "earlier-call",
-      output: {
-        category: {
-          choice: "maintenance",
-          probabilities: { maintenance: 1, billing: 0, other: 0 },
-        },
-        severity: { score: 2, probabilities: [0, 0, 1] },
-        blocked: { probability: 1 },
-      },
+test("the example rejects a decision made on a ticket that changed meanwhile", async () => {
+  // Removal proof: remove the freshness guard in examples/triage.ts; the run then succeeds and
+  // applies the stale "maintenance" category.
+  const { sixb, calls, reportedErrors } = setup({
+    beforeAnswer: async () => {
+      await sixb.objects(Ticket).upsert({
+        properties: { id: "ticket", description: "Already repaired", category: "other" },
+      })
     },
   })
-  const worker = new ActionWorker(host)
-  await worker.start()
-  try {
-    const deadline = Date.now() + 2000
-    let run = await host.storage.actionRuns!.getById({ projectId: host.id, id: runId })
-    while (run?.status !== "failed" && run?.status !== "succeeded" && Date.now() < deadline) {
-      await Bun.sleep(10)
-      run = await host.storage.actionRuns!.getById({ projectId: host.id, id: runId })
-    }
-    expect(run?.status).toBe("failed")
-    expect(calls()).toBe(0)
-    expect((await sixb.objects(Ticket).get("ticket"))?.properties.category).toBe("other")
-  } finally {
-    await worker.stop()
-  }
+  await sixb.objects(Ticket).upsert({ properties: { id: "ticket", description: "Stopped" } })
+
+  const run = await sixb
+    .objects(Ticket)
+    .requestAction({ id: "ticket", action: triageTicket, params: {} })
+
+  expect(run.status).toBe("failed")
+  expect(run.error?.details.phase).toBe("edits")
+  expect(reportedErrors).toEqual(["Ticket changed; request a new triage."])
+  expect(calls()).toBe(1)
+  expect((await sixb.objects(Ticket).get("ticket"))?.properties.category).toBe("other")
 })

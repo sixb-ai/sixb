@@ -48,18 +48,21 @@ export async function runWritebackPhase(
     // before the edit batch exists. Object, link-scope, and returned query/list rows share the
     // edits phase's recorder and are fenced by the same CAS. Query membership and telemetry
     // history remain call-level snapshots.
-    const read = toActionReadFacade(input.runtime, input.reads)
+    const context = {
+      ...input.baseContext,
+      signal: input.signal,
+      sixb: toActionRuntimeFacade(input.runtime),
+      read: toActionReadFacade(input.runtime, input.reads),
+    }
     const rawResult = isObjectActionDefinition(input.action)
       ? await handler({
-          ...input.baseContext,
-          sixb: toActionRuntimeFacade(input.runtime),
-          read,
+          ...context,
           target: requireObjectTarget(input.objectTarget, {
             actionId: input.action.id,
             runId: input.run.id,
           }).snapshot,
         })
-      : await handler({ ...input.baseContext, sixb: toActionRuntimeFacade(input.runtime), read })
+      : await handler(context)
     result = normalizeWritebackResult(rawResult)
   } catch (error) {
     const completedAt = new Date()

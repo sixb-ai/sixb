@@ -61,6 +61,10 @@ export type ActionBinding<TObjectType extends ObjectType = ObjectType> =
 export interface ActionRunPhaseInfo {
   readonly id: string
   readonly startedAt: Date
+  /**
+   * Identifies this run to external systems. Send it as the idempotency key of the external call a
+   * writeback makes, so that call applies once even when it is retried.
+   */
   readonly idempotencyKey: string
 }
 
@@ -180,6 +184,12 @@ export interface BaseActionPhaseContext<TParams extends Record<string, unknown>>
   readonly run: ActionRunPhaseInfo
   readonly params: TParams
   readonly subject: ActionSubject
+  /**
+   * Aborts when the caller cancels the run or it runs out of time: a run has 30 seconds until its
+   * writeback succeeds or its edits commit, and its effects have 30 more after the commit. Forward
+   * it to every call the handler awaits. Edits that follow a succeeded writeback always complete, so
+   * their signal never aborts.
+   */
   readonly signal: AbortSignal
   readonly logger: Logger
 }

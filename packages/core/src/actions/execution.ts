@@ -14,13 +14,7 @@ import type {
 } from "../storage/action-runs"
 import { assertObjectReadOutputWithinLimit } from "../storage/objects/execution-limits"
 import { type ActionDescriptor, snapshotActionDescriptor } from "./descriptor"
-import {
-  type RequestActionAndWaitInput,
-  type RequestActionInput,
-  type RequestActionResult,
-  requestAction,
-  requestActionAndWait,
-} from "./request"
+import { type RequestActionInput, requestAction } from "./request"
 import { canDelegationAccessActionRun } from "./run-authorization"
 import type { ActionDefinition } from "./types"
 
@@ -36,8 +30,14 @@ export interface ActionsRuntime {
   getById(actionId: string): ActionDescriptor | null
   listGlobal(): readonly ActionDescriptor[]
   listForType(objectType: ObjectType): readonly ActionDescriptor[]
-  request(input: RequestActionInput): Promise<RequestActionResult>
-  requestAndWait(input: RequestActionAndWaitInput): Promise<ActionRunRecord>
+  /**
+   * Run an Action in this process and return its terminal record. A run that fails resolves with
+   * status `failed`. The call rejects when the request itself is refused (unknown action, invalid
+   * params, missing authority, a run id still in progress, a stopping runtime), and with
+   * `internal.unexpected` when a run that started cannot return its record: request it again with
+   * the same run id to get it.
+   */
+  request(input: RequestActionInput): Promise<ActionRunRecord>
   readonly runs: ActionRunsRuntime
 }
 
@@ -107,7 +107,6 @@ export function createActionsRuntime(
           )
       ),
     request: (input) => requestAction(runtime, execution, input),
-    requestAndWait: (input) => requestActionAndWait(runtime, execution, input),
     runs: {
       getById: async (runId) => {
         if (

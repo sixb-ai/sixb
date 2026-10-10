@@ -490,11 +490,19 @@ function describeSixb(
       )
     case "actions.get":
       return icon("actions", m.inspectAction, humanize(intent.args[0]))
-    case "actions.request":
+    case "actions.request": {
+      // The request answers with the finished run, so it reads like `action-runs get`.
+      const run = actionRunInfo(parsed?.json)
+      const action = humanize(intent.args[0])
       return withDetail(
-        icon("actions", m.requestAction, humanize(intent.args[0])),
-        actionOutcome(parsed?.json, m)
+        {
+          icon: "actions",
+          title: run.status ? actionRunTitle(run, m) : m.requestAction.title(action),
+          runningTitle: m.requestAction.running(action),
+        },
+        run.subjectLabel
       )
+    }
     case "action-runs.get": {
       const run = actionRunInfo(parsed?.json)
       return {
@@ -641,13 +649,6 @@ function latestReading(value: unknown, m: AgentMessages["bash"]): string | undef
 
 function seriesCount(value: unknown): number | null {
   return isRecord(value) && Array.isArray(value.series) ? value.series.length : null
-}
-
-/** The outcome word for a queued action request. */
-function actionOutcome(value: unknown, m: AgentMessages["bash"]): string | undefined {
-  if (!isRecord(value)) return undefined
-  if (typeof value.runId === "string") return value.created === false ? m.alreadyQueued : m.queued
-  return undefined
 }
 
 function runOutcome(value: unknown, m: AgentMessages["bash"]): string | undefined {
