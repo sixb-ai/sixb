@@ -408,7 +408,11 @@ export function prop<
   const TOptions extends PropertyOptions,
 >(id: TId, schema: TSchema, options: TOptions): PropertyResult<TId, TSchema, TOptions>
 export function prop(id: string, schema: Schema, options?: PropertyOptions): Property {
-  const { markings, ...rest } = options ?? {}
+  // Most properties carry no markings: skip the rest copy that only exists to drop the key.
+  if (!options || withoutMarkingsKey(options)) {
+    return { id, name: options?.name ?? id, schema, ...options }
+  }
+  const { markings, ...rest } = options
   return {
     id,
     name: options?.name ?? id,
@@ -418,6 +422,12 @@ export function prop(id: string, schema: Schema, options?: PropertyOptions): Pro
       ? { markings: markingIdsFrom(markings, `Property '${id}' markings`) }
       : {}),
   }
+}
+
+function withoutMarkingsKey(
+  options: PropertyOptions
+): options is PropertyOptions & { markings?: undefined } {
+  return !("markings" in options)
 }
 
 // ── Link shorthand ──────────────────────────────────────────
