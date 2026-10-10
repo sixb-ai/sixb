@@ -54,7 +54,7 @@ import {
   customAuthExperienceResponse,
   type SixbAuthExperienceOptions,
 } from "../auth/experience"
-import { ClientAddressRateLimiter } from "../auth/rate-limit"
+import { ClientAddressRateLimiter, FixedWindowRateLimiter } from "../auth/rate-limit"
 import { requestCaller } from "../auth/scope"
 import { hasForegroundSessionActivity } from "../auth/session-activity"
 import { createSessionRenewalCookieHeaders } from "../auth/session-cookies"
@@ -80,6 +80,7 @@ import {
   CreateAuthServiceAccountResponseSchema,
   CreateDeviceAuthorizationBodySchema,
   CreateDeviceAuthorizationResponseSchema,
+  CreateSignInCodeResponseSchema,
   DeviceAuthorizationDecisionBodySchema,
   DisableAuthServiceAccountResponseSchema,
   ExchangeDeviceAuthorizationBodySchema,
@@ -105,6 +106,8 @@ import {
   RevokeAuthServiceAccountAccessTokenResponseSchema,
   RevokeAuthSessionParamsSchema,
   RevokeAuthSessionResponseSchema,
+  SignInCodeParamsSchema,
+  SignInCodeStatusResponseSchema,
   SignOutAllResponseSchema,
   SuspendAuthMemberResponseSchema,
   UpdateAuthMemberGroupsBodySchema,
@@ -150,6 +153,10 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
   const deviceAuthorizationLimiter = new ClientAddressRateLimiter(
     DEVICE_AUTHORIZATIONS_PER_ADDRESS,
     DEVICE_AUTHORIZATION_TTL_MS
+  )
+  const signInCodeLimiter = new FixedWindowRateLimiter(
+    SIGN_IN_CODES_PER_USER,
+    SIGN_IN_CODE_LIMIT_WINDOW_MS
   )
   return app
     .get(
@@ -229,7 +236,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
     .post(
       "/api/auth/device-authorizations/token",
       async ({ body, request }) => {
-        const { deviceCode } = ExchangeDeviceAuthorizationBodySchema.parse(body)
+        const { deviceCode, clientName } = ExchangeDeviceAuthorizationBodySchema.parse(body)
         const id = parseDeviceAuthorizationId(deviceCode)
         if (!id) return jsonResponse({ status: "expired" as const }, 200)
         const storage = requireAuthStorage(host)
@@ -257,7 +264,7 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
         }
         const { session, tokens } = host.auth.prepareBearerSession({
           userId: authorization.approvedUserId,
-          clientName: authorization.clientName,
+          clientName: clientName ?? authorization.clientName,
           now,
         })
         try {
@@ -287,6 +294,106 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
           tags: [OPENAPI_TAGS.authSessions.name],
           operationId: "exchangeDeviceAuthorization",
           security: [],
+        },
+      }
+    )
+    .post(
+      "/api/auth/sign-in-codes",
+      async ({ request, ...context }) => {
+        const caller = requireSessionCaller(context)
+        if (caller instanceof Response) return caller
+        // A code stands in for signing in, so only someone at a signed-in browser may make one. A
+        // native session could otherwise chain itself onto device after device.
+        if (caller.session.bearer) {
+          return jsonResponse(
+            { error: "[SixbServer] Sign-in codes are created from a signed-in browser." },
+            403
+          )
+        }
+        // The code is a device authorization this browser approves on the spot: the device that
+        // presents it exchanges it at the token endpoint, once, like any approved device.
+        const now = new Date()
+        // Each code is a way in for two minutes, so one person gets no more than the dialog needs.
+        if (!signInCodeLimiter.tryConsume(caller.user.id, now.getTime())) {
+          return jsonResponse(
+            { error: "[SixbServer] Too many sign-in codes. Try again in a few minutes." },
+            429
+          )
+        }
+        const id = `dva_${randomUUID()}`
+        const code = `${id}.${randomBytes(32).toString("base64url")}`
+        const expiresAt = new Date(now.getTime() + SIGN_IN_CODE_TTL_MS)
+        const storage = requireAuthStorage(host)
+        try {
+          await storage.deviceAuthorizations.create({
+            id,
+            projectId: host.id,
+            deviceCodeHash: hashDeviceCode(code),
+            userCode: createDeviceUserCode(),
+            clientName: SIGN_IN_CODE_CLIENT_NAME,
+            createdAt: now,
+            expiresAt,
+          })
+          await storage.deviceAuthorizations.approve({
+            projectId: host.id,
+            id,
+            userId: caller.user.id,
+            sessionId: caller.session.id,
+            approvedAt: now,
+          })
+        } catch (error) {
+          return authRouteErrorResponse(error)
+        }
+        const url = new URL("sixb://connect")
+        url.searchParams.set("api", options.resolveAuthRequestOrigin(request))
+        url.searchParams.set("code", code)
+        return jsonResponse(
+          { id, code, url: url.toString(), expiresAt: expiresAt.toISOString() },
+          201
+        )
+      },
+      {
+        response: {
+          201: CreateSignInCodeResponseSchema,
+          401: ErrorResponseSchema,
+          403: ErrorResponseSchema,
+          429: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Create a code that signs another device in",
+          tags: [OPENAPI_TAGS.authSessions.name],
+          operationId: "createSignInCode",
+          security: SIXB_SESSION_MUTATION_SECURITY_REQUIREMENT,
+        },
+      }
+    )
+    .get(
+      "/api/auth/sign-in-codes/:codeId",
+      async ({ params, ...context }) => {
+        const caller = requireSessionCaller(context)
+        if (caller instanceof Response) return caller
+        const { codeId } = SignInCodeParamsSchema.parse(params)
+        const authorization = await requireAuthStorage(host).deviceAuthorizations.getById({
+          projectId: host.id,
+          id: codeId,
+        })
+        // Only the person a code signs in can follow it; to anyone else it does not exist.
+        if (!authorization || authorization.approvedUserId !== caller.user.id) {
+          return jsonResponse({ error: "Sign-in code not found" }, 404)
+        }
+        return jsonResponse({ status: signInCodeStatus(authorization, new Date()) }, 200)
+      },
+      {
+        params: SignInCodeParamsSchema,
+        response: {
+          200: SignInCodeStatusResponseSchema,
+          401: ErrorResponseSchema,
+          404: ErrorResponseSchema,
+        },
+        detail: {
+          summary: "Check whether a sign-in code was used",
+          tags: [OPENAPI_TAGS.authSessions.name],
+          operationId: "getSignInCode",
         },
       }
     )
@@ -1632,10 +1739,26 @@ export function registerAuthRoutes(app: Elysia, host: SixbHostView, options: Aut
 const DEVICE_AUTHORIZATION_TTL_MS = 10 * 60 * 1000
 const DEVICE_AUTHORIZATIONS_PER_ADDRESS = 10
 const DEVICE_AUTHORIZATION_POLL_INTERVAL_SECONDS = 2
+// A sign-in code is on screen to be scanned now; the browser shows a fresh one when it runs out.
+const SIGN_IN_CODE_TTL_MS = 2 * 60 * 1000
+// The dialog asks for one code as it opens and one each time a code runs out, so an open dialog uses
+// five in this window. The rest is room to reopen it.
+const SIGN_IN_CODES_PER_USER = 20
+const SIGN_IN_CODE_LIMIT_WINDOW_MS = 10 * 60 * 1000
+// The session's name when the device that exchanges a code does not give its own.
+const SIGN_IN_CODE_CLIENT_NAME = "Signed in with a code"
 const DEVICE_USER_CODE_ALPHABET = "BCDFGHJKLMNPQRSTVWXYZ23456789"
 
 function hashDeviceCode(deviceCode: string): string {
   return createHash("sha256").update(deviceCode).digest("base64url")
+}
+
+function signInCodeStatus(
+  authorization: { readonly status: string; readonly expiresAt: Date },
+  now: Date
+): "pending" | "used" | "expired" {
+  if (authorization.status === "consumed") return "used"
+  return authorization.expiresAt <= now ? "expired" : "pending"
 }
 
 function parseDeviceAuthorizationId(deviceCode: string): string | null {

@@ -22,6 +22,12 @@ export {
   type SidebarUser,
   SidebarUserMenu,
 } from "./sidebar-user-menu"
+export {
+  type SignInCode,
+  type SignInCodeStatus,
+  SignInOnAnotherDeviceDialog,
+  type SignInOnAnotherDeviceDialogProps,
+} from "./sign-in-on-another-device"
 // Sixb speech dictation
 export { DictationButton, type DictationButtonProps } from "./speech/dictation-button"
 export { DictationTextarea, type DictationTextareaProps } from "./speech/dictation-textarea"
@@ -290,6 +296,7 @@ export {
   PopoverTrigger,
 } from "./ui/popover"
 export { Progress } from "./ui/progress"
+export { QrCode } from "./ui/qr-code"
 export { RadioGroup, RadioGroupItem } from "./ui/radio-group"
 export { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "./ui/resizable"
 export { ScrollArea, ScrollBar } from "./ui/scroll-area"

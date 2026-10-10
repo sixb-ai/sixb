@@ -88,6 +88,21 @@ await signOutSixbSession({ baseUrl, store })
 
 The access token lasts 15 minutes. The client refreshes it before it expires, and once more if the API rejects it, so the user stays signed in while the tool is used. The session ends after the API's idle timeout without use, or when it is signed out or revoked; the client then clears the store and calls `onSessionEnded`. The session appears under the tool's name in the user's sessions in Atlas.
 
+A tool on a device with a camera can sign in without a browser instead. When the user chooses **Sign in on another device** in a signed-in browser, it shows a QR code holding a `sixb://connect` link. Read the scanned link and exchange its code for a session:
+
+```ts
+import { exchangeSixbSignInCode, parseSixbSignInLink } from "@sixb/client"
+
+const link = parseSixbSignInLink(scannedText) // null for anything else
+if (link) {
+  await store.save(
+    await exchangeSixbSignInCode({ baseUrl: link.baseUrl, code: link.code, clientName: "Acme CLI" })
+  )
+}
+```
+
+A code works once and expires after two minutes. Configure the client with `link.baseUrl` as above.
+
 ## Call the API
 
 API functions accept `path`, `query`, and `body` options matching the endpoint. Set `throwOnError` to reject failed requests:
