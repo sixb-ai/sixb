@@ -11,8 +11,9 @@ import {
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
-import type { LanguageModelCatalog, LanguageModelRef } from "../models"
-import { isModelReasoning } from "../models/language-model"
+import type { LanguageModelCatalog, LanguageModelEntry, LanguageModelRef } from "../models"
+import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
+import { resolveLanguageModel } from "../models/resolve"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentStorage,
@@ -49,7 +50,7 @@ export interface RequestAgentRunInput {
   readonly threadId?: string
   /** Configured language model selected for this turn. Omitted uses the agent default. */
   readonly model?: LanguageModelRef
-  /** Provider-neutral reasoning effort selected for this turn. */
+  /** Provider-neutral reasoning effort selected for this turn. Omitted uses the model's default. */
   readonly reasoning?: AgentReasoningLevel
   /** Title to stamp on the thread when one is created. */
   readonly title?: string
@@ -89,7 +90,7 @@ export async function requestAgentRun(
   assertNoAgentSelector(input)
   assertAuthorized(runtime, { kind: "agent.run" })
   assertRequestAuthorityCanRunAgent(runtime)
-  const spec = resolveConversationRunSpec({ models, input })
+  const spec = await resolveConversationRunSpec({ models, input })
   assertAttachments(input.attachments)
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
@@ -229,10 +230,10 @@ export async function retryAgentRun(
       triggerMessageId: failedRun.triggerMessageId,
       spec:
         failedRun.spec ??
-        resolveConversationRunSpec({
+        (await resolveConversationRunSpec({
           models,
           input: {},
-        }),
+        })),
     })
   })
   await publishRunActivity(runtime, run)
@@ -294,10 +295,14 @@ async function assertAiLimitPreflight(
   }
 }
 
-function resolveConversationRunSpec(input: {
+/**
+ * Freeze the model selection of a turn. The model's default reasoning is resolved here, not by the
+ * worker, so a retry runs with the reasoning the turn was admitted with.
+ */
+async function resolveConversationRunSpec(input: {
   readonly models?: LanguageModelCatalog
   readonly input: Pick<RequestAgentRunInput, "model" | "reasoning">
-}): ConversationAgentRunSpec {
+}): Promise<ConversationAgentRunSpec> {
   if (!input.models) {
     throw new AgentRequestError(
       "model_not_found",
@@ -313,18 +318,40 @@ function resolveConversationRunSpec(input: {
     )
   }
 
-  const reasoning = input.input.reasoning
-  if (reasoning !== undefined && !isModelReasoning(reasoning)) {
-    throw new AgentRequestError(
-      "invalid_model_selection",
-      `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
-    )
+  const explicitReasoning = input.input.reasoning
+  if (explicitReasoning !== undefined) {
+    await assertModelSupportsReasoning(model, explicitReasoning)
   }
+  const reasoning = explicitReasoning ?? model.reasoning
 
   return Object.freeze({
     model: Object.freeze({ provider: selected.provider, modelId: selected.modelId }),
     ...(reasoning === undefined ? {} : { reasoning }),
   })
+}
+
+// Checked against the model's resolved capabilities, as `GET /api/models` reports them (its
+// configured ones when the provider catalog is unavailable). Undeclared capabilities accept any
+// level; the provider then falls back to its own default.
+async function assertModelSupportsReasoning(
+  entry: LanguageModelEntry,
+  reasoning: unknown
+): Promise<void> {
+  if (!isModelReasoning(reasoning)) {
+    throw new AgentRequestError(
+      "invalid_model_selection",
+      `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
+    )
+  }
+  if (reasoning === "provider-default") return
+  const model = await resolveLanguageModel(entry.model)
+  const issue = modelReasoningSupportIssue(model.definition.capabilities.reasoning, reasoning)
+  if (issue !== undefined) {
+    throw new AgentRequestError(
+      "invalid_model_selection",
+      `[Sixb] Language model '${entry.provider}/${entry.modelId}' cannot use this reasoning: ${issue}.`
+    )
+  }
 }
 
 async function prepareDurableAgentExecution(

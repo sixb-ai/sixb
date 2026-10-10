@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { agent, can, defineGroup, defineRole, SixbHost } from "../src"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
+import { defineLanguageModel, type ModelCatalogInput } from "../src/models"
 import { createTestAgentExecution, createTestSixb } from "../src/testing"
 import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -9,12 +10,12 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 const users = defineGroup("agent-users")
 const runner = defineRole("agent.runner", { grantedTo: [users], grants: [can.run(agent)] })
 
-function setup() {
+function setup(language: ModelCatalogInput["language"] = [testLanguageModel()]) {
   const deps = createTestRuntimeDeps()
   const host = new SixbHost({
     id: "agent-runtime-tests",
     ontology: [],
-    models: { language: [testLanguageModel()] },
+    models: { language },
     groups: [users],
     roles: [runner],
     ...deps,
@@ -91,6 +92,54 @@ describe("single project Agent", () => {
       requestedBy: { type: "user", id: "owner" },
     })
     expect((await storage.auth.serviceAccounts.list({ projectId: host.id })).total).toBe(0)
+  })
+
+  test("freezes the model's default reasoning when a turn omits it", async () => {
+    // Proven by removal: drop `?? model.reasoning` from resolveConversationRunSpec.
+    const { host } = setup([
+      { model: testLanguageModel(), reasoning: "low" },
+      testLanguageModel("plain-model"),
+    ])
+    const sixb = await userScope(host, "owner")
+    const first = await sixb.agent.runs.request({ text: "Hi" })
+    expect(first.run.spec).toEqual({
+      model: { provider: "test", modelId: "test-model" },
+      reasoning: "low",
+    })
+    const plain = await sixb.agent.runs.request({
+      text: "Hi",
+      model: { provider: "test", modelId: "plain-model" },
+    })
+    expect(plain.run.spec).toEqual({ model: { provider: "test", modelId: "plain-model" } })
+  })
+
+  test("rejects a reasoning the selected model cannot use before creating history", async () => {
+    // Proven by removal: skip assertModelSupportsReasoning; the run is admitted with "max".
+    const binding = testLanguageModel()
+    const { host, storage } = setup([
+      {
+        ...binding,
+        // Admission checks the resolved capabilities, which the configured ones may not declare.
+        async resolve() {
+          return {
+            ...binding,
+            definition: defineLanguageModel({
+              ...binding.definition,
+              capabilities: { reasoning: { efforts: ["low", "high"] } },
+            }),
+          }
+        },
+      },
+    ])
+    const sixb = await userScope(host, "owner")
+    await expect(sixb.agent.runs.request({ text: "Hi", reasoning: "max" })).rejects.toMatchObject({
+      code: "invalid_model_selection",
+      message:
+        "[Sixb] Language model 'test/test-model' cannot use this reasoning: reasoning effort 'max' is not supported.",
+    })
+    expect((await storage.agents.threads.list({ projectId: host.id })).total).toBe(0)
+    const { run } = await sixb.agent.runs.request({ text: "Hi", reasoning: "high" })
+    expect(run.spec?.reasoning).toBe("high")
   })
 
   test("rejects removed selectors and unknown models before creating history", async () => {

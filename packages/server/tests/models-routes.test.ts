@@ -152,6 +152,19 @@ describe("GET /api/models", () => {
     })
   })
 
+  test("exposes the reasoning applied when a request omits it", async () => {
+    // Removal proof: drop `defaultReasoning` from serializeLanguageModel.
+    const response = await createApp({
+      language: [
+        { model: testModel("private", "fast"), reasoning: "low" },
+        testModel("private", "slow"),
+      ],
+    }).fetch(new Request("http://localhost/api/models"))
+    const { language } = (await response.json()) as { language: Record<string, unknown>[] }
+    expect(language[0]).toMatchObject({ modelId: "fast", defaultReasoning: "low" })
+    expect(language[1]).not.toHaveProperty("defaultReasoning")
+  })
+
   test("returns an empty catalog without resolving providers", async () => {
     const response = await createApp().fetch(new Request("http://localhost/api/models"))
     expect(response.status).toBe(200)

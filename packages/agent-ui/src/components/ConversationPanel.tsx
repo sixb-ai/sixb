@@ -76,6 +76,9 @@ export interface ConversationPanelProps {
   readonly modelsError?: boolean
   readonly onSelectModel: (model: LanguageModel) => void
   readonly onSelectReasoning: (reasoning: ModelReasoningLevel) => void
+  readonly onResetReasoning?: () => void
+  readonly usingDefaultModel?: boolean
+  readonly onResetModelSelection?: () => void
   readonly composerPlaceholder?: string
   /** Text to restore into the composer (e.g. after a failed send), applied when the nonce changes. */
   readonly composerDraft?: string
@@ -134,6 +137,9 @@ export function ConversationPanel({
   modelsError,
   onSelectModel,
   onSelectReasoning,
+  onResetReasoning,
+  usingDefaultModel,
+  onResetModelSelection,
   composerPlaceholder,
   composerDraft,
   composerDraftAttachments,
@@ -171,6 +177,9 @@ export function ConversationPanel({
       modelsError={modelsError}
       onSelectModel={onSelectModel}
       onSelectReasoning={onSelectReasoning}
+      onResetReasoning={onResetReasoning}
+      usingDefaultModel={usingDefaultModel}
+      onResetModelSelection={onResetModelSelection}
       placeholder={composerPlaceholder}
       className={compact ? "px-4 pt-2 pb-4" : wideClassName}
       draft={composerDraft}

@@ -1124,6 +1124,7 @@ export type {
   EmbeddingModelResult,
   LanguageModelCatalog,
   LanguageModelEntry,
+  LanguageModelEntryInput,
   LanguageModelRef,
   ModelCallCost,
   ModelCatalog,

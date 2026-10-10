@@ -186,6 +186,45 @@ describe("createModelCatalog", () => {
     expect(() => createModelCatalog({ language: [invalid] })).toThrow(/Invalid language model/)
   })
 
+  test("carries a default reasoning configured next to a model", () => {
+    const catalog = createModelCatalog({ language: [{ model: gpt, reasoning: "low" }, sonnet] })
+
+    expect(catalog.language.default).toMatchObject({ model: gpt, reasoning: "low" })
+    expect(catalog.language.list()[1]).not.toHaveProperty("reasoning")
+  })
+
+  test("rejects a default reasoning the model declares it cannot use", () => {
+    // Proven by removal: drop `assertDefaultReasoning` from the catalog's validator.
+    const model = {
+      ...gpt,
+      definition: defineLanguageModel({
+        ...gpt.definition,
+        capabilities: { reasoning: { efforts: ["low", "high"] } },
+      }),
+    }
+    expect(() => createModelCatalog({ language: [{ model, reasoning: "max" }] })).toThrow(
+      "[Sixb] Invalid language model at 'models.language[0]': default reasoning 'max' cannot be used: reasoning effort 'max' is not supported."
+    )
+    expect(
+      createModelCatalog({ language: [{ model, reasoning: "high" }] }).language.default
+    ).toMatchObject({ reasoning: "high" })
+    // Undeclared capabilities are resolved later; the provider falls back when needed.
+    expect(createModelCatalog({ language: [{ model: gpt, reasoning: "max" }] })).toBeDefined()
+  })
+
+  test.each([
+    [{ model: gpt, reasoning: { budgetTokens: 1_000 } }, "expected 'reasoning' to be one of"],
+    [{ model: gpt, reasoning: "extreme" }, "expected 'reasoning' to be one of"],
+    [{ model: gpt, temperature: 0 }, "unknown option 'temperature'"],
+    [{ model: undefined }, "expected a Sixb LanguageModel instance"],
+  ])("rejects an invalid model entry %#", (entry, message) => {
+    expect(() =>
+      createModelCatalog({ language: [entry] } as unknown as Parameters<
+        typeof createModelCatalog
+      >[0])
+    ).toThrow(message)
+  })
+
   test("does not freeze the provider-owned model", () => {
     const model = testModel("gateway", "openai/gpt-5.4")
 

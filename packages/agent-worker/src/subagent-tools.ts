@@ -120,6 +120,7 @@ export class SubagentCoordinator {
     const key = requireNonEmpty("spawn_agent", input.key, "key", 128)
     const task = requireNonEmpty("spawn_agent", input.task, "task")
     const model = this.resolveModel(input.model)
+    const reasoning = input.reasoning ?? model.reasoning
     const runId = createSubagentRunId(this.parentRun.id, key)
     const executionId = createSubagentExecutionId(runId)
     const execution = createInheritedAgentExecutionRecord({
@@ -132,7 +133,7 @@ export class SubagentCoordinator {
       task,
       toolNames: this.host.definitions.tools.list().map((definition) => definition.name),
       maxSteps: this.context.defaultMaxSteps,
-      ...(input.reasoning === undefined ? {} : { reasoning: input.reasoning }),
+      ...(reasoning === undefined ? {} : { reasoning }),
     }
 
     let run: SubagentRunRecord

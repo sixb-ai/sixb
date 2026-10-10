@@ -13,7 +13,12 @@ import {
   type ModelDefinition,
 } from "./definitions"
 import { assertEmbeddingModel, type EmbeddingModel } from "./embedding-model"
-import type { LanguageModel } from "./language-model"
+import {
+  type LanguageModel,
+  MODEL_REASONING_LEVELS,
+  type ModelReasoningLevel,
+  modelReasoningSupportIssue,
+} from "./language-model"
 import { assertRerankingModel, type RerankingModel } from "./reranking-model"
 
 /** Stable identity of a configured provider binding. */
@@ -58,6 +63,18 @@ export interface LanguageModelCatalog {
  */
 export interface LanguageModelEntry extends LanguageModelRef {
   readonly model: LanguageModel
+  /** Reasoning applied when a caller selects this model without choosing one. */
+  readonly reasoning?: ModelReasoningLevel
+}
+
+/** A language model configured with project defaults. A bare model has none. */
+export interface LanguageModelEntryInput {
+  readonly model: LanguageModel
+  /**
+   * Reasoning applied whenever this model is used without an explicit choice: chat turns, AI
+   * workflow steps, and direct generation. Must be supported by the model.
+   */
+  readonly reasoning?: ModelReasoningLevel
 }
 
 /** Models a project allows Sixb to use, organized by technical model kind. */
@@ -72,7 +89,7 @@ export interface ModelCatalog {
 export interface ModelCatalogInput {
   readonly audio?: AudioModelCatalogInput
   /** Ordered; the first entry is the project default. */
-  readonly language?: readonly LanguageModel[]
+  readonly language?: readonly (LanguageModel | LanguageModelEntryInput)[]
   /** Ordered; the first entry is the project default decision model. */
   readonly decision?: readonly DecisionModel[]
   readonly embedding?: readonly EmbeddingModel[]
@@ -136,14 +153,26 @@ function createRerankingCatalog(
 }
 
 function createLanguageCatalog(
-  models: readonly LanguageModel[] | undefined
+  inputs: readonly (LanguageModel | LanguageModelEntryInput)[] | undefined
 ): LanguageModelCatalog | undefined {
-  if (models === undefined) return undefined
-  if (!Array.isArray(models)) {
+  if (inputs === undefined) return undefined
+  if (!Array.isArray(inputs)) {
     throw new RuntimeError("[Sixb] 'models.language' must be an array of Sixb language models.")
   }
 
-  const index = indexModelBindings(models, "language", assertLanguageModel)
+  const entries = inputs.map(languageModelEntryInput)
+  const index = indexModelBindings(
+    entries.map((entry) => entry.model),
+    "language",
+    (model, position) => {
+      assertLanguageModel(model, position)
+      assertDefaultReasoning(model, entries[position]?.reasoning, position)
+    },
+    (position): Pick<LanguageModelEntry, "reasoning"> => {
+      const reasoning = entries[position]?.reasoning
+      return reasoning === undefined ? {} : { reasoning }
+    }
+  )
   const [defaultEntry] = index.list()
   if (!defaultEntry) {
     throw new RuntimeError(
@@ -162,6 +191,50 @@ function createEmbeddingCatalog(
   }
 
   return indexModelBindings(models ?? [], "embedding", assertEmbeddingModel)
+}
+
+/** Accept a bare model or `{ model, reasoning }`; the model itself is validated by the index. */
+function languageModelEntryInput(input: unknown, index: number): LanguageModelEntryInput {
+  if (!isLanguageModelEntryInput(input)) return { model: input as LanguageModel }
+  const unknownKey = Object.keys(input).find((key) => key !== "model" && key !== "reasoning")
+  if (unknownKey !== undefined) {
+    throw invalidLanguageModel(index, `unknown option '${unknownKey}'`)
+  }
+  const reasoning: unknown = input.reasoning
+  if (
+    reasoning !== undefined &&
+    !(MODEL_REASONING_LEVELS as readonly unknown[]).includes(reasoning)
+  ) {
+    throw invalidLanguageModel(
+      index,
+      `expected 'reasoning' to be one of: ${MODEL_REASONING_LEVELS.join(", ")}`
+    )
+  }
+  return input
+}
+
+// A model binding carries `stream`; an entry wraps one under `model`.
+function isLanguageModelEntryInput(input: unknown): input is LanguageModelEntryInput {
+  return (
+    typeof input === "object" &&
+    input !== null &&
+    !Array.isArray(input) &&
+    "model" in input &&
+    typeof (input as { readonly stream?: unknown }).stream !== "function"
+  )
+}
+
+// Capabilities known without catalog I/O. Unknown support is accepted: providers fall back to their
+// default when a resolved model turns out not to support the level.
+function assertDefaultReasoning(
+  model: LanguageModel,
+  reasoning: ModelReasoningLevel | undefined,
+  index: number
+): void {
+  const issue = modelReasoningSupportIssue(model.definition.capabilities.reasoning, reasoning)
+  if (issue !== undefined) {
+    throw invalidLanguageModel(index, `default reasoning '${reasoning}' cannot be used: ${issue}`)
+  }
 }
 
 function assertLanguageModel(model: unknown, index: number): asserts model is LanguageModel {

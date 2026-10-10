@@ -71,6 +71,23 @@ describe("resolveAgentExecutionPlan", () => {
     expect(plan.maxSteps).toBe(7)
   })
 
+  test("keeps the reasoning frozen at admission and defaults only runs without a spec", () => {
+    // Proven by removal: read `entry.reasoning` whenever the spec has none.
+    const withDefault: LanguageModelCatalog = {
+      ...models,
+      default: { ...entries[0]!, reasoning: "low" },
+      getByRef: (ref) =>
+        ref.modelId === "default" ? { ...entries[0]!, reasoning: "low" } : models.getByRef(ref),
+    }
+    const spec = { model: { provider: defaultModel.providerId, modelId: defaultModel.modelId } }
+    expect(
+      resolveAgentExecutionPlan({ spec, models: withDefault, tools, defaultMaxSteps: 7 })
+    ).not.toHaveProperty("reasoning")
+    expect(
+      resolveAgentExecutionPlan({ models: withDefault, tools, defaultMaxSteps: 7 }).reasoning
+    ).toBe("low")
+  })
+
   test("fails closed when a selected model disappears or no models are configured", () => {
     expect(() =>
       resolveAgentExecutionPlan({
@@ -112,6 +129,34 @@ describe("resolveWorkflowAgentStepExecutionPlan", () => {
     expect(plan.instructions).toBe("Review the request.")
     expect(plan.tools).toEqual([])
     expect(plan.maxSteps).toBe(25)
+  })
+
+  test("applies the selected catalog model's default reasoning unless the step sets one", () => {
+    // Proven by removal: drop `?? selected.reasoning` from the workflow step plan.
+    const model = new WorkerTestModel({ modelId: "default-model" })
+    const entry: LanguageModelEntry = {
+      provider: model.providerId,
+      modelId: model.modelId,
+      model,
+      reasoning: "medium",
+    }
+    const models: LanguageModelCatalog = {
+      default: entry,
+      list: () => [entry],
+      getByRef: () => entry,
+    }
+    const plan = (config: Parameters<typeof defineAgentStep>[1]) =>
+      resolveWorkflowAgentStepExecutionPlan({
+        workflowId: "triage",
+        step: workflowStep(config),
+        models,
+        tools: toolCatalog([]),
+        defaultMaxSteps: 25,
+      })
+
+    expect(plan({ instructions: "Review." }).reasoning).toBe("medium")
+    expect(plan({ instructions: "Review.", model }).reasoning).toBe("medium")
+    expect(plan({ instructions: "Review.", reasoning: "high" }).reasoning).toBe("high")
   })
 
   test("resolves only the tools selected by the workflow step", () => {

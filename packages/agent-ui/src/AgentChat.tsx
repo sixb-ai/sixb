@@ -163,6 +163,9 @@ export function AgentChat({
         modelsError={conversation.modelsError}
         onSelectModel={conversation.selectModel}
         onSelectReasoning={conversation.selectReasoning}
+        onResetReasoning={conversation.resetReasoning}
+        usingDefaultModel={conversation.usingDefaultModel}
+        onResetModelSelection={conversation.resetModelSelection}
         composerPlaceholder={composerPlaceholder ?? "Ask anything"}
         composerDraft={conversation.draftReseed.text}
         composerDraftAttachments={conversation.draftReseed.attachments}

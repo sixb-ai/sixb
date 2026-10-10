@@ -1,4 +1,5 @@
 import type {
+  LanguageModel,
   LanguageModelCatalog,
   LanguageModelEntry,
   LanguageModelRef,
@@ -6,13 +7,14 @@ import type {
   ModelsRuntime,
 } from "../src"
 
-declare const input: ModelCatalogInput
+declare const model: LanguageModel
 declare const catalog: LanguageModelCatalog
 
-const ref: LanguageModelRef = {
-  provider: input.language?.[0]?.providerId ?? "vercel-ai-gateway",
-  modelId: input.language?.[0]?.modelId ?? "openai/gpt-5.4",
-}
+const configured: ModelCatalogInput = { language: [{ model, reasoning: "low" }, model] }
+// @ts-expect-error a project default is a provider-neutral level, not a token budget
+const budgeted: ModelCatalogInput = { language: [{ model, reasoning: { budgetTokens: 1_000 } }] }
+
+const ref: LanguageModelRef = { provider: model.providerId, modelId: model.modelId }
 const entry: LanguageModelEntry | null = catalog.getByRef(ref)
 const listed: readonly LanguageModelEntry[] = catalog.list()
 const defaultEntry: LanguageModelEntry = catalog.default
@@ -20,6 +22,8 @@ const defaultEntry: LanguageModelEntry = catalog.default
 // @ts-expect-error model references are structured, never user-authored string aliases
 catalog.getByRef("gateway/openai/gpt-5.4")
 
+void configured
+void budgeted
 void entry
 void listed
 void defaultEntry

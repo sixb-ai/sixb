@@ -2,6 +2,7 @@ import type { ModelReasoningLevel } from "@sixb/core/models"
 import { cn } from "@sixb/ui/lib/utils"
 import { RotateCcw } from "lucide-react"
 import type { CSSProperties } from "react"
+import { defaultReasoningLevel } from "../modelSelection"
 import type { LanguageModel } from "../types"
 import { reasoningLabel } from "./model-picker-labels"
 
@@ -10,11 +11,14 @@ export function ReasoningEffortSlider({
   value,
   disabled,
   onChange,
+  onReset,
 }: {
   model: LanguageModel
   value: ModelReasoningLevel
   disabled?: boolean
   onChange: (level: ModelReasoningLevel) => void
+  /** Return to the model's default reasoning. Defaults to selecting that level. */
+  onReset?: () => void
 }) {
   const levels: readonly ModelReasoningLevel[] = model.reasoningLevels.filter(
     (level) => level !== "provider-default" && level !== "none" && level !== "minimal"
@@ -24,9 +28,7 @@ export function ReasoningEffortSlider({
   const lastIndex = Math.max(0, levels.length - 1)
   const progress = lastIndex > 0 ? index / lastIndex : 0
   const enhanced = value === "max"
-  const resetLevel = model.reasoningLevels.includes("provider-default")
-    ? "provider-default"
-    : model.reasoningLevels[0]
+  const resetLevel = defaultReasoningLevel(model)
 
   return (
     <div>
@@ -50,7 +52,10 @@ export function ReasoningEffortSlider({
           disabled={disabled || value === resetLevel}
           aria-label="Reset reasoning effort"
           title="Use model default"
-          onClick={() => resetLevel && onChange(resetLevel)}
+          onClick={() => {
+            if (onReset) onReset()
+            else if (resetLevel) onChange(resetLevel)
+          }}
           className="absolute top-1/2 right-0 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/60 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-40"
         >
           <RotateCcw className="size-3.5" aria-hidden="true" />

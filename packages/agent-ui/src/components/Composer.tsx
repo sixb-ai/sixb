@@ -63,6 +63,10 @@ export interface ComposerProps {
   readonly modelsError?: boolean
   readonly onSelectModel?: (model: LanguageModel) => void
   readonly onSelectReasoning?: (reasoning: ModelReasoningLevel) => void
+  readonly onResetReasoning?: () => void
+  /** The model selection follows the project defaults. */
+  readonly usingDefaultModel?: boolean
+  readonly onResetModelSelection?: () => void
   readonly placeholder?: string
   /** Optional classes for the composer shell. */
   readonly className?: string
@@ -131,6 +135,9 @@ export function Composer({
   modelsError,
   onSelectModel,
   onSelectReasoning,
+  onResetReasoning,
+  usingDefaultModel,
+  onResetModelSelection,
   placeholder,
   className,
   hint,
@@ -646,6 +653,9 @@ export function Composer({
                 disabled={disabled || pending || running}
                 onSelectModel={onSelectModel}
                 onSelectReasoning={onSelectReasoning}
+                onResetReasoning={onResetReasoning}
+                usingDefault={usingDefaultModel}
+                onResetToDefault={onResetModelSelection}
               />
             ) : null}
             {running ? (

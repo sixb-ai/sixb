@@ -1,8 +1,9 @@
 import type { ModelReasoningLevel } from "@sixb/core/models"
 import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components"
 import { cn } from "@sixb/ui/lib/utils"
-import { ChevronDown, Search, Shapes } from "lucide-react"
+import { ChevronDown, RotateCcw, Search, Shapes } from "lucide-react"
 import { useMemo, useState } from "react"
+import { defaultLanguageModel, defaultReasoningLevel } from "../modelSelection"
 import type { LanguageModel } from "../types"
 import { ModelPickerRow } from "./ModelPickerRow"
 import { reasoningLabel } from "./model-picker-labels"
@@ -18,6 +19,12 @@ export interface ModelControlsProps {
   readonly disabled?: boolean
   readonly onSelectModel: (model: LanguageModel) => void
   readonly onSelectReasoning: (reasoning: ModelReasoningLevel) => void
+  /** Return to the selected model's default reasoning. */
+  readonly onResetReasoning?: () => void
+  /** The selection follows the project defaults: nothing was chosen explicitly. */
+  readonly usingDefault?: boolean
+  /** Forget the explicit choice and follow the project defaults again. */
+  readonly onResetToDefault?: () => void
 }
 
 export function ModelControls({
@@ -29,8 +36,13 @@ export function ModelControls({
   disabled,
   onSelectModel,
   onSelectReasoning,
+  onResetReasoning,
+  usingDefault = false,
+  onResetToDefault,
 }: ModelControlsProps) {
   const [modelOpen, setModelOpen] = useState(false)
+  const defaultModel = defaultLanguageModel(models)
+  const defaultSummary = defaultModel ? modelSummary(defaultModel) : undefined
   const [query, setQuery] = useState("")
   const normalizedQuery = query.trim().toLowerCase()
   const hasReasoning =
@@ -69,7 +81,12 @@ export function ModelControls({
             ) : (
               <Shapes className="size-4" aria-hidden="true" />
             )}
-            <span className="truncate text-foreground" title={selectedModel?.name}>
+            <span
+              className="truncate text-foreground"
+              title={
+                usingDefault && defaultSummary ? `Default · ${defaultSummary}` : selectedModel?.name
+              }
+            >
               {selectedModel ? selectedModel.name : error ? "Models unavailable" : "Default model"}
             </span>
             {hasReasoning &&
@@ -129,13 +146,45 @@ export function ModelControls({
                 value={selectedReasoning}
                 disabled={disabled}
                 onChange={onSelectReasoning}
+                onReset={onResetReasoning}
               />
+            </div>
+          ) : null}
+          {defaultSummary && onResetToDefault ? (
+            <div className="flex min-h-10 shrink-0 items-center gap-2 border-t border-border/60 px-4 py-1.5 text-xs">
+              {usingDefault ? (
+                <span className="shrink-0 text-muted-foreground">Default</span>
+              ) : (
+                <button
+                  type="button"
+                  disabled={disabled}
+                  onClick={onResetToDefault}
+                  className="-ml-2 flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 font-medium text-foreground outline-none transition-colors hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50"
+                >
+                  <RotateCcw className="size-3.5" aria-hidden="true" />
+                  Reset to default
+                </button>
+              )}
+              <span
+                className="min-w-0 flex-1 truncate text-right text-muted-foreground"
+                title={defaultSummary}
+              >
+                {defaultSummary}
+              </span>
             </div>
           ) : null}
         </PopoverContent>
       </Popover>
     </div>
   )
+}
+
+/** "<model> · <level>", omitting a level the provider chooses. */
+function modelSummary(model: LanguageModel): string {
+  const reasoning = defaultReasoningLevel(model)
+  return reasoning === undefined || reasoning === "provider-default"
+    ? model.name
+    : `${model.name} · ${reasoningLabel(reasoning)}`
 }
 
 function sameModel(left: LanguageModel, right: LanguageModel | undefined): boolean {
