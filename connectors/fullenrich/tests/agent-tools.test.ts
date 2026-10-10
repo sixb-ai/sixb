@@ -47,14 +47,14 @@ function run(
   const connector = (async (requested: unknown) => {
     expect(requested).toBe(definition)
     return client
-  }) as AgentToolRunContext["connector"]
+  }) as AgentToolRunContext["sixb"]["connector"]
   return Promise.resolve(
     tool.handler({
       input,
       toolCallId: "call-1",
       signal,
       run: { kind: "conversation", id: "run-1", threadId: "thread-1" },
-      connector,
+      sixb: { connector } as AgentToolRunContext["sixb"],
       logger: noopLogger,
       artifacts: unusedArtifacts,
     })

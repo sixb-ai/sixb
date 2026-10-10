@@ -10,6 +10,7 @@
 import type {
   ActionEditsContext,
   ActionReadFacade,
+  AgentToolRuntimeFacade,
   ObjectQueryBuilder,
   Sixb,
   WorkflowRuntimeFacade,
@@ -23,15 +24,18 @@ type RowOf<TBuilt> = TBuilt extends { first(): Promise<infer TRow> } ? NonNullab
 
 declare const sixb: Sixb
 declare const workflow: WorkflowRuntimeFacade
+declare const tool: AgentToolRuntimeFacade
 declare const read: ActionReadFacade
 
 // ── The same query is the same type everywhere ─────────────────────────────
 
 const fromSixb = sixb.objects(Room).query().traverse(Room.l.thermostat)
 const fromWorkflow = workflow.objects(Room).query().traverse(Room.l.thermostat)
+const fromTool = tool.objects(Room).query().traverse(Room.l.thermostat)
 const fromAction = read.objects(Room).query().traverse(Room.l.thermostat)
 
 type _workflowMatchesSixb = Expect<Equal<typeof fromWorkflow, typeof fromSixb>>
+type _toolMatchesSixb = Expect<Equal<typeof fromTool, typeof fromSixb>>
 type _actionMatchesSixb = Expect<Equal<typeof fromAction, typeof fromSixb>>
 // The id-only target resolves to the registered object type, not the loose base.
 type _thermostat = Expect<Equal<typeof fromSixb, ObjectQueryBuilder<typeof Thermostat>>>

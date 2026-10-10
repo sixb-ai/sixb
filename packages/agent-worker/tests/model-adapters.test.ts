@@ -17,7 +17,7 @@ import {
 } from "../src/model-adapters"
 import { WorkerTestModel } from "./worker-model-fixture"
 
-const connector = (() => Promise.reject(new Error("unused"))) as AgentToolRunContext["connector"]
+const unusedSixb = {} as AgentToolRunContext["sixb"]
 const toolRuntime = {
   artifactsForToolCall() {
     return {
@@ -95,12 +95,12 @@ describe("owned model adapters", () => {
       },
     })
     const client = await connectorDefinition.adapter.connect()
-    const resolve = (async () => client) as AgentToolRunContext["connector"]
+    const resolve = (async () => client) as AgentToolRunContext["sixb"]["connector"]
     const definition = defineAgentTool("search_knowledge")
       .description("Search project knowledge.")
       .input({ query: "string", limit: "integer", mode: stringEnum(["quick", "deep"]) })
-      .run(async ({ input, signal, run, connector: resolveConnector }) => ({
-        results: (await resolveConnector(connectorDefinition)).search(input.query),
+      .run(async ({ input, signal, run, sixb }) => ({
+        results: (await sixb.connector(connectorDefinition)).search(input.query),
         limit: input.limit,
         mode: input.mode,
         aborted: signal.aborted,
@@ -111,7 +111,7 @@ describe("owned model adapters", () => {
       definitions: [definition],
       valueTypesById: new Map(),
       run,
-      connector: resolve,
+      sixb: { connector: resolve } as AgentToolRunContext["sixb"],
       logger: noopLogger,
       ...toolRuntime,
     })
@@ -153,7 +153,7 @@ describe("owned model adapters", () => {
         definitions: [definition, definition],
         valueTypesById: new Map(),
         run: { kind: "conversation", id: "run-2", threadId: "thread" },
-        connector,
+        sixb: unusedSixb,
         logger: noopLogger,
         ...toolRuntime,
       })
@@ -163,7 +163,7 @@ describe("owned model adapters", () => {
       definitions: [definition],
       valueTypesById: new Map(),
       run: { kind: "conversation", id: "run-2", threadId: "thread" },
-      connector,
+      sixb: unusedSixb,
       logger: noopLogger,
       ...toolRuntime,
     })
@@ -185,7 +185,7 @@ describe("owned model adapters", () => {
       definitions: [definition],
       valueTypesById: new Map(),
       run: { kind: "conversation", id: "run-3", threadId: "thread" },
-      connector,
+      sixb: unusedSixb,
       logger: noopLogger,
       ...toolRuntime,
     })

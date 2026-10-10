@@ -18,8 +18,8 @@ import { knowledgeConnector } from "../connectors/knowledge"
 export const searchKnowledge = defineAgentTool("search_knowledge")
   .description("Search project knowledge.")
   .input({ query: "string" })
-  .run(async ({ input, signal, connector }) => {
-    const knowledge = await connector(knowledgeConnector)
+  .run(async ({ input, signal, sixb }) => {
+    const knowledge = await sixb.connector(knowledgeConnector)
     return knowledge.search(input.query, { signal })
   })
 ```
@@ -27,6 +27,18 @@ export const searchKnowledge = defineAgentTool("search_knowledge")
 The input schema validates arguments from the model. Return JSON-compatible data, and pass
 `signal` to requests that support cancellation. Resolving a [connector](../connectors/overview.md)
 in the handler keeps its credentials on the server.
+
+## Use project data in a tool
+
+A tool is one specific operation that has to run on the server, such as a call to an API whose
+key stays there; reading and searching data is work the agent does on its own. In the handler,
+`sixb` reads objects and requests actions as the requester:
+
+| Run | Permissions |
+| --- | --- |
+| Chat | The signed-in user's. |
+| Child agent (delegation is currently disabled) | The parent chat's user's. |
+| Workflow AI task | Those granted through the step's `groups`. |
 
 ## Register the tool
 
@@ -47,7 +59,8 @@ export const sixb = createSixb({
 
 Project tools are available to the conversational agent. To use a tool in an
 [AI workflow step](../workflows/overview.md#add-an-ai-task), include it in that step's `tools`.
-Only expose operations and data that the tool's intended users should be able to access.
+Data read through `sixb` is already limited to the requester's permissions; also limit what the
+tool returns from connectors and other sources to what its users should see.
 
 ## Add a skill
 

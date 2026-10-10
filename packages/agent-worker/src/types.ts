@@ -1,5 +1,4 @@
 import type {
-  AgentToolRunContext,
   AuthorizablePrincipal,
   BlobStorage,
   Broker,
@@ -84,7 +83,6 @@ export interface AgentExecutionContext extends AgentWorkerContext {
   readonly sixb: Sixb
   readonly authorPrincipal?: AuthorizablePrincipal
   readonly blobStorage: BlobStorage
-  readonly connector: AgentToolRunContext["connector"]
 }
 
 export interface AgentTurnContext {

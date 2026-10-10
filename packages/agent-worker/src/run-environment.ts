@@ -321,7 +321,7 @@ function startAgentEnvironment(input: AgentEnvironmentSetup): AgentExecutionEnvi
       definitions: plan.tools,
       valueTypesById: context.valueTypesById,
       run: input.toolRun,
-      connector: context.connector,
+      sixb: context.sixb,
       logger,
       artifactsForToolCall,
       toolResultToModelOutput: (output) => mediaBridge.toModelOutput(output),
