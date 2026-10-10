@@ -26,10 +26,12 @@ The orchestrator subscribes only to the event types its routes need, and fan-out
 drops its siblings.
 
 Requesting an [action](../../../docs/actions/overview.md) skips the whole model: the
-requesting process persists the run, executes it, and returns its terminal record (the
-`action.requested` event is an observation, not a route). A process that stops
-gracefully refuses new action requests and waits up to 35 seconds for those it runs;
-one that crashes leaves their runs unfinished, with no job to resume them.
+requesting process creates the run's execution, executes the run, records it once when it
+ends, and returns that record (the `action.requested` event is an observation, not a route).
+A run that commits edits is recorded in the same transaction as its edits. Its effects run
+after the record is returned. A process that stops gracefully refuses new action requests and
+waits up to 65 seconds for those it runs and their effects; one that crashes leaves no record
+of the runs it was executing, with nothing to resume them.
 
 Posting a message to an [agent](../../../docs/models/built-in-agent.md) thread skips the
 orchestrator and enqueues onto `queues.agents` directly, while the API can enqueue a
@@ -54,16 +56,19 @@ Actions have no queue and no worker.
 ### Run records
 
 Every queued execution writes a durable **run record** to `storage`, so progress
-survives restarts and is visible in [Atlas](../../../docs/deployment/overview.md#atlas-admin-ui). An
-action's run record is written the same way by the process that requests it. A run moves through
-the same lifecycle across primitives:
+survives restarts and is visible in [Atlas](../../../docs/deployment/overview.md#atlas-admin-ui). A
+run moves through the same lifecycle across primitives:
 
-| Status      | Meaning                                                              |
-| ----------- | -------------------------------------------------------------------- |
-| `running`   | claimed by a worker, or executing in the process that requested it  |
-| `succeeded` | completed and committed                                              |
-| `failed`    | errored; recorded with the failure name/message                      |
-| `cancelled` | aborted (by shutdown or an explicit request)                         |
+| Status      | Meaning                                         |
+| ----------- | ----------------------------------------------- |
+| `running`   | claimed by a worker                             |
+| `succeeded` | completed and committed                         |
+| `failed`    | errored; recorded with the failure name/message |
+| `cancelled` | aborted (by shutdown or an explicit request)    |
+
+An action run has no lifecycle in storage: the request that runs it is its only state while it
+executes, and its record is written once, `succeeded` or `failed`, when it ends. Only the outcome
+of its effects is recorded later, on that record.
 
 Run records carry the inputs, outputs, timing (`startedAt` / `finishedAt`), and
 any error, so a run stays auditable after the fact.
@@ -87,4 +92,4 @@ catch-up and retention never run.
 Because jobs and run records live in durable, shared providers, a crashed worker
 loses no work: the unfinished job's lease expires and another worker reclaims it.
 Actions are the exception: with no job to reclaim, an action whose process crashes
-mid-run stays unfinished.
+mid-run leaves no record, and requesting its `runId` again runs it again.
