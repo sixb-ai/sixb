@@ -21,7 +21,9 @@ import {
 } from "@sixb/core"
 import { createAccessTokenCredential, createSessionCredential } from "@sixb/core/internal/auth"
 import { CSRF_TOKEN_RESPONSE_HEADER_NAME } from "../src/auth/csrf"
-import { createSixbApi, SixbServer } from "../src/server"
+import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "../src/routes/files"
+import { createSixbApi, MAX_WEBSOCKET_MESSAGE_BYTES, SixbServer } from "../src/server"
+import { DEFAULT_REQUEST_BODY_LIMIT_BYTES } from "../src/utils/request-body"
 import { createTestBrowserPolicy } from "./helpers"
 
 const securityAdmins = defineGroup("security-admins")
@@ -1407,6 +1409,197 @@ describe("server auth guard", () => {
     expect(response.headers.get("access-control-allow-origin")).toBe("http://api.localhost")
   })
 })
+
+// Elysia parses a request body before the auth guard runs, so these limits are what bound an
+// anonymous caller. Each test names the change that shows its guard is load-bearing.
+describe("request body limits", () => {
+  async function withServer(
+    sixb: SixbHost,
+    run: (server: { readonly baseUrl: string; readonly port: number }) => Promise<void>
+  ): Promise<void> {
+    const port = await getFreePort()
+    const baseUrl = `http://127.0.0.1:${port}`
+    const server = new SixbServer({
+      host: sixb,
+      hostname: "127.0.0.1",
+      port,
+      quiet: true,
+      browser: createTestBrowserPolicy({ apiOrigin: baseUrl }),
+    })
+    await server.start()
+    try {
+      await run({ baseUrl, port })
+    } finally {
+      await server.stop()
+    }
+  }
+
+  // To check, drop `limitRequestBody` from `startApiServer`: the declared body reaches the guard
+  // (401) and the chunked one is read until Bun's own limit.
+  test("caps an anonymous JSON body before the auth guard runs", async () => {
+    const { sixb } = createRuntime({ auth: true })
+    await withServer(sixb, async ({ baseUrl }) => {
+      const url = `${baseUrl}/api/objects/device/fan-1`
+      const headers = { "content-type": "application/json" }
+      const tooLarge = {
+        error: `Request body exceeds the ${DEFAULT_REQUEST_BODY_LIMIT_BYTES} byte limit.`,
+      }
+
+      const declared = await fetch(url, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({
+          properties: { name: "x".repeat(DEFAULT_REQUEST_BODY_LIMIT_BYTES) },
+        }),
+      })
+      expect(declared.status).toBe(413)
+      expect(await declared.json()).toEqual(tooLarge)
+
+      // This body never ends, so the server can only answer by stopping at the limit.
+      const chunk = new Uint8Array(64 * 1024)
+      const chunked = await fetch(url, {
+        method: "PUT",
+        headers,
+        body: new ReadableStream<Uint8Array>({ pull: (controller) => controller.enqueue(chunk) }),
+        duplex: "half",
+      } as RequestInit & { duplex: "half" })
+      expect(chunked.status).toBe(413)
+      expect(await chunked.json()).toEqual(tooLarge)
+
+      const normal = await fetch(url, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify({ properties: { name: "Fan" } }),
+      })
+      expect(normal.status).toBe(401)
+    })
+  })
+
+  // To check, remove the cap lift from `readRequestBodyWithLimit`: the upload fails with 413 and
+  // the webhook answers with the server's message instead of its own.
+  test("lets a route that reads its own body apply its own limit", async () => {
+    const { sixb, storage } = createRuntime({ auth: true, connector: true })
+    const credential = await seedAccessToken(storage)
+    await withServer(sixb, async ({ baseUrl }) => {
+      const form = new FormData()
+      form.set("file", new File([new Uint8Array(2 * DEFAULT_REQUEST_BODY_LIMIT_BYTES)], "big.bin"))
+      const upload = await fetch(`${baseUrl}/api/files`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${credential.tokenValue}` },
+        body: form,
+      })
+      expect(upload.status).toBe(200)
+      expect(await upload.json()).toMatchObject({ sizeBytes: 2 * DEFAULT_REQUEST_BODY_LIMIT_BYTES })
+
+      const webhook = await fetch(`${baseUrl}/api/webhooks/github/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ padding: "x".repeat(DEFAULT_REQUEST_BODY_LIMIT_BYTES) }),
+      })
+      expect(webhook.status).toBe(413)
+      expect(await webhook.json()).toEqual({
+        error: `Webhook body exceeds ${DEFAULT_REQUEST_BODY_LIMIT_BYTES} bytes.`,
+      })
+    })
+  })
+
+  // To check, read the staged content in an Elysia `parse` hook instead of the handler: the
+  // anonymous request gets a 413 instead of a 401.
+  test("reads upload bodies only after authenticating the caller", async () => {
+    const { sixb } = createRuntime({ auth: true })
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const oversized = (method: string, path: string) =>
+      app.fetch(
+        new Request(`http://localhost${path}`, {
+          method,
+          headers: {
+            "content-type": "application/octet-stream",
+            "content-length": String(DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES + 1),
+          },
+          body: "small body",
+        })
+      )
+
+    expect((await oversized("POST", "/api/files")).status).toBe(401)
+    expect((await oversized("PUT", "/api/files/uploads/upl_1/content")).status).toBe(401)
+  })
+
+  // To check, drop `maxRequestBodySize` from `startApiServer`: the auth guard answers 401.
+  test("rejects a body larger than any route reads before the app runs", async () => {
+    const { sixb } = createRuntime({ auth: true })
+    await withServer(sixb, async ({ port }) => {
+      const statusLine = await readStatusLine(
+        port,
+        [
+          "POST /api/files HTTP/1.1",
+          `Host: 127.0.0.1:${port}`,
+          `Content-Length: ${DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES + 1}`,
+          "",
+          "",
+        ].join("\r\n")
+      )
+      expect(statusLine).toStartWith("HTTP/1.1 413")
+    })
+  })
+
+  // To check, drop `maxPayloadLength` from `getElysiaWsHandler`: the server answers the message
+  // with an error and keeps the socket open.
+  test("closes a WebSocket that sends an oversized message", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage, { audience: "app" })
+    await withServer(sixb, async ({ port }) => {
+      const ws = createTestWebSocket(`ws://127.0.0.1:${port}/ws/events`, {
+        origin: "http://app.localhost",
+        cookie: seeded.cookie,
+      })
+      const closed = new Promise<void>((resolvePromise, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error("WebSocket stayed open"))
+          ws.close()
+        }, 1000)
+        ws.addEventListener("close", () => {
+          clearTimeout(timeout)
+          resolvePromise()
+        })
+      })
+      ws.addEventListener("open", () => ws.send("x".repeat(MAX_WEBSOCKET_MESSAGE_BYTES + 1)))
+
+      await closed
+    })
+  })
+})
+
+/** Sends a raw request head and resolves with the response's status line. */
+async function readStatusLine(port: number, head: string): Promise<string> {
+  return await new Promise<string>((resolvePromise, reject) => {
+    let received = ""
+    Bun.connect({
+      hostname: "127.0.0.1",
+      port,
+      socket: {
+        open(socket) {
+          socket.write(head)
+        },
+        data(socket, data) {
+          received += data.toString()
+          const end = received.indexOf("\r\n")
+          if (end !== -1) {
+            resolvePromise(received.slice(0, end))
+            socket.end()
+          }
+        },
+        close() {
+          reject(new Error("Connection closed before a response"))
+        },
+        error(_socket, error) {
+          reject(error)
+        },
+      },
+    }).catch(reject)
+  })
+}
 
 /** Sign a native client in through the device flow, approved by `seeded`'s browser session. */
 async function signInDevice(

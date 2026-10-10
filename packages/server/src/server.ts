@@ -5,7 +5,7 @@ import { CSRF_HEADER_NAME, setRequestClientAddress } from "@sixb/core/internal/a
 import { bindRequestExecution } from "@sixb/core/internal/request-execution"
 import { setApiPublicOrigin } from "@sixb/core/internal/runtime"
 import type { Server } from "bun"
-import { Elysia } from "elysia"
+import { Elysia, ParseError } from "elysia"
 import { websocket as elysiaWebSocket } from "elysia/ws"
 import { zodToJsonSchema } from "zod-to-json-schema"
 import {
@@ -56,10 +56,15 @@ import {
 import { OPENAPI_TAG_METADATA } from "./openapi/tags"
 import { registerHttpRoutes } from "./registerRoutes"
 import { registerAuthRoutes } from "./routes/auth"
+import { DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES } from "./routes/files"
 import { registerWebhookRoutes } from "./routes/webhooks"
 import { registerWebSocketRoutes } from "./routes/ws"
 import { jsonValueOpenApiOverride } from "./schemas/common"
 import { ObjectQueryOpenApiSchemas } from "./schemas/objects"
+import { limitRequestBody, RequestBodyTooLargeError } from "./utils/request-body"
+
+// Clients send only subscription messages; Bun's default would buffer up to 16 MB for one.
+export const MAX_WEBSOCKET_MESSAGE_BYTES = 64 * 1024
 
 export interface SixbServerOptions {
   host: SixbHostView
@@ -262,6 +267,13 @@ export function createSixbApi(server: SixbServer) {
       setResponseHeader(set, "cache-control", "no-store")
     }
     return shared.kind === "deny" ? shared.response : undefined
+  })
+  // A body over its limit fails while Elysia parses it, before the auth guard or handler runs.
+  app.onError(({ error, set }) => {
+    if (error instanceof ParseError && error.cause instanceof RequestBodyTooLargeError) {
+      set.status = 413
+      return { error: error.cause.message }
+    }
   })
 
   // Resolve authentication and bind one execution SDK at the request boundary. Protected routes
@@ -531,8 +543,13 @@ function startApiServer(
   const bunServer = Bun.serve({
     port: options.port,
     hostname: options.host,
-    fetch: (request: Request, server: Server<unknown>) => {
-      const socketAddress = server.requestIP(request)?.address
+    // No route reads more than a simple upload form, so Bun rejects anything larger with 413.
+    maxRequestBodySize: DEFAULT_SIMPLE_FILE_UPLOAD_BODY_BYTES,
+    fetch: (incoming: Request, server: Server<unknown>) => {
+      const socketAddress = server.requestIP(incoming)?.address
+      // Elysia parses a body before the auth guard runs, so cap it here, as it streams. The capped
+      // request replaces this one before any state is keyed to it.
+      const request = limitRequestBody(incoming)
       if (socketAddress) {
         const forwardedFor = request.headers.get("x-forwarded-for")
         setRequestClientAddress(request, options.resolveClientAddress(socketAddress, forwardedFor))
@@ -551,6 +568,7 @@ function getElysiaWsHandler(app: SixbApp) {
   return {
     ...elysiaWebSocket,
     ...(cfg?.websocket ?? {}),
+    maxPayloadLength: MAX_WEBSOCKET_MESSAGE_BYTES,
   } as Parameters<typeof Bun.serve>[0]["websocket"]
 }
 
