@@ -48,6 +48,7 @@ import {
   createAgentRunId,
   createSubagentRunId,
   ensureManagedAgentExecutionIdentity,
+  isAgentToolResult,
   publishAgentRunCancel,
 } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
@@ -7976,7 +7977,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("views and publishes an image created by bash", async () => {
+  test("views an image created by bash without attaching it to the answer", async () => {
     let viewedPrompt: unknown
     const sandboxes = new RecordingSandboxFactory()
     const sixb = buildSixb(
@@ -8009,6 +8010,20 @@ describe("AgentWorker", () => {
       const viewCall = assistant?.parts.find(
         (part) => part.type === "tool-call" && part.toolName === "view_file"
       )
+      const viewed =
+        viewCall?.type === "tool-call" && viewCall.state === "output-available"
+          ? viewCall.output
+          : undefined
+      if (!isAgentToolResult(viewed) || viewed.content[1]?.type !== "file") {
+        throw new Error("Expected the viewed image in the view_file result.")
+      }
+      expect(
+        new Uint8Array(
+          await new Response(
+            await sixb.blobStorage.open(viewed.content[1].fileRef.blobId)
+          ).arrayBuffer()
+        )
+      ).toEqual(TEST_PNG_BYTES)
       expect(viewCall).toMatchObject({
         state: "output-available",
         output: {
@@ -8022,17 +8037,8 @@ describe("AgentWorker", () => {
           ],
         },
       })
-      const filePart = assistant?.parts.find((part) => part.type === "file")
-      expect(filePart).toMatchObject({
-        type: "file",
-        fileRef: { fileName: "bash-image.png", mediaType: "image/png" },
-      })
-      if (!filePart || filePart.type !== "file") throw new Error("Expected viewed image file.")
-      expect(
-        new Uint8Array(
-          await new Response(await sixb.blobStorage.open(filePart.fileRef.blobId)).arrayBuffer()
-        )
-      ).toEqual(TEST_PNG_BYTES)
+      // Viewing is work, not a deliverable: the image stays in the trace only.
+      expect(assistant?.parts.some((part) => part.type === "file")).toBe(false)
       expect(
         sandboxes.sandboxes[0]?.writtenFiles.some((file) =>
           file.path.includes(".sixb/agent/artifacts/")

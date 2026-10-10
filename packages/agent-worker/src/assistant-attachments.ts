@@ -1,13 +1,21 @@
-import type { AgentMessagePart } from "@sixb/core"
+import type { AgentMessagePart, AgentToolDefinition } from "@sixb/core"
 import { isAgentToolResult } from "@sixb/core/internal/agents"
 import { fileContentKey } from "./file-ref"
 import type { AgentOutputAttachment } from "./output-attachments"
 
-/** Promote rich tool-result files to user-facing message files and remove duplicate outputs. */
+/**
+ * Attach the answer's deliverables: files returned by project tools and files published to
+ * `$SIXB_OUTPUT_DIR`, each once. A file a built-in tool only read, such as a page `view_file`
+ * prepared for the model, stays in the tool result: it is part of the work, not of the answer.
+ */
 export function assistantPartsWithAttachments(
   parts: readonly AgentMessagePart[],
-  outputAttachments: readonly AgentOutputAttachment[] = []
+  input: {
+    readonly projectTools: readonly Pick<AgentToolDefinition, "name">[]
+    readonly outputAttachments?: readonly AgentOutputAttachment[]
+  }
 ): AgentMessagePart[] {
+  const projectToolNames = new Set(input.projectTools.map((tool) => tool.name))
   const result = [...parts]
   const seen = new Set(
     parts.flatMap((part) => (part.type === "file" ? [fileContentKey(part.fileRef)] : []))
@@ -17,6 +25,7 @@ export function assistantPartsWithAttachments(
       if (
         part.type !== "tool-call" ||
         part.state !== "output-available" ||
+        !projectToolNames.has(part.toolName) ||
         !isAgentToolResult(part.output)
       ) {
         return []
@@ -25,7 +34,7 @@ export function assistantPartsWithAttachments(
         contentPart.type === "file" ? [contentPart.fileRef] : []
       )
     }),
-    ...outputAttachments.map((attachment) => attachment.fileRef),
+    ...(input.outputAttachments ?? []).map((attachment) => attachment.fileRef),
   ]
 
   for (const fileRef of candidates) {

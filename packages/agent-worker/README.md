@@ -93,6 +93,10 @@ the inference or accounting path.
 
 ## Attachments
 
+An answer's attachments are the files its project tools returned and the files published to
+`$SIXB_OUTPUT_DIR`, each once. Files a built-in tool only read, such as the image `view_file`
+prepared for the model, stay in that tool's result and are shown in the work trace.
+
 Assistant file attachments remain structured message parts for display and download; they are not
 replayed as assistant text. Earlier files in the retained conversation are discoverable through the
 sandbox's `$SIXB_ATTACHMENTS` manifest and inspectable using `view_file` when materialized. Current

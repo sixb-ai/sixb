@@ -3,14 +3,15 @@ import type { AgentFileRef } from "../types"
 
 export type AgentDocumentKind = "markdown" | "html" | "csv" | "tsv" | "pdf" | "image"
 
-/** A file part tied to the durable message route that authorizes reading its bytes. */
+/** A message file tied to the durable message route that authorizes reading its bytes. */
 export interface AgentDocumentSource {
   readonly id: string
   readonly kind: AgentDocumentKind | null
   readonly fileRef: AgentFileRef
   readonly threadId: string
   readonly messageId: string
-  readonly partIndex: number
+  /** JSON pointer to the file reference in the message, such as `/parts/2/fileRef`. */
+  readonly path: string
   readonly inlineUrl: string
   readonly downloadUrl: string
 }

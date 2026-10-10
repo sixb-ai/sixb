@@ -84,7 +84,10 @@ export async function runSubagent(input: {
     })
     assertSubagentCanFinalize({ runtime, sandboxReadiness })
     const childResult = subagentResult(
-      assistantPartsWithAttachments(parts, outputAttachments.attachments),
+      assistantPartsWithAttachments(parts, {
+        projectTools: plan.tools,
+        outputAttachments: outputAttachments.attachments,
+      }),
       run
     )
 

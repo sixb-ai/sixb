@@ -8,6 +8,7 @@ import {
 import type { NormalizedPart, NormalizedTool } from "./parts"
 import { coerceReadInput, coerceReadOutput, describeRead } from "./read/interpret"
 import { webFetchUrl } from "./utils/webFetch"
+import { describeViewFile } from "./view-file/interpret"
 
 /** A short, present-tense label for the newest visible step in a live work group. */
 export function latestWorkLabel(parts: readonly NormalizedPart[]): string {
@@ -46,6 +47,8 @@ function toolProgressLabel(tool: NormalizedTool): string {
     const description = describeRead(coerceReadInput(tool.input), coerceReadOutput(tool.output))
     return `Reading ${description.target}`
   }
+
+  if (tool.toolName === "view_file") return `Viewing ${describeViewFile(tool).target}`
 
   const name = humanize(tool.toolName)
   return name ? `Using ${name}` : "Working"
