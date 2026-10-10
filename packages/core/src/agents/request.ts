@@ -175,6 +175,15 @@ export async function requestAgentRun(
   }
 }
 
+/** A failed turn, or one its worker died during, can run again from the same trigger message. */
+export function isRetryableAgentRun(
+  run: Pick<ConversationAgentRunRecord, "status" | "finishReason">
+): boolean {
+  return (
+    run.status === "failed" || (run.status === "cancelled" && run.finishReason === "interrupted")
+  )
+}
+
 /** Retry a failed turn as a new child execution while reusing its immutable trigger message. */
 export async function retryAgentRun(
   runtime: SixbRuntimeContext,
@@ -188,10 +197,10 @@ export async function retryAgentRun(
   })
   assertAuthorized(runtime, { kind: "agent.run" })
   assertRequestAuthorityCanRunAgent(runtime)
-  if (failedRun.status !== "failed") {
+  if (!isRetryableAgentRun(failedRun)) {
     throw new AgentRequestError(
       "run_not_retryable",
-      `[Sixb] Only failed Agent runs can be retried.`
+      `[Sixb] Only failed or interrupted Agent runs can be retried.`
     )
   }
 

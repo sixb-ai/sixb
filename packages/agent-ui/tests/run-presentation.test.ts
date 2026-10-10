@@ -307,6 +307,67 @@ describe("presentActiveTurn", () => {
     ).toEqual({ kind: "idle" })
   })
 
+  test("an interrupted turn offers a retry from history or from the live event", () => {
+    const interrupted = run({ id: "r1", status: "cancelled", finishReason: "interrupted" })
+    expect(presentActiveTurn(sources({ runs: [interrupted] }))).toEqual({
+      kind: "interrupted",
+      run: interrupted,
+      hasProgress: false,
+    })
+    expect(presentActiveTurn(sources({ runs: [interrupted], messagesLoading: true }))).toEqual({
+      kind: "idle",
+    })
+
+    // The live parts a dead worker streamed were never saved; they do not count as progress.
+    const running = run({ id: "r1", status: "running" })
+    expect(
+      presentActiveTurn(
+        sources({
+          activeRunId: running.id,
+          pendingRun: running,
+          live: liveState({
+            runId: running.id,
+            finishStatus: "cancelled",
+            finishReason: "interrupted",
+            parts: [{ kind: "text", text: "partial" }],
+            partKeys: ["t1"],
+          }),
+        })
+      )
+    ).toEqual({ kind: "interrupted", run: running, hasProgress: false })
+
+    const retried = run({ id: "r2", status: "succeeded" })
+    expect(
+      presentActiveTurn(
+        sources({ runs: [retried, interrupted], messages: [assistantMessage("r2")] })
+      )
+    ).toEqual({ kind: "idle" })
+  })
+
+  test("a turn interrupted by a stopping worker continues from its saved answer", () => {
+    // Regression proof: compute hasProgress as false for interrupted turns; Continue is lost.
+    const interrupted = run({ id: "r1", status: "cancelled", finishReason: "interrupted" })
+    expect(
+      presentActiveTurn(sources({ runs: [interrupted], messages: [assistantMessage("r1")] }))
+    ).toEqual({ kind: "interrupted", run: interrupted, hasProgress: true })
+
+    const running = run({ id: "r1", status: "running" })
+    expect(
+      presentActiveTurn(
+        sources({
+          activeRunId: running.id,
+          pendingRun: running,
+          live: liveState({
+            runId: running.id,
+            finalizedMessageId: "message-r1",
+            finishStatus: "cancelled",
+            finishReason: "interrupted",
+          }),
+        })
+      )
+    ).toEqual({ kind: "interrupted", run: running, hasProgress: true })
+  })
+
   test("terminal markers wait for the transcript to load", () => {
     const failed = run({ id: "r1", status: "failed" })
     const cancelled = run({ id: "r2", status: "cancelled" })

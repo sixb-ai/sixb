@@ -19,6 +19,45 @@ test.each([
   expect(renderPanel({ compact, threadId: "existing-thread" })).toContain("<textarea")
 })
 
+test("replaces an interrupted turn's unsaved stream with a way to run it again", () => {
+  // Regression proof: drop the interrupted check from Transcript's showLive; unsaved text renders.
+  const html = renderPanel({
+    threadId: "thread",
+    live: {
+      ...createLiveRunState("run"),
+      parts: [{ kind: "text", text: "Unsaved partial answer" }],
+      partKeys: ["text#1#t"],
+      finishStatus: "cancelled",
+      finishReason: "interrupted",
+    },
+    interrupted: { hasProgress: false },
+    onRetry: () => {},
+  })
+  expect(html).toContain("The response was interrupted before it finished.")
+  expect(html).toContain("Try again")
+  expect(html).not.toContain("Unsaved partial answer")
+})
+
+test("offers to continue a turn interrupted with its partial answer saved", () => {
+  const html = renderPanel({
+    threadId: "thread",
+    live: {
+      ...createLiveRunState("run"),
+      parts: [{ kind: "text", text: "Saved partial answer" }],
+      partKeys: ["text#1#t"],
+      finalizedMessageId: "message",
+      finishStatus: "cancelled",
+      finishReason: "interrupted",
+    },
+    interrupted: { hasProgress: true },
+    onContinue: () => {},
+  })
+  expect(html).toContain("Saved partial answer")
+  expect(html).toContain("The response was interrupted before it finished.")
+  expect(html).toContain("Continue")
+  expect(html).not.toContain("Try again")
+})
+
 function renderPanel(props: Partial<ConversationPanelProps>): string {
   const cache = new QueryClient()
   const noop = () => {}

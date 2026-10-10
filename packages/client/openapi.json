@@ -32154,6 +32154,7 @@
                             "content-filter",
                             "tool-calls",
                             "timeout",
+                            "interrupted",
                             "error",
                             "other",
                             "unknown"
@@ -32926,6 +32927,7 @@
                             "content-filter",
                             "tool-calls",
                             "timeout",
+                            "interrupted",
                             "error",
                             "other",
                             "unknown"
@@ -33228,7 +33230,7 @@
     },
     "/api/agent-threads/{threadId}/runs/{runId}/retry": {
       "post": {
-        "summary": "Retry a failed agent run",
+        "summary": "Retry a failed or interrupted agent run",
         "tags": ["Agent Runs"],
         "operationId": "retryAgentRun",
         "security": [
@@ -33355,6 +33357,7 @@
                             "content-filter",
                             "tool-calls",
                             "timeout",
+                            "interrupted",
                             "error",
                             "other",
                             "unknown"
@@ -33848,6 +33851,7 @@
                               "content-filter",
                               "tool-calls",
                               "timeout",
+                              "interrupted",
                               "error",
                               "other",
                               "unknown"
@@ -34247,6 +34251,7 @@
                         "content-filter",
                         "tool-calls",
                         "timeout",
+                        "interrupted",
                         "error",
                         "other",
                         "unknown"

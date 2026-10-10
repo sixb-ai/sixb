@@ -76,6 +76,8 @@ export type ActiveTurnPresentation =
       readonly hasProgress: boolean
       readonly timeoutMs?: number
     }
+  /** The worker running the turn stopped before finishing it; saved progress means Continue. */
+  | { readonly kind: "interrupted"; readonly run: AgentRun; readonly hasProgress: boolean }
   /** The turn was stopped before it produced any content. */
   | { readonly kind: "cancelled" }
   | { readonly kind: "idle" }
@@ -128,6 +130,22 @@ export function presentActiveTurn(sources: ActiveTurnSources): ActiveTurnPresent
       hasProgress,
       ...(timeoutMs === undefined ? {} : { timeoutMs }),
     }
+  }
+
+  const interruptedFromRun =
+    !messagesLoading && presentationRun?.finishReason === "interrupted" ? presentationRun : null
+  const interruptedFromEvent =
+    live.runId === activeRunId && live.finishReason === "interrupted" ? activeRun : null
+  const interruptedRun = interruptedFromRun ?? interruptedFromEvent
+  if (interruptedRun) {
+    // Only saved progress counts: a stopping worker keeps the partial answer, a dead one saved
+    // nothing of what it streamed.
+    const hasProgress =
+      (live.runId === interruptedRun.id && live.finalizedMessageId !== null) ||
+      messages.some(
+        (message) => message.role === "assistant" && message.runId === interruptedRun.id
+      )
+    return { kind: "interrupted", run: interruptedRun, hasProgress }
   }
 
   const failedFromHistory =
