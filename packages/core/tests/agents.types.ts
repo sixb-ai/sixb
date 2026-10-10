@@ -2,9 +2,14 @@ import {
   type AgentToolDefinition,
   type AgentToolResult,
   type AgentToolRunContext,
+  type AgentToolRuntimeFacade,
   defineAgentTool,
   defineConnector,
+  defineObjectType,
   type InferAgentToolInput,
+  type ObjectReadSet,
+  prop,
+  type Sixb,
   stringEnum,
 } from "../src"
 
@@ -39,14 +44,14 @@ const searchKnowledge = defineAgentTool("search_knowledge")
     },
   })
   .run(async (context) => {
-    const { input, connector, logger, run, signal } = context
+    const { input, sixb, logger, run, signal } = context
     const query: string = input.query
     const limit: number = input.limit
     const mode: "quick" | "deep" = input.mode
     const requestedAt: string = input.requestedAt
     const active: boolean = input.filters.active
     const note: string | undefined = input.filters.note
-    const knowledge = await connector(knowledgeConnector)
+    const knowledge = await sixb.connector(knowledgeConnector)
     const results: string[] = knowledge.search(query)
 
     logger.info("Searching", { limit, mode, active })
@@ -58,8 +63,10 @@ const searchKnowledge = defineAgentTool("search_knowledge")
     run.agentId
     const threadId: string | undefined = run.kind === "conversation" ? run.threadId : undefined
 
-    // @ts-expect-error tool handlers receive no privileged Sixb runtime
-    context.sixb
+    // @ts-expect-error tools act as the requester through a narrowed SDK that cannot start workflows
+    sixb.workflows
+    // @ts-expect-error nor manage schedules, events or the Agent itself
+    sixb.agent
 
     return {
       results,
@@ -143,5 +150,59 @@ defineAgentTool("create_image")
     }
     return result
   })
+
+// ── Reading project data as the requester ─────────────────────────────────
+
+const Project = defineObjectType({
+  id: "project",
+  name: "Project",
+  properties: [
+    prop("id", "string", { required: true, primary: true }),
+    prop("name", "string", { required: true, query: { searchable: true, filterable: true } }),
+    prop("budget", "double"),
+  ],
+})
+
+defineAgentTool("find_project")
+  .description("Find a project by name.")
+  .input({ name: "string" })
+  .run(async ({ input, sixb }) => {
+    const byQuery = await sixb
+      .objects(Project)
+      .query()
+      .where((project) => project.p.name.eq(input.name))
+      .first()
+    const byId = await sixb.objects(Project).get("project-1")
+    const name: string | undefined = byQuery?.properties.name
+    const budget: number | undefined = byId?.properties.budget
+    return { name: name ?? null, budget: budget ?? null }
+  })
+
+// The handler receives the run's bound SDK; its type keeps a tool to object reads and actions.
+declare const tool: AgentToolRuntimeFacade
+declare const runtime: Sixb
+const _runSdkServesTools: AgentToolRuntimeFacade = runtime
+void _runSdkServesTools
+type _toolObjectsAreReads = Expect<
+  Equal<ReturnType<typeof tool.objects<typeof Project>>, ObjectReadSet<typeof Project>>
+>
+type _sameQueries = Expect<
+  Equal<
+    ReturnType<ReturnType<typeof tool.objects<typeof Project>>["query"]>,
+    ReturnType<ReturnType<typeof runtime.objects<typeof Project>>["query"]>
+  >
+>
+// @ts-expect-error tools change objects by requesting actions
+tool.objects(Project).upsert({ properties: { id: "project-1", name: "Alpha" } })
+// @ts-expect-error nor delete them or edit their links
+tool.objects(Project).byId("project-1").delete()
+// @ts-expect-error the agent reads projected ontology data, not datasets
+tool.datasets
+// @ts-expect-error nor telemetry series directly
+tool.telemetry
+// @ts-expect-error files a tool produces go through its artifacts
+tool.blobs
+// @ts-expect-error tools do not start workflows
+tool.workflows
 
 void definition

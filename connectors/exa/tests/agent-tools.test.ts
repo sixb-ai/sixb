@@ -625,7 +625,7 @@ function harness(
   const connector = (async (requestedDefinition: unknown) => {
     expect(requestedDefinition).toBe(definition)
     return resolveConnector()
-  }) as AgentToolRunContext["connector"]
+  }) as AgentToolRunContext["sixb"]["connector"]
 
   return {
     tool,
@@ -635,7 +635,7 @@ function harness(
         toolCallId: "search-call-1",
         signal,
         run: { kind: "conversation", id: "run-1", threadId: "thread-1" },
-        connector,
+        sixb: { connector } as AgentToolRunContext["sixb"],
         logger: noopLogger,
         artifacts: unusedArtifacts,
       })
@@ -661,7 +661,7 @@ function fetchHarness(
   const connector = (async (requestedDefinition: unknown) => {
     expect(requestedDefinition).toBe(definition)
     return resolveConnector()
-  }) as AgentToolRunContext["connector"]
+  }) as AgentToolRunContext["sixb"]["connector"]
 
   return {
     tool,
@@ -671,7 +671,7 @@ function fetchHarness(
         toolCallId: "fetch-call-1",
         signal,
         run: { kind: "conversation", id: "run-1", threadId: "thread-1" },
-        connector,
+        sixb: { connector } as AgentToolRunContext["sixb"],
         logger: noopLogger,
         artifacts: unusedArtifacts,
       })

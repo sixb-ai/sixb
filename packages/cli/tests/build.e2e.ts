@@ -184,8 +184,8 @@ describe("sixb build", () => {
           })
           export const tools = ["search", "fetch"].map(operation =>
             defineAgentTool("web_" + operation).description(operation).input({})
-              .run(async ({ connector }) => {
-                const client = await connector(exa)
+              .run(async ({ sixb }) => {
+                const client = await sixb.connector(exa)
                 return { result: client[operation](), instance: client.instance }
               })
           )
@@ -216,10 +216,12 @@ describe("sixb build", () => {
           const tool = host.definitions.tools.getByName("web_" + operation)
           const output = await tool.handler({
             input: {}, signal: new AbortController().signal,
-            connector: async definition => {
-              const client = await sdk.connector(definition)
-              assert.equal(host.definitions.connectors.getById(definition.id), definition)
-              return client
+            sixb: {
+              connector: async definition => {
+                const client = await sdk.connector(definition)
+                assert.equal(host.definitions.connectors.getById(definition.id), definition)
+                return client
+              },
             },
           })
           assert.deepEqual(output, { result: operation, instance: 1 })

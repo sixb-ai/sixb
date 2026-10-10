@@ -365,7 +365,7 @@ export function fullEnrichSearchPeople(
         FILTER_SYNTAX
     )
     .input(PEOPLE_SEARCH_INPUT)
-    .run(async ({ input, connector, signal }) => {
+    .run(async ({ input, sixb: { connector }, signal }) => {
       const limit = pageLimit(input.page.limit, maxResults, "search_people")
       const cursor = pageCursor(input.page.cursor, "search_people")
       const response = await callFullEnrich(
@@ -405,7 +405,7 @@ export function fullEnrichSearchCompanies(
         FILTER_SYNTAX
     )
     .input(COMPANY_SEARCH_INPUT)
-    .run(async ({ input, connector, signal }) => {
+    .run(async ({ input, sixb: { connector }, signal }) => {
       const limit = pageLimit(input.page.limit, maxResults, "search_companies")
       const cursor = pageCursor(input.page.cursor, "search_companies")
       const response = await callFullEnrich(
@@ -440,7 +440,7 @@ export function fullEnrichLookupPerson(
         "person: null when nothing matches. Costs 0.25 credits unless already retrieved."
     )
     .input(PERSON_LOOKUP_INPUT)
-    .run(async ({ input, connector, signal }) => {
+    .run(async ({ input, sixb: { connector }, signal }) => {
       const identifiers = trimStrings(input.identifiers, "lookup_person")
       const byProfile =
         identifiers.person_professional_network_url !== undefined ||
@@ -480,7 +480,7 @@ export function fullEnrichLookupCompany(
         "Costs 0.25 credits unless already retrieved."
     )
     .input(COMPANY_LOOKUP_INPUT)
-    .run(async ({ input, connector, signal }) => {
+    .run(async ({ input, sixb: { connector }, signal }) => {
       const identifiers = trimStrings(input.identifiers, "lookup_company")
       if (
         identifiers.domain === undefined &&
@@ -530,7 +530,7 @@ export function fullEnrichStartContactEnrichment(
         "enrichment_id to pass to get_contact_enrichment later."
     )
     .input(contactEnrichmentInput(allowedFields))
-    .run(async ({ input, connector, signal }) => {
+    .run(async ({ input, sixb: { connector }, signal }) => {
       const enrichFields = [...new Set(input.enrich_fields)]
       if (enrichFields.length === 0) {
         throw new AgentToolPublicError(
@@ -587,7 +587,7 @@ export function fullEnrichGetContactEnrichment(
         "Email status DELIVERABLE is safest; HIGH_PROBABILITY and CATCH_ALL may bounce."
     )
     .input(ENRICHMENT_ID_INPUT)
-    .run(async ({ input, connector, signal }) => {
+    .run(async ({ input, sixb: { connector }, signal }) => {
       const enrichmentId = requiredString(
         input.enrichment_id,
         "enrichment_id",
@@ -634,7 +634,7 @@ export function fullEnrichStartReverseEmailLookup(
         "to pass to get_reverse_email_lookup later."
     )
     .input(REVERSE_EMAIL_LOOKUP_INPUT)
-    .run(async ({ input, connector, signal }) => {
+    .run(async ({ input, sixb: { connector }, signal }) => {
       assertCount(input.emails.length, maxEmails, "emails", "start_reverse_email_lookup")
       const emails = input.emails.map((value, index) => {
         const email = value.trim()
@@ -681,7 +681,7 @@ export function fullEnrichGetReverseEmailLookup(
         "the lookup is running; check again later rather than repeatedly."
     )
     .input(LOOKUP_ID_INPUT)
-    .run(async ({ input, connector, signal }) => {
+    .run(async ({ input, sixb: { connector }, signal }) => {
       const lookupId = requiredString(input.lookup_id, "lookup_id", "get_reverse_email_lookup")
       const lookup = await readJob(
         { connectorDefinition, connector, signal, timeoutMs, toolName: "get_reverse_email_lookup" },
@@ -714,7 +714,7 @@ export function fullEnrichCreditBalance(
   return defineAgentTool("get_enrichment_credits")
     .description("Read the FullEnrich credits remaining for search, lookup, and enrichment.")
     .input({})
-    .run(async ({ connector, signal }) => {
+    .run(async ({ sixb: { connector }, signal }) => {
       const credits = await callFullEnrich(
         { connectorDefinition, connector, signal, timeoutMs, toolName: "get_enrichment_credits" },
         (client, requestSignal) => client.account.credits({ signal: requestSignal })

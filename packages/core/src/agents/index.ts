@@ -161,6 +161,7 @@ export type {
   AgentToolRunBuilder,
   AgentToolRunContext,
   AgentToolRunInfo,
+  AgentToolRuntimeFacade,
   AgentToolTextContent,
   AgentUsageReference,
   InferAgentToolInput,

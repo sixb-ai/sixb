@@ -24,6 +24,5 @@ export function createAgentExecutionContext(input: {
     sixb,
     ...(input.authorPrincipal === undefined ? {} : { authorPrincipal: input.authorPrincipal }),
     blobStorage: sixb.blobs,
-    connector: sixb.connector,
   }
 }
