@@ -14,6 +14,8 @@ import {
   stringField,
   toSeriesData,
 } from "../src/bash/data"
+import { en } from "../src/i18n/en"
+import { fr } from "../src/i18n/fr"
 
 describe("extractObjects", () => {
   test("reads both the bare-array and { objects } envelopes", () => {
@@ -117,9 +119,9 @@ describe("scalar helpers", () => {
   test("metaLine drops zero counts and pluralizes", () => {
     expect(
       metaLine([
-        [3, "property", "properties"],
-        [0, "link", "links"],
-        [1, "action", "actions"],
+        [3, en.bash.counts.properties],
+        [0, en.bash.counts.links],
+        [1, en.bash.counts.actions],
       ])
     ).toBe("3 properties · 1 action")
   })
@@ -139,6 +141,7 @@ describe("scalar helpers", () => {
     expect(arrayLen("nope")).toBe(0)
     expect(formatValue("")).toBe("—")
     expect(formatValue(true)).toBe("Yes")
-    expect(formatValue(1000)).toBe((1000).toLocaleString())
+    expect(formatValue(1000)).toBe("1,000")
+    expect(formatValue(1000, fr.bash)).toBe("1\u202f000")
   })
 })

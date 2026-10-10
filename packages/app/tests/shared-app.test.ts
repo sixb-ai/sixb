@@ -246,7 +246,12 @@ describe("generated shared application bootstrap", () => {
 
     const genericMessage = "This shared link is invalid, expired, or no longer available."
     expect(shell).toContain(genericMessage)
-    expect(sharedMain).toContain(genericMessage)
+    // The bootstrap reads it from the catalog; the shell inlines every translation.
+    expect(sharedMain).toContain("messages.unavailableDetail")
+    // Shared links cannot read project settings: they declare the reader's language instead.
+    expect(sharedMain).toContain("document.documentElement.lang = browserAppLocale()")
+    expect(shell).toContain('document.documentElement.lang = language || "en"')
+    expect(shell).toContain("Ce lien de partage est invalide")
     expect(sharedMain).not.toContain("bootstrap.grantId +")
     expect(sharedMain).not.toContain("bootstrap.requestedPath +")
     expect(sharedMain).not.toContain('", error)')
@@ -268,7 +273,7 @@ describe("generated shared application bootstrap", () => {
     expect(runtime).toContain("React.useLayoutEffect")
     expect(runtime).toContain("return crossingBoundary ? null : children")
     expect(runtime).toContain("window.location.reload()")
-    expect(runtime).toContain('? "This shared page could not be displayed."')
+    expect(runtime).toContain("? messages.sharedDetail")
     expect(runtime).toContain("<RoutedApp hideErrorDetails />")
     expect(runtime).toContain('console.error("[SixbApp] A shared page failed to render.")')
   })
@@ -337,6 +342,7 @@ async function executeSharedShellBootstrap(
 
   const root = { replaceChildren() {} }
   const documentStub = {
+    documentElement: { lang: "" },
     getElementById() {
       return root
     },

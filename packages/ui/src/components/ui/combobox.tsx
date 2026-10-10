@@ -13,6 +13,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@sixb/ui/components/ui/
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, ChevronsUpDown } from "lucide-react"
 import { type UIEvent, useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useUiMessages } from "../../lib/i18n/ui"
 
 const COMBOBOX_LOAD_MORE_THRESHOLD_PX = 80
 
@@ -35,16 +36,16 @@ export function Combobox({
   value,
   options,
   onValueChange,
-  placeholder = "Select an option...",
-  searchPlaceholder = "Search...",
-  emptyLabel = "No results found.",
+  placeholder,
+  searchPlaceholder,
+  emptyLabel,
   disabled = false,
   className,
   "aria-describedby": ariaDescribedBy,
   hasMore = false,
   loadingMore = false,
-  loadingLabel = "Loading more...",
-  loadMoreLabel = "Load more",
+  loadingLabel,
+  loadMoreLabel,
   onLoadMore,
 }: {
   readonly id?: string
@@ -63,6 +64,7 @@ export function Combobox({
   readonly loadMoreLabel?: string
   readonly onLoadMore?: () => void
 }) {
+  const messages = useUiMessages().combobox
   const [open, setOpen] = useState(false)
   const loadedOptionCountRef = useRef(options.length)
   const loadMorePendingRef = useRef(false)
@@ -114,7 +116,7 @@ export function Combobox({
           className={cn("w-full justify-between bg-background", className)}
         >
           <span className={cn("truncate", !selectedOption && "text-muted-foreground")}>
-            {selectedOption?.label ?? placeholder}
+            {selectedOption?.label ?? placeholder ?? messages.placeholder}
           </span>
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
@@ -125,13 +127,13 @@ export function Combobox({
         align="start"
       >
         <Command>
-          <CommandInput placeholder={searchPlaceholder} />
+          <CommandInput placeholder={searchPlaceholder ?? messages.search} />
           <CommandList
             className="overscroll-contain"
             style={{ maxHeight: "18rem", overflowY: "auto" }}
             onScroll={handleListScroll}
           >
-            <CommandEmpty>{emptyLabel}</CommandEmpty>
+            <CommandEmpty>{emptyLabel ?? messages.empty}</CommandEmpty>
             <CommandGroup>
               {options.map((option) => (
                 <CommandItem
@@ -167,7 +169,9 @@ export function Combobox({
                 onSelect={requestLoadMore}
                 className="justify-center rounded-none px-3 py-2 text-xs text-muted-foreground"
               >
-                {loadingMore ? loadingLabel : loadMoreLabel}
+                {loadingMore
+                  ? (loadingLabel ?? messages.loadingMore)
+                  : (loadMoreLabel ?? messages.loadMore)}
               </CommandItem>
             ) : null}
           </CommandList>

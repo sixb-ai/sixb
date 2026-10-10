@@ -6,7 +6,11 @@ import { AssistantBody } from "../src/components/MessageParts"
 import { WebSearchToolView } from "../src/components/WebSearchToolView"
 import { createLiveRunState, liveRunReducer } from "../src/liveRun"
 import { type NormalizedPart, normalizeDurableParts } from "../src/parts"
-import { coerceWebSearchOutput, collectWebSources } from "../src/utils/webSearch"
+import {
+  coerceWebSearchOutput,
+  collectWebSources,
+  formatPublicationDate,
+} from "../src/utils/webSearch"
 
 const result = {
   url: "https://www.example.com/article",
@@ -50,7 +54,9 @@ describe("web search sources", () => {
     expect(source?.excerpt.length).toBeLessThanOrEqual(360)
     expect(source?.excerpt.endsWith("…")).toBe(true)
     expect(source?.author).toBe("Someone")
-    expect(source?.publishedDate).toBe("Sep 14, 2026")
+    expect(source?.publishedDate).toBe("2026-09-14T23:00:00Z")
+    expect(formatPublicationDate("2026-09-14T23:00:00Z", "en")).toBe("Sep 14, 2026")
+    expect(formatPublicationDate("2026-09-14T23:00:00Z", "fr-FR")).toBe("14 sept. 2026")
     expect(
       coerceWebSearchOutput({ results: [{ ...result, publishedDate: "unknown" }] })?.[0]
         ?.publishedDate

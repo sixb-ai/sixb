@@ -10,6 +10,7 @@ import { Button } from "@sixb/ui/components/ui/button"
 import { cn } from "@sixb/ui/lib/utils"
 import { ArrowDownIcon } from "lucide-react"
 import type * as React from "react"
+import { useUiMessages } from "../../lib/i18n/ui"
 
 function MessageScrollerProvider(
   props: React.ComponentProps<typeof MessageScrollerPrimitive.Provider>
@@ -90,6 +91,7 @@ function MessageScrollerButton({
   ...props
 }: React.ComponentProps<typeof MessageScrollerPrimitive.Button> &
   Pick<React.ComponentProps<typeof Button>, "variant" | "size">) {
+  const messages = useUiMessages()
   return (
     <MessageScrollerPrimitive.Button
       data-slot="message-scroller-button"
@@ -108,7 +110,7 @@ function MessageScrollerButton({
         <>
           <ArrowDownIcon />
           <span className="sr-only">
-            {direction === "end" ? "Scroll to end" : "Scroll to start"}
+            {direction === "end" ? messages.status.scrollToEnd : messages.status.scrollToStart}
           </span>
         </>
       )}

@@ -199,6 +199,13 @@ describe("custom app metadata and manifest generation", () => {
       join(fixtureModules, "@sixb", "client"),
       "dir"
     )
+    // The generated runtime takes its locale provider from @sixb/app, never from the project's
+    // own dependencies: this fixture deliberately has no @sixb/ui.
+    await symlink(
+      join(process.cwd(), "packages", "app"),
+      join(fixtureModules, "@sixb", "app"),
+      "dir"
+    )
 
     // Keep Bun.build in a disposable process. A completed in-process split build leaves bundler
     // state that can break a later HTML dev bundle in the same bun:test process.

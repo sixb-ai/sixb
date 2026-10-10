@@ -59,7 +59,7 @@ or a token budget such as `{ budgetTokens: 4096 }`; Sixb checks it against the s
 way at startup, budget range included.
 
 Chat follows the project defaults until a user picks a model or an effort. Choosing a model starts
-from that model's default reasoning, and **Reset to default** forgets the choice, so later changes
+from that model's default reasoning, and **Reset** forgets the choice, so later changes
 to your defaults reach the user again. The chosen reasoning is fixed when a message is sent, so a
 retry runs with the same setting.
 

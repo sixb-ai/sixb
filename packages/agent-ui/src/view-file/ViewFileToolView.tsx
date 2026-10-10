@@ -4,6 +4,7 @@ import type { ReactNode } from "react"
 import { ActivityStatusText } from "../components/ActivityStatus"
 import { useDocumentPreview } from "../document-preview/DocumentPreviewRoot"
 import { formatFileSize } from "../document-preview/file-size"
+import { useAgentMessages } from "../i18n"
 import type { NormalizedFile, NormalizedTool } from "../parts"
 import { describeViewFile } from "./interpret"
 
@@ -12,12 +13,15 @@ import { describeViewFile } from "./interpret"
  * image as a small preview, any other file as a compact chip, each opening the document preview.
  */
 export function ViewFileToolView({ tool }: { tool: NormalizedTool }) {
+  const messages = useAgentMessages().viewFile
   const { target, file } = describeViewFile(tool)
   const running = tool.state === "input-streaming" || tool.state === "input-available"
   const label =
     tool.state === "output-error"
-      ? `Couldn't view ${target}`
-      : `${running ? "Viewing" : "Viewed"} ${target}`
+      ? messages.failed(target)
+      : running
+        ? messages.running(target)
+        : messages.title(target)
 
   return (
     <div className="min-w-0 space-y-1.5">
@@ -39,8 +43,9 @@ export function ViewFileToolView({ tool }: { tool: NormalizedTool }) {
 }
 
 function ViewedFile({ file }: { file: NormalizedFile }) {
+  const unnamed = useAgentMessages().files.file
   const { fileRef, document } = file
-  const name = fileRef.fileName?.trim() || "File"
+  const name = fileRef.fileName?.trim() || unnamed
 
   if (document?.kind === "image") {
     return (
@@ -79,6 +84,7 @@ function OpenFile({
   children: ReactNode
 }) {
   const preview = useDocumentPreview()
+  const messages = useAgentMessages()
   const { document } = file
   const className = cn(
     "block w-fit max-w-full rounded-md outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring",
@@ -91,7 +97,7 @@ function OpenFile({
         type="button"
         className={className}
         onClick={() => preview.openDocument(document)}
-        aria-label={`Preview ${name}`}
+        aria-label={messages.documents.preview(name)}
       >
         {children}
       </button>
@@ -104,7 +110,7 @@ function OpenFile({
         target="_blank"
         rel="noreferrer"
         className={className}
-        aria-label={`Open ${name}`}
+        aria-label={messages.viewFile.open(name)}
       >
         {children}
       </a>

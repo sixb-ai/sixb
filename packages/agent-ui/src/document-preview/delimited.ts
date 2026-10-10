@@ -1,4 +1,5 @@
 import Papa from "papaparse"
+import { en } from "../i18n/en"
 import type { AgentDocumentKind } from "./types"
 
 // Keep the DOM bounded; larger files remain available through the viewer's download action.
@@ -14,8 +15,13 @@ export interface DelimitedTextPreview {
   readonly columnsTruncated: boolean
 }
 
+/** `reason` lets the viewer explain the failure in the reader's language. */
 export class DelimitedTextParseError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly reason: "empty" | "malformed" | "no-header",
+    readonly row?: number
+  ) {
     super(message)
     this.name = "DelimitedTextParseError"
   }
@@ -23,11 +29,12 @@ export class DelimitedTextParseError extends Error {
 
 export function parseDelimitedText(
   source: string,
-  kind: Extract<AgentDocumentKind, "csv" | "tsv">
+  kind: Extract<AgentDocumentKind, "csv" | "tsv">,
+  columnLabel: (index: number) => string = en.documents.column
 ): DelimitedTextPreview {
   const normalized = source.startsWith("\uFEFF") ? source.slice(1) : source
   if (!normalized.trim()) {
-    throw new DelimitedTextParseError("The file is empty.")
+    throw new DelimitedTextParseError("The file is empty.", "empty")
   }
 
   let headerRecord: string[] | null = null
@@ -51,9 +58,11 @@ export function parseDelimitedText(
     step: (result, parser) => {
       const error = result.errors[0]
       if (error) {
-        const row = error.row === undefined ? "" : ` near row ${totalRows + 2}`
+        const row = error.row === undefined ? undefined : totalRows + 2
         parseError = new DelimitedTextParseError(
-          `The file contains malformed delimited text${row}.`
+          `The file contains malformed delimited text${row === undefined ? "" : ` near row ${row}`}.`,
+          "malformed",
+          row
         )
         parser.abort()
         return
@@ -75,7 +84,7 @@ export function parseDelimitedText(
 
   if (parseError) throw parseError
   if (headerRecord === null) {
-    throw new DelimitedTextParseError("The file does not contain a header row.")
+    throw new DelimitedTextParseError("The file does not contain a header row.", "no-header")
   }
   if (pendingRecord && !(endsWithLineBreak(normalized) && isEmptyRecord(pendingRecord))) {
     retainRecord(pendingRecord)
@@ -84,7 +93,7 @@ export function parseDelimitedText(
   const renderedColumns = Math.min(totalColumns, MAX_DELIMITED_PREVIEW_COLUMNS)
   const headers = Array.from({ length: renderedColumns }, (_, index) => {
     const value = headerRecord?.[index]?.trim()
-    return value || `Column ${index + 1}`
+    return value || columnLabel(index + 1)
   })
   const rows = previewRows.map((record) =>
     Array.from({ length: renderedColumns }, (_, index) => record[index] ?? "")

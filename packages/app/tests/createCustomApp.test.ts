@@ -663,7 +663,7 @@ describe("createCustomApp.dev", () => {
     expect(main).toContain("requireSixbBrowserAuthSession(runtimeConfig, browserClient).catch(")
     expect(main).toContain("renderApiUnavailable(runtimeConfig.api.baseUrl)")
     expect(runtime).toContain("export function renderApiUnavailable(apiBaseUrl: string)")
-    expect(runtime).toContain("Can't reach the Sixb API")
+    expect(runtime).toContain("messages.apiUnavailable.title")
   })
 
   test("wraps routes in an error boundary that special-cases 404s", async () => {

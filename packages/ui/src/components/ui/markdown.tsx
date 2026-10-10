@@ -5,6 +5,7 @@ import type * as React from "react"
 import { useEffect, useState } from "react"
 import ReactMarkdown, { type Components } from "react-markdown"
 import remarkGfm from "remark-gfm"
+import { useUiMessages } from "../../lib/i18n/ui"
 
 // GitHub-flavored markdown: tables, strikethrough, task lists, and autolinks — matching the docs
 // site's `Bun.markdown` options so both surfaces render the same constructs.
@@ -55,6 +56,7 @@ function Markdown({ children, className, ...props }: MarkdownProps) {
 }
 
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const messages = useUiMessages()
   const [html, setHtml] = useState<string | null>(null)
   const [copied, setCopied] = useState(false)
 
@@ -89,7 +91,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
           type="button"
           className={cn("code-copy", copied && "is-copied")}
           onClick={copy}
-          aria-label={copied ? "Copied" : "Copy code"}
+          aria-label={copied ? messages.status.copied : messages.status.copyCode}
         >
           <Copy className="code-copy-copy" aria-hidden="true" />
           <Check className="code-copy-check" aria-hidden="true" />

@@ -214,7 +214,8 @@ function applyToolChunk(tool: NormalizedTool, chunk: Record<string, unknown>): N
         ...tool,
         state: "output-error",
         input: chunk.input,
-        errorText: typeof chunk.errorText === "string" ? chunk.errorText : "Tool input error.",
+        // Views say in the reader's language that the call failed when the stream gives no text.
+        ...(typeof chunk.errorText === "string" ? { errorText: chunk.errorText } : {}),
       }
     case "tool-output-available":
       return { ...tool, state: "output-available", output: chunk.output }
@@ -222,7 +223,7 @@ function applyToolChunk(tool: NormalizedTool, chunk: Record<string, unknown>): N
       return {
         ...tool,
         state: "output-error",
-        errorText: typeof chunk.errorText === "string" ? chunk.errorText : "Tool error.",
+        ...(typeof chunk.errorText === "string" ? { errorText: chunk.errorText } : {}),
       }
     default:
       return tool

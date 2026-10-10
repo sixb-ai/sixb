@@ -57,8 +57,17 @@ browser theme and `backgroundColor` sets the launch background.
 Only the root layout supplies metadata. It is loaded during app generation, so do not access
 `window` or `document` at module scope.
 
-Pages declare the project's [`locale`](../runtime/overview.md#language-and-time-zone) as their
-document language, so browsers and screen readers handle your content in the right language.
+Your app's document language follows the project's
+[`locale`](../runtime/overview.md#language-and-time-zone), so browsers and screen readers handle
+your content in the right language. The HTML is built without the project, so it starts as
+`<html lang="en">` and Sixb sets the project's locale as soon as the app's first API call returns.
+A custom sign-in page is served with it. Shared-link pages cannot read project settings, so they
+declare the reader's browser language.
+
+Text that Sixb writes itself, such as the assistant's buttons and statuses, dialog close labels, or
+the not-found, access, and shared-link screens, is translated into English and French. It follows
+the user's browser languages and falls back to the project's `locale`. Your own pages, welcome
+content, and labels are shown as you wrote them.
 
 ## App icons
 

@@ -358,6 +358,29 @@ import { SpeechRecognitionProvider } from "@sixb/ui/hooks"
 
 Recognizers must stay free of React imports.
 
+## Localization
+
+Components speak English unless a `LocaleProvider` sits above them. It picks the first of the
+browser's languages that Sixb translates (English and French), then `fallbackLocale`, then
+English. Pass `locale` to force one. Dates and numbers use the resulting locale with `Intl`.
+
+```tsx
+import { LocaleProvider, UiLabelsProvider } from "@sixb/ui/lib/i18n"
+
+<LocaleProvider fallbackLocale="fr-FR">
+  <UiLabelsProvider labels={{ dialog: { close: "Close window" } }}>{children}</UiLabelsProvider>
+</LocaleProvider>
+```
+
+`UiLabelsProvider` rewords individual messages in every language; it is never required.
+`useLocale()` returns the locale in effect. Speech dictation listens in that language by default.
+Custom apps get a provider automatically, with the project's `locale` as the fallback.
+
+Packages that render their own text build a catalog with `defineMessages({ en, fr })`: English is
+the source, every other language must translate all of it (checked by TypeScript), and missing
+messages fall back to English at runtime. Messages are strings or typed functions; use
+`plural(language, count, { one, other })` for plurals.
+
 ## Theming
 
 Every color, font, radius, and shadow in this package resolves through CSS variables, and
@@ -499,6 +522,7 @@ import {
   useTheme,
 } from "@sixb/ui/hooks"
 import { type AddressProvider, createPhotonProvider, formatAddress } from "@sixb/ui/lib/address"
+import { LocaleProvider, UiLabelsProvider, useLocale } from "@sixb/ui/lib/i18n"
 import { createWebSpeechRecognizer, type SpeechRecognizer } from "@sixb/ui/lib/speech"
 import { cn } from "@sixb/ui/lib/utils"
 ```

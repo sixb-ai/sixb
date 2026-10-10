@@ -2,6 +2,7 @@
 
 import { MicIcon } from "lucide-react"
 import type { SpeechRecognitionState } from "../../hooks/use-speech-recognition"
+import { useUiMessages } from "../../lib/i18n/ui"
 import { cn } from "../../lib/utils"
 import { Button } from "../ui/button"
 import { Spinner } from "../ui/spinner"
@@ -42,23 +43,30 @@ export function DictationButton({
   variant = "outline",
 }: DictationButtonProps) {
   const { isActive, isReceivingAudio, status, supported, start, stop } = dictation
+  const messages = useUiMessages().dictation
   const transitioning = status === "starting" || status === "stopping"
-  const subject = label ? `${label.toLowerCase()} ` : ""
+  const subject = label?.toLowerCase()
+  const toggleLabel = isActive
+    ? subject
+      ? messages.stopSubject(subject)
+      : messages.stop
+    : subject
+      ? messages.startSubject(subject)
+      : messages.start
 
   return (
     <Button
       type="button"
       size={size}
       variant={variant}
-      aria-label={isActive ? `Stop ${subject}dictation` : `Start ${subject}dictation`}
+      aria-label={toggleLabel}
       aria-pressed={isActive}
       disabled={disabled || Boolean(busyReason) || supported !== true || transitioning}
       onClick={isActive ? stop : start}
       title={
         isActive
-          ? "Stop dictation"
-          : (busyReason ??
-            (supported === false ? "Dictation isn't supported in this browser" : "Start dictation"))
+          ? messages.stop
+          : (busyReason ?? (supported === false ? messages.unsupportedButton : messages.start))
       }
       className={cn(
         "rounded-full bg-card shadow-sm",
