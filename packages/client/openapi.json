@@ -10034,9 +10034,15 @@
                   "properties": {
                     "id": {
                       "type": "string"
+                    },
+                    "locale": {
+                      "type": "string"
+                    },
+                    "timeZone": {
+                      "type": "string"
                     }
                   },
-                  "required": ["id"],
+                  "required": ["id", "locale", "timeZone"],
                   "additionalProperties": false
                 }
               }
@@ -20950,6 +20956,17 @@
                             "properties": {
                               "type": {
                                 "type": "string",
+                                "enum": ["continuation"]
+                              }
+                            },
+                            "required": ["type"],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
                                 "enum": ["reasoning"]
                               },
                               "text": {
@@ -30895,6 +30912,17 @@
                                   "properties": {
                                     "type": {
                                       "type": "string",
+                                      "enum": ["continuation"]
+                                    }
+                                  },
+                                  "required": ["type"],
+                                  "additionalProperties": false
+                                },
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
                                       "enum": ["reasoning"]
                                     },
                                     "text": {
@@ -31335,7 +31363,8 @@
                                     "output_budget_exhausted",
                                     "output_collection_failed",
                                     "output_file_changed",
-                                    "output_storage_failed"
+                                    "output_storage_failed",
+                                    "step_limit_reached"
                                   ]
                                 },
                                 "severity": {
@@ -31344,7 +31373,7 @@
                                 },
                                 "scope": {
                                   "type": "string",
-                                  "enum": ["output"]
+                                  "enum": ["output", "run"]
                                 },
                                 "path": {
                                   "type": "string"
@@ -31521,6 +31550,10 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "continue": {
+                    "type": "boolean",
+                    "enum": [true]
+                  },
                   "model": {
                     "type": "object",
                     "properties": {
@@ -31563,6 +31596,16 @@
                         "additionalProperties": false
                       }
                     ]
+                  },
+                  "timeZone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "locale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
                   },
                   "attachments": {
                     "type": "array",
@@ -31690,7 +31733,6 @@
                     "minLength": 1
                   }
                 },
-                "required": ["text"],
                 "additionalProperties": false
               }
             },
@@ -31702,6 +31744,10 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "continue": {
+                    "type": "boolean",
+                    "enum": [true]
+                  },
                   "model": {
                     "type": "object",
                     "properties": {
@@ -31744,6 +31790,16 @@
                         "additionalProperties": false
                       }
                     ]
+                  },
+                  "timeZone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "locale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
                   },
                   "attachments": {
                     "type": "array",
@@ -31871,7 +31927,6 @@
                     "minLength": 1
                   }
                 },
-                "required": ["text"],
                 "additionalProperties": false
               }
             },
@@ -31883,6 +31938,10 @@
                     "type": "string",
                     "minLength": 1
                   },
+                  "continue": {
+                    "type": "boolean",
+                    "enum": [true]
+                  },
                   "model": {
                     "type": "object",
                     "properties": {
@@ -31925,6 +31984,16 @@
                         "additionalProperties": false
                       }
                     ]
+                  },
+                  "timeZone": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "locale": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
                   },
                   "attachments": {
                     "type": "array",
@@ -32052,7 +32121,6 @@
                     "minLength": 1
                   }
                 },
-                "required": ["text"],
                 "additionalProperties": false
               }
             }
@@ -32262,7 +32330,8 @@
                                   "output_budget_exhausted",
                                   "output_collection_failed",
                                   "output_file_changed",
-                                  "output_storage_failed"
+                                  "output_storage_failed",
+                                  "step_limit_reached"
                                 ]
                               },
                               "severity": {
@@ -32271,7 +32340,7 @@
                               },
                               "scope": {
                                 "type": "string",
-                                "enum": ["output"]
+                                "enum": ["output", "run"]
                               },
                               "path": {
                                 "type": "string"
@@ -32391,6 +32460,9 @@
                   "type": "object",
                   "properties": {
                     "error": {
+                      "type": "string"
+                    },
+                    "code": {
                       "type": "string"
                     }
                   },
@@ -33034,7 +33106,8 @@
                                   "output_budget_exhausted",
                                   "output_collection_failed",
                                   "output_file_changed",
-                                  "output_storage_failed"
+                                  "output_storage_failed",
+                                  "step_limit_reached"
                                 ]
                               },
                               "severity": {
@@ -33043,7 +33116,7 @@
                               },
                               "scope": {
                                 "type": "string",
-                                "enum": ["output"]
+                                "enum": ["output", "run"]
                               },
                               "path": {
                                 "type": "string"
@@ -33463,7 +33536,8 @@
                                   "output_budget_exhausted",
                                   "output_collection_failed",
                                   "output_file_changed",
-                                  "output_storage_failed"
+                                  "output_storage_failed",
+                                  "step_limit_reached"
                                 ]
                               },
                               "severity": {
@@ -33472,7 +33546,7 @@
                               },
                               "scope": {
                                 "type": "string",
-                                "enum": ["output"]
+                                "enum": ["output", "run"]
                               },
                               "path": {
                                 "type": "string"
@@ -33956,7 +34030,8 @@
                                     "output_budget_exhausted",
                                     "output_collection_failed",
                                     "output_file_changed",
-                                    "output_storage_failed"
+                                    "output_storage_failed",
+                                    "step_limit_reached"
                                   ]
                                 },
                                 "severity": {
@@ -33965,7 +34040,7 @@
                                 },
                                 "scope": {
                                   "type": "string",
-                                  "enum": ["output"]
+                                  "enum": ["output", "run"]
                                 },
                                 "path": {
                                   "type": "string"
@@ -34355,7 +34430,8 @@
                               "output_budget_exhausted",
                               "output_collection_failed",
                               "output_file_changed",
-                              "output_storage_failed"
+                              "output_storage_failed",
+                              "step_limit_reached"
                             ]
                           },
                           "severity": {
@@ -34364,7 +34440,7 @@
                           },
                           "scope": {
                             "type": "string",
-                            "enum": ["output"]
+                            "enum": ["output", "run"]
                           },
                           "path": {
                             "type": "string"
@@ -34635,6 +34711,19 @@
                                 "max"
                               ]
                             }
+                          },
+                          "defaultReasoning": {
+                            "type": "string",
+                            "enum": [
+                              "provider-default",
+                              "none",
+                              "minimal",
+                              "low",
+                              "medium",
+                              "high",
+                              "xhigh",
+                              "max"
+                            ]
                           }
                         },
                         "required": [

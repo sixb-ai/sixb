@@ -10,13 +10,17 @@ interface ModelEntry<TModel> extends ModelRef {
   readonly model: TModel
 }
 
-/** Private index shared by model families; default selection belongs to each family. */
-export function indexModelBindings<TModel extends ModelBinding>(
+/**
+ * Private index shared by model families; default selection belongs to each family. `details`
+ * adds family-specific settings configured next to a binding to its entry.
+ */
+export function indexModelBindings<TModel extends ModelBinding, TDetails extends object = object>(
   models: readonly TModel[],
   kind: string,
-  validate: (model: TModel, index: number) => void
+  validate: (model: TModel, index: number) => void,
+  details?: (index: number) => TDetails
 ) {
-  const byRef = new Map<string, ModelEntry<TModel>>()
+  const byRef = new Map<string, ModelEntry<TModel> & TDetails>()
 
   for (const [index, model] of models.entries()) {
     validate(model, index)
@@ -27,7 +31,17 @@ export function indexModelBindings<TModel extends ModelBinding>(
       )
     }
 
-    byRef.set(key, Object.freeze({ provider: model.providerId, modelId: model.modelId, model }))
+    // Without `details`, `TDetails` is the empty default.
+    const entryDetails = details ? details(index) : ({} as TDetails)
+    byRef.set(
+      key,
+      Object.freeze({
+        ...entryDetails,
+        provider: model.providerId,
+        modelId: model.modelId,
+        model,
+      })
+    )
   }
 
   const entries = Object.freeze([...byRef.values()])

@@ -1,7 +1,9 @@
 import { describe, expect, test } from "bun:test"
 import { agent, can, defineGroup, defineRole, SixbHost } from "../src"
+import { AGENT_CONTINUATION_INSTRUCTION, toModelMessages } from "../src/agents/adapters"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
+import { defineLanguageModel, type ModelCatalogInput } from "../src/models"
 import { createTestAgentExecution, createTestSixb } from "../src/testing"
 import { testLanguageModel } from "./helpers/language-model"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
@@ -9,12 +11,12 @@ import { createTestRuntimeDeps } from "./test-runtime-deps"
 const users = defineGroup("agent-users")
 const runner = defineRole("agent.runner", { grantedTo: [users], grants: [can.run(agent)] })
 
-function setup() {
+function setup(language: ModelCatalogInput["language"] = [testLanguageModel()]) {
   const deps = createTestRuntimeDeps()
   const host = new SixbHost({
     id: "agent-runtime-tests",
     ontology: [],
-    models: { language: [testLanguageModel()] },
+    models: { language },
     groups: [users],
     roles: [runner],
     ...deps,
@@ -91,6 +93,113 @@ describe("single project Agent", () => {
       requestedBy: { type: "user", id: "owner" },
     })
     expect((await storage.auth.serviceAccounts.list({ projectId: host.id })).total).toBe(0)
+  })
+
+  test("freezes the model's default reasoning when a turn omits it", async () => {
+    // Proven by removal: drop `?? model.reasoning` from resolveConversationRunSpec.
+    const { host } = setup([
+      { model: testLanguageModel(), reasoning: "low" },
+      testLanguageModel("plain-model"),
+    ])
+    const sixb = await userScope(host, "owner")
+    const first = await sixb.agent.runs.request({ text: "Hi" })
+    expect(first.run.spec).toEqual({
+      model: { provider: "test", modelId: "test-model" },
+      reasoning: "low",
+    })
+    const plain = await sixb.agent.runs.request({
+      text: "Hi",
+      model: { provider: "test", modelId: "plain-model" },
+    })
+    expect(plain.run.spec).toEqual({ model: { provider: "test", modelId: "plain-model" } })
+  })
+
+  test("rejects a reasoning the selected model cannot use before creating history", async () => {
+    // Proven by removal: skip assertModelSupportsReasoning; the run is admitted with "max".
+    const binding = testLanguageModel()
+    const { host, storage } = setup([
+      {
+        ...binding,
+        // Admission checks the resolved capabilities, which the configured ones may not declare.
+        async resolve() {
+          return {
+            ...binding,
+            definition: defineLanguageModel({
+              ...binding.definition,
+              capabilities: { reasoning: { efforts: ["low", "high"] } },
+            }),
+          }
+        },
+      },
+    ])
+    const sixb = await userScope(host, "owner")
+    await expect(sixb.agent.runs.request({ text: "Hi", reasoning: "max" })).rejects.toMatchObject({
+      code: "invalid_model_selection",
+      message:
+        "[Sixb] Language model 'test/test-model' cannot use this reasoning: reasoning effort 'max' is not supported.",
+    })
+    expect((await storage.agents.threads.list({ projectId: host.id })).total).toBe(0)
+    const { run } = await sixb.agent.runs.request({ text: "Hi", reasoning: "high" })
+    expect(run.spec?.reasoning).toBe("high")
+  })
+
+  test("freezes the requester's canonical time zone and locale on the run", async () => {
+    // Proven by removal: drop timeZone/locale from resolveConversationRunSpec.
+    const { host, storage } = setup()
+    const sixb = await userScope(host, "owner")
+    const { run } = await sixb.agent.runs.request({
+      text: "Hi",
+      timeZone: "europe/paris",
+      locale: "fr-ca",
+    })
+    expect(run.spec).toMatchObject({ timeZone: "Europe/Paris", locale: "fr-CA" })
+
+    for (const [settings, message] of [
+      [{ timeZone: "Etc/Unknown" }, `'timeZone' must be an IANA time zone; received "Etc/Unknown"`],
+      [{ locale: "fr_FR" }, `'locale' must be a BCP 47 language tag; received "fr_FR"`],
+    ] as const) {
+      await expect(sixb.agent.runs.request({ text: "Hi", ...settings })).rejects.toMatchObject({
+        code: "invalid_locale",
+        message: expect.stringContaining(message),
+      })
+    }
+    expect((await storage.agents.threads.list({ projectId: host.id })).total).toBe(1)
+  })
+
+  test("continues a cut-short answer with a framework-written instruction", async () => {
+    // Proven by removal: send `continue` as user text; the model then reads the user's words.
+    const { host, storage } = setup([testLanguageModel(), testLanguageModel("deep-model")])
+    const sixb = await userScope(host, "owner")
+    const { run } = await sixb.agent.runs.request({
+      text: "Write the report",
+      model: { provider: "test", modelId: "deep-model" },
+      reasoning: "high",
+    })
+    await storage.agents.runs.finishQueued({ projectId: host.id, id: run.id, status: "cancelled" })
+    const continued = await sixb.agent.runs.request({ threadId: run.threadId, continue: true })
+    const trigger = await storage.agents.messages.getById({
+      projectId: host.id,
+      id: continued.run.triggerMessageId,
+    })
+    expect(trigger).toMatchObject({ role: "user", parts: [{ type: "continuation" }] })
+    // It keeps the cut-short turn's model and reasoning. Proven by removal: drop continuedSelection.
+    expect(continued.run.spec).toMatchObject({
+      model: { provider: "test", modelId: "deep-model" },
+      reasoning: "high",
+    })
+    expect(toModelMessages([trigger!])).toEqual([
+      { role: "user", content: [{ type: "text", text: AGENT_CONTINUATION_INSTRUCTION }] },
+    ])
+
+    for (const input of [
+      { continue: true },
+      { threadId: run.threadId, continue: true, text: "Continue" },
+      { threadId: run.threadId },
+    ]) {
+      await expect(sixb.agent.runs.request(input)).rejects.toMatchObject({
+        code: expect.stringMatching(/^(thread_not_found|invalid_message)$/),
+      })
+    }
   })
 
   test("rejects removed selectors and unknown models before creating history", async () => {

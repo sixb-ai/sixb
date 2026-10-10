@@ -32,6 +32,8 @@ import {
   useState,
 } from "react"
 import { createPortal } from "react-dom"
+import { useAgentMessages } from "../i18n"
+import type { AgentMessages } from "../i18n/en"
 import type { AgentFileRef, LanguageModel } from "../types"
 import { agentContextLabel, mergeAgentContext } from "../utils/contextDisplay"
 import {
@@ -63,6 +65,10 @@ export interface ComposerProps {
   readonly modelsError?: boolean
   readonly onSelectModel?: (model: LanguageModel) => void
   readonly onSelectReasoning?: (reasoning: ModelReasoningLevel) => void
+  readonly onResetReasoning?: () => void
+  /** The model selection follows the project defaults. */
+  readonly usingDefaultModel?: boolean
+  readonly onResetModelSelection?: () => void
   readonly placeholder?: string
   /** Optional classes for the composer shell. */
   readonly className?: string
@@ -104,7 +110,6 @@ type ComposerAttachment =
       readonly fileName: string
       readonly mediaType?: string
       readonly sizeBytes: number
-      readonly error: string
     }
 
 const MAX_HEIGHT_PX = 200
@@ -131,6 +136,9 @@ export function Composer({
   modelsError,
   onSelectModel,
   onSelectReasoning,
+  onResetReasoning,
+  usingDefaultModel,
+  onResetModelSelection,
   placeholder,
   className,
   hint,
@@ -142,6 +150,9 @@ export function Composer({
   ambientContext = [],
   compact = false,
 }: ComposerProps) {
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.composer
+  const unnamedContext = agentMessages.context.unnamed
   const [value, setValue] = useState("")
   const [attachments, setAttachments] = useState<ComposerAttachment[]>([])
   const [contextEntries, setContextEntries] = useState<AgentContextEntryInput[]>(() =>
@@ -169,7 +180,7 @@ export function Composer({
     if (!mention || mention.query.trim().length === 0) return []
     const normalizedQuery = mention.query.trim().toLowerCase()
     const local = ambientContext.filter((context) =>
-      agentContextLabel(context).toLowerCase().includes(normalizedQuery)
+      agentContextLabel(context, unnamedContext).toLowerCase().includes(normalizedQuery)
     )
     const remote = (contextSearch.data?.items ?? []).map(
       (item) => ({ kind: "object", ref: item.ref }) as const satisfies AgentContextInput
@@ -181,9 +192,9 @@ export function Composer({
           (item) =>
             agentContextIdentity({ kind: "object", ref: item.ref }) ===
             agentContextIdentity(context)
-        )?.label ?? agentContextLabel(context),
+        )?.label ?? agentContextLabel(context, unnamedContext),
     }))
-  }, [ambientContext, contextSearch.data?.items, mention])
+  }, [ambientContext, contextSearch.data?.items, mention, unnamedContext])
 
   const uploading = attachments.some((attachment) => attachment.status === "uploading")
   const readyAttachments = attachments.flatMap((attachment) =>
@@ -336,7 +347,8 @@ export function Composer({
             )
           )
         })
-        .catch((error: unknown) => {
+        // The API explains failures to developers; the composer shows its own message.
+        .catch(() => {
           setAttachments((current) =>
             current.map((attachment) =>
               attachment.id === id
@@ -346,7 +358,6 @@ export function Composer({
                     fileName: file.name,
                     mediaType: file.type || undefined,
                     sizeBytes: file.size,
-                    error: uploadErrorMessage(error),
                   }
                 : attachment
             )
@@ -538,9 +549,9 @@ export function Composer({
     : null
 
   const statusHint = uploading
-    ? "Uploading attachment…"
+    ? messages.uploadingAttachment
     : failedCount > 0
-      ? `${failedCount} attachment ${failedCount === 1 ? "failed" : "failed"} to upload.`
+      ? messages.attachmentsFailed(failedCount)
       : hint
 
   return (
@@ -608,8 +619,8 @@ export function Composer({
               onKeyDown={handleKeyDown}
               disabled={disabled}
               rows={1}
-              placeholder={placeholder ?? "Send a message…"}
-              aria-label="Message"
+              placeholder={placeholder ?? messages.placeholder}
+              aria-label={messages.message}
               className="max-h-[200px] min-h-9 w-full resize-none overflow-y-hidden border-0 bg-transparent px-0 py-1 text-[15px] leading-relaxed shadow-none focus-visible:ring-0 md:text-[15px]"
             />
           </div>
@@ -627,7 +638,7 @@ export function Composer({
               type="button"
               onClick={() => fileInputRef.current?.click()}
               disabled={!canAttachFiles}
-              aria-label="Attach files"
+              aria-label={messages.attachFiles}
               className={cn(
                 "flex size-9 shrink-0 items-center justify-center rounded-full text-foreground transition-colors",
                 "hover:bg-muted disabled:cursor-not-allowed disabled:text-muted-foreground"
@@ -646,6 +657,9 @@ export function Composer({
                 disabled={disabled || pending || running}
                 onSelectModel={onSelectModel}
                 onSelectReasoning={onSelectReasoning}
+                onResetReasoning={onResetReasoning}
+                usingDefault={usingDefaultModel}
+                onResetToDefault={onResetModelSelection}
               />
             ) : null}
             {running ? (
@@ -653,7 +667,7 @@ export function Composer({
                 type="button"
                 onClick={onStop}
                 disabled={stopping}
-                aria-label="Stop generating"
+                aria-label={messages.stop}
                 className={cn(
                   "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
                   "bg-primary text-primary-foreground hover:bg-primary/90",
@@ -671,7 +685,7 @@ export function Composer({
                 type="button"
                 onClick={submit}
                 disabled={!canSend}
-                aria-label="Send message"
+                aria-label={messages.send}
                 className={cn(
                   "flex size-9 shrink-0 items-center justify-center rounded-full transition-colors",
                   "bg-primary text-primary-foreground hover:bg-primary/90",
@@ -703,6 +717,7 @@ export function Composer({
 }
 
 function DropFilesOverlay({ compact }: { readonly compact: boolean }) {
+  const messages = useAgentMessages().composer
   return (
     <div
       className={cn(
@@ -722,10 +737,8 @@ function DropFilesOverlay({ compact }: { readonly compact: boolean }) {
             <UploadCloud className="size-7" />
           </div>
         </div>
-        <p className="text-xl font-semibold text-foreground">Add files</p>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Drop any file here to attach it to the conversation.
-        </p>
+        <p className="text-xl font-semibold text-foreground">{messages.addFiles}</p>
+        <p className="mt-1 text-sm text-muted-foreground">{messages.dropFiles}</p>
       </div>
     </div>
   )
@@ -738,15 +751,17 @@ function AttachmentPreview({
   attachment: ComposerAttachment
   onRemove: () => void
 }) {
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.composer
   const fileName = attachment.status === "ready" ? attachment.fileRef.fileName : attachment.fileName
   const mediaType =
     attachment.status === "ready" ? attachment.fileRef.mediaType : attachment.mediaType
-  const { Icon, label, tone } = fileKind(fileName, mediaType)
+  const { Icon, label, tone } = fileKind(fileName, mediaType, agentMessages.files)
   const subtitle =
     attachment.status === "uploading"
-      ? "Uploading…"
+      ? messages.uploading
       : attachment.status === "error"
-        ? "Upload failed"
+        ? messages.uploadFailed
         : label
 
   return (
@@ -755,7 +770,7 @@ function AttachmentPreview({
         "relative flex max-w-full items-center gap-3 rounded-2xl border border-border bg-background py-2 pr-10 pl-2 shadow-sm",
         attachment.status === "error" && "border-destructive/40"
       )}
-      title={attachment.status === "error" ? attachment.error : fileName}
+      title={attachment.status === "error" ? messages.uploadError : fileName}
     >
       <div
         className={cn(
@@ -773,7 +788,9 @@ function AttachmentPreview({
         )}
       </div>
       <div className="min-w-0">
-        <p className="truncate text-sm font-semibold text-foreground">{fileName || "File"}</p>
+        <p className="truncate text-sm font-semibold text-foreground">
+          {fileName || agentMessages.files.file}
+        </p>
         <p
           className={cn(
             "truncate text-xs text-muted-foreground",
@@ -786,7 +803,9 @@ function AttachmentPreview({
       <button
         type="button"
         onClick={onRemove}
-        aria-label={`Remove ${fileName || "attachment"}`}
+        aria-label={
+          fileName ? messages.removeAttachment(fileName) : messages.removeUnnamedAttachment
+        }
         className="absolute top-2 right-2 flex size-5 items-center justify-center rounded-full bg-foreground text-background transition-opacity hover:opacity-80"
       >
         <X className="size-3.5" />
@@ -795,7 +814,11 @@ function AttachmentPreview({
   )
 }
 
-function fileKind(fileName: string | undefined, mediaType: string | undefined) {
+function fileKind(
+  fileName: string | undefined,
+  mediaType: string | undefined,
+  messages: AgentMessages["files"]
+) {
   const normalizedName = fileName?.toLowerCase() ?? ""
   const normalizedType = mediaType?.toLowerCase() ?? ""
   if (
@@ -803,21 +826,21 @@ function fileKind(fileName: string | undefined, mediaType: string | undefined) {
     normalizedType.includes("csv") ||
     /\.(csv|tsv|xls|xlsx)$/i.test(normalizedName)
   ) {
-    return { Icon: Table2, label: "Spreadsheet", tone: "green" as const }
+    return { Icon: Table2, label: messages.spreadsheet, tone: "green" as const }
   }
   if (
     normalizedType.startsWith("image/") ||
     /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(normalizedName)
   ) {
-    return { Icon: ImageIcon, label: "Image", tone: "blue" as const }
+    return { Icon: ImageIcon, label: messages.image, tone: "blue" as const }
   }
   if (normalizedType === "application/pdf" || normalizedName.endsWith(".pdf")) {
-    return { Icon: FileText, label: "PDF", tone: "red" as const }
+    return { Icon: FileText, label: messages.pdf, tone: "red" as const }
   }
   if (normalizedType.startsWith("text/") || /\.(txt|md|json|yaml|yml)$/i.test(normalizedName)) {
-    return { Icon: FileText, label: "Document", tone: "zinc" as const }
+    return { Icon: FileText, label: messages.document, tone: "zinc" as const }
   }
-  return { Icon: FileIcon, label: "File", tone: "zinc" as const }
+  return { Icon: FileIcon, label: messages.file, tone: "zinc" as const }
 }
 
 function attachmentId(): string {
@@ -830,10 +853,4 @@ function mentionKey(candidate: AgentContextMention): string {
 
 function hasDraggedFiles(event: DragEvent): boolean {
   return Array.from(event.dataTransfer?.types ?? []).includes("Files")
-}
-
-function uploadErrorMessage(error: unknown): string {
-  if (error instanceof Error) return error.message
-  if (typeof error === "string") return error
-  return "Could not upload attachment."
 }

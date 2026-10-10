@@ -2,9 +2,11 @@ import { cn } from "@sixb/ui/lib/utils"
 import { ChevronRight, MoreHorizontal } from "lucide-react"
 import { Slot } from "radix-ui"
 import type * as React from "react"
+import { useUiMessages } from "../../lib/i18n/ui"
 
 function Breadcrumb({ ...props }: React.ComponentProps<"nav">) {
-  return <nav aria-label="breadcrumb" data-slot="breadcrumb" {...props} />
+  const messages = useUiMessages()
+  return <nav aria-label={messages.breadcrumb.label} data-slot="breadcrumb" {...props} />
 }
 
 function BreadcrumbList({ className, ...props }: React.ComponentProps<"ol">) {
@@ -76,6 +78,7 @@ function BreadcrumbSeparator({ children, className, ...props }: React.ComponentP
 }
 
 function BreadcrumbEllipsis({ className, ...props }: React.ComponentProps<"span">) {
+  const messages = useUiMessages()
   return (
     <span
       data-slot="breadcrumb-ellipsis"
@@ -85,7 +88,7 @@ function BreadcrumbEllipsis({ className, ...props }: React.ComponentProps<"span"
       {...props}
     >
       <MoreHorizontal className="size-4" />
-      <span className="sr-only">More</span>
+      <span className="sr-only">{messages.breadcrumb.more}</span>
     </span>
   )
 }

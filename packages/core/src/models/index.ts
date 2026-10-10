@@ -26,6 +26,7 @@ export type {
   LanguageModelCatalog,
   LanguageModelDefinitionCatalog,
   LanguageModelEntry,
+  LanguageModelEntryInput,
   LanguageModelRef,
   ModelCatalog,
   ModelCatalogFor,

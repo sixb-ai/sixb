@@ -1,6 +1,7 @@
 import { type AgentContextEntryInput, agentContextIdentity } from "@sixb/core/agents/context"
 import { cn } from "@sixb/ui/lib/utils"
 import { Box, PanelsTopLeft, X } from "lucide-react"
+import { useAgentMessages } from "../i18n"
 import { agentContextLabel } from "../utils/contextDisplay"
 
 export function ContextChips({
@@ -12,6 +13,7 @@ export function ContextChips({
   readonly onRemove?: (index: number) => void
   readonly className?: string
 }) {
+  const messages = useAgentMessages().context
   if (entries.length === 0) return null
   return (
     <div className={cn("flex flex-wrap gap-1.5", className)}>
@@ -30,13 +32,15 @@ export function ContextChips({
                 aria-hidden="true"
               />
             )}
-            <span className="min-w-0 flex-1 truncate">{agentContextLabel(entry.context)}</span>
+            <span className="min-w-0 flex-1 truncate">
+              {agentContextLabel(entry.context, messages.unnamed)}
+            </span>
             {onRemove ? (
               <button
                 type="button"
                 onClick={() => onRemove(index)}
                 className="-mr-0.5 inline-flex size-4 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-background hover:text-foreground"
-                aria-label={`Remove ${agentContextLabel(entry.context)} context`}
+                aria-label={messages.remove(agentContextLabel(entry.context, messages.unnamed))}
               >
                 <X className="size-3" />
               </button>

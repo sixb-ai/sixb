@@ -4,6 +4,7 @@ import { toModelMessages } from "@sixb/core/internal/agents"
 import type { ModelMessage, ModelUsage } from "@sixb/core/models"
 import type { ConversationAgentRunRecord } from "@sixb/core/storage"
 import { createTestAgentExecution } from "@sixb/core/testing"
+import { renderCurrentTime } from "../src/agent-prompt"
 import { runAgentTurn } from "../src/run-agent-turn"
 import { NOOP_STREAM_SINK } from "../src/stream-sink"
 import type { AgentWorkerStorage } from "../src/types"
@@ -178,6 +179,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       blobStorage: new InMemoryBlobStorage(),
       tools: [],
       systemPrompt: "Test system prompt.",
+      projectTimeZone: "UTC",
       streamSink: NOOP_STREAM_SINK,
       recoverAiModelCall: async () => {},
       turnTimeoutMs: 60_000,
@@ -198,17 +200,31 @@ function conversationMessages(prompt: readonly ModelMessage[]): readonly unknown
 test("preserves the exact model history when no checkpoint exists", async () => {
   const { prompt, transcript } = await runAndCaptureModelPrompt(false)
 
-  expect(conversationMessages(prompt)).toEqual(toModelMessages(transcript))
+  expect(conversationMessages(prompt)).toEqual(
+    toModelMessages(transcript, {
+      userMessageSuffix: (message) =>
+        message.role === "user" ? renderCurrentTime(message.createdAt, "UTC") : undefined,
+    })
+  )
 })
 
 test("a seeded checkpoint changes only the model input", async () => {
   // Verified regression guard: temporarily passing `retainedMessages` instead of `modelMessages`
   // from runAgentTurn removes the synthetic summary and makes this exact assertion fail.
   const { storage, prompt, transcript } = await runAndCaptureModelPrompt(true)
+  const three = transcript.at(-1)
+  if (!three) throw new Error("Expected the retained message.")
 
+  // The synthetic summary is not a sent message, so only the retained one is dated.
   expect(conversationMessages(prompt)).toEqual([
     { role: "user", content: [{ type: "text", text: serializedSummary }] },
-    { role: "user", content: [{ type: "text", text: "three" }] },
+    {
+      role: "user",
+      content: [
+        { type: "text", text: "three" },
+        { type: "text", text: `\n\n${renderCurrentTime(three.createdAt, "UTC")}` },
+      ],
+    },
   ])
 
   const durableTranscript = await storage.agents.messages.list({

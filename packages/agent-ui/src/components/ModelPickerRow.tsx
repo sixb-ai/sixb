@@ -9,6 +9,7 @@ import {
 import { cn } from "@sixb/ui/lib/utils"
 import { Check, Info } from "lucide-react"
 import { useId, useState } from "react"
+import { useAgentMessages } from "../i18n"
 import type { LanguageModel } from "../types"
 import { ProviderLogo } from "./ProviderLogo"
 
@@ -23,6 +24,7 @@ export function ModelPickerRow({
   disabled?: boolean
   onSelect: (model: LanguageModel) => void
 }) {
+  const messages = useAgentMessages().models
   const [detailsOpen, setDetailsOpen] = useState(false)
   const detailsId = useId()
 
@@ -74,7 +76,7 @@ export function ModelPickerRow({
           <button
             type="button"
             disabled={disabled}
-            aria-label={`Details about ${model.name}`}
+            aria-label={messages.details(model.name)}
             className="mr-1 hidden size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground outline-none hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-50 [@media(pointer:coarse)]:flex"
           >
             <Info className="size-3.5" aria-hidden="true" />
@@ -85,7 +87,7 @@ export function ModelPickerRow({
           align="end"
           sideOffset={8}
           collisionPadding={8}
-          aria-label={`Details about ${model.name}`}
+          aria-label={messages.details(model.name)}
           className="w-72 max-w-[calc(100vw-1rem)] rounded-2xl border-border/60 p-4 shadow-xl shadow-black/10"
         >
           <ModelDetails model={model} />
@@ -96,13 +98,14 @@ export function ModelPickerRow({
 }
 
 function ModelDetails({ model }: { model: LanguageModel }) {
+  const messages = useAgentMessages().models
   const capabilities = [
-    model.capabilities.input.includes("image") && "Images",
-    model.capabilities.input.includes("pdf") && "PDF",
-    model.capabilities.input.includes("audio") && "Audio",
-    model.capabilities.input.includes("video") && "Video",
-    model.capabilities.tools && "Tools",
-    model.capabilities.reasoning && "Reasoning",
+    model.capabilities.input.includes("image") && messages.images,
+    model.capabilities.input.includes("pdf") && messages.pdf,
+    model.capabilities.input.includes("audio") && messages.audio,
+    model.capabilities.input.includes("video") && messages.video,
+    model.capabilities.tools && messages.tools,
+    model.capabilities.reasoning && messages.reasoning,
   ].filter(Boolean)
 
   return (
@@ -116,16 +119,18 @@ function ModelDetails({ model }: { model: LanguageModel }) {
       ) : null}
       {model.capabilities.contextWindowTokens ? (
         <div className="flex items-baseline justify-between gap-3 text-xs">
-          <span className="text-muted-foreground">Context window</span>
+          <span className="text-muted-foreground">{messages.contextWindow}</span>
           <span className="text-foreground">
-            {model.capabilities.contextWindowTokens.toLocaleString("en-US")} tokens
+            {messages.tokens(model.capabilities.contextWindowTokens)}
           </span>
         </div>
       ) : null}
       {capabilities.length > 0 ? (
         <p className="text-xs leading-5 text-muted-foreground">{capabilities.join(" · ")}</p>
       ) : null}
-      {model.via ? <p className="text-[11px] text-muted-foreground/70">Via {model.via}</p> : null}
+      {model.via ? (
+        <p className="text-[11px] text-muted-foreground/70">{messages.via(model.via)}</p>
+      ) : null}
     </div>
   )
 }

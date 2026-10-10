@@ -4,6 +4,7 @@ import type {
   AgentToolCatalog,
   AgentToolDefinition,
   LanguageModelCatalog,
+  LanguageModelEntry,
 } from "@sixb/core"
 import { createSixbError } from "@sixb/core/internal/errors"
 import type { LanguageModel } from "@sixb/core/models"
@@ -24,6 +25,9 @@ export interface ResolvedAgentExecutionPlan {
   readonly instructions?: string
   readonly tools: readonly AgentToolDefinition[]
   readonly maxSteps: number
+  /** The requester's time zone and locale, when the run captured them. */
+  readonly timeZone?: string
+  readonly locale?: string
 }
 
 /** Resolve the project's conversational Agent without a static definition. */
@@ -34,18 +38,23 @@ export function resolveAgentExecutionPlan(input: {
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
   const modelRef = input.spec?.model ?? input.models?.default
-  const model = modelRef ? input.models?.getByRef(modelRef)?.model : undefined
-  if (!model) {
+  const entry = modelRef ? input.models?.getByRef(modelRef) : undefined
+  if (!entry) {
     throw createSixbError(
       "agent.execution_failed",
       "[SixbAgentWorker] The conversation's language model is not available in models.language."
     )
   }
+  // Admission freezes the model's default reasoning into the spec; only runs admitted before
+  // specs existed take today's default.
+  const reasoning = input.spec ? input.spec.reasoning : entry.reasoning
   return Object.freeze({
-    model,
+    model: entry.model,
     tools: input.tools.list(),
     maxSteps: input.defaultMaxSteps,
-    ...(input.spec?.reasoning === undefined ? {} : { reasoning: input.spec.reasoning }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(input.spec?.timeZone === undefined ? {} : { timeZone: input.spec.timeZone }),
+    ...(input.spec?.locale === undefined ? {} : { locale: input.spec.locale }),
   })
 }
 
@@ -58,8 +67,8 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
   const { workflowId, step, models } = input
-  const model = resolveWorkflowAgentStepModel(step, models)
-  if (model === null) {
+  const selected = resolveWorkflowAgentStepModel(step, models)
+  if (selected === null) {
     const reference =
       step.model === undefined
         ? "the project default language model"
@@ -83,12 +92,13 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     return tool
   })
 
+  const reasoning = step.reasoning ?? selected.reasoning
   return Object.freeze({
-    model,
+    model: selected.model,
     instructions: step.instructions,
     tools: Object.freeze(tools),
     maxSteps: input.defaultMaxSteps,
-    ...(step.reasoning === undefined ? {} : { reasoning: step.reasoning }),
+    ...(reasoning === undefined ? {} : { reasoning }),
   })
 }
 
@@ -129,13 +139,12 @@ export function resolveSubagentExecutionPlan(input: {
   })
 }
 
+/** A catalog entry carries the model's default reasoning; a model outside a catalog has none. */
 function resolveWorkflowAgentStepModel(
   step: AgentStepDefinition,
   models: LanguageModelCatalog | undefined
-): LanguageModel | null {
-  if (step.model === undefined) return models?.default.model ?? null
-  if (models === undefined) return step.model
-  return (
-    models.getByRef({ provider: step.model.providerId, modelId: step.model.modelId })?.model ?? null
-  )
+): Pick<LanguageModelEntry, "model" | "reasoning"> | null {
+  if (step.model === undefined) return models?.default ?? null
+  if (models === undefined) return { model: step.model }
+  return models.getByRef({ provider: step.model.providerId, modelId: step.model.modelId })
 }

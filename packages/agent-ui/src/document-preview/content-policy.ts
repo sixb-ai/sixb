@@ -25,10 +25,13 @@ export function customPreviewTooLarge(
   return source.fileRef.sizeBytes > maxFileSizeBytes
 }
 
-export function documentLoadError(error: unknown): string {
+/** Why a document could not load, as a message key of the viewer's catalog. */
+export type DocumentLoadError = "gone" | "storageUnavailable" | "loadFailed"
+
+export function documentLoadError(error: unknown): DocumentLoadError {
   if (isSixbApiError(error)) {
-    if (error.status === 404) return "This document is no longer available."
-    if (error.status === 501) return "Document storage is not available."
+    if (error.status === 404) return "gone"
+    if (error.status === 501) return "storageUnavailable"
   }
-  return "Could not load this document."
+  return "loadFailed"
 }

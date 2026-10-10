@@ -11,6 +11,7 @@ import {
   Spinner,
 } from "@sixb/ui/components"
 import { useIsMobile } from "@sixb/ui/hooks"
+import { useLocale } from "@sixb/ui/lib/i18n"
 import { cn } from "@sixb/ui/lib/utils"
 import { Download, ExternalLink, FileWarning, X } from "lucide-react"
 import {
@@ -31,6 +32,8 @@ import {
   useState,
 } from "react"
 import { createPortal } from "react-dom"
+import { useAgentMessages } from "../i18n"
+import type { AgentMessages } from "../i18n/en"
 import {
   useCustomDocument,
   useDelimitedTextDocument,
@@ -382,6 +385,7 @@ function DocumentPreviewDialog({
   viewerProps: DocumentViewerProps
   onDismiss: () => void
 }) {
+  const messages = useAgentMessages().documents
   return (
     <Dialog
       open={open}
@@ -394,11 +398,11 @@ function DocumentPreviewDialog({
         className="flex h-[calc(100dvh-1rem)] max-h-none w-[calc(100vw-1rem)] max-w-none flex-col gap-0 overflow-hidden rounded-xl p-0 sm:h-[min(88vh,56rem)] sm:w-[min(92vw,72rem)] sm:max-w-[min(92vw,72rem)]"
       >
         <DialogTitle className="sr-only">
-          {activeDocument ? `Preview ${documentName(activeDocument)}` : "Document preview"}
+          {activeDocument
+            ? messages.preview(documentName(activeDocument, messages))
+            : messages.dialogTitle}
         </DialogTitle>
-        <DialogDescription className="sr-only">
-          Preview, switch between, and download documents from this conversation.
-        </DialogDescription>
+        <DialogDescription className="sr-only">{messages.dialogDescription}</DialogDescription>
         {activeDocument ? (
           <DocumentViewer {...viewerProps} showActionLabels focusActiveTab={false} />
         ) : null}
@@ -418,6 +422,7 @@ function DocumentPreviewCanvas({
   activeDocument: AgentDocumentSource | null
   viewerProps: DocumentViewerProps
 }) {
+  const messages = useAgentMessages().documents
   const titleId = `${viewerProps.idPrefix}-canvas-title`
   const descriptionId = `${viewerProps.idPrefix}-canvas-description`
   if (!host || !open || !activeDocument) return null
@@ -431,10 +436,10 @@ function DocumentPreviewCanvas({
       className="pointer-events-auto flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden rounded-xl border border-border bg-background shadow-2xl motion-safe:animate-in motion-safe:fade-in motion-safe:slide-in-from-right-2 motion-safe:duration-200"
     >
       <h2 id={titleId} className="sr-only">
-        Preview {documentName(activeDocument)}
+        {messages.preview(documentName(activeDocument, messages))}
       </h2>
       <p id={descriptionId} className="sr-only">
-        Preview and switch between documents while continuing to use the assistant.
+        {messages.canvasDescription}
       </p>
       <DocumentViewer {...viewerProps} showActionLabels focusActiveTab={false} />
     </section>,
@@ -506,6 +511,7 @@ function DocumentTabs({
   showActionLabels: boolean
   focusActiveTab: boolean
 }) {
+  const messages = useAgentMessages().documents
   const activeDocument = documents.find((document) => document.id === activeId)
   const tabRefs = useRef(new Map<string, HTMLButtonElement>())
 
@@ -550,12 +556,12 @@ function DocumentTabs({
     <header className="flex h-11 shrink-0 items-center border-b border-border bg-muted/20">
       <div
         role="tablist"
-        aria-label="Open documents"
+        aria-label={messages.tabs}
         className="scrollbar-thin flex h-full min-w-0 flex-1 overflow-x-auto overflow-y-hidden"
       >
         {documents.map((document) => {
           const active = document.id === activeId
-          const name = documentName(document)
+          const name = documentName(document, messages)
           return (
             <div
               key={document.id}
@@ -596,7 +602,7 @@ function DocumentTabs({
                   "mr-2 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-40 transition-[color,background-color,opacity] hover:bg-muted hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   !active && "group-hover/document-tab:opacity-70"
                 )}
-                aria-label={`Close ${name}`}
+                aria-label={messages.close(name)}
               >
                 <X className="size-3.5" />
               </button>
@@ -611,10 +617,10 @@ function DocumentTabs({
               href={activeDocument.inlineUrl}
               target="_blank"
               rel="noreferrer"
-              aria-label={`Open ${documentName(activeDocument)} in a new tab`}
+              aria-label={messages.openInNewTab(documentName(activeDocument, messages))}
             >
               <ExternalLink />
-              {showActionLabels ? <span className="hidden sm:inline">Open</span> : null}
+              {showActionLabels ? <span className="hidden sm:inline">{messages.open}</span> : null}
             </a>
           </Button>
         ) : null}
@@ -622,11 +628,13 @@ function DocumentTabs({
           <Button variant="ghost" size="sm" asChild>
             <a
               href={activeDocument.downloadUrl}
-              download={documentName(activeDocument)}
-              aria-label={`Download ${documentName(activeDocument)}`}
+              download={documentName(activeDocument, messages)}
+              aria-label={messages.download(documentName(activeDocument, messages))}
             >
               <Download />
-              {showActionLabels ? <span className="hidden sm:inline">Download</span> : null}
+              {showActionLabels ? (
+                <span className="hidden sm:inline">{messages.downloadLabel}</span>
+              ) : null}
             </a>
           </Button>
         ) : null}
@@ -634,8 +642,8 @@ function DocumentTabs({
           variant="ghost"
           size="icon-sm"
           onClick={onDismiss}
-          aria-label="Close document viewer"
-          title="Close document viewer"
+          aria-label={messages.closeViewer}
+          title={messages.closeViewer}
         >
           <X />
         </Button>
@@ -651,6 +659,7 @@ function DocumentContent({
   readonly document: AgentDocumentSource
   readonly renderers: readonly AgentDocumentPreviewRenderer[]
 }) {
+  const messages = useAgentMessages().documents
   const resolution = resolveAgentDocumentPreview(document, renderers)
   if (resolution?.type === "custom") {
     return <CustomDocument document={document} renderer={resolution.renderer} />
@@ -663,12 +672,7 @@ function DocumentContent({
   if (resolution?.renderer === "pdf-native") return <PdfDocument document={document} />
   if (resolution?.renderer === "image-native") return <ImageDocument document={document} />
 
-  return (
-    <DocumentNotice
-      title="Preview unavailable"
-      description="This file type is not available in the document viewer yet."
-    />
-  )
+  return <DocumentNotice title={messages.unavailable} description={messages.unsupported} />
 }
 
 function CustomDocument({
@@ -678,13 +682,18 @@ function CustomDocument({
   readonly document: AgentDocumentSource
   readonly renderer: AgentDocumentPreviewRenderer
 }) {
+  const agentMessages = useAgentMessages()
+  const messages = agentMessages.documents
+  const locale = useLocale()
   const preview = useCustomDocument(document, renderer.maxFileSizeBytes)
 
   if (preview.tooLarge) {
     return (
       <DocumentNotice
-        title="Document is too large to preview"
-        description={`This viewer accepts files up to ${formatFileSize(renderer.maxFileSizeBytes)}. Download the file to view it elsewhere.`}
+        title={messages.tooLarge}
+        description={messages.tooLargeFor(
+          formatFileSize(renderer.maxFileSizeBytes, locale, agentMessages.files)
+        )}
       />
     )
   }
@@ -692,8 +701,8 @@ function CustomDocument({
   if (preview.error || !preview.source) {
     return (
       <DocumentNotice
-        title="Could not preview document"
-        description={preview.error ?? "The document content was unavailable."}
+        title={messages.failed}
+        description={preview.error ? messages[preview.error] : messages.contentUnavailable}
       />
     )
   }
@@ -727,19 +736,19 @@ class DocumentRendererBoundary extends Component<
 
   render() {
     if (this.state.failed) {
-      return (
-        <DocumentNotice
-          title="Could not preview document"
-          description="The configured document viewer could not render this file."
-        />
-      )
+      return <RendererFailedNotice />
     }
     return this.props.children
   }
 }
 
+function RendererFailedNotice() {
+  const messages = useAgentMessages().documents
+  return <DocumentNotice title={messages.failed} description={messages.rendererFailed} />
+}
+
 function ImageDocument({ document }: { document: AgentDocumentSource }) {
-  const name = documentName(document)
+  const name = documentName(document, useAgentMessages().documents)
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/20 p-4 sm:p-8">
       <img
@@ -752,6 +761,7 @@ function ImageDocument({ document }: { document: AgentDocumentSource }) {
 }
 
 function HtmlDocument({ document }: { document: AgentDocumentSource }) {
+  const messages = useAgentMessages().documents
   const preview = useHtmlDocument(document)
   const safeDocument = useMemo(
     () => (preview.text === undefined ? null : buildSafeHtmlPreviewDocument(preview.text)),
@@ -759,67 +769,53 @@ function HtmlDocument({ document }: { document: AgentDocumentSource }) {
   )
 
   if (preview.tooLarge) {
-    return (
-      <DocumentNotice
-        title="Document is too large to preview"
-        description="Download the file to view the complete document."
-      />
-    )
+    return <DocumentNotice title={messages.tooLarge} description={messages.downloadToView} />
   }
   if (preview.loading) return <DocumentLoading />
   if (preview.error || safeDocument === null) {
     return (
       <DocumentNotice
-        title="Could not preview document"
-        description={preview.error ?? "The document did not contain readable HTML."}
+        title={messages.failed}
+        description={preview.error ? messages[preview.error] : messages.noHtml}
       />
     )
   }
 
-  const name = documentName(document)
+  const name = documentName(document, messages)
   return (
     <iframe
       srcDoc={safeDocument}
       sandbox={HTML_PREVIEW_SANDBOX}
       referrerPolicy="no-referrer"
       title={name}
-      aria-label={`Preview ${name}`}
+      aria-label={messages.preview(name)}
       className="min-h-0 w-full flex-1 border-0 bg-white"
     />
   )
 }
 
 function DelimitedTextDocument({ document }: { document: AgentDocumentSource }) {
+  const messages = useAgentMessages().documents
   const preview = useDelimitedTextDocument(document)
   const parsed = useMemo(
-    () => parseDelimitedPreview(preview.text, document.kind),
-    [preview.text, document.kind]
+    () => parseDelimitedPreview(preview.text, document.kind, messages),
+    [preview.text, document.kind, messages]
   )
 
   if (preview.tooLarge) {
-    return (
-      <DocumentNotice
-        title="Document is too large to preview"
-        description="Download the file to view the complete document."
-      />
-    )
+    return <DocumentNotice title={messages.tooLarge} description={messages.downloadToView} />
   }
   if (preview.loading) return <DocumentLoading />
   if (preview.error || parsed.error) {
     return (
       <DocumentNotice
-        title="Could not preview table"
-        description={preview.error ?? parsed.error ?? "The file could not be parsed."}
+        title={messages.tableFailed}
+        description={preview.error ? messages[preview.error] : (parsed.error ?? messages.notParsed)}
       />
     )
   }
   if (!parsed.data) {
-    return (
-      <DocumentNotice
-        title="Could not preview table"
-        description="The file did not contain readable rows."
-      />
-    )
+    return <DocumentNotice title={messages.tableFailed} description={messages.noRows} />
   }
 
   const data = parsed.data
@@ -831,13 +827,13 @@ function DelimitedTextDocument({ document }: { document: AgentDocumentSource }) 
           className="shrink-0 border-b border-border bg-muted/40 px-4 py-2 text-xs text-muted-foreground"
           role="status"
         >
-          {delimitedLimitMessage(data)} Download the file to view all data.
+          {delimitedLimitMessage(data, messages)} {messages.downloadAll}
         </p>
       ) : null}
       <div className="min-h-0 flex-1 overflow-auto">
         <table
           className="w-max min-w-full border-separate border-spacing-0 text-sm"
-          aria-label={`${documentName(document)} data preview`}
+          aria-label={messages.dataPreview(documentName(document, messages))}
         >
           <thead>
             <tr>
@@ -872,7 +868,7 @@ function DelimitedTextDocument({ document }: { document: AgentDocumentSource }) 
                   colSpan={Math.max(data.headers.length, 1)}
                   className="px-4 py-12 text-center text-sm text-muted-foreground"
                 >
-                  No data rows.
+                  {messages.noDataRows}
                 </td>
               </tr>
             )}
@@ -885,66 +881,64 @@ function DelimitedTextDocument({ document }: { document: AgentDocumentSource }) 
 
 function parseDelimitedPreview(
   text: string | undefined,
-  kind: AgentDocumentSource["kind"]
+  kind: AgentDocumentSource["kind"],
+  messages: AgentMessages["documents"]
 ): { readonly data: DelimitedTextPreview | null; readonly error: string | null } {
   if (text === undefined) return { data: null, error: null }
-  if (kind !== "csv" && kind !== "tsv") {
-    return { data: null, error: "The file is not CSV or TSV data." }
-  }
+  if (kind !== "csv" && kind !== "tsv") return { data: null, error: messages.notDelimited }
 
   try {
-    return { data: parseDelimitedText(text, kind), error: null }
+    return { data: parseDelimitedText(text, kind, messages.column), error: null }
   } catch (error) {
-    return {
-      data: null,
-      error:
-        error instanceof DelimitedTextParseError
-          ? error.message
-          : "The file contains malformed delimited text.",
-    }
+    return { data: null, error: delimitedParseMessage(error, messages) }
   }
 }
 
-function delimitedLimitMessage(data: DelimitedTextPreview): string {
+function delimitedParseMessage(error: unknown, messages: AgentMessages["documents"]): string {
+  if (!(error instanceof DelimitedTextParseError)) return messages.malformed
+  if (error.reason === "empty") return messages.emptyFile
+  if (error.reason === "no-header") return messages.noHeader
+  return error.row === undefined ? messages.malformed : messages.malformedNear(error.row)
+}
+
+function delimitedLimitMessage(
+  data: DelimitedTextPreview,
+  messages: AgentMessages["documents"]
+): string {
   const limits: string[] = []
-  if (data.rowsTruncated) {
-    limits.push(
-      `the first ${data.rows.length.toLocaleString()} of ${data.totalRows.toLocaleString()} rows`
-    )
-  }
+  if (data.rowsTruncated) limits.push(messages.firstRows(data.rows.length, data.totalRows))
   if (data.columnsTruncated) {
-    limits.push(
-      `the first ${data.headers.length.toLocaleString()} of ${data.totalColumns.toLocaleString()} columns`
-    )
+    limits.push(messages.firstColumns(data.headers.length, data.totalColumns))
   }
-  return `Showing ${limits.join(" and ")}.`
+  return messages.showing(limits.join(` ${messages.and} `))
 }
 
 function PdfDocument({ document }: { document: AgentDocumentSource }) {
-  const name = documentName(document)
+  const messages = useAgentMessages().documents
+  const name = documentName(document, messages)
   return (
     <object
       data={document.inlineUrl}
       type="application/pdf"
       title={name}
-      aria-label={`Preview ${name}`}
+      aria-label={messages.preview(name)}
       className="flex min-h-0 w-full flex-1 bg-muted/20"
     >
       <DocumentNotice
-        title="PDF preview unavailable"
-        description="Open the PDF in your browser or download it to view the document."
+        title={messages.pdfUnavailable}
+        description={messages.pdfDescription}
         action={
           <div className="flex justify-center gap-2">
             <Button variant="outline" size="sm" asChild>
               <a href={document.inlineUrl} target="_blank" rel="noreferrer">
                 <ExternalLink />
-                Open PDF
+                {messages.openPdf}
               </a>
             </Button>
             <Button variant="outline" size="sm" asChild>
               <a href={document.downloadUrl} download={name}>
                 <Download />
-                Download
+                {messages.downloadLabel}
               </a>
             </Button>
           </div>
@@ -955,22 +949,18 @@ function PdfDocument({ document }: { document: AgentDocumentSource }) {
 }
 
 function MarkdownDocument({ document }: { document: AgentDocumentSource }) {
+  const messages = useAgentMessages().documents
   const preview = useMarkdownDocument(document)
 
   if (preview.tooLarge) {
-    return (
-      <DocumentNotice
-        title="Document is too large to preview"
-        description="Download the file to view the complete document."
-      />
-    )
+    return <DocumentNotice title={messages.tooLarge} description={messages.downloadToView} />
   }
   if (preview.loading) return <DocumentLoading />
   if (preview.error || preview.text === undefined) {
     return (
       <DocumentNotice
-        title="Could not preview document"
-        description={preview.error ?? "The document did not contain readable text."}
+        title={messages.failed}
+        description={preview.error ? messages[preview.error] : messages.noText}
       />
     )
   }
@@ -985,11 +975,12 @@ function MarkdownDocument({ document }: { document: AgentDocumentSource }) {
 }
 
 function DocumentLoading() {
+  const messages = useAgentMessages().documents
   return (
     <div className="flex min-h-0 flex-1 items-center justify-center" aria-busy="true" role="status">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Spinner className="size-4" />
-        Loading document…
+        {messages.loading}
       </div>
     </div>
   )
@@ -1024,6 +1015,6 @@ function documentTabDomId(idPrefix: string, documentId: string): string {
   return `${idPrefix}-document-tab-${documentId}`
 }
 
-function documentName(document: AgentDocumentSource): string {
-  return document.fileRef.fileName?.trim() || "Document"
+function documentName(document: AgentDocumentSource, messages: AgentMessages["documents"]): string {
+  return document.fileRef.fileName?.trim() || messages.document
 }

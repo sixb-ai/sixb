@@ -8,6 +8,7 @@ import type {
   AddressSuggestion,
 } from "../../lib/address"
 import { addressDraftFromSuggestion } from "../../lib/address"
+import { useUiMessages } from "../../lib/i18n/ui"
 import { cn } from "../../lib/utils"
 import { Field, FieldLabel } from "../ui/field"
 import { Input } from "../ui/input"
@@ -37,16 +38,6 @@ export type AddressFieldsProps = {
   readonly countries?: readonly string[]
   readonly proximity?: AddressCoordinates
   readonly bbox?: readonly [number, number, number, number]
-}
-
-const DEFAULT_LABELS: Record<AddressField | "search", string> = {
-  search: "Search address",
-  line1: "Address line 1",
-  line2: "Address line 2",
-  city: "City",
-  region: "State / region",
-  postalCode: "Postal code",
-  countryCode: "Country code",
 }
 
 const DEFAULT_REQUIRED: readonly AddressField[] = ["line1", "city", "postalCode", "countryCode"]
@@ -80,7 +71,8 @@ export function AddressFields({
   const generatedId = useId()
   const prefix = idPrefix ?? generatedId
   const [query, setQuery] = useState("")
-  const text = { ...DEFAULT_LABELS, ...labels }
+  const messages = useUiMessages()
+  const text = { ...messages.address, ...labels }
 
   function patch(field: AddressField, next: string) {
     onChange({

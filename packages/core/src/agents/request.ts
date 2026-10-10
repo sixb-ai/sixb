@@ -11,8 +11,10 @@ import {
 import { resolveExecutionScopeAuthorization } from "../execution/authorization"
 import { ensureExecutionRecord, executionRecordInputFromRuntime } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
-import type { LanguageModelCatalog, LanguageModelRef } from "../models"
-import { isModelReasoning } from "../models/language-model"
+import type { LanguageModelCatalog, LanguageModelEntry, LanguageModelRef } from "../models"
+import { isModelReasoning, modelReasoningSupportIssue } from "../models/language-model"
+import { resolveLanguageModel } from "../models/resolve"
+import { canonicalLocale, canonicalTimeZone } from "../runtime/locale"
 import type { SixbRuntimeContext } from "../runtime/types"
 import {
   type AgentStorage,
@@ -34,13 +36,19 @@ import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
+import type { AgentMessagePart } from "./message"
 import { assertNoAgentSelector } from "./retired-config"
 import { publishAgentRunActivity } from "./streams/protocol"
 import { AGENT_REASONING_LEVELS, type AgentReasoningLevel } from "./types"
 
 export interface RequestAgentRunInput {
-  /** The user's message that triggers the turn. */
-  readonly text: string
+  /** The user's message that triggers the turn. Omitted only to {@link continue}. */
+  readonly text?: string
+  /**
+   * Continue an answer the turn limit cut short, in an existing thread. Sixb writes the
+   * instruction the model reads, so the request carries no text, attachments, or context.
+   */
+  readonly continue?: boolean
   /** Blob-backed files attached to the trigger message. */
   readonly attachments?: readonly FileRef[]
   /** Structured page/object context snapshotted onto the triggering user message. */
@@ -49,8 +57,15 @@ export interface RequestAgentRunInput {
   readonly threadId?: string
   /** Configured language model selected for this turn. Omitted uses the agent default. */
   readonly model?: LanguageModelRef
-  /** Provider-neutral reasoning effort selected for this turn. */
+  /** Provider-neutral reasoning effort selected for this turn. Omitted uses the model's default. */
   readonly reasoning?: AgentReasoningLevel
+  /**
+   * IANA time zone of the person asking, such as their browser's. The Agent presents dates and
+   * times in it. Omitted uses the project time zone.
+   */
+  readonly timeZone?: string
+  /** BCP 47 language of the person asking. Omitted uses the project locale. */
+  readonly locale?: string
   /** Title to stamp on the thread when one is created. */
   readonly title?: string
   /** Explicit id for the trigger (user) message. Defaults to a generated id. */
@@ -89,7 +104,16 @@ export async function requestAgentRun(
   assertNoAgentSelector(input)
   assertAuthorized(runtime, { kind: "agent.run" })
   assertRequestAuthorityCanRunAgent(runtime)
-  const spec = resolveConversationRunSpec({ models, input })
+  const trigger = triggerParts(input)
+  const continued = input.continue ? await continuedSelection(runtime, models, input) : {}
+  const spec = await resolveConversationRunSpec({
+    models,
+    input: {
+      ...input,
+      model: input.model ?? continued.model,
+      reasoning: input.reasoning ?? continued.reasoning,
+    },
+  })
   assertAttachments(input.attachments)
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
@@ -144,7 +168,7 @@ export async function requestAgentRun(
         role: "user",
         parts: [
           ...contextParts,
-          { type: "text", text: input.text },
+          ...trigger,
           ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
         ],
         authorPrincipal: principal,
@@ -229,15 +253,68 @@ export async function retryAgentRun(
       triggerMessageId: failedRun.triggerMessageId,
       spec:
         failedRun.spec ??
-        resolveConversationRunSpec({
+        (await resolveConversationRunSpec({
           models,
           input: {},
-        }),
+        })),
     })
   })
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
+}
+
+/**
+ * A continuation picks up where the cut-short turn stopped, with its model and reasoning unless the
+ * request chooses others. A model that has since left the catalog falls back to the defaults.
+ */
+async function continuedSelection(
+  runtime: SixbRuntimeContext,
+  models: LanguageModelCatalog | undefined,
+  input: RequestAgentRunInput
+): Promise<Pick<RequestAgentRunInput, "model" | "reasoning">> {
+  const agents = requireAgentStorage(runtime)
+  const threadId = input.threadId ?? ""
+  if (!(await agents.threads.getById({ projectId: runtime.projectId, id: threadId }))) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      "[Sixb] An Agent continuation needs an existing thread."
+    )
+  }
+  if (input.model !== undefined || input.reasoning !== undefined) return {}
+  const { runs } = await agents.runs.list({
+    projectId: runtime.projectId,
+    threadId,
+    kinds: ["conversation"],
+    order: "desc",
+    limit: 1,
+  })
+  const spec = runs[0]?.kind === "conversation" ? runs[0].spec : undefined
+  if (!spec || !models?.getByRef(spec.model)) return {}
+  return {
+    model: spec.model,
+    ...(spec.reasoning === undefined ? {} : { reasoning: spec.reasoning }),
+  }
+}
+
+/** The words of the user, or the continuation Sixb words for them. */
+function triggerParts(input: RequestAgentRunInput): readonly AgentMessagePart[] {
+  if (input.continue === true) {
+    if (input.text !== undefined || input.attachments?.length || input.context?.length) {
+      throw new AgentRequestError(
+        "invalid_message",
+        "[Sixb] An Agent continuation carries no text, attachments, or context."
+      )
+    }
+    return [{ type: "continuation" }]
+  }
+  if (typeof input.text !== "string" || input.text.trim().length === 0) {
+    throw new AgentRequestError(
+      "invalid_message",
+      "[Sixb] An Agent message needs text, or `continue: true` to continue the previous answer."
+    )
+  }
+  return [{ type: "text", text: input.text }]
 }
 
 function assertAttachments(attachments: readonly FileRef[] | undefined): void {
@@ -294,10 +371,14 @@ async function assertAiLimitPreflight(
   }
 }
 
-function resolveConversationRunSpec(input: {
+/**
+ * Freeze the model selection of a turn. The model's default reasoning is resolved here, not by the
+ * worker, so a retry runs with the reasoning the turn was admitted with.
+ */
+async function resolveConversationRunSpec(input: {
   readonly models?: LanguageModelCatalog
-  readonly input: Pick<RequestAgentRunInput, "model" | "reasoning">
-}): ConversationAgentRunSpec {
+  readonly input: Pick<RequestAgentRunInput, "model" | "reasoning" | "timeZone" | "locale">
+}): Promise<ConversationAgentRunSpec> {
   if (!input.models) {
     throw new AgentRequestError(
       "model_not_found",
@@ -313,18 +394,71 @@ function resolveConversationRunSpec(input: {
     )
   }
 
-  const reasoning = input.input.reasoning
-  if (reasoning !== undefined && !isModelReasoning(reasoning)) {
+  const explicitReasoning = input.input.reasoning
+  if (explicitReasoning !== undefined) {
+    await assertModelSupportsReasoning(model, explicitReasoning)
+  }
+  const reasoning = explicitReasoning ?? model.reasoning
+  const timeZone = requestedSetting(
+    "timeZone",
+    input.input.timeZone,
+    canonicalTimeZone,
+    "an IANA time zone"
+  )
+  const locale = requestedSetting(
+    "locale",
+    input.input.locale,
+    canonicalLocale,
+    "a BCP 47 language tag"
+  )
+
+  return Object.freeze({
+    model: Object.freeze({ provider: selected.provider, modelId: selected.modelId }),
+    ...(reasoning === undefined ? {} : { reasoning }),
+    ...(timeZone === undefined ? {} : { timeZone }),
+    ...(locale === undefined ? {} : { locale }),
+  })
+}
+
+function requestedSetting(
+  field: "timeZone" | "locale",
+  value: string | undefined,
+  canonical: (value: unknown) => string | undefined,
+  expected: string
+): string | undefined {
+  if (value === undefined) return undefined
+  const resolved = canonical(value)
+  if (resolved === undefined) {
+    throw new AgentRequestError(
+      "invalid_locale",
+      `[Sixb] Agent request '${field}' must be ${expected}; received ${JSON.stringify(value)}.`
+    )
+  }
+  return resolved
+}
+
+// Checked against the model's resolved capabilities, as `GET /api/models` reports them (its
+// configured ones when the provider catalog is unavailable). Undeclared capabilities accept any
+// level; the provider then falls back to its own default.
+async function assertModelSupportsReasoning(
+  entry: LanguageModelEntry,
+  reasoning: unknown
+): Promise<void> {
+  if (!isModelReasoning(reasoning)) {
     throw new AgentRequestError(
       "invalid_model_selection",
       `[Sixb] Agent reasoning must be one of: ${AGENT_REASONING_LEVELS.join(", ")}, or a nonnegative budgetTokens object.`
     )
   }
-
-  return Object.freeze({
-    model: Object.freeze({ provider: selected.provider, modelId: selected.modelId }),
-    ...(reasoning === undefined ? {} : { reasoning }),
-  })
+  if (reasoning === "provider-default") return
+  const model = await resolveLanguageModel(entry.model)
+  const issue = modelReasoningSupportIssue(model.definition.capabilities.reasoning, reasoning)
+  if (issue !== undefined) {
+    throw new AgentRequestError(
+      "invalid_model_selection",
+      `[Sixb] Language model '${entry.provider}/${entry.modelId}' cannot use this reasoning: ${issue}.`
+    )
+  }
 }
 
 async function prepareDurableAgentExecution(

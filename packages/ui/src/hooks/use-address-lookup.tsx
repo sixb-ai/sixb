@@ -9,11 +9,11 @@ import type {
   AddressSuggestion,
 } from "../lib/address"
 import { createPhotonProvider } from "../lib/address"
+import { useUiMessages } from "../lib/i18n/ui"
 import { useDebouncedValue } from "./use-debounced-value"
 
 const DEFAULT_MIN_LENGTH = 3
 const DEFAULT_DEBOUNCE_MS = 300
-const DEFAULT_ERROR_MESSAGE = "Address lookup is unavailable right now."
 
 const AddressProviderContext = createContext<AddressProvider | null>(null)
 
@@ -90,9 +90,10 @@ export function useAddressLookup(options: UseAddressLookupOptions): UseAddressLo
     enabled = true,
     minLength = DEFAULT_MIN_LENGTH,
     debounceMs = DEFAULT_DEBOUNCE_MS,
-    errorMessage = DEFAULT_ERROR_MESSAGE,
     lang,
   } = options
+  const messages = useUiMessages()
+  const errorMessage = options.errorMessage ?? messages.address.unavailable
 
   const provider = useAddressProvider(options.provider)
   const [suggestions, setSuggestions] = useState<readonly AddressSuggestion[]>([])

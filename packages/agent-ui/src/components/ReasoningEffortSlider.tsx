@@ -2,20 +2,25 @@ import type { ModelReasoningLevel } from "@sixb/core/models"
 import { cn } from "@sixb/ui/lib/utils"
 import { RotateCcw } from "lucide-react"
 import type { CSSProperties } from "react"
+import { useAgentMessages } from "../i18n"
+import { defaultReasoningLevel } from "../modelSelection"
 import type { LanguageModel } from "../types"
-import { reasoningLabel } from "./model-picker-labels"
 
 export function ReasoningEffortSlider({
   model,
   value,
   disabled,
   onChange,
+  onReset,
 }: {
   model: LanguageModel
   value: ModelReasoningLevel
   disabled?: boolean
   onChange: (level: ModelReasoningLevel) => void
+  /** Return to the model's default reasoning. Defaults to selecting that level. */
+  onReset?: () => void
 }) {
+  const messages = useAgentMessages().reasoning
   const levels: readonly ModelReasoningLevel[] = model.reasoningLevels.filter(
     (level) => level !== "provider-default" && level !== "none" && level !== "minimal"
   )
@@ -24,33 +29,34 @@ export function ReasoningEffortSlider({
   const lastIndex = Math.max(0, levels.length - 1)
   const progress = lastIndex > 0 ? index / lastIndex : 0
   const enhanced = value === "max"
-  const resetLevel = model.reasoningLevels.includes("provider-default")
-    ? "provider-default"
-    : model.reasoningLevels[0]
+  const resetLevel = defaultReasoningLevel(model)
 
   return (
     <div>
       <div className="relative flex min-h-6 items-center justify-between gap-2 pr-8">
-        <span className="text-xs text-muted-foreground">Thinking</span>
+        <span className="text-xs text-muted-foreground">{messages.thinking}</span>
         <div className="min-w-0 text-center">
           <span
-            title={reasoningDescription(value)}
+            title={messages.descriptions[value]}
             className={cn(
               "text-sm font-medium",
               enhanced ? "text-[#007aff] dark:text-[#9ec3ee]" : "text-primary"
             )}
           >
             <span key={value} className="sixb-reasoning-label">
-              {reasoningLabel(value)}
+              {messages.levels[value]}
             </span>
           </span>
         </div>
         <button
           type="button"
           disabled={disabled || value === resetLevel}
-          aria-label="Reset reasoning effort"
-          title="Use model default"
-          onClick={() => resetLevel && onChange(resetLevel)}
+          aria-label={messages.reset}
+          title={messages.useDefault}
+          onClick={() => {
+            if (onReset) onReset()
+            else if (resetLevel) onChange(resetLevel)
+          }}
           className="absolute top-1/2 right-0 flex size-6 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground/60 outline-none transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/40 disabled:opacity-40"
         >
           <RotateCcw className="size-3.5" aria-hidden="true" />
@@ -86,8 +92,8 @@ export function ReasoningEffortSlider({
           step={1}
           value={index}
           disabled={disabled}
-          aria-label="Reasoning effort"
-          aria-valuetext={`${reasoningLabel(value)}: ${reasoningDescription(value)}`}
+          aria-label={messages.effort}
+          aria-valuetext={`${messages.levels[value]}: ${messages.descriptions[value]}`}
           onChange={(event) => {
             const level = levels[Number(event.target.value)]
             if (level) onChange(level)
@@ -112,23 +118,4 @@ export function ReasoningEffortSlider({
       </div>
     </div>
   )
-}
-
-function reasoningDescription(level: ModelReasoningLevel): string {
-  switch (level) {
-    case "provider-default":
-      return "Use the model provider's default"
-    case "none":
-      return "Answer without extended reasoning"
-    case "minimal":
-    case "low":
-      return "Faster for straightforward work"
-    case "medium":
-      return "A balanced level for most tasks"
-    case "high":
-    case "xhigh":
-      return "More depth for complex tasks"
-    case "max":
-      return "Maximum reasoning depth for the hardest tasks"
-  }
 }

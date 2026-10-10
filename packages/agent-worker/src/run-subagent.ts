@@ -3,7 +3,7 @@ import { runModelLoop } from "@sixb/core/internal/agents"
 import { createSixbError } from "@sixb/core/internal/errors"
 import { QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import { coerceAgentRunFinishReason, type SubagentRunRecord } from "@sixb/core/storage"
-import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION } from "./agent-prompt"
+import { DEFAULT_AGENT_FINAL_STEP_INSTRUCTION, withCurrentTime } from "./agent-prompt"
 import { assistantPartsWithAttachments } from "./assistant-attachments"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { finishRunOrThrow } from "./finalize"
@@ -57,7 +57,11 @@ export async function runSubagent(input: {
       model: runtime.usageRecorder.wrapModel(plan.model),
       messages: [
         { role: "system", content: context.systemPrompt },
-        { role: "user", content: [{ type: "text", text: run.spec.task }] },
+        withCurrentTime(
+          { role: "user", content: [{ type: "text", text: run.spec.task }] },
+          run.createdAt,
+          context.projectTimeZone
+        ),
       ],
       tools: context.tools,
       ...(plan.reasoning === undefined ? {} : { reasoning: plan.reasoning }),

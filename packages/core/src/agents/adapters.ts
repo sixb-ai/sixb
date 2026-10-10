@@ -20,6 +20,10 @@ import type {
 import { isAgentToolResult } from "./tool-result"
 import type { AgentToolFileContent } from "./types"
 
+/** What the model reads for a {@link AgentContinuationPart}, in place of a user's words. */
+export const AGENT_CONTINUATION_INSTRUCTION =
+  "<sixb_continuation>Your previous answer stopped at the turn time limit. Continue from where it stopped, in the same language, without repeating what you already wrote.</sixb_continuation>"
+
 export interface AgentFileDataResolverInput<TMessage extends AgentMessage = AgentMessage> {
   readonly message: TMessage
   readonly part: AgentFilePart
@@ -54,6 +58,11 @@ export interface ToModelMessagesOptions<TMessage extends AgentMessage = AgentMes
    * models that cannot consume inline files.
    */
   readonly fileText?: (input: AgentFileDataResolverInput<TMessage>) => string | undefined
+  /**
+   * Framework text closing a user message, such as when it was sent. It must derive from stored
+   * data only, so replaying the same history always projects the same bytes.
+   */
+  readonly userMessageSuffix?: (message: TMessage) => string | undefined
   /** Add current metadata, sandbox paths, and projection notes for a tool-result file. */
   readonly toolResultFileText?: (
     input: AgentToolResultFileResolverInput<TMessage>
@@ -122,6 +131,10 @@ function userModelMessage<TMessage extends AgentMessage>(
     content.push({ type: "text", text: `${serializedContext}\n\n` })
   }
   message.parts.forEach((part, partIndex) => {
+    if (part.type === "continuation") {
+      content.push({ type: "text", text: AGENT_CONTINUATION_INSTRUCTION })
+      return
+    }
     if (part.type === "text") {
       content.push({
         type: "text",
@@ -152,6 +165,8 @@ function userModelMessage<TMessage extends AgentMessage>(
       }
     }
   })
+  const suffix = options.userMessageSuffix?.(message)
+  if (suffix) content.push({ type: "text", text: `\n\n${suffix}` })
   return { role: "user", content }
 }
 

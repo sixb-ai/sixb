@@ -1,6 +1,7 @@
 import { access, mkdir, readFile, writeFile } from "node:fs/promises"
 import { join, relative, resolve } from "node:path"
 import type { AuthSessionAudience } from "@sixb/core"
+import { en, fr } from "./locale-messages"
 import { renderAppManifest } from "./manifest"
 import { resolveAppMetadata } from "./metadata"
 import { renderCustomAppRuntimeScript } from "./runtime"
@@ -15,6 +16,11 @@ export interface BuiltInRouteManifestEntry {
 export interface GenerateRouteManifestOptions {
   readonly builtInRoutes?: readonly BuiltInRouteManifestEntry[]
   readonly layouts?: readonly AppRouteLayout[]
+}
+
+/** The shared shell's unavailable message per language, inlined before any module loads. */
+function sharedUnavailableTranslations(): Record<string, string> {
+  return { en: en.shared.unavailableDetail, fr: fr.shared.unavailableDetail }
 }
 
 export const AUTH_EXPERIENCE_BOOTSTRAP_PLACEHOLDER = "__SIXB_AUTH_BOOTSTRAP__"
@@ -504,8 +510,10 @@ import {
   useNavigate,
   useRoutes,
 } from "react-router-dom"
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query"
 import { isSixbApiError } from "@sixb/client/browser"
+import { getProjectInfoOptions } from "@sixb/client/hooks"
+import { LocaleProvider, useAppMessages } from "@sixb/app/locale"
 import { routePaths, routes } from "./routes"
 ${globalsCssImport}
 ${layoutImport}
@@ -695,6 +703,7 @@ function AppFallback({
   showReload?: boolean
   action?: React.ReactNode
 }) {
+  const messages = useAppMessages()
   return (
     <div
       role="alert"
@@ -730,7 +739,7 @@ function AppFallback({
                 textDecoration: "none",
               }}
             >
-              Go home
+              {messages.goHome}
             </a>
             {showReload ? (
               <button
@@ -745,7 +754,7 @@ function AppFallback({
                   cursor: "pointer",
                 }}
               >
-                Reload
+                {messages.reload}
               </button>
             ) : null}
           </>
@@ -756,6 +765,7 @@ function AppFallback({
 }
 
 function AccessDeniedView() {
+  const messages = useAppMessages().accessDenied
   const [isSigningOut, setIsSigningOut] = React.useState(false)
 
   async function handleSignOut() {
@@ -770,8 +780,8 @@ function AccessDeniedView() {
 
   return (
     <AppFallback
-      title="Access required"
-      detail="Your account is signed in, but it does not have permission to access this app."
+      title={messages.title}
+      detail={messages.detail}
       showReload={false}
       action={
         <button
@@ -787,7 +797,7 @@ function AccessDeniedView() {
             cursor: isSigningOut ? "default" : "pointer",
           }}
         >
-          {isSigningOut ? "Signing out…" : "Sign out"}
+          {isSigningOut ? messages.signingOut : messages.signOut}
         </button>
       }
     />
@@ -798,10 +808,11 @@ function AccessDeniedView() {
 // route below) and for an expected 404 surfaced through a query. Apps will be
 // able to override this via app/not-found.tsx.
 function NotFoundView() {
+  const messages = useAppMessages().notFound
   return (
     <AppFallback
-      title="Not found"
-      detail="The page or resource you requested does not exist."
+      title={messages.title}
+      detail={messages.detail}
       showReload={false}
     />
   )
@@ -819,15 +830,16 @@ function AppErrorFallback({
   error: unknown
   hideErrorDetails: boolean
 }) {
+  const messages = useAppMessages().error
   if (isSixbApiError(error) && error.status === 404) {
     return <NotFoundView />
   }
   return (
     <AppFallback
-      title="Something went wrong"
+      title={messages.title}
       detail={
         hideErrorDetails
-          ? "This shared page could not be displayed."
+          ? messages.sharedDetail
           : error instanceof Error
             ? error.message
             : String(error)
@@ -909,41 +921,87 @@ function RoutedApp({ hideErrorDetails }: { readonly hideErrorDetails: boolean })
   )
 }
 
+// Project settings do not change while the app runs: never refetch or collect them. Built on use:
+// the query key captures the API base URL, which the bootstrap configures after this module loads.
+function projectInfoQuery() {
+  return {
+    ...getProjectInfoOptions(),
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
+    retry: false,
+  }
+}
+
+// Framework text follows the reader's browser languages and falls back to the project's. A shared
+// link's grant cannot read project settings, so it keeps the browser's languages alone.
+function ProjectLocale({
+  shared,
+  children,
+}: {
+  readonly shared: boolean
+  readonly children: React.ReactNode
+}) {
+  const { data: project } = useQuery({ ...projectInfoQuery(), enabled: !shared })
+  return <LocaleProvider fallbackLocale={project?.locale}>{children}</LocaleProvider>
+}
+
 function App({ basename }: StartAppOptions) {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter basename={basename}>
-        <SharedDocumentLinkInterceptor basename={basename} />
-        <InternalLinkInterceptor basename={basename} />
-        {basename ? (
-          <RoutedApp hideErrorDetails />
-        ) : (
-          <SharedDocumentBoundary>
-            <RoutedApp hideErrorDetails={false} />
-          </SharedDocumentBoundary>
-        )}
-      </BrowserRouter>
+      <ProjectLocale shared={Boolean(basename)}>
+        <BrowserRouter basename={basename}>
+          <SharedDocumentLinkInterceptor basename={basename} />
+          <InternalLinkInterceptor basename={basename} />
+          {basename ? (
+            <RoutedApp hideErrorDetails />
+          ) : (
+            <SharedDocumentBoundary>
+              <RoutedApp hideErrorDetails={false} />
+            </SharedDocumentBoundary>
+          )}
+        </BrowserRouter>
+      </ProjectLocale>
     </QueryClientProvider>
   )
 }
 
 export function startApp(options: StartAppOptions = {}) {
+  // The HTML is built without loading the project: declare the project's language on the document
+  // as soon as the API answers, without waiting for the page tree to render.
+  if (!options.basename) {
+    void queryClient.fetchQuery(projectInfoQuery()).then(
+      (project) => {
+        document.documentElement.lang = project.locale
+      },
+      () => undefined
+    )
+  }
   getRoot().render(<App basename={options.basename} />)
 }
 
+// Without a session the project's locale is unknown: these speak the browser's language.
 export function renderAccessDenied() {
-  getRoot().render(<AccessDeniedView />)
+  getRoot().render(
+    <LocaleProvider>
+      <AccessDeniedView />
+    </LocaleProvider>
+  )
 }
 
 export function renderApiUnavailable(apiBaseUrl: string) {
   getRoot().render(
+    <LocaleProvider>
+      <ApiUnavailableView apiBaseUrl={apiBaseUrl} />
+    </LocaleProvider>
+  )
+}
+
+function ApiUnavailableView({ apiBaseUrl }: { readonly apiBaseUrl: string }) {
+  const messages = useAppMessages()
+  return (
     <AppFallback
-      title="Can't reach the Sixb API"
-      detail={
-        "This app could not load your session from " +
-        apiBaseUrl +
-        ". Check that the API is running and allows this origin, then retry."
-      }
+      title={messages.apiUnavailable.title}
+      detail={messages.apiUnavailable.detail(apiBaseUrl)}
       action={
         <button
           type="button"
@@ -957,7 +1015,7 @@ export function renderApiUnavailable(apiBaseUrl: string) {
             cursor: "pointer",
           }}
         >
-          Retry
+          {messages.retry}
         </button>
       }
     />
@@ -1011,7 +1069,8 @@ if (authSession === "unavailable") {
 
   // This module contains framework bootstrap only. It must never statically import routes, the
   // authored layout, or any page: that graph is imported after the session is accepted.
-  const sharedMainContent = `import {
+  const sharedMainContent = `import { browserAppLocale, browserAppMessages } from "@sixb/app/locale"
+import {
   configureSixbSharedBrowserClient,
   isSixbApiError,
   readSixbBrowserRuntimeConfig,
@@ -1043,6 +1102,8 @@ export function startSharedApp(
   bootstrap: SharedAppBootstrap,
   options: SharedAppStartOptions = {}
 ): void {
+  // A shared link speaks the reader's language: the grant cannot read the project's.
+  document.documentElement.lang = browserAppLocale()
   if (!isValidBootstrap(bootstrap)) {
     renderSharedFallback("unavailable")
     return
@@ -1171,28 +1232,29 @@ function renderSharedFallback(
     "justify-content:center;gap:.75rem;padding:2rem;text-align:center;" +
     "font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
 
+  const messages = browserAppMessages().shared
   const title = document.createElement("h1")
   title.style.cssText = "margin:0;font-size:1.5rem"
   title.textContent =
     state === "loading"
-      ? "Opening shared access…"
+      ? messages.opening
       : state === "retryable"
-        ? "Unable to open this link"
-        : "Link unavailable"
+        ? messages.retryableTitle
+        : messages.unavailableTitle
   const detail = document.createElement("p")
   detail.style.cssText = "margin:0;max-width:32rem"
   detail.textContent =
     state === "loading"
-      ? "Please wait while this link is verified."
+      ? messages.verifying
       : state === "retryable"
-        ? "A temporary problem occurred. Please try again."
-        : "This shared link is invalid, expired, or no longer available."
+        ? messages.retryableDetail
+        : messages.unavailableDetail
   main.append(title, detail)
 
   if (retry) {
     const button = document.createElement("button")
     button.type = "button"
-    button.textContent = "Try again"
+    button.textContent = messages.tryAgain
     button.style.cssText =
       "margin-top:.25rem;padding:.625rem 1rem;border:1px solid currentColor;" +
       "border-radius:.375rem;background:transparent;color:inherit;cursor:pointer;font:inherit"
@@ -1283,7 +1345,13 @@ ${renderSharedMetadataHead(metadata)}
           "min-height:100dvh;display:grid;place-items:center;padding:2rem;text-align:center;" +
           "font-family:system-ui,-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif"
         const message = document.createElement("p")
-        message.textContent = "This shared link is invalid, expired, or no longer available."
+        // Inline and dependency-free: the translations travel with the page.
+        const translations = ${JSON.stringify(sharedUnavailableTranslations())}
+        const language = (navigator.languages || [navigator.language])
+          .map((tag) => String(tag).split("-")[0].toLowerCase())
+          .find((tag) => tag in translations)
+        document.documentElement.lang = language || "en"
+        message.textContent = translations[language || "en"]
         main.append(message)
         root.replaceChildren(main)
       }

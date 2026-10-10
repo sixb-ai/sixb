@@ -3,6 +3,7 @@
 import { useId } from "react"
 import { useDictation } from "../../hooks/use-dictation"
 import type { SpeechRecognitionState } from "../../hooks/use-speech-recognition"
+import { useUiMessages } from "../../lib/i18n/ui"
 import type { SpeechRecognizer } from "../../lib/speech"
 import { appendDictationText } from "../../lib/speech"
 import { cn } from "../../lib/utils"
@@ -60,8 +61,9 @@ export function DictationTextarea({
   busyReason,
   readOnlyWhileListening = true,
   showInterim = true,
-  unsupportedMessage = "Voice dictation isn't supported in this browser. You can still type instead.",
+  unsupportedMessage,
 }: DictationTextareaProps) {
+  const messages = useUiMessages().dictation
   const generatedId = useId()
   const fieldId = id ?? `${generatedId}-dictation`
   const statusId = `${generatedId}-status`
@@ -72,13 +74,13 @@ export function DictationTextarea({
 
   const statusMessage =
     state.status === "starting"
-      ? "Waiting for microphone permission…"
+      ? messages.waitingForPermission
       : state.status === "listening"
-        ? "Listening… Press stop when you're finished."
+        ? messages.listening
         : state.status === "stopping"
-          ? "Finishing dictation…"
+          ? messages.finishing
           : state.supported === false
-            ? unsupportedMessage
+            ? (unsupportedMessage ?? messages.unsupported)
             : null
 
   const displayValue =

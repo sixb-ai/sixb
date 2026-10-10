@@ -7,6 +7,7 @@ import {
   type LanguageModel,
   type LanguageModelRequest,
   type LanguageModelStreamEvent,
+  type ModelCatalogInput,
   ModelCatalogUnavailableError,
   ModelStreamError,
   rateModelCall,
@@ -64,7 +65,7 @@ function fakeModel(
   return { model, requests }
 }
 
-function setup(models?: readonly LanguageModel[], controller = new AbortController()) {
+function setup(models?: ModelCatalogInput["language"], controller = new AbortController()) {
   const deps = createTestRuntimeDeps()
   const host = new SixbHost({
     id: "generation",
@@ -178,6 +179,18 @@ describe("language generation", () => {
     expect(
       (await setup().sixb.models.language.generate({ model: first.model, prompt: "Hi" })).output
     ).toBe("Hello")
+  })
+
+  test("applies a catalog model's default reasoning only when the call omits one", async () => {
+    // Proven by removal: pass `input.reasoning` instead of the resolved reasoning to the loop.
+    const first = fakeModel()
+    const second = fakeModel({ modelId: "second" })
+    const { sixb } = setup([{ model: first.model, reasoning: "low" }, second.model])
+    await sixb.models.language.generate({ prompt: "Hi" })
+    await sixb.models.language.generate({ prompt: "Hi", reasoning: "provider-default" })
+    await sixb.models.language.generate({ model: second.model, prompt: "Hi" })
+    expect(first.requests.map((request) => request.reasoning)).toEqual(["low", "provider-default"])
+    expect(second.requests[0]?.reasoning).toBeUndefined()
   })
 
   test("embedding-only catalogs reject language generation before inference", async () => {

@@ -11,6 +11,7 @@ import {
   SunMedium,
 } from "lucide-react"
 import { useTheme } from "../hooks/useTheme"
+import { useUiMessages } from "../lib/i18n/ui"
 import { Avatar, AvatarFallback, AvatarImage } from "./ui/avatar"
 import {
   DropdownMenu,
@@ -23,9 +24,9 @@ import {
 import { SidebarMenu, SidebarMenuButton, SidebarMenuItem, useSidebar } from "./ui/sidebar"
 
 const themes = [
-  { value: "light", label: "Light", Icon: SunMedium },
-  { value: "dark", label: "Dark", Icon: MoonStar },
-  { value: "system", label: "System", Icon: LaptopMinimal },
+  { value: "light", Icon: SunMedium },
+  { value: "dark", Icon: MoonStar },
+  { value: "system", Icon: LaptopMinimal },
 ] as const
 
 export interface SidebarUser {
@@ -58,6 +59,7 @@ function initials(name: string): string {
 export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuProps) {
   const { theme, setTheme } = useTheme()
   const { isMobile } = useSidebar()
+  const messages = useUiMessages()
 
   return (
     <SidebarMenu>
@@ -88,11 +90,11 @@ export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuPro
               </SidebarMenuButton>
             ) : (
               <SidebarMenuButton
-                tooltip="Preferences"
+                tooltip={messages.sidebar.preferences}
                 className="text-sidebar-foreground data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
               >
                 <Settings2 />
-                <span>Preferences</span>
+                <span>{messages.sidebar.preferences}</span>
               </SidebarMenuButton>
             )}
           </DropdownMenuTrigger>
@@ -131,7 +133,7 @@ export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuPro
               return (
                 <DropdownMenuItem key={option.value} onClick={() => setTheme(option.value)}>
                   <Icon />
-                  <span className="flex-1">{option.label}</span>
+                  <span className="flex-1">{messages.theme[option.value]}</span>
                   {selected ? <Check className="text-muted-foreground" /> : null}
                 </DropdownMenuItem>
               )
@@ -143,7 +145,7 @@ export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuPro
                 <DropdownMenuItem asChild>
                   <a href={apiHref} target="_blank" rel="noopener noreferrer">
                     <ExternalLink />
-                    <span>API reference</span>
+                    <span>{messages.sidebar.apiReference}</span>
                   </a>
                 </DropdownMenuItem>
               </>
@@ -154,7 +156,7 @@ export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuPro
                 <DropdownMenuSeparator />
                 <DropdownMenuItem onClick={onSignOut}>
                   <LogOut />
-                  <span>Log out</span>
+                  <span>{messages.sidebar.logOut}</span>
                 </DropdownMenuItem>
               </>
             ) : null}
@@ -168,8 +170,9 @@ export function SidebarUserMenu({ user, apiHref, onSignOut }: SidebarUserMenuPro
 /** Shared collapse/expand toggle for the sidebar rail. */
 export function SidebarCollapseToggle() {
   const { state, toggleSidebar } = useSidebar()
+  const messages = useUiMessages()
   const collapsed = state === "collapsed"
-  const label = collapsed ? "Expand sidebar" : "Collapse sidebar"
+  const label = collapsed ? messages.sidebar.expand : messages.sidebar.collapse
   const Icon = collapsed ? ChevronsRight : ChevronsLeft
 
   return (

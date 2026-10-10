@@ -1,12 +1,5 @@
 import type { NormalizedPart } from "../parts"
 
-const publicationDateFormatter = new Intl.DateTimeFormat("en", {
-  day: "numeric",
-  month: "short",
-  year: "numeric",
-  timeZone: "UTC",
-})
-
 export interface WebSource {
   readonly id: string
   readonly url: string
@@ -15,7 +8,18 @@ export interface WebSource {
   readonly title: string
   readonly excerpt: string
   readonly author?: string
+  /** ISO date as published by the source; see {@link formatPublicationDate}. */
   readonly publishedDate?: string
+}
+
+/** A publication date in the reader's language. Sources publish calendar dates, read in UTC. */
+export function formatPublicationDate(value: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(new Date(value))
 }
 
 /** Recognize the bounded Exa web_search output, without depending on the connector package. */
@@ -93,9 +97,8 @@ function excerpt(value: string): string {
 
 function publicationDate(value: unknown): string | undefined {
   if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}(?:T|$)/.test(value)) return
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return
-  return publicationDateFormatter.format(date)
+  if (!Number.isFinite(new Date(value).getTime())) return
+  return value
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

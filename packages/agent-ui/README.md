@@ -67,6 +67,7 @@ export function AppAssistant() {
     <AgentSurface
       title="Operations Assistant"
       launcherLabel="Ask Operations"
+      composerPlaceholder="Ask about today's operations"
     />
   )
 }
@@ -98,6 +99,29 @@ thread without adding assistant state to the host URL.
 
 Use `AgentChatPage` when an application needs a standalone routed full-page conversation.
 Its conversation header includes a “Back to app” action that returns to the router's root route.
+
+## Language
+
+The chat translates the text it writes itself: buttons, statuses, activity lines, errors, and
+document viewer messages, in English and French. It follows the nearest `LocaleProvider` from
+`@sixb/ui/lib/i18n` and speaks English without one. Your content (titles, welcome content,
+`composerPlaceholder`, ontology names) is shown as you wrote it, and the model answers in the
+user's language.
+
+Reword any message with `AgentLabelsProvider`; labels apply in every language:
+
+```tsx
+import { AgentLabelsProvider, AgentSurface } from "@sixb/agent-ui"
+
+<AgentLabelsProvider labels={{ chat: { placeholder: "Ask about an order" } }}>
+  <AgentSurface />
+</AgentLabelsProvider>
+```
+
+Each message carries the browser's time zone and language, so the agent presents dates in the
+user's local time. **Continue**, after a turn reaches its time limit, sends `continue: true`
+instead of a written message: Sixb words the instruction for the model, and the transcript shows
+no message for it.
 
 ## Ambient context from anywhere in the tree
 
@@ -160,6 +184,10 @@ Use `useAgentConversation` once per conversation surface to share thread data, s
 model selection, send/stop/retry actions, and failed-send draft restoration. The host owns `threadId`;
 update it when `onThreadCreated` fires. Use `embedded: true` for a compact surface that does not need
 the workspace-wide activity subscription.
+
+Until the user picks a model or a reasoning effort, messages carry neither and the server applies
+the project's defaults from `models.language`. An explicit choice is remembered in the browser;
+`resetModelSelection` forgets it.
 
 The example below requires a configured Sixb client and a `QueryClientProvider` from
 `@tanstack/react-query` above it. Load `@sixb/ui/globals.css` for the shared theme/Tailwind styles and
@@ -246,6 +274,9 @@ export function CustomChat() {
           selectedReasoning={chat.selectedReasoning}
           onSelectModel={chat.selectModel}
           onSelectReasoning={chat.selectReasoning}
+          onResetReasoning={chat.resetReasoning}
+          usingDefaultModel={chat.usingDefaultModel}
+          onResetModelSelection={chat.resetModelSelection}
         />
       </section>
     </DocumentPreviewRoot>

@@ -7,6 +7,7 @@ import { SandboxRecovery } from "./components/SandboxRecovery"
 import { DocumentPreviewRoot } from "./document-preview/DocumentPreviewRoot"
 import type { AgentDocumentPreviewRenderer } from "./document-preview/types"
 import { useAgentConversation } from "./hooks/useAgentConversation"
+import { useAgentMessages } from "./i18n"
 import type { AgentContextInput } from "./types"
 
 export interface AgentChatProps {
@@ -43,6 +44,7 @@ export function AgentChat({
   conversationHeaderActions,
   composerPlaceholder,
 }: AgentChatProps) {
+  const messages = useAgentMessages()
   const threadId = threadIdInput ?? null
   const conversation = useAgentConversation({
     threadId,
@@ -63,25 +65,30 @@ export function AgentChat({
   if (conversation.agentLoading) {
     content = <div className="h-full" aria-busy="true" />
   } else if (conversation.agentError) {
-    content = <ErrorState title="Agent unavailable" description="Could not load the agent." />
+    content = (
+      <ErrorState
+        title={messages.chat.agentUnavailable}
+        description={messages.chat.agentLoadFailed}
+      />
+    )
   } else if (!conversation.currentAgent) {
     content = (
       <div className="flex h-full items-center justify-center p-6">
         <EmptyState
           icon={<MessagesSquare className="size-12 stroke-1" />}
-          title="Agent unavailable"
-          description="Configure at least one language model and grant access to the project agent."
+          title={messages.chat.agentUnavailable}
+          description={messages.chat.agentNotConfigured}
         />
       </div>
     )
   } else if (conversation.threadUnavailable) {
     content = (
       <ErrorState
-        title="Conversation unavailable"
-        description="This conversation is no longer available."
+        title={messages.chat.conversationUnavailable}
+        description={messages.chat.conversationGone}
       >
         <Button variant="outline" onClick={onNavigateHome}>
-          New thread
+          {messages.threads.new}
         </Button>
       </ErrorState>
     )
@@ -133,7 +140,7 @@ export function AgentChat({
         sendError={conversation.sendError}
         currentThread={conversation.currentThread}
         runningThreadCount={runningThreadCount}
-        threadsError={conversation.threadsError ? "Could not load threads." : null}
+        threadsError={conversation.threadsError ? messages.chat.threadsLoadFailed : null}
         hasMoreThreads={conversation.threadsHasMore}
         loadingMoreThreads={conversation.threadsLoadingMore}
         loadMoreThreadsError={conversation.threadsLoadMoreError}
@@ -163,7 +170,10 @@ export function AgentChat({
         modelsError={conversation.modelsError}
         onSelectModel={conversation.selectModel}
         onSelectReasoning={conversation.selectReasoning}
-        composerPlaceholder={composerPlaceholder ?? "Ask anything"}
+        onResetReasoning={conversation.resetReasoning}
+        usingDefaultModel={conversation.usingDefaultModel}
+        onResetModelSelection={conversation.resetModelSelection}
+        composerPlaceholder={composerPlaceholder ?? messages.chat.placeholder}
         composerDraft={conversation.draftReseed.text}
         composerDraftAttachments={conversation.draftReseed.attachments}
         composerDraftContext={conversation.draftReseed.context}

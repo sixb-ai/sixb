@@ -15,6 +15,7 @@ import { type AgentRunFinishReason, coerceAgentRunFinishReason } from "@sixb/cor
 import {
   DEFAULT_AGENT_FINAL_STEP_INSTRUCTION,
   renderWorkflowOutputFinalizerPrompt,
+  withCurrentTime,
 } from "./agent-prompt"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
 import { agentTraceFromModelSteps } from "./model-adapters"
@@ -32,6 +33,8 @@ export interface RunWorkflowAgentNodeInput {
   readonly workflowRunId: string
   readonly nodeRunId: string
   readonly prompt: string
+  /** When the node run was created; dates the prompt for the model. */
+  readonly createdAt: Date
   readonly valueTypesById: ReadonlyMap<string, ValueType>
   readonly usageRecorder: AiModelCallRecorder
   readonly signal: AbortSignal
@@ -116,7 +119,11 @@ export async function runWorkflowAgentNode(
           role: "system",
           content: input.context.systemPrompt,
         },
-        { role: "user", content: [{ type: "text", text: input.prompt }] },
+        withCurrentTime(
+          { role: "user", content: [{ type: "text", text: input.prompt }] },
+          input.createdAt,
+          input.context.projectTimeZone
+        ),
       ],
       tools: input.context.tools,
       ...(input.plan.reasoning === undefined ? {} : { reasoning: input.plan.reasoning }),

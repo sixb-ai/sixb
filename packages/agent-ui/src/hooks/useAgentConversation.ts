@@ -19,6 +19,14 @@ import {
 import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/models"
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
+import { useAgentMessages } from "../i18n"
+import {
+  type ModelPreference,
+  preferenceWithoutReasoning,
+  preferenceWithReasoning,
+  resolveModelSelection,
+} from "../modelSelection"
+import { type RequesterSettings, sendWithRequesterSettings } from "../requesterSettings"
 import {
   EXTENDED_WAITING_STATUS_MS,
   isActiveAgentRunStatus,
@@ -27,13 +35,7 @@ import {
   shouldShowExtendedWaitingStatus,
 } from "../runPresentation"
 import { THREAD_PAGE_SIZE } from "../threadNavigation"
-import type {
-  AgentContextEntryInput,
-  AgentFileRef,
-  AgentModelSelection,
-  AgentRun,
-  LanguageModel,
-} from "../types"
+import type { AgentContextEntryInput, AgentFileRef, AgentRun, LanguageModel } from "../types"
 import { useThreadStream } from "./useThreadStream"
 
 interface PendingSend {
@@ -70,6 +72,7 @@ export function useAgentConversation({
   embedded = false,
   onThreadCreated,
 }: UseAgentConversationInput) {
+  const labels = useAgentMessages().chat
   const queryClient = useQueryClient()
   const agentQuery = useQuery(getAgentOptions())
   const modelsQuery = useQuery(listModelsOptions())
@@ -101,8 +104,9 @@ export function useAgentConversation({
   const currentAgent = agentQuery.data
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
   const [modelPreference, setModelPreference] = useState(readModelPreference)
-  const selectedModel = resolveSelectedModel(models, modelPreference)
-  const selectedReasoning = resolveSelectedReasoning(selectedModel, modelPreference?.reasoning)
+  const modelSelection = resolveModelSelection(models, modelPreference)
+  const selectedModel = modelSelection.model
+  const selectedReasoning = modelSelection.reasoning
   const threads = useMemo(
     () => threadsQuery.data?.pages.flatMap((page) => page.threads) ?? [],
     [threadsQuery.data]
@@ -242,15 +246,12 @@ export function useAgentConversation({
     try {
       if (targetThreadId !== null) {
         setPendingUser({ threadId: targetThreadId, text, attachments, context, messageId: null })
-        const response = await postMessage.mutateAsync({
-          path: { threadId: targetThreadId },
-          body: messageBody(
-            text,
-            attachments,
-            context,
-            modelSelection(selectedModel, selectedReasoning)
-          ),
-        })
+        const response = await sendWithRequesterSettings((settings) =>
+          postMessage.mutateAsync({
+            path: { threadId: targetThreadId },
+            body: messageBody(text, attachments, context, modelSelection.request, settings),
+          })
+        )
         recordAcceptedSend(response.run)
         await Promise.all([
           queryClient.invalidateQueries({
@@ -267,15 +268,13 @@ export function useAgentConversation({
       })
       createdThreadId = created.thread.id
       setPendingUser({ threadId: createdThreadId, text, attachments, context, messageId: null })
-      const response = await postMessage.mutateAsync({
-        path: { threadId: createdThreadId },
-        body: messageBody(
-          text,
-          attachments,
-          context,
-          modelSelection(selectedModel, selectedReasoning)
-        ),
-      })
+      const newThreadId = createdThreadId
+      const response = await sendWithRequesterSettings((settings) =>
+        postMessage.mutateAsync({
+          path: { threadId: newThreadId },
+          body: messageBody(text, attachments, context, modelSelection.request, settings),
+        })
+      )
       recordAcceptedSend(response.run)
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
       onThreadCreated(createdThreadId)
@@ -291,7 +290,7 @@ export function useAgentConversation({
       }))
       setSendError({
         threadId: createdThreadId ?? targetThreadId,
-        message: "Couldn't send your message. Please try again.",
+        message: labels.sendFailed,
       })
       if (createdThreadId) onThreadCreated(createdThreadId)
       if (targetThreadId !== null) {
@@ -319,25 +318,40 @@ export function useAgentConversation({
       {
         onSuccess: (response) => {
           setPendingSend({ run: response.run })
-          void Promise.all([
-            queryClient.invalidateQueries({
-              queryKey: listAgentThreadMessagesQueryKey({ path: { threadId } }),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: listAgentThreadRunsQueryKey({ path: { threadId } }),
-            }),
-            queryClient.invalidateQueries({
-              queryKey: getAgentThreadQueryKey({ path: { threadId } }),
-            }),
-            queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
-          ])
+          void refreshThread(threadId)
         },
       }
     )
   }
 
-  const continueAfterTimeout = () => {
-    void send("Continue from where you left off.", [], [])
+  const refreshThread = (threadId: string) =>
+    Promise.all([
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadMessagesQueryKey({ path: { threadId } }),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: listAgentThreadRunsQueryKey({ path: { threadId } }),
+      }),
+      queryClient.invalidateQueries({
+        queryKey: getAgentThreadQueryKey({ path: { threadId } }),
+      }),
+      queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() }),
+    ])
+
+  // Sixb writes the continuation for the model, with the cut-short turn's model and reasoning; the
+  // transcript shows no message for it.
+  const continueAfterTimeout = async () => {
+    if (isRunning || threadId === null) return
+    setSendError(null)
+    try {
+      const response = await sendWithRequesterSettings((settings) =>
+        postMessage.mutateAsync({ path: { threadId }, body: { continue: true, ...settings } })
+      )
+      setPendingSend({ run: response.run })
+      await refreshThread(threadId)
+    } catch {
+      setSendError({ threadId, message: labels.sendFailed })
+    }
   }
 
   const handleRecreateSandbox = () => {
@@ -358,25 +372,22 @@ export function useAgentConversation({
     )
   }
 
+  // Choosing a model starts from that model's default reasoning.
   const selectModel = (model: LanguageModel) => {
-    const reasoning = model.reasoningLevels.includes(selectedReasoning ?? "provider-default")
-      ? selectedReasoning
-      : model.reasoningLevels[0]
-    updateModelPreference({
-      model: { provider: model.provider, modelId: model.modelId },
-      ...(reasoning === undefined ? {} : { reasoning }),
-    })
+    updateModelPreference({ model: { provider: model.provider, modelId: model.modelId } })
   }
 
   const selectReasoning = (reasoning: ModelReasoningLevel) => {
     if (!selectedModel?.reasoningLevels.includes(reasoning)) return
-    updateModelPreference({
-      model: { provider: selectedModel.provider, modelId: selectedModel.modelId },
-      reasoning,
-    })
+    updateModelPreference(preferenceWithReasoning(modelSelection, reasoning))
   }
 
-  const updateModelPreference = (preference: AgentModelSelection) => {
+  const resetReasoning = () => updateModelPreference(preferenceWithoutReasoning(modelSelection))
+
+  /** Follow the project defaults again, including later changes to them. */
+  const resetModelSelection = () => updateModelPreference(null)
+
+  const updateModelPreference = (preference: ModelPreference | null) => {
     setModelPreference(preference)
     writeModelPreference(preference)
   }
@@ -408,8 +419,11 @@ export function useAgentConversation({
     modelsError: modelsQuery.isError,
     selectedModel,
     selectedReasoning,
+    usingDefaultModel: modelSelection.request === undefined,
     selectModel,
     selectReasoning,
+    resetReasoning,
+    resetModelSelection,
     threads,
     threadsError: threadsQuery.isError,
     threadsHasMore: threadsQuery.hasNextPage,
@@ -422,8 +436,7 @@ export function useAgentConversation({
     agentThreads,
     messages,
     messagesLoading: threadId !== null && messagesQuery.isLoading,
-    messagesError:
-      threadId !== null && messagesQuery.isError ? "Could not load this conversation." : null,
+    messagesError: threadId !== null && messagesQuery.isError ? labels.messagesLoadFailed : null,
     live,
     reconnecting,
     pendingUser: pendingUserForThread,
@@ -447,50 +460,19 @@ function messageBody(
   text: string,
   attachments: readonly AgentFileRef[],
   context: readonly AgentContextEntryInput[],
-  selection: AgentModelSelection | undefined
+  selection: ModelPreference | undefined,
+  settings: RequesterSettings
 ) {
   return {
     text,
     ...(selection === undefined ? {} : selection),
+    ...settings,
     ...(attachments.length === 0 ? {} : { attachments: [...attachments] }),
     ...(context.length === 0 ? {} : { context: [...context] }),
   }
 }
 
-function resolveSelectedModel(
-  models: readonly LanguageModel[],
-  preference: AgentModelSelection | null
-): LanguageModel | undefined {
-  const preferred = preference
-    ? models.find(
-        (model) =>
-          model.provider === preference.model.provider && model.modelId === preference.model.modelId
-      )
-    : undefined
-  return preferred ?? models.find((model) => model.isDefault) ?? models[0]
-}
-
-function resolveSelectedReasoning(
-  model: LanguageModel | undefined,
-  preferred: ModelReasoningLevel | undefined
-): ModelReasoningLevel | undefined {
-  if (!model || model.reasoningLevels.length === 0) return undefined
-  if (preferred && model.reasoningLevels.includes(preferred)) return preferred
-  return model.reasoningLevels[0]
-}
-
-function modelSelection(
-  model: LanguageModel | undefined,
-  reasoning: ModelReasoningLevel | undefined
-): AgentModelSelection | undefined {
-  if (!model) return undefined
-  return {
-    model: { provider: model.provider, modelId: model.modelId },
-    ...(reasoning === undefined ? {} : { reasoning }),
-  }
-}
-
-function readModelPreference(): AgentModelSelection | null {
+function readModelPreference(): ModelPreference | null {
   if (typeof window === "undefined") return null
   try {
     const value = JSON.parse(window.localStorage.getItem(MODEL_PREFERENCE_KEY) ?? "null") as unknown
@@ -501,26 +483,29 @@ function readModelPreference(): AgentModelSelection | null {
   }
 }
 
-function writeModelPreference(preference: AgentModelSelection): void {
+function writeModelPreference(preference: ModelPreference | null): void {
   if (typeof window === "undefined") return
   try {
-    window.localStorage.setItem(MODEL_PREFERENCE_KEY, JSON.stringify(preference))
+    if (preference === null) window.localStorage.removeItem(MODEL_PREFERENCE_KEY)
+    else window.localStorage.setItem(MODEL_PREFERENCE_KEY, JSON.stringify(preference))
   } catch {
     // Restricted browser contexts may disable storage; the in-memory preference still works.
   }
 }
 
-function isModelPreference(value: unknown): value is AgentModelSelection {
+function isModelPreference(value: unknown): value is ModelPreference {
   if (typeof value !== "object" || value === null) return false
   const candidate = value as {
     readonly model?: { readonly provider?: unknown; readonly modelId?: unknown }
     readonly reasoning?: unknown
   }
   return (
-    typeof candidate.model?.provider === "string" &&
-    typeof candidate.model.modelId === "string" &&
+    (candidate.model === undefined ||
+      (typeof candidate.model.provider === "string" &&
+        typeof candidate.model.modelId === "string")) &&
     (candidate.reasoning === undefined ||
-      (typeof candidate.reasoning === "string" && REASONING_LEVELS.has(candidate.reasoning)))
+      (typeof candidate.reasoning === "string" && REASONING_LEVELS.has(candidate.reasoning))) &&
+    (candidate.model !== undefined || candidate.reasoning !== undefined)
   )
 }
 

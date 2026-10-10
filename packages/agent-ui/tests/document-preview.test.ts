@@ -424,14 +424,12 @@ describe("Markdown document loading policy", () => {
     ).toBe(true)
   })
 
-  test("normalizes expected API errors", () => {
-    expect(documentLoadError(new SixbApiError("missing", { status: 404 }))).toBe(
-      "This document is no longer available."
-    )
+  test("normalizes expected API errors to message keys, never to the API's English", () => {
+    expect(documentLoadError(new SixbApiError("missing", { status: 404 }))).toBe("gone")
     expect(documentLoadError(new SixbApiError("missing storage", { status: 501 }))).toBe(
-      "Document storage is not available."
+      "storageUnavailable"
     )
-    expect(documentLoadError(new Error("network details"))).toBe("Could not load this document.")
+    expect(documentLoadError(new Error("network details"))).toBe("loadFailed")
   })
 })
 

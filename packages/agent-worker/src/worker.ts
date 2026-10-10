@@ -1103,6 +1103,8 @@ function buildAgentContext(
     agentSkills,
     defaultMaxSteps: options.defaultMaxSteps ?? DEFAULT_MAX_STEPS,
     turnTimeoutMs,
+    locale: host.locale,
+    timeZone: host.timeZone,
   }
 }
 

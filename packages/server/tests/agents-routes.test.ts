@@ -565,6 +565,19 @@ describe("agent routes", () => {
     expect(invalidAttachmentResponse.status).toBe(400)
     expect(await invalidAttachmentResponse.json()).toEqual({
       error: "[Sixb] Attachment 0 is not a valid file reference.",
+      code: "invalid_attachment",
+    })
+    // Strict on browser hints, naming the field and the code clients retry on.
+    const invalidZoneResponse = await app.fetch(
+      jsonRequest(`/api/agent-threads/${createThreadBody.thread.id}/messages`, "POST", {
+        text: "Check the failed pipeline.",
+        timeZone: "Etc/Unknown",
+      })
+    )
+    expect(invalidZoneResponse.status).toBe(400)
+    expect(await invalidZoneResponse.json()).toEqual({
+      error: `[Sixb] Agent request 'timeZone' must be an IANA time zone; received "Etc/Unknown".`,
+      code: "invalid_locale",
     })
     const postMessageResponse = await app.fetch(
       jsonRequest(`/api/agent-threads/${createThreadBody.thread.id}/messages`, "POST", {
@@ -973,6 +986,27 @@ describe("agent routes", () => {
     })
   })
 
+  test("accepts a continuation flag in place of text, and neither is rejected", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const session = await seedSession(storage, "usr_continue", ["support-users"])
+    const created = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", {}, session.csrfHeaders)
+    )
+    const { thread } = (await created.json()) as { thread: { id: string } }
+    const post = (body: unknown) =>
+      app.fetch(
+        jsonRequest(`/api/agent-threads/${thread.id}/messages`, "POST", body, session.csrfHeaders)
+      )
+
+    expect((await post({})).status).toBe(400)
+    const continued = await post({ continue: true })
+    expect(continued.status).toBe(202)
+    const { run } = (await continued.json()) as { run: { triggerMessageId: string } }
+    await expect(
+      storage.agents.messages.getById({ projectId: sixb.id, id: run.triggerMessageId })
+    ).resolves.toMatchObject({ parts: [{ type: "continuation" }] })
+  })
+
   test("retries a failed run with a fresh attribution snapshot and the same trigger", async () => {
     const { app, storage, sixb } = createApp({ auth: true })
     const session = await seedSession(storage, "usr_retry", ["support-users", "admins"])
@@ -985,7 +1019,7 @@ describe("agent routes", () => {
       jsonRequest(
         `/api/agent-threads/${thread.thread.id}/messages`,
         "POST",
-        { text: "try this", reasoning: "medium" },
+        { text: "try this", reasoning: "medium", timeZone: "Europe/Paris", locale: "fr-FR" },
         session.csrfHeaders
       )
     )
@@ -998,7 +1032,12 @@ describe("agent routes", () => {
       id: request.run.id,
     })
     expect(originalRun).toMatchObject({
-      spec: { model: { provider: "test", modelId: "test-model" }, reasoning: "medium" },
+      spec: {
+        model: { provider: "test", modelId: "test-model" },
+        reasoning: "medium",
+        timeZone: "Europe/Paris",
+        locale: "fr-FR",
+      },
     })
     await expect(
       storage.executions.getById({ projectId: sixb.id, id: originalRun?.executionId ?? "" })

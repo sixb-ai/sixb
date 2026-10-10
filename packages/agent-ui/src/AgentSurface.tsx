@@ -26,6 +26,7 @@ import {
   readAgentSurfaceState,
   writeAgentSurfaceState,
 } from "./agent-surface-state"
+import { useAgentMessages } from "./i18n"
 
 export type { AgentSurfaceMode } from "./agent-surface-state"
 
@@ -42,6 +43,7 @@ export interface AgentSurfaceProps {
   readonly onRequestDock?: () => void
   readonly title?: string
   readonly launcherLabel?: string
+  readonly composerPlaceholder?: string
   readonly context?: readonly AgentContextInput[]
   /** Controlled thread. The latest value is still remembered for a later dock transition. */
   readonly threadId?: string | null
@@ -76,8 +78,9 @@ export function AgentSurface({
   fullPage = false,
   onRequestFullPage,
   onRequestDock,
-  title = "Assistant",
-  launcherLabel = "Open assistant",
+  title,
+  launcherLabel,
+  composerPlaceholder,
   context,
   threadId,
   defaultThreadId = null,
@@ -94,6 +97,9 @@ export function AgentSurface({
   panelClassName,
   welcomeContent,
 }: AgentSurfaceProps) {
+  const messages = useAgentMessages().surface
+  const surfaceTitle = title ?? messages.title
+  const launcher = launcherLabel ?? messages.open
   const minimumWidth = Math.min(minDockWidth, maxDockWidth)
   const maximumWidth = Math.max(minDockWidth, maxDockWidth)
   const storageKey = agentSurfaceSessionStorageKey(persistenceKey)
@@ -230,8 +236,8 @@ export function AgentSurface({
           type="button"
           size="icon"
           className="fixed right-5 bottom-5 z-40 size-11 rounded-full shadow-lg max-sm:right-3 max-sm:bottom-3"
-          aria-label={launcherLabel}
-          title={launcherLabel}
+          aria-label={launcher}
+          title={launcher}
           onClick={() => changeMode("dock")}
         >
           <MessageSquareText className="size-4" />
@@ -253,7 +259,7 @@ export function AgentSurface({
       <aside
         data-agent-surface={presentation}
         data-agent-surface-resizing={resizing ? "" : undefined}
-        aria-label={title}
+        aria-label={surfaceTitle}
         aria-hidden={!visible}
         inert={!visible}
         style={surfaceStyle}
@@ -271,7 +277,7 @@ export function AgentSurface({
         {visible && !fullPage && resizable ? (
           <div
             role="separator"
-            aria-label="Resize assistant"
+            aria-label={messages.resize}
             aria-orientation="vertical"
             aria-valuemin={minimumWidth}
             aria-valuemax={maximumWidth}
@@ -297,7 +303,7 @@ export function AgentSurface({
               type="button"
               variant="ghost"
               size="icon-lg"
-              aria-label="Collapse assistant"
+              aria-label={messages.collapse}
               onClick={() => changeMode("collapsed")}
               className="absolute top-0.5 left-1.5 z-20 bg-background/90 backdrop-blur-sm [&_svg]:size-5"
             >
@@ -308,6 +314,7 @@ export function AgentSurface({
           <AgentPanel
             compact={!fullPage}
             context={context}
+            composerPlaceholder={composerPlaceholder}
             threadId={currentThreadId}
             onThreadChange={changeThread}
             welcomeContent={welcomeContent}
@@ -317,7 +324,7 @@ export function AgentSurface({
                   type="button"
                   variant="ghost"
                   size="icon-lg"
-                  aria-label="Move assistant to side panel"
+                  aria-label={messages.dock}
                   onClick={() => {
                     changeMode("dock")
                     onRequestDock?.()
@@ -331,7 +338,7 @@ export function AgentSurface({
                   type="button"
                   variant="ghost"
                   size="icon-lg"
-                  aria-label="Expand conversation"
+                  aria-label={messages.expand}
                   onClick={() => {
                     if (onExpandThread && currentThreadId) onExpandThread(currentThreadId)
                     else onRequestFullPage?.()

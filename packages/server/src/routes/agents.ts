@@ -1,4 +1,10 @@
-import { AgentRequestError, type AgentRunView, type FileRef, type SixbHostView } from "@sixb/core"
+import {
+  AgentRequestError,
+  type AgentRequestErrorCode,
+  type AgentRunView,
+  type FileRef,
+  type SixbHostView,
+} from "@sixb/core"
 import { publishAgentRunCancel, publishAgentRunFinished } from "@sixb/core/internal/agents"
 import { agentRunStreamId } from "@sixb/core/internal/agents/streams"
 import {
@@ -29,6 +35,7 @@ import {
   AgentMessageListResponseSchema,
   AgentMessageSchema,
   AgentMessagesQuerySchema,
+  AgentRequestErrorResponseSchema,
   AgentRunListQuerySchema,
   AgentRunListResponseSchema,
   AgentRunParamsSchema,
@@ -170,7 +177,9 @@ async function publishQueuedRunCancellation(
 function handleAgentRouteError(
   error: unknown,
   set: { status?: number | string; headers?: unknown }
-): ReturnType<typeof handleRouteError> {
+):
+  | ReturnType<typeof handleRouteError>
+  | { readonly error: string; readonly code: AgentRequestErrorCode } {
   // A duplicate id is a conflict, not a bad request. Map it to a generic 409 rather than echoing the
   // provider's raw message (which leaks the id, project, and storage prefix).
   if (error instanceof AgentStorageError && error.code === "duplicate_id") {
@@ -205,11 +214,14 @@ function handleAgentRouteError(
       case "invalid_context":
       case "invalid_attachment":
       case "invalid_model_selection":
+      case "invalid_locale":
+      case "invalid_message":
       case "model_not_found":
         set.status = 400
         break
     }
-    return { error: error.message }
+    // The code lets clients react without parsing the English message.
+    return { error: error.message, code: error.code }
   }
 
   return handleRouteError(error, set)
@@ -595,8 +607,11 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const requestInput = {
             threadId: thread.id,
             text: parsed.text,
+            continue: parsed.continue,
             model: parsed.model,
             reasoning: parsed.reasoning,
+            timeZone: parsed.timeZone,
+            locale: parsed.locale,
             attachments: parsed.attachments as readonly FileRef[] | undefined,
             context: parsed.context,
             messageId: parsed.messageId,
@@ -616,7 +631,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
         body: PostAgentMessageBodySchema,
         response: {
           202: PostAgentMessageResponseSchema,
-          400: ErrorResponseSchema,
+          400: AgentRequestErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
           409: ErrorResponseSchema,

@@ -4,7 +4,7 @@ import type { BlobStorage } from "../blob-storage/types"
 import type { ExecutionContext } from "../execution"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { createAudioRuntime } from "./audio/runtime"
-import type { ModelCatalog } from "./catalog"
+import type { LanguageModelEntry, ModelCatalog } from "./catalog"
 import { createDecisionRuntime } from "./decision/runtime"
 import { ModelProviderError, ModelStreamError, UnsupportedModelFeatureError } from "./errors"
 import type { ModelCallEndEvent } from "./events"
@@ -45,14 +45,16 @@ export function createModelsRuntime(
     const messages = generationMessages(input)
     const signal = session.signal(input.signal)
     signal.throwIfAborted()
-    const selected = input.model
+    // A catalog entry also carries the model's default reasoning; a model passed without a
+    // catalog has none.
+    const selected: Pick<LanguageModelEntry, "model" | "reasoning"> | null | undefined = input.model
       ? catalog
         ? catalog.language?.getByRef({
             provider: input.model.providerId,
             modelId: input.model.modelId,
-          })?.model
-        : input.model
-      : catalog?.language?.default.model
+          })
+        : { model: input.model }
+      : catalog?.language?.default
     if (!selected) {
       throw new Error(
         input.model
@@ -64,12 +66,15 @@ export function createModelsRuntime(
       input.output === undefined
         ? undefined
         : languageModelOutput(input.output, runtime.ontology.getValueTypesById())
-    const model = await resolveLanguageModel(selected)
+    const model = await resolveLanguageModel(selected.model)
     const reasoningIssue = modelReasoningSupportIssue(
       model.definition.capabilities.reasoning,
       input.reasoning
     )
     if (reasoningIssue) throw new UnsupportedModelFeatureError(`[SixbModels] ${reasoningIssue}.`)
+    // The default was checked against the capabilities known at startup; like any request, a level
+    // the resolved model turns out not to support falls back to the provider default.
+    const reasoning = input.reasoning ?? selected.reasoning
     if (output && model.definition.capabilities.nativeStructuredOutput === false) {
       throw new UnsupportedModelFeatureError(
         "[SixbModels] Model does not support native structured output."
@@ -79,7 +84,7 @@ export function createModelsRuntime(
       aiModelCallOutputTokenAllowance(input.maxOutputTokens ?? model.definition.maxOutputTokens),
       model.definition.maxOutputTokens ?? Infinity
     )
-    if (typeof input.reasoning === "object" && input.reasoning.budgetTokens >= maxOutputTokens) {
+    if (typeof reasoning === "object" && reasoning.budgetTokens >= maxOutputTokens) {
       throw new TypeError("[SixbModels] Output allowance must exceed the reasoning token budget.")
     }
     const accounting = await session.accounting()
@@ -92,7 +97,7 @@ export function createModelsRuntime(
       maxSteps: 1,
       rejectLocalToolCalls: true,
       maxOutputTokens,
-      reasoning: input.reasoning,
+      reasoning,
       caching: input.caching,
       signal,
       onModelCallEnd: async (completed: ModelCallEndEvent) => {

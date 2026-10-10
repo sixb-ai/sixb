@@ -69,6 +69,7 @@ export {
   type UseAgentConversationInput,
   useAgentConversation,
 } from "./hooks/useAgentConversation"
+export { type AgentLabels, AgentLabelsProvider, type AgentMessages } from "./i18n"
 export { createLiveRunState, type LiveRunState } from "./liveRun"
 export { type NormalizedPart, type NormalizedTool, normalizeDurableParts } from "./parts"
 export type { ActiveTurnPresentation } from "./runPresentation"

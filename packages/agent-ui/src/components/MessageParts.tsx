@@ -4,6 +4,7 @@ import { ChevronRight, Wrench } from "lucide-react"
 import { memo, useState } from "react"
 import { latestWorkLabel } from "../activity-label"
 import { BashToolView } from "../bash/BashToolView"
+import { useAgentMessages } from "../i18n"
 import type { NormalizedPart, NormalizedTool } from "../parts"
 import { ReadToolView } from "../read/ReadToolView"
 import { coerceWebFetchOutput } from "../utils/webFetch"
@@ -101,6 +102,7 @@ function WorkGroup({
   parts: readonly NormalizedPart[]
   inProgress: boolean
 }) {
+  const messages = useAgentMessages()
   const [open, setOpen] = useState(false)
   const sources = collectWebSources(parts)
   const searches = parts.flatMap((part) =>
@@ -116,10 +118,9 @@ function WorkGroup({
 
   const toolCount = parts.reduce((count, part) => count + (part.kind === "tool" ? 1 : 0), 0)
   const hasTools = toolCount > 0
-  const liveLabel = latestWorkLabel(parts)
-  const label = hasTools ? "Worked" : "Reasoning"
-  const detail =
-    !inProgress && hasTools ? `${toolCount} ${toolCount === 1 ? "step" : "steps"}` : undefined
+  const liveLabel = latestWorkLabel(parts, messages)
+  const label = hasTools ? messages.activity.worked : messages.activity.reasoning
+  const detail = !inProgress && hasTools ? messages.activity.steps(toolCount) : undefined
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="max-w-full">
@@ -153,7 +154,7 @@ function WorkGroup({
       <WebSources sources={sources} />
       {searchFailed || emptySearch ? (
         <p className="mt-2 px-1 text-xs text-muted-foreground" role="status">
-          {searchFailed ? "Web search failed. See work details." : "No sources found."}
+          {searchFailed ? messages.activity.searchFailedHint : messages.activity.noSources}
         </p>
       ) : null}
     </Collapsible>
@@ -178,6 +179,7 @@ function GroupReasoning({ text, streaming }: { text: string; streaming: boolean 
  * nested dropdown.
  */
 function ToolCallRow({ tool }: { tool: NormalizedTool }) {
+  const messages = useAgentMessages().activity
   if (tool.toolName === "bash") {
     return (
       <BashToolView
@@ -208,8 +210,7 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
   const isError = tool.state === "output-error"
   const hasInput = tool.input !== undefined || Boolean(tool.inputText)
   const hasOutput = tool.state === "output-available" && tool.output !== undefined
-  const hasErrorDetail = isError && Boolean(tool.errorText)
-  const expandable = hasInput || hasOutput || hasErrorDetail
+  const expandable = hasInput || hasOutput || isError
 
   // Errors read as the same quiet marker as any other tool — no red in the transcript. The failure
   // detail lives inside the disclosure for anyone who wants to expand and debug it.
@@ -228,9 +229,13 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
           ) : null}
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 space-y-2">
-          {hasInput ? <JsonViewer label="Input" value={tool.input ?? tool.inputText} /> : null}
-          {hasOutput ? <JsonViewer label="Output" value={tool.output} /> : null}
-          {hasErrorDetail ? <JsonViewer label="Details" value={tool.errorText} /> : null}
+          {hasInput ? (
+            <JsonViewer label={messages.input} value={tool.input ?? tool.inputText} />
+          ) : null}
+          {hasOutput ? <JsonViewer label={messages.output} value={tool.output} /> : null}
+          {isError ? (
+            <JsonViewer label={messages.details} value={tool.errorText || messages.toolFailed} />
+          ) : null}
         </CollapsibleContent>
       </Collapsible>
     </div>
@@ -240,11 +245,12 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
 function ToolStatus({ state }: { state: NormalizedTool["state"] }) {
   // Only the in-flight state is worth a badge; a finished call (done or errored) reads from the
   // marker itself, keeping failures from flashing red in the transcript.
+  const messages = useAgentMessages().activity
   const running = state === "input-streaming" || state === "input-available"
   if (!running) return null
   return (
     <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground/60 shimmer">
-      running
+      {messages.running}
     </span>
   )
 }
