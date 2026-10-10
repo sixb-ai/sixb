@@ -111,6 +111,13 @@ export {
   retryAgentRun,
 } from "./request"
 export type {
+  AgentDefinitions,
+  AgentDefinitionsInput,
+  AgentProjectFile,
+  AgentSkillCatalog,
+  AgentSkillDefinition,
+} from "./skills"
+export type {
   AgentCompactionFailureCode,
   AgentRunControlStreamId,
   AgentRunFailure,

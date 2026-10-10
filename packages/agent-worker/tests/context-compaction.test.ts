@@ -86,6 +86,7 @@ describe("agent conversation context estimation", () => {
       model,
       instructions: "Answer clearly.",
       tools: [],
+      skills: [],
       maxSteps: 4,
     }
     await storage.aiUsage.recordModelCall({
@@ -226,6 +227,7 @@ describe("agent conversation context estimation", () => {
       model,
       instructions: "Answer clearly.",
       tools: [],
+      skills: [],
       maxSteps: 4,
     }
     await storage.aiUsage.recordModelCall({

@@ -1,6 +1,7 @@
 import { type Dirent, watch } from "node:fs"
 import { lstat, readdir } from "node:fs/promises"
 import { join, resolve, sep } from "node:path"
+import { isAgentContextPath } from "@sixb/core/internal/bootstrap"
 
 const ignoredDirectories = new Set([
   ".sixb",
@@ -13,8 +14,11 @@ const ignoredDirectories = new Set([
   ".local",
 ])
 const isAppSource = (path: string) => path.startsWith(`app${sep}`)
-const isSource = (path: string) =>
-  /\.(?:[cm]?[jt]sx?|json|ya?ml|toml|css)$/.test(path) || path === "bun.lock"
+/** Project code, plus the non-code files the Agent reads (`SIXB.md`, `skills/`). */
+export const isSource = (path: string) =>
+  /\.(?:[cm]?[jt]sx?|json|ya?ml|toml|css)$/.test(path) ||
+  path === "bun.lock" ||
+  isAgentContextPath(path.split(sep).join("/"))
 const ignored = (path: string) => path.split(sep).some((part) => ignoredDirectories.has(part))
 
 function missing(error: unknown): boolean {

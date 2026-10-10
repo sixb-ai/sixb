@@ -167,6 +167,7 @@ async function runAndCaptureModelPrompt(withCheckpoint: boolean) {
       prompt = value
     }),
     tools: [],
+    skills: [],
     maxSteps: 4,
   }
 

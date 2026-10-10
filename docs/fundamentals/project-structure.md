@@ -29,6 +29,7 @@ fit together.
 | [`shares/`](../auth/shared-access.md) | Permissions that can be granted through a share link |
 | [`app/`](../apps/overview.md) | React pages and layouts, with their own routing conventions |
 | [`skills/`](../models/tools-and-authorization.md#add-a-skill) | Agent instructions in `<name>/SKILL.md` and supporting resources |
+| [`SIXB.md`](../models/overview.md#give-it-project-instructions) | Instructions the chat agent follows in every conversation |
 | `lib/` | Shared helpers imported by your project |
 
 ## How files are loaded

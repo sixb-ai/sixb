@@ -1,5 +1,5 @@
 import { isActionDefinition } from "../actions"
-import type { AgentToolCatalog } from "../agents"
+import type { AgentSkillCatalog, AgentToolCatalog } from "../agents"
 import type { ModelCatalog } from "../models"
 import { isModelReasoning } from "../models/language-model"
 import type { SchemaOrRef, ValueType } from "../ontology"
@@ -53,6 +53,7 @@ export function isAgentStepDefinition(value: unknown): value is AgentStepDefinit
     typeof value.instructions === "string" &&
     isStringArray(value.groupIds) &&
     isStringArray(value.toolNames) &&
+    isStringArray(value.skillNames) &&
     isRecord(value.input) &&
     isRecord(value.output) &&
     typeof value.prompt === "function"
@@ -120,6 +121,7 @@ export function validateWorkflowsAtStartup(options: {
   registeredActionIds: ReadonlySet<string>
   models?: ModelCatalog
   tools: AgentToolCatalog
+  skills: AgentSkillCatalog
 }): readonly WorkflowDefinition[] {
   for (const workflow of options.workflows) {
     validateWorkflowDefinition(workflow)
@@ -170,7 +172,11 @@ export function validateWorkflowAgentStepGroupReferences(
 function validateWorkflowAgentStepRuntimeReferences(
   workflowId: string,
   step: AgentStepDefinition,
-  options: { readonly models?: ModelCatalog; readonly tools: AgentToolCatalog }
+  options: {
+    readonly models?: ModelCatalog
+    readonly tools: AgentToolCatalog
+    readonly skills: AgentSkillCatalog
+  }
 ): void {
   if (step.model === undefined && options.models?.language === undefined) {
     throw new WorkflowDefinitionError(
@@ -189,6 +195,13 @@ function validateWorkflowAgentStepRuntimeReferences(
     if (options.tools.getByName(toolName) === null) {
       throw new WorkflowDefinitionError(
         `Workflow "${workflowId}" agent step "${step.id}" uses unknown project tool "${toolName}". Add it to 'tools' in createSixb().`
+      )
+    }
+  }
+  for (const skillName of step.skillNames) {
+    if (options.skills.getByName(skillName) === null) {
+      throw new WorkflowDefinitionError(
+        `Workflow "${workflowId}" agent step "${step.id}" uses unknown Agent Skill "${skillName}". Add it as 'skills/${skillName}/SKILL.md'.`
       )
     }
   }
@@ -385,6 +398,7 @@ function validateAgentNodeDefinition(workflowId: string, node: WorkflowAgentNode
   }
   assertUniqueNonEmptyAgentStepValues(workflowId, node.id, "group", node.agentStep.groupIds)
   assertUniqueNonEmptyAgentStepValues(workflowId, node.id, "tool", node.agentStep.toolNames)
+  assertUniqueNonEmptyAgentStepValues(workflowId, node.id, "skill", node.agentStep.skillNames)
   if (node.mapper !== undefined && typeof node.mapper !== "function") {
     throw new WorkflowDefinitionError(
       `Workflow "${workflowId}" agent node "${node.id}" mapper must be a function.`
@@ -395,7 +409,7 @@ function validateAgentNodeDefinition(workflowId: string, node: WorkflowAgentNode
 function assertUniqueNonEmptyAgentStepValues(
   workflowId: string,
   stepId: string,
-  kind: "group" | "tool",
+  kind: "group" | "tool" | "skill",
   values: readonly string[]
 ): void {
   const seen = new Set<string>()

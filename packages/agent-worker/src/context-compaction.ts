@@ -18,7 +18,6 @@ import type {
 } from "@sixb/core/storage"
 import { AgentStorageError, stableJsonStringify } from "@sixb/core/storage"
 import { renderAgentSystemPrompt } from "./agent-prompt"
-import type { AgentSkill } from "./agent-skills"
 import type { AgentContextBudget } from "./context-budget"
 import { AgentContextCompactionError, AgentExecutionLostError } from "./errors"
 import type { ResolvedAgentExecutionPlan } from "./execution-plan"
@@ -48,7 +47,6 @@ const SUMMARY_SYSTEM_PROMPT = [
 
 export interface PreparedAgentConversationContext {
   readonly threadContext: LoadedAgentThreadModelContext
-  readonly skills: readonly AgentSkill[]
 }
 
 /** Load, estimate, and—when required—compact one admitted conversational run before setup. */
@@ -61,21 +59,18 @@ export async function prepareAgentConversationContext(input: {
   readonly frameworkTools?: readonly ModelTool[]
 }): Promise<PreparedAgentConversationContext> {
   const { context, plan, budget, run, runtime } = input
-  const [skills, initialContext] = await Promise.all([
-    context.agentSkills,
-    loadAgentThreadModelContext({
-      storage: context.storage.agents,
-      projectId: context.id,
-      threadId: run.threadId,
-    }),
-  ])
+  const initialContext = await loadAgentThreadModelContext({
+    storage: context.storage.agents,
+    projectId: context.id,
+    threadId: run.threadId,
+  })
   runtime.assertCanContinue()
 
   const estimateShape = {
     systemPrompt: renderAgentSystemPrompt({
       mode: "conversation",
       instructions: plan.instructions,
-      skills,
+      skills: plan.skills,
     }),
     tools: contextEstimateTools([
       ...agentModelToolSpecs({
@@ -99,7 +94,7 @@ export async function prepareAgentConversationContext(input: {
       inputBudgetTokens: budget.inputBudgetTokens,
     })
   ) {
-    return { threadContext: initialContext, skills }
+    return { threadContext: initialContext }
   }
 
   const reason = "threshold" satisfies AgentContextCheckpointReason
@@ -218,7 +213,7 @@ export async function prepareAgentConversationContext(input: {
       estimatedInputTokensBefore,
       estimatedInputTokensAfter,
     })
-    return { threadContext, skills }
+    return { threadContext }
   } catch (error) {
     // Preserve queue ownership, accounting, deadline, and cancellation failures as their original
     // run-level outcome instead of relabeling them as a compaction implementation failure.

@@ -136,6 +136,7 @@ export function defineAgentStep<const TId extends string>(
   const { model, reasoning, instructions } = config
   const groupIds = groupIdsFromAgentStepConfig(id, config)
   const toolNames = toolNamesFromAgentStepConfig(id, config)
+  const skillNames = skillNamesFromAgentStepConfig(id, config)
 
   return {
     input(input: RuntimeWorkflowInput): unknown {
@@ -154,6 +155,7 @@ export function defineAgentStep<const TId extends string>(
                 instructions,
                 groupIds,
                 toolNames,
+                skillNames,
                 input,
                 output,
                 prompt,
@@ -208,9 +210,30 @@ function toolNamesFromAgentStepConfig(
   return Object.freeze(toolNames)
 }
 
+function skillNamesFromAgentStepConfig(
+  stepId: string,
+  config: DefineAgentStepConfig
+): readonly string[] {
+  if (config.skills !== undefined && !Array.isArray(config.skills)) {
+    throw new WorkflowDefinitionError(
+      `Agent step "${stepId}" skills must be an array of Agent Skill names.`
+    )
+  }
+  const skillNames = Array.from(config.skills ?? [], (name) => {
+    if (typeof name !== "string" || !name.trim()) {
+      throw new WorkflowDefinitionError(
+        `Agent step "${stepId}" skills must contain only non-empty Agent Skill names.`
+      )
+    }
+    return name
+  })
+  assertUniqueAgentStepValues(stepId, "skill", skillNames)
+  return Object.freeze(skillNames)
+}
+
 function assertUniqueAgentStepValues(
   stepId: string,
-  kind: "group" | "tool",
+  kind: "group" | "tool" | "skill",
   values: readonly string[]
 ): void {
   const seen = new Set<string>()
