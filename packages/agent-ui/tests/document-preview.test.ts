@@ -65,7 +65,7 @@ describe("agent document source", () => {
     const source = createAgentDocumentSource({
       threadId: "thread/1",
       messageId: "message 1",
-      partIndex: 2,
+      path: "/parts/2/fileRef",
       fileRef: MARKDOWN_FILE,
       baseUrl: "https://example.test",
     })
@@ -82,7 +82,7 @@ describe("agent document source", () => {
     const source = createAgentDocumentSource({
       threadId: "thread-1",
       messageId: "message-1",
-      partIndex: 0,
+      path: "/parts/0/fileRef",
       fileRef: { ...MARKDOWN_FILE, fileName: "archive.zip", mediaType: "application/zip" },
       baseUrl: "https://example.test",
     })
@@ -442,7 +442,7 @@ function document(id: string, fileName: string): AgentDocumentSource {
     fileRef: { ...MARKDOWN_FILE, blobId: id, fileName },
     threadId: "thread-1",
     messageId: `message-${id}`,
-    partIndex: 0,
+    path: "/parts/0/fileRef",
     inlineUrl: `https://example.test/${id}`,
     downloadUrl: `https://example.test/${id}?disposition=attachment`,
   }

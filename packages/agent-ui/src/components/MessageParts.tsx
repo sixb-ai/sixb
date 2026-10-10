@@ -8,6 +8,7 @@ import type { NormalizedPart, NormalizedTool } from "../parts"
 import { ReadToolView } from "../read/ReadToolView"
 import { coerceWebFetchOutput } from "../utils/webFetch"
 import { coerceWebSearchOutput, collectWebSources } from "../utils/webSearch"
+import { ViewFileToolView } from "../view-file/ViewFileToolView"
 import { ACTIVITY_STATUS_ROW_CLASS_NAME, ActivityStatusText } from "./ActivityStatus"
 import { FileAttachmentCard } from "./FileAttachmentCard"
 import { WebFetchToolView } from "./WebFetchToolView"
@@ -192,6 +193,7 @@ function ToolCallRow({ tool }: { tool: NormalizedTool }) {
     )
   }
   if (tool.toolName === "read") return <ReadToolView tool={tool} />
+  if (tool.toolName === "view_file") return <ViewFileToolView tool={tool} />
   if (
     tool.toolName === "web_fetch" &&
     (tool.state !== "output-available" || coerceWebFetchOutput(tool.output) !== null)

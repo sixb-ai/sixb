@@ -82,7 +82,7 @@ const document: AgentDocumentSource = {
   kind: "image",
   threadId: "thread",
   messageId: "message",
-  partIndex: 0,
+  path: "/parts/0/fileRef",
   fileRef: {
     blobId: "blob",
     digest: "a".repeat(64),

@@ -278,7 +278,9 @@ the domain; unrecognized output shapes fall back to the generic tool inspector.
 ## Document previews
 
 Durable files attached by a user or produced by an agent open directly from the conversation when
-Sixb has a viewer for their format:
+Sixb has a viewer for their format. Files the agent only viewed with `view_file` are not attachments
+of the answer; its work trace shows each as a small image preview or file chip that opens the same
+way. Viewers by format:
 
 - Markdown uses the shared Sixb Markdown renderer.
 - HTML is a static preview in a sandboxed iframe. Scripts, forms, network subresources, nested
