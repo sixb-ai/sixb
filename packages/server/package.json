@@ -43,6 +43,7 @@
   "devDependencies": {
     "@sixb/auth-magic-link": "workspace:*",
     "@sixb/auth-oidc": "workspace:*",
+    "@sixb/cli-core": "workspace:*",
     "@sixb/core": "workspace:*",
     "@sixb/sqlite": "workspace:*",
     "@types/bun": "latest",
