@@ -77,12 +77,6 @@
       "import": "./dist/events/selectors/index.js",
       "default": "./dist/events/selectors/index.js"
     },
-    "./internal/action-edits": {
-      "types": "./dist/actions/worker.d.ts",
-      "bun": "./src/actions/worker.ts",
-      "import": "./dist/actions/worker.js",
-      "default": "./dist/actions/worker.js"
-    },
     "./internal/actions": {
       "types": "./dist/actions/index.d.ts",
       "bun": "./src/actions/index.ts",

@@ -1,6 +1,7 @@
-import type { ActionDefinition, ActionTargetObject, ObjectTypeWithPropertyTokens } from "@sixb/core"
-import type { ActionRunRecord, ObjectRow } from "@sixb/core/storage"
-import type { RunActionJobInput } from "../types"
+import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
+import type { ActionRunRecord, ObjectRow } from "../../storage"
+import type { ActionDefinition, ActionTargetObject } from "../types"
+import type { RunActionJobInput } from "./types"
 
 export type LoadedObjectTarget = {
   readonly subjectObjectType: ObjectTypeWithPropertyTokens

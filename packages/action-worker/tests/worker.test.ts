@@ -10,6 +10,7 @@ import {
   InMemoryStorage,
   param,
   prop,
+  type Sixb,
   type SixbErrorContext,
   SixbHost,
   type Storage,
@@ -26,7 +27,6 @@ import {
 import type { ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { ActionWorker } from "../src"
-import type { ActionExecutionFacade } from "../src/types"
 import { waitFor } from "./helpers"
 
 const Device = defineObjectType({
@@ -53,7 +53,7 @@ interface DeviceObjectSet {
   }): Promise<ActionRunRecord>
 }
 
-function deviceObjects(sixb: ActionExecutionFacade): DeviceObjectSet {
+function deviceObjects(sixb: Sixb): DeviceObjectSet {
   return sixb.objects(Device)
 }
 

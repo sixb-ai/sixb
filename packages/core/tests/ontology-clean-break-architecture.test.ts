@@ -221,6 +221,7 @@ describe("ontology clean-break architecture", () => {
       join(coreSource, "materialization"),
       join(coreSource, "materializer"),
       join(coreSource, "storage/ontology"),
+      join(coreSource, "actions/run"),
       join(workspaceRoot, "packages/action-worker/src"),
       join(workspaceRoot, "packages/projection-worker/src"),
       join(workspaceRoot, "storage/sqlite/src/ontology-storage"),

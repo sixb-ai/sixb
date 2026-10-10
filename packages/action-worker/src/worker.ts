@@ -1,23 +1,14 @@
-import type { DomainEventLog, Queues, SixbDefinitions, Storage } from "@sixb/core"
+import type { Queues } from "@sixb/core"
+import type { ActionRunHost, ActionRunResult } from "@sixb/core/internal/actions"
+import { executeActionRun } from "@sixb/core/internal/actions"
 import { createSixbError } from "@sixb/core/internal/errors"
-import type { LoggingService } from "@sixb/core/internal/logging"
-import {
-  bindDurablePrimitiveExecution,
-  type PrimitiveExecutionHost,
-} from "@sixb/core/internal/primitive-execution"
 import type { QueueWorkerFailureDecision } from "@sixb/core/internal/workers"
 import { QueueWorker } from "@sixb/core/internal/workers"
 import type { ActionRunRequestedQueueJob, ClaimedQueueJob } from "@sixb/core/queues"
 import { ACTION_RUN_FAILURE_CODES } from "@sixb/core/storage"
-import { runActionJob } from "./run-action-job"
-import type { ActionJob, ActionRunResult, ActionWorkerContext } from "./types"
 
-export interface ActionWorkerHost extends PrimitiveExecutionHost {
-  readonly events: DomainEventLog
-  readonly storage: Storage
+export interface ActionWorkerHost extends ActionRunHost {
   readonly queues: Queues
-  readonly logging?: LoggingService
-  readonly definitions: Pick<SixbDefinitions, "actions">
 }
 
 export interface ActionWorkerOptions {
@@ -91,66 +82,16 @@ export class ActionWorker extends QueueWorker<
       )
     }
 
-    const actionRuns = this.host.storage.actionRuns
-    if (!actionRuns) {
-      throw createSixbError(
-        "internal.unexpected",
-        "[SixbActionWorker] Action workers require storage.actionRuns support.",
-        { details: { runId: job.payload.runId } }
-      )
-    }
-    const run = await actionRuns.getById({ projectId: this.host.id, id: job.payload.runId })
-    if (!run) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbActionWorker] Action run '${job.payload.runId}' was not found.`,
-        { details: { runId: job.payload.runId } }
-      )
-    }
-
-    const durableExecution = await this.host.storage.executions.getById({
-      projectId: this.host.id,
-      id: run.executionId,
-    })
-    if (!durableExecution) {
-      throw createSixbError(
-        "internal.unexpected",
-        `[SixbActionWorker] Action run '${run.id}' references missing execution '${run.executionId}'.`,
-        {
-          details: {
-            actionId: run.actionId,
-            runId: run.id,
-            executionId: run.executionId,
-          },
-        }
-      )
-    }
-
-    const actionJob: ActionJob = { id: run.id, actionId: run.actionId }
-    const execution = bindDurablePrimitiveExecution(this.host, {
-      modelExecution: { attempt: job.attempt, signal },
-      execution: durableExecution,
-      primitive: {
-        kind: "action",
-        id: run.actionId,
-        runId: run.id,
-      },
-    })
-    const context = buildActionContext(this.host, execution)
-
-    const result = await runActionJob({
-      runtime: context,
-      job: actionJob,
-      run,
+    const { result, correlationId } = await executeActionRun(this.host, {
+      runId: job.payload.runId,
       signal,
       attempt: job.attempt,
     })
-
     if ("skipped" in result) {
       return
     }
 
-    await emitActionTerminalEvent(this.host, result, durableExecution.correlationId)
+    await emitActionTerminalEvent(this.host, result, correlationId)
   }
 
   protected override async onExecutionError(
@@ -208,35 +149,4 @@ async function emitActionTerminalEvent(
     },
     { source: "SixbActionWorker" }
   )
-}
-
-function buildActionContext(
-  host: ActionWorkerHost,
-  execution: ReturnType<typeof bindDurablePrimitiveExecution>
-): ActionWorkerContext {
-  const actionRunsStorage = host.storage.actionRuns
-  if (!actionRunsStorage) {
-    throw createSixbError(
-      "internal.unexpected",
-      "[SixbActionWorker] Action workers require storage.actionRuns support."
-    )
-  }
-  const sixb = {
-    models: execution.sixb.models,
-    objects: execution.sixb.objects,
-    actions: execution.sixb.actions,
-    connector: execution.sixb.connector,
-    blobs: execution.sixb.blobs,
-  }
-  return {
-    id: host.id,
-    errorReporterHost: host,
-    events: host.events,
-    logging: host.logging,
-    storage: host.storage,
-    actionRunsStorage,
-    ontologyMutations: execution.ontologyMutations,
-    sixb,
-    actions: host.definitions.actions,
-  }
 }
