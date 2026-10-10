@@ -517,6 +517,211 @@ describe("server auth guard", () => {
     expect(await replayed.json()).toEqual({ status: "expired" })
   })
 
+  test("signs another device in with a single-use code from a signed-in browser", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const token = await seedAccessToken(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const browserCookie = `${seeded.cookie}; ${seeded.csrfCookie}`
+    const createCode = (headers: Record<string, string>) =>
+      app.fetch(new Request("http://localhost/api/auth/sign-in-codes", { method: "POST", headers }))
+    const codeStatus = (id: string) =>
+      app.fetch(
+        new Request(`http://localhost/api/auth/sign-in-codes/${id}`, {
+          headers: { cookie: browserCookie },
+        })
+      )
+    const exchange = (body: Record<string, string>) =>
+      app.fetch(
+        new Request("http://localhost/api/auth/device-authorizations/token", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        })
+      )
+
+    expect((await createCode({ cookie: browserCookie })).status).toBe(403)
+    expect((await createCode({ authorization: `Bearer ${token.tokenValue}` })).status).toBe(403)
+
+    const created = await createCode({ cookie: browserCookie, ...seeded.csrfHeader })
+    expect(created.status).toBe(201)
+    const code = (await created.json()) as {
+      readonly id: string
+      readonly code: string
+      readonly url: string
+      readonly expiresAt: string
+    }
+    const link = new URL(code.url)
+    expect(link.protocol).toBe("sixb:")
+    expect(link.searchParams.get("api")).toBe("http://api.localhost")
+    expect(link.searchParams.get("code")).toBe(code.code)
+    expect(Date.parse(code.expiresAt) - Date.now()).toBeLessThanOrEqual(2 * 60 * 1000)
+    expect(await (await codeStatus(code.id)).json()).toEqual({ status: "pending" })
+
+    const exchanged = await exchange({ deviceCode: code.code, clientName: "Acme scanner" })
+    const tokens = (await exchanged.json()) as {
+      readonly status: string
+      readonly accessToken: string
+    }
+    expect(tokens.status).toBe("approved")
+    expect(await (await codeStatus(code.id)).json()).toEqual({ status: "used" })
+    expect(await (await exchange({ deviceCode: code.code })).json()).toEqual({
+      status: "expired",
+    })
+
+    const asDevice = { authorization: `Bearer ${tokens.accessToken}` }
+    const sessions = await app.fetch(
+      new Request("http://localhost/api/auth/sessions", { headers: asDevice })
+    )
+    const listed = (await sessions.json()) as {
+      readonly sessions: ReadonlyArray<{ readonly current: boolean; readonly clientName?: string }>
+    }
+    expect(listed.sessions.find((entry) => entry.current)?.clientName).toBe("Acme scanner")
+    // The signed-in device cannot pass its sign-in on to further devices.
+    expect((await createCode(asDevice)).status).toBe(403)
+  })
+
+  test("hides a sign-in code from other users and expires it after two minutes", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const browserCookie = `${seeded.cookie}; ${seeded.csrfCookie}`
+    const created = await app.fetch(
+      new Request("http://localhost/api/auth/sign-in-codes", {
+        method: "POST",
+        headers: { cookie: browserCookie, ...seeded.csrfHeader },
+      })
+    )
+    const code = (await created.json()) as { readonly id: string; readonly code: string }
+
+    const other = createSessionCredential("ses_other")
+    await storage.auth.users.create({
+      id: "usr_2",
+      projectId: "test-project",
+      email: "bo@acme.com",
+    })
+    await storage.auth.sessions.create({
+      id: other.sessionId,
+      projectId: "test-project",
+      userId: "usr_2",
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: other.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    const asOther = await app.fetch(
+      new Request(`http://localhost/api/auth/sign-in-codes/${code.id}`, {
+        headers: { cookie: `sixb_session=${other.cookieValue}` },
+      })
+    )
+    expect(asOther.status).toBe(404)
+
+    setSystemTime(new Date(Date.now() + 2 * 60 * 1000 + 1))
+    try {
+      const status = await app.fetch(
+        new Request(`http://localhost/api/auth/sign-in-codes/${code.id}`, {
+          headers: { cookie: browserCookie },
+        })
+      )
+      expect(await status.json()).toEqual({ status: "expired" })
+      const exchanged = await app.fetch(
+        new Request("http://localhost/api/auth/device-authorizations/token", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ deviceCode: code.code }),
+        })
+      )
+      expect(await exchanged.json()).toEqual({ status: "expired" })
+    } finally {
+      setSystemTime()
+    }
+  })
+
+  // Reproduce: drop the approving-session check from `completeDeviceAuthorization` in
+  // InMemoryAuthStorage; the exchange then answers "approved" for a browser that has signed out.
+  test("cancels a sign-in code when the browser that made it signs out", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const asBrowser = { cookie: `${seeded.cookie}; ${seeded.csrfCookie}`, ...seeded.csrfHeader }
+    const created = await app.fetch(
+      new Request("http://localhost/api/auth/sign-in-codes", { method: "POST", headers: asBrowser })
+    )
+    const code = (await created.json()) as { readonly code: string }
+
+    const signedOut = await app.fetch(
+      new Request("http://localhost/api/auth/sign-out", { method: "POST", headers: asBrowser })
+    )
+    expect(signedOut.status).toBe(200)
+
+    const exchanged = await app.fetch(
+      new Request("http://localhost/api/auth/device-authorizations/token", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ deviceCode: code.code }),
+      })
+    )
+    expect(await exchanged.json()).toEqual({ status: "expired" })
+    await expect(
+      storage.auth.sessions.listActiveByUserId({
+        projectId: sixb.id,
+        userId: "usr_1",
+        now: new Date(),
+      })
+    ).resolves.toEqual([])
+  })
+
+  // Reproduce: skip the limiter in POST /api/auth/sign-in-codes; the 21st request returns 201.
+  test("limits how many sign-in codes one person can create", async () => {
+    const { sixb, storage } = createRuntime({ auth: true })
+    const seeded = await seedSession(storage)
+    const app = createSixbApi(
+      new SixbServer({ host: sixb, quiet: true, browser: createTestBrowserPolicy() })
+    )
+    const createCode = (cookie: string) =>
+      app.fetch(
+        new Request("http://localhost/api/auth/sign-in-codes", {
+          method: "POST",
+          headers: { cookie: `${cookie}; ${seeded.csrfCookie}`, ...seeded.csrfHeader },
+        })
+      )
+
+    for (let count = 0; count < 20; count += 1) {
+      expect((await createCode(seeded.cookie)).status).toBe(201)
+    }
+    const limited = await createCode(seeded.cookie)
+    expect(limited.status).toBe(429)
+    expect(await limited.json()).toEqual({
+      error: "[SixbServer] Too many sign-in codes. Try again in a few minutes.",
+    })
+
+    // The limit is each person's own.
+    const other = createSessionCredential("ses_other")
+    await storage.auth.users.create({
+      id: "usr_2",
+      projectId: "test-project",
+      email: "bo@acme.com",
+    })
+    await storage.auth.sessions.create({
+      id: other.sessionId,
+      projectId: "test-project",
+      userId: "usr_2",
+      strategyId: "test",
+      audience: "atlas",
+      tokenHash: other.tokenHash,
+      createdAt: new Date("2026-05-16T10:00:00.000Z"),
+      expiresAt: new Date("2099-05-16T10:00:00.000Z"),
+    })
+    expect((await createCode(`sixb_session=${other.cookieValue}`)).status).toBe(201)
+  })
+
   // Reproduce: skip the limiter in POST /api/auth/device-authorizations, or resolve the leftmost
   // x-forwarded-for entry (the old behavior); either way the 11th request returns 201.
   // Reproduce: check application access for every caller in ServerAuthGuard again; the native

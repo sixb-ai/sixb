@@ -26,6 +26,7 @@ import {
   createAuthServiceAccountAccessToken,
   createDeviceAuthorization,
   createFileUpload,
+  createSignInCode,
   deleteAiLimitPolicy,
   disableAuthServiceAccount,
   disconnectConnectorConnection,
@@ -63,6 +64,7 @@ import {
   getProjectionRun,
   getRule,
   getSharedAccessSession,
+  getSignInCode,
   getStatus,
   getSync,
   getTelemetryHistory,
@@ -196,6 +198,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadError,
   CreateFileUploadResponse,
+  CreateSignInCodeData,
+  CreateSignInCodeError,
+  CreateSignInCodeResponse,
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyError,
   DeleteAiLimitPolicyResponse,
@@ -304,6 +309,9 @@ import type {
   GetSharedAccessSessionData,
   GetSharedAccessSessionError,
   GetSharedAccessSessionResponse,
+  GetSignInCodeData,
+  GetSignInCodeError,
+  GetSignInCodeResponse,
   GetStatusData,
   GetStatusResponse,
   GetSyncData,
@@ -597,22 +605,22 @@ export const exchangeDeviceAuthorizationMutation = (
 }
 
 /**
- * Refresh a native client's session tokens
+ * Create a code that signs another device in
  */
-export const refreshAuthSessionMutation = (
-  options?: Partial<Options<RefreshAuthSessionData>>
+export const createSignInCodeMutation = (
+  options?: Partial<Options<CreateSignInCodeData>>
 ): UseMutationOptions<
-  RefreshAuthSessionResponse,
-  RefreshAuthSessionError,
-  Options<RefreshAuthSessionData>
+  CreateSignInCodeResponse,
+  CreateSignInCodeError,
+  Options<CreateSignInCodeData>
 > => {
   const mutationOptions: UseMutationOptions<
-    RefreshAuthSessionResponse,
-    RefreshAuthSessionError,
-    Options<RefreshAuthSessionData>
+    CreateSignInCodeResponse,
+    CreateSignInCodeError,
+    Options<CreateSignInCodeData>
   > = {
     mutationFn: async (fnOptions) => {
-      const { data } = await refreshAuthSession({
+      const { data } = await createSignInCode({
         ...options,
         ...fnOptions,
         throwOnError: true,
@@ -660,6 +668,58 @@ const createQueryKey = <TOptions extends Options>(
     params.query = options.query
   }
   return [params]
+}
+
+export const getSignInCodeQueryKey = (options: Options<GetSignInCodeData>) =>
+  createQueryKey("getSignInCode", options)
+
+/**
+ * Check whether a sign-in code was used
+ */
+export const getSignInCodeOptions = (options: Options<GetSignInCodeData>) =>
+  queryOptions<
+    GetSignInCodeResponse,
+    GetSignInCodeError,
+    GetSignInCodeResponse,
+    ReturnType<typeof getSignInCodeQueryKey>
+  >({
+    queryFn: async ({ queryKey, signal }) => {
+      const { data } = await getSignInCode({
+        ...options,
+        ...queryKey[0],
+        signal,
+        throwOnError: true,
+      })
+      return data
+    },
+    queryKey: getSignInCodeQueryKey(options),
+  })
+
+/**
+ * Refresh a native client's session tokens
+ */
+export const refreshAuthSessionMutation = (
+  options?: Partial<Options<RefreshAuthSessionData>>
+): UseMutationOptions<
+  RefreshAuthSessionResponse,
+  RefreshAuthSessionError,
+  Options<RefreshAuthSessionData>
+> => {
+  const mutationOptions: UseMutationOptions<
+    RefreshAuthSessionResponse,
+    RefreshAuthSessionError,
+    Options<RefreshAuthSessionData>
+  > = {
+    mutationFn: async (fnOptions) => {
+      const { data } = await refreshAuthSession({
+        ...options,
+        ...fnOptions,
+        throwOnError: true,
+      })
+      return data
+    },
+  }
+  return mutationOptions
 }
 
 export const getAuthSessionQueryKey = (options?: Options<GetAuthSessionData>) =>

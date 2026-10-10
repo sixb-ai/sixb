@@ -115,16 +115,25 @@ export class PgAuthStorage implements AuthStorage {
       }
       assertCompletableDeviceAuthorization(authorization, input)
       const session = await createSession(tx, input.session)
+      // An approval lasts only as long as the session that gave it: signing that session out
+      // withdraws the approvals it has not yet handed over.
       const [consumed] = await tx`
         UPDATE auth_device_authorizations
         SET status = 'consumed', consumed_at = ${input.completedAt}
         WHERE project_id = ${input.projectId} AND id = ${input.id} AND status = 'approved'
+          AND EXISTS (
+            SELECT 1 FROM auth_sessions
+            WHERE project_id = ${input.projectId}
+              AND id = auth_device_authorizations.approved_session_id
+              AND revoked_at IS NULL AND expires_at > ${input.completedAt}
+              AND (absolute_expires_at IS NULL OR absolute_expires_at > ${input.completedAt})
+          )
         RETURNING *
       `
       if (!consumed) {
         throw new AuthStorageError(
           "invalid_device_authorization",
-          "[Sixb] Device authorization was already consumed."
+          "[Sixb] Device authorization was already consumed, or the session that approved it has ended."
         )
       }
       return {

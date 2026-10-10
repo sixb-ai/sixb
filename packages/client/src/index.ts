@@ -21,9 +21,12 @@ export type {
   SixbSessionRequestOptions,
   SixbSessionStore,
   SixbSessionTokens,
+  SixbSignInLink,
 } from "./session"
 export {
+  exchangeSixbSignInCode,
   getSixbSessionAccessToken,
+  parseSixbSignInLink,
   SixbSessionEndedError,
   signOutSixbSession,
   startSixbDeviceLogin,

@@ -56,6 +56,9 @@ import type {
   CreateFileUploadData,
   CreateFileUploadErrors,
   CreateFileUploadResponses,
+  CreateSignInCodeData,
+  CreateSignInCodeErrors,
+  CreateSignInCodeResponses,
   DeleteAiLimitPolicyData,
   DeleteAiLimitPolicyErrors,
   DeleteAiLimitPolicyResponses,
@@ -164,6 +167,9 @@ import type {
   GetSharedAccessSessionData,
   GetSharedAccessSessionErrors,
   GetSharedAccessSessionResponses,
+  GetSignInCodeData,
+  GetSignInCodeErrors,
+  GetSignInCodeResponses,
   GetStatusData,
   GetStatusResponses,
   GetSyncData,
@@ -466,6 +472,35 @@ export const exchangeDeviceAuthorization = <ThrowOnError extends boolean = false
       "Content-Type": "application/json",
       ...options.headers,
     },
+  })
+
+/**
+ * Create a code that signs another device in
+ */
+export const createSignInCode = <ThrowOnError extends boolean = false>(
+  options?: Options<CreateSignInCodeData, ThrowOnError>
+) =>
+  (options?.client ?? client).post<CreateSignInCodeResponses, CreateSignInCodeErrors, ThrowOnError>(
+    {
+      security: [
+        { name: "x-sixb-csrf", type: "apiKey" },
+        { scheme: "bearer", type: "http" },
+      ],
+      url: "/api/auth/sign-in-codes",
+      ...options,
+    }
+  )
+
+/**
+ * Check whether a sign-in code was used
+ */
+export const getSignInCode = <ThrowOnError extends boolean = false>(
+  options: Options<GetSignInCodeData, ThrowOnError>
+) =>
+  (options.client ?? client).get<GetSignInCodeResponses, GetSignInCodeErrors, ThrowOnError>({
+    security: [{ scheme: "bearer", type: "http" }],
+    url: "/api/auth/sign-in-codes/{codeId}",
+    ...options,
   })
 
 /**

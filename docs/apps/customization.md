@@ -140,3 +140,42 @@ export default function SignIn({ state, actions }: AuthExperienceProps) {
 The sign-in screen uses `app/globals.css` and your app metadata, but is not wrapped in
 `app/layout.tsx`. Sixb handles the credentials and session. See
 [Authentication](../auth/authentication.md) for setup.
+
+## Sign in on another device
+
+Atlas offers **Sign in on another device** in its account menu: it shows a QR code that signs
+another device in as the current user. To offer it in your app, render
+`SignInOnAnotherDeviceDialog` from `@sixb/ui/components` with the API's sign-in code functions:
+
+```tsx
+import { createSignInCode, getSignInCode } from "@sixb/client"
+import { SignInOnAnotherDeviceDialog } from "@sixb/ui/components"
+import { useState } from "react"
+
+export function SignInElsewhere() {
+  const [open, setOpen] = useState(false)
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Sign in on another device
+      </button>
+      <SignInOnAnotherDeviceDialog
+        open={open}
+        onOpenChange={setOpen}
+        createCode={async () => (await createSignInCode({ throwOnError: true })).data}
+        getCodeStatus={async (codeId) =>
+          (await getSignInCode({ path: { codeId }, throwOnError: true })).data.status
+        }
+      />
+    </>
+  )
+}
+```
+
+The dialog replaces each code as it expires and says when a device has used it. If you already
+show `SidebarUserMenu`, pass `onSignInOnAnotherDevice` to add the menu item.
+
+Without `@sixb/ui`'s styles, build your own view from `createSignInCodeMutation` and
+`getSignInCodeOptions` in `@sixb/client/hooks`, and draw the code's `url` with `QrCode` from
+`@sixb/ui/components/ui/qr-code`, which needs no stylesheet. The auth example's
+`app/device-sign-in.tsx` does this.

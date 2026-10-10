@@ -116,6 +116,18 @@ Use `authentication` as the `auth` option. The optional absolute lifetime applie
 
 Sixb-served apps handle cookies, CSRF, and sign-in redirects. For a separate frontend, use the [browser client setup](../client/overview.md#standalone-browser-apps). To customize the sign-in screen, see [Custom sign-in](../apps/customization.md#custom-sign-in).
 
+### Sign in on another device
+
+A signed-in user can sign in a second device without signing in again. In Atlas, open the account menu and choose **Sign in on another device**. Atlas shows a QR code; the other device scans it and is signed in as the same user.
+
+- A code works once and expires after two minutes. The dialog shows a new code when one expires.
+- Only a signed-in browser can create a code. Access tokens and sessions on other devices cannot.
+- Signing out of the browser that created a code cancels it.
+- A user can create 20 codes in ten minutes. Further requests return `429` until the window passes.
+- The new device appears in the user's sessions, where it can be signed out.
+
+Custom apps can offer the same option; see [Sign in on another device](../apps/customization.md#sign-in-on-another-device). Tools outside the browser read the code with the [client](../client/overview.md#tools-outside-the-browser).
+
 ## Development and production
 
 Omitting `auth` allows unrestricted local access. Production requires an authentication strategy unless you explicitly opt out. Configure the API and browser [public origins](../deployment/overview.md#configure-public-origins) before deploying.
