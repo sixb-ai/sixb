@@ -1,7 +1,7 @@
 # Running Actions
 
 Use `useActionRunMutation` to run an action from your app. It gives your component loading, success,
-and error states while waiting for the action to finish.
+and error states that follow the action's outcome.
 
 Define the action in your project first. See [Actions](../actions/overview.md) for the server-side
 definition.
@@ -38,11 +38,9 @@ export function MarkPaidButton({ invoiceId }: { invoiceId: string }) {
 }
 ```
 
-`isPending` stays true while waiting for the result. `isSuccess` means the action succeeded.
-`isError` covers request errors, failed or cancelled runs, and timeouts.
-
-The hook waits up to 60 seconds by default; set `timeoutMs` to change this. A timeout stops waiting
-in the browser. It does not cancel the action.
+`isPending` stays true while the action runs. `isSuccess` means the action succeeded. `isError`
+covers rejected requests and runs that failed or timed out; for a run, the error is an
+`ActionRunFailedError` whose `run` holds its details. Leaving the page does not cancel the action.
 
 ## Run a global action
 
@@ -64,6 +62,7 @@ createDraft.mutate({ customerId })
 Set `invalidateOnCommit: true` to refresh object queries after a completed run that committed
 changes. This also refreshes data when an action committed changes before failing.
 
-For background work where the UI should only wait for acceptance, use `requestAction` from
-`@sixb/client`. It returns a run ID before the action finishes. See the
-[Client SDK](../client/overview.md#call-the-api) for request and wait helpers.
+Outside React, use `requestAction` from `@sixb/client`, which also returns the finished run. See the
+[Client SDK](../client/overview.md#run-an-action). Work that needs more than an action's
+[30 seconds](../actions/overview.md#request-an-action) belongs in a
+[workflow](../workflows/overview.md).

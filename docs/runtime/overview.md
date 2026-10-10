@@ -41,7 +41,7 @@ Each project supplies these five providers:
 | `lakeStorage` | Datasets and their versions. |
 | `blobStorage` | Uploaded files and other binary content. |
 | `broker` | Event delivery between parts of your project. |
-| `queues` | Background jobs such as syncs, actions, and workflows. |
+| `queues` | Background jobs such as syncs, pipelines, and workflows. |
 
 Choose implementations from [Infrastructure providers](../infrastructure/overview.md). In-memory messaging works locally because everything shares a process. [Production services](../deployment/overview.md) need persistent providers that they can share.
 

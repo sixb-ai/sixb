@@ -77,6 +77,31 @@ Run your tests with:
 bun test tests/
 ```
 
+## Test an action
+
+Add the action to the fixture's `actions`, then request it. The test SDK runs it and returns the finished run:
+
+```ts
+// tests/mark-paid.test.ts
+import { expect, test } from "bun:test"
+import { markPaid } from "../actions/mark-paid"
+import { Invoice } from "../ontology/invoice"
+import { createFixture } from "./fixture"
+
+test("marking an invoice paid updates its status", async () => {
+  const { sixb } = createFixture()
+  await sixb.objects(Invoice).upsert({ properties: { id: "inv-1", status: "open" } })
+
+  const run = await sixb.objects(Invoice).byId("inv-1").requestAction({
+    action: markPaid,
+    params: {},
+  })
+
+  expect(run.status).toBe("succeeded")
+  expect((await sixb.objects(Invoice).get("inv-1"))?.properties.status).toBe("paid")
+})
+```
+
 ## Test permissions
 
 Create a caller from the fixture's registered roles. Check both the operation they may perform and one they must not:
@@ -111,6 +136,6 @@ Use your actual security definitions when testing your project's access rules. S
 
 ## Integration tests
 
-Use real providers or a running development instance when testing database behavior, external integrations, or complete action and workflow execution. Creating a test SDK does not start workers; requesting an action queues it rather than executing its handler.
+Use real providers or a running development instance when testing database behavior, external integrations, or complete workflow execution. Creating a test SDK does not start workers, so a requested workflow stays queued.
 
 Keep integration tests isolated from production data and credentials. Test your app's user journeys through its UI or the [Client SDK](../client/overview.md).

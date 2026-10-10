@@ -51,16 +51,16 @@ const { data: history } = await getTelemetryHistory({
   query: { from: "2025-01-01T00:00:00Z", to: "2025-01-02T00:00:00Z", order: "asc" },
 })
 
-// Request an action on an object, then wait for terminal success/failure
-import { requestActionAndWait } from "@sixb/client"
+// Run an action on an object. The response is the finished run; check its status.
+import { requestAction } from "@sixb/client"
 
-const run = await requestActionAndWait({
+const { data: run } = await requestAction({
   path: { actionId: "setTemperature" },
   body: {
     subject: { kind: "object", objectTypeId: "thermostat", primaryId: "living-room" },
     params: { target: 72 },
   },
-  timeoutMs: 30_000,
+  throwOnError: true,
 })
 ```
 
@@ -161,7 +161,7 @@ const temperatureHistoryOptions = telemetryHistoryQueryOptions({
   property: Thermostat.p.temperature,
 })
 
-// Action mutation whose success means the action run reached terminal success.
+// Action mutation whose success means the action run succeeded.
 function SetTemperatureButton() {
   const setTemperature = useActionRunMutation<{ target: number }>({
     actionId: "setTemperature",
@@ -181,10 +181,8 @@ function SetTemperatureButton() {
 }
 ```
 
-Use `useActionRunMutation()` for app buttons where loading, success, and error states should
-reflect the final action run. Keep the generated `requestActionMutation()` or root
-`requestAction()` for enqueue-only flows where accepting the request is enough, such as long
-background work or screens that immediately navigate to a run detail view.
+Use `useActionRunMutation()` for app buttons: a run that failed or was cancelled rejects with
+`ActionRunFailedError`, so loading, success, and error states follow the action's outcome.
 
 ### Domain events
 
@@ -239,6 +237,6 @@ The models module provides normalized types and adapter functions that transform
 
 | Entry point | What it provides |
 |---|---|
-| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getActionRun`, `getTelemetryHistory`, etc.), terminal action wait helpers (`requestActionAndWait`, `waitForActionRun`), all generated types, and UI model types/adapters |
+| `@sixb/client` | `client`, all generated SDK functions (`listObjects`, `getObject`, `upsertObject`, `requestAction`, `getActionRun`, `getTelemetryHistory`, etc.), `ActionRunFailedError`, all generated types, and UI model types/adapters |
 | `@sixb/client/hooks` | TanStack Query `queryOptions` factories (`listObjectsOptions`, `getObjectOptions`, `getTelemetryHistoryOptions`, `telemetryHistoryQueryOptions`, `listRelationshipsOptions`), typed hooks (`useTelemetryHistoryQuery`, object query hooks, `useActionRunMutation`), object-query key/invalidation helpers, the `events.object(Type)` builder, and event hooks (`useEvents`, `useLatest`, `useLatestByObject`, `useInvalidateOnEvent`, `SixbEventsProvider`) |
 | `@sixb/client/models` | UI model types (`ObjectSummary`, `ObjectDetail`, `TelemetryHistory`, `RelationshipEdge`, etc.) and adapters (`toObjectSummary`, `toObjectDetail`, `toTelemetryHistoryWithRange`) |

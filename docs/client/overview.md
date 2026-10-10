@@ -103,24 +103,28 @@ const { data } = await getObject({
 
 Use [typed queries](typed-queries.md) when you want ontology-derived property types. Your API's `/docs` page contains the complete endpoint schemas.
 
-## Wait for an action
+## Run an action
 
-`requestActionAndWait` waits for a terminal result. The lower-level `requestAction` returns when the request is queued.
+`requestAction` runs the action and returns its finished run. A run that fails comes back with `status: "failed"` and its `error`. An error response usually means no run was requested, but it can also follow a run that started: send the request again with the same `runId` to get that run's record.
 
 ```ts
-import { requestActionAndWait } from "@sixb/client"
+import { requestAction } from "@sixb/client"
 
-const run = await requestActionAndWait({
+const { data: run } = await requestAction({
   path: { actionId: "markPaid" },
   body: {
     subject: { kind: "object", objectTypeId: "Invoice", primaryId: "inv-1" },
     params: {},
   },
-  timeoutMs: 30_000,
+  throwOnError: true,
 })
+
+if (run.status !== "succeeded") {
+  console.error(run.error?.message)
+}
 ```
 
-Failed or cancelled runs reject with `ActionRunFailedError`; a timeout rejects with `ActionRunTimeoutError` and does not cancel the run. The helper follows terminal events when available and polls the run as a fallback.
+To retry safely, send your own `runId` in the body. A repeated request returns the finished run instead of running the action again, and answers 409 while it still runs. Closing the connection does not cancel the action.
 
 In React, use [`useActionRunMutation`](../apps/actions.md), which includes loading and error state.
 

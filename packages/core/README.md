@@ -141,7 +141,8 @@ const found = await sixb
 ## Actions
 
 Actions define typed commands that can be requested globally or for an object subject.
-Local object/link mutations are declared in `.edits(...)` and committed by the action worker.
+Local object/link mutations are declared in `.edits(...)` and committed together.
+`sixb.actions.request(...)` runs the action in the calling process and returns its finished run.
 
 ```ts
 const renameRoom = defineAction("renameRoom")
@@ -160,7 +161,7 @@ const renameRoom = defineAction("renameRoom")
     })
   })
 
-await sixb.actions.request({
+const run = await sixb.actions.request({
   actionId: "renameRoom",
   subject: { kind: "object", objectTypeId: "Room", primaryId: "room:101" },
   params: { name: "Boardroom 101" },
@@ -435,7 +436,7 @@ src/
 | `.list({ limit, offset, ... })` | List stored objects with storage-system filtering and pagination |
 | `.byId(id)` | Get a handle for link/telemetry/action operations |
 | `.appendTelemetryBatch(items)` | Batch append telemetry for multiple objects |
-| `.requestAction({ actionId, params })` | Request an action on an object |
+| `.requestAction({ id, actionId, params })` | Run an action on an object and return its finished run |
 
 ### ObjectByIdHandle API (`sixb.objects(Type).byId(id)`)
 
@@ -446,7 +447,7 @@ src/
 | `.unlink(token, target)` | Remove a link |
 | `.listLinks(token?)` | List links from this object |
 | `.telemetry(token)` | Get a telemetry appender for a property |
-| `.requestAction({ actionId, params })` | Request an action |
+| `.requestAction({ actionId, params })` | Run an action and return its finished run |
 
 ### Storage And Queue Interfaces
 
