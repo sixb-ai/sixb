@@ -175,8 +175,14 @@ const AgentToolCallErrorSchema = AgentToolCallBaseSchema.extend({
   errorText: z.string(),
 })
 
+/** The user asked to continue an answer cut short; Sixb writes what the model reads. */
+const AgentContinuationPartSchema = z.object({
+  type: z.literal("continuation"),
+})
+
 export const AgentMessagePartSchema = z.union([
   AgentTextPartSchema,
+  AgentContinuationPartSchema,
   AgentReasoningPartSchema,
   AgentStepStartPartSchema,
   AgentFilePartSchema,
@@ -189,7 +195,7 @@ export const AgentMessagePartSchema = z.union([
 export const AgentRunDiagnosticSchema = z.object({
   code: z.enum(AGENT_RUN_DIAGNOSTIC_CODES),
   severity: z.enum(["warning", "error"]),
-  scope: z.literal("output"),
+  scope: z.enum(["output", "run"]),
   path: z.string().optional(),
   message: z.string(),
 })
@@ -234,7 +240,10 @@ export const AgentMessageListResponseSchema = z.object({
 
 export const PostAgentMessageBodySchema = z
   .object({
-    text: z.string().trim().min(1),
+    /** Required unless `continue` is set. */
+    text: z.string().trim().min(1).optional(),
+    /** Continue the previous answer after it reached the turn limit, without text of its own. */
+    continue: z.literal(true).optional(),
     model: LanguageModelRefSchema.optional(),
     reasoning: ModelReasoningSchema.optional(),
     /** IANA time zone of the person asking. The Agent presents dates and times in it. */

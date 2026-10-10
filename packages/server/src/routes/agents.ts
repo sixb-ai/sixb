@@ -215,6 +215,7 @@ function handleAgentRouteError(
       case "invalid_attachment":
       case "invalid_model_selection":
       case "invalid_locale":
+      case "invalid_message":
       case "model_not_found":
         set.status = 400
         break
@@ -606,6 +607,7 @@ export function registerAgentRoutes(app: Elysia, host: SixbHostView) {
           const requestInput = {
             threadId: thread.id,
             text: parsed.text,
+            continue: parsed.continue,
             model: parsed.model,
             reasoning: parsed.reasoning,
             timeZone: parsed.timeZone,

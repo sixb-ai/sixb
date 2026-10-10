@@ -7820,7 +7820,7 @@ describe("AgentWorker", () => {
     }
   })
 
-  test("adds visible guidance when the step limit is reached before an answer", async () => {
+  test("reports a step limit reached before an answer as a diagnostic, not transcript text", async () => {
     const sixb = buildSixbWithEchoTool(toolOnlyModel())
     const storage = agentStorageOf(sixb)
 
@@ -7844,19 +7844,21 @@ describe("AgentWorker", () => {
 
       expect(run.status).toBe("succeeded")
       expect(run.finishReason).toBe("tool-calls")
+      // Chats render the code in the reader's language; the message is for developers.
+      expect(run.diagnostics).toEqual([
+        {
+          code: "step_limit_reached",
+          severity: "warning",
+          scope: "run",
+          message: "The Agent reached its 4-step limit before producing a final answer.",
+        },
+      ])
 
       const messages = await listMessages(storage, threadId)
       const assistant = messages.find((message) => message.role === "assistant")
       const parts = assistant?.parts ?? []
       expect(parts.filter((part) => part.type === "tool-call")).toHaveLength(4)
-      expect(
-        parts.some(
-          (part) =>
-            part.type === "text" &&
-            part.text.includes("configured 4-step limit") &&
-            part.text.includes("producing a final answer")
-        )
-      ).toBe(true)
+      expect(parts.some((part) => part.type === "text")).toBe(false)
     } finally {
       await worker.stop()
     }

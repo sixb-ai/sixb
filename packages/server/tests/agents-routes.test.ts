@@ -986,6 +986,27 @@ describe("agent routes", () => {
     })
   })
 
+  test("accepts a continuation flag in place of text, and neither is rejected", async () => {
+    const { app, storage, sixb } = createApp({ auth: true })
+    const session = await seedSession(storage, "usr_continue", ["support-users"])
+    const created = await app.fetch(
+      jsonRequest("/api/agent-threads", "POST", {}, session.csrfHeaders)
+    )
+    const { thread } = (await created.json()) as { thread: { id: string } }
+    const post = (body: unknown) =>
+      app.fetch(
+        jsonRequest(`/api/agent-threads/${thread.id}/messages`, "POST", body, session.csrfHeaders)
+      )
+
+    expect((await post({})).status).toBe(400)
+    const continued = await post({ continue: true })
+    expect(continued.status).toBe(202)
+    const { run } = (await continued.json()) as { run: { triggerMessageId: string } }
+    await expect(
+      storage.agents.messages.getById({ projectId: sixb.id, id: run.triggerMessageId })
+    ).resolves.toMatchObject({ parts: [{ type: "continuation" }] })
+  })
+
   test("retries a failed run with a fresh attribution snapshot and the same trigger", async () => {
     const { app, storage, sixb } = createApp({ auth: true })
     const session = await seedSession(storage, "usr_retry", ["support-users", "admins"])

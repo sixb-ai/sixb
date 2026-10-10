@@ -1038,6 +1038,7 @@ export type {
   AgentContextInput,
   AgentContextOrigin,
   AgentContextPart,
+  AgentContinuationPart,
   AgentDescriptor,
   AgentFileDataProjection,
   AgentFileDataResolverInput,

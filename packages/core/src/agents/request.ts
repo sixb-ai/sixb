@@ -36,13 +36,19 @@ import { resolveAgentContextParts } from "./context-resolution"
 import { dispatchQueuedAgentRuns } from "./dispatch"
 import { AgentRequestError } from "./errors"
 import { createAgentMessageId, createAgentRunId, createAgentThreadId } from "./ids"
+import type { AgentMessagePart } from "./message"
 import { assertNoAgentSelector } from "./retired-config"
 import { publishAgentRunActivity } from "./streams/protocol"
 import { AGENT_REASONING_LEVELS, type AgentReasoningLevel } from "./types"
 
 export interface RequestAgentRunInput {
-  /** The user's message that triggers the turn. */
-  readonly text: string
+  /** The user's message that triggers the turn. Omitted only to {@link continue}. */
+  readonly text?: string
+  /**
+   * Continue an answer the turn limit cut short, in an existing thread. Sixb writes the
+   * instruction the model reads, so the request carries no text, attachments, or context.
+   */
+  readonly continue?: boolean
   /** Blob-backed files attached to the trigger message. */
   readonly attachments?: readonly FileRef[]
   /** Structured page/object context snapshotted onto the triggering user message. */
@@ -98,7 +104,16 @@ export async function requestAgentRun(
   assertNoAgentSelector(input)
   assertAuthorized(runtime, { kind: "agent.run" })
   assertRequestAuthorityCanRunAgent(runtime)
-  const spec = await resolveConversationRunSpec({ models, input })
+  const trigger = triggerParts(input)
+  const continued = input.continue ? await continuedSelection(runtime, models, input) : {}
+  const spec = await resolveConversationRunSpec({
+    models,
+    input: {
+      ...input,
+      model: input.model ?? continued.model,
+      reasoning: input.reasoning ?? continued.reasoning,
+    },
+  })
   assertAttachments(input.attachments)
 
   // Resolve context before creating a thread: invalid or inaccessible references must not leave an
@@ -153,7 +168,7 @@ export async function requestAgentRun(
         role: "user",
         parts: [
           ...contextParts,
-          { type: "text", text: input.text },
+          ...trigger,
           ...(input.attachments ?? []).map((fileRef) => ({ type: "file" as const, fileRef })),
         ],
         authorPrincipal: principal,
@@ -247,6 +262,59 @@ export async function retryAgentRun(
   await publishRunActivity(runtime, run)
   const jobId = await dispatchAgentRun(runtime, agents, runId)
   return { run, ...(jobId ? { jobId } : {}), createdThread: false }
+}
+
+/**
+ * A continuation picks up where the cut-short turn stopped, with its model and reasoning unless the
+ * request chooses others. A model that has since left the catalog falls back to the defaults.
+ */
+async function continuedSelection(
+  runtime: SixbRuntimeContext,
+  models: LanguageModelCatalog | undefined,
+  input: RequestAgentRunInput
+): Promise<Pick<RequestAgentRunInput, "model" | "reasoning">> {
+  const agents = requireAgentStorage(runtime)
+  const threadId = input.threadId ?? ""
+  if (!(await agents.threads.getById({ projectId: runtime.projectId, id: threadId }))) {
+    throw new AgentRequestError(
+      "thread_not_found",
+      "[Sixb] An Agent continuation needs an existing thread."
+    )
+  }
+  if (input.model !== undefined || input.reasoning !== undefined) return {}
+  const { runs } = await agents.runs.list({
+    projectId: runtime.projectId,
+    threadId,
+    kinds: ["conversation"],
+    order: "desc",
+    limit: 1,
+  })
+  const spec = runs[0]?.kind === "conversation" ? runs[0].spec : undefined
+  if (!spec || !models?.getByRef(spec.model)) return {}
+  return {
+    model: spec.model,
+    ...(spec.reasoning === undefined ? {} : { reasoning: spec.reasoning }),
+  }
+}
+
+/** The words of the user, or the continuation Sixb words for them. */
+function triggerParts(input: RequestAgentRunInput): readonly AgentMessagePart[] {
+  if (input.continue === true) {
+    if (input.text !== undefined || input.attachments?.length || input.context?.length) {
+      throw new AgentRequestError(
+        "invalid_message",
+        "[Sixb] An Agent continuation carries no text, attachments, or context."
+      )
+    }
+    return [{ type: "continuation" }]
+  }
+  if (typeof input.text !== "string" || input.text.trim().length === 0) {
+    throw new AgentRequestError(
+      "invalid_message",
+      "[Sixb] An Agent message needs text, or `continue: true` to continue the previous answer."
+    )
+  }
+  return [{ type: "text", text: input.text }]
 }
 
 function assertAttachments(attachments: readonly FileRef[] | undefined): void {

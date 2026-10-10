@@ -6989,6 +6989,9 @@ export type GetWorkflowAgentNodeExecutionResponses = {
             | null
         }
       | {
+          type: "continuation"
+        }
+      | {
           type: "reasoning"
           text: string
           /**
@@ -10414,6 +10417,9 @@ export type ListAgentThreadMessagesResponses = {
               | null
           }
         | {
+            type: "continuation"
+          }
+        | {
             type: "reasoning"
             text: string
             /**
@@ -10587,8 +10593,9 @@ export type ListAgentThreadMessagesResponses = {
           | "output_collection_failed"
           | "output_file_changed"
           | "output_storage_failed"
+          | "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output"
+        scope: "output" | "run"
         path?: string
         message: string
       }>
@@ -10623,7 +10630,8 @@ export type ListAgentThreadMessagesResponse =
 
 export type PostAgentThreadMessageData = {
   body: {
-    text: string
+    text?: string
+    continue?: true
     model?: {
       provider: string
       modelId: string
@@ -10820,8 +10828,9 @@ export type PostAgentThreadMessageResponses = {
           | "output_collection_failed"
           | "output_file_changed"
           | "output_storage_failed"
+          | "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output"
+        scope: "output" | "run"
         path?: string
         message: string
       }>
@@ -11087,8 +11096,9 @@ export type CancelAgentRunResponses = {
           | "output_collection_failed"
           | "output_file_changed"
           | "output_storage_failed"
+          | "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output"
+        scope: "output" | "run"
         path?: string
         message: string
       }>
@@ -11263,8 +11273,9 @@ export type RetryAgentRunResponses = {
           | "output_collection_failed"
           | "output_file_changed"
           | "output_storage_failed"
+          | "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output"
+        scope: "output" | "run"
         path?: string
         message: string
       }>
@@ -11415,8 +11426,9 @@ export type ListAgentThreadRunsResponses = {
           | "output_collection_failed"
           | "output_file_changed"
           | "output_storage_failed"
+          | "step_limit_reached"
         severity: "warning" | "error"
-        scope: "output"
+        scope: "output" | "run"
         path?: string
         message: string
       }>
@@ -11564,8 +11576,9 @@ export type GetAgentRunResponses = {
         | "output_collection_failed"
         | "output_file_changed"
         | "output_storage_failed"
+        | "step_limit_reached"
       severity: "warning" | "error"
-      scope: "output"
+      scope: "output" | "run"
       path?: string
       message: string
     }>
