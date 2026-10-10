@@ -1464,3 +1464,15 @@ test("distinguishes unavailable Anthropic catalogs from malformed metadata", asy
     createAnthropic({ fetch: async () => new Response("not JSON") }).catalog.list()
   ).rejects.toBeInstanceOf(SyntaxError)
 })
+
+test("carries a default reasoning set on the model binding", async () => {
+  const provider = createAnthropic({ apiKey: "test", fetch: async () => Response.json({}) })
+  const model = provider("claude-opus-5", { reasoning: "high" })
+
+  expect(model.defaultReasoning).toBe("high")
+  expect((await model.resolve?.({ offline: true }))?.defaultReasoning).toBe("high")
+  expect(provider("claude-opus-5").defaultReasoning).toBeUndefined()
+  expect(() => provider("claude-opus-5", { reasoning: "extreme" as unknown as "high" })).toThrow(
+    "[SixbAnthropic] reasoning must be one of:"
+  )
+})

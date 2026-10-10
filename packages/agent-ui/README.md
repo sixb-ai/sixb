@@ -161,6 +161,10 @@ model selection, send/stop/retry actions, and failed-send draft restoration. The
 update it when `onThreadCreated` fires. Use `embedded: true` for a compact surface that does not need
 the workspace-wide activity subscription.
 
+Until the user picks a model or a reasoning effort, messages carry neither and the server applies
+the project's defaults from `models.language`. An explicit choice is remembered in the browser;
+`resetModelSelection` forgets it.
+
 The example below requires a configured Sixb client and a `QueryClientProvider` from
 `@tanstack/react-query` above it. Load `@sixb/ui/globals.css` for the shared theme/Tailwind styles and
 `@sixb/agent-ui/globals.css` for the agent component classes and animations.
@@ -246,6 +250,9 @@ export function CustomChat() {
           selectedReasoning={chat.selectedReasoning}
           onSelectModel={chat.selectModel}
           onSelectReasoning={chat.selectReasoning}
+          onResetReasoning={chat.resetReasoning}
+          usingDefaultModel={chat.usingDefaultModel}
+          onResetModelSelection={chat.resetModelSelection}
         />
       </section>
     </DocumentPreviewRoot>

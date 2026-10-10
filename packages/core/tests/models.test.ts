@@ -186,6 +186,44 @@ describe("createModelCatalog", () => {
     expect(() => createModelCatalog({ language: [invalid] })).toThrow(/Invalid language model/)
   })
 
+  test("reads a model's default reasoning from its binding", () => {
+    const catalog = createModelCatalog({ language: [{ ...gpt, defaultReasoning: "low" }, sonnet] })
+
+    expect(catalog.language.default.model.defaultReasoning).toBe("low")
+    expect(catalog.language.list()[1]?.model.defaultReasoning).toBeUndefined()
+  })
+
+  test("rejects a default reasoning the model declares it cannot use", () => {
+    // Proven by removal: drop `assertDefaultReasoning` from the catalog's validator.
+    const model = {
+      ...gpt,
+      definition: defineLanguageModel({
+        ...gpt.definition,
+        capabilities: { reasoning: { efforts: ["low", "high"] } },
+      }),
+    }
+    expect(() => createModelCatalog({ language: [{ ...model, defaultReasoning: "max" }] })).toThrow(
+      "[Sixb] Invalid language model at 'models.language[0]': default reasoning 'max' cannot be used: reasoning effort 'max' is not supported."
+    )
+    expect(
+      createModelCatalog({ language: [{ ...model, defaultReasoning: "high" }] }).language.default
+        .model.defaultReasoning
+    ).toBe("high")
+    // Undeclared capabilities are resolved later; the provider falls back when needed.
+    expect(createModelCatalog({ language: [{ ...gpt, defaultReasoning: "max" }] })).toBeDefined()
+  })
+
+  test.each([
+    [{ budgetTokens: 1_000 }],
+    ["extreme"],
+  ])("rejects a default reasoning that is not a level %#", (defaultReasoning) => {
+    expect(() =>
+      createModelCatalog({
+        language: [{ ...gpt, defaultReasoning } as unknown as LanguageModel],
+      })
+    ).toThrow("expected 'defaultReasoning' to be one of")
+  })
+
   test("does not freeze the provider-owned model", () => {
     const model = testModel("gateway", "openai/gpt-5.4")
 

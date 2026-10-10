@@ -23,11 +23,14 @@ import { createVercelGateway } from "@sixb/vercel-ai-gateway"
 
 const gateway = createVercelGateway({ apiKey: () => process.env.MY_GATEWAY_KEY })
 const model = gateway("anthropic/claude-sonnet-4.5", {
+  reasoning: "low",
   maxOutputTokens: 4096,
   providerOptions: { gateway: { sort: "cost" } },
 })
 ```
 
+- **Default reasoning:** `reasoning` is the level Sixb applies when the model runs without an
+  explicit choice. It is checked against the model's capabilities at startup.
 - **Caching:** automatic by default; set per-call `caching: "off"` to disable it.
 - **Output limits:** the strictest per-call, configured, or model limit wins.
 - **Retries:** `429` and `5xx` responses are retried before streaming starts. Configure

@@ -11,12 +11,14 @@ import {
   type LanguageModelProvider,
   type LanguageModelRequest,
   MODEL_REASONING_EFFORTS,
+  MODEL_REASONING_LEVELS,
   type ModelCapabilities,
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
   ModelProviderError,
   type ModelReasoningCapabilities,
   type ModelReasoningEffort,
+  type ModelReasoningLevel,
   modelReasoningSupportIssue,
   rateModelCall,
   UnsupportedModelFeatureError,
@@ -51,6 +53,8 @@ export interface AnthropicOptions {
 }
 
 export interface AnthropicModelOptions {
+  /** Reasoning Sixb applies when this model runs without an explicit choice. */
+  readonly reasoning?: ModelReasoningLevel
   readonly maxOutputTokens?: number
   /** Additional native Messages API fields. Adapter-owned fields are rejected or merged safely. */
   readonly request?: JsonObject
@@ -291,6 +295,7 @@ class AnthropicLanguageModel implements LanguageModel {
   readonly modelId: string
   readonly definition: LanguageModelDefinition
   readonly costEstimator: ModelCostEstimator
+  readonly defaultReasoning?: ModelReasoningLevel
   private readonly maxOutputTokens: number
 
   constructor(
@@ -320,6 +325,14 @@ class AnthropicLanguageModel implements LanguageModel {
     }
     this.maxOutputTokens = maxOutputTokens
     if (options.request !== undefined) assertJsonObject(options.request, "model request options")
+    if (options.reasoning !== undefined) {
+      if (!(MODEL_REASONING_LEVELS as readonly unknown[]).includes(options.reasoning)) {
+        throw new TypeError(
+          `[SixbAnthropic] reasoning must be one of: ${MODEL_REASONING_LEVELS.join(", ")}.`
+        )
+      }
+      this.defaultReasoning = options.reasoning
+    }
     for (const [index, tool] of (options.providerTools ?? []).entries()) {
       assertJsonObject(tool, `providerTools[${index}]`)
     }

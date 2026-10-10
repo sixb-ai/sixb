@@ -29,6 +29,8 @@ export const LanguageModelSchema = LanguageModelRefSchema.extend({
     contextWindowTokens: z.number().int().positive().optional(),
   }),
   reasoningLevels: z.array(z.enum(MODEL_REASONING_LEVELS)),
+  /** Reasoning the project applies when a request selects this model without choosing one. */
+  defaultReasoning: z.enum(MODEL_REASONING_LEVELS).optional(),
 })
 
 export const ModelCatalogSchema = z.object({

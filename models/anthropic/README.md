@@ -34,6 +34,7 @@ const provider = createAnthropic({
 })
 
 const model = provider("claude-opus-5", {
+  reasoning: "high",
   maxOutputTokens: 16_384,
   request: {
     cache_control: { type: "ephemeral" },
@@ -43,7 +44,9 @@ const model = provider("claude-opus-5", {
 const definitions = await provider.catalog.list()
 ```
 
-Share the configured provider or model through normal imports. Agents accept the returned
+`reasoning` is the level Sixb applies when the model runs without an explicit choice; Sixb checks
+it against the model's capabilities at startup. Share the configured provider or model through
+normal imports. Agents accept the returned
 `LanguageModel` directly. An optional project catalog uses `models: { language: [model] }`.
 
 `await model.resolve?.()` returns an executable metadata snapshot from the effective catalog.

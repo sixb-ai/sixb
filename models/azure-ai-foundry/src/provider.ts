@@ -8,9 +8,11 @@ import {
   type LanguageModelRequest,
   type LanguageModelStream,
   type LanguageModelStreamEvent,
+  MODEL_REASONING_LEVELS,
   ModelCatalogUnavailableError,
   type ModelCostEstimator,
   ModelProviderError,
+  type ModelReasoningLevel,
   UnsupportedModelFeatureError,
 } from "@sixb/core/models"
 import { chatEvents } from "@sixb/model-protocols/chat"
@@ -81,6 +83,8 @@ export interface AzureAIFoundryModelMetadata {
 }
 
 export interface AzureAIFoundryModelOptions extends RequestOptions {
+  /** Reasoning Sixb applies when this model runs without an explicit choice. */
+  readonly reasoning?: ModelReasoningLevel
   readonly definition?: Omit<LanguageModelDefinition, "kind" | "providerId" | "modelId">
   readonly rateCard?: LanguageModelRateCard
   readonly costEstimator?: ModelCostEstimator
@@ -89,12 +93,14 @@ export interface AzureAIFoundryModelOptions extends RequestOptions {
 }
 
 export interface AzureAIFoundryMessagesOptions extends MessagesRequestOptions {
+  readonly reasoning?: ModelReasoningLevel
   readonly definition?: AzureAIFoundryModelOptions["definition"]
   readonly rateCard?: LanguageModelRateCard
   readonly costEstimator?: ModelCostEstimator
 }
 
 export interface AzureAIFoundryChatOptions extends ChatRequestOptions {
+  readonly reasoning?: ModelReasoningLevel
   readonly definition?: AzureAIFoundryModelOptions["definition"]
   readonly rateCard?: LanguageModelRateCard
   readonly costEstimator?: ModelCostEstimator
@@ -242,6 +248,7 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
   private readonly options: AzureAIFoundryModelOptions & MessagesRequestOptions & ChatRequestOptions
   private readonly scope: string
   private readonly reliableReasoning: boolean | undefined
+  readonly defaultReasoning?: ModelReasoningLevel
 
   constructor(
     private readonly requestedProtocol: Protocol | undefined,
@@ -262,6 +269,13 @@ class FoundryModel<Protocol extends FoundryProtocol> implements AzureAIFoundryMo
       !["reported", "unknown"].includes(options.reasoningUsage)
     )
       throw new TypeError(`${PREFIX} Invalid reasoningUsage.`)
+    if (options.reasoning !== undefined) {
+      if (!(MODEL_REASONING_LEVELS as readonly unknown[]).includes(options.reasoning))
+        throw new TypeError(
+          `${PREFIX} reasoning must be one of: ${MODEL_REASONING_LEVELS.join(", ")}.`
+        )
+      this.defaultReasoning = options.reasoning
+    }
     this.profile = resolveModel({
       providerId,
       modelId,

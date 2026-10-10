@@ -20,6 +20,12 @@ import { MODEL_REASONING_LEVELS, type ModelReasoningLevel } from "@sixb/core/mod
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useEffect, useMemo, useState } from "react"
 import {
+  type ModelPreference,
+  preferenceWithoutReasoning,
+  preferenceWithReasoning,
+  resolveModelSelection,
+} from "../modelSelection"
+import {
   EXTENDED_WAITING_STATUS_MS,
   isActiveAgentRunStatus,
   presentActiveTurn,
@@ -27,13 +33,7 @@ import {
   shouldShowExtendedWaitingStatus,
 } from "../runPresentation"
 import { THREAD_PAGE_SIZE } from "../threadNavigation"
-import type {
-  AgentContextEntryInput,
-  AgentFileRef,
-  AgentModelSelection,
-  AgentRun,
-  LanguageModel,
-} from "../types"
+import type { AgentContextEntryInput, AgentFileRef, AgentRun, LanguageModel } from "../types"
 import { useThreadStream } from "./useThreadStream"
 
 interface PendingSend {
@@ -101,8 +101,9 @@ export function useAgentConversation({
   const currentAgent = agentQuery.data
   const models = useMemo(() => modelsQuery.data?.language ?? [], [modelsQuery.data])
   const [modelPreference, setModelPreference] = useState(readModelPreference)
-  const selectedModel = resolveSelectedModel(models, modelPreference)
-  const selectedReasoning = resolveSelectedReasoning(selectedModel, modelPreference?.reasoning)
+  const modelSelection = resolveModelSelection(models, modelPreference)
+  const selectedModel = modelSelection.model
+  const selectedReasoning = modelSelection.reasoning
   const threads = useMemo(
     () => threadsQuery.data?.pages.flatMap((page) => page.threads) ?? [],
     [threadsQuery.data]
@@ -244,12 +245,7 @@ export function useAgentConversation({
         setPendingUser({ threadId: targetThreadId, text, attachments, context, messageId: null })
         const response = await postMessage.mutateAsync({
           path: { threadId: targetThreadId },
-          body: messageBody(
-            text,
-            attachments,
-            context,
-            modelSelection(selectedModel, selectedReasoning)
-          ),
+          body: messageBody(text, attachments, context, modelSelection.request),
         })
         recordAcceptedSend(response.run)
         await Promise.all([
@@ -269,12 +265,7 @@ export function useAgentConversation({
       setPendingUser({ threadId: createdThreadId, text, attachments, context, messageId: null })
       const response = await postMessage.mutateAsync({
         path: { threadId: createdThreadId },
-        body: messageBody(
-          text,
-          attachments,
-          context,
-          modelSelection(selectedModel, selectedReasoning)
-        ),
+        body: messageBody(text, attachments, context, modelSelection.request),
       })
       recordAcceptedSend(response.run)
       await queryClient.invalidateQueries({ queryKey: listAgentThreadsQueryKey() })
@@ -358,25 +349,22 @@ export function useAgentConversation({
     )
   }
 
+  // Choosing a model starts from that model's default reasoning.
   const selectModel = (model: LanguageModel) => {
-    const reasoning = model.reasoningLevels.includes(selectedReasoning ?? "provider-default")
-      ? selectedReasoning
-      : model.reasoningLevels[0]
-    updateModelPreference({
-      model: { provider: model.provider, modelId: model.modelId },
-      ...(reasoning === undefined ? {} : { reasoning }),
-    })
+    updateModelPreference({ model: { provider: model.provider, modelId: model.modelId } })
   }
 
   const selectReasoning = (reasoning: ModelReasoningLevel) => {
     if (!selectedModel?.reasoningLevels.includes(reasoning)) return
-    updateModelPreference({
-      model: { provider: selectedModel.provider, modelId: selectedModel.modelId },
-      reasoning,
-    })
+    updateModelPreference(preferenceWithReasoning(modelSelection, reasoning))
   }
 
-  const updateModelPreference = (preference: AgentModelSelection) => {
+  const resetReasoning = () => updateModelPreference(preferenceWithoutReasoning(modelSelection))
+
+  /** Follow the project defaults again, including later changes to them. */
+  const resetModelSelection = () => updateModelPreference(null)
+
+  const updateModelPreference = (preference: ModelPreference | null) => {
     setModelPreference(preference)
     writeModelPreference(preference)
   }
@@ -408,8 +396,11 @@ export function useAgentConversation({
     modelsError: modelsQuery.isError,
     selectedModel,
     selectedReasoning,
+    usingDefaultModel: modelSelection.request === undefined,
     selectModel,
     selectReasoning,
+    resetReasoning,
+    resetModelSelection,
     threads,
     threadsError: threadsQuery.isError,
     threadsHasMore: threadsQuery.hasNextPage,
@@ -447,7 +438,7 @@ function messageBody(
   text: string,
   attachments: readonly AgentFileRef[],
   context: readonly AgentContextEntryInput[],
-  selection: AgentModelSelection | undefined
+  selection: ModelPreference | undefined
 ) {
   return {
     text,
@@ -457,40 +448,7 @@ function messageBody(
   }
 }
 
-function resolveSelectedModel(
-  models: readonly LanguageModel[],
-  preference: AgentModelSelection | null
-): LanguageModel | undefined {
-  const preferred = preference
-    ? models.find(
-        (model) =>
-          model.provider === preference.model.provider && model.modelId === preference.model.modelId
-      )
-    : undefined
-  return preferred ?? models.find((model) => model.isDefault) ?? models[0]
-}
-
-function resolveSelectedReasoning(
-  model: LanguageModel | undefined,
-  preferred: ModelReasoningLevel | undefined
-): ModelReasoningLevel | undefined {
-  if (!model || model.reasoningLevels.length === 0) return undefined
-  if (preferred && model.reasoningLevels.includes(preferred)) return preferred
-  return model.reasoningLevels[0]
-}
-
-function modelSelection(
-  model: LanguageModel | undefined,
-  reasoning: ModelReasoningLevel | undefined
-): AgentModelSelection | undefined {
-  if (!model) return undefined
-  return {
-    model: { provider: model.provider, modelId: model.modelId },
-    ...(reasoning === undefined ? {} : { reasoning }),
-  }
-}
-
-function readModelPreference(): AgentModelSelection | null {
+function readModelPreference(): ModelPreference | null {
   if (typeof window === "undefined") return null
   try {
     const value = JSON.parse(window.localStorage.getItem(MODEL_PREFERENCE_KEY) ?? "null") as unknown
@@ -501,26 +459,29 @@ function readModelPreference(): AgentModelSelection | null {
   }
 }
 
-function writeModelPreference(preference: AgentModelSelection): void {
+function writeModelPreference(preference: ModelPreference | null): void {
   if (typeof window === "undefined") return
   try {
-    window.localStorage.setItem(MODEL_PREFERENCE_KEY, JSON.stringify(preference))
+    if (preference === null) window.localStorage.removeItem(MODEL_PREFERENCE_KEY)
+    else window.localStorage.setItem(MODEL_PREFERENCE_KEY, JSON.stringify(preference))
   } catch {
     // Restricted browser contexts may disable storage; the in-memory preference still works.
   }
 }
 
-function isModelPreference(value: unknown): value is AgentModelSelection {
+function isModelPreference(value: unknown): value is ModelPreference {
   if (typeof value !== "object" || value === null) return false
   const candidate = value as {
     readonly model?: { readonly provider?: unknown; readonly modelId?: unknown }
     readonly reasoning?: unknown
   }
   return (
-    typeof candidate.model?.provider === "string" &&
-    typeof candidate.model.modelId === "string" &&
+    (candidate.model === undefined ||
+      (typeof candidate.model.provider === "string" &&
+        typeof candidate.model.modelId === "string")) &&
     (candidate.reasoning === undefined ||
-      (typeof candidate.reasoning === "string" && REASONING_LEVELS.has(candidate.reasoning)))
+      (typeof candidate.reasoning === "string" && REASONING_LEVELS.has(candidate.reasoning))) &&
+    (candidate.model !== undefined || candidate.reasoning !== undefined)
   )
 }
 

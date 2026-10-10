@@ -6,6 +6,7 @@ import type {
   ModelAssistantPart,
   ModelCapabilities,
   ModelFinishReason,
+  ModelReasoningLevel,
   ModelUsage,
 } from "@sixb/core/models"
 import { defineLanguageModel, type LanguageModelDefinition } from "@sixb/core/models"
@@ -32,6 +33,7 @@ export interface WorkerTestModelOptions {
   readonly modelId?: string
   readonly capabilities?: ModelCapabilities
   readonly definition?: LanguageModelDefinition
+  readonly defaultReasoning?: ModelReasoningLevel
   readonly stream?: (request: LanguageModelRequest) => Promise<WorkerTestStream>
   readonly generate?: (request: LanguageModelRequest) => Promise<WorkerTestGeneration>
 }
@@ -41,6 +43,7 @@ export class WorkerTestModel implements LanguageModel {
   readonly providerId: string
   readonly modelId: string
   readonly definition: LanguageModelDefinition
+  readonly defaultReasoning?: ModelReasoningLevel
   private readonly handler: (request: LanguageModelRequest) => Promise<WorkerTestStream>
 
   constructor(options: WorkerTestModelOptions = {}) {
@@ -69,6 +72,7 @@ export class WorkerTestModel implements LanguageModel {
     )
     this.providerId = this.definition.providerId
     this.modelId = this.definition.modelId
+    if (options.defaultReasoning !== undefined) this.defaultReasoning = options.defaultReasoning
     this.handler =
       options.stream ??
       (options.generate

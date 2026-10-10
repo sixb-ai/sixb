@@ -11640,6 +11640,15 @@ export type ListModelsResponses = {
       reasoningLevels: Array<
         "provider-default" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
       >
+      defaultReasoning?:
+        | "provider-default"
+        | "none"
+        | "minimal"
+        | "low"
+        | "medium"
+        | "high"
+        | "xhigh"
+        | "max"
     }>
   }
 }

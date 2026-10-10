@@ -797,3 +797,14 @@ test("does not normalize the documented non-OpenAI zero reasoning counter into a
   expect(event.usage.cacheReadInputTokens).toBeUndefined()
   expect(event.usage.uncachedInputTokens).toBeUndefined()
 })
+
+test("carries a default reasoning set on the model binding", () => {
+  const provider = createAzureAIFoundry({ endpoint, apiKey: "test" })
+
+  expect(provider("deployment", { reasoning: "medium" }).defaultReasoning).toBe("medium")
+  expect(provider.messages("deployment", { reasoning: "low" }).defaultReasoning).toBe("low")
+  expect(provider("deployment").defaultReasoning).toBeUndefined()
+  expect(() => provider("deployment", { reasoning: "extreme" as unknown as "low" })).toThrow(
+    "[SixbAzureAIFoundry] reasoning must be one of:"
+  )
+})

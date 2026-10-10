@@ -43,20 +43,23 @@ export function resolveAgentExecutionPlan(input: {
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
   const modelRef = input.spec?.model ?? input.models?.default
-  const model = modelRef ? input.models?.getByRef(modelRef)?.model : undefined
-  if (!model) {
+  const entry = modelRef ? input.models?.getByRef(modelRef) : undefined
+  if (!entry) {
     throw createSixbError(
       "agent.execution_failed",
       "[SixbAgentWorker] The conversation's language model is not available in models.language."
     )
   }
+  // Admission freezes the model's default reasoning into the spec; only runs admitted before
+  // specs existed take today's default.
+  const reasoning = input.spec ? input.spec.reasoning : entry.model.defaultReasoning
   return Object.freeze({
-    model,
+    model: entry.model,
     ...(input.projectInstructions === undefined ? {} : { instructions: input.projectInstructions }),
     tools: input.tools.list(),
     skills: input.skills.list(),
     maxSteps: input.defaultMaxSteps,
-    ...(input.spec?.reasoning === undefined ? {} : { reasoning: input.spec.reasoning }),
+    ...(reasoning === undefined ? {} : { reasoning }),
   })
 }
 
@@ -70,8 +73,8 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
   readonly defaultMaxSteps: number
 }): ResolvedAgentExecutionPlan {
   const { workflowId, step, models } = input
-  const model = resolveWorkflowAgentStepModel(step, models)
-  if (model === null) {
+  const selected = resolveWorkflowAgentStepModel(step, models)
+  if (selected === null) {
     const reference =
       step.model === undefined
         ? "the project default language model"
@@ -107,13 +110,14 @@ export function resolveWorkflowAgentStepExecutionPlan(input: {
     return skill
   })
 
+  const reasoning = step.reasoning ?? selected.defaultReasoning
   return Object.freeze({
-    model,
+    model: selected,
     instructions: step.instructions,
     tools: Object.freeze(tools),
     skills: Object.freeze(skills),
     maxSteps: input.defaultMaxSteps,
-    ...(step.reasoning === undefined ? {} : { reasoning: step.reasoning }),
+    ...(reasoning === undefined ? {} : { reasoning }),
   })
 }
 
@@ -159,6 +163,7 @@ export function resolveSubagentExecutionPlan(input: {
   })
 }
 
+/** The catalog's binding is the configured one, default reasoning included. */
 function resolveWorkflowAgentStepModel(
   step: AgentStepDefinition,
   models: LanguageModelCatalog | undefined
