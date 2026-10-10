@@ -12,7 +12,7 @@ through it:
 event  ->  orchestrator  ->  dispatcher  ->  execution + run  ->  queue  ->  worker  ->  event
 ```
 
-1. Something produces a [domain event](../../../docs/events/overview.md) — a sync finishes,
+1. Something produces a [domain event](../../../docs/websockets/overview.md#domain-events) — a sync finishes,
    a dataset version is committed, or a schedule triggers.
 2. The **orchestrator** subscribes to events, matches each against compiled
    routes, and delegates to the primitive's Core dispatcher.
@@ -27,7 +27,7 @@ drops its siblings.
 
 Requesting an [action](../../../docs/actions/overview.md) skips the whole model: the
 requesting process creates the run's execution, executes the run, records it once when it
-ends, and returns that record (the `action.requested` event is an observation, not a route).
+ends, and returns that record. A run emits no event of its own.
 A run that commits edits is recorded in the same transaction as its edits. Its effects run
 after the record is returned. A process that stops gracefully refuses new action requests and
 waits up to 65 seconds for those it runs and their effects; one that crashes leaves no record

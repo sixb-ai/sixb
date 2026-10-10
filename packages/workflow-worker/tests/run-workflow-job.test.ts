@@ -25,7 +25,7 @@ import { drainActionRuns } from "@sixb/core/internal/actions"
 import { agentServiceAccountId } from "@sixb/core/internal/agents"
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import { snapshotWorkflowInput, workflowAgentStepActorId } from "@sixb/core/internal/workflows"
-import type { QueueWorkflowRunInput, WorkflowRunStorage } from "@sixb/core/storage"
+import type { ActionRunRecord, QueueWorkflowRunInput, WorkflowRunStorage } from "@sixb/core/storage"
 import { createTestSixb, createTestWorkflowExecution } from "@sixb/core/testing"
 import { EventsRuntimeWorkflowRunObserver } from "../src/events"
 import { runWorkflowJob as executeWorkflowJob, runWorkflowResumeJob } from "../src/run-workflow-job"
@@ -247,6 +247,12 @@ function requireWorkflowRunsStorage(input: {
     throw new Error("Expected workflow run storage in test runtime.")
   }
   return workflowRuns
+}
+
+async function getActionRun(host: SixbHost, runId: string): Promise<ActionRunRecord> {
+  const run = await host.storage.actionRuns?.getById({ projectId: host.id, id: runId })
+  if (!run) throw new Error(`Expected Action run '${runId}' to be recorded.`)
+  return run
 }
 
 function createRuntime(host: WorkflowWorkerHost): WorkflowWorkerContext {
@@ -1468,19 +1474,16 @@ describe("runWorkflowJob", () => {
       },
     })
 
-    const events = await sixb.events.read({
-      types: ["action.requested", "action.completed"],
-    })
     expect(actionHandlerCalls).toBe(1)
-    expect(events.map((event) => event.type)).toEqual(["action.requested", "action.completed"])
-    expect(events[0]?.payload).toMatchObject({
+    const actionRun = await getActionRun(sixb, "wfrun_action:action:1")
+    expect(actionRun).toMatchObject({
+      status: "succeeded",
       subject: {
         kind: "object",
         objectTypeId: "Transaction",
         primaryId: "txn_1",
       },
       actionId: "attach-invoice",
-      runId: "wfrun_action:action:1",
     })
     expect(result.nodes[1]?.status).toBe("succeeded")
     expect(result.nodes[1]?.output).toEqual({
@@ -1488,17 +1491,10 @@ describe("runWorkflowJob", () => {
     })
     expect(result.run.output).toEqual(result.nodes[0]?.output)
 
-    const actionRun = await sixb.storage.actionRuns?.getById({
+    const actionExecution = await sixb.storage.executions.getById({
       projectId: sixb.id,
-      id: "wfrun_action:action:1",
+      id: actionRun.executionId,
     })
-    expect(actionRun).not.toBeNull()
-    const actionExecution = actionRun
-      ? await sixb.storage.executions.getById({
-          projectId: sixb.id,
-          id: actionRun.executionId,
-        })
-      : null
     const workflowExecution = await sixb.storage.executions.getById({
       projectId: sixb.id,
       id: result.run.executionId,
@@ -1544,14 +1540,10 @@ describe("runWorkflowJob", () => {
       },
     })
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
-    })
     expect(actionHandlerCalls).toBe(1)
-    expect(events[0]?.payload).toMatchObject({
+    expect(await getActionRun(sixb, "wfrun_global_action:action:1")).toMatchObject({
       subject: { kind: "none" },
       actionId: "create-invoice",
-      runId: "wfrun_global_action:action:1",
     })
     expect(result.nodes[1]?.status).toBe("succeeded")
     expect(result.nodes[1]?.output).toEqual({
@@ -1580,21 +1572,12 @@ describe("runWorkflowJob", () => {
       },
     })
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
-    })
     expect(actionHandlerCalls).toBe(1)
-    expect(events[0]?.payload).toMatchObject({
-      subject: { kind: "none" },
-      params: {
-        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
-      },
-      actionId: "create-invoice",
-      runId: "wfrun_global_action_direct:action:1",
+    const actionRun = await getActionRun(sixb, "wfrun_global_action_direct:action:1")
+    expect(actionRun).toMatchObject({ subject: { kind: "none" }, actionId: "create-invoice" })
+    expect(actionRun.params).toEqual({
+      invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
     })
-    const params = events[0]?.type === "action.requested" ? events[0].payload.params : {}
-    expect(params).not.toHaveProperty("transaction")
-    expect(params).not.toHaveProperty("confidence")
     expect(result.nodes[1]?.input).toEqual({
       params: {
         invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
@@ -1683,20 +1666,15 @@ describe("runWorkflowJob", () => {
       },
     })
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
-    })
-    expect(events[0]?.payload).toMatchObject({
+    const actionRun = await getActionRun(sixb, "wfrun_pick_global_action_params:action:1")
+    expect(actionRun).toMatchObject({
       subject: { kind: "none" },
-      params: {
-        amount: 250,
-        transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
-      },
       actionId: "create-invoice-from-transaction",
-      runId: "wfrun_pick_global_action_params:action:1",
     })
-    const params = events[0]?.type === "action.requested" ? events[0].payload.params : {}
-    expect(params).not.toHaveProperty("extraContext")
+    expect(actionRun.params).toEqual({
+      amount: 250,
+      transaction: { objectTypeId: "Transaction", primaryId: "txn_1" },
+    })
     expect(result.nodes[1]?.input).toEqual({
       params: {
         amount: 250,
@@ -1729,24 +1707,19 @@ describe("runWorkflowJob", () => {
       },
     })
 
-    const events = await sixb.events.read({
-      types: ["action.requested"],
-    })
     expect(actionHandlerCalls).toBe(1)
-    expect(events[0]?.payload).toMatchObject({
+    const actionRun = await getActionRun(sixb, "wfrun_object_action_direct:action:2")
+    expect(actionRun).toMatchObject({
       subject: {
         kind: "object",
         objectTypeId: "Transaction",
         primaryId: "txn_1",
       },
-      params: {
-        invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
-      },
       actionId: "attach-invoice",
-      runId: "wfrun_object_action_direct:action:2",
     })
-    const params = events[0]?.type === "action.requested" ? events[0].payload.params : {}
-    expect(params).not.toHaveProperty("confidence")
+    expect(actionRun.params).toEqual({
+      invoice: { objectTypeId: "Invoice", primaryId: "inv_1" },
+    })
     expect(result.nodes[2]?.input).toEqual({
       subject: {
         kind: "object",
@@ -1967,12 +1940,11 @@ describe("runWorkflowJob", () => {
       workflowRunId: "wfrun_action_failed",
       order: "asc",
     })
-    const events = await sixb.events.read({
-      types: ["action.requested"],
-    })
     expect(run?.status).toBe("failed")
     expect(nodes.nodes.map((node) => node.status)).toEqual(["succeeded", "failed"])
-    expect(events).toHaveLength(1)
+    expect(await getActionRun(sixb, "wfrun_action_failed:action:1")).toMatchObject({
+      status: "failed",
+    })
   })
 
   test("fails clearly when the workflow is missing", async () => {

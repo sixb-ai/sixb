@@ -38,18 +38,6 @@ export function canViewEvent(
         }) &&
         isAllowed(authorization, { kind: "object.view", objectTypeId: event.payload.targetTypeId })
       )
-    case "actions": {
-      // Apply is necessary; for object-bound actions the principal must also be
-      // able to view the subject type, or the event would leak a hidden
-      // object's id/type — mirroring the rule in `canListAction`.
-      if (!isAllowed(authorization, { kind: "action.apply", actionId: event.payload.actionId })) {
-        return false
-      }
-      const subject = event.payload.subject
-      return subject.kind === "object"
-        ? isAllowed(authorization, { kind: "object.view", objectTypeId: subject.objectTypeId })
-        : true
-    }
     case "workflows":
       return isAllowed(authorization, {
         kind: "workflow.run",

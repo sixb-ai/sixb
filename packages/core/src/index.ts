@@ -223,17 +223,7 @@ export type {
 // ── Events ──────────────────────────────────────────────────
 
 export type {
-  ActionCompletedEvent,
-  ActionEvent,
   ActionEventOrigin,
-  ActionEventSelectorBuilder,
-  ActionEventSelectorContext,
-  ActionEventSelectorEvent,
-  ActionEventSelectorOperation,
-  ActionEventToken,
-  ActionEventTokenOf,
-  ActionFailedEvent,
-  ActionRequestedEvent,
   DatasetEvent,
   DatasetEventSelectorBuilder,
   DatasetEventSelectorContext,

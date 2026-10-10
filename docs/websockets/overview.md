@@ -30,7 +30,7 @@ Subscribe to a topic, event types, or a specific object:
 }
 ```
 
-Other optional filters are `primaryId`, `actionId`, and `runId`. `limit` is the page size used to replay from a cursor, up to 500, rather than a total event limit.
+Other optional filters are `primaryId` and `runId`. `limit` is the page size used to replay from a cursor, up to 500, rather than a total event limit.
 
 Each event arrives in an `event` frame:
 
@@ -54,7 +54,6 @@ This abbreviated example shows common fields. The event also carries its subject
 | `objects` | `object.created`, `object.updated`, `object.deleted` |
 | `links` | `link.created`, `link.updated`, `link.deleted` |
 | `telemetry` | `telemetry.appended` |
-| `actions` | `action.requested`, `action.completed`, `action.failed` |
 | `workflows` | `workflow.run.started`, `workflow.run.finished` |
 | `rules` | `rule.triggered`, `rule.resolved` |
 | `schedules` | `schedule.triggered` |

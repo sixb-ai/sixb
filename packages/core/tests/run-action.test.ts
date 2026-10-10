@@ -107,7 +107,6 @@ async function createContext(
   return {
     id: host.id,
     errorReporterHost: host,
-    events: host.events,
     storage: host.storage,
     actionRunsStorage: host.storage.actionRuns!,
     ontologyMutations: execution.ontologyMutations,

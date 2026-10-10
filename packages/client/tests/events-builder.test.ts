@@ -1,13 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
 import {
   col,
-  defineAction,
   defineConnector,
   defineDataset,
   definePipeline,
   defineRule,
   defineSync,
-  param,
 } from "@sixb/core"
 import { defineObjectType, link, prop } from "@sixb/core/ontology"
 import { createSixbClient } from "../src/api"
@@ -29,11 +27,6 @@ const Sensor = defineObjectType({
 const sensorOffline = defineRule("sensor.offline")
   .on(Sensor)
   .where((sensor) => sensor.p.status.eq("offline"))
-
-const acknowledgeSensor = defineAction("acknowledge-sensor")
-  .on(Sensor)
-  .params({ note: param("string") })
-  .writeback(async () => {})
 
 const readings = defineDataset("sensor.readings", { schema: [col("id", "string")] })
 const source = defineConnector("sensor-source", { type: "test", connect: () => ({}) })
@@ -154,36 +147,13 @@ describe("events builder filter spec", () => {
     expect(events.all().ir).toEqual({})
     expect(events.telemetry().ir).toEqual({ topic: "telemetry" })
     expect(events.workflows().run("run-1").ir).toEqual({ topic: "workflows", runId: "run-1" })
-    expect(events.actions().run("act-1").action("approveQuote").terminal().ir).toEqual({
-      topic: "actions",
-      runId: "act-1",
-      actionId: "approveQuote",
-      types: ["action.completed", "action.failed"],
-    })
-    expect(events.actions().subject(Sensor).byId("sensor-1").completed().ir).toEqual({
-      topic: "actions",
-      objectTypeId: "Sensor",
-      primaryId: "sensor-1",
-      types: ["action.completed"],
-    })
-    expect(events.actions().subject("Sensor").byId("sensor-1").failed().ir).toEqual({
-      topic: "actions",
-      objectTypeId: "Sensor",
-      primaryId: "sensor-1",
-      types: ["action.failed"],
-    })
   })
 
-  test("definition-scoped rule and action builders", () => {
+  test("definition-scoped rule builders", () => {
     expect(events.rule(sensorOffline).triggered().ir).toEqual({
       topic: "rules",
       ruleId: "sensor.offline",
       types: ["rule.triggered"],
-    })
-    expect(events.action(acknowledgeSensor).completed().ir).toEqual({
-      topic: "actions",
-      actionId: "acknowledge-sensor",
-      types: ["action.completed"],
     })
   })
 
@@ -293,47 +263,6 @@ describe("buildEventPredicate", () => {
     )
   })
 
-  test("actions match run, action id and object subject scope", () => {
-    const matches = buildEventPredicate(
-      events.actions().run("act-1").action("approveQuote").subject(Sensor).byId("sensor-1").ir
-    )
-    const actionCompleted = event({
-      type: "action.completed",
-      topic: "actions",
-      payload: {
-        actionId: "approveQuote",
-        runId: "act-1",
-        subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-1" },
-        finishedAt: "2026-01-01T00:00:00.000Z",
-      },
-    })
-    expect(matches(actionCompleted)).toBe(true)
-    expect(
-      matches(
-        event({ ...actionCompleted, payload: { ...actionCompleted.payload, runId: "act-2" } })
-      )
-    ).toBe(false)
-    expect(
-      matches(
-        event({
-          ...actionCompleted,
-          payload: { ...actionCompleted.payload, actionId: "rejectQuote" },
-        })
-      )
-    ).toBe(false)
-    expect(
-      matches(
-        event({
-          ...actionCompleted,
-          payload: {
-            ...actionCompleted.payload,
-            subject: { kind: "object", objectTypeId: "Sensor", primaryId: "sensor-2" },
-          },
-        })
-      )
-    ).toBe(false)
-  })
-
   test("an empty filter matches everything", () => {
     const matches = buildEventPredicate(events.all().ir)
     expect(matches(telemetryEvent)).toBe(true)
@@ -417,7 +346,7 @@ describe("builder subscribe over the transport", () => {
     const errors: string[] = []
     const states: Array<{ connected: boolean; reconnecting: boolean; error: string | null }> = []
 
-    const unsubscribe = events.actions({ client: sharedClient }).subscribe(() => undefined, {
+    const unsubscribe = events.workflows({ client: sharedClient }).subscribe(() => undefined, {
       onError: (error) => errors.push(error),
       onStateChange: (state) => states.push(state),
     })
@@ -474,14 +403,10 @@ describe("builder subscribe over the transport", () => {
     expect(ws.closed).toBe(true)
   })
 
-  test("sends action run, action id and subject scope to the server", () => {
+  test("sends run scope to the server", () => {
     const unsubscribe = events
-      .actions()
-      .run("act-1")
-      .action("approveQuote")
-      .subject(Sensor)
-      .byId("sensor-1")
-      .terminal()
+      .workflows()
+      .run("run-1")
       .subscribe(() => undefined)
 
     const ws = FakeWebSocket.instances.at(-1)
@@ -489,14 +414,10 @@ describe("builder subscribe over the transport", () => {
 
     ws.onopen?.()
     ws.onmessage?.({ data: JSON.stringify({ type: "connected" }) })
-    expect(JSON.parse(ws.sent[0])).toMatchObject({
+    expect(JSON.parse(ws.sent[0])).toEqual({
       type: "subscribe",
-      topic: "actions",
-      types: ["action.completed", "action.failed"],
-      runId: "act-1",
-      actionId: "approveQuote",
-      objectTypeId: "Sensor",
-      primaryId: "sensor-1",
+      topic: "workflows",
+      runId: "run-1",
     })
 
     unsubscribe()

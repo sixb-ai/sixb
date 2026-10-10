@@ -138,8 +138,9 @@ recorded, a succeeded run may never get `run.effects`, so do not wait for it ind
 `run.idempotencyKey` to these calls as well.
 
 The order is `validate` → `writeback` → `edits` → `effects`. Only add the handlers you need, with
-at least `.writeback()` or `.edits()`. Sixb emits the corresponding [events](../websockets/overview.md)
-automatically.
+at least `.writeback()` or `.edits()`. The object and link [events](../websockets/overview.md) of the
+saved edits carry `origin: { kind: "action", actionId, runId }`. The run itself emits no event: its
+record is returned to the requester and listed in `GET /api/action-runs`.
 
 ## Edit objects and relationships
 

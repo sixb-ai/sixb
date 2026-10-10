@@ -1,7 +1,6 @@
 import type { JsonValue } from "../../json"
 import type { OntologyMaterializationEvent } from "../../materialization/events"
 import type { EventOrigin } from "../envelope"
-import type { ActionEvent } from "./actions"
 import type { DatasetEvent } from "./datasets"
 import type { LinkEvent } from "./links"
 import type { ObjectEvent } from "./objects"
@@ -28,12 +27,6 @@ export type {
   PropertyChangeMap,
   PropertyChangeOperation,
 } from "../property-changes"
-export type {
-  ActionCompletedEvent,
-  ActionEvent,
-  ActionFailedEvent,
-  ActionRequestedEvent,
-} from "./actions"
 export type { DatasetEvent, DatasetVersionCommittedEvent } from "./datasets"
 export type {
   LinkCreatedEvent,
@@ -82,7 +75,6 @@ export type DomainEvent =
   | ObjectEvent
   | TelemetryEvent
   | LinkEvent
-  | ActionEvent
   | ScheduleEvent
   | RuleEvent
   | SyncEvent
@@ -129,9 +121,6 @@ export type StoredLinkCreatedEvent = StoredOntologyEventOf<"link.created">
 export type StoredLinkUpdatedEvent = StoredOntologyEventOf<"link.updated">
 export type StoredLinkMutationEvent = StoredLinkCreatedEvent | StoredLinkUpdatedEvent
 export type StoredLinkDeletedEvent = StoredOntologyEventOf<"link.deleted">
-export type StoredActionRequestedEvent = Extract<StoredDomainEvent, { type: "action.requested" }>
-export type StoredActionCompletedEvent = Extract<StoredDomainEvent, { type: "action.completed" }>
-export type StoredActionFailedEvent = Extract<StoredDomainEvent, { type: "action.failed" }>
 export type StoredScheduleTriggeredEvent = Extract<
   StoredDomainEvent,
   { type: "schedule.triggered" }

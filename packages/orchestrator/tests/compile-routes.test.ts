@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
   col,
-  defineAction,
   defineConnector,
   defineDataset,
   defineObjectType,
@@ -54,15 +53,8 @@ const highTemperature = defineSchedule("room.high-temperature")
 const highTemperatureRule = defineRule("room.high-temperature-rule")
   .on(Room)
   .where((room) => room.p.temperature.gt(30))
-const acknowledgeRoom = defineAction("acknowledge-room")
-  .on(Room)
-  .params({})
-  .writeback(async () => {})
 const ruleTriggered = defineSchedule("room.rule-triggered").on(
   events.rule(highTemperatureRule).triggered()
-)
-const actionCompleted = defineSchedule("room.acknowledged").on(
-  events.action(acknowledgeRoom).completed()
 )
 
 function makeDataset(id: string) {
@@ -201,18 +193,13 @@ describe("compileRoutes", () => {
     ])
   })
 
-  test("rule and action event schedules use source-scoped routes", () => {
+  test("rule event schedules use source-scoped routes", () => {
     const ruleRoutes = compile({
       schedules: [ruleTriggered],
       workflows: [makeWorkflow("rule-alert", ruleTriggered)],
     })
-    const actionRoutes = compile({
-      schedules: [actionCompleted],
-      workflows: [makeWorkflow("action-alert", actionCompleted)],
-    })
 
     expect(ruleRoutes.has("event-schedule:rule.triggered:room.high-temperature-rule")).toBe(true)
-    expect(actionRoutes.has("event-schedule:action.completed:acknowledge-room")).toBe(true)
   })
 
   test("dataset, sync, and pipeline event schedules can target downstream work", () => {

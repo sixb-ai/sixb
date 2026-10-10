@@ -2,13 +2,11 @@ import { describe, expect, test } from "bun:test"
 import {
   col,
   type DomainEvent,
-  defineAction,
   defineConnector,
   defineDataset,
   definePipeline,
   defineSync,
   events,
-  param,
 } from "../src"
 import { buildEventSelectorPredicate, eventSelectorSpec } from "../src/events"
 import { defineObjectType, link, prop } from "../src/ontology"
@@ -38,11 +36,6 @@ const Invoice = defineObjectType({
 const invoiceAtRisk = defineRule("invoice.at-risk")
   .on(Invoice)
   .where((invoice) => invoice.p.amount.gt(500))
-
-const approveInvoice = defineAction("approve-invoice")
-  .on(Invoice)
-  .params({ reason: param("string") })
-  .writeback(async () => {})
 
 const rawInvoices = defineDataset("raw.invoices", {
   schema: [col("id", "string")],
@@ -138,17 +131,11 @@ describe("events selector builder", () => {
     })
   })
 
-  test("builds rule and action selectors from definition tokens", () => {
+  test("builds rule selectors from definition tokens", () => {
     expect(eventSelectorSpec(events.rule(invoiceAtRisk).triggered())).toEqual({
       topic: "rules",
       types: ["rule.triggered"],
       ruleId: "invoice.at-risk",
-    })
-
-    expect(eventSelectorSpec(events.action(approveInvoice).completed())).toEqual({
-      topic: "actions",
-      types: ["action.completed"],
-      actionId: "approve-invoice",
     })
   })
 
@@ -313,9 +300,8 @@ describe("buildEventSelectorPredicate", () => {
     ).toBe(false)
   })
 
-  test("matches rule and action definition ids", () => {
+  test("matches rule definition ids", () => {
     const matchesRule = buildEventSelectorPredicate(events.rule(invoiceAtRisk).triggered())
-    const matchesAction = buildEventSelectorPredicate(events.action(approveInvoice).completed())
 
     expect(
       matchesRule(
@@ -343,21 +329,6 @@ describe("buildEventSelectorPredicate", () => {
         })
       )
     ).toBe(false)
-
-    expect(
-      matchesAction(
-        event({
-          type: "action.completed",
-          topic: "actions",
-          payload: {
-            actionId: approveInvoice.id,
-            runId: "run-1",
-            subject: { kind: "object", objectTypeId: Invoice.id, primaryId: "inv-1" },
-            finishedAt: "2026-07-09T18:00:00.000Z",
-          },
-        })
-      )
-    ).toBe(true)
   })
 
   test("matches typed run outcomes", () => {

@@ -33,7 +33,6 @@ The hook manages subscription cleanup and reconnects. For a standalone browser a
 | `events.object(Invoice).byId(id).deleted()` | Deletion of one invoice. |
 | `events.object(Device).telemetry(Device.p.temperature)` | Changes to one telemetry property. |
 | `events.object(Invoice).link(Invoice.l.customer).created()` | New customer relationships. |
-| `events.actions().run(runId).terminal()` | Completion or failure of one action run. |
 | `events.workflows().run(runId)` | Events for one workflow run. |
 
 Use topic builders such as `events.datasets()`, `events.rules()`, and `events.schedules()` for broader subscriptions. `events.all()` selects all visible events.

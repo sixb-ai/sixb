@@ -7,7 +7,6 @@ import {
   assertCanReuseActionRun,
   type PersistedActionRun,
 } from "../run-persistence"
-import { emitActionRequested, emitActionTerminal } from "./events"
 import { type ActionRunHost, executeActionRun } from "./execute"
 import { toActionRunFailure } from "./normalize"
 import { UnrecordedActionRunError } from "./run-action"
@@ -181,7 +180,6 @@ export class ActionRunExecutor {
 
     let outcome: Awaited<ReturnType<typeof executeActionRun>>
     try {
-      await emitActionRequested(this.host.events, run, execution.correlationId)
       outcome = await executeActionRun(this.host, { run, execution, signal: request.signal })
     } catch (error) {
       throw this.failRequest(run, error)
@@ -193,7 +191,6 @@ export class ActionRunExecutor {
       await assertCanReuseActionRun(outcome.record, request)
       return outcome.record
     }
-    await emitActionTerminal(this.host.events, outcome.record, execution.correlationId)
     if (outcome.effects) this.startEffects(run, outcome.effects)
     return outcome.record
   }

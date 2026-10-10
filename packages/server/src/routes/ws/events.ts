@@ -23,7 +23,6 @@ const SubscribeSchema = z.object({
   types: z.array(z.enum(EVENT_TYPES)).optional(),
   objectTypeId: z.string().optional(),
   primaryId: z.string().optional(),
-  actionId: z.string().optional(),
   runId: z.string().optional(),
   afterCursor: z.string().optional(),
   limit: z.number().int().positive().max(500).optional(),
@@ -210,17 +209,11 @@ function eventMatchesScope(
   filter: {
     readonly objectTypeId?: string
     readonly primaryId?: string
-    readonly actionId?: string
     readonly runId?: string
   }
 ): boolean {
-  const { objectTypeId, primaryId, actionId, runId } = filter
-  if (
-    objectTypeId === undefined &&
-    primaryId === undefined &&
-    actionId === undefined &&
-    runId === undefined
-  ) {
+  const { objectTypeId, primaryId, runId } = filter
+  if (objectTypeId === undefined && primaryId === undefined && runId === undefined) {
     return true
   }
 
@@ -229,9 +222,6 @@ function eventMatchesScope(
     return false
   }
   if (primaryId !== undefined && scope.primaryId !== primaryId) {
-    return false
-  }
-  if (actionId !== undefined && scope.actionId !== actionId) {
     return false
   }
   if (runId !== undefined && scope.runId !== runId) {

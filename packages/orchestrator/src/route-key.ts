@@ -49,7 +49,6 @@ function eventScheduleRouteKey(
     readonly objectTypeId?: string
     readonly linkId?: string
     readonly ruleId?: string
-    readonly actionId?: string
     readonly datasetId?: string
     readonly syncId?: string
     readonly pipelineId?: string
@@ -64,8 +63,6 @@ function eventScheduleRouteKey(
         : null
     case "rules":
       return scope.ruleId ? `event-schedule:${eventType}:${scope.ruleId}` : null
-    case "actions":
-      return scope.actionId ? `event-schedule:${eventType}:${scope.actionId}` : null
     case "datasets":
       return scope.datasetId ? `event-schedule:${eventType}:${scope.datasetId}` : null
     case "syncs":

@@ -63,13 +63,12 @@ describe("EventSchema", () => {
   test("keeps authorable events outside the materialization contract", () => {
     const event = {
       ...storedEventBase,
-      type: "action.completed",
-      topic: "actions",
+      type: "sync.run.finished",
+      topic: "syncs",
       payload: {
-        actionId: "approve-device",
+        syncId: "import-devices",
         runId: "run-1",
-        subject: { objectTypeId: "device", primaryId: "device-1" },
-        finishedAt: "2026-07-26T10:00:00.000Z",
+        status: "succeeded",
       },
     } as const
 
