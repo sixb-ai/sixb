@@ -65,7 +65,7 @@ const recent = await sixb.events.read({
 ```
 
 Schedules can react to typed domain events and drive syncs, pipelines, or workflows. See
-[Events](../../../docs/events/overview.md) and [Schedules](../../../docs/schedules/overview.md).
+[Events](../../../docs/websockets/overview.md#domain-events) and [Schedules](../../../docs/schedules/overview.md).
 
 ### Logs
 
