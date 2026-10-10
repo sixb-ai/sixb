@@ -416,11 +416,6 @@ export const fr: Translation<AgentMessages> = {
       checking: "Vérification de l’exécution de l’action",
       succeeded: (action) => (action ? `Action ${quoted(action)} réussie` : "Action réussie"),
       failed: (action) => (action ? `Échec de l’action ${quoted(action)}` : "Échec de l’action"),
-      running: (action) =>
-        action ? `Exécution de l’action ${quoted(action)}` : "Exécution de l’action",
-      cancelled: (action) => (action ? `Action ${quoted(action)} annulée` : "Action annulée"),
-      queued: (action) =>
-        action ? `Action ${quoted(action)} en file d’attente` : "Action en file d’attente",
     },
     listActionRuns: {
       title: "Exécutions d’actions listées",

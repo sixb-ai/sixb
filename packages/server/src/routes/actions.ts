@@ -134,10 +134,11 @@ export function registerActionRoutes(app: Elysia, host: SixbHostView) {
           summary: "Request an action",
           description:
             "Runs the action and returns its terminal run. A run that fails is returned with " +
-            "status `failed`. An error response usually means no run was requested, but a 500 " +
-            "can follow a run that started: request again with the same `runId` to get its " +
-            "record. A `runId` that was already used returns that run once it has finished, and " +
-            "409 while it still runs. 503 means the server is stopping and started nothing.",
+            "status `failed`. Its effects run after the response, which does not wait for them. " +
+            "An error response usually means no run was requested, but a 500 can follow a run " +
+            "that started: request again with the same `runId` to get its record if it was " +
+            "written. A `runId` that was already recorded returns that run, and 409 while this " +
+            "server still runs it. 503 means the server is stopping and started nothing.",
           tags: [OPENAPI_TAGS.actions.name],
           operationId: "requestAction",
           security: accessTokenSecurityRequirement("requestAction"),

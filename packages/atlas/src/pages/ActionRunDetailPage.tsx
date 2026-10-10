@@ -1,35 +1,45 @@
-import { client } from "@sixb/client"
+import { type ActionRunDetail, client } from "@sixb/client"
 import { getActionRunOptions, listActionsOptions } from "@sixb/client/hooks"
 import { Card, CardContent } from "@sixb/ui/components"
 import { useQuery } from "@tanstack/react-query"
+import { CircleHelp, Loader2 } from "lucide-react"
 import { useMemo } from "react"
 import { Navigate, useParams } from "react-router-dom"
 import { DataPanel, ErrorPage, LoadingPage, PageFrame } from "../components/common"
 import { SixbFailureSummary } from "../components/SixbFailureSummary"
-import { useActionLiveUpdates } from "../features/actions/hooks/useActionLiveUpdates"
 import { useOntologyValueTypes } from "../features/objects/hooks/useOntologyValueTypes"
+import { type EffectsState, effectsState } from "../lib/actions/effects"
 import { actionRunFileContentUrl } from "../lib/files"
 import { fieldRecordSchema, valueSchema } from "../lib/valueSchema"
 import { ActionRunMetaGrid, ActionRunStatusBadge, formatSubject } from "./ActionsPage"
 
-export function ActionRunDetailPage() {
-  const { runId = "" } = useParams()
-  const runQuery = useQuery({
+/** How often a run whose effects have not ended is read again: they record no event. */
+const EFFECTS_REFETCH_MS = 1_000
+
+function useActionRun(runId: string, hasEffects: (actionId: string) => boolean | undefined) {
+  return useQuery({
     ...getActionRunOptions({ path: { runId } }),
     enabled: runId.length > 0,
+    refetchInterval: (query) => {
+      const run = query.state.data
+      return run && effectsState(run, hasEffects(run.actionId)) === "pending"
+        ? EFFECTS_REFETCH_MS
+        : false
+    },
   })
+}
+
+export function ActionRunDetailPage() {
+  const { runId = "" } = useParams()
   const actionsQuery = useQuery(listActionsOptions())
+  const hasEffects = (actionId: string) =>
+    actionsQuery.data?.find((candidate) => candidate.id === actionId)?.phases.effects
+  const runQuery = useActionRun(runId, hasEffects)
   const actionParamSchemas = useMemo(
     () => (actionsQuery.data ?? []).flatMap((action) => action.params.map((param) => param.schema)),
     [actionsQuery.data]
   )
   const ontology = useOntologyValueTypes(actionParamSchemas)
-  const status = runQuery.data?.status
-  useActionLiveUpdates({
-    runId,
-    enabled:
-      runId.length > 0 && (status === undefined || status === "queued" || status === "running"),
-  })
 
   if (!runId) {
     return <Navigate to="/actions?tab=runs" replace />
@@ -117,9 +127,34 @@ export function ActionRunDetailPage() {
 
       <Card className="p-0">
         <CardContent className="p-5">
-          <DataPanel label="Effects" value={run.effects ?? null} emptyLabel="No effects" />
+          <ActionRunEffects run={run} state={effectsState(run, action?.phases.effects)} />
         </CardContent>
       </Card>
     </PageFrame>
   )
+}
+
+function ActionRunEffects({ run, state }: { run: ActionRunDetail; state: EffectsState }) {
+  if (state === "pending" || state === "unrecorded") {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Effects</p>
+        <p className="flex items-start gap-2 text-sm text-muted-foreground">
+          {state === "pending" ? (
+            <>
+              <Loader2 className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />
+              Effects are running. Their outcome is recorded when they end.
+            </>
+          ) : (
+            <>
+              <CircleHelp className="mt-0.5 h-4 w-4 shrink-0" />
+              Effects outcome not recorded. They may have been interrupted, or their outcome could
+              not be saved; check what they were meant to do.
+            </>
+          )}
+        </p>
+      </div>
+    )
+  }
+  return <DataPanel label="Effects" value={run.effects ?? null} emptyLabel="No effects" />
 }

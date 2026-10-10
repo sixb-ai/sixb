@@ -4,13 +4,14 @@ import { createSixbError, isSixbError } from "../../errors/internal"
 export const ACTION_TIMEOUT_MS = 30_000
 
 /**
- * How long a stopping process waits for its in-flight Action runs: the deadline, plus a margin.
+ * How long a stopping process waits for its in-flight Action runs and their effects: a run's
+ * deadline, then its effects' deadline, plus a margin.
  *
- * It does not bound a whole run. Edits past the boundary are uninterruptible and effects get up to
- * another 30 seconds, so a run can still be executing when the wait ends. A deployment's kill
- * timeout must exceed this bound.
+ * It does not bound a whole run. Edits past the boundary are uninterruptible, and effects start
+ * only once they committed, so a run or its effects can still be executing when the wait ends. A
+ * deployment's kill timeout must exceed this bound.
  */
-export const ACTION_RUN_DRAIN_TIMEOUT_MS = ACTION_TIMEOUT_MS + 5_000
+export const ACTION_RUN_DRAIN_TIMEOUT_MS = 2 * ACTION_TIMEOUT_MS + 5_000
 
 export interface ActionRunSignalsInput {
   readonly actionId: string
@@ -28,7 +29,8 @@ export interface ActionRunSignalsInput {
  * it, validation, writeback and edits run under {@link beforeBoundary}, which aborts when the run's
  * deadline elapses or its caller aborts. After it, edits and commit run under
  * {@link uninterruptible}: abandoning them would strand an external change that the ontology never
- * records. Effects run after the commit under a deadline of their own.
+ * records. Effects run after the commit under a deadline of their own, which
+ * {@link startEffects} starts.
  *
  * Cancellation is cooperative: a handler stops early only when it forwards its `signal` to what it
  * awaits.
@@ -42,50 +44,70 @@ export class ActionRunSignals {
   readonly uninterruptible: AbortSignal = new AbortController().signal
 
   private readonly input: ActionRunSignalsInput
-  private readonly timers = new Set<ReturnType<typeof setTimeout>>()
+  private readonly deadline: ActionDeadline
 
   constructor(input: ActionRunSignalsInput) {
     this.input = input
-    const deadline = this.startDeadline("run")
-    this.beforeBoundary = input.caller ? AbortSignal.any([deadline, input.caller]) : deadline
+    this.deadline = new ActionDeadline(input, "run")
+    this.beforeBoundary = input.caller
+      ? AbortSignal.any([this.deadline.signal, input.caller])
+      : this.deadline.signal
   }
 
-  /** The run stopped before its boundary because its deadline elapsed first. */
-  get timedOut(): boolean {
-    return this.beforeBoundary.aborted && isActionTimeout(this.beforeBoundary.reason)
+  /**
+   * Why the run stopped before its boundary: its deadline's `action.timeout` when the deadline
+   * elapsed first, or else a `runtime.cancelled` error caused by what its caller aborted with.
+   */
+  stopReason(): unknown {
+    const reason = this.beforeBoundary.reason
+    if (isActionTimeout(reason)) return reason
+    return createSixbError(
+      "runtime.cancelled",
+      `[Sixb] Action run '${this.input.runId}' was cancelled by its caller.`,
+      { cause: reason, details: { actionId: this.input.actionId, runId: this.input.runId } }
+    )
   }
 
-  /** The run stopped before its boundary because its caller aborted first. */
-  get cancelled(): boolean {
-    return this.beforeBoundary.aborted && !this.timedOut
+  /**
+   * Start the deadline the run's effects run under. It is independent of the run's own: effects
+   * start after the run is recorded, and the caller of the deadline disposes it once they end.
+   */
+  startEffects(): ActionDeadline {
+    return new ActionDeadline(this.input, "effects")
   }
 
-  /** Start the deadline the effects phase runs under. */
-  startEffects(): AbortSignal {
-    return this.startDeadline("effects")
-  }
-
-  /** Release every pending deadline timer. */
+  /** Release the run's deadline timer. */
   dispose(): void {
-    for (const timer of this.timers) clearTimeout(timer)
-    this.timers.clear()
+    this.deadline.dispose()
   }
+}
 
-  private startDeadline(scope: "run" | "effects"): AbortSignal {
+/** A signal that aborts with `action.timeout` once its scope's deadline elapses. */
+export class ActionDeadline {
+  readonly signal: AbortSignal
+  private readonly timer: ReturnType<typeof setTimeout>
+
+  constructor(
+    input: Pick<ActionRunSignalsInput, "actionId" | "runId" | "timeoutMs">,
+    scope: "run" | "effects"
+  ) {
     const controller = new AbortController()
-    const timeoutMs = this.input.timeoutMs ?? ACTION_TIMEOUT_MS
-    const timer = setTimeout(() => {
-      this.timers.delete(timer)
+    const timeoutMs = input.timeoutMs ?? ACTION_TIMEOUT_MS
+    this.signal = controller.signal
+    this.timer = setTimeout(() => {
       controller.abort(
         createSixbError(
           "action.timeout",
-          `[Sixb] Action run '${this.input.runId}' exceeded its ${timeoutMs} ms ${scope} deadline.`,
-          { details: { actionId: this.input.actionId, runId: this.input.runId } }
+          `[Sixb] Action run '${input.runId}' exceeded its ${timeoutMs} ms ${scope} deadline.`,
+          { details: { actionId: input.actionId, runId: input.runId } }
         )
       )
     }, timeoutMs)
-    this.timers.add(timer)
-    return controller.signal
+  }
+
+  /** Release the deadline timer. */
+  dispose(): void {
+    clearTimeout(this.timer)
   }
 }
 

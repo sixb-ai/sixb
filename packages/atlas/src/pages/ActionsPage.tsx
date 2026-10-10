@@ -89,24 +89,15 @@ type ActionRunStatus = ActionRunSummary["status"]
 type ActionsPageTab = "actions" | "runs"
 
 const actionRunStatusLabels: Record<ActionRunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
   succeeded: "Succeeded",
   failed: "Failed",
-  cancelled: "Cancelled",
 }
 
 const actionRunStatusClasses: Record<ActionRunStatus, string> = {
-  queued:
-    "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-300",
-  running:
-    "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300",
   succeeded:
     "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300",
   failed:
     "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300",
-  cancelled:
-    "border-zinc-200 bg-zinc-50 text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300",
 }
 
 export function ActionsPage() {
@@ -361,7 +352,7 @@ function ActionCard({
             {latestRun ? (
               <>
                 <span className="min-w-0 truncate text-sm text-muted-foreground">
-                  Latest run {formatRelativeTime(latestRun.queuedAt)}
+                  Latest run {formatRelativeTime(latestRun.startedAt)}
                 </span>
                 <ActionRunStatusBadge status={latestRun.status} />
               </>
@@ -416,7 +407,7 @@ export function ActionRunTable({ runs }: { runs: readonly ActionRunSummary[] }) 
             <TableHead>Action</TableHead>
             <TableHead>Status</TableHead>
             <TableHead className="hidden md:table-cell">Subject</TableHead>
-            <TableHead className="hidden text-right sm:table-cell">Queued</TableHead>
+            <TableHead className="hidden text-right sm:table-cell">Started</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>
@@ -437,7 +428,7 @@ export function ActionRunTable({ runs }: { runs: readonly ActionRunSummary[] }) 
                 {formatSubject(run.subject)}
               </TableCell>
               <TableCell className="hidden text-right text-xs text-muted-foreground sm:table-cell">
-                {formatRelativeTime(run.queuedAt)}
+                {formatRelativeTime(run.startedAt)}
               </TableCell>
             </TableRow>
           ))}
@@ -451,7 +442,6 @@ export function ActionRunStatusBadge({ status }: { status: ActionRunStatus }) {
   return (
     <Badge variant="outline" className={cn("gap-1.5 rounded-md", actionRunStatusClasses[status])}>
       {status === "succeeded" ? <CheckCircle2 className="h-3 w-3" /> : null}
-      {status === "running" ? <Loader2 className="h-3 w-3 animate-spin" /> : null}
       {actionRunStatusLabels[status]}
     </Badge>
   )
@@ -857,8 +847,8 @@ export function ActionRunMetaGrid({ run }: { run: ActionRunSummary }) {
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <Metric label="Status" value={<ActionRunStatusBadge status={run.status} />} />
-      <Metric label="Phase" value={run.phase ?? "Not started"} />
-      <Metric label="Queued" value={formatDate(run.queuedAt)} />
+      <Metric label="Phase" value={run.phase} />
+      <Metric label="Started" value={formatDate(run.startedAt)} />
       <Metric label="Subject" value={formatSubject(run.subject)} mono />
     </div>
   )

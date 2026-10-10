@@ -271,6 +271,7 @@ export const sqliteStorageMigrations = defineMigrations({
     sqliteSql("057-reranking-model-kind", rerankingModelKindSql),
     sqliteSql("058-file-download-grants", fileDownloadGrantsSql),
     sqliteSql("059-drained-source-versions", drainedSourceVersionsSql),
+    sqliteSql("060-terminal-action-runs", terminalActionRunsSql),
   ],
 })
 
@@ -597,3 +598,4 @@ import fileDownloadGrantsSql from "./migrations/058-file-download-grants.sql" wi
 import drainedSourceVersionsSql from "./migrations/059-drained-source-versions.sql" with {
   type: "text",
 }
+import terminalActionRunsSql from "./migrations/060-terminal-action-runs.sql" with { type: "text" }

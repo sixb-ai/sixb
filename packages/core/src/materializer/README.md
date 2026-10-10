@@ -158,7 +158,12 @@ its mutable overrides let operation N+1 observe operation N. In `continue` mode,
 operation rolls back only its working override; provider and infrastructure failures abort the
 whole transaction.
 
-Action-backed edits validate the trusted Action execution, the run's immutable `executionId`, and the running-state fence inside the commit transaction before new work. Exact replay remains valid after the run becomes terminal. Their semantic result lives only in the ontology commit, correlated by Action origin; the Action run is not a second commit ledger.
+Action-backed edits carry the run's terminal record. The commit validates the trusted Action
+execution and the record's `executionId`, then inserts the record in its own transaction before new
+work, so edits never land without the run that made them and a run id commits once: a second insert
+for it fails the commit. An exact replay returns the stored commit and inserts nothing; the carried
+record is not part of the commit's intent. The edits' semantic result lives only in the ontology
+commit, correlated by Action origin; the Action run is not a second commit ledger.
 
 ## Telemetry append
 

@@ -1,6 +1,6 @@
 // Generated SDK surface (modern)
 
-export type { ActionRunDetail, ActionRunTerminalFailureStatus } from "./actions"
+export type { ActionRunDetail } from "./actions"
 export { ActionRunFailedError } from "./actions"
 export * from "./agent-streams"
 export * from "./api"

@@ -3,7 +3,7 @@ import { defineObjectType, InMemoryStorage, OntologyRegistry, prop, type Storage
 import { StorageTransactionError } from "../src/storage"
 import {
   createMaterializerTestFixture,
-  queueTestActionRun,
+  recordTestActionRun,
   startTestSyncRun,
   startTestWebhookRun,
 } from "../src/testing"
@@ -24,7 +24,7 @@ describe("InMemoryStorage.transaction", () => {
     const storage = new InMemoryStorage()
 
     await storage.transaction(async (tx) => {
-      await queueTestActionRun(tx, actionRunInput("run_commit"))
+      await recordTestActionRun(tx, actionRunInput("run_commit"))
     })
 
     expect(
@@ -90,7 +90,7 @@ describe("InMemoryStorage.transaction", () => {
     await expect(
       storage.transaction(async (tx) => {
         requireTransactionalRunStores(tx)
-        await queueTestActionRun(tx, actionRunInput("run_rollback"))
+        await recordTestActionRun(tx, actionRunInput("run_rollback"))
         await startTestSyncRun(tx, syncRunInput("sync_rollback"))
         await startTestWebhookRun(tx, webhookRunInput("webhook_rollback"))
 
@@ -110,7 +110,7 @@ describe("InMemoryStorage.transaction", () => {
 
     await storage.transaction(async (tx) => {
       requireTransactionalRunStores(tx)
-      await queueTestActionRun(tx, actionRunInput("run_commit"))
+      await recordTestActionRun(tx, actionRunInput("run_commit"))
       await startTestSyncRun(tx, syncRunInput("sync_commit"))
       await startTestWebhookRun(tx, webhookRunInput("webhook_commit"))
     })
@@ -152,7 +152,7 @@ describe("InMemoryStorage.transaction", () => {
     const releaseTransaction = deferred()
     const transactionResult = storage
       .transaction(async (tx) => {
-        await queueTestActionRun(tx, actionRunInput("run_uncommitted"))
+        await recordTestActionRun(tx, actionRunInput("run_uncommitted"))
         transactionStarted.resolve()
         await releaseTransaction.promise
         throw new Error("rollback")

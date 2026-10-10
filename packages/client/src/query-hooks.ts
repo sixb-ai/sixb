@@ -334,7 +334,7 @@ export interface ActionRunMutationBaseOptions<TVariables, TContext>
   extends Omit<UseMutationOptions<ActionRunDetail, Error, TVariables, TContext>, "mutationFn"> {
   /** hey-api client override. Defaults to the nearest SixbProvider client, then the global client. */
   readonly client?: Client
-  /** Invalidate action-run caches, and object-query caches when the terminal run committed changes. */
+  /** Invalidate action-run caches, and object-query caches when the run committed its edits. */
   readonly invalidateOnCommit?: boolean
   /** Override used by tests and non-hook option factory consumers. */
   readonly queryClient?: QueryClient
@@ -528,10 +528,11 @@ async function invalidateActionRunMutationCaches(
     queryClient.invalidateQueries({ queryKey: listActionRunsInfiniteQueryKey() }),
   ]
 
-  // A run that reached the commit phase may have changed any object the action touched. The run
-  // record no longer carries a per-object diff — object changes live in the authoritative ontology
-  // commit — so object reads are invalidated wholesale.
-  if (run.phase === "commit" || run.phase === "effects") {
+  // A run that succeeded in its commit phase, or went on to its effects, committed its edits with
+  // its record, and may have changed any object the action touched. A run that failed committed
+  // nothing. The record carries no per-object diff — object changes live in the authoritative
+  // ontology commit — so object reads are invalidated wholesale.
+  if (run.status === "succeeded" && (run.phase === "commit" || run.phase === "effects")) {
     invalidations.push(
       invalidateObjectQueries(queryClient),
       queryClient.invalidateQueries({ predicate: isGeneratedObjectRead })

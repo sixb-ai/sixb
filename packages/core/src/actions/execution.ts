@@ -31,11 +31,12 @@ export interface ActionsRuntime {
   listGlobal(): readonly ActionDescriptor[]
   listForType(objectType: ObjectType): readonly ActionDescriptor[]
   /**
-   * Run an Action in this process and return its terminal record. A run that fails resolves with
-   * status `failed`. The call rejects when the request itself is refused (unknown action, invalid
-   * params, missing authority, a run id still in progress, a stopping runtime), and with
-   * `internal.unexpected` when a run that started cannot return its record: request it again with
-   * the same run id to get it.
+   * Run an Action in this process and return its terminal record, without waiting for its effects.
+   * A run that fails resolves with status `failed`. The call rejects when the request itself is
+   * refused (unknown action, invalid params, missing authority, a run id this process is still
+   * running, a stopping runtime), and with `internal.unexpected` when a run that started could not
+   * be recorded: requesting it again with the same run id returns its record if it was recorded, and
+   * runs it again otherwise.
    */
   request(input: RequestActionInput): Promise<ActionRunRecord>
   readonly runs: ActionRunsRuntime

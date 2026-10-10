@@ -7,11 +7,11 @@ import {
 } from "../../execution/primitive"
 import type { LoggingService } from "../../logging/service"
 import type { SixbDefinitions } from "../../runtime/definitions"
-import type { ActionRunRecord, ActionRunStorage, Storage } from "../../storage"
+import type { ActionRunStorage, Storage } from "../../storage"
 import type { ExecutionRecord } from "../../storage/executions"
 import { runAction } from "./run-action"
 import { ActionRunSignals } from "./signals"
-import type { ActionRunContext, ActionRunResult } from "./types"
+import type { ActionRunContext, ActionRunOutcome, PendingActionRun } from "./types"
 
 /** What executing a stored Action run needs from its host. */
 export interface ActionRunHost extends PrimitiveExecutionHost {
@@ -22,12 +22,12 @@ export interface ActionRunHost extends PrimitiveExecutionHost {
 }
 
 export interface ExecuteActionRunInput {
-  readonly run: ActionRunRecord
+  readonly run: PendingActionRun
   /** The durable execution the run was requested under. */
   readonly execution: ExecutionRecord
   /** Cancels the run before its irreversible boundary. */
   readonly signal?: AbortSignal
-  /** Test-only override of the run's 30-second deadline. */
+  /** Test-only override of the 30-second deadlines of the run and of its effects. */
   readonly timeoutMs?: number
 }
 
@@ -40,15 +40,16 @@ export interface ExecuteActionRunInput {
 const MODEL_EXECUTION_ATTEMPT = 1
 
 /**
- * Execute a requested Action run inside the durable execution it was requested under.
+ * Execute a requested Action run inside the durable execution it was requested under, and record it.
  *
  * Binds the Action's primitive scope to that execution, then runs the phases under the run's
- * deadline and the caller's signal.
+ * deadline and the caller's signal. Its effects, when it has any, are left to start: see
+ * {@link ActionRunOutcome.effects}.
  */
 export async function executeActionRun(
   host: ActionRunHost,
   input: ExecuteActionRunInput
-): Promise<ActionRunResult> {
+): Promise<ActionRunOutcome> {
   const { run, execution } = input
   const actionRuns = requireActionRunStorage(host, run.id)
   const signals = new ActionRunSignals({

@@ -673,7 +673,8 @@ function filePath(value: unknown): string | undefined {
   return undefined
 }
 
-type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+/** An Action run is recorded once, when it ends. */
+type ActionRunStatus = "succeeded" | "failed"
 
 interface ActionRunInfo {
   readonly actionId?: string
@@ -681,20 +682,10 @@ interface ActionRunInfo {
   readonly subjectLabel?: string
 }
 
-const ACTION_RUN_STATUSES: ReadonlySet<string> = new Set([
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-])
-
 function actionRunInfo(value: unknown): ActionRunInfo {
   if (!isRecord(value)) return {}
   const status =
-    typeof value.status === "string" && ACTION_RUN_STATUSES.has(value.status)
-      ? (value.status as ActionRunStatus)
-      : undefined
+    value.status === "succeeded" || value.status === "failed" ? value.status : undefined
   const actionId = typeof value.actionId === "string" ? value.actionId : undefined
   return { actionId, status, subjectLabel: subjectLabel(value.subject) }
 }

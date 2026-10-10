@@ -10,6 +10,7 @@ import type {
   OntologyOperationOutcome,
 } from "../materializer"
 import type { OntologyMutationRuntime } from "../runtime/ontology-mutations"
+import type { RecordActionRunInput } from "../storage"
 
 /** Exact reads an Action handler depended on, protected by row-level CAS at commit time. */
 export interface ActionReadDependencies {
@@ -22,9 +23,8 @@ const NO_READ_DEPENDENCIES: ActionReadDependencies = { objects: [], links: [], l
 
 export interface CommitActionEditsInput {
   readonly mutations: Pick<OntologyMutationRuntime, "commitEdits">
-  readonly projectId: string
-  readonly runId: string
-  readonly actionId: string
+  /** The run's terminal record, which the commit inserts with its edits. */
+  readonly run: RecordActionRunInput
   readonly batch: EditBatch
   readonly dependencies?: ActionReadDependencies
 }
@@ -46,9 +46,10 @@ export interface ActionEditCommitResult {
  * Commits one Action run's recorded edits as a single atomic ontology commit.
  *
  * The batch lowers to canonical Materializer operations and the Materializer validates the Action run
- * identity, applies managed authority, resolves effective state, writes the authoritative commit, and
- * inserts outbox facts in one transaction. Repeating the call for the same run replays that commit;
- * a divergent request for the same run is a typed idempotency conflict.
+ * identity, applies managed authority, resolves effective state, writes the authoritative commit,
+ * inserts outbox facts, and records the run in one transaction. Repeating the call for the same run
+ * replays that commit without recording anything; a divergent request for the same run is a typed
+ * idempotency conflict.
  */
 export async function commitActionEdits(
   input: CommitActionEditsInput
@@ -56,7 +57,8 @@ export async function commitActionEdits(
   const dependencies = input.dependencies ?? NO_READ_DEPENDENCIES
   const commit = await input.mutations.commitEdits({
     mode: "atomic",
-    source: { kind: "action", actionId: input.actionId, runId: input.runId },
+    source: { kind: "action", actionId: input.run.actionId, runId: input.run.id },
+    run: input.run,
     operations: lowerEditBatch(input.batch),
     expectedObjects: dependencies.objects,
     expectedLinks: dependencies.links,

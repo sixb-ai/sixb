@@ -58,9 +58,9 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
     })
     const actionRunId = `${context.job.id}:action:${nodeIndex}`
 
-    // No `signal`: the run is bounded by its own deadline, and cancelling it would leave a
-    // terminal `cancelled` run that a redelivery of this node, under the same run id, could only
-    // report as a failure.
+    // No `signal`: the run is bounded by its own deadline, and cancelling it would record a run
+    // that failed with `runtime.cancelled`, which a redelivery of this node, under the same run
+    // id, could only report as a failure.
     const run = await context.runtime.sixb.actions.request({
       actionId: node.action.id,
       subject: mapperResult.subject,
@@ -68,21 +68,13 @@ export const actionNodeExecutor: WorkflowNodeExecutor<WorkflowActionNodeDefiniti
       runId: actionRunId,
       onRequested: () => context.markSideEffectBoundaryPassed(),
     })
-    if (run.status !== "succeeded") {
-      // `request` resolves only with a terminal run, and a terminal failure always records why.
-      if (!run.error) {
-        throw createSixbError(
-          "internal.unexpected",
-          `[SixbWorkflowWorker] Action run '${run.id}' ended with status '${run.status}' and no recorded failure.`,
-          { details: { actionId: run.actionId, runId: run.id, nodeId: node.id } }
-        )
-      }
+    if (run.status === "failed") {
       throw new ActionRunFailedError({
         runId: run.id,
         actionId: run.actionId,
         subject: run.subject,
         error: run.error,
-        finishedAt: (run.finishedAt ?? new Date()).toISOString(),
+        finishedAt: run.finishedAt.toISOString(),
       })
     }
 

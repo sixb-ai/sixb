@@ -1,15 +1,15 @@
 import type { DomainEventLog } from "../../events"
 import type { ActionRunRecord } from "../../storage"
-import type { ActionRunResult } from "./types"
+import type { PendingActionRun } from "./types"
 
 // Transitional: the action worker used to emit these events. Emitting them from the inline path
 // keeps their consumers (Atlas live updates, schedules, client subscriptions) working until the
 // run record becomes their only source of truth and the events are removed.
 
-/** Announce a run once it is durable, before it executes. */
+/** Announce a run before it executes. */
 export async function emitActionRequested(
   events: DomainEventLog,
-  run: ActionRunRecord,
+  run: PendingActionRun,
   correlationId: string
 ): Promise<void> {
   await events.emit(
@@ -31,26 +31,26 @@ export async function emitActionRequested(
   )
 }
 
-/** Announce the outcome of a run this process executed. */
+/** Announce how a run ended, once this process recorded it. */
 export async function emitActionTerminal(
   events: DomainEventLog,
-  result: ActionRunResult,
+  run: ActionRunRecord,
   correlationId: string
 ): Promise<void> {
-  const finishedAt = result.finishedAt.toISOString()
+  const finishedAt = run.finishedAt.toISOString()
 
   await events.emit(
     {
       events:
-        result.status === "succeeded"
+        run.status === "succeeded"
           ? [
               {
                 type: "action.completed",
-                idempotencyKey: `action.completed:${result.id}`,
+                idempotencyKey: `action.completed:${run.id}`,
                 payload: {
-                  actionId: result.actionId,
-                  runId: result.id,
-                  subject: result.subject,
+                  actionId: run.actionId,
+                  runId: run.id,
+                  subject: run.subject,
                   finishedAt,
                 },
               },
@@ -58,12 +58,12 @@ export async function emitActionTerminal(
           : [
               {
                 type: "action.failed",
-                idempotencyKey: `action.failed:${result.id}`,
+                idempotencyKey: `action.failed:${run.id}`,
                 payload: {
-                  actionId: result.actionId,
-                  runId: result.id,
-                  subject: result.subject,
-                  error: result.error,
+                  actionId: run.actionId,
+                  runId: run.id,
+                  subject: run.subject,
+                  error: run.error,
                   finishedAt,
                 },
               },
