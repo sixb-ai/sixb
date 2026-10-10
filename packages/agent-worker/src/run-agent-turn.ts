@@ -3,6 +3,7 @@ import { createAgentMessageId, runModelLoop, toModelMessages } from "@sixb/core/
 import { createSixbError } from "@sixb/core/internal/errors"
 import { isAbortError, QueueDeliveryLeaseLostError } from "@sixb/core/internal/workers"
 import {
+  type AgentRunDiagnostic,
   type AgentRunFinishReason,
   type AgentRunRecord,
   type AgentStorage,
@@ -250,10 +251,8 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
     }
 
     const finishReason = coerceAgentRunFinishReason(result.finishReason) ?? "unknown"
-    const assistant = ensureVisibleAssistantMessage(
-      { role: "assistant", parts: interruptedParts },
-      { finishReason, maxSteps }
-    )
+    const assistant: AgentMessage = { role: "assistant", parts: interruptedParts }
+    const stepLimit = stepLimitDiagnostic(assistant, { finishReason, maxSteps })
     let outputAttachments: Awaited<ReturnType<typeof collectAgentOutputAttachments>>
     try {
       outputAttachments = await collectAgentOutputAttachments({
@@ -299,9 +298,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<AgentRunRe
         status: "succeeded",
         modelId: plan.model.modelId,
         finishReason,
-        ...(outputAttachments.diagnostics.length === 0
+        ...(outputAttachments.diagnostics.length === 0 && !stepLimit
           ? {}
-          : { diagnostics: outputAttachments.diagnostics }),
+          : {
+              diagnostics: [...(stepLimit ? [stepLimit] : []), ...outputAttachments.diagnostics],
+            }),
       },
     })
 
@@ -321,20 +322,20 @@ export function stoppedByWorker(turnSignal: AbortSignal, stopSignal?: AbortSigna
   return stopSignal?.aborted === true && turnSignal.reason === stopSignal.reason
 }
 
-function ensureVisibleAssistantMessage(
+/**
+ * A turn that ran out of steps before answering says so through a diagnostic, which chats render in
+ * the reader's language, rather than through text written into the transcript.
+ */
+function stepLimitDiagnostic(
   message: AgentMessage,
   input: { readonly finishReason: string | undefined; readonly maxSteps: number }
-): AgentMessage {
-  if (hasVisibleText(message.parts) || input.finishReason !== "tool-calls") return message
+): AgentRunDiagnostic | undefined {
+  if (hasVisibleText(message.parts) || input.finishReason !== "tool-calls") return undefined
   return {
-    ...message,
-    parts: [
-      ...message.parts,
-      {
-        type: "text",
-        text: `I reached the configured ${input.maxSteps}-step limit before producing a final answer. Ask me to continue and I can use the work above as context.`,
-      },
-    ],
+    code: "step_limit_reached",
+    severity: "warning",
+    scope: "run",
+    message: `The Agent reached its ${input.maxSteps}-step limit before producing a final answer.`,
   }
 }
 

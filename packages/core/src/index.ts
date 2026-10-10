@@ -1043,6 +1043,7 @@ export type {
   AgentContextInput,
   AgentContextOrigin,
   AgentContextPart,
+  AgentContinuationPart,
   AgentDefinitions,
   AgentDefinitionsInput,
   AgentDescriptor,

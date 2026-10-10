@@ -1,5 +1,6 @@
 import { stableJsonStringify } from "../json"
 import type { AgentMessageRecord } from "../storage/agents/types"
+import { AGENT_CONTINUATION_INSTRUCTION } from "./adapters"
 import type { AgentMessage, AgentMessagePart } from "./message"
 
 export const AGENT_CONTEXT_ESTIMATOR_VERSION = 1 as const
@@ -144,6 +145,9 @@ function estimateMessageTokens(
       case "step-start":
         tokens += STEP_OVERHEAD_TOKENS
         break
+      case "continuation":
+        tokens += textTokens(AGENT_CONTINUATION_INSTRUCTION)
+        break
       case "context":
         tokens += textTokens(stableJsonStringify(part.context))
         break
@@ -199,6 +203,8 @@ function serializeSummaryPart(
     case "provider-state":
     case "step-start":
       return []
+    case "continuation":
+      return [`${indent}<continuation_request />`]
     case "context":
       return part.context.kind === "object"
         ? [

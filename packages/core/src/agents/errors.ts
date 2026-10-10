@@ -34,6 +34,7 @@ export type AgentRequestErrorCode =
   | "model_not_found"
   | "invalid_model_selection"
   | "invalid_locale"
+  | "invalid_message"
   | "run_not_found"
   | "run_not_retryable"
   | "thread_not_found"

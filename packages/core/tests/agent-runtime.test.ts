@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { agent, can, defineGroup, defineRole, SixbHost } from "../src"
+import { AGENT_CONTINUATION_INSTRUCTION, toModelMessages } from "../src/agents/adapters"
 import { emptyGrantIndex } from "../src/authorization"
 import { bindRequestExecution } from "../src/execution/request"
 import { defineLanguageModel, type ModelCatalogInput } from "../src/models"
@@ -163,6 +164,42 @@ describe("single project Agent", () => {
       })
     }
     expect((await storage.agents.threads.list({ projectId: host.id })).total).toBe(1)
+  })
+
+  test("continues a cut-short answer with a framework-written instruction", async () => {
+    // Proven by removal: send `continue` as user text; the model then reads the user's words.
+    const { host, storage } = setup([testLanguageModel(), testLanguageModel("deep-model")])
+    const sixb = await userScope(host, "owner")
+    const { run } = await sixb.agent.runs.request({
+      text: "Write the report",
+      model: { provider: "test", modelId: "deep-model" },
+      reasoning: "high",
+    })
+    await storage.agents.runs.finishQueued({ projectId: host.id, id: run.id, status: "cancelled" })
+    const continued = await sixb.agent.runs.request({ threadId: run.threadId, continue: true })
+    const trigger = await storage.agents.messages.getById({
+      projectId: host.id,
+      id: continued.run.triggerMessageId,
+    })
+    expect(trigger).toMatchObject({ role: "user", parts: [{ type: "continuation" }] })
+    // It keeps the cut-short turn's model and reasoning. Proven by removal: drop continuedSelection.
+    expect(continued.run.spec).toMatchObject({
+      model: { provider: "test", modelId: "deep-model" },
+      reasoning: "high",
+    })
+    expect(toModelMessages([trigger!])).toEqual([
+      { role: "user", content: [{ type: "text", text: AGENT_CONTINUATION_INSTRUCTION }] },
+    ])
+
+    for (const input of [
+      { continue: true },
+      { threadId: run.threadId, continue: true, text: "Continue" },
+      { threadId: run.threadId },
+    ]) {
+      await expect(sixb.agent.runs.request(input)).rejects.toMatchObject({
+        code: expect.stringMatching(/^(thread_not_found|invalid_message)$/),
+      })
+    }
   })
 
   test("rejects removed selectors and unknown models before creating history", async () => {
