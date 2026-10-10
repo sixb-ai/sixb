@@ -18,6 +18,15 @@ export const SIXB_ERROR_DEFINITIONS = {
     publicMessage: "Data the Action read changed before its commit.",
     retryable: true,
   },
+  "action.run_in_progress": {
+    publicMessage: "The Action run is already in progress.",
+    retryable: true,
+  },
+  // Not retryable: the deadline aborts a writeback whose external call may still have landed.
+  "action.timeout": {
+    publicMessage: "The Action exceeded its 30-second time limit.",
+    retryable: false,
+  },
   "agent.execution_failed": {
     publicMessage: "Agent execution failed.",
     retryable: false,
@@ -133,6 +142,10 @@ export const SIXB_ERROR_DEFINITIONS = {
   "runtime.cancelled": {
     publicMessage: "Execution was cancelled.",
     retryable: false,
+  },
+  "runtime.stopping": {
+    publicMessage: "The runtime is stopping; retry the request.",
+    retryable: true,
   },
   "vector.model_unavailable": {
     publicMessage: "The embedding model configured for this vector profile is unavailable.",

@@ -6,6 +6,7 @@
  */
 
 import { resolve } from "node:path"
+import { ActionRunExecutor, registerActionRunExecutor } from "../actions/run/executor"
 import type { ActionDefinition } from "../actions/types"
 import type { AgentDefinitionsInput, AgentToolDefinition } from "../agents"
 import {
@@ -294,6 +295,10 @@ export class SixbHost<in out TParams extends ParamsConfig = ParamsConfig> {
     }
     registerProjectionRegistry(this.hostContext, definitions.projections)
     shareSixbErrorReporter(this, this.hostContext)
+    // Bound SDKs run requested Actions through the context; the host drains them on shutdown.
+    const executor = new ActionRunExecutor(this)
+    registerActionRunExecutor(this, executor)
+    registerActionRunExecutor(this.hostContext, executor)
     registerVectorIndexingRuntime(
       this,
       createVectorIndexingRuntime(this.hostContext, this.materializer)

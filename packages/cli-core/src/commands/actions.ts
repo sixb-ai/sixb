@@ -1,6 +1,6 @@
 import type { ApiClient } from "../api-client"
 import { isHelp, parseCommandArgs, requestsHelp } from "../arguments"
-import { CliError, EXIT_API, fail, writeJson, writeText } from "../output"
+import { fail, writeJson, writeText } from "../output"
 import { GROUP_HELP } from "./metadata"
 import { asRecord, parseQueryOptions, readJson } from "./shared"
 
@@ -28,7 +28,6 @@ export async function actions(api: ApiClient, args: readonly string[]): Promise<
         "--subject-id": "string",
         "--file": "string",
         "--run-id": "string",
-        "--wait": "boolean",
       },
       "actions request",
       1
@@ -38,7 +37,6 @@ export async function actions(api: ApiClient, args: readonly string[]): Promise<
     const subjectId = options["--subject-id"]
     const paramsSource = options["--file"]
     const runId = options["--run-id"]
-    const wait = options["--wait"]
     if (Boolean(subjectType) !== Boolean(subjectId)) {
       fail("--subject-type and --subject-id must be provided together.")
     }
@@ -46,49 +44,16 @@ export async function actions(api: ApiClient, args: readonly string[]): Promise<
     if (Array.isArray(params) || typeof params !== "object" || params === null) {
       fail("Action params must be a JSON object.")
     }
-    const requested = await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
-      params,
-      ...(subjectType && subjectId
-        ? { subject: { kind: "object", objectTypeId: subjectType, primaryId: subjectId } }
-        : {}),
-      ...(runId ? { runId } : {}),
-    })
-    if (!wait) return writeJson(requested)
-
-    const requestedRunId = asRecord(requested).runId
-    if (typeof requestedRunId !== "string" || requestedRunId.length === 0) {
-      throw new CliError(
-        {
-          code: "invalid_api_response",
-          message: "The Action request response did not contain a run id.",
-        },
-        EXIT_API
-      )
-    }
-    return writeJson(await waitForActionRun(api, requestedRunId))
+    // The API answers once the Action has run, with its terminal run.
+    return writeJson(
+      await api.post(`/api/actions/${encodeURIComponent(actionId)}`, {
+        params,
+        ...(subjectType && subjectId
+          ? { subject: { kind: "object", objectTypeId: subjectType, primaryId: subjectId } }
+          : {}),
+        ...(runId ? { runId } : {}),
+      })
+    )
   }
   fail(`Unknown actions command '${sub}'.`)
-}
-
-const ACTION_WAIT_TIMEOUT_MS = 25_000
-const ACTION_WAIT_POLL_MS = 250
-const TERMINAL_ACTION_STATUSES = new Set(["succeeded", "failed", "cancelled"])
-
-async function waitForActionRun(api: ApiClient, runId: string): Promise<unknown> {
-  const startedAt = Date.now()
-  while (Date.now() - startedAt < ACTION_WAIT_TIMEOUT_MS) {
-    const run = await api.get(`/api/action-runs/${encodeURIComponent(runId)}`)
-    const status = asRecord(run).status
-    if (typeof status === "string" && TERMINAL_ACTION_STATUSES.has(status)) return run
-    await new Promise((resolve) => setTimeout(resolve, ACTION_WAIT_POLL_MS))
-  }
-
-  throw new CliError(
-    {
-      code: "action_wait_timeout",
-      message: `Action run '${runId}' did not finish within ${ACTION_WAIT_TIMEOUT_MS / 1_000} seconds.`,
-      hint: `Inspect it with 'sixb action-runs get ${runId}'.`,
-    },
-    EXIT_API
-  )
 }

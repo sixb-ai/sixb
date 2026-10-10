@@ -84,7 +84,7 @@ describe("auth example Atlas authorization", () => {
         actionId: "acknowledge-note",
         subject: { kind: "object", objectTypeId: "note", primaryId: "team-note" },
       })
-    ).resolves.toMatchObject({ runId: expect.any(String) })
+    ).resolves.toMatchObject({ status: "succeeded" })
     await expect(
       teamMember.actions.request({
         actionId: "resolve-access-request",
@@ -123,7 +123,7 @@ describe("auth example Atlas authorization", () => {
         actionId: "resolve-access-request",
         subject: { kind: "object", objectTypeId: "access-request", primaryId: "access-request" },
       })
-    ).resolves.toMatchObject({ runId: expect.any(String) })
+    ).resolves.toMatchObject({ status: "succeeded" })
     await expect(
       admin.workflows.requestById({
         workflowId: "run-access-review",

@@ -1,8 +1,8 @@
 import { AuthorizationError, assertAuthorized, canViewActionRun } from "../authorization"
 import {
   getAuthorizationRef,
+  type ResolvedRuntimeAuthorization,
   resolveExecutionScopeAuthorization,
-  resolveRuntimeAuthorizationForProject,
 } from "../execution/authorization"
 import {
   createPrimitiveExecutionRecord,
@@ -10,22 +10,19 @@ import {
   executionRecordInputFromRuntime,
 } from "../execution/durable"
 import type { ExecutionContext } from "../execution/types"
-import { ActionRunTimeoutError } from "../objects/action/errors"
 import { OntologyValidationError } from "../ontology/errors"
 import type { ObjectTypeWithPropertyTokens } from "../ontology/tokens"
 import type { SixbRuntimeContext } from "../runtime/types"
 import { assertParamUsersActive } from "../shared/params/user-refs"
+import type { ActionRunRecord } from "../storage"
 import {
-  ActionRunError,
-  type ActionRunRecord,
-  type ActionRunStorage,
-  isTerminalActionRun,
-} from "../storage"
-import { assertObjectReadOutputWithinLimit } from "../storage/objects/execution-limits"
+  assertObjectReadOutputWithinLimit,
+  ObjectReadLimitExceededError,
+} from "../storage/objects/execution-limits"
 import { admitDelegatedObjectAction, assertDelegatedActionTarget } from "./delegated-admission"
-import { actionRunBelongsToShareGrant, canDelegationAccessActionRun } from "./run-authorization"
-import { dispatchActionRun } from "./run-dispatch"
-import { createActionRunId } from "./run-id"
+import { getActionRunExecutor } from "./run/executor"
+import { actionRunBelongsToShareGrant } from "./run-authorization"
+import { persistActionRun } from "./run-persistence"
 import type { ActionDefinition, ActionSubject } from "./types"
 import {
   isObjectActionDefinition,
@@ -34,49 +31,21 @@ import {
   validateActionSubject,
 } from "./validation"
 
-export interface RequestActionResult {
-  readonly runId: string
-  readonly queuedAt: string
-  readonly jobId?: string
-  readonly created: boolean
-}
-
 export interface RequestActionOptions {
   readonly runId?: string
+  /**
+   * Cancels the run before its irreversible boundary: a succeeded writeback, or the commit of an
+   * Action without one. Past it, the run finishes whatever this signal does.
+   */
   readonly signal?: AbortSignal
 }
 
-export interface RequestActionAndWaitOptions extends RequestActionOptions {
-  readonly timeoutMs?: number
-  readonly onRequested?: (runId: string) => void | Promise<void>
-}
-
-export interface RequestActionInput {
+export interface RequestActionInput extends RequestActionOptions {
   readonly actionId: string
   readonly subject?: ActionSubject
   readonly params?: Record<string, unknown>
-  readonly runId?: string
-  readonly signal?: AbortSignal
-}
-
-export interface RequestActionAndWaitInput extends RequestActionInput {
-  readonly timeoutMs?: number
+  /** Called once the run is durable, before it executes. A throw fails the run unexecuted. */
   readonly onRequested?: (runId: string) => void | Promise<void>
-}
-
-export interface WaitForActionRunInput {
-  readonly runId: string
-  readonly timeoutMs?: number
-  readonly signal?: AbortSignal
-}
-
-const DEFAULT_ACTION_WAIT_TIMEOUT_MS = 60_000
-const DEFAULT_ACTION_WAIT_POLL_MS = 1_000
-
-function clearTimer(timer: ReturnType<typeof setTimeout> | undefined): void {
-  if (timer) {
-    clearTimeout(timer)
-  }
 }
 
 function getActionDefinition(runtime: SixbRuntimeContext, actionId: string): ActionDefinition {
@@ -87,11 +56,17 @@ function getActionDefinition(runtime: SixbRuntimeContext, actionId: string): Act
   return action
 }
 
+/**
+ * Request an Action run and execute it in this process, returning its terminal record.
+ *
+ * Admission, authorization and params are checked before anything is persisted. A run id that was
+ * already requested returns that run's record once it is terminal, without running it again.
+ */
 export async function requestAction(
   runtime: SixbRuntimeContext,
   execution: ExecutionContext,
   input: RequestActionInput
-): Promise<RequestActionResult> {
+): Promise<ActionRunRecord> {
   // Capture the three process-local capabilities before caller-owned request getters can run.
   const projectId = runtime.projectId
   const runtimeAuthorization = runtime.runtimeAuthorization
@@ -127,7 +102,7 @@ export async function requestAction(
     assertAuthorized({ projectId, runtimeAuthorization }, { kind: "action.apply", actionId })
   }
   if (authorization.type !== "delegated" && action.binding.kind === "object") {
-    // Object actions also require visibility of the subject's object type.
+    // Object actions require visibility of the type they are bound to, as listing them does.
     assertAuthorized(
       { projectId, runtimeAuthorization },
       { kind: "object.view", objectTypeId: action.binding.objectType.id }
@@ -142,74 +117,139 @@ export async function requestAction(
   if (isObjectActionDefinition(action)) {
     objectType = resolveObjectActionSubject({ runtime, action, subject })
     pathPrefix = `${objectType.id}.${action.id}`
+    if (authorization.type !== "delegated") {
+      // A run is visible to whoever may view its subject's type (`canViewActionRun`). A subtype
+      // excluded from a broad grant is not visible through its parent, so admitting the request on
+      // the bound type alone would run what its caller can never read back.
+      assertAuthorized(
+        { projectId, runtimeAuthorization },
+        { kind: "object.view", objectTypeId: objectType.id }
+      )
+    }
   }
 
   const actionParams = normalizeActionParams(runtime, action.params, rawParams, pathPrefix)
 
-  // `dispatchActionRun` checks an existing run id before creating its durable execution. Keep
+  // `persistActionRun` checks an existing run id before creating its durable execution. Keep
   // process-local delegation outside that oracle unless it carries durable grant provenance.
   void getAuthorizationRef(runtimeAuthorization)
+  // A run is persisted only if it can start; an aborted caller gets its abort, not a cancelled run.
+  const executor = getActionRunExecutor(runtime)
+  request.signal?.throwIfAborted()
 
-  return dispatchActionRun({
-    errorReporterHost: runtime,
-    projectId,
-    storage: runtime.storage,
-    queue: runtime.queues.actions,
-    events: runtime.events,
-    actionId,
-    subject,
-    params: actionParams,
-    runId: request.runId,
-    assertNewRun: () =>
-      assertParamUsersActive({
-        auth: runtime.storage.auth,
-        projectId,
-        schemas: Object.fromEntries(
-          Object.entries(action.params).map(([paramId, param]) => [paramId, param.schema])
-        ),
-        values: actionParams,
-        valueTypesById: runtime.ontology.getValueTypesById(),
-        describe: (paramId) => `Action param '${pathPrefix}.${paramId}'`,
-        invalid: (message) => new OntologyValidationError(message),
-      }),
-    ...(authorization.type === "delegated"
-      ? {
-          assertCanReuseExisting: async (
-            storage: SixbRuntimeContext["storage"],
-            existing: ActionRunRecord
-          ) => {
-            if (
-              !authorization.delegation ||
-              !(await actionRunBelongsToShareGrant({
-                storage,
-                projectId,
-                run: existing,
-                grantId: authorization.delegation.grantId,
-              }))
-            ) {
-              throw new AuthorizationError(
-                `apply:action:${actionId}`,
-                "[Sixb] Delegated authority cannot reuse this Action run."
-              )
-            }
-          },
-        }
-      : {}),
-    createExecution: async (executionId, runId) => {
-      const caller = await ensureExecutionRecord(
-        runtime.storage.executions,
-        executionRecordInputFromRuntime({
-          execution,
-          runtimeAuthorization,
+  const persist = () =>
+    persistActionRun({
+      projectId,
+      storage: runtime.storage,
+      actionId,
+      subject,
+      params: actionParams,
+      runId: request.runId,
+      assertNewRun: () =>
+        assertParamUsersActive({
+          auth: runtime.storage.auth,
+          projectId,
+          schemas: Object.fromEntries(
+            Object.entries(action.params).map(([paramId, param]) => [paramId, param.schema])
+          ),
+          values: actionParams,
+          valueTypesById: runtime.ontology.getValueTypesById(),
+          describe: (paramId) => `Action param '${pathPrefix}.${paramId}'`,
+          invalid: (message) => new OntologyValidationError(message),
+        }),
+      ...(authorization.type === "delegated"
+        ? {
+            assertCanReuseExisting: async (
+              storage: SixbRuntimeContext["storage"],
+              existing: ActionRunRecord
+            ) => {
+              if (
+                !authorization.delegation ||
+                !(await actionRunBelongsToShareGrant({
+                  storage,
+                  projectId,
+                  run: existing,
+                  grantId: authorization.delegation.grantId,
+                }))
+              ) {
+                throw new AuthorizationError(
+                  `apply:action:${actionId}`,
+                  "[Sixb] Delegated authority cannot reuse this Action run."
+                )
+              }
+            },
+          }
+        : {}),
+      createExecution: async (executionId, runId) => {
+        const caller = await ensureExecutionRecord(
+          runtime.storage.executions,
+          executionRecordInputFromRuntime({
+            execution,
+            runtimeAuthorization,
+          })
+        )
+        return createPrimitiveExecutionRecord({
+          id: executionId,
+          primitive: { kind: "action", id: actionId, runId },
+          origin: { type: "execution", parent: caller },
         })
-      )
-      return createPrimitiveExecutionRecord({
-        id: executionId,
-        primitive: { kind: "action", id: actionId, runId },
-        origin: { type: "execution", parent: caller },
-      })
-    },
+      },
+    })
+
+  const requested = await executor.request({
+    persist,
+    signal: request.signal,
+    onRequested: request.onRequested,
   })
+
+  if (requested.replayed) {
+    assertCanViewReplayedRun(authorization, requested.run)
+  }
+  return enforceDelegatedOutputBudget(authorization, requested.run)
+}
+
+/**
+ * A replayed run answers this request but was persisted by another one, so it stays under the
+ * visibility rules `actions.runs.getById` applies. Admission already requires the grants those
+ * rules check, on the same Action and subject; this keeps the record from depending on it. A
+ * delegated reuse was already checked against its grant.
+ */
+function assertCanViewReplayedRun(
+  authorization: ResolvedRuntimeAuthorization,
+  run: ActionRunRecord
+): void {
+  if (authorization.type === "principal" && !canViewActionRun(authorization.context, run)) {
+    throw new AuthorizationError(
+      `apply:action:${run.actionId}`,
+      `[Sixb] Action run '${run.id}' is not visible to this principal.`
+    )
+  }
+}
+
+/**
+ * A delegated caller receives the record only within its output budget, like any read.
+ *
+ * The run already ran by then, and its record does not change: requesting the same run id again
+ * is refused the same way.
+ */
+function enforceDelegatedOutputBudget(
+  authorization: ResolvedRuntimeAuthorization,
+  run: ActionRunRecord
+): ActionRunRecord {
+  if (authorization.type !== "delegated") return run
+  try {
+    assertObjectReadOutputWithinLimit(run, authorization.objectRead.limits)
+  } catch (error) {
+    if (!(error instanceof ObjectReadLimitExceededError)) throw error
+    throw new ObjectReadLimitExceededError(
+      error.metric,
+      error.limit,
+      `[Sixb] Action run '${run.id}' finished with status '${run.status}', but its record exceeds ` +
+        `this caller's ${error.metric} limit (${error.limit}). Requesting it again returns the ` +
+        "same record."
+    )
+  }
+  return run
 }
 
 function snapshotActionRequest(input: RequestActionInput): {
@@ -217,199 +257,23 @@ function snapshotActionRequest(input: RequestActionInput): {
   readonly subject: ActionSubject
   readonly params: Record<string, unknown>
   readonly runId?: string
+  readonly signal?: AbortSignal
+  readonly onRequested?: (runId: string) => void | Promise<void>
 } {
   const actionId = input.actionId
   const subject = input.subject
   const params = input.params
   const runId = input.runId
-  return structuredClone({
-    actionId,
-    subject: subject ?? { kind: "none" },
-    params: params ?? {},
-    ...(runId === undefined ? {} : { runId }),
-  })
-}
-
-export async function requestActionAndWait(
-  runtime: SixbRuntimeContext,
-  execution: ExecutionContext,
-  input: RequestActionAndWaitInput
-): Promise<ActionRunRecord> {
-  const runId = createActionRunId(input.runId)
-
-  await requestAction(runtime, execution, {
-    ...input,
-    runId,
-  })
-  await input.onRequested?.(runId)
-
-  return waitForActionRun(runtime, {
-    runId,
-    timeoutMs: input.timeoutMs,
-    signal: input.signal,
-  })
-}
-
-export async function waitForActionRun(
-  runtime: SixbRuntimeContext,
-  input: WaitForActionRunInput
-): Promise<ActionRunRecord> {
-  const projectId = runtime.projectId
-  const runtimeAuthorization = runtime.runtimeAuthorization
-  const request = {
-    runId: input.runId,
-    timeoutMs: input.timeoutMs,
-    signal: input.signal,
+  const signal = input.signal
+  const onRequested = input.onRequested
+  return {
+    ...structuredClone({
+      actionId,
+      subject: subject ?? { kind: "none" },
+      params: params ?? {},
+      ...(runId === undefined ? {} : { runId }),
+    }),
+    ...(signal === undefined ? {} : { signal }),
+    ...(onRequested === undefined ? {} : { onRequested }),
   }
-  const authorization = resolveRuntimeAuthorizationForProject({
-    projectId,
-    runtimeAuthorization,
-  })
-  if (authorization.type === "denied") {
-    throw new AuthorizationError(
-      "runtime:unbound",
-      "[Sixb] Protected operations require registered runtime authorization for this project."
-    )
-  }
-  // Process-local delegation cannot poll durable runs without originating grant provenance.
-  if (authorization.type === "delegated") void getAuthorizationRef(runtimeAuthorization)
-  const actionRuns = requireActionRunStorage(runtime)
-  const timeoutMs = request.timeoutMs ?? DEFAULT_ACTION_WAIT_TIMEOUT_MS
-  const signal = request.signal
-  const startedAt = Date.now()
-
-  if (signal?.aborted) {
-    throw signal.reason ?? new Error("aborted")
-  }
-
-  return new Promise<ActionRunRecord>((resolve, reject) => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    let pollTimer: ReturnType<typeof setTimeout> | undefined
-    let unsubscribe: (() => void) | undefined
-    let settled = false
-    let checking = false
-
-    const releaseSubscription = (release: (() => void) | undefined) => {
-      if (!release) return
-      try {
-        release()
-      } catch (error) {
-        console.error("[Sixb] Failed to release action run wait subscription:", error)
-      }
-    }
-
-    const cleanup = () => {
-      if (settled) return
-      settled = true
-      clearTimer(timer)
-      clearTimer(pollTimer)
-      signal?.removeEventListener("abort", onAbort)
-      releaseSubscription(unsubscribe)
-    }
-
-    const rejectWith = (error: unknown) => {
-      cleanup()
-      reject(error)
-    }
-
-    const schedulePoll = () => {
-      if (!settled && !pollTimer) {
-        pollTimer = setTimeout(() => {
-          pollTimer = undefined
-          void check()
-        }, DEFAULT_ACTION_WAIT_POLL_MS)
-      }
-    }
-
-    const check = async () => {
-      if (settled || checking) {
-        return
-      }
-      checking = true
-      try {
-        const record = await actionRuns.getById({
-          projectId,
-          id: request.runId,
-        })
-        const visible =
-          record &&
-          (authorization.type === "unrestricted" ||
-            (authorization.type === "principal" &&
-              canViewActionRun(authorization.context, record)) ||
-            (authorization.type === "delegated" &&
-              (await canDelegationAccessActionRun({
-                storage: runtime.storage,
-                projectId,
-                authority: authorization,
-                run: record,
-              }))))
-        if (visible && isTerminalActionRun(record)) {
-          if (authorization.type === "delegated") {
-            assertObjectReadOutputWithinLimit(record, authorization.objectRead.limits)
-          }
-          cleanup()
-          resolve(record)
-          return
-        }
-        schedulePoll()
-      } catch (error) {
-        rejectWith(error)
-      } finally {
-        checking = false
-      }
-    }
-
-    const onAbort = () => {
-      rejectWith(signal?.reason ?? new Error("aborted"))
-    }
-
-    timer = setTimeout(
-      () => {
-        rejectWith(new ActionRunTimeoutError({ runId: request.runId, timeoutMs }))
-      },
-      Math.max(0, timeoutMs - (Date.now() - startedAt))
-    )
-
-    if (signal) {
-      signal.addEventListener("abort", onAbort, { once: true })
-    }
-
-    runtime.events
-      .subscribe({ types: ["action.completed", "action.failed"] }, (events) => {
-        if (
-          events.some(
-            (event) =>
-              (event.type === "action.completed" || event.type === "action.failed") &&
-              event.payload.runId === request.runId
-          )
-        ) {
-          void check()
-        }
-      })
-      .then((unsubscribeEvents) => {
-        // Timeout or abort can settle the wait before the asynchronous subscription resolves.
-        // `cleanup()` had no handle to release in that case, so release the late handle here.
-        if (settled) {
-          releaseSubscription(unsubscribeEvents)
-          return
-        }
-        unsubscribe = unsubscribeEvents
-        void check()
-      })
-      .catch((error: unknown) => {
-        if (settled) {
-          console.error("[Sixb] Action run wait subscription failed after the wait settled:", error)
-          return
-        }
-        rejectWith(error)
-      })
-  })
-}
-
-function requireActionRunStorage(runtime: SixbRuntimeContext): ActionRunStorage {
-  const actionRuns = runtime.storage.actionRuns
-  if (!actionRuns) {
-    throw new ActionRunError("[Sixb] Action run storage is not configured.")
-  }
-  return actionRuns
 }

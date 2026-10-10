@@ -1,6 +1,7 @@
 import type { ActionDescriptor, SixbHostView } from "@sixb/core"
 import { schemaFieldsToJsonSchema } from "@sixb/core/internal/ontology"
 import type { Elysia } from "elysia"
+import { serializeActionRunDetail } from "../actions/serialize"
 import { accessTokenSecurityRequirement } from "../auth/access-token-boundary"
 import { requireRequestSixb } from "../auth/scope"
 import { OPENAPI_TAGS } from "../openapi/tags"
@@ -8,8 +9,11 @@ import {
   ActionCatalogItemSchema,
   ActionDetailSchema,
   ActionIdParamsSchema,
+  ActionRequestFailedResponseSchema,
+  ActionRunDetailSchema,
+  ActionRunInProgressResponseSchema,
   RequestActionBodySchema,
-  RequestActionResponseSchema,
+  RuntimeStoppingResponseSchema,
 } from "../schemas/actions"
 import { ErrorResponseSchema } from "../schemas/common"
 import { handleRouteError } from "../utils/http"
@@ -92,20 +96,24 @@ export function registerActionRoutes(app: Elysia, host: SixbHostView) {
     .post(
       "/api/actions/:actionId",
       async (context) => {
-        const { params, body, set } = context
+        const { params, body, set, request, server } = context
+        // An Action can outlast Bun's 10-second idle timeout: it has 30 seconds to reach its
+        // boundary, then edits that nothing interrupts, then up to 30 seconds of effects.
+        server?.timeout(request, 0)
+
         const sixb = requireRequestSixb(context)
         try {
           const parsedBody = RequestActionBodySchema.parse(body)
-          const input = {
+          // No `request.signal`: a client that disconnects never cancels the run. Retrying with
+          // the same `runId` returns its record once it is terminal.
+          const run = await sixb.actions.request({
             actionId: params.actionId,
             subject: parsedBody.subject,
             params: parsedBody.params,
             runId: parsedBody.runId,
-          }
-          const result = await sixb.actions.request(input)
+          })
 
-          set.status = 202
-          return RequestActionResponseSchema.parse(result)
+          return serializeActionRunDetail(run)
         } catch (error) {
           return handleRouteError(error, set)
         }
@@ -114,13 +122,22 @@ export function registerActionRoutes(app: Elysia, host: SixbHostView) {
         params: ActionIdParamsSchema,
         body: RequestActionBodySchema,
         response: {
-          202: RequestActionResponseSchema,
+          200: ActionRunDetailSchema,
           400: ErrorResponseSchema,
           403: ErrorResponseSchema,
           404: ErrorResponseSchema,
+          409: ActionRunInProgressResponseSchema,
+          500: ActionRequestFailedResponseSchema,
+          503: RuntimeStoppingResponseSchema,
         },
         detail: {
           summary: "Request an action",
+          description:
+            "Runs the action and returns its terminal run. A run that fails is returned with " +
+            "status `failed`. An error response usually means no run was requested, but a 500 " +
+            "can follow a run that started: request again with the same `runId` to get its " +
+            "record. A `runId` that was already used returns that run once it has finished, and " +
+            "409 while it still runs. 503 means the server is stopping and started nothing.",
           tags: [OPENAPI_TAGS.actions.name],
           operationId: "requestAction",
           security: accessTokenSecurityRequirement("requestAction"),

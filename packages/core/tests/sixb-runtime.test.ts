@@ -537,7 +537,7 @@ describe("SixbHost runtime", () => {
 
     await expect(
       sixb.objects(Document).requestAction({ id: "doc:1", action: attach, params: { file } })
-    ).resolves.toMatchObject({ created: true })
+    ).resolves.toMatchObject({ status: "succeeded" })
     await expect(sixb.workflows.request(review, { input: { file } })).resolves.toMatchObject({
       created: true,
     })

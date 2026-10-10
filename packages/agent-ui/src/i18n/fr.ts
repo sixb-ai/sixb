@@ -469,7 +469,6 @@ export const fr: Translation<AgentMessages> = {
     yes: "Oui",
     no: "Non",
     queued: "en file d’attente",
-    alreadyQueued: "déjà en file d’attente",
     statuses: {
       queued: "en file d’attente",
       running: "en cours",
@@ -488,9 +487,6 @@ export const fr: Translation<AgentMessages> = {
     properties: "Propriétés",
     links: "Liens",
     actions: "Actions",
-    actionRequested: "Action demandée.",
-    actionInProgress: "Action déjà en cours.",
-    run: "Exécution",
     queuedAgo: (time) => `en file d’attente (${time})`,
     startedAgo: (time) => `démarrée (${time})`,
     finishedAgo: (time) => `terminée (${time})`,

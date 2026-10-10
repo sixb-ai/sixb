@@ -33,7 +33,9 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | Code | Retryable | What happened | What to do |
 | --- | --- | --- | --- |
 | `action.phase_failed` | No | An Action phase could not complete successfully. | Inspect `details.phase` and the native error reported to `onError`. |
-| `action.read_conflict` | Yes | Data the Action read changed before its commit, so nothing was committed. | Request a new run; if the Action has a writeback, check the external system first. |
+| `action.read_conflict` | Yes | Data the Action read changed before each of its three commit attempts, so nothing was committed. | Request a new run; if the Action has a writeback, check the external system first. |
+| `action.run_in_progress` | Yes | A request reused the `runId` of a run that is still executing. | Retry with the same `runId` once it finishes to get its outcome. |
+| `action.timeout` | No | Validation, writeback, or edits did not finish within 30 seconds, so nothing was committed. On a run's `effects`, the effects did not finish within 30 seconds of the commit. | If the Action has a writeback, check the external system before requesting a new run. Move longer work into a workflow. |
 | `agent.execution_failed` | No | An active Agent execution failed. | Inspect the run identity and the native error reported to `onError`. |
 | `ai.usage_limit_exceeded` | No | An applicable AI usage limit has no capacity for another model call. | Wait until `details.resetAt`, or raise or disable the applicable limit policy. |
 | `ai.usage_limit_unavailable` | Yes | Sixb could not evaluate an applicable AI usage limit safely. | Restore complete accounting or the limit storage provider, then retry. |
@@ -63,6 +65,7 @@ To send failures to a monitoring service, configure [onError](../logging/overvie
 | `projection.run_identity_mismatch` | No | Delivery does not match the run's pinned identity. | Discard it and dispatch from the current definition. |
 | `queue.enqueue_failed` | Yes | A job could not be handed to its queue. | Retry the unchanged request while the durable run remains in its enqueue phase. |
 | `runtime.cancelled` | No | Work was cancelled before completion. | Confirm the cancellation before requesting another run. |
+| `runtime.stopping` | Yes | The process is shutting down and refused the request before starting anything. | Retry the unchanged request; another process, or this one once restarted, accepts it. |
 | `storage.unavailable` | Yes | The storage connection was lost or could not be opened. | Let the run retry; check the database's availability and connection limits if it persists. |
 | `sync.execution_failed` | No | A Sync failed while reading, validating, or writing its dataset. | Inspect the `onError` report, fix the source or data, then request a new run. |
 | `vector.model_unavailable` | No | The profile's embedding model is unavailable or incompatible. | Check model registration and dimensions, then index the profile again. |

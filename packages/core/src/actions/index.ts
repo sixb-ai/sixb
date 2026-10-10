@@ -14,17 +14,12 @@ export type {
 export { ActionReadRecorder, createActionReadFacade } from "./read-facade"
 export type { ActionDefinitionCatalog, ActionRegistryOptions } from "./registry"
 export { ActionRegistry } from "./registry"
-export type {
-  RequestActionAndWaitInput,
-  RequestActionAndWaitOptions,
-  RequestActionInput,
-  RequestActionOptions,
-  RequestActionResult,
-  WaitForActionRunInput,
-} from "./request"
-export { requestAction, requestActionAndWait, waitForActionRun } from "./request"
+export type { RequestActionInput, RequestActionOptions } from "./request"
+export { requestAction } from "./request"
 export type { ActionRunHost } from "./run/execute"
 export { executeActionRun } from "./run/execute"
+export { drainActionRuns } from "./run/executor"
+export { ACTION_RUN_DRAIN_TIMEOUT_MS } from "./run/signals"
 export type { ActionRunResult } from "./run/types"
 export type {
   ActionBinding,

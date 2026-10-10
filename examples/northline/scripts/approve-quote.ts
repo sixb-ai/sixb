@@ -1,5 +1,5 @@
 import { businessStore, initializeDemoSources } from "../lib/sources/source-state"
-import { apiRequest, isRecord, waitUntil } from "./api"
+import { apiRequest, isRecord } from "./api"
 
 await initializeDemoSources()
 const state = await businessStore.read()
@@ -12,7 +12,7 @@ if (!quote || !quote.service_case_id) {
   throw new Error("[Northline] No quote is awaiting a decision.")
 }
 
-const response = await apiRequest(`/actions/record-quote-decision`, {
+const run = await apiRequest(`/actions/record-quote-decision`, {
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify({
@@ -24,16 +24,12 @@ const response = await apiRequest(`/actions/record-quote-decision`, {
     },
   }),
 })
-if (!isRecord(response) || typeof response.runId !== "string") {
+if (!isRecord(run) || typeof run.status !== "string") {
   throw new Error("[Northline] Quote decision returned an unexpected response.")
 }
-
-await waitUntil("quote approval", async () => {
-  const run = await apiRequest(`/action-runs/${encodeURIComponent(response.runId as string)}`)
-  if (!isRecord(run)) return false
-  if (run.status === "failed") {
-    throw new Error(`[Northline] Quote approval failed: ${String(run.error)}`)
-  }
-  return run.status === "succeeded"
-})
+if (run.status !== "succeeded") {
+  const reason =
+    isRecord(run.error) && typeof run.error.message === "string" ? run.error.message : ""
+  throw new Error(`[Northline] Quote approval ${run.status}. ${reason}`.trim())
+}
 console.log(`[Northline] Approved ${quote.quote_number}.`)

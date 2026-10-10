@@ -15,9 +15,9 @@ import type {
 } from "../types"
 import { coerceActionParamsToTyped, isObjectActionDefinition } from "../validation"
 import type { LoadedObjectTarget } from "./phase-types"
-import type { RunActionJobInput } from "./types"
+import type { ActionRunContext } from "./types"
 
-export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): ActionRuntimeFacade {
+export function toActionRuntimeFacade(runtime: ActionRunContext): ActionRuntimeFacade {
   return {
     blobs: {
       put(input) {
@@ -49,7 +49,7 @@ export function toActionRuntimeFacade(runtime: RunActionJobInput["runtime"]): Ac
 }
 
 export function toActionReadFacade(
-  runtime: RunActionJobInput["runtime"],
+  runtime: ActionRunContext,
   recorder: ActionReadRecorder
 ): ActionReadFacade {
   return createActionReadFacade(runtime.sixb, {
@@ -82,11 +82,11 @@ function toActionTargetObject(
   }
 }
 
+/** The handler context every phase shares. Each phase adds the `signal` it runs under. */
 export function createBasePhaseContext(input: {
-  readonly runtime: RunActionJobInput["runtime"]
+  readonly runtime: ActionRunContext
   readonly action: ActionDefinition
   readonly run: ActionRunRecord
-  readonly signal: AbortSignal
   readonly logger: Logger
 }) {
   return {
@@ -104,14 +104,13 @@ export function createBasePhaseContext(input: {
       input.runtime.sixb.objects.getValueTypesById()
     ),
     subject: input.run.subject,
-    signal: input.signal,
   }
 }
 
 export type BasePhaseContext = ReturnType<typeof createBasePhaseContext>
 
 export async function loadObjectTarget(input: {
-  readonly runtime: RunActionJobInput["runtime"]
+  readonly runtime: ActionRunContext
   readonly action: ActionDefinition
   readonly run: ActionRunRecord
 }): Promise<LoadedObjectTarget | null> {

@@ -432,7 +432,6 @@ export const en = {
     yes: "Yes",
     no: "No",
     queued: "queued",
-    alreadyQueued: "already queued",
     statuses: {
       queued: "queued",
       running: "running",
@@ -452,9 +451,6 @@ export const en = {
     properties: "Properties",
     links: "Links",
     actions: "Actions",
-    actionRequested: "Action requested.",
-    actionInProgress: "Action already in progress.",
-    run: "Run",
     queuedAgo: (time: string) => `queued ${time}`,
     startedAgo: (time: string) => `started ${time}`,
     finishedAgo: (time: string) => `finished ${time}`,
