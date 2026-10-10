@@ -126,5 +126,6 @@ export function enumValue<const T extends readonly string[]>(
 
 function formatAlternatives(values: readonly string[]): string {
   if (values.length < 2) return values[0] ?? "a supported value"
+  if (values.length === 2) return `${values[0]} or ${values[1]}`
   return `${values.slice(0, -1).join(", ")}, or ${values.at(-1)}`
 }

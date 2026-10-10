@@ -195,7 +195,7 @@ List options:
   --action <action-id>
   --type <object-type>
   --id <primary-id>
-  --status queued|running|succeeded|failed|cancelled
+  --status succeeded|failed
   --started-after|--started-before <RFC3339>
   --limit <1-${CLI_LIMITS.list.maximum}>              Defaults to ${CLI_LIMITS.list.default}
   --offset <n>                  Non-negative; defaults to 0

@@ -95,7 +95,7 @@ describe("public core export boundaries", () => {
     ])
       expect(Object.hasOwn(storage, name)).toBe(false)
     expect(internalStorage.createTransactionStorageProxy).toBeFunction()
-    expect(internalStorage.finishActionRunPhase).toBeFunction()
+    expect(internalStorage.normalizeRecordActionRunInput).toBeFunction()
   })
 
   test("event routing has an internal subpath", () => {

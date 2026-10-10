@@ -713,7 +713,8 @@ function filePath(value: unknown): string | undefined {
   return undefined
 }
 
-type ActionRunStatus = "queued" | "running" | "succeeded" | "failed" | "cancelled"
+/** An Action run is recorded once, when it ends. */
+type ActionRunStatus = "succeeded" | "failed"
 
 interface ActionRunInfo {
   readonly actionId?: string
@@ -721,20 +722,10 @@ interface ActionRunInfo {
   readonly subjectLabel?: string
 }
 
-const ACTION_RUN_STATUSES: ReadonlySet<string> = new Set([
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-])
-
 function actionRunInfo(value: unknown): ActionRunInfo {
   if (!isRecord(value)) return {}
   const status =
-    typeof value.status === "string" && ACTION_RUN_STATUSES.has(value.status)
-      ? (value.status as ActionRunStatus)
-      : undefined
+    value.status === "succeeded" || value.status === "failed" ? value.status : undefined
   const actionId = typeof value.actionId === "string" ? value.actionId : undefined
   return { actionId, status, subjectLabel: subjectLabel(value.subject) }
 }
@@ -751,18 +742,7 @@ export function subjectLabel(subject: unknown): string | undefined {
 function actionRunTitle(run: ActionRunInfo): string {
   if (!run.status) return "Checked an action run"
   const name = run.actionId ? capitalize(humanize(run.actionId)) : "Action"
-  switch (run.status) {
-    case "succeeded":
-      return `${name} succeeded`
-    case "failed":
-      return `${name} failed`
-    case "running":
-      return `Running ${run.actionId ? humanize(run.actionId) : "action"}`
-    case "cancelled":
-      return `${name} cancelled`
-    default:
-      return `${name} queued`
-  }
+  return run.status === "succeeded" ? `${name} succeeded` : `${name} failed`
 }
 
 export function capitalize(value: string): string {

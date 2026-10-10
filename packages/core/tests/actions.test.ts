@@ -717,55 +717,6 @@ describe("requestAction", () => {
     })
   })
 
-  test("rolls back the Action execution when run persistence fails", async () => {
-    const runtimeDeps = createTestRuntimeDeps()
-    const sixb = createTestSixb({
-      id: "action-atomic-dispatch-test",
-      ontology: [Room],
-      actions: [actionDefinition(setTemperature)],
-      ...runtimeDeps,
-    })
-    let childExecutionId: string | undefined
-    const restore = decorateOperationScopedMethodForTesting(
-      runtimeDeps.storage.actionRuns,
-      "queue",
-      (queue) => async (input) => {
-        childExecutionId = input.executionId
-        await queue(input)
-        throw new Error("injected Action run persistence failure")
-      }
-    )
-
-    try {
-      await expect(
-        sixb.objects(Room).requestAction({
-          id: "room:1",
-          actionId: "setTemperature",
-          params: { target: 72 },
-          runId: "act_atomic_failure",
-        })
-      ).rejects.toThrow("injected Action run persistence failure")
-    } finally {
-      restore()
-    }
-
-    expect(childExecutionId).toBeString()
-    expect(
-      await runtimeDeps.storage.actionRuns.getById({
-        projectId: "action-atomic-dispatch-test",
-        id: "act_atomic_failure",
-      })
-    ).toBeNull()
-    expect(
-      childExecutionId
-        ? await runtimeDeps.storage.executions.getById({
-            projectId: "action-atomic-dispatch-test",
-            id: childExecutionId,
-          })
-        : undefined
-    ).toBeNull()
-  })
-
   test("runs the Action when the action.requested observation event fails", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const host = new SixbHost({
@@ -850,8 +801,8 @@ describe("requestAction", () => {
     ).rejects.toBeInstanceOf(ActionRunError)
   })
 
-  // Guard proof: return the existing run from `reuseActionRun` in `actions/run-persistence.ts`
-  // whatever its status, and the second request resolves with a run that is still executing.
+  // Guard proof: drop the `executing` check from `ActionRunExecutor.request`
+  // (`actions/run/executor.ts`), and the second request runs the writeback a second time.
   test("refuses a run id while its run is executing, then answers with its outcome", async () => {
     let writebacks = 0
     let releaseWriteback = () => {}
@@ -860,6 +811,8 @@ describe("requestAction", () => {
       .params({})
       .writeback(async () => {
         writebacks += 1
+        // Only the first execution waits, so a second one ends the test instead of hanging it.
+        if (writebacks > 1) return
         writebackStarted.resolve()
         await new Promise<void>((resolve) => {
           releaseWriteback = resolve
@@ -891,8 +844,8 @@ describe("requestAction", () => {
     expect(writebacks).toBe(1)
   })
 
-  // Both requests may persist before either sees the other: the serializable insert lets one win,
-  // and the other then finds a run that is still executing.
+  // Neither request finds a record when it starts: this process knows the run id is executing, and
+  // refuses the one that comes second. Guard proof: as for the test above.
   test("executes a run id once when two requests race for it", async () => {
     let writebacks = 0
     const release = Promise.withResolvers<void>()
@@ -900,7 +853,8 @@ describe("requestAction", () => {
       .params({})
       .writeback(async () => {
         writebacks += 1
-        await release.promise
+        // Only the first execution waits, so a second one ends the test instead of hanging it.
+        if (writebacks === 1) await release.promise
       })
     const sixb = createTestSixb({
       id: "action-race-test",
@@ -926,7 +880,212 @@ describe("requestAction", () => {
     expect(writebacks).toBe(1)
   })
 
-  test("calls onRequested once the run is durable and before it executes", async () => {
+  // Requests on two hosts that share storage stand for two processes: neither knows the other is
+  // executing the run id. Guard proof: refuse every `ActionRunError` from `record` in `recordRun`
+  // (`actions/run/run-action.ts`), and the request that records second rejects.
+  test("answers both requests with one record when two processes run the same run id", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const started = [Promise.withResolvers<void>(), Promise.withResolvers<void>()]
+    const release = Promise.withResolvers<void>()
+    let writebacks = 0
+    const slow = defineAction("slow")
+      .params({})
+      .writeback(async () => {
+        started[writebacks]?.resolve()
+        writebacks += 1
+        await release.promise
+        return { writeback: writebacks }
+      })
+      .edits(() => {})
+    const hosts = ["first", "second"].map(
+      () =>
+        new SixbHost({
+          id: "action-two-process-test",
+          ontology: [Room],
+          actions: [actionDefinition(slow)],
+          ...runtimeDeps,
+        })
+    )
+
+    const requests = hosts.map((host, index) =>
+      createTestSixb(host, {
+        executionId: `exec_request_${index}`,
+        requestId: `request_${index}`,
+        correlationId: `correlation_${index}`,
+      }).actions.request({ actionId: "slow", runId: "act_shared" })
+    )
+    await Promise.all(started.map((deferred) => deferred.promise))
+    release.resolve()
+    const [first, second] = await Promise.all(requests)
+
+    // Both writebacks ran: that is what `run.idempotencyKey` is for.
+    expect(writebacks).toBe(2)
+    expect(second).toEqual(first)
+    const listed = await runtimeDeps.storage.actionRuns.list({
+      projectId: "action-two-process-test",
+    })
+    expect(listed.runs).toEqual([first])
+    const commits = await runtimeDeps.storage.ontology.commits.list({
+      projectId: "action-two-process-test",
+      run: { kind: "action", id: "act_shared" },
+    })
+    expect(commits.commits).toHaveLength(1)
+  })
+
+  // Guard proof: compare the payload in `findRecordedRun` (`actions/run/run-action.ts`) again, and
+  // the second request fails as `internal.unexpected`, reported to `onError`, for a run that
+  // succeeded.
+  test("refuses a run id that another process recorded first for another request", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const started = [Promise.withResolvers<void>(), Promise.withResolvers<void>()]
+    const release = Promise.withResolvers<void>()
+    let writebacks = 0
+    const slow = defineAction("slow")
+      .params({ n: param("double") })
+      .writeback(async () => {
+        started[writebacks]?.resolve()
+        writebacks += 1
+        await release.promise
+      })
+    const reports: string[] = []
+    const hosts = [0, 1].map(
+      () =>
+        new SixbHost({
+          id: "action-two-process-payload-test",
+          ontology: [Room],
+          actions: [actionDefinition(slow)],
+          onError: (_error, context) => {
+            reports.push(context.type)
+          },
+          ...runtimeDeps,
+        })
+    )
+    const requests = hosts.map((host, index) =>
+      createTestSixb(host, {
+        executionId: `exec_request_${index}`,
+        requestId: `request_${index}`,
+        correlationId: `correlation_${index}`,
+      })
+        .actions.request({ actionId: "slow", params: { n: index }, runId: "act_shared" })
+        .then(
+          (run) => run,
+          (error: unknown) => error
+        )
+    )
+    await Promise.all(started.map((deferred) => deferred.promise))
+    release.resolve()
+    const outcomes = await Promise.all(requests)
+
+    const recorded = outcomes.find((outcome) => !(outcome instanceof Error))
+    const refused = outcomes.find((outcome) => outcome instanceof Error)
+    expect(recorded).toMatchObject({ id: "act_shared", status: "succeeded" })
+    expect(refused).toBeInstanceOf(ActionRunError)
+    expect(refused instanceof Error ? refused.message : refused).toBe(
+      "[Sixb] Action run 'act_shared' already exists with a different request payload."
+    )
+    await Promise.all(hosts.map((host) => flushSixbErrors(host)))
+    expect(reports).toEqual([])
+  })
+
+  // Guard proof: answer `action.run_in_progress` from `joinHeldRunId`
+  // (`actions/run/executor.ts`) without `assertCanReuseActionRun`, and the request for another
+  // payload is refused as in progress instead.
+  test("refuses another payload for a run id it is executing as it would a recorded one", async () => {
+    const started = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const slow = defineAction("slow")
+      .params({ n: param("double") })
+      .writeback(async () => {
+        started.resolve()
+        await release.promise
+      })
+    const sixb = createTestSixb({
+      id: "action-in-progress-payload-test",
+      ontology: [Room],
+      actions: [actionDefinition(slow)],
+      ...createTestRuntimeDeps(),
+    })
+
+    const first = sixb.actions.request({ actionId: "slow", params: { n: 1 }, runId: "act_held" })
+    await started.promise
+    const refused = await sixb.actions
+      .request({ actionId: "slow", params: { n: 2 }, runId: "act_held" })
+      .then(
+        () => undefined,
+        (error: unknown) => error
+      )
+    release.resolve()
+    await first
+
+    expect(refused).toBeInstanceOf(ActionRunError)
+    expect(refused instanceof Error ? refused.message : refused).toBe(
+      "[Sixb] Action run 'act_held' already exists with a different request payload."
+    )
+  })
+
+  // Guard proof: in `ActionRunExecutor.dispatch` (`actions/run/executor.ts`), refuse a run id as
+  // in progress as soon as a request holds it, and the second replay below gets
+  // `action.run_in_progress` while the first one looks the record up.
+  test("answers concurrent replays of a recorded run with its record", async () => {
+    const quick = defineAction("quick")
+      .params({})
+      .writeback(() => {})
+    const sixb = createTestSixb({
+      id: "action-concurrent-replay-test",
+      ontology: [Room],
+      actions: [actionDefinition(quick)],
+      ...createTestRuntimeDeps(),
+    })
+    const run = await sixb.actions.request({ actionId: "quick", runId: "act_replayed" })
+
+    await expect(
+      Promise.all([
+        sixb.actions.request({ actionId: "quick", runId: "act_replayed" }),
+        sixb.actions.request({ actionId: "quick", runId: "act_replayed" }),
+      ])
+    ).resolves.toEqual([run, run])
+  })
+
+  // Guard proof: answer `action.run_in_progress` from `joinHeldRunId`
+  // (`actions/run/executor.ts`) without looking the record up, and the request that comes once the
+  // run is recorded, while its request still announces it, is refused as in progress.
+  test("answers with the record a request still holding the run id has written", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const quick = defineAction("quick")
+      .params({})
+      .writeback(() => {})
+    const host = new SixbHost({
+      id: "action-recorded-held-test",
+      ontology: [Room],
+      actions: [actionDefinition(quick)],
+      ...runtimeDeps,
+    })
+    const sixb = createTestSixb(host)
+    const announcing = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const emit = host.events.emit.bind(host.events)
+    host.events.emit = async (input, options) => {
+      if (input.events.some((event) => event.type === "action.completed")) {
+        announcing.resolve()
+        await release.promise
+      }
+      return emit(input, options)
+    }
+
+    const first = sixb.actions.request({ actionId: "quick", runId: "act_announced" })
+    await announcing.promise
+    const second = sixb.actions.request({ actionId: "quick", runId: "act_announced" })
+    const recorded = await runtimeDeps.storage.actionRuns.getById({
+      projectId: host.id,
+      id: "act_announced",
+    })
+    if (!recorded) throw new Error("The run is recorded before it is announced.")
+    await expect(second).resolves.toEqual(recorded)
+    release.resolve()
+    await expect(first).resolves.toEqual(recorded)
+  })
+
+  test("calls onRequested before the run executes, with nothing recorded yet", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const calls: string[] = []
     const recorded = defineAction("recorded")
@@ -949,17 +1108,17 @@ describe("requestAction", () => {
           projectId: "action-on-requested-test",
           id: runId,
         })
-        calls.push(`requested:${runId}:${stored?.status}`)
+        calls.push(`requested:${runId}:${stored === null ? "unrecorded" : stored.status}`)
       },
     })
 
     expect(run.status).toBe("succeeded")
-    expect(calls).toEqual(["requested:act_hooked:queued", "writeback"])
+    expect(calls).toEqual(["requested:act_hooked:unrecorded", "writeback"])
   })
 
-  // Guard proof: drop `failUnexecuted` from `actions/run/executor.ts` and the run stays queued, so
-  // its id is refused as in progress forever.
-  test("fails a run unexecuted when onRequested throws", async () => {
+  // Guard proof: drop the catch around `onRequested` in `ActionRunExecutor.execute`
+  // (`actions/run/executor.ts`), and the request rejects with the hook's own, uncoded error.
+  test("starts and records nothing when onRequested throws", async () => {
     let writebacks = 0
     const recorded = defineAction("recorded")
       .params({})
@@ -967,6 +1126,7 @@ describe("requestAction", () => {
         writebacks += 1
       })
     const reports: string[] = []
+    const runtimeDeps = createTestRuntimeDeps()
     const sixb = createTestSixb({
       id: "action-on-requested-failure-test",
       ontology: [Room],
@@ -974,7 +1134,7 @@ describe("requestAction", () => {
       onError: (_error, context) => {
         reports.push(context.type)
       },
-      ...createTestRuntimeDeps(),
+      ...runtimeDeps,
     })
     const hookError = new Error("caller withdrew")
 
@@ -988,27 +1148,32 @@ describe("requestAction", () => {
       })
     ).rejects.toMatchObject({
       code: "internal.unexpected",
-      message: expect.stringContaining("Action run 'act_withdrawn' was requested"),
+      message:
+        "[Sixb] Action run 'act_withdrawn' did not start: its requester failed before it executed.",
       cause: hookError,
     })
+    expect(writebacks).toBe(0)
+    expect(
+      await runtimeDeps.storage.actionRuns.getById({
+        projectId: "action-on-requested-failure-test",
+        id: "act_withdrawn",
+      })
+    ).toBeNull()
+    expect(await sixb.events.read({ types: ["action.requested"] })).toHaveLength(0)
 
+    // Nothing was recorded, so the same run id runs once requested again.
     await expect(
       sixb.actions.request({ actionId: "recorded", runId: "act_withdrawn" })
-    ).resolves.toMatchObject({
-      status: "failed",
-      phase: "request",
-      error: { code: "internal.unexpected", details: { phase: "request" } },
-    })
-    expect(writebacks).toBe(0)
-    expect(await sixb.events.read({ types: ["action.requested"] })).toHaveLength(0)
+    ).resolves.toMatchObject({ status: "succeeded" })
+    expect(writebacks).toBe(1)
     await flushSixbErrors(sixb)
-    expect(reports).toEqual(["run.failed"])
+    expect(reports).toEqual([])
   })
 
   // Guard proofs: drop the catch that calls `failRequest` in `ActionRunExecutor.execute`
   // (`actions/run/executor.ts`), and the request rejects uncoded, a 400 over HTTP, with nothing
-  // reported. Throw the handler's error from `runAction` (`actions/run/run-action.ts`) instead of
-  // an `UnrecordedActionRunError`, and the report loses the phase the run failed in.
+  // reported. Throw the storage error from `recordRun` (`actions/run/run-action.ts`) instead of an
+  // `UnrecordedActionRunError`, and the report loses the phase the run failed in.
   test("fails the request as internal.unexpected when a run's outcome cannot be recorded", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const leaky = defineAction("leaky")
@@ -1028,7 +1193,7 @@ describe("requestAction", () => {
     })
     const restore = decorateOperationScopedMethodForTesting(
       runtimeDeps.storage.actionRuns,
-      "finish",
+      "record",
       () => async () => {
         throw new Error("storage unavailable")
       }
@@ -1047,10 +1212,17 @@ describe("requestAction", () => {
     expect(failure).toMatchObject({
       code: "internal.unexpected",
       message:
-        "[Sixb] Action run 'act_unrecorded' was requested, but its record could not be " +
-        "returned. Request it again with the same runId to get it.",
+        "[Sixb] Action run 'act_unrecorded' was requested, but its record could not be written. " +
+        "Requesting it again with the same runId returns its record if it was written, and runs " +
+        "it again otherwise.",
       details: { actionId: "leaky", runId: "act_unrecorded" },
     })
+    expect(
+      await runtimeDeps.storage.actionRuns.getById({
+        projectId: "action-unrecorded-test",
+        id: "act_unrecorded",
+      })
+    ).toBeNull()
     await flushSixbErrors(sixb)
     expect(reports).toHaveLength(1)
     expect(reports[0]).toMatchObject({
@@ -1060,7 +1232,7 @@ describe("requestAction", () => {
     })
   })
 
-  test("persists nothing for a caller that has already aborted", async () => {
+  test("starts nothing for a caller that has already aborted", async () => {
     const runtimeDeps = createTestRuntimeDeps()
     const sixb = createTestSixb({
       id: "action-aborted-caller-test",
@@ -1249,8 +1421,8 @@ describe("drainActionRuns", () => {
   }
 
   // Guard proof: in `ActionRunExecutor.request` (`actions/run/executor.ts`), track a request only
-  // once `persist` resolves, and the drain returns while the run is still being persisted.
-  test("waits for a request that is still persisting its run", async () => {
+  // once `persist` resolves, and the drain returns while the request is still looking up its run.
+  test("waits for a request that is still looking up its run id", async () => {
     const calls: string[] = []
     const quick = defineAction("quick")
       .params({})
@@ -1264,11 +1436,11 @@ describe("drainActionRuns", () => {
     const release = Promise.withResolvers<void>()
     const restore = decorateOperationScopedMethodForTesting(
       storage.actionRuns,
-      "queue",
-      (queue) => async (input) => {
+      "getById",
+      (getById) => async (input) => {
         persisting.resolve()
         await release.promise
-        return queue(input)
+        return getById(input)
       }
     )
 
@@ -1353,9 +1525,137 @@ describe("drainActionRuns", () => {
     await expect(request).resolves.toMatchObject({ status: "succeeded" })
   })
 
+  // Guard proof: in `ActionRunExecutor.drain` (`actions/run/executor.ts`), wait once for the
+  // requests in flight instead of until nothing is left, and the drain returns before the effects
+  // that the request it waited for started.
+  test("waits for the effects a request starts while draining", async () => {
+    const calls: string[] = []
+    const editsStarted = Promise.withResolvers<void>()
+    const releaseEdits = Promise.withResolvers<void>()
+    const effectsStarted = Promise.withResolvers<void>()
+    const releaseEffects = Promise.withResolvers<void>()
+    const notify = defineAction("notify")
+      .params({})
+      .edits(async () => {
+        editsStarted.resolve()
+        await releaseEdits.promise
+      })
+      .effects(async () => {
+        effectsStarted.resolve()
+        await releaseEffects.promise
+        calls.push("effects")
+      })
+    const { host, sixb } = createDrainHost("action-drain-effects-test", [actionDefinition(notify)])
+
+    const request = sixb.actions.request({ actionId: "notify", runId: "act_notify" })
+    await editsStarted.promise
+    const drained = drainActionRuns(host, 5_000).then(() => {
+      calls.push("drained")
+    })
+    releaseEdits.resolve()
+    await expect(request).resolves.toMatchObject({ status: "succeeded" })
+    await effectsStarted.promise
+    // Let every pending continuation run: a drain that stopped at the request returns here.
+    await new Promise((resolve) => setImmediate(resolve))
+    expect(calls).toEqual([])
+
+    releaseEffects.resolve()
+    await drained
+    expect(calls).toEqual(["effects", "drained"])
+  })
+
   test("names what it was given when that is not a host", async () => {
     await expect(drainActionRuns({}, 0)).rejects.toThrow(
       "[Sixb] Cannot drain Action runs: this object is not a SixbHost."
     )
+  })
+})
+
+describe("Action effects", () => {
+  // Guard proof: await `outcome.effects()` in `ActionRunExecutor.execute`
+  // (`actions/run/executor.ts`): the request then waits for effects that wait for the test, which
+  // times out.
+  test("returns the run before its effects end, then records how they ended", async () => {
+    const runtimeDeps = createTestRuntimeDeps()
+    const effectsStarted = Promise.withResolvers<void>()
+    const releaseEffects = Promise.withResolvers<void>()
+    const reports: SixbErrorContext[] = []
+    const notify = defineAction("notify")
+      .params({ fail: param("boolean") })
+      .edits(({ objects }) => {
+        objects(Room).create({ id: "room:notified", externalId: "R", name: "Notified" })
+      })
+      .effects(async ({ params, commit }) => {
+        expect(commit.created).toBe(true)
+        effectsStarted.resolve()
+        await releaseEffects.promise
+        if (params.fail) throw new Error("Slack is down")
+      })
+    const host = new SixbHost({
+      id: "action-effects-test",
+      ontology: [Room],
+      actions: [actionDefinition(notify)],
+      onError: (_error, context) => {
+        reports.push(context)
+      },
+      ...runtimeDeps,
+    })
+    const sixb = createTestSixb(host)
+
+    const run = await sixb.actions.request({
+      actionId: "notify",
+      params: { fail: true },
+      runId: "act_notify",
+    })
+    await effectsStarted.promise
+
+    expect(run).toMatchObject({ status: "succeeded", phase: "commit" })
+    expect(run.effects).toBeUndefined()
+    expect(await sixb.events.read({ types: ["action.completed"] })).toHaveLength(1)
+
+    releaseEffects.resolve()
+    await drainActionRuns(host, 5_000)
+    const recorded = await runtimeDeps.storage.actionRuns.getById({
+      projectId: "action-effects-test",
+      id: "act_notify",
+    })
+    expect(recorded).toMatchObject({
+      status: "succeeded",
+      phase: "effects",
+      effects: {
+        status: "failed",
+        error: { code: "action.phase_failed", details: { phase: "effects" } },
+      },
+    })
+    expect(recorded?.error).toBeUndefined()
+    await flushSixbErrors(host)
+    expect(reports).toMatchObject([
+      { type: "action.phase.failed", runId: "act_notify", phase: "effects" },
+    ])
+  })
+
+  test("runs no effects for a run that committed no edits", async () => {
+    let effects = 0
+    const notify = defineAction("notify")
+      .params({})
+      .validate(() => ({ error: "Not now" }))
+      .edits(() => {})
+      .effects(() => {
+        effects += 1
+      })
+    const runtimeDeps = createTestRuntimeDeps()
+    const host = new SixbHost({
+      id: "action-effects-skipped-test",
+      ontology: [Room],
+      actions: [actionDefinition(notify)],
+      onError: () => {},
+      ...runtimeDeps,
+    })
+
+    const run = await createTestSixb(host).actions.request({ actionId: "notify" })
+    await drainActionRuns(host, 5_000)
+
+    expect(run).toMatchObject({ status: "failed", phase: "validation" })
+    expect(effects).toBe(0)
   })
 })

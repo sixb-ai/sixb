@@ -9325,24 +9325,14 @@ export type RequestActionResponses = {
           objectTypeId: string
           primaryId: string
         }
-    status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
-    phase?:
-      | "request"
-      | "enqueue"
-      | "validation"
-      | "writeback"
-      | "edits"
-      | "commit"
-      | "effects"
-      | "cancelled"
-    queuedAt: string
-    startedAt?: string
-    finishedAt?: string
+    status: "succeeded" | "failed"
+    phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+    startedAt: string
+    finishedAt: string
     error?: {
       code:
         | "internal.unexpected"
         | "runtime.cancelled"
-        | "queue.enqueue_failed"
         | "action.phase_failed"
         | "action.read_conflict"
         | "action.timeout"
@@ -9352,15 +9342,7 @@ export type RequestActionResponses = {
       details: {
         actionId: string
         runId: string
-        phase:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
+        phase: "validation" | "writeback" | "edits" | "commit" | "effects"
       }
       httpStatus?: number
       redacted?: true
@@ -9393,7 +9375,6 @@ export type RequestActionResponses = {
             code:
               | "internal.unexpected"
               | "runtime.cancelled"
-              | "queue.enqueue_failed"
               | "action.phase_failed"
               | "action.read_conflict"
               | "action.timeout"
@@ -9422,7 +9403,6 @@ export type RequestActionResponses = {
             code:
               | "internal.unexpected"
               | "runtime.cancelled"
-              | "queue.enqueue_failed"
               | "action.phase_failed"
               | "action.read_conflict"
               | "action.timeout"
@@ -9796,7 +9776,7 @@ export type ListActionRunsData = {
   path?: never
   query?: {
     actionId?: string
-    status?: "queued" | "running" | "succeeded" | "failed" | "cancelled"
+    status?: "succeeded" | "failed"
     objectTypeId?: string
     primaryId?: string
     startedAfter?: string
@@ -9843,24 +9823,14 @@ export type ListActionRunsResponses = {
             objectTypeId: string
             primaryId: string
           }
-      status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
-      phase?:
-        | "request"
-        | "enqueue"
-        | "validation"
-        | "writeback"
-        | "edits"
-        | "commit"
-        | "effects"
-        | "cancelled"
-      queuedAt: string
-      startedAt?: string
-      finishedAt?: string
+      status: "succeeded" | "failed"
+      phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+      startedAt: string
+      finishedAt: string
       error?: {
         code:
           | "internal.unexpected"
           | "runtime.cancelled"
-          | "queue.enqueue_failed"
           | "action.phase_failed"
           | "action.read_conflict"
           | "action.timeout"
@@ -9870,15 +9840,7 @@ export type ListActionRunsResponses = {
         details: {
           actionId: string
           runId: string
-          phase:
-            | "request"
-            | "enqueue"
-            | "validation"
-            | "writeback"
-            | "edits"
-            | "commit"
-            | "effects"
-            | "cancelled"
+          phase: "validation" | "writeback" | "edits" | "commit" | "effects"
         }
         httpStatus?: number
         redacted?: true
@@ -9941,24 +9903,14 @@ export type GetActionRunResponses = {
           objectTypeId: string
           primaryId: string
         }
-    status: "queued" | "running" | "succeeded" | "failed" | "cancelled"
-    phase?:
-      | "request"
-      | "enqueue"
-      | "validation"
-      | "writeback"
-      | "edits"
-      | "commit"
-      | "effects"
-      | "cancelled"
-    queuedAt: string
-    startedAt?: string
-    finishedAt?: string
+    status: "succeeded" | "failed"
+    phase: "validation" | "writeback" | "edits" | "commit" | "effects"
+    startedAt: string
+    finishedAt: string
     error?: {
       code:
         | "internal.unexpected"
         | "runtime.cancelled"
-        | "queue.enqueue_failed"
         | "action.phase_failed"
         | "action.read_conflict"
         | "action.timeout"
@@ -9968,15 +9920,7 @@ export type GetActionRunResponses = {
       details: {
         actionId: string
         runId: string
-        phase:
-          | "request"
-          | "enqueue"
-          | "validation"
-          | "writeback"
-          | "edits"
-          | "commit"
-          | "effects"
-          | "cancelled"
+        phase: "validation" | "writeback" | "edits" | "commit" | "effects"
       }
       httpStatus?: number
       redacted?: true
@@ -10009,7 +9953,6 @@ export type GetActionRunResponses = {
             code:
               | "internal.unexpected"
               | "runtime.cancelled"
-              | "queue.enqueue_failed"
               | "action.phase_failed"
               | "action.read_conflict"
               | "action.timeout"
@@ -10038,7 +9981,6 @@ export type GetActionRunResponses = {
             code:
               | "internal.unexpected"
               | "runtime.cancelled"
-              | "queue.enqueue_failed"
               | "action.phase_failed"
               | "action.read_conflict"
               | "action.timeout"

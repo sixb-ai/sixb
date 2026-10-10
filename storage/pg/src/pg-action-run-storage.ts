@@ -4,33 +4,23 @@ import {
   serializeActionRunFailure,
 } from "@sixb/core/internal/action-run-storage"
 import { assertActionRunExecution } from "@sixb/core/internal/action-run-storage-provider"
-import {
-  actionRunPhaseRecordsEqual,
-  canRequeueActionRunAfterEnqueueFailure,
-  finishActionRunPhase,
-} from "@sixb/core/internal/storage"
+import { normalizeRecordActionRunInput, resolveActionRunEffects } from "@sixb/core/internal/storage"
 import type {
   ActionRunEffectsRecord,
-  ActionRunFailure,
   ActionRunParams,
   ActionRunPhase,
   ActionRunRecord,
+  ActionRunStatus,
   ActionRunStorage,
   ActionRunWritebackRecord,
-  EnterActionRunPhaseInput,
   ExecutionStorage,
-  FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
-  LockActionMaterializationRunInput,
-  QueueActionRunInput,
   RecordActionEffectsInput,
-  RecordActionWritebackInput,
-  StartActionRunInput,
+  RecordActionRunInput,
 } from "@sixb/core/storage"
-import { ActionRunError, isTerminalActionRun } from "@sixb/core/storage"
-import type { SQLClient, SqlParameter } from "./pg-client"
-import { isUniqueViolation } from "./storage-errors"
+import { ActionRunError } from "@sixb/core/storage"
+import type { SqlParameter } from "./pg-client"
 import { type PgStoreClient, runPgTransaction } from "./transactions"
 
 export class PgActionRunStorage implements ActionRunStorage {
@@ -39,289 +29,100 @@ export class PgActionRunStorage implements ActionRunStorage {
     private readonly executions: ExecutionStorage
   ) {}
 
-  async lockForMaterialization(input: LockActionMaterializationRunInput): Promise<ActionRunRecord> {
-    const [row] = await this.sql<DatabaseRow[]>`
-      SELECT *
-      FROM action_runs
-      WHERE project_id = ${input.projectId} AND id = ${input.runId}
-      FOR UPDATE
-    `
-    if (!row) {
-      throw new ActionRunError(
-        `[SixbPg] Action run '${input.runId}' not found for project '${input.projectId}'.`
-      )
-    }
-    if (row.action_id !== input.actionId) {
-      throw new ActionRunError(
-        `[SixbPg] Action run '${input.runId}' does not belong to action '${input.actionId}'.`
-      )
-    }
-    if (row.status !== "running") {
-      throw new ActionRunError(
-        `[SixbPg] Action run '${input.runId}' cannot materialize from status '${row.status}'.`
-      )
-    }
-    return rowToActionRunRecord(row)
-  }
-
-  async queue(input: QueueActionRunInput): Promise<ActionRunRecord> {
+  async record(input: RecordActionRunInput): Promise<ActionRunRecord> {
+    const record = normalizeRecordActionRunInput(input)
     await assertActionRunExecution({
       executions: this.executions,
-      projectId: input.projectId,
-      executionId: input.executionId,
-      runId: input.id,
-      actionId: input.actionId,
+      projectId: record.projectId,
+      executionId: record.executionId,
+      runId: record.id,
+      actionId: record.actionId,
     })
 
-    try {
-      const [row] = await this.sql<DatabaseRow[]>`
-        INSERT INTO action_runs (
-          project_id,
-          id,
-          execution_id,
-          action_id,
-          subject_kind,
-          object_type_id,
-          primary_id,
-          status,
-          phase,
-          queued_at,
-          started_at,
-          finished_at,
-          params,
-          idempotency_key,
-          writeback_status,
-          writeback_completed_at,
-          writeback_result,
-          writeback_error,
-          effects_status,
-          effects_completed_at,
-          effects_error,
-          error
-        ) VALUES (
-          ${input.projectId},
-          ${input.id},
-          ${input.executionId},
-          ${input.actionId},
-          ${input.subject.kind},
-          ${input.subject.kind === "object" ? input.subject.objectTypeId : null},
-          ${input.subject.kind === "object" ? input.subject.primaryId : null},
-          ${"queued"},
-          ${"request"},
-          ${input.queuedAt ?? new Date()},
-          ${null},
-          ${null},
-          ${JSON.stringify(input.params)}::text::jsonb,
-          ${input.idempotencyKey},
-          ${null},
-          ${null},
-          ${null},
-          ${null},
-          ${null},
-          ${null},
-          ${null},
-          ${null}
-        )
-        RETURNING *
-      `
+    // A conflict with a committed record is answered as a refusal rather than raised: a raised
+    // unique violation would abort the caller's transaction before the error could say what
+    // conflicted. A conflict with a concurrent transaction's insert waits for that transaction;
+    // under the serializable isolation of an Action commit, it then fails with a serialization
+    // error, which the Materializer retries into a replay of the commit that won.
+    const [row] = await this.sql<DatabaseRow[]>`
+      INSERT INTO action_runs (
+        project_id,
+        id,
+        execution_id,
+        action_id,
+        subject_kind,
+        object_type_id,
+        primary_id,
+        status,
+        phase,
+        started_at,
+        finished_at,
+        params,
+        idempotency_key,
+        writeback_status,
+        writeback_completed_at,
+        writeback_result,
+        writeback_error,
+        error
+      ) VALUES (
+        ${record.projectId},
+        ${record.id},
+        ${record.executionId},
+        ${record.actionId},
+        ${record.subject.kind},
+        ${record.subject.kind === "object" ? record.subject.objectTypeId : null},
+        ${record.subject.kind === "object" ? record.subject.primaryId : null},
+        ${record.status},
+        ${record.phase},
+        ${record.startedAt},
+        ${record.finishedAt},
+        ${JSON.stringify(record.params)}::text::jsonb,
+        ${record.idempotencyKey},
+        ${record.writeback?.status ?? null},
+        ${record.writeback?.completedAt ?? null},
+        ${record.writeback?.status === "succeeded" ? JSON.stringify(record.writeback.result) : null}::text::jsonb,
+        ${record.writeback?.status === "failed" ? serializeActionRunFailure(record.writeback.error, "writeback") : null}::text::jsonb,
+        ${record.status === "failed" ? serializeActionRunFailure(record.error) : null}::text::jsonb
+      )
+      ON CONFLICT DO NOTHING
+      RETURNING *
+    `
+    if (row) return rowToActionRunRecord(row)
 
-      return rowToActionRunRecord(row)
-    } catch (error) {
-      if (isUniqueViolation(error)) {
-        return this.requeueAfterEnqueueFailure(input)
-      }
-
-      throw error
-    }
+    const [conflict] = await this.sql<{ id: string }[]>`
+      SELECT id FROM action_runs
+      WHERE project_id = ${record.projectId} AND id = ${record.id}
+    `
+    throw new ActionRunError(
+      conflict
+        ? `[SixbPg] Action run '${record.id}' is already recorded for project '${record.projectId}'.`
+        : `[SixbPg] Execution '${record.executionId}' already belongs to another Action run.`
+    )
   }
 
-  private async requeueAfterEnqueueFailure(input: QueueActionRunInput): Promise<ActionRunRecord> {
+  async recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord> {
     return runPgTransaction(this.sql, async (tx) => {
       const [existing] = await tx<DatabaseRow[]>`
         SELECT * FROM action_runs
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         FOR UPDATE
       `
-
-      if (
-        !existing ||
-        !canRequeueActionRunAfterEnqueueFailure(rowToActionRunRecord(existing), input)
-      ) {
-        throw new ActionRunError(
-          `[SixbPg] Action run '${input.id}' already exists for project '${input.projectId}'.`
-        )
-      }
-
-      const [updated] = await tx<DatabaseRow[]>`
-        UPDATE action_runs
-        SET
-          status = ${"queued"},
-          phase = ${"request"},
-          queued_at = ${input.queuedAt ?? new Date()},
-          started_at = ${null},
-          finished_at = ${null},
-          writeback_status = ${null},
-          writeback_completed_at = ${null},
-          writeback_result = ${null},
-          writeback_error = ${null},
-          effects_status = ${null},
-          effects_completed_at = ${null},
-          effects_error = ${null},
-          error = ${null}
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        RETURNING *
-      `
-
-      return rowToActionRunRecord(updated)
-    })
-  }
-
-  async start(input: StartActionRunInput): Promise<ActionRunRecord> {
-    const [updated] = await this.sql<DatabaseRow[]>`
-      UPDATE action_runs
-      SET
-        status = ${"running"},
-        phase = ${input.phase ?? "validation"},
-        started_at = ${input.startedAt ?? new Date()},
-        error = ${null}
-      WHERE project_id = ${input.projectId}
-        AND id = ${input.id}
-        AND status = ${"queued"}
-      RETURNING *
-    `
-
-    if (updated) {
-      return rowToActionRunRecord(updated)
-    }
-
-    const existing = await this.getById({ projectId: input.projectId, id: input.id })
-    if (!existing) {
-      throw new ActionRunError(
-        `[SixbPg] Action run '${input.id}' not found for project '${input.projectId}'.`
+      const { run, effects } = resolveActionRunEffects(
+        existing ? rowToActionRunRecord(existing) : null,
+        input
       )
-    }
-
-    throw new ActionRunError(
-      `[SixbPg] Action run '${input.id}' cannot start from status '${existing.status}'.`
-    )
-  }
-
-  async enterPhase(input: EnterActionRunPhaseInput): Promise<ActionRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      await this.requireRunningRun(tx, input.projectId, input.id, "transition phase")
-
-      const [updated] = await tx<DatabaseRow[]>`
-        UPDATE action_runs
-        SET phase = ${input.phase}
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        RETURNING *
-      `
-
-      return rowToActionRunRecord(updated)
-    })
-  }
-
-  async recordWriteback(input: RecordActionWritebackInput): Promise<ActionRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const existing = await this.requireRunningRun(
-        tx,
-        input.projectId,
-        input.id,
-        "record writeback"
-      )
-      const nextWriteback = toWritebackRecord(input, new Date(input.completedAt ?? new Date()))
-      const currentWriteback = toActionRunWritebackRecord(existing)
-
-      if (currentWriteback) {
-        if (actionRunPhaseRecordsEqual(currentWriteback, nextWriteback)) {
-          return rowToActionRunRecord(existing)
-        }
-
-        throw new ActionRunError(
-          `[SixbPg] Action run '${input.id}' already has a different writeback record.`
-        )
-      }
-
-      const [updated] = await tx<DatabaseRow[]>`
-        UPDATE action_runs
-        SET
-          phase = ${"writeback"},
-          writeback_status = ${input.status},
-          writeback_completed_at = ${nextWriteback.completedAt},
-          writeback_result = ${input.status === "succeeded" ? JSON.stringify(input.result) : null}::text::jsonb,
-          writeback_error = ${input.status === "failed" ? serializeActionRunFailure(input.error, "writeback") : null}::text::jsonb
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        RETURNING *
-      `
-
-      return rowToActionRunRecord(updated)
-    })
-  }
-
-  async recordEffects(input: RecordActionEffectsInput): Promise<ActionRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const existing = await this.requireRunningRun(tx, input.projectId, input.id, "record effects")
-      const nextEffects = toEffectsRecord(input, new Date(input.completedAt ?? new Date()))
-      const currentEffects = toActionRunEffectsRecord(existing)
-
-      if (currentEffects) {
-        if (actionRunPhaseRecordsEqual(currentEffects, nextEffects)) {
-          return rowToActionRunRecord(existing)
-        }
-
-        throw new ActionRunError(
-          `[SixbPg] Action run '${input.id}' already has a different effects record.`
-        )
-      }
+      if (!effects) return run
 
       const [updated] = await tx<DatabaseRow[]>`
         UPDATE action_runs
         SET
           phase = ${"effects"},
-          effects_status = ${input.status},
-          effects_completed_at = ${nextEffects.completedAt},
-          effects_error = ${input.status === "failed" ? serializeActionRunFailure(input.error, "effects") : null}::text::jsonb
+          effects_status = ${effects.status},
+          effects_completed_at = ${effects.completedAt},
+          effects_error = ${effects.status === "failed" ? serializeActionRunFailure(effects.error, "effects") : null}::text::jsonb
         WHERE project_id = ${input.projectId} AND id = ${input.id}
         RETURNING *
       `
-
-      return rowToActionRunRecord(updated)
-    })
-  }
-
-  async finish(input: FinishActionRunInput): Promise<ActionRunRecord> {
-    return runPgTransaction(this.sql, async (tx) => {
-      const [existing] = await tx<DatabaseRow[]>`
-        SELECT * FROM action_runs
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        FOR UPDATE
-      `
-
-      if (!existing) {
-        throw new ActionRunError(
-          `[SixbPg] Action run '${input.id}' not found for project '${input.projectId}'.`
-        )
-      }
-
-      if (isTerminalActionRun({ status: existing.status })) {
-        throw new ActionRunError(
-          `[SixbPg] Action run '${input.id}' cannot finish from terminal status '${existing.status}'.`
-        )
-      }
-
-      const phase = finishActionRunPhase(input, existing.phase)
-
-      const [updated] = await tx<DatabaseRow[]>`
-        UPDATE action_runs
-        SET
-          status = ${input.status},
-          phase = ${phase},
-          finished_at = ${input.finishedAt ?? new Date()},
-          error = ${input.status === "succeeded" ? null : serializeActionRunFailure(input.error)}::text::jsonb
-        WHERE project_id = ${input.projectId} AND id = ${input.id}
-        RETURNING *
-      `
-
       return rowToActionRunRecord(updated)
     })
   }
@@ -405,12 +206,12 @@ export class PgActionRunStorage implements ActionRunStorage {
     }
 
     if (input.startedAfter) {
-      whereClauses.push(`COALESCE(started_at, queued_at) >= $${index++}`)
+      whereClauses.push(`started_at >= $${index++}`)
       params.push(input.startedAfter)
     }
 
     if (input.startedBefore) {
-      whereClauses.push(`COALESCE(started_at, queued_at) <= $${index++}`)
+      whereClauses.push(`started_at <= $${index++}`)
       params.push(input.startedBefore)
     }
 
@@ -427,7 +228,7 @@ export class PgActionRunStorage implements ActionRunStorage {
     let query = `
       SELECT * FROM action_runs
       ${where}
-      ORDER BY COALESCE(started_at, queued_at) ${order}, id ${order}
+      ORDER BY started_at ${order}, id ${order}
     `
 
     if (input.limit !== undefined) {
@@ -448,42 +249,6 @@ export class PgActionRunStorage implements ActionRunStorage {
       total,
     }
   }
-
-  private async requireRunningRun(
-    runner: SQLClient,
-    projectId: string,
-    id: string,
-    operation: string
-  ): Promise<DatabaseRow> {
-    const [existing] = await runner<DatabaseRow[]>`
-      SELECT * FROM action_runs
-      WHERE project_id = ${projectId} AND id = ${id}
-      FOR UPDATE
-    `
-
-    if (!existing) {
-      throw new ActionRunError(`[SixbPg] Action run '${id}' not found for project '${projectId}'.`)
-    }
-
-    if (existing.status !== "running") {
-      throw new ActionRunError(
-        `[SixbPg] Action run '${id}' cannot ${operation} from status '${existing.status}'.`
-      )
-    }
-
-    return existing
-  }
-}
-
-function toActionRunFailure(row: DatabaseRow): ActionRunFailure | undefined {
-  return row.error === null ? undefined : parseActionRunFailure(row.error)
-}
-
-function parsePhaseFailure<TPhase extends Extract<ActionRunPhase, "writeback" | "effects">>(
-  value: unknown,
-  expectedPhase: TPhase
-): ActionRunFailure<TPhase> {
-  return parseActionRunFailure(value, expectedPhase)
 }
 
 function toActionRunWritebackRecord(row: DatabaseRow): ActionRunWritebackRecord | undefined {
@@ -491,22 +256,19 @@ function toActionRunWritebackRecord(row: DatabaseRow): ActionRunWritebackRecord 
     return undefined
   }
 
-  const completedAt = row.writeback_completed_at
-    ? new Date(row.writeback_completed_at)
-    : new Date(row.queued_at)
-
+  const completedAt = new Date(row.writeback_completed_at ?? row.finished_at)
   if (row.writeback_status === "succeeded") {
     return {
       status: "succeeded",
       completedAt,
-      result: (row.writeback_result ?? null) as JsonValue,
+      result: row.writeback_result ?? null,
     }
   }
 
   return {
     status: "failed",
     completedAt,
-    error: parsePhaseFailure(row.writeback_error, "writeback"),
+    error: parseActionRunFailure(row.writeback_error, "writeback"),
   }
 }
 
@@ -515,10 +277,7 @@ function toActionRunEffectsRecord(row: DatabaseRow): ActionRunEffectsRecord | un
     return undefined
   }
 
-  const completedAt = row.effects_completed_at
-    ? new Date(row.effects_completed_at)
-    : new Date(row.queued_at)
-
+  const completedAt = new Date(row.effects_completed_at ?? row.finished_at)
   if (row.effects_status === "succeeded") {
     return {
       status: "succeeded",
@@ -529,65 +288,30 @@ function toActionRunEffectsRecord(row: DatabaseRow): ActionRunEffectsRecord | un
   return {
     status: "failed",
     completedAt,
-    error: parsePhaseFailure(row.effects_error, "effects"),
-  }
-}
-
-function toWritebackRecord(
-  input: RecordActionWritebackInput,
-  completedAt: Date
-): ActionRunWritebackRecord {
-  if (input.status === "succeeded") {
-    return {
-      status: "succeeded",
-      completedAt,
-      result: input.result,
-    }
-  }
-
-  return {
-    status: "failed",
-    completedAt,
-    error: input.error,
-  }
-}
-
-function toEffectsRecord(
-  input: RecordActionEffectsInput,
-  completedAt: Date
-): ActionRunEffectsRecord {
-  if (input.status === "succeeded") {
-    return {
-      status: "succeeded",
-      completedAt,
-    }
-  }
-
-  return {
-    status: "failed",
-    completedAt,
-    error: input.error,
+    error: parseActionRunFailure(row.effects_error, "effects"),
   }
 }
 
 function rowToActionRunRecord(row: DatabaseRow): ActionRunRecord {
-  return {
+  const writeback = toActionRunWritebackRecord(row)
+  const effects = toActionRunEffectsRecord(row)
+  const fields = {
     id: row.id,
     projectId: row.project_id,
     executionId: row.execution_id,
     actionId: row.action_id,
     subject: rowToActionSubject(row),
-    status: row.status,
-    phase: row.phase ?? undefined,
-    queuedAt: new Date(row.queued_at),
-    startedAt: row.started_at ? new Date(row.started_at) : undefined,
-    finishedAt: row.finished_at ? new Date(row.finished_at) : undefined,
+    phase: row.phase,
+    startedAt: new Date(row.started_at),
+    finishedAt: new Date(row.finished_at),
     params: row.params,
     idempotencyKey: row.idempotency_key,
-    writeback: toActionRunWritebackRecord(row),
-    effects: toActionRunEffectsRecord(row),
-    error: toActionRunFailure(row),
+    ...(writeback === undefined ? {} : { writeback }),
+    ...(effects === undefined ? {} : { effects }),
   }
+
+  if (row.status === "succeeded") return { ...fields, status: "succeeded" }
+  return { ...fields, status: "failed", error: parseActionRunFailure(row.error) }
 }
 
 function rowToActionSubject(row: DatabaseRow): ActionSubject {
@@ -614,11 +338,10 @@ interface DatabaseRow {
   subject_kind: ActionSubject["kind"]
   object_type_id: string | null
   primary_id: string | null
-  status: ActionRunRecord["status"]
-  phase: ActionRunPhase | null
-  queued_at: Date | string
-  started_at: Date | string | null
-  finished_at: Date | string | null
+  status: ActionRunStatus
+  phase: ActionRunPhase
+  started_at: Date | string
+  finished_at: Date | string
   params: ActionRunParams
   idempotency_key: string
   writeback_status: ActionRunWritebackRecord["status"] | null

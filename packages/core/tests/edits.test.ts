@@ -8,7 +8,7 @@ import { bindDurablePrimitiveExecution } from "../src/execution/primitive"
 import { createLinkScopeFingerprint } from "../src/materializer"
 import type { ObjectRow, Storage, TimeseriesHistoryBatchResult } from "../src/storage"
 import { StorageTransactionError } from "../src/storage"
-import { createTestSixb, queueTestActionRun } from "../src/testing"
+import { createTestActionRunRecord, createTestSixb } from "../src/testing"
 import { createTestRuntimeDeps } from "./test-runtime-deps"
 
 const Customer = defineObjectType({
@@ -60,18 +60,20 @@ function createRuntime() {
 type EditsRuntime = ReturnType<typeof createRuntime>["sixb"]
 type EditsHost = ReturnType<typeof createRuntime>["host"]
 
-async function startActionRun(host: EditsHost, runId: string, actionId = "markPaid") {
-  const actionRuns = host.storage.actionRuns
-  if (!actionRuns) throw new Error("Expected action run storage in the test runtime.")
-  await queueTestActionRun(host.storage, {
+function actionRunInput(host: EditsHost, runId: string, actionId = "markPaid") {
+  return {
     projectId: host.id,
     id: runId,
     actionId,
-    subject: { kind: "none" },
+    subject: { kind: "none" as const },
     params: {},
     idempotencyKey: `action:${host.id}:${runId}`,
-  })
-  await actionRuns.start({ projectId: host.id, id: runId })
+  }
+}
+
+/** Create the execution an Action run commits its edits under. */
+async function startActionRun(host: EditsHost, runId: string, actionId = "markPaid") {
+  await createTestActionRunRecord(host.storage.executions, actionRunInput(host, runId, actionId))
 }
 
 async function commit(
@@ -83,8 +85,10 @@ async function commit(
     readonly dependencies?: Parameters<typeof commitActionEdits>[0]["dependencies"]
   }
 ) {
-  const run = await host.storage.actionRuns?.getById({ projectId: host.id, id: input.runId })
-  if (!run) throw new Error(`Expected Action run '${input.runId}'.`)
+  const run = await createTestActionRunRecord(
+    host.storage.executions,
+    actionRunInput(host, input.runId, input.actionId)
+  )
   const execution = await host.storage.executions.getById({
     projectId: host.id,
     id: run.executionId,
@@ -97,9 +101,7 @@ async function commit(
   }
   return commitActionEdits({
     mutations: bindDurablePrimitiveExecution(host, { execution, primitive }).ontologyMutations,
-    projectId: host.id,
-    runId: input.runId,
-    actionId: input.actionId ?? "markPaid",
+    run,
     batch: input.batch,
     ...(input.dependencies !== undefined ? { dependencies: input.dependencies } : {}),
   })

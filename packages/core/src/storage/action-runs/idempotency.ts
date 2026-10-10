@@ -1,13 +1,6 @@
 import type { ActionSubject } from "../../actions"
 import { stableJsonStringify } from "../../json"
-import type {
-  ActionRunEffectsRecord,
-  ActionRunPhase,
-  ActionRunRecord,
-  ActionRunWritebackRecord,
-  FinishActionRunInput,
-  QueueActionRunInput,
-} from "./types"
+import type { ActionRunEffectsRecord, ActionRunRecord, ActionRunWritebackRecord } from "./types"
 
 export function actionSubjectsEqual(left: ActionSubject, right: ActionSubject): boolean {
   if (left.kind !== right.kind) return false
@@ -20,6 +13,18 @@ export function actionRunParamsEqual(left: unknown, right: unknown): boolean {
   return stableJsonStringify(left) === stableJsonStringify(right)
 }
 
+/** Whether two runs carry the same request: the same Action, subject, and params. */
+export function actionRunRequestsEqual(
+  left: Pick<ActionRunRecord, "actionId" | "subject" | "params">,
+  right: Pick<ActionRunRecord, "actionId" | "subject" | "params">
+): boolean {
+  return (
+    left.actionId === right.actionId &&
+    actionSubjectsEqual(left.subject, right.subject) &&
+    actionRunParamsEqual(left.params, right.params)
+  )
+}
+
 export type ActionRunPhaseRecord = ActionRunWritebackRecord | ActionRunEffectsRecord
 
 export function actionRunPhaseRecordsEqual(
@@ -27,39 +32,6 @@ export function actionRunPhaseRecordsEqual(
   right: ActionRunPhaseRecord
 ): boolean {
   return actionRunParamsEqual(stripPhaseRecordCompletedAt(left), stripPhaseRecordCompletedAt(right))
-}
-
-export function finishActionRunPhase(
-  input: FinishActionRunInput,
-  current: ActionRunPhase | null | undefined
-): ActionRunPhase {
-  if (input.status === "succeeded") {
-    return input.phase ?? current ?? "validation"
-  }
-
-  return input.error.details.phase
-}
-
-export function canRequeueActionRunAfterEnqueueFailure(
-  existing: ActionRunRecord,
-  input: QueueActionRunInput
-): boolean {
-  return (
-    existing.status === "failed" &&
-    existing.phase === "enqueue" &&
-    existing.executionId === input.executionId &&
-    existing.error?.retryable === true &&
-    existing.actionId === input.actionId &&
-    existing.idempotencyKey === input.idempotencyKey &&
-    actionSubjectsEqual(existing.subject, input.subject) &&
-    actionRunParamsEqual(existing.params, input.params)
-  )
-}
-
-export function isTerminalActionRun(record: Pick<ActionRunRecord, "status">): boolean {
-  return (
-    record.status === "succeeded" || record.status === "failed" || record.status === "cancelled"
-  )
 }
 
 function stripPhaseRecordCompletedAt(

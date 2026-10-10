@@ -93,19 +93,11 @@ export type SixbRunFailedContext = SixbFailureContext<"run.failed"> &
     readonly attempt?: number
   }
 
-/** A post-commit Action effects phase failed without changing the committed Action outcome. */
-export interface SixbActionPhaseFailedContext extends SixbFailureContext<"action.phase.failed"> {
-  readonly actionId: string
-  readonly runId: string
-  readonly phase: "effects"
-  readonly failure: ActionRunFailure<"effects">
-}
-
 /**
  * A post-commit Action phase failed without changing the committed Action outcome.
  *
- * Effects run after the authoritative commit, so the Action run remains succeeded while this
- * context exposes the exact phase failure stored on the run.
+ * Effects run after the run is recorded with its commit, so the run remains succeeded while this
+ * context exposes the exact phase failure recorded on it.
  */
 export interface SixbActionPhaseFailedContext extends SixbFailureContext<"action.phase.failed"> {
   readonly actionId: string

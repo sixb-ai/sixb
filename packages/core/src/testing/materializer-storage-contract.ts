@@ -13,6 +13,7 @@ import {
 import type { TrustedPrimitiveRef } from "../execution"
 import { restoreTrustedPrimitiveExecutionScope } from "../execution/durable"
 import { createTestingScope } from "../execution/scopes"
+import { MaterializationConflictError } from "../materialization/errors"
 import type {
   ExpectedLinkRevision,
   ExpectedObjectRevision,
@@ -35,8 +36,13 @@ import type {
   PlannedReplacementIdentity,
   ProjectionExecution,
   ProjectionRunStorage,
+  RecordActionRunInput,
 } from "../storage"
-import { createTestActionExecution, queueTestActionRun } from "./action-execution"
+import {
+  createTestActionExecution,
+  createTestActionRunRecord,
+  recordTestActionRun,
+} from "./action-execution"
 import { createTestProjectionExecution, startTestProjectionRun } from "./projection-execution"
 
 export interface MaterializerStorageContractProvider<TStorage extends Storage> {
@@ -406,23 +412,29 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         })
       ).toBeNull()
 
-      await createTestActionExecution(storage.executions, {
+      // A run id is recorded once, so a commit for a run that is already recorded commits nothing.
+      const recordedRun = {
+        id: "recorded-action-run",
         projectId: "materializer-storage-contract",
         actionId: "renameDevice",
-        runId: "missing-action-run",
-      })
-      const missingActionMaterializer = await primitiveMaterializer(materializer, storage, {
+        subject: { kind: "object", objectTypeId: Device.id, primaryId: "one" },
+        params: {},
+        idempotencyKey: "recorded-action-run",
+      } as const
+      await recordTestActionRun(storage, { ...recordedRun, phase: "validation" })
+      const recordedActionMaterializer = await primitiveMaterializer(materializer, storage, {
         kind: "action",
         id: "renameDevice",
-        runId: "missing-action-run",
+        runId: recordedRun.id,
       })
       await expect(
-        missingActionMaterializer.edits.commit({
+        recordedActionMaterializer.edits.commit({
           mode: "atomic",
-          source: { kind: "action", actionId: "renameDevice", runId: "missing-action-run" },
+          source: { kind: "action", actionId: "renameDevice", runId: recordedRun.id },
+          run: await createTestActionRunRecord(storage.executions, recordedRun),
           operations: [
             {
-              id: "missing-run-rename",
+              id: "recorded-run-rename",
               kind: "object.patch",
               ref: { objectTypeId: Device.id, primaryId: "one" },
               set: { name: "Must not persist" },
@@ -434,19 +446,21 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
           expectedLinks: [],
           expectedLinkScopes: [],
         })
-      ).rejects.toThrow("missing-action-run")
+      ).rejects.toThrow("recorded-action-run")
+      expect(
+        await storage.actionRuns.getById({
+          projectId: "materializer-storage-contract",
+          id: recordedRun.id,
+        })
+      ).toMatchObject({ phase: "validation" })
 
-      await queueTestActionRun(storage, {
+      const actionRun = await createTestActionRunRecord(storage.executions, {
         id: "action-run",
         projectId: "materializer-storage-contract",
         actionId: "renameDevice",
         subject: { kind: "object", objectTypeId: Device.id, primaryId: "one" },
         params: {},
         idempotencyKey: "action-run",
-      })
-      await storage.actionRuns.start({
-        id: "action-run",
-        projectId: "materializer-storage-contract",
       })
       const actionMaterializer = await primitiveMaterializer(materializer, storage, {
         kind: "action",
@@ -456,6 +470,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       const actionCommit = await actionMaterializer.edits.commit({
         mode: "atomic",
         source: { kind: "action", actionId: "renameDevice", runId: "action-run" },
+        run: actionRun,
         operations: [
           {
             id: "rename",
@@ -470,6 +485,13 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         expectedLinks: [],
         expectedLinkScopes: [],
       })
+      // The commit recorded the run it carried, with its edits.
+      expect(
+        await storage.actionRuns.getById({
+          projectId: "materializer-storage-contract",
+          id: "action-run",
+        })
+      ).toMatchObject({ status: "succeeded", phase: "commit", executionId: actionRun.executionId })
       expect(
         await storage.ontology.commits.getByOrigin({
           projectId: "materializer-storage-contract",
@@ -941,7 +963,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         })
       )
       const commitObservation = async (runId: string, name: string) => {
-        await queueTestActionRun(storage, {
+        const run = await createTestActionRunRecord(storage.executions, {
           id: runId,
           projectId: "materializer-storage-contract",
           actionId: "observePeers",
@@ -949,7 +971,6 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
           params: {},
           idempotencyKey: runId,
         })
-        await storage.actionRuns.start({ id: runId, projectId: "materializer-storage-contract" })
         const actionMaterializer = await primitiveMaterializer(materializer, storage, {
           kind: "action",
           id: "observePeers",
@@ -958,6 +979,7 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
         return actionMaterializer.edits.commit({
           mode: "atomic",
           source: { kind: "action", actionId: "observePeers", runId },
+          run,
           operations: [
             {
               id: `record-${runId}`,
@@ -1000,6 +1022,13 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
           primaryId: source.primaryId,
         })
       ).toMatchObject({ properties: { name: "observed peers" } })
+      // The conflict fails the commit after it inserted the run's record, which rolls back with it.
+      expect(
+        await storage.actionRuns.getById({
+          projectId: "materializer-storage-contract",
+          id: "stale-many-scope-action",
+        })
+      ).toBeNull()
     } finally {
       await provider.cleanup?.(createdStorage)
     }
@@ -1353,6 +1382,97 @@ export function runMaterializerStorageContractSuite<TStorage extends Storage>(
       await provider.cleanup?.(createdStorage)
     }
   })
+
+  // Two processes can execute one run id, each under an execution of its own, and commit its edits
+  // at the same time: the second commit waits for the first, then replays it and is refused.
+  // Removal proof: drop `recordActionRun` from `executeEditTransaction`
+  // (`materializer/edits/commit.ts`), and no record holds the run that committed.
+  if (provider.concurrentTransactions) {
+    test(`${name} commits a run id once when two of its executions commit together`, async () => {
+      const createdStorage = await provider.createStorage()
+      const storage = requireContractStorage(createdStorage)
+      const primitive = { kind: "action", id: "createDevice", runId: "shared-run" } as const
+      const scopeOf = async (executionId: string) => {
+        const execution = await storage.executions.getById({
+          projectId: CONTRACT_PROJECT,
+          id: executionId,
+        })
+        if (!execution) throw new Error(`Test execution '${executionId}' is missing.`)
+        return restoreTrustedPrimitiveExecutionScope({ execution, primitive })
+      }
+      const commitOf = (run: RecordActionRunInput, primaryId: string) => ({
+        mode: "atomic" as const,
+        source: { kind: "action" as const, actionId: "createDevice", runId: "shared-run" },
+        run,
+        operations: [
+          {
+            id: "create",
+            kind: "object.create" as const,
+            ref: deviceRef(primaryId),
+            properties: { id: primaryId, name: primaryId },
+          },
+        ],
+        expectedObjects: [],
+        expectedLinks: [],
+        expectedLinkScopes: [],
+      })
+      try {
+        const firstRun = await createTestActionRunRecord(storage.executions, {
+          id: "shared-run",
+          projectId: CONTRACT_PROJECT,
+          actionId: "createDevice",
+          subject: { kind: "none" },
+          params: {},
+          idempotencyKey: "shared-run",
+        })
+        const secondRun = {
+          ...firstRun,
+          executionId: await createTestActionExecution(storage.executions, {
+            projectId: CONTRACT_PROJECT,
+            actionId: "createDevice",
+            runId: "shared-run",
+            executionId: "shared-run-second",
+          }),
+        }
+        const paused = pauseBeforeFinalize(storage)
+        const first = contractMaterializer(paused.storage)
+          .withScope(await scopeOf(firstRun.executionId))
+          .edits.commit(commitOf(firstRun, "first"))
+        // It has recorded the run and holds its transaction open.
+        await paused.reached
+
+        let retries = 0
+        const recording = observeActionRunRecords(storage)
+        const second = contractMaterializer(recording.storage, {}, () => {
+          retries += 1
+        })
+          .withScope(await scopeOf(secondRun.executionId))
+          .edits.commit(commitOf(secondRun, "second"))
+          .then(
+            () => null,
+            (error: unknown) => error
+          )
+        // Its transaction reads before the first one commits, and then records the run too.
+        await recording.reached
+        paused.release()
+
+        await expect(first).resolves.toMatchObject({ created: true })
+        const refused = await second
+        expect(refused).toBeInstanceOf(MaterializationConflictError)
+        expect(refused instanceof MaterializationConflictError ? refused.kind : refused).toBe(
+          "idempotency"
+        )
+        expect(retries).toBeGreaterThan(0)
+        expect(
+          await storage.actionRuns.getById({ projectId: CONTRACT_PROJECT, id: "shared-run" })
+        ).toMatchObject({ executionId: firstRun.executionId })
+        expect(await device(storage, "first")).not.toBeNull()
+        expect(await device(storage, "second")).toBeNull()
+      } finally {
+        await provider.cleanup?.(createdStorage)
+      }
+    })
+  }
 
   // Removal proof: in PostgreSQL's `committedSince`, count only commits at or past the
   // watermark's xmax; the edit, in flight when the plan opened, is then taken as seen.
@@ -1907,7 +2027,8 @@ const CONTRACT_PROJECT = "materializer-storage-contract"
 
 function contractMaterializer(
   storage: Storage,
-  batching: { readonly transactionReplanRows?: number } = {}
+  batching: { readonly transactionReplanRows?: number } = {},
+  onSerializationRetry?: () => void
 ): OntologyMaterializer {
   return createOntologyMaterializer({
     projectId: CONTRACT_PROJECT,
@@ -1916,6 +2037,7 @@ function contractMaterializer(
     storage,
     dependencies: {
       batching: { sourceStageRows: 1, statePageRows: 1, planChunkRows: 1, ...batching },
+      ...(onSerializationRetry === undefined ? {} : { onSerializationRetry }),
     },
   })
 }
@@ -1986,6 +2108,40 @@ function observePlanning(
 }
 
 /** The same storage, whose transactions wait before they finalize until `release` is called. */
+/** Resolves `reached` when a transaction of `storage` first records an Action run. */
+function observeActionRunRecords(storage: ContractStorage) {
+  const reached = Promise.withResolvers<void>()
+  const observed = new Proxy(storage, {
+    get(target, property) {
+      if (property !== "transaction") {
+        const value = Reflect.get(target, property, target)
+        return typeof value === "function" ? value.bind(target) : value
+      }
+      return (run: (tx: Storage) => unknown, options?: Parameters<Storage["transaction"]>[1]) =>
+        target.transaction((tx) => {
+          const actionRuns = tx.actionRuns
+          if (!actionRuns) return run(tx)
+          const recording: ActionRunStorage = {
+            record: (input) => {
+              reached.resolve()
+              return actionRuns.record(input)
+            },
+            recordEffects: (input) => actionRuns.recordEffects(input),
+            getById: (input) => actionRuns.getById(input),
+            list: (input) => actionRuns.list(input),
+          }
+          return run(
+            new Proxy(tx, {
+              get: (store, key) =>
+                key === "actionRuns" ? recording : Reflect.get(store, key, store),
+            })
+          )
+        }, options)
+    },
+  })
+  return { storage: observed, reached: reached.promise }
+}
+
 function pauseBeforeFinalize(storage: ContractStorage) {
   let reach!: () => void
   const reached = new Promise<void>((resolve) => {

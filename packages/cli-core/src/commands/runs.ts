@@ -12,7 +12,7 @@ import { CLI_LIMITS, DEFAULT_LIST_ORDER } from "../policies"
 import { GROUP_HELP } from "./metadata"
 import { normalizeWindowOptions, parseQueryOptions } from "./shared"
 
-const ACTION_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "cancelled"] as const
+const ACTION_RUN_STATUSES = ["succeeded", "failed"] as const
 const WORKFLOW_RUN_STATUSES = [
   "queued",
   "running",

@@ -1,5 +1,5 @@
 import type { ObjectTypeWithPropertyTokens } from "../../ontology/tokens"
-import type { ActionRunRecord, ObjectRow } from "../../storage"
+import type { ObjectRow } from "../../storage"
 import type { ActionDefinition, ActionTargetObject } from "../types"
 import type { ActionRunContext } from "./types"
 
@@ -18,5 +18,3 @@ export type PhaseExecutionBase = {
 }
 
 export type RuntimePhaseHandler = (ctx: unknown) => unknown
-
-export type UpdateActiveRun = (run: ActionRunRecord) => void

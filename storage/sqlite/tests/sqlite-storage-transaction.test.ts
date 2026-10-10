@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { migrateStorage, type Storage } from "@sixb/core"
 import { StorageTransactionError } from "@sixb/core/storage"
-import { queueTestActionRun, startTestSyncRun, startTestWebhookRun } from "@sixb/core/testing"
+import { recordTestActionRun, startTestSyncRun, startTestWebhookRun } from "@sixb/core/testing"
 import { SqliteStorage } from "../src"
 import { closeSqliteStoreConnection, openSqliteStoreConnection } from "../src/transactions"
 
@@ -30,7 +30,7 @@ test("file-backed snapshot reads remain available during a write transaction", a
     transactionEntered = resolve
   })
   const transaction = storage.transaction(async (tx) => {
-    await queueTestActionRun(tx, actionRunInput("concurrent-read-writer"))
+    await recordTestActionRun(tx, actionRunInput("concurrent-read-writer"))
     transactionEntered()
     await blocked
   })
@@ -67,7 +67,7 @@ describe("SqliteStorage.transaction", () => {
 
   test("commits writes atomically", async () => {
     await storage.transaction(async (tx) => {
-      await queueTestActionRun(tx, actionRunInput("run_commit"))
+      await recordTestActionRun(tx, actionRunInput("run_commit"))
     })
 
     expect(
@@ -91,7 +91,7 @@ describe("SqliteStorage.transaction", () => {
     await expect(
       storage.transaction(async (tx) => {
         requireTransactionalRunStores(tx)
-        await queueTestActionRun(tx, actionRunInput("run_rollback"))
+        await recordTestActionRun(tx, actionRunInput("run_rollback"))
         await startTestSyncRun(tx, syncRunInput("sync_rollback"))
         await startTestWebhookRun(tx, webhookRunInput("webhook_rollback"))
 
@@ -117,7 +117,7 @@ describe("SqliteStorage.transaction", () => {
     })
 
     const failed = storage.transaction(async (tx) => {
-      await queueTestActionRun(tx, {
+      await recordTestActionRun(tx, {
         id: "rolled-back",
         projectId: "my-app",
         actionId: "paint",
@@ -132,7 +132,7 @@ describe("SqliteStorage.transaction", () => {
     await entered
 
     let rootFinished = false
-    const rootWrite = queueTestActionRun(storage, {
+    const rootWrite = recordTestActionRun(storage, {
       id: "root-write",
       projectId: "my-app",
       actionId: "paint",
@@ -163,7 +163,7 @@ describe("SqliteStorage.transaction", () => {
     await storage.transaction(() => {
       detachedWrite = Promise.resolve().then(async () => {
         await detachedGate
-        return queueTestActionRun(storage, {
+        return recordTestActionRun(storage, {
           id: "detached-write",
           projectId: "my-app",
           actionId: "paint",

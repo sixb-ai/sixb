@@ -16,7 +16,7 @@ import {
 import { drainActionRuns } from "@sixb/core/internal/actions"
 import { flushSixbErrors } from "@sixb/core/internal/error-reporting"
 import { decorateOperationScopedMethodForTesting } from "@sixb/core/internal/storage-operation-scope"
-import { type ActionRunRecord, isTerminalActionRun } from "@sixb/core/storage"
+import type { ActionRunRecord } from "@sixb/core/storage"
 import { createTestSixb } from "@sixb/core/testing"
 import { createSixbApi, SixbServer } from "../src/server"
 import { createTestBrowserPolicy } from "./helpers"
@@ -80,11 +80,12 @@ async function withActionServer(
   }
 }
 
-async function waitForTerminalRun(host: SixbHost, runId: string): Promise<ActionRunRecord> {
+/** The run once it is recorded, which it is when it ends. */
+async function waitForRecordedRun(host: SixbHost, runId: string): Promise<ActionRunRecord> {
   const deadline = Date.now() + 2_000
   for (;;) {
     const run = await host.storage.actionRuns?.getById({ projectId: host.id, id: runId })
-    if (run && isTerminalActionRun(run)) return run
+    if (run) return run
     if (Date.now() > deadline) throw new Error(`Action run '${runId}' did not finish.`)
     await Bun.sleep(10)
   }
@@ -178,7 +179,7 @@ describe("POST /api/actions/:actionId", () => {
     await withActionServer([leaky], async ({ baseUrl, host, storage, reports }) => {
       const restore = decorateOperationScopedMethodForTesting(
         storage.actionRuns,
-        "finish",
+        "record",
         () => async () => {
           throw new Error("storage unavailable")
         }
@@ -195,7 +196,8 @@ describe("POST /api/actions/:actionId", () => {
       expect(JSON.parse(body)).toEqual({
         error:
           "[Sixb] Action run 'act_unrecorded' was requested, but its record could not be " +
-          "returned. Request it again with the same runId to get it.",
+          "written. Requesting it again with the same runId returns its record if it was " +
+          "written, and runs it again otherwise.",
         code: "internal.unexpected",
       })
       expect(body).not.toContain("secret-token-123")
@@ -273,7 +275,7 @@ describe("POST /api/actions/:actionId", () => {
       await Bun.sleep(50)
 
       release.resolve()
-      const run = await waitForTerminalRun(host, "act_disconnected")
+      const run = await waitForRecordedRun(host, "act_disconnected")
       expect(run.status).toBe("succeeded")
       const retried = await requestAction(baseUrl, "disconnected", {
         subject: { kind: "object", objectTypeId: "device", primaryId: "fan-1" },

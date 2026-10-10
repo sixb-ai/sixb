@@ -21,6 +21,7 @@ import {
   type WorkflowDefinition,
   WorkflowValidationError,
 } from "@sixb/core"
+import { drainActionRuns } from "@sixb/core/internal/actions"
 import { agentServiceAccountId } from "@sixb/core/internal/agents"
 import { bindDurablePrimitiveExecution } from "@sixb/core/internal/primitive-execution"
 import { snapshotWorkflowInput, workflowAgentStepActorId } from "@sixb/core/internal/workflows"
@@ -1784,6 +1785,8 @@ describe("runWorkflowJob", () => {
         },
       },
     })
+    // Effects run after the Action's request returns: wait for them to end.
+    await drainActionRuns(sixb, 5_000)
     const actionRun = await sixb.storage.actionRuns!.getById({
       projectId: sixb.id,
       id: "wfrun_action_effects_failed:action:1",

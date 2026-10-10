@@ -21,14 +21,15 @@ export function throwIfAborted(signal: AbortSignal): void {
 /**
  * Translate work performed by an Action phase without misclassifying its bookkeeping.
  *
- * Whatever a handler throws once its phase's deadline has elapsed is that deadline's doing: the run
- * failed with `action.timeout`, and the handler's own error stays the cause reported to `onError`.
- * Every expectation an Action commit carries comes from the Action's own reads, so an expectation
- * conflict at commit is a read conflict: the run can be requested again against current state.
+ * Whatever a handler throws once its phase's signal aborted is that abort's doing: the run failed
+ * with `action.timeout` when its deadline elapsed, and with `runtime.cancelled` when its caller
+ * aborted. The handler's own error stays the cause reported to `onError`. Every expectation an
+ * Action commit carries comes from the Action's own reads, so an expectation conflict at commit is
+ * a read conflict: the run can be requested again against current state.
  */
 export function translateActionPhaseError(
   error: unknown,
-  phase: Exclude<ActionRunPhase, "request" | "enqueue" | "cancelled">,
+  phase: ActionRunPhase,
   input: {
     readonly actionId: string
     readonly runId: string
@@ -38,13 +39,22 @@ export function translateActionPhaseError(
 ): unknown {
   const details = { actionId: input.actionId, runId: input.runId, phase }
   if (input.signal?.aborted) {
-    return isActionTimeout(input.signal.reason) && !isActionTimeout(error)
-      ? createSixbError(
-          "action.timeout",
-          `[Sixb] Action run '${input.runId}' exceeded its deadline during ${phase}.`,
+    if (isActionTimeout(input.signal.reason)) {
+      return isActionTimeout(error)
+        ? error
+        : createSixbError(
+            "action.timeout",
+            `[Sixb] Action run '${input.runId}' exceeded its deadline during ${phase}.`,
+            { cause: error, details }
+          )
+    }
+    return isSixbError(error) && error.code === "runtime.cancelled"
+      ? error
+      : createSixbError(
+          "runtime.cancelled",
+          `[Sixb] Action run '${input.runId}' was cancelled by its caller during ${phase}.`,
           { cause: error, details }
         )
-      : error
   }
   if (isSixbError(error) && error.code === "internal.unexpected") {
     return error
@@ -85,9 +95,7 @@ export function toActionRunFailure<TPhase extends ActionRunPhase>(
   const code =
     isSixbError(error) && (ACTION_RUN_FAILURE_CODES as readonly string[]).includes(error.code)
       ? (error.code as ActionRunFailure<TPhase>["code"])
-      : phase === "cancelled"
-        ? "runtime.cancelled"
-        : "internal.unexpected"
+      : "internal.unexpected"
   const normalized = createSixbError(
     code,
     summarizeErrorMessage(error, "Action execution failed."),

@@ -1,12 +1,6 @@
 /** Implementation exports for Sixb packages only. */
 
-export {
-  actionRunParamsEqual,
-  actionRunPhaseRecordsEqual,
-  actionSubjectsEqual,
-  canRequeueActionRunAfterEnqueueFailure,
-  finishActionRunPhase,
-} from "./action-runs/idempotency"
+export { normalizeRecordActionRunInput, resolveActionRunEffects } from "./action-runs/record"
 export { assertAiUsageExecutionId, normalizeAiModelCallRecord } from "./ai-usage/record"
 export { normalizeAiModelCallUsage } from "./ai-usage/usage"
 export { parseFileDownloadGrantRow } from "./file-download-grants/record"

@@ -35,12 +35,10 @@ export type {
   ActionRunRecord,
   ActionRunStatus,
   ActionRunStorage,
-  FinishActionRunInput,
   ListActionRunsInput,
   ListActionRunsResult,
-  LockActionMaterializationRunInput,
-  QueueActionRunInput,
-  StartActionRunInput,
+  RecordActionEffectsInput,
+  RecordActionRunInput,
 } from "./action-runs"
 export { ACTION_RUN_FAILURE_CODES, ACTION_RUN_PHASES, ActionRunError } from "./action-runs"
 export type {

@@ -37,7 +37,7 @@ import {
   createTestAgentExecution,
   createTestSixb,
   createTestWorkflowExecution,
-  queueTestActionRun,
+  recordTestActionRun,
   startTestPipelineRun,
   startTestSyncRun,
   startTestWebhookRun,
@@ -511,7 +511,7 @@ describe("SixbServer HTTP contract", () => {
       responseStatus: 202,
     })
 
-    await queueTestActionRun(sixb.storage, {
+    await recordTestActionRun(sixb.storage, {
       id: "act_audit_previous",
       projectId: "contract-project",
       actionId: "syncDeviceLabel",
@@ -522,20 +522,13 @@ describe("SixbServer HTTP contract", () => {
       },
       params: { label: "Fan 1 audited" },
       idempotencyKey: "action:contract-project:act_audit_previous",
-      queuedAt: new Date("2026-02-18T09:12:00.000Z"),
-    })
-    await sixb.storage.actionRuns!.start({
-      id: "act_audit_previous",
-      projectId: "contract-project",
       startedAt: new Date("2026-02-18T09:12:01.000Z"),
-      phase: "validation",
-    })
-    await sixb.storage.actionRuns!.recordWriteback({
-      id: "act_audit_previous",
-      projectId: "contract-project",
-      status: "succeeded",
-      completedAt: new Date("2026-02-18T09:12:02.000Z"),
-      result: { externalId: "ext_123" },
+      finishedAt: new Date("2026-02-18T09:12:03.000Z"),
+      writeback: {
+        status: "succeeded",
+        completedAt: new Date("2026-02-18T09:12:02.000Z"),
+        result: { externalId: "ext_123" },
+      },
     })
     await sixb.storage.actionRuns!.recordEffects({
       id: "act_audit_previous",
@@ -553,13 +546,6 @@ describe("SixbServer HTTP contract", () => {
           phase: "effects",
         },
       },
-    })
-    await sixb.storage.actionRuns!.finish({
-      id: "act_audit_previous",
-      projectId: "contract-project",
-      status: "succeeded",
-      finishedAt: new Date("2026-02-18T09:12:05.000Z"),
-      phase: "effects",
     })
 
     const port = await getFreePort()
@@ -2407,7 +2393,6 @@ describe("SixbServer HTTP contract", () => {
       expect(requestActionResponse.status).toBe(200)
       const requestActionBody = (await requestActionResponse.json()) as Record<string, unknown> & {
         id: string
-        queuedAt: string
         finishedAt: string
       }
       expect(requestActionBody.id.startsWith("act_")).toBe(true)
@@ -2422,7 +2407,6 @@ describe("SixbServer HTTP contract", () => {
         },
         status: "succeeded",
         phase: "writeback",
-        queuedAt: expect.any(String),
         startedAt: expect.any(String),
         finishedAt: expect.any(String),
         params: { speed: null },
@@ -2480,7 +2464,7 @@ describe("SixbServer HTTP contract", () => {
               primaryId: "fan-2",
             },
             status: "succeeded",
-            queuedAt: requestActionBody.queuedAt,
+            startedAt: requestActionBody.startedAt,
           },
         ],
         hasMore: false,
@@ -2509,9 +2493,8 @@ describe("SixbServer HTTP contract", () => {
         },
         status: "succeeded",
         phase: "effects",
-        queuedAt: "2026-02-18T09:12:00.000Z",
         startedAt: "2026-02-18T09:12:01.000Z",
-        finishedAt: "2026-02-18T09:12:05.000Z",
+        finishedAt: "2026-02-18T09:12:03.000Z",
         params: { label: "Fan 1 audited" },
         writeback: {
           status: "succeeded",

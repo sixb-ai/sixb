@@ -1,21 +1,23 @@
 import { recordEdits } from "../../edits/recorder"
-import type { JsonValue } from "../../json"
-import type { ActionRunRecord } from "../../storage"
+import type { RecordActionRunInput } from "../../storage"
 import type { ActionEditCommitResult } from "../commit-edits"
 import { commitActionEdits } from "../commit-edits"
 import type { ActionReadRecorder } from "../read-facade"
 import { isObjectActionDefinition } from "../validation"
 import { type BasePhaseContext, requireObjectSubject, toActionReadFacade } from "./context"
 import { throwIfAborted, translateActionPhaseError } from "./normalize"
-import type {
-  LoadedObjectTarget,
-  PhaseExecutionBase,
-  RuntimePhaseHandler,
-  UpdateActiveRun,
-} from "./phase-types"
+import type { LoadedObjectTarget, PhaseExecutionBase, RuntimePhaseHandler } from "./phase-types"
+import type { ActionRunState } from "./state"
+
+/** The commit of a run's edits, which recorded the run with them. */
+export interface CommittedActionRun {
+  readonly record: RecordActionRunInput
+  readonly commit: ActionEditCommitResult
+}
 
 /**
- * Records the run's edits and commits them through the ontology Materializer.
+ * Records the run's edits and commits them through the ontology Materializer, together with the
+ * run's terminal record. Resolves with `null` for an Action without edits, which commits nothing.
  *
  * Object and link-scope reads performed by the writeback and edits handlers, including every object
  * a query or listing returned, are captured as expected revisions so a commit fails when that state
@@ -27,26 +29,19 @@ import type {
  */
 export async function runEditsAndCommitPhase(
   input: PhaseExecutionBase & {
-    readonly run: ActionRunRecord
+    readonly state: ActionRunState
     readonly baseContext: BasePhaseContext
     readonly objectTarget: LoadedObjectTarget | null
-    readonly writeback: JsonValue | undefined
     /** Shared with the writeback phase so both phases' reads fence the same commit. */
     readonly reads: ActionReadRecorder
-    readonly updateActiveRun: UpdateActiveRun
   }
-): Promise<{ run: ActionRunRecord; result: ActionEditCommitResult | null }> {
+): Promise<CommittedActionRun | null> {
   const handler = input.action.phases.edits as RuntimePhaseHandler | undefined
-  if (!handler) {
-    return { run: input.run, result: null }
-  }
+  if (!handler) return null
 
-  let run = await input.runtime.actionRunsStorage.enterPhase({
-    projectId: input.runtime.id,
-    id: input.run.id,
-    phase: "edits",
-  })
-  input.updateActiveRun(run)
+  const { state } = input
+  const ids = { actionId: input.action.id, runId: state.run.id }
+  state.enter("edits")
 
   const reads = input.reads
   if (input.objectTarget) {
@@ -63,7 +58,7 @@ export async function runEditsAndCommitPhase(
   try {
     batch = await recordEdits(
       {
-        runId: run.id,
+        runId: state.run.id,
         valueTypesById: input.runtime.sixb.objects.getValueTypesById(),
       },
       async ({ objects }) => {
@@ -72,16 +67,13 @@ export async function runEditsAndCommitPhase(
           signal: input.signal,
           objects,
           read: toActionReadFacade(input.runtime, reads),
-          writeback: input.writeback,
+          writeback: state.writebackValue,
         }
 
         if (isObjectActionDefinition(input.action)) {
           await handler({
             ...baseContext,
-            subject: requireObjectSubject(input.run.subject, {
-              actionId: input.action.id,
-              runId: input.run.id,
-            }),
+            subject: requireObjectSubject(state.run.subject, ids),
           })
           return
         }
@@ -90,38 +82,26 @@ export async function runEditsAndCommitPhase(
       }
     )
   } catch (error) {
-    throw translateActionPhaseError(error, "edits", {
-      actionId: input.action.id,
-      runId: input.run.id,
-      signal: input.signal,
-    })
+    throw translateActionPhaseError(error, "edits", { ...ids, signal: input.signal })
   }
 
   throwIfAborted(input.signal)
-  run = await input.runtime.actionRunsStorage.enterPhase({
-    projectId: input.runtime.id,
-    id: input.run.id,
-    phase: "commit",
-  })
-  input.updateActiveRun(run)
+  state.enter("commit")
+  // Built as the commit starts: the run succeeds exactly when this commit does.
+  const record = state.succeeded()
 
   let commit: ActionEditCommitResult
   try {
     commit = await commitActionEdits({
       mutations: input.runtime.ontologyMutations,
-      projectId: input.runtime.id,
-      runId: run.id,
-      actionId: input.action.id,
+      run: record,
       batch,
       dependencies: reads.dependencies(),
     })
   } catch (error) {
     // The commit ran to its end whatever `signal` did meanwhile, so its error is never a timeout.
-    throw translateActionPhaseError(error, "commit", {
-      actionId: input.action.id,
-      runId: input.run.id,
-    })
+    throw translateActionPhaseError(error, "commit", ids)
   }
 
-  return { run, result: commit }
+  return { record, commit }
 }

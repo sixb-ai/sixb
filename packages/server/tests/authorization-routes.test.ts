@@ -32,7 +32,7 @@ import { createSessionCredential } from "@sixb/core/internal/auth"
 import {
   createTestSixb,
   createTestWorkflowExecution,
-  queueTestActionRun,
+  recordTestActionRun,
   startTestPipelineRun,
   startTestSyncRun,
 } from "@sixb/core/testing"
@@ -1085,14 +1085,14 @@ describe("authorized action routes", () => {
       })
     )
     const requested = (await request.json()) as { id: string }
-    await queueTestActionRun(storage, {
+    await recordTestActionRun(storage, {
       id: "act_hidden_invoice",
       projectId: "test-project",
       actionId: "send-contract",
       subject: { kind: "object", objectTypeId: "invoice", primaryId: "i1" },
       params: {},
       idempotencyKey: "act_hidden_invoice",
-      queuedAt: new Date("2099-01-01T00:00:00.000Z"),
+      startedAt: new Date("2099-01-01T00:00:00.000Z"),
     })
 
     const visibleList = await app.fetch(

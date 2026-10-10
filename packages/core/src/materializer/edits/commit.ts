@@ -9,7 +9,7 @@ import type {
   OntologyMaterializationOrigin,
   OntologyOperationOutcome,
 } from "../../materialization/model"
-import type { Storage } from "../../storage"
+import type { RecordActionRunInput, Storage } from "../../storage"
 import type { MaterializationSession, OntologyCommitWrite } from "../../storage/ontology"
 import type { MaterializerContext, MaterializerStorage } from "../context"
 import { replayCommit, withSerializationRetry } from "../execution/commit-lifecycle"
@@ -67,7 +67,7 @@ async function prepareEditCommit(
   const identity = createTimedCommitIdentity({
     projectId: context.projectId,
     idempotencyKey,
-    normalizedCallerIntent: input,
+    normalizedCallerIntent: editIntent(input),
     now: context.clock(),
   })
   return {
@@ -86,24 +86,15 @@ function editIdempotencyKey(input: NormalizedEditCommit): string {
   return createRuntimeIdempotencyKey(input.source.requestId)
 }
 
-async function lockActionRunForMaterialization(
-  storage: Storage,
-  projectId: string,
-  input: NormalizedEditCommit,
-  execution: MaterializerExecution
-): Promise<void> {
-  if (input.source.kind !== "action") return
-  if (!storage.actionRuns) {
-    throw new MaterializationValidationError(
-      "Storage does not provide Action run capabilities required by this commit."
-    )
-  }
-  const run = await storage.actionRuns.lockForMaterialization({
-    projectId,
-    actionId: input.source.actionId,
-    runId: input.source.runId,
-  })
-  assertMaterializerRunExecution(execution, run.executionId, `Action run '${run.id}'`)
+/**
+ * What a replay of the commit must repeat: its edits, without the run record an Action commit
+ * carries. That record is written by the commit that inserts it, and its timestamps differ on
+ * every attempt.
+ */
+function editIntent(input: NormalizedEditCommit): unknown {
+  if (!("run" in input)) return input
+  const { run: _run, ...intent } = input
+  return intent
 }
 
 async function validateMutationExecution(
@@ -122,14 +113,11 @@ async function validateMutationExecution(
     id: input.source.actionId,
     runId: input.source.runId,
   })
-  if (!storage.actionRuns) {
+  const run = requireActionRun(input)
+  if (run.projectId !== projectId || run.id !== input.source.runId) {
     throw new MaterializationValidationError(
-      "Storage does not provide Action run capabilities required by this commit."
+      `The record carried by Action run '${input.source.runId}' belongs to another run.`
     )
-  }
-  const run = await storage.actionRuns.getById({ projectId, id: input.source.runId })
-  if (!run) {
-    throw new MaterializationValidationError(`Action run '${input.source.runId}' was not found.`)
   }
   if (run.actionId !== input.source.actionId) {
     throw new MaterializationConflictError(
@@ -137,7 +125,34 @@ async function validateMutationExecution(
       `Action run '${run.id}' does not belong to action '${input.source.actionId}'.`
     )
   }
+  if (run.status !== "succeeded" || run.phase !== "commit") {
+    throw new MaterializationValidationError(
+      `Action run '${run.id}' commits its edits only as a succeeded run in its commit phase.`
+    )
+  }
   assertMaterializerRunExecution(execution, run.executionId, `Action run '${run.id}'`)
+}
+
+/**
+ * Insert the run that made these edits, in the commit's transaction: the edits, their outbox facts,
+ * and the run record land together or not at all. A run already recorded fails the commit, since a
+ * run id is recorded once.
+ */
+async function recordActionRun(storage: Storage, input: NormalizedEditCommit): Promise<void> {
+  if (input.source.kind !== "action") return
+  if (!storage.actionRuns) {
+    throw new MaterializationValidationError(
+      "Storage does not provide Action run capabilities required by this commit."
+    )
+  }
+  await storage.actionRuns.record(requireActionRun(input))
+}
+
+function requireActionRun(input: NormalizedEditCommit): RecordActionRunInput {
+  if (!("run" in input)) {
+    throw new MaterializationValidationError("An Action commit must carry its run's record.")
+  }
+  return input.run
 }
 
 async function executeEditCommit(
@@ -167,12 +182,7 @@ async function executeEditTransaction(
   )
   if (replay) return replay
 
-  await lockActionRunForMaterialization(
-    storage,
-    context.projectId,
-    command.input,
-    command.execution
-  )
+  await recordActionRun(storage, command.input)
 
   const session = await beginEditMaterialization(context, storage, command)
   const workingState = await loadEditWorkingState(
